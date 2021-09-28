@@ -1,0 +1,27 @@
+repos:
+  -   repo: https://github.com/pycqa/isort
+      rev: 5.9.3
+      hooks:
+      - id: isort
+        language_version: python3
+  -   repo: https://github.com/psf/black
+      rev: 21.9b0
+      hooks:
+      - id: black
+        language_version: python3
+        exclude: versioneer.py
+        args:
+          - --target-version=py37
+  -   repo: https://gitlab.com/pycqa/flake8
+      rev: 3.9.2
+      hooks:
+      - id: flake8
+        language_version: python3
+  - repo: https://github.com/asottile/pyupgrade
+    # Do not upgrade: there's a bug in Cython that causes sum(... for ...) to fail;
+    # it needs sum([... for ...])
+    rev: v2.13.0
+    hooks:
+      - id: pyupgrade
+        args:
+          - "--py37-plus"

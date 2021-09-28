@@ -1,10 +1,7 @@
-from __future__ import print_function, division, absolute_import
-
 import collections
-from functools import wraps
 import sys
 import time as timemod
-
+from functools import wraps
 
 _empty_namedtuple = collections.namedtuple("_empty_namedtuple", ())
 
@@ -38,7 +35,7 @@ disk_io_counters = _psutil_caller("disk_io_counters")
 net_io_counters = _psutil_caller("net_io_counters")
 
 
-class _WindowsTime(object):
+class _WindowsTime:
     """
     Combine time.time() and time.perf_counter() to get an absolute clock
     with fine resolution.
@@ -51,10 +48,7 @@ class _WindowsTime(object):
         self.delta = None
         self.last_resync = float("-inf")
 
-    if sys.version_info >= (3,):
-        perf_counter = timemod.perf_counter
-    else:
-        perf_counter = timemod.clock
+    perf_counter = timemod.perf_counter
 
     def time(self):
         delta = self.delta
@@ -83,67 +77,19 @@ class _WindowsTime(object):
 
 
 # A high-resolution wall clock timer measuring the seconds since Unix epoch
-if sys.platform.startswith('win'):
+if sys.platform.startswith("win"):
     time = _WindowsTime().time
 else:
     # Under modern Unices, time.time() should be good enough
     time = timemod.time
 
+process_time = timemod.process_time
 
-def _native_thread_time():
-    # Python 3.7+, not all platforms
-    return timemod.thread_time()
-
-
-def _linux_thread_time():
-    # Use hardcoded CLOCK_THREAD_CPUTIME_ID on Python 3 <= 3.6
-    if sys.platform != 'linux':
-        raise OSError
-    return timemod.clock_gettime(3)
-
-
-def _native_process_time():
-    # Python 3, should work everywhere
-    return timemod.process_time()
-
-
-def _native_clock_func():
-    # time.clock() unfortunately has different semantics depending on the
-    # platform.  On POSIX it's a per-process CPU timer (with possibly
-    # poor resolution).  On Windows it's a high-resolution wall clock timer.
-    return timemod.clock()
-
-
-def _detect_process_time():
-    """
-    Return a per-process CPU timer function if possible, otherwise
-    a wall-clock timer.
-    """
-    for func in [_native_process_time]:
-        try:
-            func()
-            return func
-        except (AttributeError, OSError):
-            pass
-    # Only Python 2?
-    return _native_clock_func
-
-
-def _detect_thread_time():
-    """
-    Return a per-thread CPU timer function if possible, otherwise
-    a per-process CPU timer function, or at worse a wall-clock timer.
-    """
-    for func in [_native_thread_time, _linux_thread_time,
-                 _native_process_time]:
-        try:
-            func()
-            return func
-        except (AttributeError, OSError):
-            pass
-    # Only Python 2?
-    return time
-
-
-process_time = _detect_process_time()
-thread_time = _detect_thread_time()
+# Get a per-thread CPU timer function if possible, otherwise
+# use a per-process CPU timer function.
+try:
+    # thread_time is supported on Python 3.7+ but not all platforms
+    thread_time = timemod.thread_time
+except (AttributeError, OSError):
+    # process_time is supported on Python 3.3+ everywhere
+    thread_time = process_time

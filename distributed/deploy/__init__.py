@@ -1,9 +1,10 @@
-from __future__ import print_function, division, absolute_import
+from contextlib import suppress
 
-from ..utils import ignoring
-
+from .adaptive import Adaptive
 from .cluster import Cluster
 from .local import LocalCluster
-from .adaptive import Adaptive
-with ignoring(ImportError):
+from .spec import ProcessInterface, SpecCluster
+from .ssh import SSHCluster
+
+with suppress(ImportError):
     from .ssh import SSHCluster

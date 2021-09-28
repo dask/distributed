@@ -1,30 +1,66 @@
-from __future__ import print_function, division, absolute_import
-
-from collections import defaultdict, deque
-from concurrent.futures import CancelledError
-from functools import partial
+import asyncio
+import inspect
 import logging
-import six
+import sys
+import threading
 import traceback
 import uuid
+import warnings
 import weakref
+from collections import defaultdict
+from contextlib import suppress
+from enum import Enum
+from functools import partial
+
+import tblib
+from tlz import merge
+from tornado import gen
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
-from six import string_types
-from toolz import merge
-from tornado import gen
-from tornado.ioloop import IOLoop
-from tornado.locks import Event
+from dask.utils import parse_timedelta
 
-from .compatibility import get_thread_identity
-from .comm import (connect, listen, CommClosedError,
-                   normalize_address,
-                   unparse_host_port, get_address_host_port)
+from . import profile, protocol
+from .comm import (
+    CommClosedError,
+    connect,
+    get_address_host_port,
+    listen,
+    normalize_address,
+    unparse_host_port,
+)
 from .metrics import time
 from .system_monitor import SystemMonitor
-from .utils import (get_traceback, truncate_exception, ignoring, shutting_down,
-                    PeriodicCallback, parse_timedelta, has_keyword)
-from . import protocol
+from .utils import (
+    CancelledError,
+    TimeoutError,
+    get_traceback,
+    has_keyword,
+    is_coroutine_function,
+    truncate_exception,
+)
+
+
+class Status(Enum):
+    """
+    This Enum contains the various states a cluster, worker, scheduler and nanny can be
+    in. Some of the status can only be observed in one of cluster, nanny, scheduler or
+    worker but we put them in the same Enum as they are compared with each
+    other.
+    """
+
+    closed = "closed"
+    closing = "closing"
+    closing_gracefully = "closing-gracefully"
+    failed = "failed"
+    init = "init"
+    created = "created"
+    running = "running"
+    starting = "starting"
+    stopped = "stopped"
+    stopping = "stopping"
+    undefined = None
+    dont_reply = "dont-reply"
 
 
 class RPCClosed(IOError):
@@ -34,23 +70,22 @@ class RPCClosed(IOError):
 logger = logging.getLogger(__name__)
 
 
-def get_total_physical_memory():
-    try:
-        import psutil
-        return psutil.virtual_memory().total / 2
-    except ImportError:
-        return 2e9
+def raise_later(exc):
+    def _raise(*args, **kwargs):
+        raise exc
+
+    return _raise
 
 
-MAX_BUFFER_SIZE = get_total_physical_memory()
+tick_maximum_delay = parse_timedelta(
+    dask.config.get("distributed.admin.tick.limit"), default="ms"
+)
 
-tick_maximum_delay = parse_timedelta(dask.config.get('distributed.admin.tick.limit'), default='ms')
-
-LOG_PDB = dask.config.get('distributed.admin.pdb-on-err')
+LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 
-class Server(object):
-    """ Distributed TCP Server
+class Server:
+    """Dask Distributed Server
 
     Superclass for endpoints in a distributed cluster, such as Worker
     and Scheduler objects.
@@ -85,20 +120,38 @@ class Server(object):
     *  ``{'op': 'add', 'x': 10, 'y': 20}``
 
     """
-    default_ip = ''
+
+    default_ip = ""
     default_port = 0
 
-    def __init__(self, handlers, stream_handlers=None, connection_limit=512,
-                 deserialize=True, io_loop=None):
+    def __init__(
+        self,
+        handlers,
+        blocked_handlers=None,
+        stream_handlers=None,
+        connection_limit=512,
+        deserialize=True,
+        serializers=None,
+        deserializers=None,
+        connection_args=None,
+        timeout=None,
+        io_loop=None,
+    ):
         self.handlers = {
-            'identity': self.identity,
-            'connection_stream': self.handle_stream,
+            "identity": self.identity,
+            "echo": self.echo,
+            "connection_stream": self.handle_stream,
         }
         self.handlers.update(handlers)
+        if blocked_handlers is None:
+            blocked_handlers = dask.config.get(
+                "distributed.%s.blocked-handlers" % type(self).__name__.lower(), []
+            )
+        self.blocked_handlers = blocked_handlers
         self.stream_handlers = {}
         self.stream_handlers.update(stream_handlers or {})
 
-        self.id = type(self).__name__ + '-' + str(uuid.uuid4())
+        self.id = type(self).__name__ + "-" + str(uuid.uuid4())
         self._address = None
         self._listen_address = None
         self._port = None
@@ -107,49 +160,144 @@ class Server(object):
         self.monitor = SystemMonitor()
         self.counters = None
         self.digests = None
-        self.events = None
-        self.event_counts = None
         self._ongoing_coroutines = weakref.WeakSet()
+        self._event_finished = asyncio.Event()
 
-        self.listener = None
+        self.listeners = []
         self.io_loop = io_loop or IOLoop.current()
         self.loop = self.io_loop
 
+        if not hasattr(self.io_loop, "profile"):
+            ref = weakref.ref(self.io_loop)
+
+            if hasattr(self.io_loop, "asyncio_loop"):
+
+                def stop():
+                    loop = ref()
+                    return loop is None or loop.asyncio_loop.is_closed()
+
+            else:
+
+                def stop():
+                    loop = ref()
+                    return loop is None or loop._closing
+
+            self.io_loop.profile = profile.watch(
+                omit=("profile.py", "selectors.py"),
+                interval=dask.config.get("distributed.worker.profile.interval"),
+                cycle=dask.config.get("distributed.worker.profile.cycle"),
+                stop=stop,
+            )
+
         # Statistics counters for various events
-        with ignoring(ImportError):
+        with suppress(ImportError):
             from .counter import Digest
+
             self.digests = defaultdict(partial(Digest, loop=self.io_loop))
 
         from .counter import Counter
+
         self.counters = defaultdict(partial(Counter, loop=self.io_loop))
-        self.events = defaultdict(lambda: deque(maxlen=10000))
-        self.event_counts = defaultdict(lambda: 0)
 
         self.periodic_callbacks = dict()
 
-        pc = PeriodicCallback(self.monitor.update, 500, io_loop=self.io_loop)
-        self.periodic_callbacks['monitor'] = pc
+        pc = PeriodicCallback(
+            self.monitor.update,
+            parse_timedelta(
+                dask.config.get("distributed.admin.system-monitor.interval")
+            )
+            * 1000,
+        )
+        self.periodic_callbacks["monitor"] = pc
 
         self._last_tick = time()
-        pc = PeriodicCallback(
-                self._measure_tick,
-                parse_timedelta(dask.config.get('distributed.admin.tick.interval'), default='ms') * 1000,
-                io_loop=self.io_loop
+        measure_tick_interval = parse_timedelta(
+            dask.config.get("distributed.admin.tick.interval"), default="ms"
         )
-        self.periodic_callbacks['tick'] = pc
+        pc = PeriodicCallback(self._measure_tick, measure_tick_interval * 1000)
+        self.periodic_callbacks["tick"] = pc
 
         self.thread_id = 0
 
-        @gen.coroutine
         def set_thread_ident():
-            self.thread_id = get_thread_identity()
+            self.thread_id = threading.get_ident()
 
         self.io_loop.add_callback(set_thread_ident)
+        self._startup_lock = asyncio.Lock()
+        self.status = Status.undefined
+
+        self.rpc = ConnectionPool(
+            limit=connection_limit,
+            deserialize=deserialize,
+            serializers=serializers,
+            deserializers=deserializers,
+            connection_args=connection_args,
+            timeout=timeout,
+            server=self,
+        )
 
         self.__stopped = False
 
+    @property
+    def status(self):
+        return self._status
+
+    @status.setter
+    def status(self, new_status):
+        if isinstance(new_status, Status):
+            self._status = new_status
+        elif isinstance(new_status, str) or new_status is None:
+            warnings.warn(
+                f"Since distributed 2.23 `.status` is now an Enum, please assign `Status.{new_status}`",
+                PendingDeprecationWarning,
+                stacklevel=1,
+            )
+            corresponding_enum_variants = [s for s in Status if s.value == new_status]
+            assert len(corresponding_enum_variants) == 1
+            self._status = corresponding_enum_variants[0]
+        else:
+            raise TypeError(f"expected Status or str, got {new_status}")
+
+    async def finished(self):
+        """Wait until the server has finished"""
+        await self._event_finished.wait()
+
+    def __await__(self):
+        async def _():
+            timeout = getattr(self, "death_timeout", 0)
+            async with self._startup_lock:
+                if self.status == Status.running:
+                    return self
+                if timeout:
+                    try:
+                        await asyncio.wait_for(self.start(), timeout=timeout)
+                        self.status = Status.running
+                    except Exception:
+                        await self.close(timeout=1)
+                        raise TimeoutError(
+                            "{} failed to start in {} seconds".format(
+                                type(self).__name__, timeout
+                            )
+                        )
+                else:
+                    await self.start()
+                    self.status = Status.running
+            return self
+
+        return _().__await__()
+
+    async def start(self):
+        await self.rpc.start()
+
+    async def __aenter__(self):
+        await self
+        return self
+
+    async def __aexit__(self, typ, value, traceback):
+        await self.close()
+
     def start_periodic_callbacks(self):
-        """ Start Periodic Callbacks consistently
+        """Start Periodic Callbacks consistently
 
         This starts all PeriodicCallbacks stored in self.periodic_callbacks if
         they are not yet running.  It does this safely on the IOLoop.
@@ -160,12 +308,13 @@ class Server(object):
             for pc in self.periodic_callbacks.values():
                 if not pc.is_running():
                     pc.start()
+
         self.io_loop.add_callback(start_pcs)
 
     def stop(self):
         if not self.__stopped:
             self.__stopped = True
-            if self.listener is not None:
+            for listener in self.listeners:
                 # Delay closing the server socket until the next IO loop tick.
                 # Otherwise race conditions can appear if an event handler
                 # for an accept() call is already scheduled by the IO loop,
@@ -173,30 +322,30 @@ class Server(object):
                 # The demonstrator for this is Worker.terminate(), which
                 # closes the server socket in response to an incoming message.
                 # See https://github.com/tornadoweb/tornado/issues/2069
-                self.io_loop.add_callback(self.listener.stop)
+                self.io_loop.add_callback(listener.stop)
+
+    @property
+    def listener(self):
+        if self.listeners:
+            return self.listeners[0]
+        else:
+            return None
 
     def _measure_tick(self):
         now = time()
         diff = now - self._last_tick
         self._last_tick = now
         if diff > tick_maximum_delay:
-            logger.info("Event loop was unresponsive in %s for %.2fs.  "
-                        "This is often caused by long-running GIL-holding "
-                        "functions or moving large chunks of data. "
-                        "This can cause timeouts and instability.",
-                        type(self).__name__, diff)
+            logger.info(
+                "Event loop was unresponsive in %s for %.2fs.  "
+                "This is often caused by long-running GIL-holding "
+                "functions or moving large chunks of data. "
+                "This can cause timeouts and instability.",
+                type(self).__name__,
+                diff,
+            )
         if self.digests is not None:
-            self.digests['tick-duration'].add(diff)
-
-    def log_event(self, name, msg):
-        msg['time'] = time()
-        if isinstance(name, list):
-            for n in name:
-                self.events[n].append(msg)
-                self.event_counts[n] += 1
-        else:
-            self.events[name].append(msg)
-            self.event_counts[name] += 1
+            self.digests["tick-duration"].add(diff)
 
     @property
     def address(self):
@@ -233,10 +382,13 @@ class Server(object):
             _, self._port = get_address_host_port(self.address)
         return self._port
 
-    def identity(self, comm):
-        return {'type': type(self).__name__, 'id': self.id}
+    def identity(self, comm=None):
+        return {"type": type(self).__name__, "id": self.id}
 
-    def listen(self, port_or_addr=None, listen_args=None):
+    def echo(self, comm=None, data=None):
+        return data
+
+    async def listen(self, port_or_addr=None, allow_offload=True, **kwargs):
         if port_or_addr is None:
             port_or_addr = self.default_port
         if isinstance(port_or_addr, int):
@@ -245,15 +397,18 @@ class Server(object):
             addr = unparse_host_port(*port_or_addr)
         else:
             addr = port_or_addr
-            assert isinstance(addr, string_types)
-        self.listener = listen(addr, self.handle_comm,
-                               deserialize=self.deserialize,
-                               connection_args=listen_args)
-        self.listener.start()
+            assert isinstance(addr, str)
+        listener = await listen(
+            addr,
+            self.handle_comm,
+            deserialize=self.deserialize,
+            allow_offload=allow_offload,
+            **kwargs,
+        )
+        self.listeners.append(listener)
 
-    @gen.coroutine
-    def handle_comm(self, comm, shutting_down=shutting_down):
-        """ Dispatch new communications to coroutine-handlers
+    async def handle_comm(self, comm):
+        """Dispatch new communications to coroutine-handlers
 
         Handlers is a dictionary mapping operation names to functions or
         coroutines.
@@ -271,182 +426,248 @@ class Server(object):
 
         logger.debug("Connection from %r to %s", address, type(self).__name__)
         self._comms[comm] = op
+        await self
         try:
             while True:
                 try:
-                    msg = yield comm.read()
+                    msg = await comm.read()
                     logger.debug("Message from %r: %s", address, msg)
-                except EnvironmentError as e:
-                    if not shutting_down():
-                        logger.debug("Lost connection to %r while reading message: %s."
-                                     " Last operation: %s",
-                                     address, e, op)
+                except OSError as e:
+                    if not sys.is_finalizing():
+                        logger.debug(
+                            "Lost connection to %r while reading message: %s."
+                            " Last operation: %s",
+                            address,
+                            e,
+                            op,
+                        )
                     break
                 except Exception as e:
-                    logger.exception(e)
-                    yield comm.write(error_message(e, status='uncaught-error'))
-                    continue
+                    logger.exception("Exception while reading from %s", address)
+                    if comm.closed():
+                        raise
+                    else:
+                        await comm.write(error_message(e, status="uncaught-error"))
+                        continue
                 if not isinstance(msg, dict):
-                    raise TypeError("Bad message type.  Expected dict, got\n  "
-                                    + str(msg))
+                    raise TypeError(
+                        "Bad message type.  Expected dict, got\n  " + str(msg)
+                    )
 
-                op = msg.pop('op')
+                try:
+                    op = msg.pop("op")
+                except KeyError as e:
+                    raise ValueError(
+                        "Received unexpected message without 'op' key: " + str(msg)
+                    ) from e
                 if self.counters is not None:
-                    self.counters['op'].add(op)
+                    self.counters["op"].add(op)
                 self._comms[comm] = op
-                serializers = msg.pop('serializers', None)
-                close_desired = msg.pop('close', False)
-                reply = msg.pop('reply', True)
-                if op == 'close':
+                serializers = msg.pop("serializers", None)
+                close_desired = msg.pop("close", False)
+                reply = msg.pop("reply", True)
+                if op == "close":
                     if reply:
-                        yield comm.write('OK')
+                        await comm.write("OK")
                     break
 
                 result = None
                 try:
-                    handler = self.handlers[op]
+                    if op in self.blocked_handlers:
+                        _msg = (
+                            "The '{op}' handler has been explicitly disallowed "
+                            "in {obj}, possibly due to security concerns."
+                        )
+                        exc = ValueError(_msg.format(op=op, obj=type(self).__name__))
+                        handler = raise_later(exc)
+                    else:
+                        handler = self.handlers[op]
                 except KeyError:
-                    logger.warning("No handler %s found in %s", op,
-                                   type(self).__name__, exc_info=True)
+                    logger.warning(
+                        "No handler %s found in %s",
+                        op,
+                        type(self).__name__,
+                        exc_info=True,
+                    )
                 else:
-                    if serializers is not None and has_keyword(handler, 'serializers'):
-                        msg['serializers'] = serializers  # add back in
+                    if serializers is not None and has_keyword(handler, "serializers"):
+                        msg["serializers"] = serializers  # add back in
 
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
                         result = handler(comm, **msg)
-                        if type(result) is gen.Future:
+                        if inspect.isawaitable(result):
+                            result = asyncio.ensure_future(result)
                             self._ongoing_coroutines.add(result)
-                            result = yield result
-                    except (CommClosedError, CancelledError) as e:
-                        if self.status == 'running':
-                            logger.info("Lost connection to %r: %s", address, e)
+                            result = await result
+                    except (CommClosedError, CancelledError):
+                        if self.status == Status.running:
+                            logger.info("Lost connection to %r", address, exc_info=True)
                         break
                     except Exception as e:
-                        logger.exception(e)
-                        result = error_message(e, status='uncaught-error')
+                        logger.exception("Exception while handling op %s", op)
+                        if comm.closed():
+                            raise
+                        else:
+                            result = error_message(e, status="uncaught-error")
 
-                if reply and result != 'dont-reply':
+                # result is not type stable:
+                # when LHS is not Status then RHS must not be Status or it raises.
+                # when LHS is Status then RHS must be status or it raises in tests
+                is_dont_reply = False
+                if isinstance(result, Status) and (result == Status.dont_reply):
+                    is_dont_reply = True
+
+                if reply and not is_dont_reply:
                     try:
-                        yield comm.write(result, serializers=serializers)
-                    except (EnvironmentError, TypeError) as e:
-                        logger.debug("Lost connection to %r while sending result for op %r: %s",
-                                     address, op, e)
+                        await comm.write(result, serializers=serializers)
+                    except (OSError, TypeError) as e:
+                        logger.debug(
+                            "Lost connection to %r while sending result for op %r: %s",
+                            address,
+                            op,
+                            e,
+                        )
                         break
+
+                self._comms[comm] = None
                 msg = result = None
                 if close_desired:
-                    yield comm.close()
+                    await comm.close()
                 if comm.closed():
                     break
 
         finally:
             del self._comms[comm]
-            if not shutting_down() and not comm.closed():
+            if not sys.is_finalizing() and not comm.closed():
                 try:
                     comm.abort()
                 except Exception as e:
-                    logger.error("Failed while closing connection to %r: %s",
-                                 address, e)
+                    logger.error(
+                        "Failed while closing connection to %r: %s", address, e
+                    )
 
-    @gen.coroutine
-    def handle_stream(self, comm, extra=None, every_cycle=[]):
+    async def handle_stream(self, comm, extra=None, every_cycle=[]):
         extra = extra or {}
         logger.info("Starting established connection")
 
-        io_error = None
         closed = False
         try:
             while not closed:
-                msgs = yield comm.read()
+                msgs = await comm.read()
                 if not isinstance(msgs, (tuple, list)):
                     msgs = (msgs,)
 
                 if not comm.closed():
                     for msg in msgs:
-                        if msg == 'OK':  # from close
+                        if msg == "OK":  # from close
                             break
-                        op = msg.pop('op')
+                        op = msg.pop("op")
                         if op:
-                            if op == 'close-stream':
+                            if op == "close-stream":
                                 closed = True
                                 break
                             handler = self.stream_handlers[op]
-                            handler(**merge(extra, msg))
+                            if is_coroutine_function(handler):
+                                self.loop.add_callback(handler, **merge(extra, msg))
+                                await gen.sleep(0)
+                            else:
+                                handler(**merge(extra, msg))
                         else:
                             logger.error("odd message %s", msg)
-                for func in every_cycle:
-                    func()
+                    await asyncio.sleep(0)
 
-        except (CommClosedError, EnvironmentError) as e:
-            io_error = e
+                for func in every_cycle:
+                    if is_coroutine_function(func):
+                        self.loop.add_callback(func)
+                    else:
+                        func()
+
+        except OSError:
+            # FIXME: This is silently ignored, is this intentional?
+            pass
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
                 import pdb
+
                 pdb.set_trace()
             raise
         finally:
-            comm.close()  # TODO: why do we need this now?
+            await comm.close()
             assert comm.closed()
 
     @gen.coroutine
     def close(self):
-        self.listener.stop()
-        for comm in self._comms:
-            comm.close()
+        for pc in self.periodic_callbacks.values():
+            pc.stop()
+        self.__stopped = True
+        for listener in self.listeners:
+            future = listener.stop()
+            if inspect.isawaitable(future):
+                yield future
+        for i in range(20):
+            # If there are still handlers running at this point, give them a
+            # second to finish gracefully themselves, otherwise...
+            if any(self._comms.values()):
+                yield asyncio.sleep(0.05)
+            else:
+                break
+        yield [comm.close() for comm in list(self._comms)]  # then forcefully close
         for cb in self._ongoing_coroutines:
             cb.cancel()
         for i in range(10):
-            if all(cb.cancelled() for c in self._ongoing_coroutines):
+            if all(c.cancelled() for c in self._ongoing_coroutines):
                 break
             else:
-                yield gen.sleep(0.01)
+                yield asyncio.sleep(0.01)
+
+        self._event_finished.set()
 
 
 def pingpong(comm):
-    return b'pong'
+    return b"pong"
 
 
-@gen.coroutine
-def send_recv(comm, reply=True, serializers=None, deserializers=None,
-              **kwargs):
-    """ Send and recv with a Comm.
+async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kwargs):
+    """Send and recv with a Comm.
 
     Keyword arguments turn into the message
 
     response = yield send_recv(comm, op='ping', reply=True)
     """
     msg = kwargs
-    msg['reply'] = reply
-    please_close = kwargs.get('close')
+    msg["reply"] = reply
+    please_close = kwargs.get("close")
     force_close = False
     if deserializers is None:
         deserializers = serializers
     if deserializers is not None:
-        msg['serializers'] = deserializers
+        msg["serializers"] = deserializers
 
     try:
-        yield comm.write(msg, serializers=serializers, on_error='raise')
+        await comm.write(msg, serializers=serializers, on_error="raise")
         if reply:
-            response = yield comm.read(deserializers=deserializers)
+            response = await comm.read(deserializers=deserializers)
         else:
             response = None
-    except EnvironmentError:
+    except OSError:
         # On communication errors, we should simply close the communication
         force_close = True
         raise
     finally:
         if please_close:
-            yield comm.close()
+            await comm.close()
         elif force_close:
             comm.abort()
 
-    if isinstance(response, dict) and response.get('status') == 'uncaught-error':
+    if isinstance(response, dict) and response.get("status") == "uncaught-error":
         if comm.deserialize:
-            six.reraise(*clean_exception(**response))
+            typ, exc, tb = clean_exception(**response)
+            raise exc.with_traceback(tb)
         else:
-            raise Exception(response['text'])
-    raise gen.Return(response)
+            raise Exception(response["exception_text"])
+    return response
 
 
 def addr_from_args(addr=None, ip=None, port=None):
@@ -459,8 +680,8 @@ def addr_from_args(addr=None, ip=None, port=None):
     return normalize_address(addr)
 
 
-class rpc(object):
-    """ Conveniently interact with a remote server
+class rpc:
+    """Conveniently interact with a remote server
 
     >>> remote = rpc(address)  # doctest: +SKIP
     >>> response = yield remote.add(x=10, y=20)  # doctest: +SKIP
@@ -473,25 +694,34 @@ class rpc(object):
 
     >>> remote.close_comms()  # doctest: +SKIP
     """
+
     active = weakref.WeakSet()
     comms = ()
     address = None
 
-    def __init__(self, arg=None, comm=None, deserialize=True, timeout=None,
-                 connection_args=None, serializers=None, deserializers=None):
+    def __init__(
+        self,
+        arg=None,
+        comm=None,
+        deserialize=True,
+        timeout=None,
+        connection_args=None,
+        serializers=None,
+        deserializers=None,
+    ):
         self.comms = {}
         self.address = coerce_to_address(arg)
         self.timeout = timeout
-        self.status = 'running'
+        self.status = Status.running
         self.deserialize = deserialize
         self.serializers = serializers
         self.deserializers = deserializers if deserializers is not None else serializers
-        self.connection_args = connection_args
+        self.connection_args = connection_args or {}
+        self._created = weakref.WeakSet()
         rpc.active.add(self)
 
-    @gen.coroutine
-    def live_comm(self):
-        """ Get an open communication
+    async def live_comm(self):
+        """Get an open communication
 
         Some comms to the ip/port target may be in current use by other
         coroutines.  We track this with the `comms` dict
@@ -508,7 +738,7 @@ class rpc(object):
 
         As is done in __getattr__ below.
         """
-        if self.status == 'closed':
+        if self.status == Status.closed:
             raise RPCClosed("RPC Closed")
         to_clear = set()
         open = False
@@ -520,66 +750,94 @@ class rpc(object):
         for s in to_clear:
             del self.comms[s]
         if not open or comm.closed():
-            comm = yield connect(self.address, self.timeout,
-                                 deserialize=self.deserialize,
-                                 connection_args=self.connection_args)
-        self.comms[comm] = False     # mark as taken
-        raise gen.Return(comm)
+            comm = await connect(
+                self.address,
+                self.timeout,
+                deserialize=self.deserialize,
+                **self.connection_args,
+            )
+            comm.name = "rpc"
+        self.comms[comm] = False  # mark as taken
+        return comm
 
     def close_comms(self):
-
-        @gen.coroutine
-        def _close_comm(comm):
+        async def _close_comm(comm):
             # Make sure we tell the peer to close
             try:
-                yield comm.write({'op': 'close', 'reply': False})
-                yield comm.close()
-            except EnvironmentError:
+                if not comm.closed():
+                    await comm.write({"op": "close", "reply": False})
+                    await comm.close()
+            except OSError:
                 comm.abort()
 
+        tasks = []
         for comm in list(self.comms):
             if comm and not comm.closed():
-                _close_comm(comm)
+                # IOLoop.current().add_callback(_close_comm, comm)
+                task = asyncio.ensure_future(_close_comm(comm))
+                tasks.append(task)
+        for comm in list(self._created):
+            if comm and not comm.closed():
+                # IOLoop.current().add_callback(_close_comm, comm)
+                task = asyncio.ensure_future(_close_comm(comm))
+                tasks.append(task)
+
         self.comms.clear()
+        return tasks
 
     def __getattr__(self, key):
-        @gen.coroutine
-        def send_recv_from_rpc(**kwargs):
-            if self.serializers is not None and kwargs.get('serializers') is None:
-                kwargs['serializers'] = self.serializers
-            if self.deserializers is not None and kwargs.get('deserializers') is None:
-                kwargs['deserializers'] = self.deserializers
+        async def send_recv_from_rpc(**kwargs):
+            if self.serializers is not None and kwargs.get("serializers") is None:
+                kwargs["serializers"] = self.serializers
+            if self.deserializers is not None and kwargs.get("deserializers") is None:
+                kwargs["deserializers"] = self.deserializers
+            comm = None
             try:
-                comm = yield self.live_comm()
-                result = yield send_recv(comm=comm, op=key, **kwargs)
+                comm = await self.live_comm()
+                comm.name = "rpc." + key
+                result = await send_recv(comm=comm, op=key, **kwargs)
             except (RPCClosed, CommClosedError) as e:
-                raise e.__class__("%s: while trying to call remote method %r"
-                                  % (e, key,))
+                if comm:
+                    raise type(e)(
+                        f"Exception while trying to call remote method {key!r} before comm was established."
+                    ) from e
+                else:
+                    raise type(e)(
+                        f"Exception while trying to call remote method {key!r} using comm {comm!r}."
+                    ) from e
 
             self.comms[comm] = True  # mark as open
-            raise gen.Return(result)
+            return result
+
         return send_recv_from_rpc
 
     def close_rpc(self):
-        if self.status != 'closed':
+        if self.status != Status.closed:
             rpc.active.discard(self)
-        self.status = 'closed'
-        self.close_comms()
+        self.status = Status.closed
+        return asyncio.gather(*self.close_comms())
 
     def __enter__(self):
         return self
 
     def __exit__(self, *args):
-        self.close_rpc()
+        asyncio.ensure_future(self.close_rpc())
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close_rpc()
 
     def __del__(self):
-        if self.status != 'closed':
+        if self.status != Status.closed:
             rpc.active.discard(self)
-            self.status = 'closed'
+            self.status = Status.closed
             still_open = [comm for comm in self.comms if not comm.closed()]
             if still_open:
-                logger.warning("rpc object %s deleted with %d open comms",
-                               self, len(still_open))
+                logger.warning(
+                    "rpc object %s deleted with %d open comms", self, len(still_open)
+                )
                 for comm in still_open:
                     comm.abort()
 
@@ -587,8 +845,8 @@ class rpc(object):
         return "<rpc to %r, %d comms>" % (self.address, len(self.comms))
 
 
-class PooledRPCCall(object):
-    """ The result of ConnectionPool()('host:port')
+class PooledRPCCall:
+    """The result of ConnectionPool()('host:port')
 
     See Also:
         ConnectionPool
@@ -605,22 +863,24 @@ class PooledRPCCall(object):
         return self.addr
 
     def __getattr__(self, key):
-        @gen.coroutine
-        def send_recv_from_rpc(**kwargs):
-            if self.serializers is not None and kwargs.get('serializers') is None:
-                kwargs['serializers'] = self.serializers
-            if self.deserializers is not None and kwargs.get('deserializers') is None:
-                kwargs['deserializers'] = self.deserializers
-            comm = yield self.pool.connect(self.addr)
+        async def send_recv_from_rpc(**kwargs):
+            if self.serializers is not None and kwargs.get("serializers") is None:
+                kwargs["serializers"] = self.serializers
+            if self.deserializers is not None and kwargs.get("deserializers") is None:
+                kwargs["deserializers"] = self.deserializers
+            comm = await self.pool.connect(self.addr)
+            name, comm.name = comm.name, "ConnectionPool." + key
             try:
-                result = yield send_recv(comm=comm, op=key, **kwargs)
+                result = await send_recv(comm=comm, op=key, **kwargs)
             finally:
                 self.pool.reuse(self.addr, comm)
+                comm.name = name
 
-            raise gen.Return(result)
+            return result
+
         return send_recv_from_rpc
 
-    def close_rpc(self):
+    async def close_rpc(self):
         pass
 
     # For compatibility with rpc()
@@ -631,11 +891,11 @@ class PooledRPCCall(object):
         pass
 
     def __repr__(self):
-        return "<pooled rpc to %r>" % (self.addr,)
+        return f"<pooled rpc to {self.addr!r}>"
 
 
-class ConnectionPool(object):
-    """ A maximum sized pool of Comm objects.
+class ConnectionPool:
+    """A maximum sized pool of Comm objects.
 
     This provides a connect method that mirrors the normal distributed.connect
     method, but provides connection sharing and tracks connection limits.
@@ -668,102 +928,171 @@ class ConnectionPool(object):
         Whether or not to deserialize data by default or pass it through
     """
 
-    def __init__(self, limit=512,
-                 deserialize=True,
-                 serializers=None,
-                 deserializers=None,
-                 connection_args=None):
-        self.open = 0          # Total number of open comms
-        self.active = 0        # Number of comms currently in use
-        self.limit = limit     # Max number of open comms
+    _instances = weakref.WeakSet()
+
+    def __init__(
+        self,
+        limit=512,
+        deserialize=True,
+        serializers=None,
+        allow_offload=True,
+        deserializers=None,
+        connection_args=None,
+        timeout=None,
+        server=None,
+    ):
+        self.limit = limit  # Max number of open comms
         # Invariant: len(available) == open - active
         self.available = defaultdict(set)
         # Invariant: len(occupied) == active
         self.occupied = defaultdict(set)
+        self.allow_offload = allow_offload
         self.deserialize = deserialize
         self.serializers = serializers
         self.deserializers = deserializers if deserializers is not None else serializers
-        self.connection_args = connection_args
-        self.event = Event()
+        self.connection_args = connection_args or {}
+        self.timeout = timeout
+        self._n_connecting = 0
+        self.server = weakref.ref(server) if server else None
+        self._created = weakref.WeakSet()
+        self._instances.add(self)
+        # _n_connecting and _connecting have subtle different semantics. The set
+        # _connecting contains futures actively trying to establish a connection
+        # while the _n_connecting also accounts for connection attempts which
+        # are waiting due to the connection limit
+        self._connecting = set()
+        self.status = Status.init
+
+    def _validate(self):
+        """
+        Validate important invariants of this class
+
+        Used only for testing / debugging
+        """
+        assert self.semaphore._value == self.limit - self.open - self._n_connecting
+
+    @property
+    def active(self):
+        return sum(map(len, self.occupied.values()))
+
+    @property
+    def open(self):
+        return self.active + sum(map(len, self.available.values()))
 
     def __repr__(self):
-        return "<ConnectionPool: open=%d, active=%d>" % (self.open,
-                                                         self.active)
+        return "<ConnectionPool: open=%d, active=%d, connecting=%d>" % (
+            self.open,
+            self.active,
+            self._n_connecting,
+        )
 
     def __call__(self, addr=None, ip=None, port=None):
-        """ Cached rpc objects """
+        """Cached rpc objects"""
         addr = addr_from_args(addr=addr, ip=ip, port=port)
-        return PooledRPCCall(addr, self,
-                             serializers=self.serializers,
-                             deserializers=self.deserializers)
+        return PooledRPCCall(
+            addr, self, serializers=self.serializers, deserializers=self.deserializers
+        )
 
-    @gen.coroutine
-    def connect(self, addr, timeout=None):
+    def __await__(self):
+        async def _():
+            await self.start()
+            return self
+
+        return _().__await__()
+
+    async def start(self):
+        # Invariant: semaphore._value == limit - open - _n_connecting
+        self.semaphore = asyncio.Semaphore(self.limit)
+        self.status = Status.running
+
+    async def connect(self, addr, timeout=None):
         """
         Get a Comm to the given address.  For internal use.
         """
         available = self.available[addr]
         occupied = self.occupied[addr]
-        if available:
+        while available:
             comm = available.pop()
-            if not comm.closed():
-                self.active += 1
-                occupied.add(comm)
-                raise gen.Return(comm)
+            if comm.closed():
+                self.semaphore.release()
             else:
-                self.open -= 1
+                occupied.add(comm)
+                return comm
 
-        while self.open >= self.limit:
-            self.event.clear()
+        if self.semaphore.locked():
             self.collect()
-            yield self.event.wait()
 
-        self.open += 1
+        self._n_connecting += 1
+        await self.semaphore.acquire()
+        fut = None
         try:
-            comm = yield connect(addr, timeout=timeout,
-                                 deserialize=self.deserialize,
-                                 connection_args=self.connection_args)
-        except Exception:
-            self.open -= 1
-            raise
-        self.active += 1
-        occupied.add(comm)
+            if self.status != Status.running:
+                raise CommClosedError(
+                    f"ConnectionPool not running. Status: {self.status}"
+                )
 
-        if self.open >= self.limit:
-            self.event.clear()
+            fut = asyncio.ensure_future(
+                connect(
+                    addr,
+                    timeout=timeout or self.timeout,
+                    deserialize=self.deserialize,
+                    **self.connection_args,
+                )
+            )
+            self._connecting.add(fut)
+            comm = await fut
+            comm.name = "ConnectionPool"
+            comm._pool = weakref.ref(self)
+            comm.allow_offload = self.allow_offload
+            self._created.add(comm)
 
-        raise gen.Return(comm)
+            occupied.add(comm)
+
+            return comm
+        except asyncio.CancelledError as exc:
+            self.semaphore.release()
+            raise CommClosedError(
+                f"ConnectionPool not running. Status: {self.status}"
+            ) from exc
+        except Exception as exc:
+            self.semaphore.release()
+            raise exc
+        finally:
+            self._connecting.discard(fut)
+            self._n_connecting -= 1
 
     def reuse(self, addr, comm):
         """
         Reuse an open communication to the given address.  For internal use.
         """
-        try:
-            self.occupied[addr].remove(comm)
-        except KeyError:
-            pass
+        # if the pool is asked to re-use a comm it does not know about, ignore
+        # this comm: just close it.
+        if comm not in self.occupied[addr]:
+            IOLoop.current().add_callback(comm.close)
         else:
-            self.active -= 1
+            self.occupied[addr].remove(comm)
             if comm.closed():
-                self.open -= 1
-                if self.open < self.limit:
-                    self.event.set()
+                self.semaphore.release()
             else:
                 self.available[addr].add(comm)
+                if self.semaphore.locked() and self._n_connecting > 0:
+                    self.collect()
 
     def collect(self):
         """
         Collect open but unused communications, to allow opening other ones.
         """
-        logger.info("Collecting unused comms.  open: %d, active: %d",
-                    self.open, self.active)
+        logger.info(
+            "Collecting unused comms.  open: %d, active: %d, connecting: %d",
+            self.open,
+            self.active,
+            self._n_connecting,
+        )
         for addr, comms in self.available.items():
             for comm in comms:
-                comm.close()
+                IOLoop.current().add_callback(comm.close)
+                self.semaphore.release()
             comms.clear()
-        self.open = self.active
-        if self.open < self.limit:
-            self.event.set()
 
     def remove(self, addr):
         """
@@ -773,27 +1102,38 @@ class ConnectionPool(object):
         if addr in self.available:
             comms = self.available.pop(addr)
             for comm in comms:
-                comm.close()
-                self.open -= 1
+                IOLoop.current().add_callback(comm.close)
+                self.semaphore.release()
         if addr in self.occupied:
             comms = self.occupied.pop(addr)
             for comm in comms:
-                comm.close()
-                self.open -= 1
-                self.active -= 1
-        if self.open < self.limit:
-            self.event.set()
+                IOLoop.current().add_callback(comm.close)
+                self.semaphore.release()
 
-    def close(self):
+    async def close(self):
         """
-        Close all communications abruptly.
+        Close all communications
         """
-        for comms in self.available.values():
-            for comm in comms:
-                comm.abort()
-        for comms in self.occupied.values():
-            for comm in comms:
-                comm.abort()
+        self.status = Status.closed
+        for d in [self.available, self.occupied]:
+            comms = set()
+            while d:
+                comms.update(d.popitem()[1])
+
+            await asyncio.gather(
+                *(comm.close() for comm in comms), return_exceptions=True
+            )
+
+            for _ in comms:
+                self.semaphore.release()
+
+        for conn_fut in self._connecting:
+            conn_fut.cancel()
+
+        # We might still have tasks haning in the semaphore. This will let them
+        # run into an exception and raise a commclosed
+        while self._n_connecting:
+            await asyncio.sleep(0.005)
 
 
 def coerce_to_address(o):
@@ -803,8 +1143,16 @@ def coerce_to_address(o):
     return normalize_address(o)
 
 
-def error_message(e, status='error'):
-    """ Produce message to send back given an exception has occurred
+def collect_causes(e):
+    causes = []
+    while e.__cause__ is not None:
+        causes.append(e.__cause__)
+        e = e.__cause__
+    return causes
+
+
+def error_message(e, status="error"):
+    """Produce message to send back given an exception has occurred
 
     This does the following:
 
@@ -816,44 +1164,57 @@ def error_message(e, status='error'):
 
     See Also
     --------
-    clean_exception: deserialize and unpack message into exception/traceback
-    six.reraise: raise exception/traceback
+    clean_exception : deserialize and unpack message into exception/traceback
     """
+    MAX_ERROR_LEN = dask.config.get("distributed.admin.max-error-length")
+    tblib.pickling_support.install(e, *collect_causes(e))
     tb = get_traceback()
-    e2 = truncate_exception(e, 1000)
+    e2 = truncate_exception(e, MAX_ERROR_LEN)
     try:
-        e3 = protocol.pickle.dumps(e2)
+        e3 = protocol.pickle.dumps(e2, protocol=4)
         protocol.pickle.loads(e3)
     except Exception:
         e2 = Exception(str(e2))
     e4 = protocol.to_serialize(e2)
     try:
-        tb2 = protocol.pickle.dumps(tb)
+        tb2 = protocol.pickle.dumps(tb, protocol=4)
+        protocol.pickle.loads(tb2)
     except Exception:
-        tb = tb2 = ''.join(traceback.format_tb(tb))
+        tb = tb2 = "".join(traceback.format_tb(tb))
 
-    if len(tb2) > 10000:
+    if len(tb2) > MAX_ERROR_LEN:
         tb_result = None
     else:
         tb_result = protocol.to_serialize(tb)
 
-    return {'status': status,
-            'exception': e4,
-            'traceback': tb_result,
-            'text': str(e2)}
+    return {
+        "status": status,
+        "exception": e4,
+        "traceback": tb_result,
+        "exception_text": repr(e2),
+        "traceback_text": "".join(traceback.format_tb(tb)),
+    }
 
 
 def clean_exception(exception, traceback, **kwargs):
-    """ Reraise exception and traceback. Deserialize if necessary
+    """Reraise exception and traceback. Deserialize if necessary
 
     See Also
     --------
-    error_message: create and serialize errors into message
+    error_message : create and serialize errors into message
     """
-    if isinstance(exception, bytes):
-        exception = protocol.pickle.loads(exception)
+    if isinstance(exception, bytes) or isinstance(exception, bytearray):
+        try:
+            exception = protocol.pickle.loads(exception)
+        except Exception:
+            exception = Exception(exception)
+    elif isinstance(exception, str):
+        exception = Exception(exception)
     if isinstance(traceback, bytes):
-        traceback = protocol.pickle.loads(traceback)
-    elif isinstance(traceback, string_types):
+        try:
+            traceback = protocol.pickle.loads(traceback)
+        except (TypeError, AttributeError):
+            traceback = None
+    elif isinstance(traceback, str):
         traceback = None  # happens if the traceback failed serializing
     return type(exception), exception, traceback

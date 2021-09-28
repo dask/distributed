@@ -1,30 +1,25 @@
-from __future__ import print_function, division, absolute_import
-
 import logging
 
-from tornado import gen
-
-from .plugin import SchedulerPlugin
-
-from ..core import connect, coerce_to_address
+from ..core import coerce_to_address, connect
 from ..worker import dumps_function
-
+from .plugin import SchedulerPlugin
 
 logger = logging.getLogger(__name__)
 
 
 class EventStream(SchedulerPlugin):
-    """ Maintain a copy of worker events """
+    """Maintain a copy of worker events"""
 
     def __init__(self, scheduler=None):
+        self.name = "EventStream"
         self.buffer = []
         if scheduler:
             scheduler.add_plugin(self)
 
     def transition(self, key, start, finish, *args, **kwargs):
-        if start == 'processing':
-            kwargs['key'] = key
-            if finish == 'memory' or finish == 'erred':
+        if start == "processing":
+            kwargs["key"] = key
+            if finish == "memory" or finish == "erred":
                 self.buffer.append(kwargs)
 
 
@@ -34,12 +29,11 @@ def swap_buffer(scheduler, es):
 
 
 def teardown(scheduler, es):
-    scheduler.remove_plugin(es)
+    scheduler.remove_plugin(name=es.name)
 
 
-@gen.coroutine
-def eventstream(address, interval):
-    """ Open a TCP connection to scheduler, receive batched task messages
+async def eventstream(address, interval):
+    """Open a TCP connection to scheduler, receive batched task messages
 
     The messages coming back are lists of dicts.  Each dict is of the following
     form::
@@ -59,16 +53,20 @@ def eventstream(address, interval):
 
     Examples
     --------
-    >>> stream = yield eventstream('127.0.0.1:8786', 0.100)  # doctest: +SKIP
-    >>> print(yield read(stream))  # doctest: +SKIP
+    >>> stream = await eventstream('127.0.0.1:8786', 0.100)  # doctest: +SKIP
+    >>> print(await read(stream))  # doctest: +SKIP
     [{'key': 'x', 'status': 'OK', 'worker': '192.168.0.1:54684', ...},
      {'key': 'y', 'status': 'error', 'worker': '192.168.0.1:54684', ...}]
     """
     address = coerce_to_address(address)
-    comm = yield connect(address)
-    yield comm.write({'op': 'feed',
-                      'setup': dumps_function(EventStream),
-                      'function': dumps_function(swap_buffer),
-                      'interval': interval,
-                      'teardown': dumps_function(teardown)})
-    raise gen.Return(comm)
+    comm = await connect(address)
+    await comm.write(
+        {
+            "op": "feed",
+            "setup": dumps_function(EventStream),
+            "function": dumps_function(swap_buffer),
+            "interval": interval,
+            "teardown": dumps_function(teardown),
+        }
+    )
+    return comm

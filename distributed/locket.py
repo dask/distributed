@@ -3,9 +3,9 @@
 
 # flake8: noqa
 
-import time
 import errno
 import threading
+import time
 import weakref
 
 __all__ = ["lock_file"]
@@ -19,16 +19,22 @@ except ImportError:
         import ctypes.wintypes
         import msvcrt
     except ImportError:
-        raise ImportError("Platform not supported (failed to import fcntl, ctypes, msvcrt)")
+        raise ImportError(
+            "Platform not supported (failed to import fcntl, ctypes, msvcrt)"
+        )
     else:
-        _kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         _WinAPI_LockFile = _kernel32.LockFile
         _WinAPI_LockFile.restype = ctypes.wintypes.BOOL
-        _WinAPI_LockFile.argtypes = [ctypes.wintypes.HANDLE] + [ctypes.wintypes.DWORD] * 4
+        _WinAPI_LockFile.argtypes = [ctypes.wintypes.HANDLE] + [
+            ctypes.wintypes.DWORD
+        ] * 4
 
         _WinAPI_UnlockFile = _kernel32.UnlockFile
         _WinAPI_UnlockFile.restype = ctypes.wintypes.BOOL
-        _WinAPI_UnlockFile.argtypes = [ctypes.wintypes.HANDLE] + [ctypes.wintypes.DWORD] * 4
+        _WinAPI_UnlockFile.argtypes = [ctypes.wintypes.HANDLE] + [
+            ctypes.wintypes.DWORD
+        ] * 4
 
         _lock_file_blocking_available = False
 
@@ -46,8 +52,10 @@ except ImportError:
         def _unlock_file(file_):
             _WinAPI_UnlockFile(msvcrt.get_osfhandle(file_.fileno()), 0, 0, 1, 0)
 
+
 else:
     _lock_file_blocking_available = True
+
     def _lock_file_blocking(file_):
         fcntl.flock(file_.fileno(), fcntl.LOCK_EX)
 
@@ -55,11 +63,8 @@ else:
         try:
             fcntl.flock(file_.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             return True
-        except IOError as error:
-            if error.errno in [errno.EACCES, errno.EAGAIN]:
-                return False
-            else:
-                raise
+        except (PermissionError, BlockingIOError):
+            return False
 
     def _unlock_file(file_):
         fcntl.flock(file_.fileno(), fcntl.LOCK_UN)
@@ -100,14 +105,13 @@ def _acquire_non_blocking(acquire, timeout, retry_period, path):
         success = acquire()
         if success:
             return
-        elif (timeout is not None and
-                time.time() - start_time > timeout):
-            raise LockError("Couldn't lock {0}".format(path))
+        elif timeout is not None and time.time() - start_time > timeout:
+            raise LockError(f"Couldn't lock {path}")
         else:
             time.sleep(retry_period)
 
 
-class _LockSet(object):
+class _LockSet:
     def __init__(self, locks):
         self._locks = locks
 
@@ -129,7 +133,7 @@ class _LockSet(object):
             lock.release()
 
 
-class _ThreadLock(object):
+class _ThreadLock:
     def __init__(self, path):
         self._path = path
         self._lock = threading.Lock()
@@ -149,7 +153,7 @@ class _ThreadLock(object):
         self._lock.release()
 
 
-class _LockFile(object):
+class _LockFile:
     def __init__(self, path):
         self._path = path
         self._file = None
@@ -174,11 +178,12 @@ class _LockFile(object):
         self._file = None
 
 
-class _Locker(object):
+class _Locker:
     """
     A lock wrapper to always apply the given *timeout* and *retry_period*
     to acquire() calls.
     """
+
     def __init__(self, lock, timeout=None, retry_period=None):
         self._lock = lock
         self._timeout = timeout

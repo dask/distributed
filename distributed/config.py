@@ -1,60 +1,55 @@
-from __future__ import print_function, division, absolute_import
-
 import logging
 import logging.config
 import os
 import sys
 
-import dask
 import yaml
+
+import dask
 
 from .compatibility import logging_names
 
 config = dask.config.config
 
 
-fn = os.path.join(os.path.dirname(__file__), 'distributed.yaml')
-dask.config.ensure_file(source=fn)
+fn = os.path.join(os.path.dirname(__file__), "distributed.yaml")
 
 with open(fn) as f:
-    defaults = yaml.load(f)
+    defaults = yaml.safe_load(f)
 
 dask.config.update_defaults(defaults)
 
 aliases = {
-    'allowed-failures': 'distributed.scheduler.allowed-failures',
-    'bandwidth': 'distributed.scheduler.bandwidth',
-    'default-data-size': 'distributed.scheduler.default-data-size',
-    'transition-log-length': 'distributed.scheduler.transition-log-length',
-    'work-stealing': 'distributed.scheduler.work-stealing',
-    'worker-ttl': 'distributed.scheduler.worker-ttl',
-
-    'multiprocessing-method': 'distributed.worker.multiprocessing-method',
-    'use-file-locking': 'distributed.worker.use-file-locking',
-    'profile-interval': 'distributed.worker.profile.interval',
-    'profile-cycle-interval': 'distributed.worker.profile.cycle',
-    'worker-memory-target': 'distributed.worker.memory.target',
-    'worker-memory-spill': 'distributed.worker.memory.spill',
-    'worker-memory-pause': 'distributed.worker.memory.pause',
-    'worker-memory-terminate': 'distributed.worker.memory.terminate',
-
-    'heartbeat-interval': 'distributed.client.heartbeat',
-
-    'compression': 'distributed.comm.compression',
-    'connect-timeout': 'distributed.comm.timeouts.connect',
-    'tcp-timeout': 'distributed.comm.timeouts.tcp',
-    'default-scheme': 'distributed.comm.default-scheme',
-    'socket-backlog': 'distributed.comm.socket-backlog',
-    'recent-messages-log-length': 'distributed.comm.recent-messages-log-length',
-
-    'diagnostics-link': 'distributed.dashboard.link',
-    'bokeh-export-tool': 'distributed.dashboard.export-tool',
-
-    'tick-time': 'distributed.admin.tick.interval',
-    'tick-maximum-delay': 'distributed.admin.tick.limit',
-    'log-length': 'distributed.admin.log-length',
-    'log-format': 'distributed.admin.log-format',
-    'pdb-on-err': 'distributed.admin.pdb-on-err',
+    "allowed-failures": "distributed.scheduler.allowed-failures",
+    "bandwidth": "distributed.scheduler.bandwidth",
+    "default-data-size": "distributed.scheduler.default-data-size",
+    "transition-log-length": "distributed.scheduler.transition-log-length",
+    "work-stealing": "distributed.scheduler.work-stealing",
+    "worker-ttl": "distributed.scheduler.worker-ttl",
+    "multiprocessing-method": "distributed.worker.multiprocessing-method",
+    "use-file-locking": "distributed.worker.use-file-locking",
+    "profile-interval": "distributed.worker.profile.interval",
+    "profile-cycle-interval": "distributed.worker.profile.cycle",
+    "worker-memory-target": "distributed.worker.memory.target",
+    "worker-memory-spill": "distributed.worker.memory.spill",
+    "worker-memory-pause": "distributed.worker.memory.pause",
+    "worker-memory-terminate": "distributed.worker.memory.terminate",
+    "heartbeat-interval": "distributed.client.heartbeat",
+    "compression": "distributed.comm.compression",
+    "connect-timeout": "distributed.comm.timeouts.connect",
+    "tcp-timeout": "distributed.comm.timeouts.tcp",
+    "default-scheme": "distributed.comm.default-scheme",
+    "socket-backlog": "distributed.comm.socket-backlog",
+    "recent-messages-log-length": "distributed.comm.recent-messages-log-length",
+    "diagnostics-link": "distributed.dashboard.link",
+    "bokeh-export-tool": "distributed.dashboard.export-tool",
+    "tick-time": "distributed.admin.tick.interval",
+    "tick-maximum-delay": "distributed.admin.tick.limit",
+    "log-length": "distributed.admin.log-length",
+    "log-format": "distributed.admin.log-format",
+    "pdb-on-err": "distributed.admin.pdb-on-err",
+    "ucx": "distributed.comm.ucx",
+    "rmm": "distributed.rmm",
 }
 
 dask.config.rename(aliases)
@@ -81,17 +76,21 @@ def _initialize_logging_old_style(config):
         }
     """
     loggers = {  # default values
-        'distributed': 'info',
-        'distributed.client': 'warning',
-        'bokeh': 'critical',
-        'tornado': 'critical',
-        'tornado.application': 'error',
+        "distributed": "info",
+        "distributed.client": "warning",
+        "bokeh": "error",
+        "tornado": "critical",
+        "tornado.application": "error",
     }
-    loggers.update(config.get('logging', {}))
+    base_config = _find_logging_config(config)
+    loggers.update(base_config.get("logging", {}))
 
     handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(logging.Formatter(dask.config.get('distributed.admin.log-format',
-                                                           config=config)))
+    handler.setFormatter(
+        logging.Formatter(
+            dask.config.get("distributed.admin.log-format", config=config)
+        )
+    )
     for name, level in loggers.items():
         if isinstance(level, str):
             level = logging_names[level.upper()]
@@ -105,29 +104,48 @@ def _initialize_logging_old_style(config):
 def _initialize_logging_new_style(config):
     """
     Initialize logging using logging's "Configuration dictionary schema".
-    (ref.: https://docs.python.org/2/library/logging.config.html#logging-config-dictschema)
+    (ref.: https://docs.python.org/3/library/logging.config.html#configuration-dictionary-schema)
     """
-    logging.config.dictConfig(config.get('logging'))
+    base_config = _find_logging_config(config)
+    logging.config.dictConfig(base_config.get("logging"))
 
 
 def _initialize_logging_file_config(config):
     """
     Initialize logging using logging's "Configuration file format".
-    (ref.: https://docs.python.org/2/library/logging.config.html#configuration-file-format)
+    (ref.: https://docs.python.org/3/howto/logging.html#configuring-logging)
     """
-    logging.config.fileConfig(config.get('logging-file-config'), disable_existing_loggers=False)
+    base_config = _find_logging_config(config)
+    logging.config.fileConfig(
+        base_config.get("logging-file-config"), disable_existing_loggers=False
+    )
+
+
+def _find_logging_config(config):
+    """
+    Look for the dictionary containing logging-specific configurations,
+    starting in the 'distributed' dictionary and then trying the top-level
+    """
+    logging_keys = {"logging-file-config", "logging"}
+    if logging_keys & config.get("distributed", {}).keys():
+        return config["distributed"]
+    else:
+        return config
 
 
 def initialize_logging(config):
-    if 'logging-file-config' in config:
-        if 'logging' in config:
-            raise RuntimeError("Config options 'logging-file-config' and 'logging' are mutually exclusive.")
+    base_config = _find_logging_config(config)
+    if "logging-file-config" in base_config:
+        if "logging" in base_config:
+            raise RuntimeError(
+                "Config options 'logging-file-config' and 'logging' are mutually exclusive."
+            )
         _initialize_logging_file_config(config)
     else:
-        log_config = config.get('logging', {})
-        if 'version' in log_config:
+        log_config = base_config.get("logging", {})
+        if "version" in log_config:
             # logging module mandates version to be an int
-            log_config['version'] = int(log_config['version'])
+            log_config["version"] = int(log_config["version"])
             _initialize_logging_new_style(config)
         else:
             _initialize_logging_old_style(config)

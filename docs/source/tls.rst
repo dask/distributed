@@ -4,9 +4,9 @@
 TLS/SSL
 =======
 
-Currently dask distributed has experimental support for TLS/SSL communication,
+Dask distributed has support for TLS/SSL communication,
 providing mutual authentication and encryption of communications between cluster
-endpoints (Clients, Schedulers and Workers).
+endpoints (Clients, Schedulers, and Workers).
 
 TLS is enabled by using a ``tls`` address such as ``tls://`` (the default
 being ``tcp``, which sends data unauthenticated and unencrypted).  In
@@ -96,3 +96,12 @@ very large data over very high speed network links.
    `A study of AES-NI acceleration <https://calomel.org/aesni_ssl_performance.html>`_
    shows recent x86 CPUs can AES-encrypt more than 1 GB per second
    on each CPU core.
+
+
+API
+---
+
+.. currentmodule:: distributed
+
+.. autoclass:: distributed.security.Security
+   :members:

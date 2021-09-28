@@ -11,7 +11,7 @@ Leave data on the cluster
 
 Wait as long as possible to gather data locally.  If you want to ask a question
 of a large piece of data on the cluster it is often faster to submit a function
-onto that data then to bring the data down to your local computer.
+onto that data than to bring the data down to your local computer.
 
 
 For example if we have a numpy array on the cluster and we want to know its
@@ -31,7 +31,7 @@ shape we might choose one of the following options:
 
 .. code-block:: python
 
-   >>> x.result().shape()  # Slow from lots of data transfer
+   >>> x.result().shape  # Slow from lots of data transfer
    (1000, 1000)
 
 **Fast**
@@ -67,7 +67,7 @@ A common solution is to batch your input into larger chunks.
    >>> def f_many(chunk):
    ...     return [f(x) for x in chunk]
 
-   >>> from toolz import partition_all
+   >>> from tlz import partition_all
    >>> chunks = partition_all(1000000, seq)  # Collect into groups of size 1000
 
    >>> futures = client.map(f_many, chunks)
@@ -105,5 +105,5 @@ C/Fortran/Numba code might be enough to give you the 10x speed boost that
 you're looking for.  Parallelism and distributed computing are expensive ways
 to accelerate your application.
 
-.. _dask: http://dask.pydata.org/en/latest/
+.. _dask: https://dask.org
 .. _concurrent.futures: https://docs.python.org/3/library/concurrent.futures.html

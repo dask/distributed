@@ -6,7 +6,7 @@ Install
 
 ::
 
-    $ pip install dask distributed --upgrade
+    $ python -m pip install dask distributed --upgrade
 
 See :doc:`installation <install>` document for more information.
 
@@ -48,7 +48,7 @@ Launch a Client and point it to the IP/port of the scheduler.
    >>> from dask.distributed import Client
    >>> client = Client('127.0.0.1:8786')
 
-See :doc:`setup <setup>` for advanced use.
+See `setup documentation <https://docs.dask.org/en/latest/setup.html>`_ for advanced use.
 
 
 Map and Submit Functions

@@ -3,27 +3,27 @@ Record known compressors
 
 Includes utilities for determining whether or not to compress
 """
-from __future__ import print_function, division, absolute_import
-
 import logging
 import random
+from contextlib import suppress
+from functools import partial
+
+from tlz import identity
 
 import dask
-from toolz import identity, partial
 
 try:
     import blosc
+
     n = blosc.set_nthreads(2)
-    if hasattr('blosc', 'releasegil'):
+    if hasattr("blosc", "releasegil"):
         blosc.set_releasegil(True)
 except ImportError:
     blosc = False
 
-from ..utils import ignoring, ensure_bytes
+from ..utils import ensure_bytes
 
-
-compressions = {None: {'compress': identity,
-                       'decompress': identity}}
+compressions = {None: {"compress": identity, "decompress": identity}}
 
 compressions[False] = compressions[None]  # alias
 
@@ -34,12 +34,12 @@ default_compression = None
 logger = logging.getLogger(__name__)
 
 
-with ignoring(ImportError):
+with suppress(ImportError):
     import zlib
-    compressions['zlib'] = {'compress': zlib.compress,
-                            'decompress': zlib.decompress}
 
-with ignoring(ImportError):
+    compressions["zlib"] = {"compress": zlib.compress, "decompress": zlib.decompress}
+
+with suppress(ImportError):
     import snappy
 
     def _fixed_snappy_decompress(data):
@@ -48,16 +48,19 @@ with ignoring(ImportError):
             data = bytes(data)
         return snappy.decompress(data)
 
-    compressions['snappy'] = {'compress': snappy.compress,
-                              'decompress': _fixed_snappy_decompress}
-    default_compression = 'snappy'
+    compressions["snappy"] = {
+        "compress": snappy.compress,
+        "decompress": _fixed_snappy_decompress,
+    }
+    default_compression = "snappy"
 
-with ignoring(ImportError):
+with suppress(ImportError):
     import lz4
 
     try:
         # try using the new lz4 API
         import lz4.block
+
         lz4_compress = lz4.block.compress
         lz4_decompress = lz4.block.decompress
     except ImportError:
@@ -86,36 +89,68 @@ with ignoring(ImportError):
             else:
                 raise
 
-    compressions['lz4'] = {'compress': _fixed_lz4_compress,
-                           'decompress': _fixed_lz4_decompress}
-    default_compression = 'lz4'
+    compressions["lz4"] = {
+        "compress": _fixed_lz4_compress,
+        "decompress": _fixed_lz4_decompress,
+    }
+    default_compression = "lz4"
 
-with ignoring(ImportError):
+
+with suppress(ImportError):
+    import zstandard
+
+    zstd_compressor = zstandard.ZstdCompressor(
+        level=dask.config.get("distributed.comm.zstd.level"),
+        threads=dask.config.get("distributed.comm.zstd.threads"),
+    )
+
+    zstd_decompressor = zstandard.ZstdDecompressor()
+
+    def zstd_compress(data):
+        return zstd_compressor.compress(data)
+
+    def zstd_decompress(data):
+        return zstd_decompressor.decompress(data)
+
+    compressions["zstd"] = {"compress": zstd_compress, "decompress": zstd_decompress}
+
+
+with suppress(ImportError):
     import blosc
-    compressions['blosc'] = {'compress': partial(blosc.compress, clevel=5,
-                                                 cname='lz4'),
-                             'decompress': blosc.decompress}
+
+    compressions["blosc"] = {
+        "compress": partial(blosc.compress, clevel=5, cname="lz4"),
+        "decompress": blosc.decompress,
+    }
 
 
-default = dask.config.get('distributed.comm.compression')
-if default != 'auto':
-    if default in compressions:
-        default_compression = default
+def get_default_compression():
+    default = dask.config.get("distributed.comm.compression")
+    if default != "auto":
+        if default in compressions:
+            return default
+        else:
+            raise ValueError(
+                "Default compression '%s' not found.\n"
+                "Choices include auto, %s"
+                % (default, ", ".join(sorted(map(str, compressions))))
+            )
     else:
-        raise ValueError("Default compression '%s' not found.\n"
-                         "Choices include auto, %s" % (
-                             default, ', '.join(sorted(map(str, compressions)))))
+        return default_compression
+
+
+get_default_compression()
 
 
 def byte_sample(b, size, n):
-    """ Sample a bytestring from many locations
+    """Sample a bytestring from many locations
 
     Parameters
     ----------
-    b: bytes or memoryview
-    size: int
+    b : bytes or memoryview
+    size : int
         size of each sample to collect
-    n: int
+    n : int
         number of samples to collect
     """
     starts = [random.randint(0, len(b) - size) for j in range(n)]
@@ -125,10 +160,16 @@ def byte_sample(b, size, n):
     ends.append(starts[-1] + size)
 
     parts = [b[start:end] for start, end in zip(starts, ends)]
-    return b''.join(map(ensure_bytes, parts))
+    return b"".join(map(ensure_bytes, parts))
 
 
-def maybe_compress(payload, min_size=1e4, sample_size=1e4, nsamples=5):
+def maybe_compress(
+    payload,
+    min_size=1e4,
+    sample_size=1e4,
+    nsamples=5,
+    compression=dask.config.get("distributed.comm.compression"),
+):
     """
     Maybe compress payload
 
@@ -139,21 +180,20 @@ def maybe_compress(payload, min_size=1e4, sample_size=1e4, nsamples=5):
         return the original
     4.  We return the compressed result
     """
-    compression = dask.config.get('distributed.comm.compression')
-    if compression == 'auto':
+    if compression == "auto":
         compression = default_compression
 
     if not compression:
         return None, payload
     if len(payload) < min_size:
         return None, payload
-    if len(payload) > 2**31:  # Too large, compression libraries often fail
+    if len(payload) > 2 ** 31:  # Too large, compression libraries often fail
         return None, payload
 
     min_size = int(min_size)
     sample_size = int(sample_size)
 
-    compress = compressions[compression]['compress']
+    compress = compressions[compression]["compress"]
 
     # Compress a sample, return original if not very compressed
     sample = byte_sample(payload, sample_size, nsamples)
@@ -167,9 +207,10 @@ def maybe_compress(payload, min_size=1e4, sample_size=1e4, nsamples=5):
 
     if default_compression and blosc and type(payload) is memoryview:
         # Blosc does itemsize-aware shuffling, resulting in better compression
-        compressed = blosc.compress(payload, typesize=payload.itemsize,
-                                    cname='lz4', clevel=5)
-        compression = 'blosc'
+        compressed = blosc.compress(
+            payload, typesize=payload.itemsize, cname="lz4", clevel=5
+        )
+        compression = "blosc"
     else:
         compressed = compress(ensure_bytes(payload))
 
@@ -180,6 +221,8 @@ def maybe_compress(payload, min_size=1e4, sample_size=1e4, nsamples=5):
 
 
 def decompress(header, frames):
-    """ Decompress frames according to information in the header """
-    return [compressions[c]['decompress'](frame)
-            for c, frame in zip(header['compression'], frames)]
+    """Decompress frames according to information in the header"""
+    return [
+        compressions[c]["decompress"](frame)
+        for c, frame in zip(header["compression"], frames)
+    ]

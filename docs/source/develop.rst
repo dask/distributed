@@ -6,21 +6,34 @@ including where to ask for help, a layout of repositories, testing practices,
 and documentation and style standards are available at the `Dask developer
 guidelines`_ in the main documentation.
 
-.. _Dask: http://dask.pydata.org/en/latest/
-.. _`Dask developer guidelines`: http://dask.pydata.org/en/latest/develop.html
+.. _Dask: http://dask.org
+.. _`Dask developer guidelines`: http://docs.dask.org/en/latest/develop.html
 
 Install
 -------
 
-After setting up an environment as described in the `Dask developer
-guidelines`_ you can clone this repository with git::
+1. Clone this repository with git::
 
-   git clone git@github.com:dask/distributed.git
+     git clone git@github.com:dask/distributed.git
+     cd distributed
 
-and install it from source::
+2. Install anaconda or miniconda (OS-dependent)
+3. ::
+
+     conda env create --file continuous_integration/environment-3.8.yaml
+     conda activate dask-distributed
+     python -m pip install -e .
+
+
+To keep a fork in sync with the upstream source::
 
    cd distributed
-   python setup.py install
+   git remote add upstream git@github.com:dask/distributed.git
+   git remote -v
+   git fetch -a upstream
+   git checkout main
+   git pull upstream main
+   git push origin main
 
 Test
 ----
@@ -71,71 +84,94 @@ The test suite contains three kinds of tests
     same event loop in the main thread.  These are good for testing complex
     logic and inspecting the state of the system directly.  They are also
     easier to debug and cause the fewest problems with shutdowns.
-2.  ``with cluster()``: Tests with multiple processes forked from the master
+2.  ``def test_foo(client)``: Tests with multiple processes forked from the main
     process.  These are good for testing the synchronous (normal user) API and
     when triggering hard failures for resilience tests.
 3.  ``popen``: Tests that call out to the command line to start the system.
     These are rare and mostly for testing the command line interface.
 
 If you are comfortable with the Tornado interface then you will be happiest
-using the ``@gen_cluster`` style of test
+using the ``@gen_cluster`` style of test, e.g.
 
 .. code-block:: python
 
-   @gen_cluster(client=True)
-   def test_submit(c, s, a, b):
-       assert isinstance(c, Client)
-       assert isinstance(s, Scheduler)
-       assert isinstance(a, Worker)
-       assert isinstance(b, Worker)
+    # tests/test_submit.py
 
-       future = c.submit(inc, 1)
-       assert future.key in c.futures
+    from distributed.utils_test import gen_cluster, inc
+    from distributed import Client, Future, Scheduler, Worker
 
-       # result = future.result()  # This synchronous API call would block
-       result = yield future
-       assert result == 2
+    @gen_cluster(client=True)
+    async def test_submit(c, s, a, b):
+        assert isinstance(c, Client)
+        assert isinstance(s, Scheduler)
+        assert isinstance(a, Worker)
+        assert isinstance(b, Worker)
 
-       assert future.key in s.tasks
-       assert future.key in a.data or future.key in b.data
+        future = c.submit(inc, 1)
+        assert isinstance(future, Future)
+        assert future.key in c.futures
+
+        # result = future.result()  # This synchronous API call would block
+        result = await future
+        assert result == 2
+
+        assert future.key in s.tasks
+        assert future.key in a.data or future.key in b.data
+
 
 The ``@gen_cluster`` decorator sets up a scheduler, client, and workers for
 you and cleans them up after the test.  It also allows you to directly inspect
 the state of every element of the cluster directly.  However, you can not use
 the normal synchronous API (doing so will cause the test to wait forever) and
 instead you need to use the coroutine API, where all blocking functions are
-prepended with an underscore (``_``).  Beware, it is a common mistake to use
-the blocking interface within these tests.
+prepended with an underscore (``_``) and awaited with ``await``.
+Beware, it is a common mistake to use the blocking interface within these tests.
 
-If you want to test the normal synchronous API you can use a ``with cluster``
-style test, which sets up a scheduler and workers for you in different forked
-processes:
+If you want to test the normal synchronous API you can use the ``client``
+pytest fixture style test, which sets up a scheduler and workers for you in
+different forked processes:
 
 .. code-block:: python
 
-   def test_submit_sync(loop):
-       with cluster() as (s, [a, b]):
-           with Client(s['address'], loop=loop) as c:
-               future = c.submit(inc, 1)
-               assert future.key in c.futures
+   from distributed.utils_test import client
 
-               result = future.result()  # use the synchronous/blocking API here
-               assert result == 2
+   def test_submit(client):
+       future = client.submit(inc, 10)
+       assert future.result() == 11
 
-               a['proc'].terminate()  # kill one of the workers
+Additionally, if you want access to the scheduler and worker processes you can
+also add the ``s, a, b`` fixtures as well.
 
-               result = future.result()  # test that future remains valid
-               assert result == 2
+
+.. code-block:: python
+
+   from distributed.utils_test import client
+
+   def test_submit(client, s, a, b):
+       future = client.submit(inc, 10)
+       assert future.result() == 11  # use the synchronous/blocking API here
+
+       a['proc'].terminate()  # kill one of the workers
+
+       result = future.result()  # test that future remains valid
+       assert result == 2
 
 In this style of test you do not have access to the scheduler or workers.  The
 variables ``s, a, b`` are now dictionaries holding a
 ``multiprocessing.Process`` object and a port integer.  However, you can now
-use the normal synchronous API (never use yield in this style of test) and you
+use the normal synchronous API (never use ``await`` in this style of test) and you
 can close processes easily by terminating them.
 
 Typically for most user-facing functions you will find both kinds of tests.
-The ``@gen_cluster`` tests test particular logic while the ``with cluster``
-tests test basic interface and resilience.
+The ``@gen_cluster`` tests test particular logic while the ``client`` pytest
+fixture tests test basic interface and resilience.
 
 You should avoid ``popen`` style tests unless absolutely necessary, such as if
 you need to test the command line interface.
+
+Linting
+-------
+distributed uses several code linters (flake8, black, isort, pyupgrade), which are
+enforced by CI. Developers should run them locally before they submit a PR, through the
+single command ``pre-commit run --all-files``. This makes sure that linter versions and
+options are aligned for all developers.

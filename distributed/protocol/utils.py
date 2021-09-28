@@ -1,15 +1,22 @@
-from __future__ import print_function, division, absolute_import
-
 import struct
 
-from ..utils import ensure_bytes, nbytes
+import dask
 
-BIG_BYTES_SHARD_SIZE = 2**26
+from ..utils import nbytes
+
+BIG_BYTES_SHARD_SIZE = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
 
 
-def frame_split_size(frames, n=BIG_BYTES_SHARD_SIZE):
+msgpack_opts = {
+    ("max_%s_len" % x): 2 ** 31 - 1 for x in ["str", "bin", "array", "map", "ext"]
+}
+msgpack_opts["strict_map_key"] = False
+msgpack_opts["raw"] = False
+
+
+def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
     """
-    Split a list of frames into a list of frames of maximum size
+    Split a frame into a list of frames of maximum size
 
     This helps us to avoid passing around very large bytestrings.
 
@@ -18,78 +25,26 @@ def frame_split_size(frames, n=BIG_BYTES_SHARD_SIZE):
     >>> frame_split_size([b'12345', b'678'], n=3)  # doctest: +SKIP
     [b'123', b'45', b'678']
     """
-    if not frames:
-        return frames
+    n = n or BIG_BYTES_SHARD_SIZE
+    frame = memoryview(frame)
 
-    if max(map(nbytes, frames)) <= n:
-        return frames
+    if frame.nbytes <= n:
+        return [frame]
 
-    out = []
-    for frame in frames:
-        if nbytes(frame) > n:
-            if isinstance(frame, (bytes, bytearray)):
-                frame = memoryview(frame)
-            try:
-                itemsize = frame.itemsize
-            except AttributeError:
-                itemsize = 1
-            for i in range(0, nbytes(frame) // itemsize, n // itemsize):
-                out.append(frame[i: i + n // itemsize])
-        else:
-            out.append(frame)
-    return out
+    nitems = frame.nbytes // frame.itemsize
+    items_per_shard = n // frame.itemsize
 
-
-def merge_frames(header, frames):
-    """ Merge frames into original lengths
-
-    Examples
-    --------
-    >>> merge_frames({'lengths': [3, 3]}, [b'123456'])
-    [b'123', b'456']
-    >>> merge_frames({'lengths': [6]}, [b'123', b'456'])
-    [b'123456']
-    """
-    lengths = list(header['lengths'])
-
-    if not frames:
-        return frames
-
-    assert sum(lengths) == sum(map(nbytes, frames))
-
-    if all(len(f) == l for f, l in zip(frames, lengths)):
-        return frames
-
-    frames = frames[::-1]
-    lengths = lengths[::-1]
-
-    out = []
-    while lengths:
-        l = lengths.pop()
-        L = []
-        while l:
-            frame = frames.pop()
-            if nbytes(frame) <= l:
-                L.append(frame)
-                l -= nbytes(frame)
-            else:
-                mv = memoryview(frame)
-                L.append(mv[:l])
-                frames.append(mv[l:])
-                l = 0
-        out.append(b''.join(map(ensure_bytes, L)))
-    return out
+    return [frame[i : i + items_per_shard] for i in range(0, nitems, items_per_shard)]
 
 
 def pack_frames_prelude(frames):
-    lengths = [len(f) for f in frames]
-    lengths = ([struct.pack('Q', len(frames))] +
-               [struct.pack('Q', nbytes(frame)) for frame in frames])
-    return b''.join(lengths)
+    nframes = len(frames)
+    nbytes_frames = map(nbytes, frames)
+    return struct.pack(f"Q{nframes}Q", nframes, *nbytes_frames)
 
 
 def pack_frames(frames):
-    """ Pack frames into a byte-like object
+    """Pack frames into a byte-like object
 
     This prepends length information to the front of the bytes-like object
 
@@ -97,16 +52,11 @@ def pack_frames(frames):
     --------
     unpack_frames
     """
-    prelude = [pack_frames_prelude(frames)]
-
-    if not isinstance(frames, list):
-        frames = list(frames)
-
-    return b''.join(prelude + frames)
+    return b"".join([pack_frames_prelude(frames), *frames])
 
 
 def unpack_frames(b):
-    """ Unpack bytes into a sequence of frames
+    """Unpack bytes into a sequence of frames
 
     This assumes that length information is at the front of the bytestring,
     as performed by pack_frames
@@ -115,14 +65,19 @@ def unpack_frames(b):
     --------
     pack_frames
     """
-    (n_frames,) = struct.unpack('Q', b[:8])
+    b = memoryview(b)
+
+    fmt = "Q"
+    fmt_size = struct.calcsize(fmt)
+
+    (n_frames,) = struct.unpack_from(fmt, b)
+    lengths = struct.unpack_from(f"{n_frames}{fmt}", b, fmt_size)
 
     frames = []
-    start = 8 + n_frames * 8
-    for i in range(n_frames):
-        (length,) = struct.unpack('Q', b[(i + 1) * 8: (i + 2) * 8])
-        frame = b[start: start + length]
-        frames.append(frame)
-        start += length
+    start = fmt_size * (1 + n_frames)
+    for length in lengths:
+        end = start + length
+        frames.append(b[start:end])
+        start = end
 
     return frames

@@ -76,7 +76,7 @@ and so this only added a few milliseconds to our total processing time.
 Extended Example
 ~~~~~~~~~~~~~~~~
 
-Computing the Fibonacci numbers creates involves a recursive function. When the
+Computing the Fibonacci numbers involves a recursive function. When the
 function is run, it calls itself using values it computed. We will use this as
 an example throughout this documentation to illustrate different techniques of
 submitting tasks from tasks.
@@ -142,7 +142,7 @@ detail, see `dask.delayed`_.
         result = fib(10).compute()
         print(result)  # prints "55"
 
-.. _dask.delayed: https://dask.pydata.org/en/latest/delayed.html
+.. _dask.delayed: https://docs.dask.org/en/latest/delayed.html
 
 Getting the client on a worker
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

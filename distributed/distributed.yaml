@@ -11,67 +11,241 @@ distributed:
   scheduler:
     allowed-failures: 3     # number of retries before a task is considered bad
     bandwidth: 100000000    # 100 MB/s estimated worker-worker bandwidth
-    default-data-size: 1000
+    blocked-handlers: []
+    default-data-size: 1kiB
+    # Number of seconds to wait until workers or clients are removed from the events log
+    # after they have been removed from the scheduler
+    events-cleanup-delay: 1h
+    idle-timeout: null      # Shut down after this duration, like "1h" or "30 minutes"
     transition-log-length: 100000
+    events-log-length: 100000
     work-stealing: True     # workers should steal tasks from each other
+    work-stealing-interval: 100ms  # Callback time for work stealing
     worker-ttl: null        # like '60s'. Time to live for workers.  They must heartbeat faster than this
+    pickle: True            # Is the scheduler allowed to deserialize arbitrary bytestrings
+    preload: []             # Run custom modules with Scheduler
+    preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.html
+    unknown-task-duration: 500ms  # Default duration for all tasks with unknown durations ("15m", "2h")
+    default-task-durations:  # How long we expect function names to run ("1h", "1s") (helps for long tasks)
+      rechunk-split: 1us
+      split-shuffle: 1us
+    validate: False         # Check scheduler state at every step for debugging
+    dashboard:
+      status:
+        task-stream-length: 1000
+      tasks:
+        task-stream-length: 100000
+      tls:
+        ca-file: null
+        key: null
+        cert: null
+      bokeh-application:  # keywords to pass to BokehTornado application
+        allow_websocket_origin: ["*"]
+        keep_alive_milliseconds: 500
+        check_unused_sessions_milliseconds: 500
+    locks:
+      lease-validation-interval: 10s  # The interval in which the scheduler validates staleness of all acquired leases. Must always be smaller than the lease-timeout itself.
+      lease-timeout: 30s  # Maximum interval to wait for a Client refresh before a lease is invalidated and released.
+
+    http:
+      routes:
+        - distributed.http.scheduler.prometheus
+        - distributed.http.scheduler.info
+        - distributed.http.scheduler.json
+        - distributed.http.health
+        - distributed.http.proxy
+        - distributed.http.statics
+
+    allowed-imports:
+      - dask
+      - distributed
+
+    active-memory-manager:
+      # Set to true to auto-start the Active Memory Manager on Scheduler start; if false
+      # you'll have to either manually start it with client.scheduler.amm_start() or run
+      # it once with client.scheduler.amm_run().
+      start: false
+      # Once started, run the AMM cycle every <interval>
+      interval: 2s
+      policies:
+        # Policies that should be executed at every cycle. Any additional keys in each
+        # object are passed as keyword arguments to the policy constructor.
+        - class: distributed.active_memory_manager.ReduceReplicas
 
   worker:
-    multiprocessing-method: forkserver
+    blocked-handlers: []
+    multiprocessing-method: spawn
     use-file-locking: True
     connections:            # Maximum concurrent connections for data
       outgoing: 50          # This helps to control network saturation
       incoming: 10
+    preload: []             # Run custom modules with Worker
+    preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.html
+    daemon: True
+    validate: False         # Check worker state at every step for debugging
+    resources: {}           # Key: value pairs specifying worker resources.
+    lifetime:
+      duration: null        # Time after which to gracefully shutdown the worker
+      stagger: 0 seconds    # Random amount by which to stagger lifetimes
+      restart: False        # Do we ressurrect the worker after the lifetime deadline?
 
     profile:
       interval: 10ms        # Time between statistical profiling queries
       cycle: 1000ms         # Time between starting new profile
+      low-level: False      # Whether or not to include low-level functions
+                            # Requires https://github.com/numba/stacktrace
 
-    # Fractions of worker memory at which we take action to avoid memory blowup
-    # Set any of the lower three values to False to turn off the behavior entirely
     memory:
+      # When there is an increase in process memory (as observed by the operating
+      # system) that is not accounted for by the dask keys stored on the worker, ignore
+      # it for this long before considering it in non-critical memory measures.
+      # This should be set to be longer than the duration of most dask tasks.
+      recent-to-old-time: 30s
+
+      rebalance:
+        # Memory measure to rebalance upon. Possible choices are:
+        # process
+        #     Total process memory, as measured by the OS.
+        # optimistic
+        #     Managed by dask (instantaneous) + unmanaged (without any increases
+        #     happened in the last <distributed.worker.memory.recent-to-old-time>).
+        #     Recommended for use on CPython with large (2MiB+) numpy-based data chunks.
+        # managed_in_memory
+        #     Only consider the data allocated by dask in RAM. Recommended if RAM is not
+        #     released in a timely fashion back to the OS after the Python objects are
+        #     dereferenced, but remains available for reuse by PyMalloc.
+        #
+        #     If this is your problem on Linux, you should alternatively consider
+        #     setting the MALLOC_TRIM_THRESHOLD_ environment variable (note the final
+        #     underscore) to a low value; refer to the mallopt man page and to the
+        #     comments about M_TRIM_THRESHOLD on
+        #     https://sourceware.org/git/?p=glibc.git;a=blob;f=malloc/malloc.c
+        # managed
+        #     Only consider data allocated by dask, including that spilled to disk.
+        #     Recommended if disk occupation of the spill file is an issue.
+        measure: optimistic
+        # Fraction of worker process memory at which we start potentially sending
+        # data to other workers. Ignored when max_memory is not set.
+        sender-min: 0.30
+        # Fraction of worker process memory at which we stop potentially accepting
+        # data from other workers. Ignored when max_memory is not set.
+        recipient-max: 0.60
+        # Fraction of worker process memory, around the cluster mean, where a worker is
+        # neither a sender nor a recipient of data during a rebalance operation. E.g. if
+        # the mean cluster occupation is 50%, sender-recipient-gap=0.10 means that only
+        # nodes above 55% will donate data and only nodes below 45% will receive them.
+        # This helps avoid data from bouncing around the cluster repeatedly.
+        # Ignored when max_memory is not set.
+        sender-recipient-gap: 0.10
+
+      # Fractions of worker process memory at which we take action to avoid memory
+      # blowup. Set any of the values to False to turn off the behavior entirely.
       target: 0.60  # target fraction to stay below
       spill: 0.70  # fraction at which we spill to disk
       pause: 0.80  # fraction at which we pause worker threads
       terminate: 0.95  # fraction at which we terminate the worker
 
+    http:
+      routes:
+        - distributed.http.worker.prometheus
+        - distributed.http.health
+        - distributed.http.statics
+
+  nanny:
+    preload: []             # Run custom modules with Nanny
+    preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.html
+    environ:
+      MALLOC_TRIM_THRESHOLD_: 65536
+      OMP_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
+
   client:
-    heartbeat: 5s  # time between client heartbeats
+    heartbeat: 5s  # Interval between client heartbeats
+    scheduler-info-interval: 2s  # Interval between scheduler-info updates
+
+  deploy:
+    lost-worker-timeout: 15s  # Interval after which to hard-close a lost worker job
+    cluster-repr-interval: 500ms  # Interval between calls to update cluster-repr for the widget
+
+  adaptive:
+    interval: 1s         # Interval between scaling evaluations
+    target-duration: 5s  # Time an entire graph calculation is desired to take ("1m", "30m")
+    minimum: 0           # Minimum number of workers
+    maximum: .inf        # Maximum number of workers
+    wait-count: 3        # Number of times a worker should be suggested for removal before removing it
 
   comm:
+    retry:  # some operations (such as gathering data) are subject to re-tries with the below parameters
+      count: 0  # the maximum retry attempts. 0 disables re-trying.
+      delay:
+         min: 1s  # the first non-zero delay between re-tries
+         max: 20s  # the maximum delay between re-tries
     compression: auto
+    shard: 64MiB
+    offload: 10MiB # Size after which we choose to offload serialization to another thread
     default-scheme: tcp
     socket-backlog: 2048
     recent-messages-log-length: 0  # number of messages to keep for debugging
+    ucx:
+      cuda_copy: False  # enable cuda-copy
+      tcp: False  # enable tcp
+      nvlink: False  # enable cuda_ipc
+      infiniband: False # enable Infiniband
+      rdmacm: False # enable RDMACM
+      net-devices: null  # define what interface to use for UCX comm
+      reuse-endpoints: null  # enable endpoint reuse
+
+    zstd:
+      level: 3      # Compression level, between 1 and 22.
+      threads: 0    # Threads to use. 0 for single-threaded, -1 to infer from cpu count.
 
     timeouts:
-      connect: 10s          # time before connecting fails
+      connect: 30s          # time before connecting fails
       tcp: 30s              # time before calling an unresponsive connection dead
 
-  # require-encryption: False   # whether to require encryption on non-local comms
-  #
-  # tls:
-  #   ca-file: xxx.pem
-  #   scheduler:
-  #     key: xxx.pem
-  #     cert: xxx.pem
-  #   worker:
-  #     key: xxx.pem
-  #     cert: xxx.pem
-  #   client:
-  #     key: xxx.pem
-  #     cert: xxx.pem
-  #   ciphers:
-  #     ECDHE-ECDSA-AES128-GCM-SHA256
+    require-encryption: null # Whether to require encryption on non-local comms
 
+    tls:
+      ciphers: null   # Allowed ciphers, specified as an OpenSSL cipher string.
+      ca-file: null   # Path to a CA file, in pem format, optional
+      scheduler:
+        cert: null    # Path to certificate file for scheduler.
+        key: null     # Path to key file for scheduler. Alternatively, the key
+                      # can be appended to the cert file above, and this field
+                      # left blank.
+      worker:
+        key: null
+        cert: null
+      client:
+        key: null
+        cert: null
+
+    websockets:
+      shard: 8MiB
+
+  diagnostics:
+    nvml: True
+    computations:
+      max-history: 100
+      ignore-modules:
+        - distributed
+        - dask
+        - xarray
+        - cudf
+        - cuml
+        - prefect
+        - xgboost
 
   ###################
   # Bokeh dashboard #
   ###################
 
   dashboard:
-    link: "http://{host}:{port}/status"
+    link: "{scheme}://{host}:{port}/status"
     export-tool: False
+    graph-max-items: 5000  # maximum number of tasks to try to plot in graph view
+    prometheus:
+      namespace: "dask"
 
   ##################
   # Administrative #
@@ -82,6 +256,12 @@ distributed:
       interval: 20ms  # time between event loop health checks
       limit: 3s       # time allowed before triggering a warning
 
+    max-error-length: 10000 # Maximum size traceback after error to return
     log-length: 10000  # default length of logs to keep in memory
     log-format: '%(name)s - %(levelname)s - %(message)s'
     pdb-on-err: False       # enter debug mode on scheduling error
+    system-monitor:
+      interval: 500ms
+    event-loop: tornado
+  rmm:
+    pool-size: null

@@ -1,16 +1,13 @@
-from __future__ import print_function, division, absolute_import
-
 import concurrent.futures as cf
 import weakref
 
-import six
-
-from toolz import merge
-
+from tlz import merge
 from tornado import gen
 
+from dask.utils import parse_timedelta
+
 from .metrics import time
-from .utils import sync
+from .utils import TimeoutError, sync
 
 
 @gen.coroutine
@@ -21,15 +18,16 @@ def _cascade_future(future, cf_future):
     """
     result = yield future._result(raiseit=False)
     status = future.status
-    if status == 'finished':
+    if status == "finished":
         cf_future.set_result(result)
-    elif status == 'cancelled':
+    elif status == "cancelled":
         cf_future.cancel()
         # Necessary for wait() and as_completed() to wake up
         cf_future.set_running_or_notify_cancel()
     else:
         try:
-            six.reraise(*result)
+            typ, exc, tb = result
+            raise exc.with_traceback(tb)
         except BaseException as exc:
             cf_future.set_exception(exc)
 
@@ -48,13 +46,17 @@ class ClientExecutor(cf.Executor):
     A concurrent.futures Executor that executes tasks on a dask.distributed Client.
     """
 
-    _allowed_kwargs = frozenset(['pure', 'workers', 'resources', 'allow_other_workers', 'retries'])
+    _allowed_kwargs = frozenset(
+        ["pure", "workers", "resources", "allow_other_workers", "retries"]
+    )
 
     def __init__(self, client, **kwargs):
         sk = set(kwargs)
         if not sk <= self._allowed_kwargs:
-            raise TypeError("unsupported arguments to ClientExecutor: %s"
-                            % sorted(sk - self._allowed_kwargs))
+            raise TypeError(
+                "unsupported arguments to ClientExecutor: %s"
+                % sorted(sk - self._allowed_kwargs)
+            )
         self._client = client
         self._futures = weakref.WeakSet()
         self._shutdown = False
@@ -68,7 +70,7 @@ class ClientExecutor(cf.Executor):
 
         # Support cancelling task through .cancel() on c.f.Future
         def cf_callback(cf_future):
-            if cf_future.cancelled() and future.status != 'cancelled':
+            if cf_future.cancelled() and future.status != "cancelled":
                 future.cancel()
 
         cf_future.add_done_callback(cf_callback)
@@ -87,7 +89,7 @@ class ClientExecutor(cf.Executor):
         A Future representing the given call.
         """
         if self._shutdown:
-            raise RuntimeError('cannot schedule new futures after shutdown')
+            raise RuntimeError("cannot schedule new futures after shutdown")
         future = self._client.submit(fn, *args, **merge(self._kwargs, kwargs))
         self._futures.add(future)
         return self._wrap_future(future)
@@ -97,12 +99,12 @@ class ClientExecutor(cf.Executor):
 
         Parameters
         ----------
-        fn: A callable that will take as many arguments as there are
+        fn : A callable that will take as many arguments as there are
             passed iterables.
-        iterables: One iterable for each parameter to *fn*.
-        timeout: The maximum number of seconds to wait. If None, then there
+        iterables : One iterable for each parameter to *fn*.
+        timeout : The maximum number of seconds to wait. If None, then there
             is no limit on the wait time.
-        chunksize: ignored.
+        chunksize : ignored.
 
         Returns
         -------
@@ -115,16 +117,20 @@ class ClientExecutor(cf.Executor):
             before the given timeout.
         Exception: If ``fn(*args)`` raises for any values.
         """
-        timeout = kwargs.pop('timeout', None)
+        timeout = kwargs.pop("timeout", None)
         if timeout is not None:
+            timeout = parse_timedelta(timeout)
             end_time = timeout + time()
-        if 'chunksize' in kwargs:
-            del kwargs['chunksize']
+        if "chunksize" in kwargs:
+            del kwargs["chunksize"]
         if kwargs:
-            raise TypeError("unexpected arguments to map(): %s"
-                            % sorted(kwargs))
+            raise TypeError("unexpected arguments to map(): %s" % sorted(kwargs))
 
         fs = self._client.map(fn, *iterables, **self._kwargs)
+
+        # Below iterator relies on fs being an iterator itself, and not just an iterable
+        # (such as a list), in order to cancel remaining futures
+        fs = iter(fs)
 
         # Yield must be hidden in closure so that the tasks are submitted
         # before the first iterator value is required.
@@ -135,14 +141,13 @@ class ClientExecutor(cf.Executor):
                     if timeout is not None:
                         try:
                             yield future.result(end_time - time())
-                        except gen.TimeoutError:
+                        except TimeoutError:
                             raise cf.TimeoutError
                     else:
                         yield future.result()
             finally:
                 remaining = list(fs)
-                for future in remaining:
-                    self._futures.add(future)
+                self._futures.update(remaining)
                 self._client.cancel(remaining)
 
         return result_iterator()
@@ -155,7 +160,7 @@ class ClientExecutor(cf.Executor):
 
         Parameters
         ----------
-        wait: If True then shutdown will not return until all running
+        wait : If True then shutdown will not return until all running
             futures have finished executing.  If False then all running
             futures are cancelled immediately.
         """

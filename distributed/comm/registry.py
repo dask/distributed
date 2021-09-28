@@ -1,11 +1,7 @@
-from __future__ import print_function, division, absolute_import
-
-from abc import ABCMeta, abstractmethod
-
-from six import with_metaclass
+from abc import ABC, abstractmethod
 
 
-class Backend(with_metaclass(ABCMeta)):
+class Backend(ABC):
     """
     A communication backend, selected by a given URI scheme (e.g. 'tcp').
     """
@@ -61,12 +57,40 @@ class Backend(with_metaclass(ABCMeta)):
 backends = {}
 
 
-def get_backend(scheme):
+def get_backend(scheme: str, require: bool = True) -> Backend:
     """
     Get the Backend instance for the given *scheme*.
+    It looks for matching scheme in dask's internal cache, and falls-back to
+    package metadata for the group name ``distributed.comm.backends``
+
+    Parameters
+    ----------
+
+    require : bool
+        Verify that the backends requirements are properly installed. See
+        https://setuptools.readthedocs.io/en/latest/pkg_resources.html for more
+        information.
     """
+
     backend = backends.get(scheme)
     if backend is None:
-        raise ValueError("unknown address scheme %r (known schemes: %s)"
-                         % (scheme, sorted(backends)))
+        import pkg_resources
+
+        backend = None
+        for backend_class_ep in pkg_resources.iter_entry_points(
+            "distributed.comm.backends", scheme
+        ):
+            # resolve and require are equivalent to load
+            backend_factory = backend_class_ep.resolve()
+            if require:
+                backend_class_ep.require()
+            backend = backend_factory()
+
+        if backend is None:
+            raise ValueError(
+                "unknown address scheme %r (known schemes: %s)"
+                % (scheme, sorted(backends))
+            )
+        else:
+            backends[scheme] = backend
     return backend

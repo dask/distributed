@@ -1,38 +1,35 @@
-from __future__ import print_function, division, absolute_import
-
-import errno
 import glob
 import logging
 import os
 import shutil
 import stat
 import tempfile
+import weakref
 
 import dask
 
 from . import locket
-from .compatibility import finalize
-
 
 logger = logging.getLogger(__name__)
 
-DIR_LOCK_EXT = '.dirlock'
+DIR_LOCK_EXT = ".dirlock"
 
 
 def is_locking_enabled():
-    return dask.config.get('distributed.worker.use-file-locking')
+    return dask.config.get("distributed.worker.use-file-locking")
 
 
 def safe_unlink(path):
     try:
         os.unlink(path)
-    except EnvironmentError as e:
+    except FileNotFoundError:
         # Perhaps it was removed by someone else?
-        if e.errno != errno.ENOENT:
-            logger.error("Failed to remove %r", str(e))
+        pass
+    except OSError as e:
+        logger.error(f"Failed to remove {path}: {e}")
 
 
-class WorkDir(object):
+class WorkDir:
     """
     A temporary work directory inside a WorkSpace.
     """
@@ -57,25 +54,34 @@ class WorkDir(object):
                     with workspace._global_lock():
                         self._lock_file = locket.lock_file(self._lock_path)
                         self._lock_file.acquire()
-                except OSError as e:
-                    logger.exception("Could not acquire workspace lock on "
-                                     "path: %s ."
-                                     "Continuing without lock. "
-                                     "This may result in workspaces not being "
-                                     "cleaned up", self._lock_path,
-                                     exc_info=True)
+                except OSError:
+                    logger.exception(
+                        "Could not acquire workspace lock on "
+                        "path: %s ."
+                        "Continuing without lock. "
+                        "This may result in workspaces not being "
+                        "cleaned up",
+                        self._lock_path,
+                        exc_info=True,
+                    )
                     self._lock_file = None
             except Exception:
                 shutil.rmtree(self.dir_path, ignore_errors=True)
                 raise
             workspace._known_locks.add(self._lock_path)
 
-            self._finalizer = finalize(self, self._finalize,
-                                       workspace, self._lock_path,
-                                       self._lock_file, self.dir_path)
+            self._finalizer = weakref.finalize(
+                self,
+                self._finalize,
+                workspace,
+                self._lock_path,
+                self._lock_file,
+                self.dir_path,
+            )
         else:
-            self._finalizer = finalize(self, self._finalize,
-                                       workspace, None, None, self.dir_path)
+            self._finalizer = weakref.finalize(
+                self, self._finalize, workspace, None, None, self.dir_path
+            )
 
     def release(self):
         """
@@ -95,7 +101,7 @@ class WorkDir(object):
                 safe_unlink(lock_path)
 
 
-class WorkSpace(object):
+class WorkSpace:
     """
     An on-disk workspace that tracks disposable work directories inside it.
     If a process crashes or another event left stale directories behind,
@@ -109,15 +115,14 @@ class WorkSpace(object):
     def __init__(self, base_dir):
         self.base_dir = os.path.abspath(base_dir)
         self._init_workspace()
-        self._global_lock_path = os.path.join(self.base_dir, 'global.lock')
-        self._purge_lock_path = os.path.join(self.base_dir, 'purge.lock')
+        self._global_lock_path = os.path.join(self.base_dir, "global.lock")
+        self._purge_lock_path = os.path.join(self.base_dir, "purge.lock")
 
     def _init_workspace(self):
         try:
             os.mkdir(self.base_dir)
-        except EnvironmentError as e:
-            if e.errno != errno.EEXIST:
-                raise
+        except FileExistsError:
+            pass
 
     def _global_lock(self, **kwargs):
         return locket.lock_file(self._global_lock_path, **kwargs)
@@ -165,10 +170,10 @@ class WorkSpace(object):
         return purged
 
     def _list_unknown_locks(self):
-        for p in glob.glob(os.path.join(self.base_dir, '*' + DIR_LOCK_EXT)):
+        for p in glob.glob(os.path.join(self.base_dir, "*" + DIR_LOCK_EXT)):
             try:
                 st = os.stat(p)
-            except EnvironmentError:
+            except OSError:
                 # May have been removed in the meantime
                 pass
             else:
@@ -199,10 +204,9 @@ class WorkSpace(object):
             return False
         try:
             # Lock file is stale, therefore purge corresponding directory
-            dir_path = lock_path[:-len(DIR_LOCK_EXT)]
+            dir_path = lock_path[: -len(DIR_LOCK_EXT)]
             if os.path.exists(dir_path):
-                logger.info("Found stale lock file and directory %r, purging",
-                            dir_path)
+                logger.info("Found stale lock file and directory %r, purging", dir_path)
                 self._purge_directory(dir_path)
         finally:
             lock.release()
@@ -212,8 +216,7 @@ class WorkSpace(object):
 
     def _on_remove_error(self, func, path, exc_info):
         typ, exc, tb = exc_info
-        logger.error("Failed to remove %r (failed in %r): %s",
-                     path, func, str(exc))
+        logger.error("Failed to remove %r (failed in %r): %s", path, func, str(exc))
 
     def new_work_dir(self, **kwargs):
         """
@@ -223,14 +226,16 @@ class WorkSpace(object):
 
         Parameters
         ----------
-        prefix: str (optional)
+        prefix : str (optional)
             The prefix of the temporary subdirectory name for the workdir
-        name: str (optional)
+        name : str (optional)
             The subdirectory name for the workdir
         """
         try:
             self._purge_leftovers()
         except OSError:
-            logger.error("Failed to clean up lingering worker directories "
-                         "in path: %s ", exc_info=True)
+            logger.error(
+                "Failed to clean up lingering worker directories in path: %s ",
+                exc_info=True,
+            )
         return WorkDir(self, **kwargs)

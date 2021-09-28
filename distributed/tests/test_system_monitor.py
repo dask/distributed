@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 from time import sleep
 
 from distributed.system_monitor import SystemMonitor
@@ -18,7 +16,7 @@ def test_SystemMonitor():
     assert all(wb >= 0 for wb in sm.write_bytes)
     assert all(len(q) == 3 for q in sm.quantities.values())
 
-    assert 'cpu' in repr(sm)
+    assert "cpu" in repr(sm)
 
 
 def test_count():

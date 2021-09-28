@@ -1,21 +1,19 @@
-from __future__ import print_function, division, absolute_import
-
-from collections import deque
 import logging
+from collections import deque
 
-import dask
 from tornado import gen, locks
 from tornado.ioloop import IOLoop
 
-from .core import CommClosedError
-from .utils import parse_timedelta
+import dask
+from dask.utils import parse_timedelta
 
+from .core import CommClosedError
 
 logger = logging.getLogger(__name__)
 
 
-class BatchedSend(object):
-    """ Batch messages in batches on a stream
+class BatchedSend:
+    """Batch messages in batches on a stream
 
     This takes an IOStream and an interval (in ms) and ensures that we send no
     more than one message every interval milliseconds.  We send lists of
@@ -24,9 +22,9 @@ class BatchedSend(object):
     Batching several messages at once helps performance when sending
     a myriad of tiny messages.
 
-    Example
-    -------
-    >>> stream = yield connect(ip, port)
+    Examples
+    --------
+    >>> stream = yield connect(address)
     >>> bstream = BatchedSend(interval='10 ms')
     >>> bstream.start(stream)
     >>> bstream.send('Hello,')
@@ -36,12 +34,13 @@ class BatchedSend(object):
 
         ['Hello,', 'world!']
     """
+
     # XXX why doesn't BatchedSend follow either the IOStream or Comm API?
 
     def __init__(self, interval, loop=None, serializers=None):
         # XXX is the loop arg useful?
         self.loop = loop or IOLoop.current()
-        self.interval = parse_timedelta(interval, default='ms')
+        self.interval = parse_timedelta(interval, default="ms")
         self.waker = locks.Event()
         self.stopped = locks.Event()
         self.please_stop = False
@@ -51,8 +50,11 @@ class BatchedSend(object):
         self.batch_count = 0
         self.byte_count = 0
         self.next_deadline = None
-        self.recent_message_log = deque(maxlen=dask.config.get('distributed.comm.recent-messages-log-length'))
+        self.recent_message_log = deque(
+            maxlen=dask.config.get("distributed.comm.recent-messages-log-length")
+        )
         self.serializers = serializers
+        self._consecutive_failures = 0
 
     def start(self, comm):
         self.comm = comm
@@ -63,9 +65,9 @@ class BatchedSend(object):
 
     def __repr__(self):
         if self.closed():
-            return '<BatchedSend: closed>'
+            return "<BatchedSend: closed>"
         else:
-            return '<BatchedSend: %d in buffer>' % len(self.buffer)
+            return "<BatchedSend: %d in buffer>" % len(self.buffer)
 
     __str__ = __repr__
 
@@ -81,62 +83,82 @@ class BatchedSend(object):
                 # Nothing to send
                 self.next_deadline = None
                 continue
-            if (self.next_deadline is not None and
-                    self.loop.time() < self.next_deadline):
+            if self.next_deadline is not None and self.loop.time() < self.next_deadline:
                 # Send interval not expired yet
                 continue
             payload, self.buffer = self.buffer, []
             self.batch_count += 1
             self.next_deadline = self.loop.time() + self.interval
             try:
-                nbytes = yield self.comm.write(payload,
-                                               serializers=self.serializers,
-                                               on_error='raise')
+                nbytes = yield self.comm.write(
+                    payload, serializers=self.serializers, on_error="raise"
+                )
                 if nbytes < 1e6:
                     self.recent_message_log.append(payload)
                 else:
-                    self.recent_message_log.append('large-message')
+                    self.recent_message_log.append("large-message")
                 self.byte_count += nbytes
-            except CommClosedError as e:
-                logger.info("Batched Comm Closed: %s", e)
+            except CommClosedError:
+                logger.info("Batched Comm Closed %r", self.comm, exc_info=True)
                 break
             except Exception:
+                # We cannot safely retry self.comm.write, as we have no idea
+                # what (if anything) was actually written to the underlying stream.
+                # Re-writing messages could result in complete garbage (e.g. if a frame
+                # header has been written, but not the frame payload), therefore
+                # the only safe thing to do here is to abort the stream without
+                # any attempt to re-try `write`.
                 logger.exception("Error in batched write")
                 break
             finally:
                 payload = None  # lose ref
+        else:
+            # nobreak. We've been gracefully closed.
+            self.stopped.set()
+            return
 
+        # If we've reached here, it means `break` was hit above and
+        # there was an exception when using `comm`.
+        # We can't close gracefully via `.close()` since we can't send messages.
+        # So we just abort.
+        # This means that any messages in our buffer our lost.
+        # To propagate exceptions, we rely on subsequent `BatchedSend.send`
+        # calls to raise CommClosedErrors.
         self.stopped.set()
+        self.abort()
 
-    def send(self, msg):
-        """ Schedule a message for sending to the other side
+    def send(self, *msgs):
+        """Schedule a message for sending to the other side
 
         This completes quickly and synchronously
         """
         if self.comm is not None and self.comm.closed():
-            raise CommClosedError
+            raise CommClosedError(f"Comm {self.comm!r} already closed.")
 
-        self.message_count += 1
-        self.buffer.append(msg)
+        self.message_count += len(msgs)
+        self.buffer.extend(msgs)
         # Avoid spurious wakeups if possible
         if self.next_deadline is None:
             self.waker.set()
 
     @gen.coroutine
-    def close(self):
-        """ Flush existing messages and then close comm """
+    def close(self, timeout=None):
+        """Flush existing messages and then close comm
+
+        If set, raises `tornado.util.TimeoutError` after a timeout.
+        """
         if self.comm is None:
             return
         self.please_stop = True
         self.waker.set()
-        yield self.stopped.wait()
+        yield self.stopped.wait(timeout=timeout)
         if not self.comm.closed():
             try:
                 if self.buffer:
                     self.buffer, payload = [], self.buffer
-                    yield self.comm.write(payload,
-                                          serializers=self.serializers,
-                                          on_error='raise')
+                    yield self.comm.write(
+                        payload, serializers=self.serializers, on_error="raise"
+                    )
             except CommClosedError:
                 pass
             yield self.comm.close()

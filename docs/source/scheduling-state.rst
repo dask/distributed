@@ -11,7 +11,7 @@ The life of a computation with Dask can be described in the following stages:
 1.  The user authors a graph using some library, perhaps dask.delayed or
     dask.dataframe or the ``submit/map`` functions on the client.  They submit
     these tasks to the scheduler.
-2.  The schedulers assimilates these tasks into its graph of all tasks to
+2.  The scheduler assimilates these tasks into its graph of all tasks to
     track, and as their dependencies become available it asks workers to run
     each of these tasks in turn.
 3.  The worker receives information about how to run the task, communicates
@@ -45,6 +45,8 @@ The scheduler keeps internal state about several kinds of entities:
    It may change between versions and you should probably avoid relying on it
    in user code (including on any APIs explained here).
 
+
+.. _scheduler-task-state:
 
 Task State
 ----------
@@ -112,7 +114,7 @@ containers to help with scheduling tasks:
 .. attribute:: Scheduler.saturated: {WorkerState}
 
    A set of workers whose computing power (as
-   measured by :attr:`WorkerState.ncores`) is fully exploited by processing
+   measured by :attr:`WorkerState.nthreads`) is fully exploited by processing
    tasks, and whose current :attr:`~WorkerState.occupancy` is a lot greater
    than the average.
 
@@ -131,8 +133,8 @@ Conversely, "saturated" workers may see their workload lightened through
 Client State
 ------------
 
-Information about each individual client is kept in a :class:`ClientState`
-object:
+Information about each individual client of the scheduler is kept
+in a :class:`ClientState` object:
 
 .. autoclass:: ClientState
 
@@ -308,5 +310,6 @@ API
 
 .. autoclass:: Scheduler
    :members:
+   :inherited-members:
 
 .. autofunction:: decide_worker

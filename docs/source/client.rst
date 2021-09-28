@@ -3,7 +3,7 @@ Client
 
 The Client is the primary entry point for users of ``dask.distributed``.
 
-After we :doc:`setup a cluster <setup>`, we initialize a ``Client`` by pointing
+After we `setup a cluster <https://docs.dask.org/en/latest/setup.html>`_, we initialize a ``Client`` by pointing
 it to the address of a ``Scheduler``:
 
 .. code-block:: python
@@ -108,12 +108,17 @@ which are used for larger and smaller result sets respectively.
 
 For more information see the page on :doc:`Managing Computation <manage-computation>`.
 
+.. _pure functions:
 
 Pure Functions by Default
 -------------------------
 
-By default we assume that all functions are pure_.  If this is not the case we
-should use the ``pure=False`` keyword argument.
+By default, ``distributed`` assumes that all functions are pure_. Pure functions:
+
+* always return the same output for a given set of inputs
+* do not have side effects, like modifying global state or creating files
+
+If this is not the case, you should use the ``pure=False`` keyword argument in methods like ``Client.map()`` and ``Client.submit()``.
 
 The client associates a key to all computations.  This key is accessible on
 the Future object.
@@ -149,8 +154,8 @@ keyword argument.  In this case keys are randomly generated (by ``uuid4``.)
 .. _pure: https://toolz.readthedocs.io/en/latest/purity.html
 
 
-Tornado Coroutines
-------------------
+Async/await Operation
+---------------------
 
 If we are operating in an asynchronous environment then the blocking functions
 listed above become asynchronous equivalents.  You must start your client
@@ -159,11 +164,10 @@ functions.
 
 .. code-block:: python
 
-   @gen.coroutine
-   def f():
-       client = yield Client(asynchronous=True)
+   async def f():
+       client = await Client(asynchronous=True)
        future = client.submit(func, *args)
-       result = yield future
+       result = await future
        return result
 
 If you want to reuse the same client in asynchronous and synchronous
@@ -174,10 +178,9 @@ call.
 
    client = Client()  # normal blocking client
 
-   @gen.coroutine
-   def f():
+   async def f():
        futures = client.map(func, L)
-       results = yield client.gather(futures, asynchronous=True)
+       results = await client.gather(futures, asynchronous=True)
        return results
 
 See the :doc:`Asynchronous <asynchronous>` documentation for more information.
@@ -196,8 +199,8 @@ following pages:
 
 .. _concurrent.futures:  https://docs.python.org/3/library/concurrent.futures.html
 .. _PEP-3148: https://www.python.org/dev/peps/pep-3148/
-.. _dask.array: http://dask.pydata.org/en/latest/array.html
-.. _dask.bag: http://dask.pydata.org/en/latest/bag.html
-.. _dask.dataframe: http://dask.pydata.org/en/latest/dataframe.html
-.. _dask.delayed: http://dask.pydata.org/en/latest/delayed.html
-.. _Dask: http://dask.pydata.org/en/latest/
+.. _dask.array: https://docs.dask.org/en/latest/array.html
+.. _dask.bag: https://docs.dask.org/en/latest/bag.html
+.. _dask.dataframe: https://docs.dask.org/en/latest/dataframe.html
+.. _dask.delayed: https://docs.dask.org/en/latest/delayed.html
+.. _Dask: https://dask.org

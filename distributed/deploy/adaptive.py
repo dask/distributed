@@ -1,19 +1,17 @@
-from __future__ import print_function, division, absolute_import
-
-from collections import deque
 import logging
-import math
+from inspect import isawaitable
 
-import toolz
-from tornado import gen
+import dask.config
+from dask.utils import parse_timedelta
 
-from ..metrics import time
-from ..utils import log_errors, PeriodicCallback, parse_timedelta
+from ..protocol import pickle
+from ..utils import log_errors
+from .adaptive_core import AdaptiveCore
 
 logger = logging.getLogger(__name__)
 
 
-class Adaptive(object):
+class Adaptive(AdaptiveCore):
     '''
     Adaptively allocate workers based on scheduler load.  A superclass.
 
@@ -26,19 +24,13 @@ class Adaptive(object):
 
     Parameters
     ----------
-    scheduler: distributed.Scheduler
     cluster: object
-        Must have scale_up and scale_down methods/coroutines
-    startup_cost : timedelta or str, default "1s"
-        Estimate of the number of seconds for nnFactor representing how costly it is to start an additional worker.
-        Affects quickly to adapt to high tasks per worker loads
+        Must have scale and scale_down methods/coroutines
     interval : timedelta or str, default "1000 ms"
         Milliseconds between checks
     wait_count: int, default 3
         Number of consecutive times that a worker should be suggested for
         removal before we remove it.
-    scale_factor : int, default 2
-        Factor to scale by when it's determined additional workers are needed
     target_duration: timedelta or str, default "5s"
         Amount of time we want a computation to take.
         This affects how aggressively we scale up.
@@ -76,127 +68,95 @@ class Adaptive(object):
 
     Notes
     -----
-    Subclasses can override :meth:`Adaptive.should_scale_up` and
+    Subclasses can override :meth:`Adaptive.target` and
     :meth:`Adaptive.workers_to_close` to control when the cluster should be
     resized. The default implementation checks if there are too many tasks
-    per worker or too little memory available (see :meth:`Adaptive.needs_cpu`
-    and :meth:`Adaptive.needs_memory`).
-
-    :meth:`Adaptive.get_scale_up_kwargs` method controls the arguments passed to
-    the cluster's ``scale_up`` method.
+    per worker or too little memory available (see
+    :meth:`Scheduler.adaptive_target`).
+    The values for interval, min, max, wait_count and target_duration can be
+    specified in the dask config under the distributed.adaptive key.
     '''
 
-    def __init__(self, scheduler, cluster=None, interval='1s', startup_cost='1s',
-                 scale_factor=2, minimum=0, maximum=None, wait_count=3,
-                 target_duration='5s', worker_key=lambda x: x, **kwargs):
-        interval = parse_timedelta(interval, default='ms')
-        self.worker_key = worker_key
-        self.scheduler = scheduler
+    def __init__(
+        self,
+        cluster=None,
+        interval=None,
+        minimum=None,
+        maximum=None,
+        wait_count=None,
+        target_duration=None,
+        worker_key=None,
+        **kwargs,
+    ):
         self.cluster = cluster
-        self.startup_cost = parse_timedelta(startup_cost, default='s')
-        self.scale_factor = scale_factor
-        if self.cluster:
-            self._adapt_callback = PeriodicCallback(self._adapt, interval * 1000,
-                                                    io_loop=scheduler.loop)
-            self.scheduler.loop.add_callback(self._adapt_callback.start)
-        self._adapting = False
+        self.worker_key = worker_key
         self._workers_to_close_kwargs = kwargs
-        self.minimum = minimum
-        self.maximum = maximum
-        self.log = deque(maxlen=1000)
-        self.close_counts = {}
-        self.wait_count = wait_count
+
+        if interval is None:
+            interval = dask.config.get("distributed.adaptive.interval")
+        if minimum is None:
+            minimum = dask.config.get("distributed.adaptive.minimum")
+        if maximum is None:
+            maximum = dask.config.get("distributed.adaptive.maximum")
+        if wait_count is None:
+            wait_count = dask.config.get("distributed.adaptive.wait-count")
+        if target_duration is None:
+            target_duration = dask.config.get("distributed.adaptive.target-duration")
+
         self.target_duration = parse_timedelta(target_duration)
 
-        self.scheduler.handlers['adaptive_recommendations'] = self.recommendations
+        logger.info("Adaptive scaling started: minimum=%s maximum=%s", minimum, maximum)
 
-    def stop(self):
-        if self.cluster:
-            self._adapt_callback.stop()
-            self._adapt_callback = None
-            del self._adapt_callback
+        super().__init__(
+            minimum=minimum, maximum=maximum, wait_count=wait_count, interval=interval
+        )
 
-    def needs_cpu(self):
+    @property
+    def scheduler(self):
+        return self.cluster.scheduler_comm
+
+    @property
+    def plan(self):
+        return self.cluster.plan
+
+    @property
+    def requested(self):
+        return self.cluster.requested
+
+    @property
+    def observed(self):
+        return self.cluster.observed
+
+    async def target(self):
         """
-        Check if the cluster is CPU constrained (too many tasks per core)
+        Determine target number of workers that should exist.
 
         Notes
         -----
-        Returns ``True`` if the occupancy per core is some factor larger
-        than ``startup_cost``.
-        """
-        total_occupancy = self.scheduler.total_occupancy
-        total_cores = sum([ws.ncores for ws in self.scheduler.workers.values()])
-
-        if total_occupancy / (total_cores + 1e-9) > self.startup_cost * 2:
-            logger.info("CPU limit exceeded [%d occupancy / %d cores]",
-                        total_occupancy, total_cores)
-            return True
-        else:
-            return False
-
-    def needs_memory(self):
-        """
-        Check if the cluster is RAM constrained
-
-        Notes
-        -----
-        Returns ``True`` if  the required bytes in distributed memory is some
-        factor larger than the actual distributed memory available.
-        """
-        limit_bytes = {w: self.scheduler.worker_info[w]['memory_limit']
-                        for w in self.scheduler.worker_info}
-        worker_bytes = [ws.nbytes for ws in self.scheduler.workers.values()]
-
-        limit = sum(limit_bytes.values())
-        total = sum(worker_bytes)
-        if total > 0.6 * limit:
-            logger.info("Ram limit exceeded [%d/%d]", limit, total)
-            return True
-        else:
-            return False
-
-    def should_scale_up(self):
-        """
-        Determine whether additional workers should be added to the cluster
+        ``Adaptive.target`` dispatches to Scheduler.adaptive_target(),
+        but may be overridden in subclasses.
 
         Returns
         -------
-        scale_up : bool
-
-        Notes
-        ----
-        Additional workers are added whenever
-
-        1. There are unrunnable tasks and no workers
-        2. The cluster is CPU constrained
-        3. The cluster is RAM constrained
-        4. There are fewer workers than our minimum
+        Target number of workers
 
         See Also
         --------
-        needs_cpu
-        needs_memory
+        Scheduler.adaptive_target
         """
-        with log_errors():
-            if len(self.scheduler.workers) < self.minimum:
-                return True
+        return await self.scheduler.adaptive_target(
+            target_duration=self.target_duration
+        )
 
-            if self.maximum is not None and len(self.scheduler.workers) >= self.maximum:
-                return False
+    async def recommendations(self, target: int) -> dict:
+        if len(self.plan) != len(self.requested):
+            # Ensure that the number of planned and requested workers
+            # are in sync before making recommendations.
+            await self.cluster
 
-            if self.scheduler.unrunnable and not self.scheduler.workers:
-                return True
+        return await super().recommendations(target)
 
-            needs_cpu = self.needs_cpu()
-            needs_memory = self.needs_memory()
-
-            if needs_cpu or needs_memory:
-                return True
-
-            return False
-
-    def workers_to_close(self, **kwargs):
+    async def workers_to_close(self, target: int):
         """
         Determine which, if any, workers should potentially be removed from
         the cluster.
@@ -208,132 +168,41 @@ class Adaptive(object):
 
         Returns
         -------
-        List of worker addresses to close, if any
+        List of worker names to close, if any
 
         See Also
         --------
         Scheduler.workers_to_close
         """
-        if len(self.scheduler.workers) <= self.minimum:
-            return []
+        return await self.scheduler.workers_to_close(
+            target=target,
+            key=pickle.dumps(self.worker_key) if self.worker_key else None,
+            attribute="name",
+            **self._workers_to_close_kwargs,
+        )
 
-        kw = dict(self._workers_to_close_kwargs)
-        kw.update(kwargs)
-
-        if self.maximum is not None and len(self.scheduler.workers) > self.maximum:
-            kw['n'] = len(self.scheduler.workers) - self.maximum
-
-        L = self.scheduler.workers_to_close(**kw)
-        if len(self.scheduler.workers) - len(L) < self.minimum:
-            L = L[:len(self.scheduler.workers) - self.minimum]
-
-        return L
-
-    @gen.coroutine
-    def _retire_workers(self, workers=None):
-        if workers is None:
-            workers = self.workers_to_close(key=self.worker_key,
-                                            minimum=self.minimum)
+    async def scale_down(self, workers):
         if not workers:
-            raise gen.Return(workers)
-        with log_errors():
-            yield self.scheduler.retire_workers(workers=workers,
-                                                remove=True,
-                                                close_workers=True)
-
-            logger.info("Retiring workers %s", workers)
-            f = self.cluster.scale_down(workers)
-            if gen.is_future(f):
-                yield f
-
-            raise gen.Return(workers)
-
-    def get_scale_up_kwargs(self):
-        """
-        Get the arguments to be passed to ``self.cluster.scale_up``.
-
-        Notes
-        -----
-        By default the desired number of total workers is returned (``n``).
-        Subclasses should ensure that the return dictionary includes a key-
-        value pair for ``n``, either by implementing it or by calling the
-        parent's ``get_scale_up_kwargs``.
-
-        See Also
-        --------
-        LocalCluster.scale_up
-        """
-        target = math.ceil(self.scheduler.total_occupancy /
-                           self.target_duration)
-        instances = max(1,
-                        len(self.scheduler.workers) * self.scale_factor,
-                        target,
-                        self.minimum)
-
-        if self.maximum:
-            instances = min(self.maximum, instances)
-
-        instances = int(instances)
-        logger.info("Scaling up to %d workers", instances)
-        return {'n': instances}
-
-    def recommendations(self, comm=None):
-        should_scale_up = self.should_scale_up()
-        workers = set(self.workers_to_close(key=self.worker_key,
-                                            minimum=self.minimum))
-        if should_scale_up and workers:
-            logger.info("Attempting to scale up and scale down simultaneously.")
-            self.close_counts.clear()
-            return {'status': 'error',
-                    'msg': 'Trying to scale up and down simultaneously'}
-
-        elif should_scale_up:
-            self.close_counts.clear()
-            return toolz.merge({'status': 'up'}, self.get_scale_up_kwargs())
-
-        elif workers:
-            d = {}
-            to_close = []
-            for w, c in self.close_counts.items():
-                if w in workers:
-                    if c >= self.wait_count:
-                        to_close.append(w)
-                    else:
-                        d[w] = c
-
-            for w in workers:
-                d[w] = d.get(w, 0) + 1
-
-            self.close_counts = d
-
-            if to_close:
-                return {'status': 'down', 'workers': to_close}
-        else:
-            self.close_counts.clear()
-            return None
-
-    @gen.coroutine
-    def _adapt(self):
-        if self._adapting:  # Semaphore to avoid overlapping adapt calls
             return
+        with log_errors():
+            logger.info("Retiring workers %s", workers)
+            # Ask scheduler to cleanly retire workers
+            await self.scheduler.retire_workers(
+                names=workers,
+                remove=True,
+                close_workers=True,
+            )
 
-        self._adapting = True
-        try:
-            recommendations = self.recommendations()
-            if not recommendations:
-                return
-            status = recommendations.pop('status')
-            if status == 'up':
-                f = self.cluster.scale_up(**recommendations)
-                self.log.append((time(), 'up', recommendations))
-                if gen.is_future(f):
-                    yield f
+            # close workers more forcefully
+            f = self.cluster.scale_down(workers)
+            if isawaitable(f):
+                await f
 
-            elif status == 'down':
-                self.log.append((time(), 'down', recommendations['workers']))
-                workers = yield self._retire_workers(workers=recommendations['workers'])
-        finally:
-            self._adapting = False
+    async def scale_up(self, n):
+        f = self.cluster.scale(n)
+        if isawaitable(f):
+            await f
 
-    def adapt(self):
-        self.scheduler.loop.add_callback(self._adapt)
+    @property
+    def loop(self):
+        return self.cluster.loop

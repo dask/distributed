@@ -3,46 +3,15 @@
 API
 ===
 
-.. currentmodule:: distributed.client
+.. currentmodule:: distributed
 
 **Client**
 
 .. autosummary::
    Client
-   Client.call_stack
-   Client.cancel
-   Client.close
-   Client.compute
-   Client.gather
-   Client.get
-   Client.get_dataset
-   Client.get_executor
-   Client.get_metadata
-   Client.get_scheduler_logs
-   Client.get_task_stream
-   Client.get_worker_logs
-   Client.has_what
-   Client.list_datasets
-   Client.map
-   Client.ncores
-   Client.persist
-   Client.publish_dataset
-   Client.profile
-   Client.rebalance
-   Client.replicate
-   Client.restart
-   Client.run
-   Client.run_on_scheduler
-   Client.scatter
-   Client.scheduler_info
-   Client.write_scheduler_file
-   Client.set_metadata
-   Client.start_ipython_workers
-   Client.start_ipython_scheduler
-   Client.submit
-   Client.unpublish_dataset
-   Client.upload_file
-   Client.who_has
+
+.. autoautosummary:: distributed.Client
+   :methods:
 
 .. currentmodule:: distributed
 
@@ -54,33 +23,31 @@ API
    rejoin
    Reschedule
 
-.. currentmodule:: distributed.recreate_exceptions
+.. currentmodule:: distributed.recreate_tasks
 
 .. autosummary::
-   ReplayExceptionClient.get_futures_error
-   ReplayExceptionClient.recreate_error_locally
+   ReplayTaskClient.recreate_task_locally
+   ReplayTaskClient.recreate_error_locally
 
-.. currentmodule:: distributed.client
+.. currentmodule:: distributed
 
 
 **Future**
 
 .. autosummary::
    Future
-   Future.add_done_callback
-   Future.cancel
-   Future.cancelled
-   Future.done
-   Future.exception
-   Future.result
-   Future.traceback
+
+.. autoautosummary:: distributed.Future
+   :methods:
 
 **Client Coordination**
 
 .. currentmodule:: distributed
 
 .. autosummary::
+   Event
    Lock
+   MultiLock
    Queue
    Variable
 
@@ -89,11 +56,20 @@ API
 
 .. autosummary::
    as_completed
-   distributed.diagnostics.progress
+   distributed.diagnostics.progressbar.progress
    wait
    fire_and_forget
    futures_of
    get_task_stream
+   get_task_metadata
+   performance_report
+
+
+**Utilities**
+
+.. autosummary::
+   distributed.utils.Log
+   distributed.utils.Logs
 
 
 Asynchronous methods
@@ -131,12 +107,12 @@ The asynchronous variants must be run within a Tornado coroutine.  See the
 Client
 ------
 
-.. currentmodule:: distributed.client
+.. currentmodule:: distributed
 
 .. autoclass:: Client
    :members:
 
-.. autoclass:: distributed.recreate_exceptions.ReplayExceptionClient
+.. autoclass:: distributed.recreate_tasks.ReplayTaskClient
    :members:
 
 
@@ -146,12 +122,36 @@ Future
 .. autoclass:: Future
    :members:
 
+Cluster
+-------
+
+Classes relevant for cluster creation and management. Other libraries
+(like `dask-jobqueue`_, `dask-gateway`_, `dask-kubernetes`_, `dask-yarn`_ etc.)
+provide additional cluster objects.
+
+.. _dask-jobqueue: https://jobqueue.dask.org/
+.. _dask-gateway: https://gateway.dask.org/
+.. _dask-kubernetes: https://kubernetes.dask.org/
+.. _dask-yarn: https://yarn.dask.org/en/latest/
+
+.. autosummary::
+   LocalCluster
+   SpecCluster
+
+.. autoclass:: LocalCluster
+   :members:
+
+.. autoclass:: SpecCluster
+   :members:
+
 
 Other
 -----
 
-.. autofunction:: as_completed
-.. autofunction:: distributed.diagnostics.progress
+.. autoclass:: as_completed
+   :members:
+
+.. autofunction:: distributed.diagnostics.progressbar.progress
 .. autofunction:: wait
 .. autofunction:: fire_and_forget
 .. autofunction:: futures_of
@@ -163,8 +163,18 @@ Other
 .. autofunction:: distributed.get_client
 .. autofunction:: distributed.secede
 .. autofunction:: distributed.rejoin
+.. autoclass:: distributed.Reschedule
+.. autoclass:: get_task_stream
+.. autoclass:: get_task_metadata
+.. autoclass:: performance_report
 
+.. autoclass:: Event
+   :members:
 .. autoclass:: Lock
+   :members:
+.. autoclass:: MultiLock
+   :members:
+.. autoclass:: Semaphore
    :members:
 .. autoclass:: Queue
    :members:
@@ -172,12 +182,11 @@ Other
    :members:
 
 
-Asyncio Client
---------------
+Utilities
+---------
 
-.. currentmodule:: distributed.asyncio
-.. autoclass:: AioClient
-   :members:
+.. autoclass:: distributed.utils.Log
+.. autoclass:: distributed.utils.Logs
 
 
 Adaptive
