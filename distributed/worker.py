@@ -1621,6 +1621,8 @@ class Worker(ServerNode):
         """
         self.log.append(("remove-replicas", keys, stimulus_id))
         recommendations = {}
+
+        rejected = []
         for key in keys:
             ts = self.tasks.get(key)
             if ts is None or ts.state != "memory":
@@ -1629,10 +1631,13 @@ class Worker(ServerNode):
                 self.log.append(("remove-replica-confirmed", ts.key, stimulus_id))
                 recommendations[ts] = "released" if ts.dependents else "forgotten"
             else:
-                self.log.append(("remove-replica-rejected", ts.key, stimulus_id))
-                self.batched_stream.send(
-                    {"op": "add-keys", "keys": [ts.key], "stimulus_id": stimulus_id}
-                )
+                rejected.append(key)
+
+        if rejected:
+            self.log.append(("remove-replica-rejected", rejected, stimulus_id))
+            self.batched_stream.send(
+                {"op": "add-keys", "keys": rejected, "stimulus_id": stimulus_id}
+            )
 
         self.transitions(recommendations=recommendations, stimulus_id=stimulus_id)
 

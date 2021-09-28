@@ -2760,8 +2760,14 @@ def _acquire_replicas(scheduler, worker, *futures):
 
 def _remove_replicas(scheduler, worker, *futures):
     keys = [f.key for f in futures]
-
-    scheduler.stream_comms[worker.address].send(
+    ws = scheduler.workers[worker.address]
+    for k in keys:
+        ts = scheduler.tasks[k]
+        if ws in ts.who_has:
+            ts.who_has.remove(ws)
+            ws._nbytes -= ts.get_nbytes()
+            del scheduler.workers[ws.address]._has_what[ts]
+    scheduler.stream_comms[ws.address].send(
         {
             "op": "remove-replicas",
             "keys": keys,
@@ -2859,6 +2865,10 @@ async def test_remove_replica_simple(c, s, a, b):
     while not all(len(s.tasks[f.key].who_has) == 1 for f in futs):
         await asyncio.sleep(0.01)
 
+    # Ensure there is no delayed reply to re-register the key
+    await asyncio.sleep(0.01)
+    assert all(s.tasks[f.key].who_has == {s.workers[a.address]} for f in futs)
+
 
 @gen_cluster(
     client=True,
@@ -2878,11 +2888,26 @@ async def test_remove_replica_while_computing(c, s, *workers):
         return
 
     final = c.submit(reduce, intermediate, workers=[w.address], key="final")
+
     while not any(f.key in w.tasks for f in intermediate):
         await asyncio.sleep(0.001)
 
+    # The scheduler removes keys from who_has/has_what immediately
+    # Make sure the worker responds to the rejection and the scheduler corrects
+    # the state
+    ws = s.workers[w.address]
+    while not any(s.tasks[fut.key] in ws.has_what for fut in futs):
+        await asyncio.sleep(0.001)
+
+    _remove_replicas(s, w, *futs)
+    # Scheduler removed keys immediately...
+    assert not any(s.tasks[fut.key] in ws.has_what for fut in futs)
+    # ... but the state is properly restored
+    while not any(s.tasks[fut.key] in ws.has_what for fut in futs):
+        await asyncio.sleep(0.01)
+
+    # The worker should reject all of these since they are required
     while not all(fut.done() for fut in intermediate):
-        # The worker should reject all of these since they are required
         _remove_replicas(s, w, *futs)
         await asyncio.sleep(0.01)
 
@@ -2891,8 +2916,10 @@ async def test_remove_replica_while_computing(c, s, *workers):
     # If a request is rejected, the worker responds with an add-keys message to
     # reenlist the key in the schedulers state system to avoid race conditions,
     # see also https://github.com/dask/distributed/issues/5265
-    rejections = [msg[1] for msg in w.log if msg[0] == "remove-replica-rejected"]
-    assert rejections
+    rejections = set()
+    for msg in w.log:
+        if msg[0] == "remove-replica-rejected":
+            rejections.update(msg[1])
     for rejected_key in rejections:
 
         def answer_sent(key):
