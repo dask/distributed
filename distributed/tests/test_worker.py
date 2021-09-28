@@ -2858,11 +2858,9 @@ async def test_remove_replica_simple(c, s, a, b):
 
     _remove_replicas(s, b, *futs)
 
-    while b.tasks:
-        await asyncio.sleep(0.01)
+    assert all(len(s.tasks[f.key].who_has) == 1 for f in futs)
 
-    # might take a moment for the reply to reach the scheduler
-    while not all(len(s.tasks[f.key].who_has) == 1 for f in futs):
+    while b.tasks:
         await asyncio.sleep(0.01)
 
     # Ensure there is no delayed reply to re-register the key
