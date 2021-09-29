@@ -3058,8 +3058,9 @@ class Client:
         or .zip  files will be importable.
 
         We recommend using :class:`distributed.diagnostics.plugin.UploadFile`
-        when using a dynamic cluster, to ensure that files are provided to
-        new workers as they join.
+        or :class:`distributed.diagnostics.plugin.UploadDirectory` when using
+        a dynamic cluster, to ensure that files are provided to new workers
+        as they join.
 
         Parameters
         ----------
@@ -3070,6 +3071,9 @@ class Client:
         --------
         distributed.diagnostics.plugin.UploadFile : A worker plugin to
             automatically upload a file when workers join the cluster. 
+        distributed.diagnostics.plugin.UploadDirectory : A worker plugin to
+            automatically upload a directory of files when workers join the
+            cluster.
 
         Examples
         --------
