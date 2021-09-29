@@ -13,6 +13,7 @@ from distributed.core import (
     ConnectionPool,
     Server,
     Status,
+    clean_exception,
     coerce_to_address,
     connect,
     pingpong,
@@ -135,9 +136,9 @@ def test_server_raises_on_blocked_handlers(loop):
         await comm.write({"op": "ping"})
         msg = await comm.read()
 
-        assert "exception" in msg
-        assert isinstance(msg["exception"], ValueError)
-        assert "'ping' handler has been explicitly disallowed" in repr(msg["exception"])
+        _, exception, _ = clean_exception(msg["exception"])
+        assert isinstance(exception, ValueError)
+        assert "'ping' handler has been explicitly disallowed" in repr(exception)
 
         await comm.close()
         server.stop()

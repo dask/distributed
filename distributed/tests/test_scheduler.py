@@ -22,7 +22,7 @@ from dask.utils import apply, parse_timedelta, stringify, typename
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.comm import Comm
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import ConnectionPool, Status, connect, rpc
+from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.scheduler import MemoryState, Scheduler
@@ -410,11 +410,9 @@ async def test_blocked_handlers_are_respected(s, a, b):
 
     response = await comm.read()
 
-    assert "exception" in response
-    assert isinstance(response["exception"], ValueError)
-    assert "'feed' handler has been explicitly disallowed" in repr(
-        response["exception"]
-    )
+    _, exc, _ = clean_exception(response["exception"], response["traceback"])
+    assert isinstance(exc, ValueError)
+    assert "'feed' handler has been explicitly disallowed" in repr(exc)
 
     await comm.close()
 

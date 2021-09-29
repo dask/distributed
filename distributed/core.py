@@ -1158,34 +1158,36 @@ def error_message(e, status="error"):
     MAX_ERROR_LEN = dask.config.get("distributed.admin.max-error-length")
     tblib.pickling_support.install(e, *collect_causes(e))
     tb = get_traceback()
-    e2 = truncate_exception(e, MAX_ERROR_LEN)
+    tb_text = "".join(traceback.format_tb(tb))
+    e = truncate_exception(e, MAX_ERROR_LEN)
     try:
-        e3 = protocol.pickle.dumps(e2, protocol=4)
-        protocol.pickle.loads(e3)
+        e_serialized = protocol.pickle.dumps(e)
+        protocol.pickle.loads(e_serialized)
     except Exception:
-        e2 = Exception(str(e2))
-    e4 = protocol.to_serialize(e2)
-    try:
-        tb2 = protocol.pickle.dumps(tb, protocol=4)
-        protocol.pickle.loads(tb2)
-    except Exception:
-        tb = tb2 = "".join(traceback.format_tb(tb))
+        e_serialized = protocol.pickle.dumps(Exception(repr(e)))
+    e_serialized = protocol.to_serialize(e_serialized)
 
-    if len(tb2) > MAX_ERROR_LEN:
+    try:
+        tb_serialized = protocol.pickle.dumps(tb)
+        protocol.pickle.loads(tb_serialized)
+    except Exception:
+        tb_serialized = protocol.pickle.dumps(tb_text)
+
+    if len(tb_serialized) > MAX_ERROR_LEN:
         tb_result = None
     else:
-        tb_result = protocol.to_serialize(tb)
+        tb_result = protocol.to_serialize(tb_serialized)
 
     return {
         "status": status,
-        "exception": e4,
+        "exception": e_serialized,
         "traceback": tb_result,
-        "exception_text": repr(e2),
-        "traceback_text": "".join(traceback.format_tb(tb)),
+        "exception_text": repr(e),
+        "traceback_text": tb_text,
     }
 
 
-def clean_exception(exception, traceback, **kwargs):
+def clean_exception(exception, traceback=None, **kwargs):
     """Reraise exception and traceback. Deserialize if necessary
 
     See Also

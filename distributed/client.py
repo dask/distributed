@@ -4111,8 +4111,9 @@ class Client:
         responses = await method(plugin=dumps(plugin, protocol=4), name=name)
         for response in responses.values():
             if response["status"] == "error":
-                exc = response["exception"]
-                tb = response["traceback"]
+                _, exc, tb = clean_exception(
+                    response["exception"], response["traceback"]
+                )
                 raise exc.with_traceback(tb)
         return responses
 

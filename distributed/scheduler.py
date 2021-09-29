@@ -6364,7 +6364,7 @@ class Scheduler(SchedulerState, ServerNode):
             if delete:
                 del_worker_tasks = defaultdict(set)
                 for ts in tasks:
-                    del_candidates = ts._who_has & workers
+                    del_candidates = tuple(ts._who_has & workers)
                     if len(del_candidates) > n:
                         for ws in random.sample(
                             del_candidates, len(del_candidates) - n
@@ -6396,7 +6396,7 @@ class Scheduler(SchedulerState, ServerNode):
                     count = min(n_missing, branching_factor * len(ts._who_has))
                     assert count > 0
 
-                    for ws in random.sample(workers - ts._who_has, count):
+                    for ws in random.sample(tuple(workers - ts._who_has), count):
                         gathers[ws._address][ts._key] = [
                             wws._address for wws in ts._who_has
                         ]
@@ -6673,7 +6673,7 @@ class Scheduler(SchedulerState, ServerNode):
 
                 return worker_keys
 
-    def add_keys(self, comm=None, worker=None, keys=()):
+    def add_keys(self, comm=None, worker=None, keys=(), stimulus_id=None):
         """
         Learn that a worker has certain keys
 
@@ -6694,12 +6694,14 @@ class Scheduler(SchedulerState, ServerNode):
                 redundant_replicas.append(key)
 
         if redundant_replicas:
+            if not stimulus_id:
+                stimulus_id = f"redundant-replicas-{time()}"
             self.worker_send(
                 worker,
                 {
                     "op": "remove-replicas",
                     "keys": redundant_replicas,
-                    "stimulus_id": f"redundant-replicas-{time()}",
+                    "stimulus_id": stimulus_id,
                 },
             )
 
