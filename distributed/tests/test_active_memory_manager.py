@@ -1,5 +1,6 @@
 import asyncio
 import random
+from time import time
 
 import pytest
 
@@ -328,45 +329,6 @@ async def test_drop_with_bad_candidates(c, s, a, b):
     assert s.tasks["x"].who_has == {ws0, ws1}
 
 
-class DropEverything(ActiveMemoryManagerPolicy):
-    """Inanely suggest to drop every single key in the cluster"""
-
-    def run(self):
-        for ts in self.manager.scheduler.tasks.values():
-            # Instead of yielding ("drop", ts, None) for each worker, which would result
-            # in semi-predictable output about which replica survives, randomly choose a
-            # different survivor at each AMM run.
-            candidates = list(ts.who_has)
-            random.shuffle(candidates)
-            for ws in candidates:
-                yield "drop", ts, {ws}
-
-
-@pytest.mark.slow
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)] * 8,
-    Worker=Nanny,
-    config={
-        "distributed.scheduler.active-memory-manager.start": True,
-        "distributed.scheduler.active-memory-manager.interval": 0.1,
-        "distributed.scheduler.active-memory-manager.policies": [
-            {"class": "distributed.tests.test_active_memory_manager.DropEverything"},
-        ],
-    },
-)
-async def test_drop_stress(c, s, *nannies):
-    """A policy which suggests dropping everything won't break a running computation,
-    but only slow it down.
-    """
-    import dask.array as da
-
-    rng = da.random.RandomState(0)
-    a = rng.random((20, 20), chunks=(1, 1))
-    b = (a @ a.T).sum().round(3)
-    assert await c.compute(b) == 2134.398
-
-
 @gen_cluster(nthreads=[("", 1)] * 4, client=True, config=demo_config("replicate", n=2))
 async def test_replicate(c, s, *workers):
     futures = await c.scatter({"x": 123})
@@ -494,3 +456,81 @@ async def test_ReduceReplicas(c, s, *workers):
     s.extensions["amm"].run_once()
     while len(s.tasks["x"].who_has) > 1:
         await asyncio.sleep(0.01)
+
+
+class DropEverything(ActiveMemoryManagerPolicy):
+    """Inanely suggest to drop every single key in the cluster"""
+
+    def __init__(self):
+        self.start = None
+
+    def run(self):
+        # Run for 5s every 0.1s, then let the computation finish
+        if not self.start:
+            self.start = time()
+        elif time() > self.start + 5:
+            self.manager.policies.remove(self)
+            return
+
+        for ts in self.manager.scheduler.tasks.values():
+            # Instead of yielding ("drop", ts, None) for each worker, which would result
+            # in semi-predictable output about which replica survives, randomly choose a
+            # different survivor at each AMM run.
+            candidates = list(ts.who_has)
+            random.shuffle(candidates)
+            for ws in candidates:
+                yield "drop", ts, {ws}
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 8,
+    Worker=Nanny,
+    config={
+        "distributed.scheduler.active-memory-manager.start": True,
+        "distributed.scheduler.active-memory-manager.interval": 0.1,
+        "distributed.scheduler.active-memory-manager.policies": [
+            {"class": "distributed.tests.test_active_memory_manager.DropEverything"},
+        ],
+    },
+)
+async def test_drop_stress(c, s, *nannies):
+    """A policy which suggests dropping everything won't break a running computation,
+    but only slow it down.
+
+    See also: test_ReduceReplicas_stress
+    """
+    da = pytest.importorskip("dask.array")
+
+    rng = da.random.RandomState(0)
+    a = rng.random((20, 20), chunks=(1, 1))
+    b = (a @ a.T).sum().round(3)
+    assert await c.compute(b) == 2134.398
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 8,
+    Worker=Nanny,
+    config={
+        "distributed.scheduler.active-memory-manager.start": True,
+        "distributed.scheduler.active-memory-manager.interval": 0.1,
+        "distributed.scheduler.active-memory-manager.policies": [
+            {"class": "distributed.active_memory_manager.ReduceReplicas"},
+        ],
+    },
+    timeout=120,
+)
+async def test_ReduceReplicas_stress(c, s, *nannies):
+    """Running ReduceReplicas compulsively won't break a running computation. Unlike
+    test_drop_stress above, this test does not stop running after a few seconds - the
+    policy must not disrupt the computation too much.
+    """
+    da = pytest.importorskip("dask.array")
+
+    rng = da.random.RandomState(0)
+    a = rng.random((20, 20), chunks=(1, 1))
+    b = (a @ a.T).sum().round(3)
+    assert await c.compute(b) == 2134.398
