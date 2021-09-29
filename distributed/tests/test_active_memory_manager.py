@@ -1,6 +1,5 @@
 import asyncio
 import random
-from time import time
 
 import pytest
 
@@ -462,16 +461,9 @@ class DropEverything(ActiveMemoryManagerPolicy):
     """Inanely suggest to drop every single key in the cluster"""
 
     def __init__(self):
-        self.start = None
+        self.i = 0
 
     def run(self):
-        # Run for 5s every 0.1s, then let the computation finish
-        if not self.start:
-            self.start = time()
-        elif time() > self.start + 5:
-            self.manager.policies.remove(self)
-            return
-
         for ts in self.manager.scheduler.tasks.values():
             # Instead of yielding ("drop", ts, None) for each worker, which would result
             # in semi-predictable output about which replica survives, randomly choose a
@@ -481,6 +473,10 @@ class DropEverything(ActiveMemoryManagerPolicy):
             for ws in candidates:
                 yield "drop", ts, {ws}
 
+        self.i += 1
+        if self.i == 5:
+            self.manager.policies.remove(self)
+
 
 @pytest.mark.slow
 @gen_cluster(
@@ -489,7 +485,7 @@ class DropEverything(ActiveMemoryManagerPolicy):
     Worker=Nanny,
     config={
         "distributed.scheduler.active-memory-manager.start": True,
-        "distributed.scheduler.active-memory-manager.interval": 0.1,
+        "distributed.scheduler.active-memory-manager.interval": 0.5,
         "distributed.scheduler.active-memory-manager.policies": [
             {"class": "distributed.tests.test_active_memory_manager.DropEverything"},
         ],
@@ -516,7 +512,7 @@ async def test_drop_stress(c, s, *nannies):
     Worker=Nanny,
     config={
         "distributed.scheduler.active-memory-manager.start": True,
-        "distributed.scheduler.active-memory-manager.interval": 0.1,
+        "distributed.scheduler.active-memory-manager.interval": 0.5,
         "distributed.scheduler.active-memory-manager.policies": [
             {"class": "distributed.active_memory_manager.ReduceReplicas"},
         ],
