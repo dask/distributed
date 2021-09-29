@@ -209,7 +209,6 @@ async def test_drop_with_waiter(c, s, a, b):
     assert not y2.done()
 
 
-@pytest.mark.xfail(reason="distributed#5265")
 @gen_cluster(client=True, config=NO_AMM_START)
 async def test_double_drop(c, s, a, b):
     """An AMM drop policy runs once to drop one of the two replicas of a key.
@@ -343,7 +342,6 @@ class DropEverything(ActiveMemoryManagerPolicy):
                 yield "drop", ts, {ws}
 
 
-@pytest.mark.xfail(reason="distributed#5265")
 @pytest.mark.slow
 @gen_cluster(
     client=True,

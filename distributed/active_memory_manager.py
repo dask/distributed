@@ -126,8 +126,11 @@ class ActiveMemoryManagerExtension:
             # populate self.pending
             self._run_policies()
 
-            drop_by_worker = defaultdict(set)
-            repl_by_worker = defaultdict(dict)
+            drop_by_worker: defaultdict[WorkerState, set[TaskState]] = defaultdict(set)
+            repl_by_worker: defaultdict[
+                WorkerState, dict[TaskState, set[WorkerState]]
+            ] = defaultdict(dict)
+
             for ts, (pending_repl, pending_drop) in self.pending.items():
                 if not ts.who_has:
                     continue
@@ -135,15 +138,15 @@ class ActiveMemoryManagerExtension:
                 assert who_has  # Never drop the last replica
                 for ws_rec in pending_repl:
                     assert ws_rec not in ts.who_has
-                    repl_by_worker[ws_rec.address][ts] = who_has
+                    repl_by_worker[ws_rec][ts] = who_has
                 for ws in pending_drop:
                     assert ws in ts.who_has
-                    drop_by_worker[ws.address].add(ts)
+                    drop_by_worker[ws].add(ts)
 
             # Fire-and-forget enact recommendations from policies
             stimulus_id = str(time())
-            for addr, ts_to_who_has in repl_by_worker.items():
-                self.scheduler.stream_comms[addr].send(
+            for ws_rec, ts_to_who_has in repl_by_worker.items():
+                self.scheduler.stream_comms[ws_rec.address].send(
                     {
                         "op": "acquire-replicas",
                         "keys": [ts.key for ts in ts_to_who_has],
@@ -153,8 +156,13 @@ class ActiveMemoryManagerExtension:
                     },
                 )
 
-            for addr, tss in drop_by_worker.items():
-                self.scheduler.stream_comms[addr].send(
+            for ws, tss in drop_by_worker.items():
+                # The scheduler immediately forgets about the replica and suggests the
+                # worker to drop it. The worker may refuse, at which point it will send
+                # back an add-keys message to reinstate it.
+                for ts in tss:
+                    self.scheduler.remove_replica(ts, ws)
+                self.scheduler.stream_comms[ws.address].send(
                     {
                         "op": "remove-replicas",
                         "keys": [ts.key for ts in tss],
