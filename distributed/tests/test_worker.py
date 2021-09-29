@@ -315,7 +315,7 @@ async def test_worker_waits_for_scheduler():
         pass
     else:
         assert False
-    assert w.status not in (Status.closed, Status.running)
+    assert w.status not in (Status.closed, Status.running, Status.paused)
     await w.close(timeout=0.1)
 
 
@@ -918,7 +918,7 @@ async def test_fail_write_to_disk(c, s, a, b):
 async def test_fail_write_many_to_disk(c, s, a):
     a.validate = False
     await asyncio.sleep(0.1)
-    assert not a.paused
+    assert a.status == Status.running
 
     class Bad:
         def __init__(self, x):
@@ -1175,7 +1175,7 @@ async def test_pause_executor(c, s, a):
         future = c.submit(f)
         futures = c.map(slowinc, range(30), delay=0.1)
 
-        while not a.paused:
+        while a.status != Status.paused:
             await asyncio.sleep(0.01)
 
         out = logger.getvalue()
@@ -1596,7 +1596,7 @@ async def test_lifetime(c, s):
     async with Worker(s.address) as a, Worker(s.address, lifetime="1 seconds") as b:
         futures = c.map(slowinc, range(200), delay=0.1, worker=[b.address])
         await asyncio.sleep(1.5)
-        assert b.status != Status.running
+        assert b.status not in (Status.running, Status.paused)
         await b.finished()
         assert set(b.data) == set(a.data)  # successfully moved data over
 
@@ -2760,8 +2760,12 @@ def _acquire_replicas(scheduler, worker, *futures):
 
 def _remove_replicas(scheduler, worker, *futures):
     keys = [f.key for f in futures]
-
-    scheduler.stream_comms[worker.address].send(
+    ws = scheduler.workers[worker.address]
+    for k in keys:
+        ts = scheduler.tasks[k]
+        if ws in ts.who_has:
+            scheduler.remove_replica(ts, ws)
+    scheduler.stream_comms[ws.address].send(
         {
             "op": "remove-replicas",
             "keys": keys,
@@ -2852,21 +2856,26 @@ async def test_remove_replica_simple(c, s, a, b):
 
     _remove_replicas(s, b, *futs)
 
+    assert all(len(s.tasks[f.key].who_has) == 1 for f in futs)
+
     while b.tasks:
         await asyncio.sleep(0.01)
 
-    # might take a moment for the reply to reach the scheduler
-    while not all(len(s.tasks[f.key].who_has) == 1 for f in futs):
-        await asyncio.sleep(0.01)
+    # Ensure there is no delayed reply to re-register the key
+    await asyncio.sleep(0.01)
+    assert all(s.tasks[f.key].who_has == {s.workers[a.address]} for f in futs)
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True,
+    config={"distributed.comm.recent-messages-log-length": 1_000},
+)
 async def test_remove_replica_while_computing(c, s, *workers):
     futs = c.map(inc, range(10), workers=[workers[0].address])
 
     # All interesting things will happen on that worker
     w = workers[1]
-    intermediate = c.map(slowinc, futs, delay=0.1, workers=[w.address])
+    intermediate = c.map(slowinc, futs, delay=0.05, workers=[w.address])
 
     def reduce(*args, **kwargs):
         import time
@@ -2875,24 +2884,52 @@ async def test_remove_replica_while_computing(c, s, *workers):
         return
 
     final = c.submit(reduce, intermediate, workers=[w.address], key="final")
-    while final.key not in w.tasks:
+
+    while not any(f.key in w.tasks for f in intermediate):
         await asyncio.sleep(0.001)
 
-    while not all(fut.done() for fut in intermediate):
-        # The worker should reject all of these since they are required
-        _remove_replicas(s, w, *futs)
-        _remove_replicas(s, w, *intermediate)
+    # The scheduler removes keys from who_has/has_what immediately
+    # Make sure the worker responds to the rejection and the scheduler corrects
+    # the state
+    ws = s.workers[w.address]
+    while not any(s.tasks[fut.key] in ws.has_what for fut in futs):
         await asyncio.sleep(0.001)
+
+    _remove_replicas(s, w, *futs)
+    # Scheduler removed keys immediately...
+    assert not any(s.tasks[fut.key] in ws.has_what for fut in futs)
+    # ... but the state is properly restored
+    while not any(s.tasks[fut.key] in ws.has_what for fut in futs):
+        await asyncio.sleep(0.01)
+
+    # The worker should reject all of these since they are required
+    while not all(fut.done() for fut in intermediate):
+        _remove_replicas(s, w, *futs)
+        await asyncio.sleep(0.01)
 
     await wait(intermediate)
+
+    # If a request is rejected, the worker responds with an add-keys message to
+    # reenlist the key in the schedulers state system to avoid race conditions,
+    # see also https://github.com/dask/distributed/issues/5265
+    rejections = set()
+    for msg in w.log:
+        if msg[0] == "remove-replica-rejected":
+            rejections.update(msg[1])
+    for rejected_key in rejections:
+
+        def answer_sent(key):
+            for batch in w.batched_stream.recent_message_log:
+                for msg in batch:
+                    if "op" in msg and msg["op"] == "add-keys" and key in msg["keys"]:
+                        return True
+            return False
+
+        assert answer_sent(rejected_key)
 
     # Since intermediate is done, futs replicas may be removed.
     # They might be already gone due to the above remove replica calls
     _remove_replicas(s, w, *futs)
-    # the intermediate tasks should not be touched because they are still needed
-    # (the scheduler should not have made the above call but we should be safe
-    # regarless)
-    assert all(w.tasks[f.key].state == "memory" for f in intermediate)
 
     while any(w.tasks[f.key].state != "released" for f in futs if f.key in w.tasks):
         await asyncio.sleep(0.001)
@@ -2944,3 +2981,61 @@ async def test_who_has_consistent_remove_replica(c, s, *workers):
     assert ("missing-dep", f1.key) in a.story(f1.key)
     assert a.tasks[f1.key].suspicious_count == 0
     assert s.tasks[f1.key].suspicious == 0
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    nthreads=[("", 1)],
+    config={"distributed.worker.memory.pause": 0.5},
+    worker_kwargs={"memory_limit": 2 ** 29},  # 500 MiB
+)
+async def test_worker_status_sync(c, s, a):
+    (ws,) = s.workers.values()
+
+    while ws.status != Status.running:
+        await asyncio.sleep(0.01)
+
+    def leak():
+        distributed._test_leak = "x" * 2 ** 28  # 250 MiB
+
+    def clear_leak():
+        del distributed._test_leak
+
+    await c.run(leak)
+
+    while ws.status != Status.paused:
+        await asyncio.sleep(0.01)
+
+    await c.run(clear_leak)
+
+    while ws.status != Status.running:
+        await asyncio.sleep(0.01)
+
+    await s.retire_workers()
+
+    while ws.status != Status.closed:
+        await asyncio.sleep(0.01)
+
+    events = [ev for _, ev in s.events[ws.address] if ev["action"] != "heartbeat"]
+    assert events == [
+        {"action": "add-worker"},
+        {
+            "action": "worker-status-change",
+            "prev-status": "undefined",
+            "status": "running",
+        },
+        {
+            "action": "worker-status-change",
+            "prev-status": "running",
+            "status": "paused",
+        },
+        {
+            "action": "worker-status-change",
+            "prev-status": "paused",
+            "status": "running",
+        },
+        {"action": "remove-worker", "processing-tasks": {}},
+        {"action": "retired"},
+    ]
