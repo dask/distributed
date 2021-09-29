@@ -2561,7 +2561,7 @@ class TaskGroupGraph(DashboardComponent):
 class TaskGroupProgress(DashboardComponent):
     """Stacked area chart showing task groups through time"""
 
-    def __init__(self, scheduler, window="120s", n_interp=200, **kwargs):
+    def __init__(self, scheduler, window="120s", n_interp=1000, **kwargs):
         self.scheduler = scheduler
         self.window = parse_timedelta(window)
         self.source = ColumnDataSource()
@@ -2588,6 +2588,9 @@ class TaskGroupProgress(DashboardComponent):
         new_data = {}
         durations = self.plugin.all_durations
 
+        if len(durations) == 0:
+            return new_data
+
         now = time()
         tmin = (
             min([v[0][0] for v in durations.values()]) - now
@@ -2601,11 +2604,11 @@ class TaskGroupProgress(DashboardComponent):
 
         for k in durations.keys():
             timing = durations[k]
+            nthreads = np.array(list(pluck(0, self.plugin.nthreads_group[k])))
             timestamps = np.array(list(pluck(0, timing))) - now
             compute = np.array(list(pluck("compute", pluck(1, timing))))
             dcompute = np.diff(compute, append=compute[-1])
             dt = np.diff(timestamps, append=timestamps[-1] + 1000)
-            nthreads = 8.0 * np.ones_like(dt)
 
             new_dcompute = dcompute
             while True:
@@ -2625,8 +2628,14 @@ class TaskGroupProgress(DashboardComponent):
         total_dcompute = sum(list(new_data.values()))
         dt = np.diff(times, append=times[-1] + 1000)
 
+        if len(self.plugin.nthreads) >= 2:
+            timestamps = np.array(list(pluck(0, self.plugin.nthreads)))
+            nthreads = np.array(list(pluck(1, self.plugin.nthreads)))
+            nthreads = np.interp(times, timestamps, nthreads)
+        else:
+            nthreads = np.full_like(times, fill_value=self.scheduler.total_nthreads)
+
         new_total_dcompute = total_dcompute
-        nthreads = 8.0 * np.ones_like(dt)
         while True:
             spillage = np.zeros_like(new_total_dcompute)
             loc = np.where(new_total_dcompute > nthreads * dt)
@@ -2648,9 +2657,8 @@ class TaskGroupProgress(DashboardComponent):
         with log_errors():
             new_data = self._get_timing_data()
             if set(self.source.data.keys()) != set(new_data.keys()):
-                renderers = self.root.renderers
-                for r in renderers:
-                    self.root.renderers.remove(r)
+                while len(self.root.renderers):
+                    self.root.renderers.pop()
 
                 self.source.data = new_data
                 self.root.varea_stack(

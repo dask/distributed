@@ -6,6 +6,7 @@ from timeit import default_timer
 from typing import Dict, List, Tuple
 
 from tlz import groupby, valmap
+from tornado.ioloop import PeriodicCallback
 
 from dask.base import tokenize
 from dask.utils import stringify
@@ -308,6 +309,10 @@ class GroupTiming(SchedulerPlugin):
         self.all_durations: Dict[str, List[Tuple[float, Dict[str, float]]]] = dict()
         # Time series of bytes stored per task group
         self.nbytes: Dict[str, List[Tuple[float, int]]] = dict()
+        # Time series of the number of threads on the scheduler aligned to group checkpoints
+        self.nthreads_group: Dict[str, List[Tuple[float, int]]] = dict()
+        # Overall time series of the number of threads on the scheduler
+        self.nthreads: List[Tuple[float, int]] = list()
         # We snapshot the task state after every `delta` number of
         # tasks are completed.
         self._deltas: Dict[str, int] = dict()
@@ -319,6 +324,10 @@ class GroupTiming(SchedulerPlugin):
 
         scheduler.add_plugin(self)
 
+        nthreads_pc = PeriodicCallback(self.track_threads, 1.0 * 1000.0)
+        self.scheduler.periodic_callbacks["nthreads_pc"] = nthreads_pc
+        nthreads_pc.start()
+
     def create(self, name, group):
         """
         Set up timeseries data for a new task group
@@ -326,6 +335,7 @@ class GroupTiming(SchedulerPlugin):
         with log_errors():
             self.states[name] = []
             self.nbytes[name] = []
+            self.nthreads_group[name] = []
             self.all_durations[name] = []
             # Snapshot states roughly after every 1% of tasks are completed.
             # This could conceivably change if new tasks are added after delta
@@ -344,6 +354,9 @@ class GroupTiming(SchedulerPlugin):
                 self.states[name].append((timestamp, group.states.copy()))
                 self.all_durations[name].append((timestamp, group.all_durations.copy()))
                 self.nbytes[name].append((timestamp, group.nbytes_total))
+                self.nthreads_group[name].append(
+                    (timestamp, self.scheduler.total_nthreads)
+                )
             else:
                 # If the timeseries exists, we check the most recent entry,
                 # and determine whether `delta` tasks have been completed since then.
@@ -361,6 +374,9 @@ class GroupTiming(SchedulerPlugin):
                     )
                     self.nbytes[name].append((timestamp, group.nbytes_total))
 
+    def track_threads(self):
+        self.nthreads.append((time.time(), self.scheduler.total_nthreads))
+
     def transition(self, key, start, finish, *args, **kwargs):
         # We mostly are interested in when tasks move from processing to memory or err,
         # so we only check if the transition starts from that state.
@@ -376,4 +392,12 @@ class GroupTiming(SchedulerPlugin):
     def restart(self, scheduler):
         self.states.clear()
         self.nbytes.clear()
+        self.all_durations.clear()
+        self.nthreads.clear()
+        self.nthreads_group.clear()
         self._deltas.clear()
+
+    async def close(self):
+        nthreads_pc = self.scheduler.periodic_callbacks.pop("progress_nthreads", None)
+        if nthreads_pc:
+            nthreads_pc.stop()
