@@ -3057,10 +3057,19 @@ class Client:
         into a temporary directory on Python's system path so any .py,  .egg
         or .zip  files will be importable.
 
+        We recommend using :class:`distributed.diagnostics.plugin.UploadFile`
+        when using a dynamic cluster, to ensure that files are provided to
+        new workers as they join.
+
         Parameters
         ----------
         filename : string
             Filename of .py, .egg or .zip file to send to workers
+
+        See Also
+        --------
+        distributed.diagnostics.plugin.UploadFile : A worker plugin to
+            automatically upload a file when workers join the cluster. 
 
         Examples
         --------
