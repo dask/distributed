@@ -479,13 +479,14 @@ class DropEverything(ActiveMemoryManagerPolicy):
 
 
 @pytest.mark.slow
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/5371")
 @gen_cluster(
     client=True,
-    nthreads=[("", 1)] * 8,
+    nthreads=[("", 1)] * 4,
     Worker=Nanny,
     config={
         "distributed.scheduler.active-memory-manager.start": True,
-        "distributed.scheduler.active-memory-manager.interval": 0.5,
+        "distributed.scheduler.active-memory-manager.interval": 0.1,
         "distributed.scheduler.active-memory-manager.policies": [
             {"class": "distributed.tests.test_active_memory_manager.DropEverything"},
         ],
@@ -506,13 +507,14 @@ async def test_drop_stress(c, s, *nannies):
 
 
 @pytest.mark.slow
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/5371")
 @gen_cluster(
     client=True,
-    nthreads=[("", 1)] * 8,
+    nthreads=[("", 1)] * 4,
     Worker=Nanny,
     config={
         "distributed.scheduler.active-memory-manager.start": True,
-        "distributed.scheduler.active-memory-manager.interval": 0.5,
+        "distributed.scheduler.active-memory-manager.interval": 0.1,
         "distributed.scheduler.active-memory-manager.policies": [
             {"class": "distributed.active_memory_manager.ReduceReplicas"},
         ],
