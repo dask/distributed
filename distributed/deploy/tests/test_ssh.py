@@ -167,6 +167,24 @@ async def test_list_of_connect_options_raises():
 
 
 @pytest.mark.asyncio
+async def test_list_of_worker_options():
+    async with SSHCluster(
+        ["127.0.0.1"] * 3,
+        connect_options=[dict(known_hosts=None)] * 3,
+        asynchronous=True,
+        scheduler_options={"port": 0, "idle_timeout": "5s"},
+        worker_options=[{"nprocs": 4, "nthreads": 1}, {"nprocs": 2, "nthreads": 1}],
+    ) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            await client.wait_for_workers(6)
+            result = await client.submit(lambda x: x + 1, 10)
+            assert result == 11
+            d = client.scheduler_info()["workers"]
+            assert all(v["nthreads"] == 1 for v in d.values())
+            assert len(d) == 6
+
+
+@pytest.mark.asyncio
 async def test_remote_python():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
