@@ -200,3 +200,32 @@ def test_watch():
     while threading.active_count() > start_threads:
         assert metrics.time() < start + 2
         time.sleep(0.01)
+
+
+def test_deep_stack():
+    import time
+
+    def f(n):
+        if n == 0:
+            time.sleep(0.2)
+        else:
+            return f(n - 1)
+
+    thread = threading.Thread(target=f, args=(400,))
+    thread.daemon = True
+    thread.start()
+
+    state = create()
+
+    for i in range(10):
+        time.sleep(0.02)
+        try:
+            frame = sys._current_frames()[thread.ident]
+        except KeyError:
+            break
+        else:
+            process(frame, None, state)
+
+    import msgpack
+
+    msgpack.loads(msgpack.dumps(state))

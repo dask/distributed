@@ -75,8 +75,9 @@ def info_frame(frame):
     }
 
 
-def process(frame, child, state, stop=None, omit=None):
-    """Add counts from a frame stack onto existing state
+def process(frame, child, state, stop=None, omit=None, depth=0):
+    """
+    Add counts from a frame stack onto existing state
 
     This recursively adds counts to the existing state dictionary and creates
     new entries for new functions.
@@ -99,10 +100,12 @@ def process(frame, child, state, stop=None, omit=None):
         return False
 
     prev = frame.f_back
-    if prev is not None and (
-        stop is None or not prev.f_code.co_filename.endswith(stop)
+    if (
+        prev is not None
+        and (stop is None or not prev.f_code.co_filename.endswith(stop))
+        and depth < 200
     ):
-        state = process(prev, frame, state, stop=stop)
+        state = process(prev, frame, state, stop=stop, depth=depth + 1)
         if state is False:
             return False
 
