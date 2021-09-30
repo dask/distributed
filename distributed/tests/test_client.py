@@ -6050,6 +6050,7 @@ async def test_futures_of_sorted(c, s, a, b):
         assert str(k) in str(f)
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "10ms"})
 async def test_profile_server(c, s, a, b):
     for i in range(5):
