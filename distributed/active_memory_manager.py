@@ -13,7 +13,7 @@ from .metrics import time
 from .utils import import_term, log_errors
 
 if TYPE_CHECKING:
-    from .scheduler import SchedulerState, TaskState, WorkerState
+    from .scheduler import Scheduler, TaskState, WorkerState
 
 
 class ActiveMemoryManagerExtension:
@@ -31,7 +31,7 @@ class ActiveMemoryManagerExtension:
     ``distributed.scheduler.active-memory-manager``.
     """
 
-    scheduler: SchedulerState
+    scheduler: Scheduler
     policies: set[ActiveMemoryManagerPolicy]
     interval: float
 
@@ -43,7 +43,7 @@ class ActiveMemoryManagerExtension:
 
     def __init__(
         self,
-        scheduler: SchedulerState,
+        scheduler: Scheduler,
         # The following parameters are exposed so that one may create, run, and throw
         # away on the fly a specialized manager, separate from the main one.
         policies: set[ActiveMemoryManagerPolicy] | None = None,
@@ -239,7 +239,7 @@ class ActiveMemoryManagerExtension:
         candidates -= pending_repl
         if not candidates:
             return None
-        return min(candidates, key=self.workers_memory.get)
+        return min(candidates, key=self.workers_memory.__getitem__)
 
     def _find_dropper(
         self,
@@ -268,7 +268,7 @@ class ActiveMemoryManagerExtension:
         candidates -= {waiter_ts.processing_on for waiter_ts in ts.waiters}
         if not candidates:
             return None
-        return max(candidates, key=self.workers_memory.get)
+        return max(candidates, key=self.workers_memory.__getitem__)
 
 
 class ActiveMemoryManagerPolicy:

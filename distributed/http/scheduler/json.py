@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from ...utils import log_errors
 from ..utils import RequestHandler
 
@@ -65,7 +67,7 @@ class IndexJSON(RequestHandler):
             )
 
 
-routes = [
+routes: list[tuple] = [
     (r"json/counts.json", CountsJSON, {}),
     (r"json/identity.json", IdentityJSON, {}),
     (r"json/index.html", IndexJSON, {}),

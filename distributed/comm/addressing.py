@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import itertools
 
 import dask
@@ -6,7 +8,7 @@ from ..utils import get_ip_interface
 from . import registry
 
 
-def parse_address(addr, strict=False):
+def parse_address(addr: str, strict: bool = False) -> tuple[str, str]:
     """
     Split address into its scheme and scheme-dependent location string.
 
@@ -30,7 +32,7 @@ def parse_address(addr, strict=False):
     return scheme, loc
 
 
-def unparse_address(scheme, loc):
+def unparse_address(scheme: str, loc: str) -> str:
     """
     Undo parse_address().
 
@@ -40,7 +42,7 @@ def unparse_address(scheme, loc):
     return f"{scheme}://{loc}"
 
 
-def normalize_address(addr):
+def normalize_address(addr: str) -> str:
     """
     Canonicalize address, adding a default scheme if necessary.
 
@@ -52,7 +54,9 @@ def normalize_address(addr):
     return unparse_address(*parse_address(addr))
 
 
-def parse_host_port(address, default_port=None):
+def parse_host_port(
+    address: str | tuple[str, int], default_port: str | int | None = None
+) -> tuple[str, int]:
     """
     Parse an endpoint address given in the form "host:port".
     """
@@ -95,19 +99,19 @@ def parse_host_port(address, default_port=None):
     return host, int(port)
 
 
-def unparse_host_port(host, port=None):
+def unparse_host_port(host: str, port: int | None = None) -> str:
     """
     Undo parse_host_port().
     """
     if ":" in host and not host.startswith("["):
-        host = "[%s]" % host
+        host = f"[{host}]"
     if port is not None:
         return f"{host}:{port}"
     else:
         return host
 
 
-def get_address_host_port(addr, strict=False):
+def get_address_host_port(addr: str, strict: bool = False) -> tuple[str, int]:
     """
     Get a (host, port) tuple out of the given address.
     For definition of strict check parse_address
@@ -129,7 +133,7 @@ def get_address_host_port(addr, strict=False):
         )
 
 
-def get_address_host(addr):
+def get_address_host(addr: str) -> str:
     """
     Return a hostname / IP address identifying the machine this address
     is located on.
@@ -145,7 +149,7 @@ def get_address_host(addr):
     return backend.get_address_host(loc)
 
 
-def get_local_address_for(addr):
+def get_local_address_for(addr: str) -> str:
     """
     Get a local listening address suitable for reaching *addr*.
 
@@ -162,7 +166,7 @@ def get_local_address_for(addr):
     return unparse_address(scheme, backend.get_local_address_for(loc))
 
 
-def resolve_address(addr):
+def resolve_address(addr: str) -> str:
     """
     Apply scheme-specific address resolution to *addr*, replacing
     all symbolic references with concrete location specifiers.
@@ -177,7 +181,9 @@ def resolve_address(addr):
     return unparse_address(scheme, backend.resolve_address(loc))
 
 
-def uri_from_host_port(host_arg, port_arg, default_port):
+def uri_from_host_port(
+    host_arg: str | None, port_arg: str | None, default_port: int
+) -> str:
     """
     Process the *host* and *port* CLI options.
     Return a URI.

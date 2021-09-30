@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import importlib
 import traceback
 from array import array
 from enum import Enum
 from functools import partial
+from types import ModuleType
 
 import msgpack
 
@@ -15,12 +18,10 @@ from . import pickle
 from .compression import decompress, maybe_compress
 from .utils import frame_split_size, msgpack_opts, pack_frames_prelude, unpack_frames
 
-lazy_registrations = {}
-
 dask_serialize = dask.utils.Dispatch("dask_serialize")
 dask_deserialize = dask.utils.Dispatch("dask_deserialize")
 
-_cached_allowed_modules = {}
+_cached_allowed_modules: dict[str, ModuleType] = {}
 
 
 def dask_dumps(x, context=None):

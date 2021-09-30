@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import inspect
 import logging
@@ -10,6 +12,7 @@ from collections import defaultdict
 from contextlib import suppress
 from enum import Enum
 from functools import partial
+from typing import ClassVar
 
 import tblib
 from tlz import merge
@@ -63,7 +66,7 @@ class Status(Enum):
     dont_reply = "dont_reply"
 
 
-Status.lookup = {s.name: s for s in Status}
+Status.lookup = {s.name: s for s in Status}  # type: ignore
 
 
 class RPCClosed(IOError):
@@ -681,7 +684,7 @@ class rpc:
     >>> remote.close_comms()  # doctest: +SKIP
     """
 
-    active = weakref.WeakSet()
+    active: ClassVar[weakref.WeakSet[rpc]] = weakref.WeakSet()
     comms = ()
     address = None
 
@@ -914,7 +917,7 @@ class ConnectionPool:
         Whether or not to deserialize data by default or pass it through
     """
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[ConnectionPool]] = weakref.WeakSet()
 
     def __init__(
         self,

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import functools
 import importlib
@@ -8,7 +10,6 @@ import multiprocessing
 import os
 import pkgutil
 import re
-import shutil
 import socket
 import sys
 import tempfile
@@ -24,7 +25,7 @@ from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
 from typing import Any as AnyType
-from typing import Dict, List
+from typing import ClassVar
 
 import click
 import tblib.pickling_support
@@ -32,7 +33,7 @@ import tblib.pickling_support
 try:
     import resource
 except ImportError:
-    resource = None
+    resource = None  # type: ignore
 
 import tlz as toolz
 from tornado import gen
@@ -44,7 +45,7 @@ from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
 try:
-    from tornado.ioloop import PollIOLoop
+    from tornado.ioloop import PollIOLoop  # type: ignore
 except ImportError:
     PollIOLoop = None  # dropped in tornado 6.0
 
@@ -346,7 +347,9 @@ class LoopRunner:
     """
 
     # All loops currently associated to loop runners
-    _all_loops = weakref.WeakKeyDictionary()
+    _all_loops: ClassVar[
+        weakref.WeakKeyDictionary[IOLoop, tuple[int, LoopRunner | None]]
+    ] = weakref.WeakKeyDictionary()
     _lock = threading.Lock()
 
     def __init__(self, loop=None, asynchronous=False):
@@ -603,7 +606,7 @@ def key_split(s):
         return "Other"
 
 
-def key_split_group(x):
+def key_split_group(x) -> str:
     """A more fine-grained version of key_split
 
     >>> key_split_group(('x-2', 1))
@@ -634,7 +637,7 @@ def key_split_group(x):
     elif typ is bytes:
         return key_split_group(x.decode())
     else:
-        return key_split(x)
+        return "Other"
 
 
 @contextmanager
@@ -837,25 +840,6 @@ def read_block(f, offset, length, delimiter=None):
     return bytes
 
 
-@contextmanager
-def tmpfile(extension=""):
-    extension = "." + extension.lstrip(".")
-    handle, filename = tempfile.mkstemp(extension)
-    os.close(handle)
-    os.remove(filename)
-
-    yield filename
-
-    if os.path.exists(filename):
-        try:
-            if os.path.isdir(filename):
-                shutil.rmtree(filename)
-            else:
-                os.remove(filename)
-        except OSError:  # sometimes we can't remove a generated temp file
-            pass
-
-
 def ensure_bytes(s):
     """Attempt to turn `s` into bytes.
 
@@ -1000,7 +984,7 @@ def json_load_robust(fn, load=json.load):
 class DequeHandler(logging.Handler):
     """A logging.Handler that records records into a deque"""
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[DequeHandler]] = weakref.WeakSet()
 
     def __init__(self, *args, n=10000, **kwargs):
         self.deque = deque(maxlen=n)
@@ -1058,15 +1042,15 @@ if not is_server_extension:
 
         # TODO: Use tornado's AnyThreadEventLoopPolicy, instead of class below,
         # once tornado > 6.0.3 is available.
-        if WINDOWS and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+        if WINDOWS:
             # WindowsProactorEventLoopPolicy is not compatible with tornado 6
             # fallback to the pre-3.8 default of Selector
             # https://github.com/tornadoweb/tornado/issues/2608
-            BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy
+            BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy  # type: ignore
         else:
             BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
 
-        class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):
+        class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):  # type: ignore
             def get_event_loop(self):
                 try:
                     return super().get_event_loop()
@@ -1373,7 +1357,7 @@ class LRU(UserDict):
         super().__setitem__(key, value)
 
 
-def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> List[Dict]:
+def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list[dict]:
     """
     Examples
     --------
@@ -1435,6 +1419,7 @@ _deprecations = {
     "parse_bytes": "dask.utils.parse_bytes",
     "parse_timedelta": "dask.utils.parse_timedelta",
     "typename": "dask.utils.typename",
+    "tmpfile": "dask.utils.tmpfile",
 }
 
 

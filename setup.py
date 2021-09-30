@@ -11,7 +11,7 @@ import versioneer
 requires = open("requirements.txt").read().strip().split("\n")
 setup_requires = []
 install_requires = []
-extras_require = {}
+extras_require: dict = {}
 for r in requires:
     if ";" in r:
         # requirements.txt conditional dependencies need to be reformatted for wheels
@@ -43,8 +43,8 @@ if cython_arg:
     except ImportError:
         setup_requires.append("cython")
 
-    _, _, params = cython_arg.partition("=")
-    params = params.split(",")
+    _, _, params_str = cython_arg.partition("=")
+    params = params_str.split(",")
     profile = "profile" in params
     if "annotate" in params:
         import Cython.Compiler.Options
@@ -55,7 +55,7 @@ if cython_arg:
         Extension("distributed.scheduler", sources=["distributed/scheduler.py"]),
     ]
     for e in cyext_modules:
-        e.cython_directives = {
+        e.cython_directives = {  # type: ignore
             "annotation_typing": True,
             "binding": False,
             "embedsignature": True,
@@ -107,5 +107,6 @@ setup(
         dask-scheduler=distributed.cli.dask_scheduler:go
         dask-worker=distributed.cli.dask_worker:go
       """,
+    # https://mypy.readthedocs.io/en/latest/installed_packages.html
     zip_safe=False,
 )

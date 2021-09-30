@@ -14,12 +14,12 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict, deque, namedtuple
-from collections.abc import Hashable, Iterable, MutableMapping
+from collections.abc import Callable, Hashable, Iterable, MutableMapping
 from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from .client import Client
@@ -105,11 +105,11 @@ PROCESSING = {
 READY = {"ready", "constrained"}
 
 
-DEFAULT_EXTENSIONS = [PubSubWorkerExtension]
+DEFAULT_EXTENSIONS: list[type] = [PubSubWorkerExtension]
 
-DEFAULT_METRICS = {}
+DEFAULT_METRICS: dict[str, Callable[[Worker], Any]] = {}
 
-DEFAULT_STARTUP_INFORMATION = {}
+DEFAULT_STARTUP_INFORMATION: dict[str, Callable[[Worker], Any]] = {}
 
 DEFAULT_DATA_SIZE = parse_bytes(
     dask.config.get("distributed.scheduler.default-data-size")
@@ -394,8 +394,8 @@ class Worker(ServerNode):
     distributed.nanny.Nanny
     """
 
-    _instances = weakref.WeakSet()
-    _initialized_clients = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[Worker]] = weakref.WeakSet()
+    _initialized_clients: ClassVar[weakref.WeakSet[Client]] = weakref.WeakSet()
 
     def __init__(
         self,
@@ -582,9 +582,9 @@ class Worker(ServerNode):
             self._workdir = self._workspace.new_work_dir(prefix="worker-")
             self.local_directory = self._workdir.dir_path
 
-        if preload is None:
+        if not preload:
             preload = dask.config.get("distributed.worker.preload")
-        if preload_argv is None:
+        if not preload_argv:
             preload_argv = dask.config.get("distributed.worker.preload-argv")
         self.preloads = preloading.process_preloads(
             self, preload, preload_argv, file_dir=self.local_directory
@@ -902,7 +902,7 @@ class Worker(ServerNode):
     def executor(self):
         return self.executors["default"]
 
-    @ServerNode.status.setter
+    @ServerNode.status.setter  # type: ignore
     def status(self, value):
         """Override Server.status to notify the Scheduler of status changes"""
         ServerNode.status.__set__(self, value)
@@ -2615,7 +2615,7 @@ class Worker(ServerNode):
                         ("busy-gather", worker, to_gather_keys, stimulus_id, time())
                     )
 
-                recommendations = {}
+                recommendations: dict[TaskState, str | tuple] = {}
                 deps_to_iter = self.in_flight_workers.pop(worker)
 
                 for d in deps_to_iter:
