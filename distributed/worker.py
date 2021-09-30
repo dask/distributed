@@ -644,8 +644,6 @@ class Worker(ServerNode):
 
         self.memory_limit = parse_memory_limit(memory_limit, self.nthreads)
 
-        self.paused = False
-
         if "memory_target_fraction" in kwargs:
             self.memory_target_fraction = kwargs.pop("memory_target_fraction")
         else:
@@ -905,6 +903,19 @@ class Worker(ServerNode):
     def executor(self):
         return self.executors["default"]
 
+    @ServerNode.status.setter
+    def status(self, value):
+        """Override Server.status to notify the Scheduler of status changes"""
+        ServerNode.status.__set__(self, value)
+        if (
+            self.batched_stream
+            and self.batched_stream.comm
+            and not self.batched_stream.comm.closed()
+        ):
+            self.batched_stream.send(
+                {"op": "worker-status-change", "status": self._status.name}
+            )
+
     async def get_metrics(self):
         out = dict(
             executing=self.executing_count,
@@ -1068,7 +1079,7 @@ class Worker(ServerNode):
 
             if response["status"] == "missing":
                 for i in range(10):
-                    if self.status != Status.running:
+                    if self.status not in (Status.running, Status.paused):
                         break
                     else:
                         await asyncio.sleep(0.05)
@@ -1103,7 +1114,7 @@ class Worker(ServerNode):
             logger.exception(e)
             raise
         finally:
-            if self.reconnect and self.status == Status.running:
+            if self.reconnect and self.status in (Status.running, Status.paused):
                 logger.info("Connection to scheduler broken.  Reconnecting...")
                 self.loop.add_callback(self.heartbeat)
             else:
@@ -1315,7 +1326,11 @@ class Worker(ServerNode):
                 logger.info("Stopping worker at %s", self.address)
             except ValueError:  # address not available if already closed
                 logger.info("Stopping worker")
-            if self.status not in (Status.running, Status.closing_gracefully):
+            if self.status not in (
+                Status.running,
+                Status.paused,
+                Status.closing_gracefully,
+            ):
                 logger.info("Closed worker has not yet started: %s", self.status)
             self.status = Status.closing
 
@@ -1345,7 +1360,7 @@ class Worker(ServerNode):
                 if not any(
                     w
                     for w in Worker._instances
-                    if w != self and w.status == Status.running
+                    if w != self and w.status in (Status.running, Status.paused)
                 ):
                     for c in Worker._initialized_clients:
                         # Regardless of what the client was initialized with
@@ -1470,7 +1485,7 @@ class Worker(ServerNode):
         ):
             max_connections = max_connections * 2
 
-        if self.paused:
+        if self.status == Status.paused:
             max_connections = 1
             throttle_msg = " Throttling outgoing connections because worker is paused."
         else:
@@ -1572,7 +1587,9 @@ class Worker(ServerNode):
             self.log.append((key, "receive-from-scatter"))
 
         if report:
-            scheduler_messages.append({"op": "add-keys", "keys": list(data)})
+            scheduler_messages.append(
+                {"op": "add-keys", "keys": list(data), "stimulus_id": stimulus_id}
+            )
 
         self.transitions(recommendations, stimulus_id=stimulus_id)
         for msg in scheduler_messages:
@@ -1620,10 +1637,23 @@ class Worker(ServerNode):
         """
         self.log.append(("remove-replicas", keys, stimulus_id))
         recommendations = {}
+
+        rejected = []
         for key in keys:
             ts = self.tasks.get(key)
-            if ts and not ts.is_protected():
+            if ts is None or ts.state != "memory":
+                continue
+            if not ts.is_protected():
+                self.log.append(("remove-replica-confirmed", ts.key, stimulus_id))
                 recommendations[ts] = "released" if ts.dependents else "forgotten"
+            else:
+                rejected.append(key)
+
+        if rejected:
+            self.log.append(("remove-replica-rejected", rejected, stimulus_id))
+            self.batched_stream.send(
+                {"op": "add-keys", "keys": rejected, "stimulus_id": stimulus_id}
+            )
 
         self.transitions(recommendations=recommendations, stimulus_id=stimulus_id)
 
@@ -2098,14 +2128,14 @@ class Worker(ServerNode):
 
     def transition_released_memory(self, ts, value, *, stimulus_id):
         recs, smsgs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
-        smsgs.append({"op": "add-keys", "keys": [ts.key]})
+        smsgs.append({"op": "add-keys", "keys": [ts.key], "stimulus_id": stimulus_id})
         return recs, smsgs
 
     def transition_flight_memory(self, ts, value, *, stimulus_id):
         self._in_flight_tasks.discard(ts)
         ts.coming_from = None
         recs, smsgs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
-        smsgs.append({"op": "add-keys", "keys": [ts.key]})
+        smsgs.append({"op": "add-keys", "keys": [ts.key], "stimulus_id": stimulus_id})
         return recs, smsgs
 
     def transition_released_forgotten(self, ts, *, stimulus_id):
@@ -2460,7 +2490,7 @@ class Worker(ServerNode):
             Total number of bytes for all the dependencies in to_gather combined
         """
         cause = None
-        if self.status != Status.running:
+        if self.status not in (Status.running, Status.paused):
             return
 
         with log_errors():
@@ -2918,7 +2948,7 @@ class Worker(ServerNode):
             raise
 
     def ensure_computing(self):
-        if self.paused:
+        if self.status == Status.paused:
             return
         try:
             stimulus_id = f"ensure-computing-{time()}"
@@ -3058,7 +3088,7 @@ class Worker(ServerNode):
                     str(funcname(function))[:1000],
                     convert_args_to_str(args2, max_len=1000),
                     convert_kwargs_to_str(kwargs2, max_len=1000),
-                    result["exception"].data,
+                    ts.exception_text,
                 )
                 recommendations[ts] = (
                     "error",
@@ -3139,7 +3169,7 @@ class Worker(ServerNode):
             if self.memory_pause_fraction and frac > self.memory_pause_fraction:
                 # Try to free some memory while in paused state
                 self._throttled_gc.collect()
-                if not self.paused:
+                if self.status == Status.running:
                     logger.warning(
                         "Worker is at %d%% memory usage. Pausing worker.  "
                         "Process memory: %s -- Worker memory limit: %s",
@@ -3149,8 +3179,8 @@ class Worker(ServerNode):
                         if self.memory_limit is not None
                         else "None",
                     )
-                    self.paused = True
-            elif self.paused:
+                    self.status = Status.paused
+            elif self.status == Status.paused:
                 logger.warning(
                     "Worker is at %d%% memory usage. Resuming worker. "
                     "Process memory: %s -- Worker memory limit: %s",
@@ -3160,7 +3190,7 @@ class Worker(ServerNode):
                     if self.memory_limit is not None
                     else "None",
                 )
-                self.paused = False
+                self.status = Status.running
                 self.ensure_computing()
 
         check_pause(memory)
@@ -3464,7 +3494,7 @@ class Worker(ServerNode):
             raise
 
     def validate_state(self):
-        if self.status != Status.running:
+        if self.status not in (Status.running, Status.paused):
             return
         try:
             assert self.executing_count >= 0
@@ -3631,7 +3661,11 @@ def get_worker() -> Worker:
         return thread_state.execution_state["worker"]
     except AttributeError:
         try:
-            return first(w for w in Worker._instances if w.status == Status.running)
+            return first(
+                w
+                for w in Worker._instances
+                if w.status in (Status.running, Status.paused)
+            )
         except StopIteration:
             raise ValueError("No workers found")
 

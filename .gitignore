@@ -1,8 +1,12 @@
 *.pyc
 *.pyd
 *.py~
+
+# Cython files
 *.c
 *.so
+distributed/scheduler.html
+
 build/
 dist/
 *.egg-info
