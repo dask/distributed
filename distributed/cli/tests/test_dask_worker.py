@@ -495,3 +495,25 @@ class MyWorker(Worker):
 
                 worker_types = await c.run(worker_type)
                 assert all(name == "MyWorker" for name in worker_types.values())
+
+
+@gen_cluster(nthreads=[], client=True)
+async def test_preload_config(c, s):
+    # Ensure dask-worker pulls the preload from the Dask config if
+    # not specified via a command line option
+    preload_text = """
+def dask_setup(worker):
+    worker.foo = 'setup'
+"""
+    env = os.environ.copy()
+    env["DASK_DISTRIBUTED__WORKER__PRELOAD"] = preload_text
+    with popen(
+        [
+            "dask-worker",
+            s.address,
+        ],
+        env=env,
+    ):
+        await c.wait_for_workers(1)
+        [foo] = (await c.run(lambda dask_worker: dask_worker.foo)).values()
+        assert foo == "setup"

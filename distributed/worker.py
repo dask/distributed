@@ -582,9 +582,9 @@ class Worker(ServerNode):
             self._workdir = self._workspace.new_work_dir(prefix="worker-")
             self.local_directory = self._workdir.dir_path
 
-        if preload is None:
+        if not preload:
             preload = dask.config.get("distributed.worker.preload")
-        if preload_argv is None:
+        if not preload_argv:
             preload_argv = dask.config.get("distributed.worker.preload-argv")
         self.preloads = preloading.process_preloads(
             self, preload, preload_argv, file_dir=self.local_directory
