@@ -12,12 +12,14 @@ from time import sleep
 import requests
 from click.testing import CliRunner
 
+from dask.utils import tmpfile
+
 import distributed
 import distributed.cli.dask_scheduler
 from distributed import Client, Scheduler
 from distributed.compatibility import LINUX
 from distributed.metrics import time
-from distributed.utils import get_ip, get_ip_interface, tmpfile
+from distributed.utils import get_ip, get_ip_interface
 from distributed.utils_test import (
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_locally_4,
