@@ -209,7 +209,7 @@ def test_scheduler_port_zero(loop):
     with tmpfile() as fn:
         with popen(
             ["dask-scheduler", "--no-dashboard", "--scheduler-file", fn, "--port", "0"]
-        ) as sched:
+        ):
             with Client(scheduler_file=fn, loop=loop) as c:
                 assert c.scheduler.port
                 assert c.scheduler.port != 8786
@@ -217,15 +217,14 @@ def test_scheduler_port_zero(loop):
 
 def test_dashboard_port_zero(loop):
     pytest.importorskip("bokeh")
-    with tmpfile() as fn:
-        with popen(["dask-scheduler", "--dashboard-address", ":0"]) as proc:
-            count = 0
-            while count < 1:
-                line = proc.stderr.readline()
-                if b"dashboard" in line.lower():
-                    sleep(0.01)
-                    count += 1
-                    assert b":0" not in line
+    with popen(["dask-scheduler", "--dashboard-address", ":0"]) as proc:
+        count = 0
+        while count < 1:
+            line = proc.stderr.readline()
+            if b"dashboard" in line.lower():
+                sleep(0.01)
+                count += 1
+                assert b":0" not in line
 
 
 PRELOAD_TEXT = """

@@ -45,7 +45,7 @@ class Cluster:
     """
 
     _supports_scaling = True
-    _cluster_info = {}
+    _cluster_info: dict = {}
 
     def __init__(self, asynchronous, quiet=False, name=None, scheduler_sync_interval=1):
         self.scheduler_info = {"workers": {}}
@@ -64,10 +64,11 @@ class Cluster:
         if name is None:
             name = str(uuid.uuid4())[:8]
 
+        # Mask class attribute with instance attribute
         self._cluster_info = {
             "name": name,
             "type": typename(type(self)),
-            **self._cluster_info,
+            **type(self)._cluster_info,
         }
         self.status = Status.created
 

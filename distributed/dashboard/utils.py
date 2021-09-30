@@ -9,7 +9,7 @@ from tlz.curried import first
 try:
     import numpy as np
 except ImportError:
-    np = False
+    np = None  # type: ignore
 
 
 BOKEH_VERSION = LooseVersion(bokeh.__version__)

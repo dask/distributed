@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Any
+
 import pytest
 
 from ..client import Client
@@ -5,7 +9,7 @@ from ..client import Client
 
 class ClusterTest:
     Cluster = None
-    kwargs = {}
+    kwargs: dict[str, Any] = {}
 
     def setUp(self):
         self.cluster = self.Cluster(2, scheduler_port=0, **self.kwargs)

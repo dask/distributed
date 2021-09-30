@@ -30,7 +30,7 @@ from distributed.utils import log_errors
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
 else:
-    ExportTool = None
+    ExportTool = None  # type: ignore
 
 
 profile_interval = dask.config.get("distributed.worker.profile.interval")

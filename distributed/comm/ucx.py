@@ -10,6 +10,7 @@ import os
 import struct
 import warnings
 import weakref
+from typing import TYPE_CHECKING
 
 import dask
 from dask.utils import parse_bytes
@@ -23,16 +24,24 @@ from .utils import ensure_concrete_host, from_frames, to_frames
 
 logger = logging.getLogger(__name__)
 
-
 # In order to avoid double init when forking/spawning new processes (multiprocess),
 # we make sure only to import and initialize UCX once at first use. This is also
 # required to ensure Dask configuration gets propagated to UCX, which needs
 # variables to be set before being imported.
-ucp = None
+if TYPE_CHECKING:
+    try:
+        import ucp
+        from ucp import create_endpoint as ucx_create_endpoint
+        from ucp import create_listener as ucx_create_listener
+    except ImportError:
+        pass
+else:
+    ucp = None  # type: ignore
+    ucx_create_endpoint = None  # type: ignore
+    ucx_create_listener = None  # type: ignore
+
 host_array = None
 device_array = None
-ucx_create_endpoint = None
-ucx_create_listener = None
 pre_existing_cuda_context = False
 cuda_context_created = False
 
@@ -255,11 +264,11 @@ class UCX(Comm):
 
                 # Send frames
 
-                # It is necessary to first synchronize the default stream before start sending
-                # We synchronize the default stream because UCX is not stream-ordered and
-                #  syncing the default stream will wait for other non-blocking CUDA streams.
-                # Note this is only sufficient if the memory being sent is not currently in use on
-                # non-blocking CUDA streams.
+                # It is necessary to first synchronize the default stream before start
+                # sending We synchronize the default stream because UCX is not
+                # stream-ordered and syncing the default stream will wait for other
+                # non-blocking CUDA streams. Note this is only sufficient if the memory
+                # being sent is not currently in use on non-blocking CUDA streams.
                 if any(cuda_send_frames):
                     synchronize_stream(0)
 
@@ -381,7 +390,7 @@ class UCXConnector(Connector):
             raise CommClosedError("Connection closed before handshake completed")
         return self.comm_class(
             ep,
-            local_addr=None,
+            local_addr="",
             peer_addr=self.prefix + address,
             deserialize=deserialize,
         )

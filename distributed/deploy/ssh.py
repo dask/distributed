@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 import logging
 import sys
 import warnings
 import weakref
 from json import dumps
-from typing import List, Union
 
 import dask
 import dask.config
@@ -247,13 +248,13 @@ old_cluster_kwargs = {
 
 
 def SSHCluster(
-    hosts: List[str] = None,
-    connect_options: Union[List[dict], dict] = {},
+    hosts: list[str] | None = None,
+    connect_options: dict | list[dict] = {},
     worker_options: dict = {},
     scheduler_options: dict = {},
     worker_module: str = "deprecated",
     worker_class: str = "distributed.Nanny",
-    remote_python: Union[str, List[str]] = None,
+    remote_python: str | list[str] | None = None,
     **kwargs,
 ):
     """Deploy a Dask cluster using SSH
@@ -277,7 +278,7 @@ def SSHCluster(
 
     Parameters
     ----------
-    hosts : List[str]
+    hosts : list[str]
         List of hostnames or addresses on which to launch our cluster.
         The first will be used for the scheduler and the rest for workers.
     connect_options : dict or list of dict, optional
