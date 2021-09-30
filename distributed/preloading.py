@@ -10,16 +10,14 @@ import urllib.request
 from collections.abc import Iterable
 from importlib import import_module
 from types import ModuleType
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import click
 
 from dask.utils import tmpfile
 
+from .core import Server
 from .utils import import_file
-
-if TYPE_CHECKING:
-    from .core import Server
 
 logger = logging.getLogger(__name__)
 

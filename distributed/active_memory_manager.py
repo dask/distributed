@@ -217,7 +217,7 @@ class ActiveMemoryManagerExtension:
         candidates -= pending_repl
         if not candidates:
             return None
-        return min(candidates, key=self.workers_memory.get)  # type: ignore
+        return min(candidates, key=self.workers_memory.__getitem__)
 
     def _find_dropper(
         self,
@@ -246,7 +246,7 @@ class ActiveMemoryManagerExtension:
         candidates -= {waiter_ts.processing_on for waiter_ts in ts.waiters}
         if not candidates:
             return None
-        return max(candidates, key=self.workers_memory.get)  # type: ignore
+        return max(candidates, key=self.workers_memory.__getitem__)
 
 
 class ActiveMemoryManagerPolicy:

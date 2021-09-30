@@ -107,5 +107,6 @@ setup(
         dask-scheduler=distributed.cli.dask_scheduler:go
         dask-worker=distributed.cli.dask_worker:go
       """,
+    # https://mypy.readthedocs.io/en/latest/installed_packages.html
     zip_safe=False,
 )
