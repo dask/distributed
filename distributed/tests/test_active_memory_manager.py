@@ -473,9 +473,19 @@ class DropEverything(ActiveMemoryManagerPolicy):
             for ws in candidates:
                 yield "drop", ts, {ws}
 
+        # Stop running after ~2s
         self.i += 1
-        if self.i == 5:
+        if self.i == 20:
             self.manager.policies.remove(self)
+
+
+async def _tensordot_stress(c):
+    da = pytest.importorskip("dask.array")
+
+    rng = da.random.RandomState(0)
+    a = rng.random((20, 20), chunks=(1, 1))
+    b = (a @ a.T).sum().round(3)
+    assert await c.compute(b) == 2134.398
 
 
 @pytest.mark.slow
@@ -491,6 +501,7 @@ class DropEverything(ActiveMemoryManagerPolicy):
             {"class": "distributed.tests.test_active_memory_manager.DropEverything"},
         ],
     },
+    timeout=120,
 )
 async def test_drop_stress(c, s, *nannies):
     """A policy which suggests dropping everything won't break a running computation,
@@ -498,12 +509,7 @@ async def test_drop_stress(c, s, *nannies):
 
     See also: test_ReduceReplicas_stress
     """
-    da = pytest.importorskip("dask.array")
-
-    rng = da.random.RandomState(0)
-    a = rng.random((20, 20), chunks=(1, 1))
-    b = (a @ a.T).sum().round(3)
-    assert await c.compute(b) == 2134.398
+    await _tensordot_stress(c)
 
 
 @pytest.mark.slow
@@ -526,9 +532,4 @@ async def test_ReduceReplicas_stress(c, s, *nannies):
     test_drop_stress above, this test does not stop running after a few seconds - the
     policy must not disrupt the computation too much.
     """
-    da = pytest.importorskip("dask.array")
-
-    rng = da.random.RandomState(0)
-    a = rng.random((20, 20), chunks=(1, 1))
-    b = (a @ a.T).sum().round(3)
-    assert await c.compute(b) == 2134.398
+    await _tensordot_stress(c)
