@@ -13,7 +13,7 @@ from dask.utils import parse_timedelta
 from .utils import import_term
 
 if TYPE_CHECKING:
-    from .scheduler import SchedulerState, TaskState, WorkerState
+    from .scheduler import Scheduler, TaskState, WorkerState
 
 
 class ActiveMemoryManagerExtension:
@@ -31,7 +31,7 @@ class ActiveMemoryManagerExtension:
     ``distributed.scheduler.active-memory-manager``.
     """
 
-    scheduler: SchedulerState
+    scheduler: Scheduler
     policies: set[ActiveMemoryManagerPolicy]
     interval: float
 
@@ -43,7 +43,7 @@ class ActiveMemoryManagerExtension:
 
     def __init__(
         self,
-        scheduler: SchedulerState,
+        scheduler: Scheduler,
         # The following parameters are exposed so that one may create, run, and throw
         # away on the fly a specialized manager, separate from the main one.
         policies: set[ActiveMemoryManagerPolicy] | None = None,
@@ -126,12 +126,14 @@ class ActiveMemoryManagerExtension:
             # populate self.pending
             self._run_policies()
 
-            drop_by_worker = defaultdict(set)
-            repl_by_worker = defaultdict(dict)
+            drop_by_worker: defaultdict[str, set[str]] = defaultdict(set)
+            repl_by_worker: defaultdict[str, dict[str, list[str]]] = defaultdict(dict)
+
             for ts, (pending_repl, pending_drop) in self.pending.items():
                 if not ts.who_has:
                     continue
                 who_has = [ws_snd.address for ws_snd in ts.who_has - pending_drop]
+
                 assert who_has  # Never drop the last replica
                 for ws_rec in pending_repl:
                     assert ws_rec not in ts.who_has
@@ -143,8 +145,8 @@ class ActiveMemoryManagerExtension:
             # Fire-and-forget enact recommendations from policies
             # This is temporary code, waiting for
             # https://github.com/dask/distributed/pull/5046
-            for addr, who_has in repl_by_worker.items():
-                asyncio.create_task(self.scheduler.gather_on_worker(addr, who_has))
+            for addr, who_has_map in repl_by_worker.items():
+                asyncio.create_task(self.scheduler.gather_on_worker(addr, who_has_map))
             for addr, keys in drop_by_worker.items():
                 asyncio.create_task(self.scheduler.delete_worker_data(addr, keys))
             # End temporary code
@@ -215,7 +217,7 @@ class ActiveMemoryManagerExtension:
         candidates -= pending_repl
         if not candidates:
             return None
-        return min(candidates, key=self.workers_memory.get)
+        return min(candidates, key=self.workers_memory.__getitem__)
 
     def _find_dropper(
         self,
@@ -244,7 +246,7 @@ class ActiveMemoryManagerExtension:
         candidates -= {waiter_ts.processing_on for waiter_ts in ts.waiters}
         if not candidates:
             return None
-        return max(candidates, key=self.workers_memory.get)
+        return max(candidates, key=self.workers_memory.__getitem__)
 
 
 class ActiveMemoryManagerPolicy:
@@ -303,13 +305,7 @@ class ReduceReplicas(ActiveMemoryManagerPolicy):
     """
 
     def run(self):
-        # TODO this is O(n) to the total number of in-memory tasks on the cluster; it
-        #      could be made faster by automatically attaching it to a TaskState when it
-        #      goes above one replica and detaching it when it drops below two.
-        for ts in self.manager.scheduler.tasks.values():
-            if len(ts.who_has) < 2:
-                continue
-
+        for ts in self.manager.scheduler.replicated_tasks:
             desired_replicas = 1  # TODO have a marker on TaskState
 
             # If a dependent task has not been assigned to a worker yet, err on the side

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import atexit
 import copy
@@ -22,6 +24,7 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
+from typing import ClassVar
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
@@ -49,7 +52,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
-from . import versions as version_module
+from . import versions as version_module  # type: ignore
 from .batched import BatchedSend
 from .cfexecutor import ClientExecutor
 from .core import (
@@ -95,7 +98,9 @@ from .worker import get_client, get_worker, secede
 
 logger = logging.getLogger(__name__)
 
-_global_clients = weakref.WeakValueDictionary()
+_global_clients: weakref.WeakValueDictionary[
+    int, Client
+] = weakref.WeakValueDictionary()
 _global_client_index = [0]
 
 _current_client = ContextVar("_current_client", default=None)
@@ -105,7 +110,7 @@ DEFAULT_EXTENSIONS = [PubSubClientExtension]
 NO_DEFAULT_PLACEHOLDER = "_no_default_"
 
 
-def _get_global_client():
+def _get_global_client() -> Client | None:
     L = sorted(list(_global_clients), reverse=True)
     for k in L:
         c = _global_clients[k]
@@ -116,13 +121,13 @@ def _get_global_client():
     return None
 
 
-def _set_global_client(c):
+def _set_global_client(c: Client | None) -> None:
     if c is not None:
         _global_clients[_global_client_index[0]] = c
         _global_client_index[0] += 1
 
 
-def _del_global_client(c):
+def _del_global_client(c: Client) -> None:
     for k in list(_global_clients):
         try:
             if _global_clients[k] is c:
@@ -590,7 +595,7 @@ class Client:
     distributed.LocalCluster:
     """
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[Client]] = weakref.WeakSet()
 
     _default_event_handlers = {"print": _handle_print, "warn": _handle_warn}
 
@@ -1376,8 +1381,6 @@ class Client:
             self.scheduler = None
 
         self.status = "closed"
-
-    _shutdown = _close
 
     def close(self, timeout=no_default):
         """Close this client
@@ -2529,12 +2532,13 @@ class Client:
         )
         if not isinstance(ignore_modules, list):
             raise TypeError(
-                f"Ignored modules must be a list. Instead got ({type(ignore_modules)}, {ignore_modules})"
+                "Ignored modules must be a list. Instead got "
+                f"({type(ignore_modules)}, {ignore_modules})"
             )
 
+        pattern: re.Pattern | None
         if ignore_modules:
-            pattern = "|".join([f"(?:{mod})" for mod in ignore_modules])
-            pattern = re.compile(pattern)
+            pattern = re.compile("|".join([f"(?:{mod})" for mod in ignore_modules]))
         else:
             pattern = None
 
@@ -4107,8 +4111,9 @@ class Client:
         responses = await method(plugin=dumps(plugin, protocol=4), name=name)
         for response in responses.values():
             if response["status"] == "error":
-                exc = response["exception"]
-                tb = response["traceback"]
+                _, exc, tb = clean_exception(
+                    response["exception"], response["traceback"]
+                )
                 raise exc.with_traceback(tb)
         return responses
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -207,7 +209,7 @@ class EventstreamHandler(WebSocketHandler):
         self.server.remove_plugin(name=self.plugin.name)
 
 
-routes = [
+routes: list[tuple] = [
     (r"info", redirect("info/main/workers.html"), {}),
     (r"info/main/workers.html", Workers, {}),
     (r"info/worker/(.*).html", Worker, {}),

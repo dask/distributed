@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import inspect
 import logging
@@ -5,12 +7,12 @@ import sys
 import threading
 import traceback
 import uuid
-import warnings
 import weakref
 from collections import defaultdict
 from contextlib import suppress
 from enum import Enum
 from functools import partial
+from typing import ClassVar
 
 import tblib
 from tlz import merge
@@ -49,18 +51,22 @@ class Status(Enum):
     other.
     """
 
-    closed = "closed"
-    closing = "closing"
-    closing_gracefully = "closing-gracefully"
-    failed = "failed"
-    init = "init"
+    undefined = "undefined"
     created = "created"
-    running = "running"
+    init = "init"
     starting = "starting"
-    stopped = "stopped"
+    running = "running"
+    paused = "paused"
     stopping = "stopping"
-    undefined = None
-    dont_reply = "dont-reply"
+    stopped = "stopped"
+    closing = "closing"
+    closing_gracefully = "closing_gracefully"
+    closed = "closed"
+    failed = "failed"
+    dont_reply = "dont_reply"
+
+
+Status.lookup = {s.name: s for s in Status}  # type: ignore
 
 
 class RPCClosed(IOError):
@@ -244,19 +250,9 @@ class Server:
 
     @status.setter
     def status(self, new_status):
-        if isinstance(new_status, Status):
-            self._status = new_status
-        elif isinstance(new_status, str) or new_status is None:
-            warnings.warn(
-                f"Since distributed 2.23 `.status` is now an Enum, please assign `Status.{new_status}`",
-                PendingDeprecationWarning,
-                stacklevel=1,
-            )
-            corresponding_enum_variants = [s for s in Status if s.value == new_status]
-            assert len(corresponding_enum_variants) == 1
-            self._status = corresponding_enum_variants[0]
-        else:
-            raise TypeError(f"expected Status or str, got {new_status}")
+        if not isinstance(new_status, Status):
+            raise TypeError(f"Expected Status; got {new_status!r}")
+        self._status = new_status
 
     async def finished(self):
         """Wait until the server has finished"""
@@ -266,7 +262,7 @@ class Server:
         async def _():
             timeout = getattr(self, "death_timeout", 0)
             async with self._startup_lock:
-                if self.status == Status.running:
+                if self.status in (Status.running, Status.paused):
                     return self
                 if timeout:
                     try:
@@ -501,7 +497,7 @@ class Server:
                             self._ongoing_coroutines.add(result)
                             result = await result
                     except (CommClosedError, CancelledError):
-                        if self.status == Status.running:
+                        if self.status in (Status.running, Status.paused):
                             logger.info("Lost connection to %r", address, exc_info=True)
                         break
                     except Exception as e:
@@ -511,14 +507,7 @@ class Server:
                         else:
                             result = error_message(e, status="uncaught-error")
 
-                # result is not type stable:
-                # when LHS is not Status then RHS must not be Status or it raises.
-                # when LHS is Status then RHS must be status or it raises in tests
-                is_dont_reply = False
-                if isinstance(result, Status) and (result == Status.dont_reply):
-                    is_dont_reply = True
-
-                if reply and not is_dont_reply:
+                if reply and result != Status.dont_reply:
                     try:
                         await comm.write(result, serializers=serializers)
                     except (OSError, TypeError) as e:
@@ -695,7 +684,7 @@ class rpc:
     >>> remote.close_comms()  # doctest: +SKIP
     """
 
-    active = weakref.WeakSet()
+    active: ClassVar[weakref.WeakSet[rpc]] = weakref.WeakSet()
     comms = ()
     address = None
 
@@ -928,7 +917,7 @@ class ConnectionPool:
         Whether or not to deserialize data by default or pass it through
     """
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[ConnectionPool]] = weakref.WeakSet()
 
     def __init__(
         self,
@@ -1169,34 +1158,36 @@ def error_message(e, status="error"):
     MAX_ERROR_LEN = dask.config.get("distributed.admin.max-error-length")
     tblib.pickling_support.install(e, *collect_causes(e))
     tb = get_traceback()
-    e2 = truncate_exception(e, MAX_ERROR_LEN)
+    tb_text = "".join(traceback.format_tb(tb))
+    e = truncate_exception(e, MAX_ERROR_LEN)
     try:
-        e3 = protocol.pickle.dumps(e2, protocol=4)
-        protocol.pickle.loads(e3)
+        e_serialized = protocol.pickle.dumps(e)
+        protocol.pickle.loads(e_serialized)
     except Exception:
-        e2 = Exception(str(e2))
-    e4 = protocol.to_serialize(e2)
-    try:
-        tb2 = protocol.pickle.dumps(tb, protocol=4)
-        protocol.pickle.loads(tb2)
-    except Exception:
-        tb = tb2 = "".join(traceback.format_tb(tb))
+        e_serialized = protocol.pickle.dumps(Exception(repr(e)))
+    e_serialized = protocol.to_serialize(e_serialized)
 
-    if len(tb2) > MAX_ERROR_LEN:
+    try:
+        tb_serialized = protocol.pickle.dumps(tb)
+        protocol.pickle.loads(tb_serialized)
+    except Exception:
+        tb_serialized = protocol.pickle.dumps(tb_text)
+
+    if len(tb_serialized) > MAX_ERROR_LEN:
         tb_result = None
     else:
-        tb_result = protocol.to_serialize(tb)
+        tb_result = protocol.to_serialize(tb_serialized)
 
     return {
         "status": status,
-        "exception": e4,
+        "exception": e_serialized,
         "traceback": tb_result,
-        "exception_text": repr(e2),
-        "traceback_text": "".join(traceback.format_tb(tb)),
+        "exception_text": repr(e),
+        "traceback_text": tb_text,
     }
 
 
-def clean_exception(exception, traceback, **kwargs):
+def clean_exception(exception, traceback=None, **kwargs):
     """Reraise exception and traceback. Deserialize if necessary
 
     See Also

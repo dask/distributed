@@ -602,6 +602,12 @@ def test_typename_deprecated():
     assert typename is dask.utils.typename
 
 
+def test_tmpfile_deprecated():
+    with pytest.warns(FutureWarning, match="tmpfile is deprecated"):
+        from distributed.utils import tmpfile
+    assert tmpfile is dask.utils.tmpfile
+
+
 def test_iscoroutinefunction_unhashable_input():
     # Ensure iscoroutinefunction can handle unhashable callables
     assert not iscoroutinefunction(_UnhashableCallable())

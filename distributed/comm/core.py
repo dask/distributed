@@ -1,11 +1,14 @@
+from __future__ import annotations
+
 import asyncio
 import inspect
 import logging
 import random
 import sys
 import weakref
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
 from contextlib import suppress
+from typing import ClassVar
 
 import dask
 from dask.utils import parse_timedelta
@@ -40,7 +43,7 @@ class Comm(ABC):
     depending on the underlying transport's characteristics.
     """
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[Comm]] = weakref.WeakSet()
 
     def __init__(self):
         self._instances.add(self)
@@ -99,21 +102,17 @@ class Comm(ABC):
 
     @abstractmethod
     def closed(self):
-        """
-        Return whether the stream is closed.
-        """
+        """Return whether the stream is closed."""
 
-    @abstractproperty
-    def local_address(self):
-        """
-        The local address.  For logging and debugging purposes only.
-        """
+    @property
+    @abstractmethod
+    def local_address(self) -> str:
+        """The local address. For logging and debugging purposes only."""
 
-    @abstractproperty
-    def peer_address(self):
-        """
-        The peer's address.  For logging and debugging purposes only.
-        """
+    @property
+    @abstractmethod
+    def peer_address(self) -> str:
+        """The peer's address. For logging and debugging purposes only."""
 
     @property
     def extra_info(self):
@@ -178,13 +177,15 @@ class Listener(ABC):
         communications, but prevents accepting new ones.
         """
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def listen_address(self):
         """
         The listening address as a URI string.
         """
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def contact_address(self):
         """
         An address this listener can be contacted on.  This can be
@@ -227,9 +228,9 @@ class Listener(ABC):
             raise CommClosedError(f"Comm {comm!r} closed.") from e
 
         comm.remote_info = handshake
-        comm.remote_info["address"] = comm._peer_addr
+        comm.remote_info["address"] = comm.peer_address
         comm.local_info = local_info
-        comm.local_info["address"] = comm._local_addr
+        comm.local_info["address"] = comm.local_address
 
         comm.handshake_options = comm.handshake_configuration(
             comm.local_info, comm.remote_info

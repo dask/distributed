@@ -22,6 +22,7 @@ dependencies:
   - msgpack-python
   - netcdf4
   - paramiko
+  - pre-commit
   - prometheus_client
   - psutil
   - pynvml  # Only tested here
@@ -49,6 +50,7 @@ dependencies:
       - git+https://github.com/dask/dask
       - git+https://github.com/dask/s3fs
       - git+https://github.com/dask/zict
-      - git+https://github.com/intake/filesystem_spec
+      # FIXME https://github.com/dask/distributed/issues/5345
+      # - git+https://github.com/intake/filesystem_spec
       - git+https://github.com/joblib/joblib
       - keras

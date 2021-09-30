@@ -28,7 +28,7 @@ import dask
 import dask.bag as db
 from dask import delayed
 from dask.optimization import SubgraphCallable
-from dask.utils import stringify
+from dask.utils import stringify, tmpfile
 
 from distributed import (
     CancelledError,
@@ -68,7 +68,7 @@ from distributed.scheduler import (
     Scheduler,
 )
 from distributed.sizeof import sizeof
-from distributed.utils import is_valid_xml, mp_context, sync, tmp_text, tmpfile
+from distributed.utils import is_valid_xml, mp_context, sync, tmp_text
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _UnhashableCallable,
@@ -5099,15 +5099,16 @@ async def test_secede_balances(c, s, a, b):
         total = client.submit(sum, futures).result()
         return total
 
-    futures = c.map(f, range(100))
+    futures = c.map(f, range(10), workers=[a.address])
 
     results = await c.gather(futures)
+    # We dispatch 10 tasks and every task generates 11 more tasks
+    # 10 * 11 + 10
+    assert a.executed_count + b.executed_count == 120
+    assert a.executed_count >= 10
+    assert b.executed_count > 0
 
-    assert a.executed_count + b.executed_count == 1100
-    assert a.executed_count > 200
-    assert b.executed_count > 200
-
-    assert results == [sum(map(inc, range(10)))] * 100
+    assert results == [sum(map(inc, range(10)))] * 10
 
 
 @gen_cluster(client=True)

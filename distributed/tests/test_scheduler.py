@@ -5,7 +5,6 @@ import logging
 import operator
 import re
 import sys
-from collections import defaultdict
 from itertools import product
 from textwrap import dedent
 from time import sleep
@@ -18,16 +17,16 @@ from tlz import concat, first, frequencies, merge, valmap
 
 import dask
 from dask import delayed
-from dask.utils import apply, parse_timedelta, stringify, typename
+from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.comm import Comm
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import ConnectionPool, Status, connect, rpc
+from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.scheduler import MemoryState, Scheduler
-from distributed.utils import TimeoutError, tmpfile
+from distributed.utils import TimeoutError
 from distributed.utils_test import (
     captured_logger,
     cluster,
@@ -58,8 +57,6 @@ pytestmark = pytest.mark.ci1
 
 alice = "alice:1234"
 bob = "bob:1234"
-
-occupancy = defaultdict(lambda: 0)
 
 
 @gen_cluster()
@@ -413,11 +410,9 @@ async def test_blocked_handlers_are_respected(s, a, b):
 
     response = await comm.read()
 
-    assert "exception" in response
-    assert isinstance(response["exception"], ValueError)
-    assert "'feed' handler has been explicitly disallowed" in repr(
-        response["exception"]
-    )
+    _, exc, _ = clean_exception(response["exception"], response["traceback"])
+    assert isinstance(exc, ValueError)
+    assert "'feed' handler has been explicitly disallowed" in repr(exc)
 
     await comm.close()
 
@@ -2092,8 +2087,8 @@ async def test_task_group_on_fire_and_forget(c, s, a, b):
 
 
 class BrokenComm(Comm):
-    peer_address = None
-    local_address = None
+    peer_address = ""
+    local_address = ""
 
     def close(self):
         pass
