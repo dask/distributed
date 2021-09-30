@@ -307,7 +307,7 @@ class GroupTiming(SchedulerPlugin):
 
         self.scheduler = scheduler
         self.time: list[float] = [time.time()]
-
+        self.nthreads: list[int] = [self.scheduler.total_nthreads]
         self.compute: dict[str, list[float]] = dict()
         self._prev_durations: dict[str, dict[str, float]] = dict()
 
@@ -343,17 +343,20 @@ class GroupTiming(SchedulerPlugin):
         for name in missing_groups:
             self.compute[name].append(0.0)
         self.time.append(now)
+        self.nthreads.append(self.scheduler.total_nthreads)
 
-        nthreads = self.scheduler.total_nthreads
-        dt = now - self.time[-1]
         idx = len(self.time) - 1
+        if idx == 0:
+            return
+        nthreads = self.nthreads[idx]
+        dt = now - self.time[idx - 1]
         while total_dcompute > dt * nthreads:
             if idx == 0:
                 break
 
             spillage = total_dcompute - dt * nthreads
             new_total_dcompute = 0.0
-            for name in groups:
+            for name in self.compute:
                 val = spillage * self.compute[name][idx] / total_dcompute
                 self.compute[name][idx] -= val
                 self.compute[name][idx - 1] += val
@@ -362,6 +365,7 @@ class GroupTiming(SchedulerPlugin):
             idx -= 1
             total_dcompute = new_total_dcompute
             dt = self.time[idx] - self.time[idx - 1]
+            nthreads = self.nthreads[idx]
 
     def restart(self, scheduler):
         pass

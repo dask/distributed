@@ -41,7 +41,7 @@ from bokeh.palettes import Viridis11
 from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap
-from tlz import curry, pipe
+from tlz import curry, pipe, valmap
 from tlz.curried import concat, groupby, map
 from tornado import escape
 
@@ -2583,11 +2583,17 @@ class TaskGroupProgress(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
-            new_data = self.plugin.compute.copy()
+            dt = np.diff(np.array(self.plugin.time), prepend=self.plugin.time[0] - 100)
+            new_data = valmap(
+                lambda x: np.array(x) / dt,
+                self.plugin.compute,
+            )
             stackers = list(new_data.keys())
             new_data["time"] = self.plugin.time
 
-            if set(self.source.data.keys()) != set(new_data.keys()):
+            if len(self.root.renderers) == 0 or set(self.source.data.keys()) != set(
+                new_data.keys()
+            ):
                 while len(self.root.renderers):
                     self.root.renderers.pop()
 
