@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
 from collections import defaultdict
 from timeit import default_timer
-from typing import Dict, List, Tuple
 
 from tlz import groupby, valmap
 from tornado.ioloop import PeriodicCallback
@@ -11,7 +12,7 @@ from tornado.ioloop import PeriodicCallback
 from dask.base import tokenize
 from dask.utils import stringify
 
-from ..utils import key_split, key_split_group, log_errors
+from ..utils import key_split
 from .plugin import SchedulerPlugin
 
 logger = logging.getLogger(__name__)
@@ -302,102 +303,70 @@ class GroupTiming(SchedulerPlugin):
     name = "group-timing"
 
     def __init__(self, scheduler):
-        self.scheduler = scheduler
-        # Time series of task states
-        self.states: Dict[str, List[Tuple[float, Dict[str, int]]]] = dict()
-        # Time series of task durations
-        self.all_durations: Dict[str, List[Tuple[float, Dict[str, float]]]] = dict()
-        # Time series of bytes stored per task group
-        self.nbytes: Dict[str, List[Tuple[float, int]]] = dict()
-        # Time series of the number of threads on the scheduler aligned to group checkpoints
-        self.nthreads_group: Dict[str, List[Tuple[float, int]]] = dict()
-        # Overall time series of the number of threads on the scheduler
-        self.nthreads: List[Tuple[float, int]] = list()
-        # We snapshot the task state after every `delta` number of
-        # tasks are completed.
-        self._deltas: Dict[str, int] = dict()
-
-        t = time.time()
-        for name, group in self.scheduler.task_groups.items():
-            self.create(name, group)
-            self.insert(t, name, group)
-
         scheduler.add_plugin(self)
 
-        nthreads_pc = PeriodicCallback(self.track_threads, 1.0 * 1000.0)
-        self.scheduler.periodic_callbacks["nthreads_pc"] = nthreads_pc
-        nthreads_pc.start()
+        self.scheduler = scheduler
+        self.time: list[float] = [time.time()]
 
-    def create(self, name, group):
-        """
-        Set up timeseries data for a new task group
-        """
-        with log_errors():
-            self.states[name] = []
-            self.nbytes[name] = []
-            self.nthreads_group[name] = []
-            self.all_durations[name] = []
-            # Snapshot states roughly after every 1% of tasks are completed.
-            # This could conceivably change if new tasks are added after delta
-            # is computed, so it's meant to be approximate.
-            n_tasks = sum(group.states.values())
-            delta = max(int(n_tasks / 100), 1)
-            self._deltas[name] = delta
+        self.compute: dict[str, list[float]] = dict()
+        self._prev_durations: dict[str, dict[str, float]] = dict()
 
-    def insert(self, timestamp, name, group):
-        """
-        Append a new entry to our tasks timeseries.
-        """
-        with log_errors():
-            if not len(self.states[name]):
-                # If the timeseries is empty, just insert the current value.
-                self.states[name].append((timestamp, group.states.copy()))
-                self.all_durations[name].append((timestamp, group.all_durations.copy()))
-                self.nbytes[name].append((timestamp, group.nbytes_total))
-                self.nthreads_group[name].append(
-                    (timestamp, self.scheduler.total_nthreads)
-                )
+        for name, group in self.scheduler.task_groups.items():
+            self.compute[name] = [0.0]
+            self._prev_durations[name] = group.all_durations.copy()
+
+        group_timing_pc = PeriodicCallback(self.track_groups, 0.1 * 1000.0)
+        self.scheduler.periodic_callbacks["group-timing"] = group_timing_pc
+        group_timing_pc.start()
+
+    def track_groups(self):
+        now = time.time()
+
+        total_dcompute = 0.0
+        groups = self.scheduler.task_groups
+        for name, group in groups.items():
+            if name not in self.compute:
+                self.compute[name] = [0.0] * len(self.time)
+            if name not in self._prev_durations:
+                prev_compute = 0.0
             else:
-                # If the timeseries exists, we check the most recent entry,
-                # and determine whether `delta` tasks have been completed since then.
-                prev = self.states[name][-1]
-                pstates = prev[1]
-                pcount = pstates["erred"] + pstates["memory"] + pstates["released"]
+                prev_compute = self._prev_durations[name]["compute"]
 
-                states = group.states
-                count = states["erred"] + states["memory"] + states["released"]
+            compute = group.all_durations["compute"]
+            dcompute = compute - prev_compute
 
-                if count - pcount >= self._deltas[name]:
-                    self.states[name].append((timestamp, group.states.copy()))
-                    self.all_durations[name].append(
-                        (timestamp, group.all_durations.copy())
-                    )
-                    self.nbytes[name].append((timestamp, group.nbytes_total))
+            total_dcompute += dcompute
+            self.compute[name].append(dcompute)
+            self._prev_durations[name] = group.all_durations.copy()
 
-    def track_threads(self):
-        self.nthreads.append((time.time(), self.scheduler.total_nthreads))
+        missing_groups = set(self.compute.keys()) - set(groups.keys())
+        for name in missing_groups:
+            self.compute[name].append(0.0)
+        self.time.append(now)
 
-    def transition(self, key, start, finish, *args, **kwargs):
-        # We mostly are interested in when tasks move from processing to memory or err,
-        # so we only check if the transition starts from that state.
-        if start == "processing":
-            with log_errors():
-                name = key_split_group(key)
-                group = self.scheduler.task_groups[name]
-                t = time.time()
-                if name not in self.states:
-                    self.create(name, group)
-                self.insert(t, name, group)
+        nthreads = self.scheduler.total_nthreads
+        dt = now - self.time[-1]
+        idx = len(self.time) - 1
+        while total_dcompute > dt * nthreads:
+            if idx == 0:
+                break
+
+            spillage = total_dcompute - dt * nthreads
+            new_total_dcompute = 0.0
+            for name in groups:
+                val = spillage * self.compute[name][idx] / total_dcompute
+                self.compute[name][idx] -= val
+                self.compute[name][idx - 1] += val
+                new_total_dcompute += self.compute[name][idx - 1]
+
+            idx -= 1
+            total_dcompute = new_total_dcompute
+            dt = self.time[idx] - self.time[idx - 1]
 
     def restart(self, scheduler):
-        self.states.clear()
-        self.nbytes.clear()
-        self.all_durations.clear()
-        self.nthreads.clear()
-        self.nthreads_group.clear()
-        self._deltas.clear()
+        pass
 
     async def close(self):
-        nthreads_pc = self.scheduler.periodic_callbacks.pop("progress_nthreads", None)
-        if nthreads_pc:
-            nthreads_pc.stop()
+        group_timing_pc = self.scheduler.periodic_callbacks.pop("group-timing", None)
+        if group_timing_pc:
+            group_timing_pc.stop()

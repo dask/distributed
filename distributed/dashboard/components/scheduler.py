@@ -41,7 +41,7 @@ from bokeh.palettes import Viridis11
 from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap
-from tlz import curry, pipe, pluck
+from tlz import curry, pipe
 from tlz.curried import concat, groupby, map
 from tornado import escape
 
@@ -2561,18 +2561,15 @@ class TaskGroupGraph(DashboardComponent):
 class TaskGroupProgress(DashboardComponent):
     """Stacked area chart showing task groups through time"""
 
-    def __init__(self, scheduler, window="120s", n_interp=1000, **kwargs):
+    def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
-        self.window = parse_timedelta(window)
         self.source = ColumnDataSource()
-        self.n_interp = n_interp
 
         if GroupTiming.name not in self.scheduler.plugins:
             self.scheduler.add_plugin(plugin=GroupTiming)
         self.plugin = self.scheduler.plugins[GroupTiming.name]
 
-        times = np.linspace(-self.window, 0, self.n_interp)
-        self.source.add(times, "time")
+        self.source.add(self.plugin.time, "time")
 
         self.root = figure(
             id="bk-task-group-progress-plot",
@@ -2583,87 +2580,23 @@ class TaskGroupProgress(DashboardComponent):
             **kwargs,
         )
 
-    def _get_timing_data(self):
-        self.color = []
-        new_data = {}
-        durations = self.plugin.all_durations
-
-        if len(durations) == 0:
-            return new_data
-
-        now = time()
-        tmin = (
-            min([v[0][0] for v in durations.values()]) - now
-            if durations
-            else -self.window
-        )
-        tmin = max(-self.window, tmin)
-        tmax = max([v[-1][0] for v in durations.values()]) - now if durations else 0
-        # tmax = max(tmax, tmin + self.window)
-        times = np.linspace(tmin, tmax, self.n_interp)
-
-        for k in durations.keys():
-            timing = durations[k]
-            nthreads = np.array(list(pluck(0, self.plugin.nthreads_group[k])))
-            timestamps = np.array(list(pluck(0, timing))) - now
-            compute = np.array(list(pluck("compute", pluck(1, timing))))
-            dcompute = np.diff(compute, append=compute[-1])
-            dt = np.diff(timestamps, append=timestamps[-1] + 1000)
-
-            new_dcompute = dcompute
-            while True:
-                spillage = np.zeros_like(new_dcompute)
-                loc = np.where(new_dcompute > nthreads * dt)
-                if not loc[0].size:
-                    break
-                spillage[loc] = new_dcompute[loc] - nthreads[loc] * dt[loc]
-                diffuse = np.roll(spillage, -1) - spillage
-                diffuse[-1] = 0
-                new_dcompute = new_dcompute + diffuse
-
-            y = np.interp(times, timestamps, new_dcompute, left=0, right=0)
-            self.color.append(color_of(key_split(k)))
-            new_data[k] = y
-
-        total_dcompute = sum(list(new_data.values()))
-        dt = np.diff(times, append=times[-1] + 1000)
-
-        if len(self.plugin.nthreads) >= 2:
-            timestamps = np.array(list(pluck(0, self.plugin.nthreads)))
-            nthreads = np.array(list(pluck(1, self.plugin.nthreads)))
-            nthreads = np.interp(times, timestamps, nthreads)
-        else:
-            nthreads = np.full_like(times, fill_value=self.scheduler.total_nthreads)
-
-        new_total_dcompute = total_dcompute
-        while True:
-            spillage = np.zeros_like(new_total_dcompute)
-            loc = np.where(new_total_dcompute > nthreads * dt)
-            if not loc[0].size:
-                break
-            spillage[loc] = new_total_dcompute[loc] - nthreads[loc] * dt[loc]
-            diffuse = np.roll(spillage, -1) - spillage
-            diffuse[-1] = 0
-            for v in new_data.values():
-                v += diffuse * v / new_total_dcompute
-            new_total_dcompute = sum(list(new_data.values()))
-
-        new_data = {k: np.divide(v, dt) for k, v in new_data.items()}
-        new_data["time"] = times
-        return new_data
-
     @without_property_validation
     def update(self):
         with log_errors():
-            new_data = self._get_timing_data()
+            new_data = self.plugin.compute.copy()
+            stackers = list(new_data.keys())
+            new_data["time"] = self.plugin.time
+
             if set(self.source.data.keys()) != set(new_data.keys()):
                 while len(self.root.renderers):
                     self.root.renderers.pop()
 
+                colors = [color_of(key_split(k)) for k in stackers]
+
                 self.source.data = new_data
                 self.root.varea_stack(
-                    stackers=list(self.plugin.states.keys()),
-                    color=self.color,
+                    stackers=stackers,
+                    color=colors,
                     x="time",
                     source=self.source,
                 )
