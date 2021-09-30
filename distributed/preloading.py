@@ -217,7 +217,7 @@ def process_preloads(
         preload_argv = [cast("list[str]", [])] * len(preload)
     if len(preload) != len(preload_argv):
         raise ValueError(
-            "preload and preload_argv have mismatched lenghts "
+            "preload and preload_argv have mismatched lengths "
             f"{len(preload)} != {len(preload_argv)}"
         )
 
