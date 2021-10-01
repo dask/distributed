@@ -103,7 +103,6 @@ async def test_prometheus(c, s, a, b):
         assert client.samples[0].value == 1.0
 
 
-@pytest.mark.repeat(100)
 @gen_cluster(client=True, clean_kwargs={"threads": False})
 async def test_prometheus_collect_task_states(c, s, a, b):
     pytest.importorskip("prometheus_client")
