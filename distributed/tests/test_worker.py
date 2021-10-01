@@ -2984,6 +2984,57 @@ async def test_who_has_consistent_remove_replica(c, s, *workers):
     assert s.tasks[f1.key].suspicious == 0
 
 
+@gen_cluster(client=True)
+async def test_missing_released_zombie_tasks(c, s, a, b):
+    """
+    Ensure that no fetch/flight tasks are left in the task dict of a
+    worker after everything was released
+    """
+    a.total_in_connections = 0
+    f1 = c.submit(inc, 1, key="f1", workers=[a.address])
+    f2 = c.submit(inc, f1, key="f2", workers=[b.address])
+    key = f1.key
+
+    while key not in b.tasks or b.tasks[key].state != "fetch":
+        await asyncio.sleep(0.01)
+
+    await a.close(report=False)
+
+    del f1, f2
+
+    while b.tasks:
+        await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True)
+async def test_missing_released_zombie_tasks_2(c, s, a, b):
+    a.total_in_connections = 0
+    f1 = c.submit(inc, 1, key="f1", workers=[a.address])
+    f2 = c.submit(inc, f1, key="f2", workers=[b.address])
+
+    while f1.key not in b.tasks:
+        await asyncio.sleep(0)
+
+    ts = b.tasks[f1.key]
+    assert ts.state == "fetch"
+
+    # A few things can happen to clear who_has. The dominant process is upon
+    # connection failure to a worker. Regardless of how the set was cleared, the
+    # task will be transitioned to missing where the worker is trying to
+    # reaquire this information from the scheduler. While this is happening on
+    # worker side, the tasks are released and we want to ensure that no dangling
+    # zombie tasks are left on the worker
+    ts.who_has.clear()
+
+    del f1, f2
+
+    while b.tasks:
+        await asyncio.sleep(0.01)
+
+    story = b.story(ts)
+    assert any("missing" in msg for msg in story)
+
+
 @pytest.mark.slow
 @gen_cluster(
     client=True,
