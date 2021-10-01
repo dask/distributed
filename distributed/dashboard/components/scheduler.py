@@ -2567,9 +2567,13 @@ class TaskGroupProgress(DashboardComponent):
 
         if GroupTiming.name not in self.scheduler.plugins:
             self.scheduler.add_plugin(plugin=GroupTiming)
+
         self.plugin = self.scheduler.plugins[GroupTiming.name]
 
-        self.source.add(self.plugin.time, "time")
+        self.source.add(np.array(self.plugin.time) * 1000.0, "time")
+
+        x_range = DataRange1d(range_padding=0)
+        y_range = DataRange1d(range_padding=0)
 
         self.root = figure(
             id="bk-task-group-progress-plot",
@@ -2577,29 +2581,44 @@ class TaskGroupProgress(DashboardComponent):
             name="task_group_progress",
             toolbar_location="above",
             min_border_bottom=50,
+            x_range=x_range,
+            y_range=y_range,
+            tools="",
+            x_axis_type="datetime",
+            y_axis_location=None,
             **kwargs,
+        )
+        self.root.yaxis.major_label_text_alpha = 0
+        self.root.yaxis.minor_tick_line_alpha = 0
+        self.root.yaxis.major_tick_line_alpha = 0
+        self.root.xgrid.visible = False
+
+        self.root.add_tools(
+            BoxZoomTool(),
+            ResetTool(),
+            PanTool(dimensions="width"),
+            WheelZoomTool(dimensions="width"),
         )
 
     @without_property_validation
     def update(self):
         with log_errors():
-            dt = np.diff(np.array(self.plugin.time), prepend=self.plugin.time[0] - 100)
+            time = np.array(self.plugin.time) * 1000.0
+            dt = np.diff(time, prepend=time[0] - 10.0)
             new_data = valmap(
                 lambda x: np.array(x) / dt,
                 self.plugin.compute,
             )
             stackers = list(new_data.keys())
-            new_data["time"] = self.plugin.time
+            new_data["time"] = time
 
-            if len(self.root.renderers) == 0 or set(self.source.data.keys()) != set(
-                new_data.keys()
-            ):
+            if self.source.data.keys() != new_data.keys():
                 while len(self.root.renderers):
                     self.root.renderers.pop()
 
                 colors = [color_of(key_split(k)) for k in stackers]
 
-                self.source.data = new_data
+                self.source.data.update(new_data)
                 self.root.varea_stack(
                     stackers=stackers,
                     color=colors,
@@ -2607,7 +2626,7 @@ class TaskGroupProgress(DashboardComponent):
                     source=self.source,
                 )
             else:
-                self.source.data = new_data
+                self.source.data.update(new_data)
 
 
 class TaskProgress(DashboardComponent):
