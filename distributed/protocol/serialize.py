@@ -36,7 +36,6 @@ def dask_dumps(x, context=None):
     else:
         sub_header, frames = dumps(x)
 
-    sub_header, frames = dumps(x)
     header = {}
     header["sub-header"] = sub_header
     header["type"] = type_name
