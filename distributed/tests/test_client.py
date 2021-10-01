@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import gc
 import inspect
 import logging
@@ -6913,6 +6914,16 @@ async def test_async_task(c, s, a, b):
     future = c.submit(f, 10)
     result = await future
     assert result == 11
+
+
+@gen_cluster(client=True)
+async def test_async_task_with_partial(c, s, a, b):
+    async def f(x, y):
+        return x + y + 1
+
+    future = c.submit(functools.partial(f, 1), 10)
+    result = await future
+    assert result == 12
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])

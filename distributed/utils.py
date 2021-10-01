@@ -1123,6 +1123,10 @@ def color_of(x, palette=palette):
 
 
 def _iscoroutinefunction(f):
+    # Python < 3.8 does not support determining if `partial` objects wrap async funcs
+    if sys.version_info < (3, 8):
+        while isinstance(f, functools.partial):
+            f = f.func
     return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
 
 
