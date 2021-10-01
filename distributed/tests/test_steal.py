@@ -701,7 +701,7 @@ async def test_dont_steal_already_released(c, s, a, b):
     while key in a.tasks and a.tasks[key].state != "released":
         await asyncio.sleep(0.05)
 
-    a.handle_steal_request(key)
+    a.handle_steal_request(key=key, stimulus_id="test")
     assert len(a.batched_stream.buffer) == 1
     msg = a.batched_stream.buffer[0]
     assert msg["op"] == "steal-response"
@@ -872,3 +872,80 @@ async def test_blacklist_shuffle_split(c, s, a, b):
                     assert "split" not in ts.prefix.name
         await asyncio.sleep(0.001)
     await res
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 3,
+    config={
+        "distributed.scheduler.work-stealing-interval": 1_000_000,
+    },
+)
+async def test_steal_concurrent_simple(c, s, *workers):
+    steal = s.extensions["stealing"]
+    w0 = workers[0]
+    w1 = workers[1]
+    w2 = workers[2]
+    futs1 = c.map(
+        slowinc,
+        range(10),
+        key=[f"f1-{ix}" for ix in range(10)],
+        workers=[w0.address],
+    )
+
+    while not w0.tasks:
+        await asyncio.sleep(0.1)
+
+    # ready is a heap but we don't need last, just not the next
+    _, victim_key = w0.ready[-1]
+
+    ws0 = s.workers[w0.address]
+    ws1 = s.workers[w1.address]
+    ws2 = s.workers[w2.address]
+    victim_ts = s.tasks[victim_key]
+    steal.move_task_request(victim_ts, ws0, ws1)
+    steal.move_task_request(victim_ts, ws0, ws2)
+
+    await c.gather(futs1)
+
+    # Last wins
+    assert not ws1.has_what
+    assert ws2.has_what
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.scheduler.work-stealing-interval": 1_000_000,
+    },
+    timeout=12345,
+)
+async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
+    # https://github.com/dask/distributed/issues/5370
+    steal = s.extensions["stealing"]
+    w0 = workers[0]
+    futs1 = c.map(
+        slowinc,
+        range(10),
+        key=[f"f1-{ix}" for ix in range(10)],
+    )
+    while not w0.tasks:
+        await asyncio.sleep(0.01)
+
+    # ready is a heap but we don't need last, just not the next
+    _, victim_key = w0.ready[-1]
+
+    victim_ts = s.tasks[victim_key]
+
+    wsA = victim_ts.processing_on
+    other_workers = [ws for ws in s.workers.values() if ws != wsA]
+    wsB = other_workers[0]
+
+    steal.move_task_request(victim_ts, wsA, wsB)
+
+    s.reschedule(victim_key)
+    await c.gather(futs1)
+
+    del futs1
+
+    assert all(v == 0 for v in steal.in_flight_occupancy.values())
