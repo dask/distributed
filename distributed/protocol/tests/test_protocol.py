@@ -10,7 +10,6 @@ from distributed.protocol.serialize import (
     dask_serialize,
     deserialize,
     serialize,
-    serialize_and_split,
 )
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import nbytes
