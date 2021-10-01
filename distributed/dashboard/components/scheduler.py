@@ -5,6 +5,7 @@ import os
 from collections import defaultdict
 from numbers import Number
 
+import numpy as np
 from bokeh.core.properties import without_property_validation
 from bokeh.io import curdoc
 from bokeh.layouts import column, row
@@ -48,11 +49,6 @@ import dask
 from dask import config
 from dask.utils import format_bytes, format_time, key_split, parse_timedelta
 
-try:
-    import numpy as np
-except ImportError:
-    np = False
-
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
     DashboardComponent,
@@ -72,7 +68,7 @@ from distributed.utils import Log, log_errors
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
 else:
-    ExportTool = None
+    ExportTool = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -708,7 +704,7 @@ class BandwidthWorkers(DashboardComponent):
                     return str(ws.name)
                 return address
 
-            x, y, value = zip(*[(name(a), name(b), c) for (a, b), c in bw.items()])
+            x, y, value = zip(*((name(a), name(b), c) for (a, b), c in bw.items()))
 
             self.color_map.high = max(value)
 
@@ -1243,7 +1239,7 @@ class AggregateAction(DashboardComponent):
             self.scheduler = scheduler
 
             if TaskStreamPlugin.name not in self.scheduler.plugins:
-                self.scheduler.add_plugin(plugin=TaskStreamPlugin)
+                self.scheduler.add_plugin(TaskStreamPlugin)
 
             action_data = {
                 "times": [0.2, 0.1],
@@ -1943,6 +1939,7 @@ class TaskGraph(DashboardComponent):
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
         self.layout = GraphLayout(scheduler)
+        scheduler.add_plugin(self.layout)
         self.invisible_count = 0  # number of invisible nodes
 
         self.node_source = ColumnDataSource(
@@ -2188,7 +2185,7 @@ class TaskGroupGraph(DashboardComponent):
             source=self.nodes_source,
         )
 
-        ####plot tg log
+        # plot tg log
         self.root.image_url(
             url="url_logo",
             x="x_logo",

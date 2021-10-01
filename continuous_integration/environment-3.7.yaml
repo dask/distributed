@@ -23,6 +23,7 @@ dependencies:
   - netcdf4
   - paramiko
   - pickle5  # Backport from Python 3.8
+  - pre-commit
   - prometheus_client
   - psutil
   - pytest

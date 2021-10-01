@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from ...utils import log_errors
 from ..utils import RequestHandler, redirect
 
@@ -12,4 +14,4 @@ class MissingBokeh(RequestHandler):
             )
 
 
-routes = [(r"/", redirect("status"), {}), (r"status", MissingBokeh, {})]
+routes: list[tuple] = [(r"/", redirect("status"), {}), (r"status", MissingBokeh, {})]

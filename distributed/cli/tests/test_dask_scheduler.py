@@ -12,12 +12,14 @@ from time import sleep
 import requests
 from click.testing import CliRunner
 
+from dask.utils import tmpfile
+
 import distributed
 import distributed.cli.dask_scheduler
 from distributed import Client, Scheduler
 from distributed.compatibility import LINUX
 from distributed.metrics import time
-from distributed.utils import get_ip, get_ip_interface, tmpfile
+from distributed.utils import get_ip, get_ip_interface
 from distributed.utils_test import (
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_locally_4,
@@ -207,7 +209,7 @@ def test_scheduler_port_zero(loop):
     with tmpfile() as fn:
         with popen(
             ["dask-scheduler", "--no-dashboard", "--scheduler-file", fn, "--port", "0"]
-        ) as sched:
+        ):
             with Client(scheduler_file=fn, loop=loop) as c:
                 assert c.scheduler.port
                 assert c.scheduler.port != 8786
@@ -215,15 +217,14 @@ def test_scheduler_port_zero(loop):
 
 def test_dashboard_port_zero(loop):
     pytest.importorskip("bokeh")
-    with tmpfile() as fn:
-        with popen(["dask-scheduler", "--dashboard-address", ":0"]) as proc:
-            count = 0
-            while count < 1:
-                line = proc.stderr.readline()
-                if b"dashboard" in line.lower():
-                    sleep(0.01)
-                    count += 1
-                    assert b":0" not in line
+    with popen(["dask-scheduler", "--dashboard-address", ":0"]) as proc:
+        count = 0
+        while count < 1:
+            line = proc.stderr.readline()
+            if b"dashboard" in line.lower():
+                sleep(0.01)
+                count += 1
+                assert b":0" not in line
 
 
 PRELOAD_TEXT = """
@@ -311,6 +312,20 @@ def test_preload_remote_module(loop, tmp_path):
                     c.run_on_scheduler(
                         lambda dask_scheduler: getattr(dask_scheduler, "foo", None)
                     )
+                    == "bar"
+                )
+
+
+def test_preload_config(loop):
+    # Ensure dask-scheduler pulls the preload from the Dask config if
+    # not specified via a command line option
+    with tmpfile() as fn:
+        env = os.environ.copy()
+        env["DASK_DISTRIBUTED__SCHEDULER__PRELOAD"] = PRELOAD_TEXT
+        with popen(["dask-scheduler", "--scheduler-file", fn], env=env):
+            with Client(scheduler_file=fn, loop=loop) as c:
+                assert (
+                    c.run_on_scheduler(lambda dask_scheduler: dask_scheduler.foo)
                     == "bar"
                 )
 

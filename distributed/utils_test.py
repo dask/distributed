@@ -1,11 +1,11 @@
+from __future__ import annotations
+
 import asyncio
-import collections
 import copy
 import functools
 import gc
 import inspect
 import io
-import itertools
 import logging
 import logging.config
 import os
@@ -21,16 +21,19 @@ import threading
 import uuid
 import warnings
 import weakref
+from collections import defaultdict
 from contextlib import contextmanager, nullcontext, suppress
 from glob import glob
+from itertools import count
 from time import sleep
+from typing import Any
 
 from distributed.scheduler import Scheduler
 
 try:
     import ssl
 except ImportError:
-    ssl = None
+    ssl = None  # type: ignore
 
 import pytest
 from tlz import assoc, memoize, merge
@@ -335,7 +338,8 @@ def slowidentity(*args, **kwargs):
 
 
 class _UnhashableCallable:
-    __hash__ = None
+    # FIXME https://github.com/python/mypy/issues/4266
+    __hash__ = None  # type: ignore
 
     def __call__(self, x):
         return x + 1
@@ -351,8 +355,8 @@ def run_for(duration, timer=time):
 
 
 # This dict grows at every varying() invocation
-_varying_dict = collections.defaultdict(int)
-_varying_key_gen = itertools.count()
+_varying_dict: defaultdict[str, int] = defaultdict(int)
+_varying_key_gen = count()
 
 
 class _ModuleSlot:
@@ -414,7 +418,7 @@ async def asyncinc(x, delay=0.02):
     return x + 1
 
 
-_readone_queues = {}
+_readone_queues: dict[Any, asyncio.Queue] = {}
 
 
 async def readone(comm):
@@ -763,7 +767,7 @@ async def disconnect(addr, timeout=3, rpc_kwargs=None):
 
 
 async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
-    await asyncio.gather(*[disconnect(addr, timeout, rpc_kwargs) for addr in addresses])
+    await asyncio.gather(*(disconnect(addr, timeout, rpc_kwargs) for addr in addresses))
 
 
 def gen_test(timeout=_TEST_TIMEOUT):
@@ -831,7 +835,7 @@ async def start_cluster(
     ):
         await asyncio.sleep(0.01)
         if time() > start + 30:
-            await asyncio.gather(*[w.close(timeout=1) for w in workers])
+            await asyncio.gather(*(w.close(timeout=1) for w in workers))
             await s.close(fast=True)
             raise TimeoutError("Cluster creation timeout")
     return s, workers
@@ -844,7 +848,7 @@ async def end_cluster(s, workers):
         with suppress(TimeoutError, CommClosedError, EnvironmentError):
             await w.close(report=False)
 
-    await asyncio.gather(*[end_worker(w) for w in workers])
+    await asyncio.gather(*(end_worker(w) for w in workers))
     await s.close()  # wait until scheduler stops completely
     s.stop()
 
@@ -1543,7 +1547,7 @@ def check_instances():
     for w in Worker._instances:
         with suppress(RuntimeError):  # closed IOLoop
             w.loop.add_callback(w.close, report=False, executor_wait=False)
-            if w.status == Status.running:
+            if w.status in (Status.running, Status.paused):
                 w.loop.add_callback(w.close)
     Worker._instances.clear()
 

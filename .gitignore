@@ -1,8 +1,12 @@
 *.pyc
 *.pyd
 *.py~
+
+# Cython files
 *.c
 *.so
+distributed/scheduler.html
+
 build/
 dist/
 *.egg-info
@@ -25,3 +29,4 @@ dask-worker-space/
 .ycm_extra_conf.py
 tags
 .ipynb_checkpoints
+.venv/

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import errno
 import logging
@@ -9,8 +11,9 @@ import warnings
 import weakref
 from contextlib import suppress
 from inspect import isawaitable
-from multiprocessing.queues import Empty
+from queue import Empty
 from time import sleep as sync_sleep
+from typing import ClassVar
 
 import psutil
 from tornado import gen
@@ -73,7 +76,7 @@ class Nanny(ServerNode):
     Worker
     """
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[Nanny]] = weakref.WeakSet()
     process = None
     status = Status.undefined
 
@@ -592,7 +595,7 @@ class Nanny(ServerNode):
             if hasattr(plugin, "teardown")
         ]
 
-        await asyncio.gather(*[td for td in teardowns if isawaitable(td)])
+        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
 
         self.stop()
         try:
@@ -607,8 +610,20 @@ class Nanny(ServerNode):
             await comm.write("OK")
         await super().close()
 
+    async def _log_event(self, topic, msg):
+        await self.scheduler.log_event(
+            topic=topic,
+            msg=msg,
+        )
+
+    def log_event(self, topic, msg):
+        self.loop.add_callback(self._log_event, topic, msg)
+
 
 class WorkerProcess:
+    running: asyncio.Event
+    stopped: asyncio.Event
+
     # The interval how often to check the msg queue for init
     _init_msg_interval = 0.05
 
