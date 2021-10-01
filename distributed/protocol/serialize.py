@@ -32,12 +32,15 @@ def dask_dumps(x, context=None):
     except TypeError:
         raise NotImplementedError(type_name)
     if has_keyword(dumps, "context"):
-        header, frames = dumps(x, context=context)
+        sub_header, frames = dumps(x, context=context)
     else:
-        header, frames = dumps(x)
+        sub_header, frames = dumps(x)
 
+    sub_header, frames = dumps(x)
+    header = {}
+    header["sub-header"] = sub_header
     header["type"] = type_name
-    header["type-serialized"] = pickle.dumps(type(x), protocol=4)
+    header["type-serialized"] = pickle.dumps(type(x))
     header["serializer"] = "dask"
     return header, frames
 
@@ -45,7 +48,7 @@ def dask_dumps(x, context=None):
 def dask_loads(header, frames):
     typ = pickle.loads(header["type-serialized"])
     loads = dask_deserialize.dispatch(typ)
-    return loads(header, frames)
+    return loads(header["sub-header"], frames)
 
 
 def pickle_dumps(x, context=None):

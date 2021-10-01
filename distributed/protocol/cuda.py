@@ -15,7 +15,9 @@ def cuda_dumps(x):
     except TypeError:
         raise NotImplementedError(type_name)
 
-    header, frames = dumps(x)
+    sub_header, frames = dumps(x)
+    header = {}
+    header["sub-header"] = sub_header
     header["type-serialized"] = pickle.dumps(type(x))
     header["serializer"] = "cuda"
     header["compression"] = (False,) * len(frames)  # no compression for gpu data
@@ -25,7 +27,7 @@ def cuda_dumps(x):
 def cuda_loads(header, frames):
     typ = pickle.loads(header["type-serialized"])
     loads = cuda_deserialize.dispatch(typ)
-    return loads(header, frames)
+    return loads(header["sub-header"], frames)
 
 
 register_serialization_family("cuda", cuda_dumps, cuda_loads)
