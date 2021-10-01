@@ -949,3 +949,42 @@ async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
     del futs1
 
     assert all(v == 0 for v in steal.in_flight_occupancy.values())
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 3,
+    config={
+        "distributed.scheduler.work-stealing-interval": 1_000_000,
+    },
+)
+async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
+    # https://github.com/dask/distributed/issues/5370
+    steal = s.extensions["stealing"]
+    w0 = workers[0]
+    futs1 = c.map(
+        slowinc,
+        range(10),
+        delay=1,
+        key=[f"f1-{ix}" for ix in range(10)],
+    )
+    while not w0.active_keys:
+        await asyncio.sleep(0.01)
+
+    # ready is a heap but we don't need last, just not the next
+    victim_key = list(w0.active_keys)[0]
+
+    victim_ts = s.tasks[victim_key]
+
+    wsA = victim_ts.processing_on
+    other_workers = [ws for ws in s.workers.values() if ws != wsA]
+    wsB = other_workers[0]
+    wsC = other_workers[1]
+
+    steal.move_task_request(victim_ts, wsA, wsB)
+
+    s.set_restrictions(worker={victim_key: [wsB.address]})
+    s.reschedule(victim_key)
+    assert wsB == victim_ts.processing_on
+    steal.move_task_request(victim_ts, wsB, wsC)
+    await c.gather(futs1)

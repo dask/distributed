@@ -216,6 +216,10 @@ class WorkStealing(SchedulerPlugin):
             return
         try:
             d = self.in_flight.pop(ts)
+            if d["stimulus_id"] != stimulus_id:
+                self.log(("stale-response", worker, stimulus_id))
+                self.in_flight[ts] = d
+                return
         except KeyError:
             self.log(("already-aborted", key, state, stimulus_id))
             return
