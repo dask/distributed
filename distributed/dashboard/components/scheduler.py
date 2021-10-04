@@ -2599,21 +2599,26 @@ class TaskGroupProgress(DashboardComponent):
             PanTool(dimensions="width"),
             WheelZoomTool(dimensions="width"),
         )
+        self._last_drawn = None
 
     @without_property_validation
     def update(self):
         with log_errors():
-            time = np.array(self.plugin.time) * 1000.0
-            dt = np.diff(time, prepend=time[0] - 10.0)
+            timestamps = np.array(self.plugin.time) * 1000.0
+            dt = np.diff(timestamps, prepend=timestamps[0] - 10.0)
             new_data = valmap(
                 lambda x: np.array(x) / dt,
                 self.plugin.compute,
             )
             stackers = list(new_data.keys())
             colors = [color_of(key_split(k)) for k in stackers]
-            new_data["time"] = time
+            new_data["time"] = timestamps
 
-            if self.source.data.keys() != new_data.keys():
+            if (
+                self.source.data.keys() != new_data.keys()
+                or not self._last_drawn
+                or time() - self._last_drawn > 5
+            ):
                 while len(self.root.renderers):
                     self.root.renderers.pop()
 
@@ -2632,8 +2637,14 @@ class TaskGroupProgress(DashboardComponent):
                     alpha=1.0,
                     source=self.source,
                 )
+                self._last_drawn = time()
             else:
-                self.source.data = new_data
+                # We would love to be able to incrementally update the data source here,
+                # but a bokeh bug is preventing, so instead we update every ~5 seconds above.
+                # This is more jittery than patches or streaming updates.
+                # https://github.com/bokeh/bokeh/issues/11119
+                # self.source.data = new_data
+                pass
 
 
 class TaskProgress(DashboardComponent):
