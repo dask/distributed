@@ -198,6 +198,7 @@ class LocalCluster(SpecCluster):
 
         worker_kwargs.update(
             {
+                "host": host,
                 "nthreads": threads_per_worker,
                 "services": worker_services,
                 "dashboard_address": worker_dashboard_address,
