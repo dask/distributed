@@ -3191,3 +3191,14 @@ async def test_worker_reconnect_task_memory_with_resources(c, s, a):
         assert ("no-worker", "memory") in {
             (start, finish) for (_, start, finish, _, _) in s.transition_log
         }
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
+async def test_set_restrictions(c, s, a, b):
+
+    f = c.submit(inc, 1, workers=[b.address])
+    await f
+    s.set_restrictions(worker={f.key: a.address})
+    assert s.tasks[f.key].worker_restrictions == {a.address}
+    s.reschedule(f)
+    await f

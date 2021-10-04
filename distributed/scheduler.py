@@ -7029,8 +7029,12 @@ class Scheduler(SchedulerState, ServerNode):
                 raise
 
     def set_restrictions(self, comm=None, worker=None):
+        ts: TaskState
         for key, restrictions in worker.items():
-            self.tasks[key]._worker_restrictions = set(restrictions)
+            ts = self.tasks[key]
+            if isinstance(restrictions, str):
+                restrictions = {restrictions}
+            ts._worker_restrictions = set(restrictions)
 
     def get_task_status(self, comm=None, keys=None):
         parent: SchedulerState = cast(SchedulerState, self)
