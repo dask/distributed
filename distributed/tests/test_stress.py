@@ -85,6 +85,7 @@ def test_cancel_stress_sync(loop):
                 c.cancel(f)
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @pytest.mark.slow
 @gen_cluster(
     nthreads=[],
