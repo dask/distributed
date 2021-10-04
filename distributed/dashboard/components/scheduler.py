@@ -2610,23 +2610,30 @@ class TaskGroupProgress(DashboardComponent):
                 self.plugin.compute,
             )
             stackers = list(new_data.keys())
+            colors = [color_of(key_split(k)) for k in stackers]
             new_data["time"] = time
 
             if self.source.data.keys() != new_data.keys():
                 while len(self.root.renderers):
                     self.root.renderers.pop()
 
-                colors = [color_of(key_split(k)) for k in stackers]
-
-                self.source.data.update(new_data)
+                self.source.data = new_data
                 self.root.varea_stack(
                     stackers=stackers,
-                    color=colors,
                     x="time",
+                    color=colors,
+                    alpha=0.5,
+                    source=self.source,
+                )
+                self.root.vline_stack(
+                    stackers=stackers,
+                    x="time",
+                    color=colors,
+                    alpha=1.0,
                     source=self.source,
                 )
             else:
-                self.source.data.update(new_data)
+                self.source.data = new_data
 
 
 class TaskProgress(DashboardComponent):
