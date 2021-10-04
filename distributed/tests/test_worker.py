@@ -739,28 +739,17 @@ async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
     assert l1["stop"] < l2["start"]
 
 
-@pytest.mark.avoid_ci
 @gen_cluster(client=True)
 async def test_log_exception_on_failed_task(c, s, a, b):
-    with tmpfile() as fn:
-        fh = logging.FileHandler(fn)
-        try:
-            from distributed.worker import logger
+    with captured_logger("distributed.worker") as logger:
+        future = c.submit(div, 1, 0)
+        await wait(future)
 
-            logger.addHandler(fh)
+        await asyncio.sleep(0.1)
 
-            future = c.submit(div, 1, 0)
-            await wait(future)
-
-            await asyncio.sleep(0.1)
-            fh.flush()
-            with open(fn) as f:
-                text = f.read()
-
-            assert "ZeroDivisionError" in text
-            assert "Exception" in text
-        finally:
-            logger.removeHandler(fh)
+    text = logger.getvalue()
+    assert "ZeroDivisionError" in text
+    assert "Exception" in text
 
 
 @gen_cluster(client=True)
