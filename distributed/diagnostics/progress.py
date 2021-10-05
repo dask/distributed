@@ -308,14 +308,14 @@ class GroupTiming(SchedulerPlugin):
         self.scheduler = scheduler
         self.time: list[float] = [time.time()]
         self.nthreads: list[int] = [self.scheduler.total_nthreads]
-        self.compute: dict[str, list[float]] = dict()
-        self._prev_durations: dict[str, dict[str, float]] = dict()
+        self.compute: dict[str, list[float]] = {}
+        self._prev_durations: dict[str, dict[str, float]] = {}
 
         for name, group in self.scheduler.task_groups.items():
             self.compute[name] = [0.0]
             self._prev_durations[name] = group.all_durations.copy()
 
-        group_timing_pc = PeriodicCallback(self.track_groups, 0.1 * 1000.0)
+        group_timing_pc = PeriodicCallback(self.track_groups, 1.0 * 1000.0)
         self.scheduler.periodic_callbacks["group-timing"] = group_timing_pc
         group_timing_pc.start()
 
@@ -368,7 +368,10 @@ class GroupTiming(SchedulerPlugin):
             nthreads = self.nthreads[idx]
 
     def restart(self, scheduler):
-        pass
+        self.time = []
+        self.nthreads = []
+        self.compute = {}
+        self._prev_durations = {}
 
     async def close(self):
         group_timing_pc = self.scheduler.periodic_callbacks.pop("group-timing", None)

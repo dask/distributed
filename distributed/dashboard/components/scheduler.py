@@ -2626,6 +2626,21 @@ class TaskGroupProgress(DashboardComponent):
             WheelZoomTool(dimensions="width"),
         )
         self._last_drawn = None
+        self._last_transition_count = self.scheduler.transition_counter
+
+    def _should_redraw(self) -> bool:
+        if not self._last_drawn:
+            return True
+        if (
+            self._last_transition_count == self.scheduler.transition_counter
+            or self.scheduler.proc.cpu_percent() > 50
+        ):
+            return False
+
+        return (
+            not set(self.plugin.compute.keys()).issubset(set(self.source.data.keys()))
+            or time() - self._last_drawn > 10
+        )
 
     @without_property_validation
     def update(self):
@@ -2641,11 +2656,7 @@ class TaskGroupProgress(DashboardComponent):
             new_data["time"] = timestamps * 1000.0
             new_data["nthreads"] = self.plugin.nthreads
 
-            if (
-                self.source.data.keys() != new_data.keys()
-                or not self._last_drawn
-                or time() - self._last_drawn > 5
-            ):
+            if self._should_redraw():
                 while len(self.root.renderers):
                     self.root.renderers.pop()
 
@@ -2710,6 +2721,7 @@ class TaskGroupProgress(DashboardComponent):
                 self.hover.formatters = {"$index": formatter}
 
                 self._last_drawn = time()
+                self._last_transition_count = self.scheduler.transition_counter
             else:
                 # We would love to be able to incrementally update the data source here,
                 # but a bokeh bug is preventing, so instead we update every ~5 seconds above.
