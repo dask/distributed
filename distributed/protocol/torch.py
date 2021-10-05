@@ -1,7 +1,12 @@
-import numpy as np
 import torch
 
-from .serialize import dask_deserialize, dask_serialize, register_generic, serialize
+from .serialize import (
+    dask_deserialize,
+    dask_serialize,
+    deserialize,
+    register_generic,
+    serialize,
+)
 
 
 @dask_serialize.register(torch.Tensor)
@@ -28,13 +33,11 @@ def deserialize_torch_Tensor(header, frames):
     if header.get("grad", False):
         i = header["grad"]["start"]
         frames, grad_frames = frames[:i], frames[i:]
-        grad = dask_deserialize.dispatch(np.ndarray)(
-            header["grad"]["header"], grad_frames
-        )
+        grad = deserialize(header["grad"]["header"], grad_frames)
     else:
         grad = None
 
-    x = dask_deserialize.dispatch(np.ndarray)(header, frames)
+    x = deserialize(header["sub-header"], frames)
     if header["device"] == "cpu":
         t = torch.from_numpy(x)
         if header["requires_grad"]:
@@ -58,7 +61,7 @@ def serialize_torch_Parameters(p):
 
 @dask_deserialize.register(torch.nn.Parameter)
 def deserialize_torch_Parameters(header, frames):
-    t = dask_deserialize.dispatch(torch.Tensor)(header, frames)
+    t = deserialize(header["sub-header"], frames)
     return torch.nn.Parameter(data=t, requires_grad=header["requires_grad"])
 
 
