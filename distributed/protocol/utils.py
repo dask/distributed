@@ -105,7 +105,7 @@ def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
     Raises ValueError if these conditions are not met.
     """
     if not mvs:
-        return memoryview(bytearray(0))
+        return memoryview(bytearray())
     if len(mvs) == 1:
         return mvs[0]
 
