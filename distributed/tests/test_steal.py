@@ -952,6 +952,28 @@ async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
 
 @gen_cluster(
     client=True,
+    config={
+        "distributed.scheduler.work-stealing-interval": 10,
+    },
+)
+async def test_get_story(c, s, *workers):
+    steal = s.extensions["stealing"]
+    futs = c.map(
+        slowinc, range(100), workers=[workers[0].address], allow_other_workers=True
+    )
+    collect = c.submit(sum, futs)
+    await collect
+    key = next(iter(workers[1].tasks))
+    ts = s.tasks[key]
+    msgs = steal.story(key)
+    msgs_ts = steal.story(ts)
+    assert msgs
+    assert msgs == msgs_ts
+    assert all(isinstance(m, tuple) for m in msgs)
+
+
+@gen_cluster(
+    client=True,
     nthreads=[("", 1)] * 3,
     config={
         "distributed.scheduler.work-stealing-interval": 1_000_000,
@@ -984,10 +1006,21 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
     s.set_restrictions(worker={victim_key: [wsB.address]})
     s.reschedule(victim_key)
     assert wsB == victim_ts.processing_on
+    # move_task_request is not responsible for respecting worker restrictions
     steal.move_task_request(victim_ts, wsB, wsC)
     await c.gather(futs1)
 
-    assert victim_ts.who_has == {wsC}
+    # If this turns out to be overly flaky, the following may be relaxed ore
+    # removed. The point of this test is to not deadlock but verifying expected
+    # state is still a nice thing
+
+    # Either the last request goes through or both have been rejected since the
+    # computation was already done by the time the request comes in. This is
+    # unfortunately not stable even if we increase the compute time
+    if victim_ts.who_has != {wsC}:
+        msgs = steal.story(victim_ts)
+        assert len(msgs) == 2
+        assert all(msg[1][0] == "already-aborted" for msg in msgs)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)

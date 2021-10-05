@@ -167,10 +167,10 @@ class WorkStealing(SchedulerPlugin):
 
         return cost_multiplier, level
 
-    def move_task_request(self, ts, victim, thief):
+    def move_task_request(self, ts, victim, thief) -> str:
         try:
             if ts in self.in_flight:
-                return
+                return "in-flight"
             stimulus_id = f"steal-{time()}"
             if self.scheduler.validate:
                 assert victim is ts.processing_on
@@ -205,8 +205,10 @@ class WorkStealing(SchedulerPlugin):
 
             self.in_flight_occupancy[victim] -= victim_duration
             self.in_flight_occupancy[thief] += thief_duration
+            return stimulus_id
         except CommClosedError:
             logger.info("Worker comm %r closed while stealing: %r", victim, ts)
+            return "comm-closed"
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -224,7 +226,7 @@ class WorkStealing(SchedulerPlugin):
         try:
             d = self.in_flight.pop(ts)
             if d["stimulus_id"] != stimulus_id:
-                self.log(("stale-response", worker, stimulus_id))
+                self.log(("stale-response", key, state, worker, stimulus_id))
                 self.in_flight[ts] = d
                 return
         except KeyError:
@@ -436,9 +438,9 @@ class WorkStealing(SchedulerPlugin):
         self.key_stealable.clear()
 
     def story(self, *keys):
-        keys = set(keys)
+        keys = {key.key if not isinstance(key, str) else key for key in keys}
         out = []
-        for _, L in self.scheduler.get_event("stealing"):
+        for _, L in self.scheduler.get_events(topic="stealing"):
             if not isinstance(L, list):
                 L = [L]
             for t in L:
