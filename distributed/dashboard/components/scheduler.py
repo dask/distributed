@@ -18,6 +18,7 @@ from bokeh.models import (
     CDSView,
     ColorBar,
     ColumnDataSource,
+    CustomJSHover,
     DataRange1d,
     GroupFilter,
     HoverTool,
@@ -2593,7 +2594,32 @@ class TaskGroupProgress(DashboardComponent):
         self.root.yaxis.major_tick_line_alpha = 0
         self.root.xgrid.visible = False
 
+        # Add a hover that will show occupancy for all currently active
+        # task groups. This is a little tricky, bokeh doesn't (yet) support
+        # hit tests for stacked area charts: https://github.com/bokeh/bokeh/issues/9182
+        # Instead, show a single vline hover which lists the currently active task
+        # groups. A custom formatter in JS-land pulls the relevant data index and
+        # assembles the tooltip. The formatter is a no-op until we have the actual
+        # task groups we want to render.
+        formatter = CustomJSHover(code="return '';")
+        self.hover = HoverTool(
+            tooltips="""
+            <div>
+              <div style="font-size: 1.2em; font-weight: bold">
+                <b>Worker thread occupancy</b>
+              </div>
+              <div>
+                $index{custom}
+              </div>
+            </div>
+            """,
+            mode="vline",
+            line_policy="nearest",
+            attachment="vertical",
+            formatters={"$index": formatter},
+        )
         self.root.add_tools(
+            self.hover,
             BoxZoomTool(),
             ResetTool(),
             PanTool(dimensions="width"),
@@ -2604,7 +2630,7 @@ class TaskGroupProgress(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
-            timestamps = np.array(self.plugin.time) * 1000.0
+            timestamps = np.array(self.plugin.time)
             dt = np.diff(timestamps, prepend=timestamps[0] - 10.0)
             new_data = valmap(
                 lambda x: np.array(x) / dt,
@@ -2612,7 +2638,8 @@ class TaskGroupProgress(DashboardComponent):
             )
             stackers = list(new_data.keys())
             colors = [color_of(key_split(k)) for k in stackers]
-            new_data["time"] = timestamps
+            new_data["time"] = timestamps * 1000.0
+            new_data["nthreads"] = self.plugin.nthreads
 
             if (
                 self.source.data.keys() != new_data.keys()
@@ -2630,13 +2657,58 @@ class TaskGroupProgress(DashboardComponent):
                     alpha=0.5,
                     source=self.source,
                 )
-                self.root.vline_stack(
+                # Hang on to the lines, since we will need these
+                # to actually attach the hover tool to a renderer.
+                # Since we don't want a proliferation of tooltips,
+                # just assign the hover tool to the last (top)
+                # renderer.
+                line_renderers = self.root.vline_stack(
                     stackers=stackers,
                     x="time",
                     color=colors,
                     alpha=1.0,
                     source=self.source,
                 )
+                formatter = CustomJSHover(
+                    code="""
+                    const colormap = %s;
+                    const divs = [];
+                    for (let k of Object.keys(source.data)) {
+                      const val = source.data[k][value];
+                      const color = colormap[k];
+                      if (k === "time" || k === "nthreads" || val < 1.e-3) {
+                        continue;
+                      }
+
+                      // Unshift so that the ordering of the labels is the same as
+                      // the ordering of the stackers.
+                      divs.unshift(
+                        '<div>'
+                          + '<span style="font-weight: bold; color:' + color + ';">'
+                            + k
+                          + '</span>'
+                          + ': '
+                          +  val.toFixed(1)
+                          + '</div>'
+                      )
+
+                    }
+                    divs.unshift(
+                      '<div>'
+                        + '<span style="font-weight: bold; color: darkgrey;">nthreads: </span>'
+                        + source.data.nthreads[value]
+                        + '</div>'
+                    );
+                    return divs.join('\\n')
+                    """
+                    % dict(
+                        zip(stackers, colors)
+                    ),  # sneak the color mapping into the callback
+                    args={"source": self.source},
+                )
+                self.hover.renderers = line_renderers[-1:]
+                self.hover.formatters = {"$index": formatter}
+
                 self._last_drawn = time()
             else:
                 # We would love to be able to incrementally update the data source here,
