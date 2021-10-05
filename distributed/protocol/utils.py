@@ -159,6 +159,10 @@ def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
     return base_mv[start_index : start_index + nbytes].cast(format)
 
 
+one_byte_carr = ctypes.c_byte * 1
+# ^ length and type don't matter, just use it to get the address of the first byte
+
+    
 def address_of_memoryview(mv: memoryview) -> int:
     """
     Get the pointer to the first byte of a memoryview's data.
@@ -170,9 +174,6 @@ def address_of_memoryview(mv: memoryview) -> int:
     # There's no direct API to get the address of a memoryview,
     # so we use a trick through ctypes and the buffer protocol:
     # https://mattgwwalker.wordpress.com/2020/10/15/address-of-a-buffer-in-python/
-    one_byte_carr = ctypes.c_byte * 1
-    # ^ length and type don't matter, just use it to get the address of the first byte
-
     try:
         carr = one_byte_carr.from_buffer(mv)
     except TypeError:
