@@ -114,12 +114,12 @@ class WorkStealing(SchedulerPlugin):
         For example a result of zero implies a task without dependencies.
         level: The location within a stealable list to place this value
         """
+        split = ts.prefix.name
+        if split in fast_tasks or split in self.scheduler.unknown_durations:
+            return None, None
+
         if not ts.dependencies:  # no dependencies fast path
             return 0, 0
-
-        split = ts.prefix.name
-        if split in fast_tasks:
-            return None, None
 
         ws = ts.processing_on
         compute_time = ws.processing[ts]

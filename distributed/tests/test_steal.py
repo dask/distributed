@@ -110,7 +110,6 @@ async def test_worksteal_many_thieves(c, s, *workers):
     assert sum(map(len, s.has_what.values())) < 150
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, reason="GH#3574")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
 async def test_dont_steal_unknown_functions(c, s, a, b):
     futures = c.map(inc, range(100), workers=a.address, allow_other_workers=True)
