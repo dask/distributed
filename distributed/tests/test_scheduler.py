@@ -1297,16 +1297,6 @@ async def test_non_existent_worker(c, s):
         assert all(ts.state == "no-worker" for ts in s.tasks.values())
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
-async def test_correct_bad_time_estimate(c, s, *workers):
-    future = c.submit(slowinc, 1, delay=0)
-    await wait(future)
-    futures = [c.submit(slowinc, future, delay=0.1, pure=False) for i in range(20)]
-    await asyncio.sleep(0.5)
-    await wait(futures)
-    assert all(w.data for w in workers), [sorted(w.data) for w in workers]
-
-
 @pytest.mark.parametrize(
     "host", ["tcp://0.0.0.0", "tcp://127.0.0.1", "tcp://127.0.0.1:38275"]
 )

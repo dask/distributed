@@ -106,7 +106,8 @@ class WorkStealing(SchedulerPlugin):
                     self.in_flight_occupancy.clear()
 
     def recalculate_cost(self, ts):
-        if ts in self.key_stealable:
+        if ts not in self.in_flight:
+            self.remove_key_from_stealable(ts)
             self.put_key_in_stealable(ts)
 
     def put_key_in_stealable(self, ts):

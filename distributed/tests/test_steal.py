@@ -988,3 +988,24 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
     await c.gather(futs1)
 
     assert victim_ts.who_has == {wsC}
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+async def test_correct_bad_time_estimate(c, s, *workers):
+    """Initial time estimation causes the task to not be considered for
+    stealing. Following occupancy readjustments will re-enlist the keys since
+    the duration estimate is now significant.
+
+    This is done during reevaluate occupancy
+    """
+    steal = s.extensions["stealing"]
+    future = c.submit(slowinc, 1, delay=0)
+    await wait(future)
+    futures = [c.submit(slowinc, future, delay=0.1, pure=False) for i in range(20)]
+    while not any(f.key in s.tasks for f in futures):
+        await asyncio.sleep(0.001)
+    assert not any(s.tasks[f.key] in steal.key_stealable for f in futures)
+    await asyncio.sleep(0.5)
+    assert any(s.tasks[f.key] in steal.key_stealable for f in futures)
+    await wait(futures)
+    assert all(w.data for w in workers), [sorted(w.data) for w in workers]
