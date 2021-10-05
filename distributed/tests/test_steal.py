@@ -908,9 +908,9 @@ async def test_steal_concurrent_simple(c, s, *workers):
 
     await c.gather(futs1)
 
-    # Last wins
-    assert not ws1.has_what
-    assert ws2.has_what
+    # First wins
+    assert ws1.has_what
+    assert not ws2.has_what
 
 
 @gen_cluster(
@@ -918,7 +918,6 @@ async def test_steal_concurrent_simple(c, s, *workers):
     config={
         "distributed.scheduler.work-stealing-interval": 1_000_000,
     },
-    timeout=12345,
 )
 async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
     # https://github.com/dask/distributed/issues/5370
@@ -965,7 +964,6 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
     futs1 = c.map(
         slowinc,
         range(10),
-        delay=1,
         key=[f"f1-{ix}" for ix in range(10)],
     )
     while not w0.active_keys:
@@ -988,3 +986,5 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
     assert wsB == victim_ts.processing_on
     steal.move_task_request(victim_ts, wsB, wsC)
     await c.gather(futs1)
+
+    assert victim_ts.who_has == {wsC}

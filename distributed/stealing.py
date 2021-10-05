@@ -96,6 +96,18 @@ class WorkStealing(SchedulerPlugin):
         elif start == "processing":
             ts = self.scheduler.tasks[key]
             self.remove_key_from_stealable(ts)
+            d = self.in_flight.pop(ts, None)
+            if d:
+                thief = d["thief"]
+                victim = d["victim"]
+                self.in_flight_occupancy[thief] -= d["thief_duration"]
+                self.in_flight_occupancy[victim] += d["victim_duration"]
+                if not self.in_flight:
+                    self.in_flight_occupancy.clear()
+
+    def recalculate_cost(self, ts):
+        if ts in self.key_stealable:
+            self.put_key_in_stealable(ts)
 
     def put_key_in_stealable(self, ts):
         cost_multiplier, level = self.steal_time_ratio(ts)
@@ -107,14 +119,6 @@ class WorkStealing(SchedulerPlugin):
             self.key_stealable[ts] = (worker, level)
 
     def remove_key_from_stealable(self, ts):
-        d = self.in_flight.pop(ts, None)
-        if d:
-            thief = d["thief"]
-            victim = d["victim"]
-            self.in_flight_occupancy[thief] -= d["thief_duration"]
-            self.in_flight_occupancy[victim] += d["victim_duration"]
-            if not self.in_flight:
-                self.in_flight_occupancy.clear()
         result = self.key_stealable.pop(ts, None)
         if result is None:
             return
@@ -164,6 +168,8 @@ class WorkStealing(SchedulerPlugin):
 
     def move_task_request(self, ts, victim, thief):
         try:
+            if ts in self.in_flight:
+                return
             stimulus_id = f"steal-{time()}"
             if self.scheduler.validate:
                 assert victim is ts.processing_on

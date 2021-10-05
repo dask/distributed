@@ -7964,8 +7964,7 @@ def _reevaluate_occupancy_worker(state: SchedulerState, ws: WorkerState):
         return
     if ws._occupancy > old * 1.3 or old > ws._occupancy * 1.3:
         for ts in ws._processing:
-            steal.remove_key_from_stealable(ts)
-            steal.put_key_in_stealable(ts)
+            steal.recalculate_cost(ts)
 
 
 @cfunc
