@@ -9,6 +9,7 @@ dependencies:
   - bokeh
   - click
   - cloudpickle
+  - coverage
   - cython  # Only tested here; also a dependency of crick
   - dask  # overridden by git tip below
   - filesystem-spec
@@ -27,6 +28,7 @@ dependencies:
   - psutil
   - pytest
   - pytest-asyncio<0.14.0
+  - pytest-cov
   - pytest-faulthandler
   - pytest-repeat
   - pytest-rerunfailures
