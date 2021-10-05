@@ -16,11 +16,12 @@ def cuda_dumps(x):
         raise NotImplementedError(type_name)
 
     sub_header, frames = dumps(x)
-    header = {}
-    header["sub-header"] = sub_header
-    header["type-serialized"] = pickle.dumps(type(x))
-    header["serializer"] = "cuda"
-    header["compression"] = (False,) * len(frames)  # no compression for gpu data
+    header = {
+        "sub-header": sub_header,
+        "type-serialized": pickle.dumps(type(x)),
+        "serializer": "cuda",
+        "compression": (False,) * len(frames),  # no compression for gpu data
+    }
     return header, frames
 
 

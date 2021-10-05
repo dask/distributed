@@ -36,11 +36,12 @@ def dask_dumps(x, context=None):
     else:
         sub_header, frames = dumps(x)
 
-    header = {}
-    header["sub-header"] = sub_header
-    header["type"] = type_name
-    header["type-serialized"] = pickle.dumps(type(x))
-    header["serializer"] = "dask"
+    header = {
+        "sub-header": sub_header,
+        "type": type_name,
+        "type-serialized": pickle.dumps(type(x)),
+        "serializer": "dask",
+    }
     return header, frames
 
 
