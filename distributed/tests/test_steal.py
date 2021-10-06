@@ -117,12 +117,17 @@ async def test_dont_steal_unknown_functions(c, s, a, b):
     assert len(a.data) >= 95, [len(a.data), len(b.data)]
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 2,
+    config={"distributed.scheduler.work-stealing-interval": "10ms"},
+)
 async def test_eventually_steal_unknown_functions(c, s, a, b):
     futures = c.map(
         slowinc, range(10), delay=0.1, workers=a.address, allow_other_workers=True
     )
     await wait(futures)
+    assert not s.unknown_durations
     assert len(a.data) >= 3, [len(a.data), len(b.data)]
     assert len(b.data) >= 3, [len(a.data), len(b.data)]
 
@@ -596,9 +601,13 @@ def test_balance(inp, expected):
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2, Worker=Nanny, timeout=60)
 async def test_restart(c, s, a, b):
     futures = c.map(
-        slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
+        slowinc, range(100), delay=0.01, workers=a.address, allow_other_workers=True
     )
     while not s.processing[b.worker_address]:
+        await asyncio.sleep(0.01)
+
+    # Unknown tasks are never stolen therefore wait for a measurement
+    while not any(s.tasks[f.key].state == "memory" for f in futures):
         await asyncio.sleep(0.01)
 
     steal = s.extensions["stealing"]
@@ -820,9 +829,13 @@ async def test_balance_with_longer_task(c, s, a, b):
         slowinc, 1, delay=5, workers=[a.address], priority=1
     )  # a surprisingly long task
     z = c.submit(
-        inc, x, workers=[a.address], allow_other_workers=True, priority=0
+        slowadd, x, 1, workers=[a.address], allow_other_workers=True, priority=0
     )  # a task after y, suggesting a, but open to b
+
+    # Allow task to be learned, otherwise it will not be stolen
+    _ = c.submit(slowadd, x, 2, workers=[b.address])
     await z
+    assert not y.done()
     assert z.key in b.data
 
 
