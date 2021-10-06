@@ -304,17 +304,25 @@ class GroupTiming(SchedulerPlugin):
 
     def __init__(self, scheduler):
         scheduler.add_plugin(self)
-
         self.scheduler = scheduler
+
+        # Timestamps for tracking compute durations by task group.
         self.time: list[float] = [time.time()]
+        # The number of threads for the scheduler, used when estimating how occupied
+        # the workers are.
         self.nthreads: list[int] = [self.scheduler.total_nthreads]
+        # The amount of compute since the last timestamp
         self.compute: dict[str, list[float]] = {}
+
+        # Tracking the previous compute time values for getting deltas.
         self._prev_durations: dict[str, dict[str, float]] = {}
 
         for name, group in self.scheduler.task_groups.items():
             self.compute[name] = [0.0]
             self._prev_durations[name] = group.all_durations.copy()
 
+        # Start a callback sampling how the computations are going.
+        # TODO: this samples every 1s. Should it be configurable?
         group_timing_pc = PeriodicCallback(self.track_groups, 1.0 * 1000.0)
         self.scheduler.periodic_callbacks["group-timing"] = group_timing_pc
         group_timing_pc.start()
@@ -326,12 +334,16 @@ class GroupTiming(SchedulerPlugin):
         groups = self.scheduler.task_groups
         for name, group in groups.items():
             if name not in self.compute:
+                # We wamt the time series to be of equal length, otherwise we
+                # are signing up for complex and costly interpolation later.
+                # If there is a new group, zero pad it in the past.
                 self.compute[name] = [0.0] * len(self.time)
             if name not in self._prev_durations:
                 prev_compute = 0.0
             else:
                 prev_compute = self._prev_durations[name]["compute"]
 
+            # Get the delta in compute.
             compute = group.all_durations["compute"]
             dcompute = compute - prev_compute
 
@@ -339,14 +351,26 @@ class GroupTiming(SchedulerPlugin):
             self.compute[name].append(dcompute)
             self._prev_durations[name] = group.all_durations.copy()
 
+        # If task groups have been forgotten by the scheduler, append zero
+        # delta compute for them.
         missing_groups = set(self.compute.keys()) - set(groups.keys())
         for name in missing_groups:
             self.compute[name].append(0.0)
+
+        # Update the timestamps and thread trackers.
         self.time.append(now)
         self.nthreads.append(self.scheduler.total_nthreads)
 
-        idx = len(self.time) - 1
+        # Above, we assigned the delta compute to this most recent time slice.
+        # However, we only get updates on tasks after they are done. If task takes
+        # longer than the sampling interval, the above is wrong! So here we identify
+        # "spillage" time, that is to say, compute time that can't have been entirely
+        # during the last time delta, and we spread that spillage time into the
+        # previous steps. It's approximate, but is much closer to reality than
+        # a worker being several hundred percent occupied.
+        idx = len(self.time) - 1  # current index with spillage
         if idx == 0:
+            # Don't spread before the first index
             return
         nthreads = self.nthreads[idx]
         dt = now - self.time[idx - 1]
@@ -354,6 +378,8 @@ class GroupTiming(SchedulerPlugin):
             if idx == 0:
                 break
 
+            # Compute can't be more than dt * nthreads (at least in a synchronous
+            # task world).
             spillage = total_dcompute - dt * nthreads
             new_total_dcompute = 0.0
             for name in self.compute:

@@ -2630,6 +2630,13 @@ class TaskGroupProgress(DashboardComponent):
         self._last_transition_count = self.scheduler.transition_counter
 
     def _should_redraw(self) -> bool:
+        """
+        Whether to redraw the whole chart.
+
+        We need to redraw the it every time we get new stackers, since their position
+        depends on the others (they are stacked). But redrawing is pretty expensive!
+        So we check to make sure we need to, and whether the scheduler seems busy.
+        """
         if not self._last_drawn:
             return True
         if (
@@ -2641,12 +2648,24 @@ class TaskGroupProgress(DashboardComponent):
         return not set(self.plugin.compute.keys()) <= set(self.source.data.keys())
 
     def _should_update(self) -> bool:
+        """
+        Whether to update the ColumnDataSource. This is cheaper than redrawing,
+        but still not free, so we check whether we need it and whether the scheudler
+        is busy.
+        """
         return (
             not self._last_transition_count == self.scheduler.transition_counter
             and not self.scheduler.proc.cpu_percent() > 50
         )
 
     def _get_timeseries(self, restrict_to_existing=False):
+        """
+        Update the ColumnDataSource with our time series data.
+
+        restrict_to_existing determines whether to add new task groups
+        which might have been added since the last time we rendered.
+        This is important as we want to add new stackers very deliberately.
+        """
         n = len(self.plugin.time)
         timestamps = np.array(self.plugin.time)
         dt = np.diff(timestamps, prepend=timestamps[0] - 10.0)
@@ -2663,9 +2682,17 @@ class TaskGroupProgress(DashboardComponent):
                 self.plugin.compute,
             )
 
-        new_data["time"] = timestamps * 1000.0
+        new_data["time"] = timestamps * 1000.0  # bokeh likes milliseconds
         new_data["nthreads"] = np.array(self.plugin.nthreads)
 
+        # This is an enormous hack around a bokeh bug:
+        # https://github.com/bokeh/bokeh/issues/11119
+        # We cannot update the length of the CDS columns for stacked area charts
+        # as there is a JS race condition. This precludes easy streaming of the
+        # data to the client. To work around this, we keep the length of the CDS
+        # constant. If our data source is shorter, we zero-pad. If it's longer,
+        # we clip to the most recent data. This may need to be revisited, or
+        # ideally removed if the above bug is fixed.
         if n >= self.npts:
             new_data = valmap(lambda x: x[-self.npts :], new_data)
         else:
@@ -2682,11 +2709,18 @@ class TaskGroupProgress(DashboardComponent):
 
     @without_property_validation
     def update(self):
+        """
+        Maybe update the chart. This is somewhat expensive to draw, so we update
+        it pretty defensively.
+        """
         with log_errors():
             if self._should_redraw():
+                # Redraw the whole chart, including any new task groups.
                 new_data = self._get_timeseries(restrict_to_existing=False)
                 stackers = list(self.plugin.compute.keys())
                 colors = [color_of(key_split(k)) for k in stackers]
+
+                # Clear existing renderers.
                 while len(self.root.renderers):
                     self.root.renderers.pop()
 
@@ -2710,6 +2744,11 @@ class TaskGroupProgress(DashboardComponent):
                     alpha=1.0,
                     source=self.source,
                 )
+                # Create a custom tooltip that:
+                #   1. Includes nthreads
+                #   2. Filters out inactive task groups
+                #      (ones without any compute during the relevant dt)
+                #   3. Colors the labels appropriately.
                 formatter = CustomJSHover(
                     code="""
                     const colormap = %s;
@@ -2753,15 +2792,10 @@ class TaskGroupProgress(DashboardComponent):
                 self._last_drawn = time()
                 self._last_transition_count = self.scheduler.transition_counter
             elif self._should_update():
+                # Update the data, only including existing columns, rather than redrawing
+                # the whole chart.
                 self.source.data = self._get_timeseries(restrict_to_existing=True)
                 self._last_transition_count = self.scheduler.transition_counter
-            else:
-                # We would love to be able to incrementally update the data source here,
-                # but a bokeh bug is preventing, so instead we update every ~5 seconds above.
-                # This is more jittery than patches or streaming updates.
-                # https://github.com/bokeh/bokeh/issues/11119
-                # self.source.data = new_data
-                pass
 
 
 class TaskProgress(DashboardComponent):
