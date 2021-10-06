@@ -1075,9 +1075,7 @@ class ComputePerKey(DashboardComponent):
             self.scheduler = scheduler
 
             if TaskStreamPlugin.name not in self.scheduler.plugins:
-                self.scheduler.add_plugin(
-                    plugin=TaskStreamPlugin,
-                )
+                self.scheduler.add_plugin(TaskStreamPlugin(self.scheduler))
 
             compute_data = {
                 "times": [0.2, 0.1],
@@ -1239,7 +1237,7 @@ class AggregateAction(DashboardComponent):
             self.scheduler = scheduler
 
             if TaskStreamPlugin.name not in self.scheduler.plugins:
-                self.scheduler.add_plugin(TaskStreamPlugin)
+                self.scheduler.add_plugin(TaskStreamPlugin(self.scheduler))
 
             action_data = {
                 "times": [0.2, 0.1],
@@ -1765,9 +1763,7 @@ class TaskStream(DashboardComponent):
         self.offset = 0
 
         if TaskStreamPlugin.name not in self.scheduler.plugins:
-            self.scheduler.add_plugin(
-                plugin=TaskStreamPlugin,
-            )
+            self.scheduler.add_plugin(TaskStreamPlugin(self.scheduler))
         self.plugin = self.scheduler.plugins[TaskStreamPlugin.name]
 
         self.index = max(0, self.plugin.index - n_rectangles)
