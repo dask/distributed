@@ -1,5 +1,6 @@
 import array
 import asyncio
+import functools
 import io
 import os
 import queue
@@ -610,3 +611,12 @@ def test_tmpfile_deprecated():
 def test_iscoroutinefunction_unhashable_input():
     # Ensure iscoroutinefunction can handle unhashable callables
     assert not iscoroutinefunction(_UnhashableCallable())
+
+
+def test_iscoroutinefunction_nested_partial():
+    async def my_async_callable(x, y, z):
+        pass
+
+    assert iscoroutinefunction(
+        functools.partial(functools.partial(my_async_callable, 1), 2)
+    )

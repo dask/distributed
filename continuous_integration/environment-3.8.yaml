@@ -9,6 +9,7 @@ dependencies:
   - bokeh
   - click
   - cloudpickle
+  - coverage
   - dask  # overridden by git tip below
   - filesystem-spec
   - h5py
@@ -25,6 +26,7 @@ dependencies:
   - psutil
   - pytest
   - pytest-asyncio<0.14.0
+  - pytest-cov
   - pytest-faulthandler
   - pytest-repeat
   - pytest-rerunfailures

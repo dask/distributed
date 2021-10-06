@@ -191,6 +191,7 @@ class TaskState:
         self.who_has = set()
         self.coming_from = None
         self.waiting_for_data = set()
+        self.waiters = set()
         self.resource_restrictions = {}
         self.exception = None
         self.exception_text = ""
@@ -1854,6 +1855,7 @@ class Worker(ServerNode):
         for dep_ts in ts.dependencies:
             if not dep_ts.state == "memory":
                 ts.waiting_for_data.add(dep_ts)
+                dep_ts.waiters.add(ts)
 
         if ts.waiting_for_data:
             self.waiting_for_data_count += 1
@@ -2669,19 +2671,6 @@ class Worker(ServerNode):
                 who_has = {k: v for k, v in who_has.items() if v}
                 self.update_who_has(who_has, stimulus_id=stimulus_id)
 
-                if self._missing_dep_flight:
-                    logger.debug(
-                        "No new workers found for %s", self._missing_dep_flight
-                    )
-                    recommendations = {
-                        dep: "released"
-                        for dep in self._missing_dep_flight
-                        if dep.state == "missing"
-                    }
-                    self.transitions(
-                        recommendations=recommendations, stimulus_id=stimulus_id
-                    )
-
             finally:
                 # This is quite arbitrary but the heartbeat has scaling implemented
                 self.periodic_callbacks[
@@ -2792,9 +2781,11 @@ class Worker(ServerNode):
                         self.available_resources[resource] += quantity
 
             for d in ts.dependencies:
-                ts.waiting_for_data.discard(ts)
-                if not d.dependents and d.state in {"flight", "fetch", "missing"}:
-                    recommendations[d] = "released"
+                ts.waiting_for_data.discard(d)
+                d.waiters.discard(ts)
+
+                if not d.waiters and d.state in {"flight", "fetch", "missing"}:
+                    recommendations[d] = "forgotten"
 
             ts.waiting_for_data.clear()
             ts.nbytes = None
@@ -3097,7 +3088,7 @@ class Worker(ServerNode):
                     str(funcname(function))[:1000],
                     convert_args_to_str(args2, max_len=1000),
                     convert_kwargs_to_str(kwargs2, max_len=1000),
-                    ts.exception_text,
+                    result["exception_text"],
                 )
                 recommendations[ts] = (
                     "error",
