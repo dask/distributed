@@ -85,7 +85,9 @@ def test_cancel_stress_sync(loop):
                 c.cancel(f)
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
+@pytest.mark.xfail(
+    reason="Flaky and re-fails on rerun. See https://github.com/dask/distributed/issues/5388"
+)
 @pytest.mark.slow
 @gen_cluster(
     nthreads=[],
