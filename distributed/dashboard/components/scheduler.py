@@ -2565,6 +2565,7 @@ class TaskGroupProgress(DashboardComponent):
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
         self.source = ColumnDataSource()
+        self.npts = 180
 
         if GroupTiming.name not in self.scheduler.plugins:
             self.scheduler.add_plugin(plugin=GroupTiming)
@@ -2637,26 +2638,55 @@ class TaskGroupProgress(DashboardComponent):
         ):
             return False
 
+        return not set(self.plugin.compute.keys()) <= set(self.source.data.keys())
+
+    def _should_update(self) -> bool:
         return (
-            not set(self.plugin.compute.keys()).issubset(set(self.source.data.keys()))
-            or time() - self._last_drawn > 10
+            not self._last_transition_count == self.scheduler.transition_counter
+            and not self.scheduler.proc.cpu_percent() > 50
         )
 
-    @without_property_validation
-    def update(self):
-        with log_errors():
-            timestamps = np.array(self.plugin.time)
-            dt = np.diff(timestamps, prepend=timestamps[0] - 10.0)
+    def _get_timeseries(self, restrict_to_existing=False):
+        n = len(self.plugin.time)
+        timestamps = np.array(self.plugin.time)
+        dt = np.diff(timestamps, prepend=timestamps[0] - 10.0)
+
+        if restrict_to_existing:
+            new_data = {
+                k: np.array(v) / dt
+                for k, v in self.plugin.compute.items()
+                if k in self.source.data
+            }
+        else:
             new_data = valmap(
                 lambda x: np.array(x) / dt,
                 self.plugin.compute,
             )
-            stackers = list(new_data.keys())
-            colors = [color_of(key_split(k)) for k in stackers]
-            new_data["time"] = timestamps * 1000.0
-            new_data["nthreads"] = self.plugin.nthreads
 
+        new_data["time"] = timestamps * 1000.0
+        new_data["nthreads"] = np.array(self.plugin.nthreads)
+
+        if n >= self.npts:
+            new_data = valmap(lambda x: x[-self.npts :], new_data)
+        else:
+
+            def extend(x):
+                tmp = np.zeros(self.npts)
+                tmp[: len(x)] = x
+                return tmp
+
+            new_data = valmap(extend, new_data)
+            new_data["time"][n:] = new_data["time"][n - 1]
+
+        return new_data
+
+    @without_property_validation
+    def update(self):
+        with log_errors():
             if self._should_redraw():
+                new_data = self._get_timeseries(restrict_to_existing=False)
+                stackers = list(self.plugin.compute.keys())
+                colors = [color_of(key_split(k)) for k in stackers]
                 while len(self.root.renderers):
                     self.root.renderers.pop()
 
@@ -2721,6 +2751,9 @@ class TaskGroupProgress(DashboardComponent):
                 self.hover.formatters = {"$index": formatter}
 
                 self._last_drawn = time()
+                self._last_transition_count = self.scheduler.transition_counter
+            elif self._should_update():
+                self.source.data = self._get_timeseries(restrict_to_existing=True)
                 self._last_transition_count = self.scheduler.transition_counter
             else:
                 # We would love to be able to incrementally update the data source here,
