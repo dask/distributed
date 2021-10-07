@@ -1,7 +1,7 @@
 Distributed
 ===========
 
-|Test Status| |Doc Status| |Gitter| |Version Status| |NumFOCUS|
+|Test Status| |Coverage| |Doc Status| |Gitter| |Version Status| |NumFOCUS|
 
 A library for distributed computation.  See documentation_ for more details.
 
@@ -11,6 +11,9 @@ A library for distributed computation.  See documentation_ for more details.
 .. |Doc Status| image:: https://readthedocs.org/projects/distributed/badge/?version=latest
    :target: https://distributed.dask.org
    :alt: Documentation Status
+.. |Coverage| image:: https://codecov.io/gh/dask/distributed/branch/main/graph/badge.svg
+   :target: https://codecov.io/gh/dask/distributed/branch/main
+   :alt: Coverage status
 .. |Gitter| image:: https://badges.gitter.im/Join%20Chat.svg
    :alt: Join the chat at https://gitter.im/dask/dask
    :target: https://gitter.im/dask/dask?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge
