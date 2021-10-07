@@ -57,7 +57,7 @@ from distributed.client import (
     wait,
 )
 from distributed.comm import CommClosedError
-from distributed.compatibility import LINUX, WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import Status
 from distributed.metrics import time
 from distributed.objects import HasWhat, WhoHas
@@ -4536,6 +4536,7 @@ async def test_scatter_dict_workers(c, s, a, b):
     assert "a" in a.data or "a" in b.data
 
 
+@pytest.mark.flaky(condition=MACOS, reruns=10, reruns_delay=5)
 @pytest.mark.slow
 @gen_test(timeout=180)
 async def test_client_timeout():
