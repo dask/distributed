@@ -32,6 +32,9 @@ async def test_simple(c, s, a, b):
     s.remove_plugin("counter")
     assert counter not in s.plugins
 
+    with pytest.raises(ValueError, match="Could not find plugin 'counter'") as e:
+        s.remove_plugin("counter")
+
 
 @gen_cluster(nthreads=[])
 async def test_add_remove_worker(s):

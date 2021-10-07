@@ -5451,8 +5451,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         See https://distributed.readthedocs.io/en/latest/plugins.html
 
-        Paramters
-        ---------
+        Parameters
+        ----------
         plugin : SchedulerPlugin
             SchedulerPlugin instance to add
         idempotent : bool
@@ -5465,7 +5465,6 @@ class Scheduler(SchedulerState, ServerNode):
         **kwargs
             Deprecated; additional arguments passed to the `plugin` class if it is
             not already an instance
-
         """
         if isinstance(plugin, type):
             warnings.warn(
@@ -5497,8 +5496,8 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> None:
         """Remove external plugin from scheduler
 
-        Paramters
-        ---------
+        Parameters
+        ----------
         plugin : SchedulerPlugin
             Deprecated; use `name` argument instead. Instance of a
             SchedulerPlugin class to remove;
@@ -5510,7 +5509,7 @@ class Scheduler(SchedulerState, ServerNode):
         if bool(name) == bool(plugin):
             raise ValueError("Must provide plugin or name (mutually exclusive)")
         if isinstance(name, SchedulerPlugin):
-            # Swapped positional arguments
+            # Backwards compatibility - the sig used to be (plugin, name)
             plugin = name
             name = None
         if plugin is not None:
@@ -5524,17 +5523,24 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 names = [k for k, v in self.plugins.items() if v is plugin]
                 if not names:
-                    return
+                    raise ValueError(
+                        f"Could not find {plugin} among the current scheduler plugins"
+                    )
                 if len(names) > 1:
                     raise ValueError(
                         f"Multiple instances of {plugin} were found in the current "
-                        "scheduler plugins, we cannot remove this plugin."
+                        "scheduler plugins; we cannot remove this plugin."
                     )
                 name = names[0]
         assert name is not None
         # End deprecated code
 
-        self.plugins.pop(name)
+        try:
+            del self.plugins[name]
+        except KeyError:
+            raise ValueError(
+                f"Could not find plugin {name!r} among the current scheduler plugins"
+            )
 
     async def register_scheduler_plugin(self, comm=None, plugin=None, name=None):
         """Register a plugin on the scheduler."""
