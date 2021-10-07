@@ -3545,6 +3545,24 @@ class SchedulerState:
             self._replicated_tasks.remove(ts)
         ts._who_has.clear()
 
+    @ccall
+    @exceptval(check=False)
+    def _reevaluate_occupancy_worker(self, ws: WorkerState):
+        """See reevaluate_occupancy"""
+        ts: TaskState
+        old = ws._occupancy
+        for ts in ws._processing:
+            self.set_duration_estimate(ts, ws)
+
+        self.check_idle_saturated(ws)
+        steal = self.extensions.get("stealing")
+        if steal is None:
+            return
+        if ws._occupancy > old * 1.3 or old > ws._occupancy * 1.3:
+            for ts in ws._processing:
+                steal.remove_key_from_stealable(ts)
+                steal.put_key_in_stealable(ts)
+
 
 class Scheduler(SchedulerState, ServerNode):
     """Dynamic distributed task scheduler
@@ -7766,7 +7784,7 @@ class Scheduler(SchedulerState, ServerNode):
                     try:
                         if ws is None or not ws._processing:
                             continue
-                        _reevaluate_occupancy_worker(parent, ws)
+                        parent._reevaluate_occupancy_worker(ws)
                     finally:
                         del ws  # lose ref
 
@@ -8105,24 +8123,6 @@ def _task_to_client_msgs(state: SchedulerState, ts: TaskState) -> dict:
             cs: ClientState
             return {cs._client_key: [report_msg] for cs in ts._who_wants}
     return {}
-
-
-@cfunc
-@exceptval(check=False)
-def _reevaluate_occupancy_worker(state: SchedulerState, ws: WorkerState):
-    """See reevaluate_occupancy"""
-    ts: TaskState
-    old = ws._occupancy
-    for ts in ws._processing:
-        state.set_duration_estimate(ts, ws)
-
-    state.check_idle_saturated(ws)
-    steal = state.extensions.get("stealing")
-    if not steal:
-        return
-    if ws._occupancy > old * 1.3 or old > ws._occupancy * 1.3:
-        for ts in ws._processing:
-            steal.recalculate_cost(ts)
 
 
 @cfunc
