@@ -4,6 +4,8 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
+from dask.utils import tmpfile
+
 from distributed.protocol import (
     decompress,
     deserialize,
@@ -18,7 +20,7 @@ from distributed.protocol.numpy import itemsize
 from distributed.protocol.pickle import HIGHEST_PROTOCOL
 from distributed.protocol.utils import BIG_BYTES_SHARD_SIZE
 from distributed.system import MEMORY_LIMIT
-from distributed.utils import ensure_bytes, nbytes, tmpfile
+from distributed.utils import ensure_bytes, nbytes
 from distributed.utils_test import gen_cluster
 
 

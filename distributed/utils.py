@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import functools
 import importlib
@@ -8,7 +10,6 @@ import multiprocessing
 import os
 import pkgutil
 import re
-import shutil
 import socket
 import sys
 import tempfile
@@ -24,7 +25,7 @@ from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
 from typing import Any as AnyType
-from typing import Dict, List
+from typing import ClassVar
 
 import click
 import tblib.pickling_support
@@ -32,7 +33,7 @@ import tblib.pickling_support
 try:
     import resource
 except ImportError:
-    resource = None
+    resource = None  # type: ignore
 
 import tlz as toolz
 from tornado import gen
@@ -41,9 +42,10 @@ from tornado.ioloop import IOLoop
 import dask
 from dask import istask
 from dask.utils import parse_timedelta as _parse_timedelta
+from dask.widgets import get_template
 
 try:
-    from tornado.ioloop import PollIOLoop
+    from tornado.ioloop import PollIOLoop  # type: ignore
 except ImportError:
     PollIOLoop = None  # dropped in tornado 6.0
 
@@ -345,7 +347,9 @@ class LoopRunner:
     """
 
     # All loops currently associated to loop runners
-    _all_loops = weakref.WeakKeyDictionary()
+    _all_loops: ClassVar[
+        weakref.WeakKeyDictionary[IOLoop, tuple[int, LoopRunner | None]]
+    ] = weakref.WeakKeyDictionary()
     _lock = threading.Lock()
 
     def __init__(self, loop=None, asynchronous=False):
@@ -398,8 +402,13 @@ class LoopRunner:
 
         def run_loop(loop=self._loop):
             loop.add_callback(loop_cb)
+            # run loop forever if it's not running already
             try:
-                loop.start()
+                if (
+                    getattr(loop, "asyncio_loop", None) is None
+                    or not loop.asyncio_loop.is_running()
+                ):
+                    loop.start()
             except Exception as e:
                 start_exc[0] = e
             finally:
@@ -416,11 +425,13 @@ class LoopRunner:
         if actual_thread is not thread:
             # Loop already running in other thread (user-launched)
             done_evt.wait(5)
-            if not isinstance(start_exc[0], RuntimeError):
+            if start_exc[0] is not None and not isinstance(start_exc[0], RuntimeError):
                 if not isinstance(
                     start_exc[0], Exception
                 ):  # track down infrequent error
-                    raise TypeError("not an exception", start_exc[0])
+                    raise TypeError(
+                        f"not an exception: {start_exc[0]!r}",
+                    )
                 raise start_exc[0]
             self._all_loops[self._loop] = count + 1, None
         else:
@@ -595,7 +606,7 @@ def key_split(s):
         return "Other"
 
 
-def key_split_group(x):
+def key_split_group(x) -> str:
     """A more fine-grained version of key_split
 
     >>> key_split_group(('x-2', 1))
@@ -626,7 +637,7 @@ def key_split_group(x):
     elif typ is bytes:
         return key_split_group(x.decode())
     else:
-        return key_split(x)
+        return "Other"
 
 
 @contextmanager
@@ -674,9 +685,14 @@ def ensure_ip(hostname):
     --------
     >>> ensure_ip('localhost')
     '127.0.0.1'
+    >>> ensure_ip('')  # Maps as localhost for binding e.g. 'tcp://:8811'
+    '127.0.0.1'
     >>> ensure_ip('123.123.123.123')  # pass through IP addresses
     '123.123.123.123'
     """
+    if not hostname:
+        hostname = "localhost"
+
     # Prefer IPv4 over IPv6, for compatibility
     families = [socket.AF_INET, socket.AF_INET6]
     for fam in families:
@@ -824,25 +840,6 @@ def read_block(f, offset, length, delimiter=None):
     return bytes
 
 
-@contextmanager
-def tmpfile(extension=""):
-    extension = "." + extension.lstrip(".")
-    handle, filename = tempfile.mkstemp(extension)
-    os.close(handle)
-    os.remove(filename)
-
-    yield filename
-
-    if os.path.exists(filename):
-        try:
-            if os.path.isdir(filename):
-                shutil.rmtree(filename)
-            else:
-                os.remove(filename)
-        except OSError:  # sometimes we can't remove a generated temp file
-            pass
-
-
 def ensure_bytes(s):
     """Attempt to turn `s` into bytes.
 
@@ -987,7 +984,7 @@ def json_load_robust(fn, load=json.load):
 class DequeHandler(logging.Handler):
     """A logging.Handler that records records into a deque"""
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[DequeHandler]] = weakref.WeakSet()
 
     def __init__(self, *args, n=10000, **kwargs):
         self.deque = deque(maxlen=n)
@@ -1045,15 +1042,15 @@ if not is_server_extension:
 
         # TODO: Use tornado's AnyThreadEventLoopPolicy, instead of class below,
         # once tornado > 6.0.3 is available.
-        if WINDOWS and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+        if WINDOWS:
             # WindowsProactorEventLoopPolicy is not compatible with tornado 6
             # fallback to the pre-3.8 default of Selector
             # https://github.com/tornadoweb/tornado/issues/2608
-            BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy
+            BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy  # type: ignore
         else:
             BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
 
-        class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):
+        class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):  # type: ignore
             def get_event_loop(self):
                 try:
                     return super().get_event_loop()
@@ -1126,6 +1123,10 @@ def color_of(x, palette=palette):
 
 
 def _iscoroutinefunction(f):
+    # Python < 3.8 does not support determining if `partial` objects wrap async funcs
+    if sys.version_info < (3, 8):
+        while isinstance(f, functools.partial):
+            f = f.func
     return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
 
 
@@ -1149,21 +1150,6 @@ def warn_on_duration(duration, msg):
     stop = time()
     if stop - start > _parse_timedelta(duration):
         warnings.warn(msg, stacklevel=2)
-
-
-def typename(typ):
-    """Return name of type
-
-    Examples
-    --------
-    >>> from distributed import Scheduler
-    >>> typename(Scheduler)
-    'distributed.scheduler.Scheduler'
-    """
-    try:
-        return typ.__module__ + "." + typ.__name__
-    except AttributeError:
-        return str(typ)
 
 
 def format_dashboard_link(host, port):
@@ -1242,8 +1228,6 @@ class Log(str):
     """A container for newline-delimited string of log entries"""
 
     def _repr_html_(self):
-        from .widgets import get_template  # Avoiding circular import
-
         return get_template("log.html.j2").render(log=self)
 
 
@@ -1251,8 +1235,6 @@ class Logs(dict):
     """A container for a dict mapping names to strings of log entries"""
 
     def _repr_html_(self):
-        from .widgets import get_template  # Avoiding circular import
-
         return get_template("logs.html.j2").render(logs=self)
 
 
@@ -1283,6 +1265,8 @@ def cli_keywords(d: dict, cls=None, cmd=None):
     ...
     ValueError: Class distributed.worker.Worker does not support keyword x
     """
+    from dask.utils import typename
+
     if cls or cmd:
         for k in d:
             if not has_keyword(cls, k) and not command_has_keyword(cmd, k):
@@ -1307,7 +1291,7 @@ def cli_keywords(d: dict, cls=None, cmd=None):
         return out
 
     return sum(
-        [["--" + k.replace("_", "-"), convert_value(v)] for k, v in d.items()], []
+        (["--" + k.replace("_", "-"), convert_value(v)] for k, v in d.items()), []
     )
 
 
@@ -1377,7 +1361,7 @@ class LRU(UserDict):
         super().__setitem__(key, value)
 
 
-def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> List[Dict]:
+def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list[dict]:
     """
     Examples
     --------
@@ -1438,6 +1422,8 @@ _deprecations = {
     "funcname": "dask.utils.funcname",
     "parse_bytes": "dask.utils.parse_bytes",
     "parse_timedelta": "dask.utils.parse_timedelta",
+    "typename": "dask.utils.typename",
+    "tmpfile": "dask.utils.tmpfile",
 }
 
 

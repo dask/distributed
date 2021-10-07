@@ -5,13 +5,15 @@ import traceback
 from array import array
 from enum import Enum
 from functools import partial
+from types import ModuleType
 
 import msgpack
 
 import dask
 from dask.base import normalize_token
+from dask.utils import typename
 
-from ..utils import ensure_bytes, has_keyword, typename
+from ..utils import ensure_bytes, has_keyword
 from . import pickle
 from .compression import decompress, maybe_compress
 from .utils import (
@@ -22,12 +24,10 @@ from .utils import (
     unpack_frames,
 )
 
-lazy_registrations = {}
-
 dask_serialize = dask.utils.Dispatch("dask_serialize")
 dask_deserialize = dask.utils.Dispatch("dask_deserialize")
 
-_cached_allowed_modules = {}
+_cached_allowed_modules: dict[str, ModuleType] = {}
 
 
 def dask_dumps(x, context=None):
@@ -364,7 +364,7 @@ def deserialize(header, frames, deserializers=None):
     ----------
     header : dict
     frames : list of bytes
-    deserializers : Optional[Dict[str, Tuple[Callable, Callable, bool]]]
+    deserializers : dict[str, tuple[Callable, Callable, bool]] | None
         An optional dict mapping a name to a (de)serializer.
         See `dask_serialize` and `dask_deserialize` for more.
 

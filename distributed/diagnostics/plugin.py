@@ -120,8 +120,12 @@ class WorkerPlugin:
     ...
     ...     def transition(self, key, start, finish, *args, **kwargs):
     ...         if finish == 'error':
-    ...             exc = self.worker.exceptions[key]
-    ...             self.logger.error("Task '%s' has failed with exception: %s" % (key, str(exc)))
+    ...             ts = self.worker.tasks[key]
+    ...             exc_info = (type(ts.exception), ts.exception, ts.traceback)
+    ...             self.logger.error(
+    ...                 "Error during computation of '%s'.", key,
+    ...                 exc_info=exc_info
+    ...             )
 
     >>> plugin = ErrorLogger()
     >>> client.register_worker_plugin(plugin)  # doctest: +SKIP
@@ -155,24 +159,6 @@ class WorkerPlugin:
         finish : string
             Final state of the transition.
         kwargs : More options passed when transitioning
-        """
-
-    def release_key(self, key, state, cause, reason, report):
-        """
-        Called when the worker releases a task.
-
-        Parameters
-        ----------
-        key : string
-        state : string
-            State of the released task.
-            One of waiting, ready, executing, long-running, memory, error.
-        cause : string or None
-            Additional information on what triggered the release of the task.
-        reason : None
-            Not used.
-        report : bool
-            Whether the worker should report the released task to the scheduler.
         """
 
 
@@ -211,9 +197,12 @@ class NannyPlugin:
         """Run when the nanny to which the plugin is attached to is closed"""
 
 
-def _get_worker_plugin_name(plugin) -> str:
-    """Returns the worker plugin name. If plugin has no name attribute
-    a random name is used."""
+def _get_plugin_name(plugin) -> str:
+    """Return plugin name.
+
+    If plugin has no name attribute a random name is used.
+
+    """
     if hasattr(plugin, "name"):
         return plugin.name
     else:

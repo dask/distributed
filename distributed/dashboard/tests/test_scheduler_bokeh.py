@@ -31,6 +31,7 @@ from distributed.dashboard.components.scheduler import (
     StealingEvents,
     StealingTimeSeries,
     SystemMonitor,
+    SystemTimeseries,
     TaskGraph,
     TaskGroupGraph,
     TaskProgress,
@@ -42,11 +43,13 @@ from distributed.dashboard.components.scheduler import (
 )
 from distributed.dashboard.components.worker import Counters
 from distributed.dashboard.scheduler import applications
+from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.metrics import time
 from distributed.utils import format_dashboard_link
 from distributed.utils_test import dec, div, gen_cluster, get_cert, inc, slowinc
 
-scheduler.PROFILING = False
+# Imported from distributed.dashboard.utils
+scheduler.PROFILING = False  # type: ignore
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
@@ -506,6 +509,78 @@ async def test_WorkerNetworkBandwidth_metrics(c, s, a, b):
     for idx, ws in enumerate(s.workers.values()):
         assert ws.metrics["read_bytes"] == nb.source.data["x_read"][idx]
         assert ws.metrics["write_bytes"] == nb.source.data["x_write"][idx]
+        assert ws.metrics["read_bytes_disk"] == nb.source.data["x_read_disk"][idx]
+        assert ws.metrics["write_bytes_disk"] == nb.source.data["x_write_disk"][idx]
+
+
+@gen_cluster(client=True)
+async def test_SystemTimeseries(c, s, a, b):
+    # Disable system monitor periodic callback to allow us to manually control
+    # when it is called below
+    a.periodic_callbacks["monitor"].stop()
+    b.periodic_callbacks["monitor"].stop()
+
+    # Update worker system monitors and send updated metrics to the scheduler
+    a.monitor.update()
+    b.monitor.update()
+    await asyncio.gather(a.heartbeat(), b.heartbeat())
+
+    systs = SystemTimeseries(s)
+    workers = s.workers.values()
+
+    assert all(len(v) == 1 for v in systs.source.data.values())
+    assert systs.source.data["read_bytes"][0] == sum(
+        ws.metrics["read_bytes"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["write_bytes"][0] == sum(
+        ws.metrics["write_bytes"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["cpu"][0] == sum(
+        ws.metrics["cpu"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["memory"][0] == sum(
+        ws.metrics["memory"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["read_bytes_disk"][0] == sum(
+        ws.metrics["read_bytes_disk"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["write_bytes_disk"][0] == sum(
+        ws.metrics["write_bytes_disk"] for ws in workers
+    ) / len(workers)
+    assert (
+        systs.source.data["time"][0]
+        == sum(ws.metrics["time"] for ws in workers) / len(workers) * 1000
+    )
+
+    # Update worker system monitors and send updated metrics to the scheduler
+    a.monitor.update()
+    b.monitor.update()
+    await asyncio.gather(a.heartbeat(), b.heartbeat())
+    systs.update()
+
+    assert all(len(v) == 2 for v in systs.source.data.values())
+    assert systs.source.data["read_bytes"][1] == sum(
+        ws.metrics["read_bytes"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["write_bytes"][1] == sum(
+        ws.metrics["write_bytes"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["cpu"][1] == sum(
+        ws.metrics["cpu"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["memory"][1] == sum(
+        ws.metrics["memory"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["read_bytes_disk"][1] == sum(
+        ws.metrics["read_bytes_disk"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["write_bytes_disk"][1] == sum(
+        ws.metrics["write_bytes_disk"] for ws in workers
+    ) / len(workers)
+    assert (
+        systs.source.data["time"][1]
+        == sum(ws.metrics["time"] for ws in workers) / len(workers) * 1000
+    )
 
 
 @gen_cluster(client=True)
@@ -696,7 +771,7 @@ async def test_TaskGroupGraph_arrows(c, s, a, b):
     while s.task_groups:
         await asyncio.sleep(0.01)
 
-    tgg.update()  ###for some reason after deleting the futures the tgg.node_source.data.values are not clear.
+    tgg.update()  # for some reason after deleting the futures the tgg.node_source.data.values are not clear.
     assert not any(tgg.nodes_source.data.values())
     assert not any(tgg.arrows_source.data.values())
 
@@ -784,7 +859,7 @@ async def test_lots_of_tasks(c, s, a, b):
     futures = c.map(toolz.identity, range(100))
     await wait(futures)
 
-    tsp = [p for p in s.plugins if "taskstream" in type(p).__name__.lower()][0]
+    tsp = s.plugins[TaskStreamPlugin.name]
     assert len(tsp.buffer) == 10
     ts.update()
     assert len(ts.source.data["start"]) == 10

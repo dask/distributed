@@ -1,6 +1,6 @@
 [run]
-include = 
-    distributed/*
+source =
+    distributed
 omit =
     distributed/tests/test*
     distributed/hdfs.py

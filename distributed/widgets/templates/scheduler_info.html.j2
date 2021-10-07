@@ -15,7 +15,7 @@
                 </tr>
                 <tr>
                     <td style="text-align: left;">
-                        <strong>Dashboard:</strong> <a href="{{ scheduler | format_dashboard_address }}">{{ scheduler | format_dashboard_address }}</a>
+                        <strong>Dashboard:</strong> <a href="{{ scheduler | format_dashboard_address }}" target="_blank">{{ scheduler | format_dashboard_address }}</a>
                     </td>
                     <td style="text-align: left;">
                         <strong>Total threads:</strong> {{ workers.values() | map(attribute='nthreads') | sum }}
@@ -57,7 +57,7 @@
                     </tr>
                     <tr>
                         <td style="text-align: left;">
-                            <strong>Dashboard: </strong> <a href="{{ worker | format_dashboard_address }}">{{ worker | format_dashboard_address }}</a>
+                            <strong>Dashboard: </strong> <a href="{{ worker | format_dashboard_address }}" target="_blank">{{ worker | format_dashboard_address }}</a>
                         </td>
                         <td style="text-align: left;">
                             <strong>Memory: </strong> {{ worker["memory_limit"] | format_bytes }}

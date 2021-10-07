@@ -396,6 +396,10 @@ class MultiWorker(Worker, ProcessInterface):
     def status(self):
         return self.workers[0].status
 
+    @status.setter
+    def status(self, value):
+        raise NotImplementedError()
+
     def __str__(self):
         return "<MultiWorker n=%d>" % len(self.workers)
 
@@ -405,7 +409,7 @@ class MultiWorker(Worker, ProcessInterface):
         await asyncio.gather(*self.workers)
 
     async def close(self):
-        await asyncio.gather(*[w.close() for w in self.workers])
+        await asyncio.gather(*(w.close() for w in self.workers))
 
 
 @gen_test()
@@ -464,9 +468,9 @@ async def test_MultiWorker():
 async def test_run_spec(c, s):
     workers = await run_spec(worker_spec, s.address)
     await c.wait_for_workers(len(worker_spec))
-    await asyncio.gather(*[w.close() for w in workers.values()])
+    await asyncio.gather(*(w.close() for w in workers.values()))
     assert not s.workers
-    await asyncio.gather(*[w.finished() for w in workers.values()])
+    await asyncio.gather(*(w.finished() for w in workers.values()))
 
 
 @gen_test()

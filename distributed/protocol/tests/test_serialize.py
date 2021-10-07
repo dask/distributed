@@ -9,7 +9,7 @@ from tlz import identity
 try:
     import numpy as np
 except ImportError:
-    np = None
+    np = None  # type: ignore
 
 import dask
 
@@ -480,7 +480,9 @@ async def test_frame_split():
         (memoryview(b"hello"), True),
         pytest.param(
             memoryview(
-                np.random.random((3, 4)) if np is not None else b"skip np.random"
+                np.random.random((3, 4))  # type: ignore
+                if np is not None
+                else b"skip np.random"
             ),
             True,
             marks=pytest.mark.skipif(np is None, reason="Test needs numpy"),
@@ -512,7 +514,9 @@ def test_serialize_lists(serializers):
         memoryview(b"hello"),
         pytest.param(
             memoryview(
-                np.random.random((3, 4)) if np is not None else b"skip np.random"
+                np.random.random((3, 4))  # type: ignore
+                if np is not None
+                else b"skip np.random"
             ),
             marks=pytest.mark.skipif(np is None, reason="Test needs numpy"),
         ),
@@ -520,7 +524,7 @@ def test_serialize_lists(serializers):
 )
 def test_deser_memoryview(data_in):
     header, frames = serialize(data_in)
-    assert header["type"] == "builtins.memoryview"
+    assert header["type"] == "memoryview"
     assert frames[0] is data_in
     data_out = deserialize(header, frames)
     assert data_in == data_out

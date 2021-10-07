@@ -5,9 +5,10 @@ import tempfile
 try:
     import ssl
 except ImportError:
-    ssl = None
+    ssl = None  # type: ignore
 
 import dask
+from dask.widgets import get_template
 
 __all__ = ("Security",)
 
@@ -153,18 +154,34 @@ class Security:
             out = dask.config.get(config_name)
         setattr(self, field, out)
 
-    def __repr__(self):
+    def _attr_to_dict(self):
         keys = sorted(self.__slots__)
         keys.remove("extra_conn_args")
-        items = []
+
+        attr = {}
+
         for k in keys:
             val = getattr(self, k)
             if val is not None:
                 if isinstance(val, str) and "\n" in val:
-                    items.append((k, "..."))
+                    attr[k] = "Temporary (In-memory)"
+                elif isinstance(val, str):
+                    attr[k] = f"Local ({os.path.abspath(val)})"
                 else:
-                    items.append((k, repr(val)))
-        return "Security(" + ", ".join(f"{k}={v}" for k, v in items) + ")"
+                    attr[k] = val
+
+        return attr
+
+    def __repr__(self):
+        attr = self._attr_to_dict()
+        return (
+            "Security("
+            + ", ".join(f"{key}={value}" for key, value in attr.items())
+            + ")"
+        )
+
+    def _repr_html_(self):
+        return get_template("security.html.j2").render(security=self._attr_to_dict())
 
     def get_tls_config_for_role(self, role):
         """

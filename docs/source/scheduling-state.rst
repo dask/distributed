@@ -11,7 +11,7 @@ The life of a computation with Dask can be described in the following stages:
 1.  The user authors a graph using some library, perhaps dask.delayed or
     dask.dataframe or the ``submit/map`` functions on the client.  They submit
     these tasks to the scheduler.
-2.  The schedulers assimilates these tasks into its graph of all tasks to
+2.  The scheduler assimilates these tasks into its graph of all tasks to
     track, and as their dependencies become available it asks workers to run
     each of these tasks in turn.
 3.  The worker receives information about how to run the task, communicates

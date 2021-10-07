@@ -15,6 +15,7 @@ from .components.scheduler import (
     MemoryByKey,
     Occupancy,
     SystemMonitor,
+    SystemTimeseries,
     TaskGraph,
     TaskGroupGraph,
     TaskProgress,
@@ -68,8 +69,23 @@ applications = {
     "/individual-workers": individual_doc(WorkerTable, 500),
     "/individual-bandwidth-types": individual_doc(BandwidthTypes, 500),
     "/individual-bandwidth-workers": individual_doc(BandwidthWorkers, 500),
-    "/individual-workers-network-bandwidth": individual_doc(
-        WorkerNetworkBandwidth, 500
+    "/individual-workers-network": individual_doc(
+        WorkerNetworkBandwidth, 500, fig_attr="bandwidth"
+    ),
+    "/individual-workers-disk": individual_doc(
+        WorkerNetworkBandwidth, 500, fig_attr="disk"
+    ),
+    "/individual-workers-network-timeseries": individual_doc(
+        SystemTimeseries, 500, fig_attr="bandwidth"
+    ),
+    "/individual-workers-cpu-timeseries": individual_doc(
+        SystemTimeseries, 500, fig_attr="cpu"
+    ),
+    "/individual-workers-memory-timeseries": individual_doc(
+        SystemTimeseries, 500, fig_attr="memory"
+    ),
+    "/individual-workers-disk-timeseries": individual_doc(
+        SystemTimeseries, 500, fig_attr="disk"
     ),
     "/individual-memory-by-key": individual_doc(MemoryByKey, 500),
     "/individual-compute-time-per-key": individual_doc(ComputePerKey, 500),

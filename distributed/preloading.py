@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import filecmp
 import inspect
 import logging
@@ -5,14 +7,16 @@ import os
 import shutil
 import sys
 import urllib.request
+from collections.abc import Iterable
 from importlib import import_module
 from types import ModuleType
-from typing import List
+from typing import cast
 
 import click
 
 from dask.utils import tmpfile
 
+from .core import Server
 from .utils import import_file
 
 logger = logging.getLogger(__name__)
@@ -143,16 +147,24 @@ class Preload:
         The Worker or Scheduler
     name: str
         module name, file name, or web address to load
-    argv: [string]
+    argv: [str]
         List of string arguments passed to click-configurable `dask_setup`.
-    file_dir: string
+    file_dir: str
         Path of a directory where files should be copied
     """
 
-    def __init__(self, dask_server, name: str, argv: List[str], file_dir: str):
+    dask_server: Server
+    name: str
+    argv: list[str]
+    file_dir: str | None
+    module: ModuleType
+
+    def __init__(
+        self, dask_server: Server, name: str, argv: Iterable[str], file_dir: str | None
+    ):
         self.dask_server = dask_server
         self.name = name
-        self.argv = argv
+        self.argv = list(argv)
         self.file_dir = file_dir
 
         if is_webaddress(name):
@@ -167,7 +179,7 @@ class Preload:
         if dask_setup:
             if isinstance(dask_setup, click.Command):
                 context = dask_setup.make_context(
-                    "dask_setup", list(self.argv), allow_extra_args=False
+                    "dask_setup", self.argv, allow_extra_args=False
                 )
                 result = dask_setup.callback(
                     self.dask_server, *context.args, **context.params
@@ -191,9 +203,25 @@ class Preload:
 
 
 def process_preloads(
-    dask_server, preload: List[str], preload_argv: List[List], file_dir: str = None
-) -> List[Preload]:
+    dask_server,
+    preload: str | list[str],
+    preload_argv: list[str] | list[list[str]],
+    *,
+    file_dir: str | None = None,
+) -> list[Preload]:
     if isinstance(preload, str):
         preload = [preload]
+    if preload_argv and isinstance(preload_argv[0], str):
+        preload_argv = [cast("list[str]", preload_argv)] * len(preload)
+    elif not preload_argv:
+        preload_argv = [cast("list[str]", [])] * len(preload)
+    if len(preload) != len(preload_argv):
+        raise ValueError(
+            "preload and preload_argv have mismatched lengths "
+            f"{len(preload)} != {len(preload_argv)}"
+        )
 
-    return [Preload(dask_server, p, preload_argv, file_dir) for p in preload]
+    return [
+        Preload(dask_server, p, argv, file_dir)
+        for p, argv in zip(preload, preload_argv)
+    ]

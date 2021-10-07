@@ -80,6 +80,9 @@ async def test_ucx_config(cleanup):
         assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "rdmacm"
 
 
+@pytest.mark.flaky(
+    reruns=10, reruns_delay=5, condition=ucp.get_ucx_version() < (1, 11, 0)
+)
 def test_ucx_config_w_env_var(cleanup, loop, monkeypatch):
     size = "1000.00 MB"
     monkeypatch.setenv("DASK_RMM__POOL_SIZE", size)
@@ -101,7 +104,7 @@ def test_ucx_config_w_env_var(cleanup, loop, monkeypatch):
                 "ucx",
                 "--no-nanny",
             ]
-        ) as w:
+        ):
             with Client(sched_addr, loop=loop, timeout=10) as c:
                 while not c.scheduler_info()["workers"]:
                     sleep(0.1)
@@ -112,7 +115,6 @@ def test_ucx_config_w_env_var(cleanup, loop, monkeypatch):
                 )
                 assert rmm_resource == rmm.mr.PoolMemoryResource
 
-                worker_addr = list(c.scheduler_info()["workers"])[0]
-                worker_rmm_usage = c.run(rmm.mr.get_current_device_resource_type)
-                rmm_resource = worker_rmm_usage[worker_addr]
-                assert rmm_resource == rmm.mr.PoolMemoryResource
+                rmm_resource_workers = c.run(rmm.mr.get_current_device_resource_type)
+                for v in rmm_resource_workers.values():
+                    assert v == rmm.mr.PoolMemoryResource

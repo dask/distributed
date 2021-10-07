@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -204,10 +206,10 @@ class EventstreamHandler(WebSocketHandler):
             self.send("pong", {"timestamp": str(datetime.now())})
 
     def on_close(self):
-        self.server.remove_plugin(self.plugin)
+        self.server.remove_plugin(name=self.plugin.name)
 
 
-routes = [
+routes: list[tuple] = [
     (r"info", redirect("info/main/workers.html"), {}),
     (r"info/main/workers.html", Workers, {}),
     (r"info/worker/(.*).html", Worker, {}),

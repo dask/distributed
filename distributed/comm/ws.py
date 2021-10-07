@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import struct
 import warnings
 import weakref
+from collections.abc import Callable
 from ssl import SSLError
-from typing import Callable
 
 from tornado import web
 from tornado.httpclient import HTTPClientError, HTTPRequest
@@ -134,19 +136,11 @@ class WSHandlerComm(Comm):
         self.handler.close()
 
     @property
-    def local_address(self):
+    def local_address(self) -> str:
         return self.handler.request.host
 
     @property
-    def peer_address(self):
-        return self.handler.request.remote_ip + ":0"
-
-    @property
-    def _local_addr(self):
-        return self.handler.request.host
-
-    @property
-    def _peer_addr(self):
+    def peer_address(self) -> str:
         return self.handler.request.remote_ip + ":0"
 
     def closed(self):
@@ -168,8 +162,8 @@ class WS(Comm):
         self._closed = False
         super().__init__()
         self.sock = sock
-        self._peer_addr = f"{self.prefix}{self.sock.parsed.netloc}"
         self._local_addr = f"{self.prefix}{self.sock.parsed.netloc}"
+        self._peer_addr = f"{self.prefix}{self.sock.parsed.netloc}"
         self.deserialize = deserialize
         self.allow_offload = allow_offload
         self._finalizer = weakref.finalize(self, self._get_finalizer())
@@ -244,11 +238,11 @@ class WS(Comm):
         return not self.sock or self.sock.close_code or self._closed
 
     @property
-    def local_address(self):
+    def local_address(self) -> str:
         return f"{self.prefix}{self.sock.parsed.netloc}"
 
     @property
-    def peer_address(self):
+    def peer_address(self) -> str:
         return f"{self.prefix}{self.sock.parsed.netloc}"
 
     def _read_extra(self):

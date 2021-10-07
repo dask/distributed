@@ -6,6 +6,7 @@ import os
 import random
 from contextlib import suppress
 from time import sleep
+from unittest import mock
 
 import psutil
 import pytest
@@ -16,6 +17,7 @@ from tlz import first, valmap
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.utils import tmpfile
 
 from distributed import Nanny, Scheduler, Worker, rpc, wait, worker
 from distributed.compatibility import LINUX, WINDOWS
@@ -23,7 +25,7 @@ from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.utils import TimeoutError, parse_ports, tmpfile
+from distributed.utils import TimeoutError, parse_ports
 from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
 pytestmark = pytest.mark.ci1
@@ -304,7 +306,7 @@ async def test_throttle_outgoing_connections(c, s, a, *workers):
         # This is is very fragile, since a refactor of memory_monitor to
         # remove _memory_monitoring will break this test.
         dask_worker._memory_monitoring = True
-        dask_worker.paused = True
+        dask_worker.status = Status.paused
         dask_worker.outgoing_current_count = 2
 
     await c.run(pause, workers=[a.address])
@@ -373,6 +375,34 @@ async def test_environment_variable(c, s):
     results = await c.run(lambda: os.environ["FOO"])
     assert results == {a.worker_address: "123", b.worker_address: "456"}
     await asyncio.gather(a.close(), b.close())
+
+
+@gen_cluster(nthreads=[], client=True)
+async def test_environment_variable_by_config(c, s, monkeypatch):
+
+    with dask.config.set({"distributed.nanny.environ": "456"}):
+        with pytest.raises(TypeError, match="configuration must be of type dict"):
+            Nanny(s.address, loop=s.loop, memory_limit=0)
+
+    with dask.config.set({"distributed.nanny.environ": {"FOO": "456"}}):
+
+        # precedence
+        # kwargs > env var > config
+
+        with mock.patch.dict(os.environ, {"FOO": "BAR"}, clear=True):
+            a = Nanny(s.address, loop=s.loop, memory_limit=0, env={"FOO": "123"})
+            x = Nanny(s.address, loop=s.loop, memory_limit=0)
+
+        b = Nanny(s.address, loop=s.loop, memory_limit=0)
+
+        await asyncio.gather(a, b, x)
+        results = await c.run(lambda: os.environ["FOO"])
+        assert results == {
+            a.worker_address: "123",
+            b.worker_address: "456",
+            x.worker_address: "BAR",
+        }
+        await asyncio.gather(a.close(), b.close(), x.close())
 
 
 @gen_cluster(
@@ -569,7 +599,7 @@ async def test_failure_during_worker_initialization(s):
     assert "Restarting worker" not in logs.getvalue()
 
 
-@gen_cluster(client=True, Worker=Nanny, timeout=10000000)
+@gen_cluster(client=True, Worker=Nanny)
 async def test_environ_plugin(c, s, a, b):
     from dask.distributed import Environ
 

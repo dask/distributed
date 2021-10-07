@@ -2,6 +2,7 @@ import asyncio
 import itertools
 import logging
 import random
+import sys
 import weakref
 from operator import mul
 from time import sleep
@@ -12,7 +13,7 @@ from tlz import concat, sliding_window
 import dask
 
 from distributed import Nanny, Worker, wait, worker_client
-from distributed.compatibility import LINUX
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.config import config
 from distributed.metrics import time
 from distributed.scheduler import key_split
@@ -152,7 +153,7 @@ async def test_dont_steal_fast_tasks_compute_time(c, s, *workers):
     xs = c.map(do_nothing, range(10), workers=workers[0].address)
     await wait(xs)
 
-    futures = c.map(do_nothing, range(1000), y=xs)
+    futures = c.map(do_nothing, range(100), y=xs)
 
     await wait(futures)
 
@@ -362,10 +363,8 @@ async def test_steal_resource_restrictions(c, s, a):
 
     b = await Worker(s.address, loop=s.loop, nthreads=1, resources={"A": 4})
 
-    start = time()
     while not b.tasks or len(a.tasks) == 101:
         await asyncio.sleep(0.01)
-        assert time() < start + 3
 
     assert len(b.tasks) > 0
     assert len(a.tasks) < 101
@@ -529,7 +528,7 @@ async def assert_balanced(inp, expected, c, s, *workers):
             await asyncio.sleep(0.001)
 
         result = [
-            sorted([int(key_split(k)) for k in s.processing[w.address]], reverse=True)
+            sorted((int(key_split(k)) for k in s.processing[w.address]), reverse=True)
             for w in workers
         ]
 
@@ -645,6 +644,12 @@ async def test_steal_communication_heavy_tasks(c, s, a, b):
     assert s.processing[b.address]
 
 
+@pytest.mark.flaky(
+    condition=WINDOWS and sys.version_info[:2] == (3, 7),
+    reruns=20,
+    reruns_delay=5,
+    reason="b.in_flight_tasks == 1",
+)
 @gen_cluster(client=True)
 async def test_steal_twice(c, s, a, b):
     x = c.submit(inc, 1, workers=a.address)
@@ -656,7 +661,7 @@ async def test_steal_twice(c, s, a, b):
         await asyncio.sleep(0.01)
 
     # Army of new workers arrives to help
-    workers = await asyncio.gather(*[Worker(s.address, loop=s.loop) for _ in range(20)])
+    workers = await asyncio.gather(*(Worker(s.address, loop=s.loop) for _ in range(20)))
 
     await wait(futures)
 
@@ -673,31 +678,34 @@ async def test_steal_twice(c, s, a, b):
     assert b.in_flight_tasks == 0
 
     await c._close()
-    await asyncio.gather(*[w.close() for w in workers])
+    await asyncio.gather(*(w.close() for w in workers))
 
 
 @gen_cluster(client=True)
 async def test_dont_steal_already_released(c, s, a, b):
     future = c.submit(slowinc, 1, delay=0.05, workers=a.address)
     key = future.key
-    await asyncio.sleep(0.05)
-    assert key in a.tasks
+    while key not in a.tasks:
+        await asyncio.sleep(0.05)
+
     del future
-    await asyncio.sleep(0.05)
-    # In case the system is slow (e.g. network) ensure that nothing bad happens
-    # if the key was already released
-    assert key not in a.tasks
-    a.steal_request(key)
-    assert a.batched_stream.buffer == [
-        {"op": "steal-response", "key": key, "state": None}
-    ]
+
+    while key in a.tasks and a.tasks[key].state != "released":
+        await asyncio.sleep(0.05)
+
+    a.handle_steal_request(key)
+    assert len(a.batched_stream.buffer) == 1
+    msg = a.batched_stream.buffer[0]
+    assert msg["op"] == "steal-response"
+    assert msg["key"] == key
+    assert msg["state"] in [None, "released"]
+
     with captured_logger(
         logging.getLogger("distributed.stealing"), level=logging.DEBUG
     ) as stealing_logs:
-        await asyncio.sleep(0.05)
-
-    logs = stealing_logs.getvalue()
-    assert f"Key released between request and confirm: {key}" in logs
+        msg = f"Key released between request and confirm: {key}"
+        while msg not in stealing_logs.getvalue():
+            await asyncio.sleep(0.05)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)

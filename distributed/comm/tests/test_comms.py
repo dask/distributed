@@ -1199,8 +1199,12 @@ async def check_repr(a, b):
     assert "closed" not in repr(b)
     await a.close()
     assert "closed" in repr(a)
+    assert a.local_address in repr(a)
+    assert b.peer_address in repr(a)
     await b.close()
     assert "closed" in repr(b)
+    assert a.local_address in repr(b)
+    assert b.peer_address in repr(b)
 
 
 @pytest.mark.asyncio

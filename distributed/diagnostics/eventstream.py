@@ -11,6 +11,7 @@ class EventStream(SchedulerPlugin):
     """Maintain a copy of worker events"""
 
     def __init__(self, scheduler=None):
+        self.name = "EventStream"
         self.buffer = []
         if scheduler:
             scheduler.add_plugin(self)
@@ -28,7 +29,7 @@ def swap_buffer(scheduler, es):
 
 
 def teardown(scheduler, es):
-    scheduler.remove_plugin(es)
+    scheduler.remove_plugin(name=es.name)
 
 
 async def eventstream(address, interval):
