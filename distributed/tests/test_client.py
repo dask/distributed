@@ -57,7 +57,7 @@ from distributed.client import (
     wait,
 )
 from distributed.comm import CommClosedError
-from distributed.compatibility import LINUX, MACOS, WINDOWS
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import Status
 from distributed.metrics import time
 from distributed.objects import HasWhat, WhoHas
