@@ -508,6 +508,7 @@ class WorkerState:
     _occupancy: double
     _pid: Py_ssize_t
     _processing: dict
+    _long_running: set
     _resources: dict
     _services: dict
     _status: Status
@@ -536,6 +537,7 @@ class WorkerState:
         "_occupancy",
         "_pid",
         "_processing",
+        "_long_running",
         "_resources",
         "_services",
         "_status",
@@ -585,6 +587,7 @@ class WorkerState:
         self._actors = set()
         self._has_what = {}
         self._processing = {}
+        self._long_running = set()
         self._executing = {}
         self._resources = {}
         self._used_resources = {}
@@ -2667,8 +2670,10 @@ class SchedulerState:
             total_duration = duration + comm
         old = ws._processing.get(ts, 0)
         ws._processing[ts] = total_duration
-        self._total_occupancy += total_duration - old
-        ws._occupancy += total_duration - old
+
+        if ts not in ws._long_running:
+            self._total_occupancy += total_duration - old
+            ws._occupancy += total_duration - old
 
         return total_duration
 
@@ -5525,7 +5530,10 @@ class Scheduler(SchedulerState, ServerNode):
         occ: double = ws._processing[ts]
         ws._occupancy -= occ
         parent._total_occupancy -= occ
+        # Cannot remove from processing since we're using this for things like
+        # idleness detection
         ws._processing[ts] = 0
+        ws._long_running.add(ts)
         self.check_idle_saturated(ws)
 
     def handle_worker_status_change(self, status: str, worker: str) -> None:
