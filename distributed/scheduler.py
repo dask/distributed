@@ -5498,12 +5498,11 @@ class Scheduler(SchedulerState, ServerNode):
 
         Parameters
         ----------
+        name : str
+            Name of the plugin to remove
         plugin : SchedulerPlugin
             Deprecated; use `name` argument instead. Instance of a
             SchedulerPlugin class to remove;
-        name : str
-            Name of the plugin to remove
-
         """
         # TODO: Remove this block of code once removing plugins by value is disabled
         if bool(name) == bool(plugin):
