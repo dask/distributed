@@ -1377,8 +1377,6 @@ class Client:
 
         self.status = "closed"
 
-    _shutdown = _close
-
     def close(self, timeout=no_default):
         """Close this client
 
