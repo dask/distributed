@@ -162,7 +162,7 @@ def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
 one_byte_carr = ctypes.c_byte * 1
 # ^ length and type don't matter, just use it to get the address of the first byte
 
-    
+
 def address_of_memoryview(mv: memoryview) -> int:
     """
     Get the pointer to the first byte of a memoryview's data.
