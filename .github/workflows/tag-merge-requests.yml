@@ -9,11 +9,13 @@ jobs:
     steps:
       - name: File Changes Action
         uses: trilom/file-changes-action@v1.2.4
+        continue-on-error: true
         with:
           prNumber: ${{ github.event.number }}
 
       - name: update-tags
         uses: actions/github-script@v5
+        continue-on-error: true
         with:
           script: |
             const fs = require('fs');
