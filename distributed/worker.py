@@ -2514,10 +2514,11 @@ class Worker(ServerNode):
                                 cause = dependent
                                 found_dependent_for_cause = True
                                 break
+
+                if not to_gather_keys:
+                    return
                 # Keep namespace clean since this func is long and has many
                 # dep*, *ts* variables
-
-                assert cause is not None
                 del to_gather, dependency_key, dependency_ts
 
                 self.log.append(
@@ -2618,7 +2619,7 @@ class Worker(ServerNode):
                     )
 
                 recommendations: dict[TaskState, str | tuple] = {}
-                deps_to_iter = self.in_flight_workers.pop(worker)
+                deps_to_iter = set(self.in_flight_workers.pop(worker)) & to_gather_keys
 
                 for d in deps_to_iter:
                     ts = self.tasks.get(d)
