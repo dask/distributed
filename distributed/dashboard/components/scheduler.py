@@ -153,14 +153,14 @@ class Occupancy(DashboardComponent):
             idle_workers = self.scheduler.idle
             saturated_workers = self.scheduler.saturated
 
-            color = [
-                "red"
-                if ws in idle_workers
-                else "green"
-                if ws in saturated_workers
-                else "blue"
-                for ws in workers
-            ]
+            color = []
+            for ws in workers:
+                if ws in self.scheduler.idle:
+                    color.append("red")
+                elif ws in self.scheduler.saturated:
+                    color.append("green")
+                else:
+                    color.append("blue")
 
             if total:
                 self.root.title.text = (
@@ -1021,17 +1021,17 @@ class SystemTimeseries(DashboardComponent):
     def get_data(self):
         workers = self.scheduler.workers.values()
 
-        read_bytes = sum(ws.metrics["read_bytes"] for ws in workers)
-        write_bytes = sum(ws.metrics["write_bytes"] for ws in workers)
-        cpu = sum(ws.metrics["cpu"] for ws in workers)
-        memory = sum(ws.metrics["memory"] for ws in workers)
-        read_bytes_disk = sum(ws.metrics["read_bytes_disk"] for ws in workers)
-        write_bytes_disk = sum(ws.metrics["write_bytes_disk"] for ws in workers)
-        time = sum(ws.metrics["time"] for ws in workers)
+        read_bytes = sum([ws.metrics["read_bytes"] for ws in workers])
+        write_bytes = sum([ws.metrics["write_bytes"] for ws in workers])
+        cpu = sum([ws.metrics["cpu"] for ws in workers])
+        memory = sum([ws.metrics["memory"] for ws in workers])
+        read_bytes_disk = sum([ws.metrics["read_bytes_disk"] for ws in workers])
+        write_bytes_disk = sum([ws.metrics["write_bytes_disk"] for ws in workers])
+        worker_time = sum([ws.metrics["time"] for ws in workers])
 
         result = {
             # use `or` to avoid ZeroDivision when no workers
-            "time": [time / (len(workers) or 1) * 1000],
+            "time": [worker_time / (len(workers) or 1) * 1000],
             "read_bytes": [read_bytes / (len(workers) or 1)],
             "write_bytes": [write_bytes / (len(workers) or 1)],
             "cpu": [cpu / (len(workers) or 1)],
