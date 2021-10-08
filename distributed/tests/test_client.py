@@ -30,7 +30,7 @@ import dask
 import dask.bag as db
 from dask import delayed
 from dask.optimization import SubgraphCallable
-from dask.utils import stringify, tmpfile
+from dask.utils import parse_timedelta, stringify, tmpfile
 
 from distributed import (
     CancelledError,
@@ -5130,7 +5130,9 @@ async def test_long_running_not_in_occupancy(c, s, a):
     f = c.submit(long_running, l)
     while f.key not in s.tasks:
         await asyncio.sleep(0)
-    assert s.workers[a.address].occupancy == s.UNKNOWN_TASK_DURATION
+    assert s.workers[a.address].occupancy == parse_timedelta(
+        dask.config.get("distributed.scheduler.unknown-task-duration")
+    )
 
     while s.workers[a.address].occupancy:
         await asyncio.sleep(0.01)
