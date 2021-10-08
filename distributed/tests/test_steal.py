@@ -1020,7 +1020,7 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
     if victim_ts.who_has != {wsC}:
         msgs = steal.story(victim_ts)
         assert len(msgs) == 2
-        assert all(msg[1][0] == "already-aborted" for msg in msgs)
+        assert all(msg[0] == "already-aborted" for msg in msgs), msgs
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
