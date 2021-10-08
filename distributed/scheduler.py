@@ -5439,15 +5439,22 @@ class Scheduler(SchedulerState, ServerNode):
                 worker_comm.abort()
                 await self.remove_worker(address=worker)
 
-    def add_plugin(self, plugin=None, idempotent=False, name=None, **kwargs):
+    def add_plugin(
+        self,
+        plugin: SchedulerPlugin,
+        *,
+        idempotent: bool = False,
+        name: "str | None" = None,
+        **kwargs,
+    ):
         """Add external plugin to scheduler.
 
         See https://distributed.readthedocs.io/en/latest/plugins.html
 
-        Paramters
-        ---------
+        Parameters
+        ----------
         plugin : SchedulerPlugin
-            SchedulerPlugin class to add (can also be an instance)
+            SchedulerPlugin instance to add
         idempotent : bool
             If true, the plugin is assumed to already exist and no
             action is taken.
@@ -5456,64 +5463,83 @@ class Scheduler(SchedulerState, ServerNode):
             checked on the Plugin instance and generated if not
             discovered.
         **kwargs
-            Additional arguments passed to the `plugin` class if it is
-            not already an instance.
-
+            Deprecated; additional arguments passed to the `plugin` class if it is
+            not already an instance
         """
         if isinstance(plugin, type):
-            plugin = plugin(self, **kwargs)
+            warnings.warn(
+                "Adding plugins by class is deprecated and will be disabled in a "
+                "future release. Please add plugins by instance instead.",
+                category=FutureWarning,
+            )
+            plugin = plugin(self, **kwargs)  # type: ignore
+        elif kwargs:
+            raise ValueError("kwargs provided but plugin is already an instance")
 
         if name is None:
             name = _get_plugin_name(plugin)
 
         if name in self.plugins:
+            if idempotent:
+                return
             warnings.warn(
-                f"Scheduler already contains a plugin with name {name}; "
-                "overwriting.",
+                f"Scheduler already contains a plugin with name {name}; overwriting.",
                 category=UserWarning,
             )
 
-        if idempotent and name in self.plugins:
-            return
-
         self.plugins[name] = plugin
 
-    def remove_plugin(self, plugin=None, name=None):
+    def remove_plugin(
+        self,
+        name: "str | None" = None,
+        plugin: "SchedulerPlugin | None" = None,
+    ) -> None:
         """Remove external plugin from scheduler
 
-        Paramters
-        ---------
+        Parameters
+        ----------
+        name : str
+            Name of the plugin to remove
         plugin : SchedulerPlugin
             Deprecated; use `name` argument instead. Instance of a
             SchedulerPlugin class to remove;
-        name : str
-            Name of the plugin to remove
-
         """
+        # TODO: Remove this block of code once removing plugins by value is disabled
+        if bool(name) == bool(plugin):
+            raise ValueError("Must provide plugin or name (mutually exclusive)")
+        if isinstance(name, SchedulerPlugin):
+            # Backwards compatibility - the sig used to be (plugin, name)
+            plugin = name
+            name = None
         if plugin is not None:
             warnings.warn(
                 "Removing scheduler plugins by value is deprecated and will be disabled "
                 "in a future release. Please remove scheduler plugins by name instead.",
                 category=FutureWarning,
             )
-        if name is not None:
-            self.plugins.pop(name)
-        elif hasattr(plugin, "name"):
-            self.plugins.pop(plugin.name)
-        else:
-            # TODO: Remove this block of code once removing plugins by value is disabled
-            if plugin in list(self.plugins.values()):
-                if sum(plugin is p for p in list(self.plugins.values())) > 1:
+            if hasattr(plugin, "name"):
+                name = plugin.name
+            else:
+                names = [k for k, v in self.plugins.items() if v is plugin]
+                if not names:
                     raise ValueError(
-                        f"Multiple instances of {plugin} were found in the current scheduler "
-                        "plugins, we cannot remove this plugin."
+                        f"Could not find {plugin} among the current scheduler plugins"
                     )
-                else:
-                    warnings.warn(
-                        "Removing scheduler plugins by value is deprecated and will be disabled "
-                        "in a future release. Please remove scheduler plugins by name instead.",
-                        category=FutureWarning,
+                if len(names) > 1:
+                    raise ValueError(
+                        f"Multiple instances of {plugin} were found in the current "
+                        "scheduler plugins; we cannot remove this plugin."
                     )
+                name = names[0]
+        assert name is not None
+        # End deprecated code
+
+        try:
+            del self.plugins[name]
+        except KeyError:
+            raise ValueError(
+                f"Could not find plugin {name!r} among the current scheduler plugins"
+            )
 
     async def register_scheduler_plugin(self, comm=None, plugin=None, name=None):
         """Register a plugin on the scheduler."""
@@ -5529,7 +5555,7 @@ class Scheduler(SchedulerState, ServerNode):
         if hasattr(plugin, "start"):
             result = plugin.start(self)
             if inspect.isawaitable(result):
-                result = await result
+                await result
 
         self.add_plugin(plugin=plugin, name=name)
 
@@ -6994,7 +7020,7 @@ class Scheduler(SchedulerState, ServerNode):
         from distributed.diagnostics.task_stream import TaskStreamPlugin
 
         if TaskStreamPlugin.name not in self.plugins:
-            self.add_plugin(TaskStreamPlugin)
+            self.add_plugin(TaskStreamPlugin(self))
 
         plugin = self.plugins[TaskStreamPlugin.name]
 
@@ -7002,7 +7028,6 @@ class Scheduler(SchedulerState, ServerNode):
 
     def start_task_metadata(self, comm=None, name=None):
         plugin = CollectTaskMetaDataPlugin(scheduler=self, name=name)
-
         self.add_plugin(plugin)
 
     def stop_task_metadata(self, comm=None, name=None):
