@@ -13,7 +13,7 @@ from tornado import gen
 try:
     import ssl
 except ImportError:
-    ssl = None
+    ssl = None  # type: ignore
 
 from tlz import sliding_window
 from tornado import netutil
@@ -147,7 +147,13 @@ class TCP(Comm):
 
     max_shard_size = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
 
-    def __init__(self, stream, local_addr, peer_addr, deserialize=True):
+    def __init__(
+        self,
+        stream,
+        local_addr: str,
+        peer_addr: str,
+        deserialize: bool = True,
+    ):
         self._closed = False
         super().__init__()
         self._local_addr = local_addr
@@ -156,7 +162,7 @@ class TCP(Comm):
         self.deserialize = deserialize
         self._finalizer = weakref.finalize(self, self._get_finalizer())
         self._finalizer.atexit = False
-        self._extra = {}
+        self._extra: dict = {}
 
         ref = weakref.ref(self)
 
@@ -171,7 +177,8 @@ class TCP(Comm):
 
     def _get_finalizer(self):
         def finalize(stream=self.stream, r=repr(self)):
-            # stream is None if a StreamClosedError is raised during interpreter shutdown
+            # stream is None if a StreamClosedError is raised during interpreter
+            # shutdown
             if stream is not None and not stream.closed():
                 logger.warning(f"Closing dangling stream in {r}")
                 stream.close()
@@ -179,11 +186,11 @@ class TCP(Comm):
         return finalize
 
     @property
-    def local_address(self):
+    def local_address(self) -> str:
         return self._local_addr
 
     @property
-    def peer_address(self):
+    def peer_address(self) -> str:
         return self._peer_addr
 
     async def read(self, deserializers=None):
@@ -391,8 +398,8 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
             stream = await self.client.connect(
                 ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
             )
-            # Under certain circumstances tornado will have a closed connnection with an error and not raise
-            # a StreamClosedError.
+            # Under certain circumstances tornado will have a closed connnection with an
+            # error and not raise a StreamClosedError.
             #
             # This occurs with tornado 5.x and openssl 1.1+
             if stream.closed() and stream.error:

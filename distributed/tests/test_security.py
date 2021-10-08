@@ -3,7 +3,7 @@ from contextlib import contextmanager
 try:
     import ssl
 except ImportError:
-    ssl = None
+    ssl = None  # type: ignore
 
 import pytest
 

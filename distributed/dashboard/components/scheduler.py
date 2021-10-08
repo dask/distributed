@@ -5,6 +5,7 @@ import os
 from collections import defaultdict
 from numbers import Number
 
+import numpy as np
 from bokeh.core.properties import without_property_validation
 from bokeh.io import curdoc
 from bokeh.layouts import column, row
@@ -48,11 +49,6 @@ import dask
 from dask import config
 from dask.utils import format_bytes, format_time, key_split, parse_timedelta
 
-try:
-    import numpy as np
-except ImportError:
-    np = False
-
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
     DashboardComponent,
@@ -72,7 +68,7 @@ from distributed.utils import Log, log_errors
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
 else:
-    ExportTool = None
+    ExportTool = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -1079,9 +1075,7 @@ class ComputePerKey(DashboardComponent):
             self.scheduler = scheduler
 
             if TaskStreamPlugin.name not in self.scheduler.plugins:
-                self.scheduler.add_plugin(
-                    plugin=TaskStreamPlugin,
-                )
+                self.scheduler.add_plugin(TaskStreamPlugin(self.scheduler))
 
             compute_data = {
                 "times": [0.2, 0.1],
@@ -1243,7 +1237,7 @@ class AggregateAction(DashboardComponent):
             self.scheduler = scheduler
 
             if TaskStreamPlugin.name not in self.scheduler.plugins:
-                self.scheduler.add_plugin(plugin=TaskStreamPlugin)
+                self.scheduler.add_plugin(TaskStreamPlugin(self.scheduler))
 
             action_data = {
                 "times": [0.2, 0.1],
@@ -1769,9 +1763,7 @@ class TaskStream(DashboardComponent):
         self.offset = 0
 
         if TaskStreamPlugin.name not in self.scheduler.plugins:
-            self.scheduler.add_plugin(
-                plugin=TaskStreamPlugin,
-            )
+            self.scheduler.add_plugin(TaskStreamPlugin(self.scheduler))
         self.plugin = self.scheduler.plugins[TaskStreamPlugin.name]
 
         self.index = max(0, self.plugin.index - n_rectangles)

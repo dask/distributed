@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import gc
 import inspect
 import logging
@@ -27,7 +28,7 @@ import dask
 import dask.bag as db
 from dask import delayed
 from dask.optimization import SubgraphCallable
-from dask.utils import stringify
+from dask.utils import stringify, tmpfile
 
 from distributed import (
     CancelledError,
@@ -67,7 +68,7 @@ from distributed.scheduler import (
     Scheduler,
 )
 from distributed.sizeof import sizeof
-from distributed.utils import is_valid_xml, mp_context, sync, tmp_text, tmpfile
+from distributed.utils import is_valid_xml, mp_context, sync, tmp_text
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _UnhashableCallable,
@@ -5098,15 +5099,16 @@ async def test_secede_balances(c, s, a, b):
         total = client.submit(sum, futures).result()
         return total
 
-    futures = c.map(f, range(100))
+    futures = c.map(f, range(10), workers=[a.address])
 
     results = await c.gather(futures)
+    # We dispatch 10 tasks and every task generates 11 more tasks
+    # 10 * 11 + 10
+    assert a.executed_count + b.executed_count == 120
+    assert a.executed_count >= 10
+    assert b.executed_count > 0
 
-    assert a.executed_count + b.executed_count == 1100
-    assert a.executed_count > 200
-    assert b.executed_count > 200
-
-    assert results == [sum(map(inc, range(10)))] * 100
+    assert results == [sum(map(inc, range(10)))] * 10
 
 
 @gen_cluster(client=True)
@@ -6049,6 +6051,7 @@ async def test_futures_of_sorted(c, s, a, b):
         assert str(k) in str(f)
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "10ms"})
 async def test_profile_server(c, s, a, b):
     for i in range(5):
@@ -6858,7 +6861,8 @@ async def test_computation_object_code_client_compute(c, s, a, b):
 async def test_upload_directory(c, s, a, b, tmp_path):
     from dask.distributed import UploadDirectory
 
-    files = set(os.listdir())
+    # Be sure to exclude code coverage reports
+    files_start = {f for f in os.listdir() if not f.startswith(".coverage")}
 
     with open(tmp_path / "foo.py", "w") as f:
         f.write("x = 123")
@@ -6884,7 +6888,8 @@ async def test_upload_directory(c, s, a, b, tmp_path):
         results = await c.run(f)
         assert results[n.worker_address] == 123
 
-    assert files == set(os.listdir())  # no change
+    files_end = {f for f in os.listdir() if not f.startswith(".coverage")}
+    assert files_start == files_end  # no change
 
 
 @gen_cluster(client=True)
@@ -6911,6 +6916,16 @@ async def test_async_task(c, s, a, b):
     future = c.submit(f, 10)
     result = await future
     assert result == 11
+
+
+@gen_cluster(client=True)
+async def test_async_task_with_partial(c, s, a, b):
+    async def f(x, y):
+        return x + y + 1
+
+    future = c.submit(functools.partial(f, 1), 10)
+    result = await future
+    assert result == 12
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])

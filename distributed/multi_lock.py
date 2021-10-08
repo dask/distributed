@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import uuid
 from collections import defaultdict
-from typing import Hashable, List
+from collections.abc import Hashable
 
 from dask.utils import parse_timedelta
 
@@ -46,7 +48,7 @@ class MultiLockExtension:
 
         self.scheduler.extensions["multi_locks"] = self
 
-    def _request_locks(self, locks: List[str], id: Hashable, num_locks: int):
+    def _request_locks(self, locks: list[str], id: Hashable, num_locks: int) -> bool:
         """Request locks
 
         Parameters

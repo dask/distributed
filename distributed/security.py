@@ -5,7 +5,7 @@ import tempfile
 try:
     import ssl
 except ImportError:
-    ssl = None
+    ssl = None  # type: ignore
 
 import dask
 from dask.widgets import get_template

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from collections import defaultdict
 from collections.abc import Generator
 from typing import TYPE_CHECKING
@@ -10,10 +9,11 @@ from tornado.ioloop import PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
-from .utils import import_term
+from .metrics import time
+from .utils import import_term, log_errors
 
 if TYPE_CHECKING:
-    from .scheduler import SchedulerState, TaskState, WorkerState
+    from .scheduler import Scheduler, TaskState, WorkerState
 
 
 class ActiveMemoryManagerExtension:
@@ -31,7 +31,7 @@ class ActiveMemoryManagerExtension:
     ``distributed.scheduler.active-memory-manager``.
     """
 
-    scheduler: SchedulerState
+    scheduler: Scheduler
     policies: set[ActiveMemoryManagerPolicy]
     interval: float
 
@@ -43,7 +43,7 @@ class ActiveMemoryManagerExtension:
 
     def __init__(
         self,
-        scheduler: SchedulerState,
+        scheduler: Scheduler,
         # The following parameters are exposed so that one may create, run, and throw
         # away on the fly a specialized manager, separate from the main one.
         policies: set[ActiveMemoryManagerPolicy] | None = None,
@@ -115,43 +115,67 @@ class ActiveMemoryManagerExtension:
         """Run all policies once and asynchronously (fire and forget) enact their
         recommendations to replicate/drop keys
         """
-        # This should never fail since this is a synchronous method
-        assert not hasattr(self, "pending")
+        with log_errors():
+            # This should never fail since this is a synchronous method
+            assert not hasattr(self, "pending")
 
-        self.pending = defaultdict(lambda: (set(), set()))
-        self.workers_memory = {
-            w: w.memory.optimistic for w in self.scheduler.workers.values()
-        }
-        try:
-            # populate self.pending
-            self._run_policies()
+            self.pending = defaultdict(lambda: (set(), set()))
+            self.workers_memory = {
+                w: w.memory.optimistic for w in self.scheduler.workers.values()
+            }
+            try:
+                # populate self.pending
+                self._run_policies()
 
-            drop_by_worker = defaultdict(set)
-            repl_by_worker = defaultdict(dict)
-            for ts, (pending_repl, pending_drop) in self.pending.items():
-                if not ts.who_has:
-                    continue
-                who_has = [ws_snd.address for ws_snd in ts.who_has - pending_drop]
-                assert who_has  # Never drop the last replica
-                for ws_rec in pending_repl:
-                    assert ws_rec not in ts.who_has
-                    repl_by_worker[ws_rec.address][ts.key] = who_has
-                for ws in pending_drop:
-                    assert ws in ts.who_has
-                    drop_by_worker[ws.address].add(ts.key)
+                drop_by_worker: defaultdict[WorkerState, set[TaskState]] = defaultdict(
+                    set
+                )
+                repl_by_worker: defaultdict[
+                    WorkerState, dict[TaskState, set[WorkerState]]
+                ] = defaultdict(dict)
 
-            # Fire-and-forget enact recommendations from policies
-            # This is temporary code, waiting for
-            # https://github.com/dask/distributed/pull/5046
-            for addr, who_has in repl_by_worker.items():
-                asyncio.create_task(self.scheduler.gather_on_worker(addr, who_has))
-            for addr, keys in drop_by_worker.items():
-                asyncio.create_task(self.scheduler.delete_worker_data(addr, keys))
-            # End temporary code
+                for ts, (pending_repl, pending_drop) in self.pending.items():
+                    if not ts.who_has:
+                        continue
+                    who_has = {ws_snd.address for ws_snd in ts.who_has - pending_drop}
+                    assert who_has  # Never drop the last replica
+                    for ws_rec in pending_repl:
+                        assert ws_rec not in ts.who_has
+                        repl_by_worker[ws_rec][ts] = who_has
+                    for ws in pending_drop:
+                        assert ws in ts.who_has
+                        drop_by_worker[ws].add(ts)
 
-        finally:
-            del self.workers_memory
-            del self.pending
+                # Fire-and-forget enact recommendations from policies
+                stimulus_id = str(time())
+                for ws_rec, ts_to_who_has in repl_by_worker.items():
+                    self.scheduler.stream_comms[ws_rec.address].send(
+                        {
+                            "op": "acquire-replicas",
+                            "keys": [ts.key for ts in ts_to_who_has],
+                            "stimulus_id": "acquire-replicas-" + stimulus_id,
+                            "priorities": {ts.key: ts.priority for ts in ts_to_who_has},
+                            "who_has": {ts.key: v for ts, v in ts_to_who_has.items()},
+                        },
+                    )
+
+                for ws, tss in drop_by_worker.items():
+                    # The scheduler immediately forgets about the replica and suggests
+                    # the worker to drop it. The worker may refuse, at which point it
+                    # will send back an add-keys message to reinstate it.
+                    for ts in tss:
+                        self.scheduler.remove_replica(ts, ws)
+                    self.scheduler.stream_comms[ws.address].send(
+                        {
+                            "op": "remove-replicas",
+                            "keys": [ts.key for ts in tss],
+                            "stimulus_id": "remove-replicas-" + stimulus_id,
+                        }
+                    )
+
+            finally:
+                del self.workers_memory
+                del self.pending
 
     def _run_policies(self) -> None:
         """Sequentially run ActiveMemoryManagerPolicy.run() for all registered policies,
@@ -215,7 +239,7 @@ class ActiveMemoryManagerExtension:
         candidates -= pending_repl
         if not candidates:
             return None
-        return min(candidates, key=self.workers_memory.get)
+        return min(candidates, key=self.workers_memory.__getitem__)
 
     def _find_dropper(
         self,
@@ -244,7 +268,7 @@ class ActiveMemoryManagerExtension:
         candidates -= {waiter_ts.processing_on for waiter_ts in ts.waiters}
         if not candidates:
             return None
-        return max(candidates, key=self.workers_memory.get)
+        return max(candidates, key=self.workers_memory.__getitem__)
 
 
 class ActiveMemoryManagerPolicy:
@@ -303,13 +327,7 @@ class ReduceReplicas(ActiveMemoryManagerPolicy):
     """
 
     def run(self):
-        # TODO this is O(n) to the total number of in-memory tasks on the cluster; it
-        #      could be made faster by automatically attaching it to a TaskState when it
-        #      goes above one replica and detaching it when it drops below two.
-        for ts in self.manager.scheduler.tasks.values():
-            if len(ts.who_has) < 2:
-                continue
-
+        for ts in self.manager.scheduler.replicated_tasks:
             desired_replicas = 1  # TODO have a marker on TaskState
 
             # If a dependent task has not been assigned to a worker yet, err on the side

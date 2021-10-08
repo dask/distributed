@@ -174,7 +174,7 @@ def test_transports_tcp_port():
 
 
 class LocalTest(ClusterTest, unittest.TestCase):
-    Cluster = LocalCluster
+    Cluster = LocalCluster  # type: ignore
     kwargs = {"silence_logs": False, "dashboard_address": ":0", "processes": False}
 
 
