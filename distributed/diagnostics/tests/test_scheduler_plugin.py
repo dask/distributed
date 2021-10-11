@@ -29,8 +29,11 @@ async def test_simple(c, s, a, b):
     await z
 
     assert counter.count == 3
-    s.remove_plugin(name="counter")
+    s.remove_plugin("counter")
     assert counter not in s.plugins
+
+    with pytest.raises(ValueError, match="Could not find plugin 'counter'") as e:
+        s.remove_plugin("counter")
 
 
 @gen_cluster(nthreads=[])
@@ -67,7 +70,7 @@ async def test_add_remove_worker(s):
     ]
 
     events[:] = []
-    s.remove_plugin(name=plugin.name)
+    s.remove_plugin(plugin.name)
     a = await Worker(s.address)
     await a.close()
     assert events == []
@@ -104,7 +107,7 @@ async def test_async_add_remove_worker(s):
     }
 
     events[:] = []
-    s.remove_plugin(name=plugin.name)
+    s.remove_plugin(plugin.name)
     async with Worker(s.address):
         pass
     assert events == []
@@ -122,6 +125,19 @@ async def test_async_add_remove_worker(s):
 
     msg = str(excinfo.value)
     assert "Multiple instances of" in msg
+
+
+@gen_cluster(client=True)
+async def test_add_by_type(c, s, a, b):
+    class MyPlugin(SchedulerPlugin):
+        def __init__(self, scheduler):
+            self.scheduler = scheduler
+
+    with pytest.warns(FutureWarning, match="Adding plugins by class is deprecated"):
+        s.add_plugin(MyPlugin)
+
+    inst = next(iter(p for p in s.plugins.values() if isinstance(p, MyPlugin)))
+    assert inst.scheduler is s
 
 
 @gen_test()

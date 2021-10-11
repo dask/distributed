@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from distributed import Worker, WorkerPlugin
@@ -273,6 +275,9 @@ async def test_WorkerPlugin_overwrite(c, s, w):
 
     await c.submit(inc, 0)
     assert w.foo == 123
+
+    while s.tasks or w.tasks:
+        await asyncio.sleep(0.01)
 
     class MyCustomPlugin(WorkerPlugin):
         name = "custom"
