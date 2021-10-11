@@ -77,7 +77,7 @@ async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=No
             for worker, c in coroutines.items():
                 try:
                     r = await c
-                except EnvironmentError:
+                except OSError:
                     missing_workers.add(worker)
                 except ValueError as e:
                     logger.info(
@@ -112,7 +112,7 @@ class WrappedKey:
         self.key = key
 
     def __repr__(self):
-        return "%s('%s')" % (type(self).__name__, self.key)
+        return f"{type(self).__name__}('{self.key}')"
 
 
 _round_robin_counter = [0]

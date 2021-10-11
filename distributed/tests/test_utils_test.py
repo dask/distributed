@@ -1,4 +1,5 @@
 import asyncio
+import pathlib
 import socket
 import threading
 from contextlib import contextmanager
@@ -8,20 +9,17 @@ import pytest
 from tornado import gen
 
 from distributed import Client, Nanny, Scheduler, Worker, config, default_client
-from distributed.core import rpc
+from distributed.core import Server, rpc
 from distributed.metrics import time
 from distributed.utils import get_ip
-from distributed.utils_test import (  # noqa: F401
-    cleanup,
+from distributed.utils_test import (
+    _LockedCommPool,
+    _UnhashableCallable,
     cluster,
     gen_cluster,
     gen_test,
     inc,
-    loop,
     new_config,
-    security,
-    tls_client,
-    tls_cluster,
     tls_only_security,
     wait_for_port,
 )
@@ -48,6 +46,47 @@ async def test_gen_cluster(c, s, a, b):
         assert isinstance(w, Worker)
     assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
     assert await c.submit(lambda: 123) == 123
+
+
+@gen_cluster(client=True)
+async def test_gen_cluster_pytest_fixture(c, s, a, b, tmp_path):
+    assert isinstance(tmp_path, pathlib.Path)
+    assert isinstance(c, Client)
+    assert isinstance(s, Scheduler)
+    for w in [a, b]:
+        assert isinstance(w, Worker)
+
+
+@pytest.mark.parametrize("foo", [True])
+@gen_cluster(client=True)
+async def test_gen_cluster_parametrized(c, s, a, b, foo):
+    assert foo is True
+    assert isinstance(c, Client)
+    assert isinstance(s, Scheduler)
+    for w in [a, b]:
+        assert isinstance(w, Worker)
+
+
+@pytest.mark.parametrize("foo", [True])
+@pytest.mark.parametrize("bar", ["a", "b"])
+@gen_cluster(client=True)
+async def test_gen_cluster_multi_parametrized(c, s, a, b, foo, bar):
+    assert foo is True
+    assert bar in ("a", "b")
+    assert isinstance(c, Client)
+    assert isinstance(s, Scheduler)
+    for w in [a, b]:
+        assert isinstance(w, Worker)
+
+
+@pytest.mark.parametrize("foo", [True])
+@gen_cluster(client=True)
+async def test_gen_cluster_parametrized_variadic_workers(c, s, *workers, foo):
+    assert foo is True
+    assert isinstance(c, Client)
+    assert isinstance(s, Scheduler)
+    for w in workers:
+        assert isinstance(w, Worker)
 
 
 @gen_cluster(
@@ -104,7 +143,7 @@ def test_gen_cluster_cleans_up_client(loop):
     assert not dask.config.get("get", None)
 
 
-@gen_cluster(client=False)
+@gen_cluster()
 async def test_gen_cluster_without_client(s, a, b):
     assert isinstance(s, Scheduler)
     for w in [a, b]:
@@ -216,7 +255,7 @@ def test_lingering_client():
         default_client()
 
 
-def test_lingering_client(loop):
+def test_lingering_client_2(loop):
     with cluster() as (s, [a, b]):
         client = Client(s["address"], loop=loop)
 
@@ -228,5 +267,109 @@ def test_tls_cluster(tls_client):
 
 @pytest.mark.asyncio
 async def test_tls_scheduler(security, cleanup):
-    async with Scheduler(security=security, host="localhost") as s:
+    async with Scheduler(
+        security=security, host="localhost", dashboard_address=":0"
+    ) as s:
         assert s.address.startswith("tls")
+
+
+def test__UnhashableCallable():
+    func = _UnhashableCallable()
+    assert func(1) == 2
+    with pytest.raises(TypeError, match="unhashable"):
+        hash(func)
+
+
+class MyServer(Server):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.handlers["ping"] = self.pong
+        self.counter = 0
+
+    def pong(self, comm):
+        self.counter += 1
+        return "pong"
+
+
+@pytest.mark.asyncio
+async def test_locked_comm_drop_in_replacement(loop):
+
+    a = await MyServer({})
+    await a.listen(0)
+
+    read_event = asyncio.Event()
+    read_event.set()
+    read_queue = asyncio.Queue()
+    original_pool = a.rpc
+    a.rpc = _LockedCommPool(original_pool, read_event=read_event, read_queue=read_queue)
+
+    b = await MyServer({})
+    await b.listen(0)
+    # Event is set, the pool works like an ordinary pool
+    res = await a.rpc(b.address).ping()
+    assert await read_queue.get() == (b.address, "pong")
+    assert res == "pong"
+    assert b.counter == 1
+
+    read_event.clear()
+    # Can also be used without a lock to intercept network traffic
+    a.rpc = _LockedCommPool(original_pool, read_queue=read_queue)
+    a.rpc.remove(b.address)
+    res = await a.rpc(b.address).ping()
+    assert await read_queue.get() == (b.address, "pong")
+
+
+@pytest.mark.asyncio
+async def test_locked_comm_intercept_read(loop):
+
+    a = await MyServer({})
+    await a.listen(0)
+    b = await MyServer({})
+    await b.listen(0)
+
+    read_event = asyncio.Event()
+    read_queue = asyncio.Queue()
+    a.rpc = _LockedCommPool(a.rpc, read_event=read_event, read_queue=read_queue)
+
+    async def ping_pong():
+        return await a.rpc(b.address).ping()
+
+    fut = asyncio.create_task(ping_pong())
+
+    # We didn't block the write but merely the read. The remove should have
+    # received the message and responded already
+    while not b.counter:
+        await asyncio.sleep(0.001)
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(asyncio.shield(fut), 0.01)
+
+    assert await read_queue.get() == (b.address, "pong")
+    read_event.set()
+    assert await fut == "pong"
+
+
+@pytest.mark.asyncio
+async def test_locked_comm_intercept_write(loop):
+
+    a = await MyServer({})
+    await a.listen(0)
+    b = await MyServer({})
+    await b.listen(0)
+
+    write_event = asyncio.Event()
+    write_queue = asyncio.Queue()
+    a.rpc = _LockedCommPool(a.rpc, write_event=write_event, write_queue=write_queue)
+
+    async def ping_pong():
+        return await a.rpc(b.address).ping()
+
+    fut = asyncio.create_task(ping_pong())
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(asyncio.shield(fut), 0.01)
+    # Write was blocked. The remote hasn't received the message, yet
+    assert b.counter == 0
+    assert await write_queue.get() == (b.address, {"op": "ping", "reply": True})
+    write_event.set()
+    assert await fut == "pong"

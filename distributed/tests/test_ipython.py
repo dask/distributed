@@ -4,7 +4,7 @@ import pytest
 from tlz import first
 
 from distributed import Client
-from distributed.utils_test import cluster, loop, mock_ipython, zmq_ctx  # noqa F401
+from distributed.utils_test import cluster, mock_ipython
 
 
 def need_functional_ipython(func):
@@ -25,9 +25,8 @@ def test_start_ipython_workers(loop, zmq_ctx):
         with Client(s["address"], loop=loop) as e:
             info_dict = e.start_ipython_workers()
             info = first(info_dict.values())
-            key = info.pop("key")
-            kc = BlockingKernelClient(**info)
-            kc.session.key = key
+            kc = BlockingKernelClient()
+            kc.load_connection_info(info)
             kc.start_channels()
             kc.wait_for_ready(timeout=10)
             msg_id = kc.execute("worker")
@@ -45,9 +44,8 @@ def test_start_ipython_scheduler(loop, zmq_ctx):
     with cluster(1) as (s, [a]):
         with Client(s["address"], loop=loop) as e:
             info = e.start_ipython_scheduler()
-            key = info.pop("key")
-            kc = BlockingKernelClient(**info)
-            kc.session.key = key
+            kc = BlockingKernelClient()
+            kc.load_connection_info(info)
             kc.start_channels()
             msg_id = kc.execute("scheduler")
             reply = kc.get_shell_msg(timeout=10)

@@ -5,20 +5,17 @@
 
 """Implements ThreadPoolExecutor."""
 
+from __future__ import annotations
+
 __author__ = "Brian Quinlan (brian@sweetapp.com)"
 
 import atexit
 import itertools
-from concurrent.futures import _base
-
-try:
-    import queue
-except ImportError:
-    import Queue as queue
-
 import os
+import queue
 import threading
 import weakref
+from concurrent.futures import _base
 
 # Workers are created as daemon threads. This is done to allow the interpreter
 # to exit when there are still idle threads in a ThreadPoolExecutor's thread
@@ -34,7 +31,9 @@ import weakref
 # workers to exit when their work queues are empty and then waits until the
 # threads finish.
 
-_threads_queues = weakref.WeakKeyDictionary()
+_threads_queues: weakref.WeakKeyDictionary[
+    threading.Thread, queue.Queue
+] = weakref.WeakKeyDictionary()
 _shutdown = False
 
 
@@ -55,20 +54,20 @@ class WorkerThreadInterrupt(threading.ThreadError):
     pass
 
 
-def _async_raise(tid, exctype=WorkerThreadInterrupt):
+def _async_raise(tid: int, exctype: BaseException = WorkerThreadInterrupt):
     """raise exception in given thread"""
     import ctypes
 
-    if not issubclass(exctype, Exception):
+    if not issubclass(exctype, BaseException):
         raise TypeError("Must pass an exception type")
     res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
         ctypes.c_long(tid), ctypes.py_object(exctype)
     )
     if res == 0:
         raise threading.ThreadError("No thread got set")
-    elif res != 1:
+    elif res != 1:  # pragma: no cover
         # if res>1, somehow more than one thread was set, so immediately roll
-        # back and raise
+        # back and raise. Should never happen.
         ctypes.pythonapi.PyThreadState_SetAsyncExc(tid, 0)
         raise threading.ThreadError("PyThreadState_SetAsyncExc failed")
 

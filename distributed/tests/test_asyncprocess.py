@@ -8,6 +8,7 @@ import weakref
 from datetime import timedelta
 from time import sleep
 
+import psutil
 import pytest
 from tornado import gen
 from tornado.locks import Event
@@ -49,7 +50,6 @@ def threads_info(q):
     q.put(threading.current_thread().name)
 
 
-@pytest.mark.xfail()
 @nodebug
 @gen_test()
 async def test_simple():
@@ -281,13 +281,9 @@ async def test_child_main_thread():
     q._writer.close()
 
 
-@pytest.mark.skipif(
-    sys.platform.startswith("win"), reason="num_fds not supported on windows"
-)
+@pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @gen_test()
 async def test_num_fds():
-    psutil = pytest.importorskip("psutil")
-
     # Warm up
     proc = AsyncProcess(target=exit_now)
     proc.daemon = True
@@ -304,11 +300,8 @@ async def test_num_fds():
     assert not proc.is_alive()
     assert proc.exitcode == 0
 
-    start = time()
     while p.num_fds() > before:
-        await asyncio.sleep(0.1)
-        print("fds:", before, p.num_fds())
-        assert time() < start + 10
+        await asyncio.sleep(0.01)
 
 
 @gen_test()
@@ -362,7 +355,7 @@ def _parent_process(child_pipe):
 
     with pristine_loop() as loop:
         try:
-            loop.run_sync(parent_process_coroutine(), timeout=10)
+            loop.run_sync(parent_process_coroutine, timeout=10)
         finally:
             loop.stop()
 
@@ -407,10 +400,8 @@ def test_asyncprocess_child_teardown_on_parent_exit():
         # test failure.
         try:
             readable = children_alive.poll(short_timeout)
-        except EnvironmentError:
-            # Windows can raise BrokenPipeError. EnvironmentError is caught for
-            # Python2/3 portability.
-            assert sys.platform.startswith("win"), "should only raise on windows"
+        except BrokenPipeError:
+            assert WINDOWS, "should only raise on windows"
             # Broken pipe implies closed, which is readable.
             readable = True
 
@@ -424,16 +415,14 @@ def test_asyncprocess_child_teardown_on_parent_exit():
             result = children_alive.recv()
         except EOFError:
             pass  # Test passes.
-        except EnvironmentError:
-            # Windows can raise BrokenPipeError. EnvironmentError is caught for
-            # Python2/3 portability.
-            assert sys.platform.startswith("win"), "should only raise on windows"
+        except BrokenPipeError:
+            assert WINDOWS, "should only raise on windows"
             # Test passes.
         else:
             # Oops, children_alive read something. It should be closed. If
             # something was read, it's a message from the child telling us they
             # are still alive!
-            raise RuntimeError("unreachable: {}".format(result))
+            raise RuntimeError(f"unreachable: {result}")
 
     finally:
         # Cleanup.

@@ -1,8 +1,10 @@
 import struct
 
+import dask
+
 from ..utils import nbytes
 
-BIG_BYTES_SHARD_SIZE = 2 ** 26
+BIG_BYTES_SHARD_SIZE = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
 
 
 msgpack_opts = {
@@ -23,6 +25,7 @@ def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
     >>> frame_split_size([b'12345', b'678'], n=3)  # doctest: +SKIP
     [b'123', b'45', b'678']
     """
+    n = n or BIG_BYTES_SHARD_SIZE
     frame = memoryview(frame)
 
     if frame.nbytes <= n:

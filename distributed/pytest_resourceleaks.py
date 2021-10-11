@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 A pytest plugin to trace resource leaks.
 """
@@ -67,7 +66,7 @@ def pytest_configure(config):
             leaks = leaks.split(",")
         unknown = sorted(set(leaks) - set(all_checkers))
         if unknown:
-            raise ValueError("unknown resources: %r" % (unknown,))
+            raise ValueError(f"unknown resources: {unknown!r}")
 
         checkers = [all_checkers[leak]() for leak in leaks]
         checker = LeakChecker(
@@ -345,7 +344,7 @@ class LeakChecker:
             from _pytest.runner import runtestprotocol
 
             item._initrequest()  # Re-init fixtures
-            reports = runtestprotocol(item, nextitem=nextitem, log=False)
+            runtestprotocol(item, nextitem=nextitem, log=False)
 
         nodeid = item.nodeid
         leaks = self.leaks.get(nodeid)
@@ -354,7 +353,7 @@ class LeakChecker:
             try:
                 for i in range(self.max_retries):
                     run_test_again()
-            except Exception as e:
+            except Exception:
                 print("--- Exception when re-running test ---")
                 import traceback
 
@@ -389,7 +388,7 @@ class LeakChecker:
                 unknown = sorted(set(leaking.args) - set(all_checkers))
                 if unknown:
                     raise ValueError(
-                        "pytest.mark.leaking: unknown resources %r" % (unknown,)
+                        f"pytest.mark.leaking: unknown resources {unknown!r}"
                     )
                 classes = tuple(all_checkers[a] for a in leaking.args)
                 self.skip_checkers[nodeid] = {
@@ -428,7 +427,7 @@ class LeakChecker:
                         report.outcome = "failed"
                         report.longrepr = "\n".join(
                             [
-                                "%s %s" % (nodeid, checker.format(before, after))
+                                f"{nodeid} {checker.format(before, after)}"
                                 for checker, before, after in leaks
                             ]
                         )
@@ -447,4 +446,4 @@ class LeakChecker:
             for rep in leaked:
                 nodeid = rep.nodeid
                 for checker, before, after in self.leaks[nodeid]:
-                    tr.line("%s %s" % (rep.nodeid, checker.format(before, after)))
+                    tr.line(f"{rep.nodeid} {checker.format(before, after)}")

@@ -1,13 +1,11 @@
 import array
 import asyncio
-import datetime
+import functools
 import io
 import os
 import queue
 import socket
-import sys
 import traceback
-from functools import partial
 from time import sleep
 
 import pytest
@@ -15,6 +13,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 
+from distributed.compatibility import MACOS, WINDOWS
 from distributed.metrics import time
 from distributed.utils import (
     LRU,
@@ -24,21 +23,18 @@ from distributed.utils import (
     LoopRunner,
     TimeoutError,
     _maybe_complex,
-    deprecated,
     ensure_bytes,
     ensure_ip,
     format_dashboard_link,
-    funcname,
     get_ip_interface,
     get_traceback,
     is_kernel,
     is_valid_xml,
+    iscoroutinefunction,
     nbytes,
     offload,
     open_port,
-    parse_bytes,
     parse_ports,
-    parse_timedelta,
     read_block,
     seek_delimiter,
     set_thread_state,
@@ -47,14 +43,13 @@ from distributed.utils import (
     truncate_exception,
     warn_on_duration,
 )
-from distributed.utils_test import (  # noqa: F401
+from distributed.utils_test import (
+    _UnhashableCallable,
     captured_logger,
     div,
     gen_test,
     has_ipv6,
     inc,
-    loop,
-    loop_in_thread,
     throws,
 )
 
@@ -155,23 +150,12 @@ def test_ensure_ip():
         assert ensure_ip("::1") == "::1"
 
 
+@pytest.mark.skipif(WINDOWS, reason="TODO")
 def test_get_ip_interface():
-    if sys.platform == "darwin":
-        assert get_ip_interface("lo0") == "127.0.0.1"
-    elif sys.platform.startswith("linux"):
-        assert get_ip_interface("lo") == "127.0.0.1"
-    else:
-        pytest.skip("test needs to be enhanced for platform %r" % (sys.platform,))
-
-    non_existent_interface = "__non-existent-interface"
-    expected_error_message = "{!r}.+network interface.+".format(non_existent_interface)
-
-    if sys.platform == "darwin":
-        expected_error_message += "'lo0'"
-    elif sys.platform.startswith("linux"):
-        expected_error_message += "'lo'"
-    with pytest.raises(ValueError, match=expected_error_message):
-        get_ip_interface(non_existent_interface)
+    iface = "lo0" if MACOS else "lo"
+    assert get_ip_interface(iface) == "127.0.0.1"
+    with pytest.raises(ValueError, match=f"'__notexist'.+network interface.+'{iface}'"):
+        get_ip_interface("__notexist")
 
 
 def test_truncate_exception():
@@ -258,15 +242,6 @@ def test_seek_delimiter_endline():
     f.seek(5)
     seek_delimiter(f, b"\n", 5)
     assert f.tell() == 7
-
-
-def test_funcname():
-    def f():
-        pass
-
-    assert funcname(f) == "f"
-    assert funcname(partial(f)) == "f"
-    assert funcname(partial(partial(f))) == "f"
 
 
 def test_ensure_bytes():
@@ -481,45 +456,6 @@ async def test_loop_runner_gen():
     await asyncio.sleep(0.01)
 
 
-def test_parse_bytes():
-    assert parse_bytes("100") == 100
-    assert parse_bytes("100 MB") == 100000000
-    assert parse_bytes("100M") == 100000000
-    assert parse_bytes("5kB") == 5000
-    assert parse_bytes("5.4 kB") == 5400
-    assert parse_bytes("1kiB") == 1024
-    assert parse_bytes("1Mi") == 2 ** 20
-    assert parse_bytes("1e6") == 1000000
-    assert parse_bytes("1e6 kB") == 1000000000
-    assert parse_bytes("MB") == 1000000
-
-
-def test_parse_timedelta():
-    for text, value in [
-        ("1s", 1),
-        ("100ms", 0.1),
-        ("5S", 5),
-        ("5.5s", 5.5),
-        ("5.5 s", 5.5),
-        ("1 second", 1),
-        ("3.3 seconds", 3.3),
-        ("3.3 milliseconds", 0.0033),
-        ("3500 us", 0.0035),
-        ("1 ns", 1e-9),
-        ("2m", 120),
-        ("2 minutes", 120),
-        (datetime.timedelta(seconds=2), 2),
-        (datetime.timedelta(milliseconds=100), 0.1),
-    ]:
-        result = parse_timedelta(text)
-        assert abs(result - value) < 1e-14
-
-    assert parse_timedelta("1ms", default="seconds") == 0.001
-    assert parse_timedelta("1", default="seconds") == 1
-    assert parse_timedelta("1", default="ms") == 0.001
-    assert parse_timedelta(1, default="ms") == 0.001
-
-
 @gen_test()
 async def test_all_exceptions_logging():
     async def throws():
@@ -553,13 +489,11 @@ def test_warn_on_duration():
     assert any("foo" in str(rec.message) for rec in record)
 
 
-def test_format_bytes_compat():
-    # moved to dask, but exported here for compatibility
-    from distributed.utils import format_bytes  # noqa
-
-
 def test_logs():
-    d = Logs({"123": Log("Hello"), "456": Log("World!")})
+    log = Log("Hello")
+    assert isinstance(log, str)
+    d = Logs({"123": log, "456": Log("World!")})
+    assert isinstance(d, dict)
     text = d._repr_html_()
     assert is_valid_xml("<div>" + text + "</div>")
     assert "Hello" in text
@@ -620,18 +554,69 @@ async def test_offload():
     assert (await offload(lambda x, y: x + y, 1, y=2)) == 3
 
 
-def test_deprecated():
-    @deprecated()
-    def foo():
-        return "bar"
+def test_serialize_for_cli_deprecated():
+    with pytest.warns(FutureWarning, match="serialize_for_cli is deprecated"):
+        from distributed.utils import serialize_for_cli
+    assert serialize_for_cli is dask.config.serialize
 
-    with pytest.warns(DeprecationWarning, match="foo is deprecated"):
-        assert foo() == "bar"
 
-    # Explicit version specified
-    @deprecated(version_removed="1.2.3")
-    def foo():
-        return "bar"
+def test_deserialize_for_cli_deprecated():
+    with pytest.warns(FutureWarning, match="deserialize_for_cli is deprecated"):
+        from distributed.utils import deserialize_for_cli
+    assert deserialize_for_cli is dask.config.deserialize
 
-    with pytest.warns(DeprecationWarning, match="removed in version 1.2.3"):
-        assert foo() == "bar"
+
+def test_parse_bytes_deprecated():
+    with pytest.warns(FutureWarning, match="parse_bytes is deprecated"):
+        from distributed.utils import parse_bytes
+    assert parse_bytes is dask.utils.parse_bytes
+
+
+def test_format_bytes_deprecated():
+    with pytest.warns(FutureWarning, match="format_bytes is deprecated"):
+        from distributed.utils import format_bytes
+    assert format_bytes is dask.utils.format_bytes
+
+
+def test_format_time_deprecated():
+    with pytest.warns(FutureWarning, match="format_time is deprecated"):
+        from distributed.utils import format_time
+    assert format_time is dask.utils.format_time
+
+
+def test_funcname_deprecated():
+    with pytest.warns(FutureWarning, match="funcname is deprecated"):
+        from distributed.utils import funcname
+    assert funcname is dask.utils.funcname
+
+
+def test_parse_timedelta_deprecated():
+    with pytest.warns(FutureWarning, match="parse_timedelta is deprecated"):
+        from distributed.utils import parse_timedelta
+    assert parse_timedelta is dask.utils.parse_timedelta
+
+
+def test_typename_deprecated():
+    with pytest.warns(FutureWarning, match="typename is deprecated"):
+        from distributed.utils import typename
+    assert typename is dask.utils.typename
+
+
+def test_tmpfile_deprecated():
+    with pytest.warns(FutureWarning, match="tmpfile is deprecated"):
+        from distributed.utils import tmpfile
+    assert tmpfile is dask.utils.tmpfile
+
+
+def test_iscoroutinefunction_unhashable_input():
+    # Ensure iscoroutinefunction can handle unhashable callables
+    assert not iscoroutinefunction(_UnhashableCallable())
+
+
+def test_iscoroutinefunction_nested_partial():
+    async def my_async_callable(x, y, z):
+        pass
+
+    assert iscoroutinefunction(
+        functools.partial(functools.partial(my_async_callable, 1), 2)
+    )
