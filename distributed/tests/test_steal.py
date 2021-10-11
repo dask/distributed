@@ -1010,7 +1010,7 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
     steal.move_task_request(victim_ts, wsB, wsC)
     await c.gather(futs1)
 
-    # If this turns out to be overly flaky, the following may be relaxed ore
+    # If this turns out to be overly flaky, the following may be relaxed or
     # removed. The point of this test is to not deadlock but verifying expected
     # state is still a nice thing
 
