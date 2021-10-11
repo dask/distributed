@@ -86,8 +86,6 @@ class _WorkItem:
         try:
             result = self.fn(*self.args, **self.kwargs)
         except BaseException as e:
-            if isinstance(e, WorkerThreadInterrupt):
-                print("In-task interrupt")
             self.future.set_exception(e)
         else:
             self.future.set_result(result)
@@ -115,7 +113,6 @@ def _worker(executor_reference, work_queue):
                 del executor
             except WorkerThreadInterrupt:
                 # thread interrupt outside of a task
-                print("Interrupt within thread!")
                 pass
     except BaseException:
         _base.LOGGER.critical("Exception in worker", exc_info=True)
