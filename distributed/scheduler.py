@@ -5869,7 +5869,7 @@ class Scheduler(SchedulerState, ServerNode):
                 )
             else:
                 logger.warning(
-                    f"Unable to broadcast message {msg['op']!r} to Nanny workers "
+                    f"Broadcasting message {msg['op']!r} to Nanny workers "
                     f"but {without_nanny} workers are not using nannies, so they "
                     "will ignore it. To fix, recreate the cluster and ensure that "
                     "`worker_class` is set to 'dask.distributed.Nanny' for all "

@@ -673,9 +673,10 @@ async def test_broadcast_nanny(s, a, b):
 
 @gen_cluster(Worker=Worker)
 async def test_broadcast_nanny_raises_exception(s, a, b):
-    with pytest.raises(RuntimeError) as error:
+    with pytest.raises(
+        RuntimeError, match="`worker_class` is set to 'dask.distributed.Nanny'"
+    ):
         await s.broadcast(msg={"op": "plugin_add"}, nanny=True)
-    assert "`worker_class` is set to 'dask.distributed.Nanny'" in str(error.value)
 
 
 @gen_cluster(nthreads=[])
