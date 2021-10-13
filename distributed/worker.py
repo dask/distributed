@@ -2489,7 +2489,7 @@ class Worker(ServerNode):
         total_nbytes : int
             Total number of bytes for all the dependencies in to_gather combined
         """
-        cause = None
+        cause: TaskState | None = None
         if self.status not in (Status.running, Status.paused):
             return
 
@@ -2517,6 +2517,8 @@ class Worker(ServerNode):
 
                 if not to_gather_keys:
                     return
+                assert cause
+
                 # Keep namespace clean since this func is long and has many
                 # dep*, *ts* variables
                 del to_gather, dependency_key, dependency_ts

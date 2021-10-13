@@ -127,12 +127,12 @@ class ActiveMemoryManagerExtension:
                 # populate self.pending
                 self._run_policies()
 
-                drop_by_worker: defaultdict[WorkerState, set[TaskState]] = defaultdict(
-                    set
-                )
-                repl_by_worker: defaultdict[
-                    WorkerState, dict[TaskState, set[WorkerState]]
-                ] = defaultdict(dict)
+                drop_by_worker: (
+                    defaultdict[WorkerState, set[TaskState]]
+                ) = defaultdict(set)
+                repl_by_worker: (
+                    defaultdict[WorkerState, dict[TaskState, set[str]]]
+                ) = defaultdict(dict)
 
                 for ts, (pending_repl, pending_drop) in self.pending.items():
                     if not ts.who_has:
