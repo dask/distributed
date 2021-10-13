@@ -48,6 +48,7 @@ API
    Event
    Lock
    MultiLock
+   Semaphore
    Queue
    Variable
 
