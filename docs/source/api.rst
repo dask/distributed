@@ -40,7 +40,7 @@ API
 .. autoautosummary:: distributed.Future
    :methods:
 
-**Client Coordination**
+**Coordination**
 
 .. currentmodule:: distributed
 
@@ -122,6 +122,24 @@ Future
 .. autoclass:: Future
    :members:
 
+
+Coordination
+------------
+
+.. autoclass:: Event
+   :members:
+.. autoclass:: Lock
+   :members:
+.. autoclass:: MultiLock
+   :members:
+.. autoclass:: Semaphore
+   :members:
+.. autoclass:: Queue
+   :members:
+.. autoclass:: Variable
+   :members:
+
+
 Cluster
 -------
 
@@ -167,19 +185,6 @@ Other
 .. autoclass:: get_task_stream
 .. autoclass:: get_task_metadata
 .. autoclass:: performance_report
-
-.. autoclass:: Event
-   :members:
-.. autoclass:: Lock
-   :members:
-.. autoclass:: MultiLock
-   :members:
-.. autoclass:: Semaphore
-   :members:
-.. autoclass:: Queue
-   :members:
-.. autoclass:: Variable
-   :members:
 
 
 Utilities
