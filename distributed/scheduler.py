@@ -2765,10 +2765,10 @@ class SchedulerState:
 
             s: set = self._unknown_durations.pop(ts._prefix._name, set())
             tts: TaskState
+            steal = self.extensions.get("stealing")
             for tts in s:
                 if tts._processing_on:
                     self.set_duration_estimate(tts, tts._processing_on)
-                    steal = self.extensions.get("stealing")
                     if steal:
                         steal.put_key_in_stealable(tts)
 

@@ -172,8 +172,6 @@ class WorkStealing(SchedulerPlugin):
             if ts in self.in_flight:
                 return "in-flight"
             stimulus_id = f"steal-{time()}"
-            if self.scheduler.validate:
-                assert victim is ts.processing_on
 
             key = ts.key
             self.remove_key_from_stealable(ts)
