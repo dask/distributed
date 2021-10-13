@@ -5856,9 +5856,25 @@ class Scheduler(SchedulerState, ServerNode):
                 if dh is not None:
                     workers.extend(dh["addresses"])
         # TODO replace with worker_list
-
         if nanny:
             addresses = [parent._workers_dv[w].nanny for w in workers]
+            without_nanny = sum(addr is None for addr in addresses)
+            if without_nanny == len(addresses):
+                raise RuntimeError(
+                    f"Attempting to broadcast message {msg['op']!r} to Nanny "
+                    f"workers but none of the {without_nanny} workers use "
+                    "nannies, so they will ignore it. To fix, recreate the "
+                    "cluster and ensure the `worker_class` is set to "
+                    "'dask.distributed.Nanny'."
+                )
+            else:
+                logger.warning(
+                    f"Unable to broadcast message {msg['op']!r} to Nanny workers "
+                    f"but {without_nanny} workers are not using nannies, so they "
+                    "will ignore it. To fix, recreate the cluster and ensure that "
+                    "`worker_class` is set to 'dask.distributed.Nanny' for all "
+                    "workers."
+                )
         else:
             addresses = workers
 
