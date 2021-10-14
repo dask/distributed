@@ -19,6 +19,24 @@ except Exception:
     HOST = "127.0.0.1"
 
 
+def handle_exception(loop, context):
+    msg = context.get("exception", context["message"])
+    print(msg)
+
+
+# Let's make sure that UCX gets time to cancel
+# progress tasks before closing the event loop.
+@pytest.fixture()
+def event_loop(scope="function"):
+    loop = asyncio.new_event_loop()
+    loop.set_exception_handler(handle_exception)
+    ucp.reset()
+    yield loop
+    ucp.reset()
+    loop.run_until_complete(asyncio.sleep(0))
+    loop.close()
+
+
 def test_registered():
     assert "ucx" in backends
     backend = get_backend("ucx")
@@ -122,6 +140,8 @@ def test_ucx_specific():
         futures = [client_communicate(key=i, delay=0.05) for i in range(N)]
         await asyncio.gather(*futures)
         assert set(l) == {1234} | set(range(N))
+
+        listener.stop()
 
     asyncio.run(f())
 
