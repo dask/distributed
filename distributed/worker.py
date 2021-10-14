@@ -2489,7 +2489,7 @@ class Worker(ServerNode):
         total_nbytes : int
             Total number of bytes for all the dependencies in to_gather combined
         """
-        cause = None
+        cause: TaskState | None = None
         if self.status not in (Status.running, Status.paused):
             return
 
@@ -2514,10 +2514,13 @@ class Worker(ServerNode):
                                 cause = dependent
                                 found_dependent_for_cause = True
                                 break
+
+                if not to_gather_keys:
+                    return
+                assert cause
+
                 # Keep namespace clean since this func is long and has many
                 # dep*, *ts* variables
-
-                assert cause is not None
                 del to_gather, dependency_key, dependency_ts
 
                 self.log.append(
@@ -2618,7 +2621,7 @@ class Worker(ServerNode):
                     )
 
                 recommendations: dict[TaskState, str | tuple] = {}
-                deps_to_iter = self.in_flight_workers.pop(worker)
+                deps_to_iter = set(self.in_flight_workers.pop(worker)) & to_gather_keys
 
                 for d in deps_to_iter:
                     ts = self.tasks.get(d)
@@ -2721,21 +2724,26 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def handle_steal_request(self, key):
+    def handle_steal_request(self, key, stimulus_id):
         # There may be a race condition between stealing and releasing a task.
         # In this case the self.tasks is already cleared. The `None` will be
         # registered as `already-computing` on the other end
         ts = self.tasks.get(key)
         state = ts.state if ts is not None else None
 
-        response = {"op": "steal-response", "key": key, "state": state}
+        response = {
+            "op": "steal-response",
+            "key": key,
+            "state": state,
+            "stimulus_id": stimulus_id,
+        }
         self.batched_stream.send(response)
 
         if state in {"ready", "waiting", "constrained"}:
             # If task is marked as "constrained" we haven't yet assigned it an
             # `available_resources` to run on, that happens in
             # `transition_constrained_executing`
-            self.transition(ts, "forgotten", stimulus_id=f"steal-request-{time()}")
+            self.transition(ts, "forgotten", stimulus_id=stimulus_id)
 
     def release_key(
         self,
@@ -3088,7 +3096,7 @@ class Worker(ServerNode):
                     str(funcname(function))[:1000],
                     convert_args_to_str(args2, max_len=1000),
                     convert_kwargs_to_str(kwargs2, max_len=1000),
-                    ts.exception_text,
+                    result["exception_text"],
                 )
                 recommendations[ts] = (
                     "error",

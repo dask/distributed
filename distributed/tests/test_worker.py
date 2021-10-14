@@ -739,28 +739,17 @@ async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
     assert l1["stop"] < l2["start"]
 
 
-@pytest.mark.avoid_ci
 @gen_cluster(client=True)
 async def test_log_exception_on_failed_task(c, s, a, b):
-    with tmpfile() as fn:
-        fh = logging.FileHandler(fn)
-        try:
-            from distributed.worker import logger
+    with captured_logger("distributed.worker") as logger:
+        future = c.submit(div, 1, 0)
+        await wait(future)
 
-            logger.addHandler(fh)
+        await asyncio.sleep(0.1)
 
-            future = c.submit(div, 1, 0)
-            await wait(future)
-
-            await asyncio.sleep(0.1)
-            fh.flush()
-            with open(fn) as f:
-                text = f.read()
-
-            assert "ZeroDivisionError" in text
-            assert "Exception" in text
-        finally:
-            logger.removeHandler(fh)
+    text = logger.getvalue()
+    assert "ZeroDivisionError" in text
+    assert "Exception" in text
 
 
 @gen_cluster(client=True)
@@ -2455,6 +2444,7 @@ async def test_hold_on_to_replicas(c, s, *workers):
         await asyncio.sleep(0.01)
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_worker_reconnects_mid_compute(c, s, a, b):
     """Ensure that, if a worker disconnects while computing a result, the scheduler will
@@ -2523,6 +2513,7 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
         await asyncio.sleep(0.001)
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, a, b):
     """
@@ -2656,7 +2647,7 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
             await asyncio.sleep(0)
 
         ts = s.tasks[fut.key]
-        a.handle_steal_request(fut.key)
+        a.handle_steal_request(fut.key, stimulus_id="test")
         stealing_ext.scheduler.send_task_to_worker(b.address, ts)
 
         fut2 = c.submit(inc, fut, workers=[a.address])
@@ -3091,3 +3082,68 @@ async def test_worker_status_sync(c, s, a):
         {"action": "remove-worker", "processing-tasks": {}},
         {"action": "retired"},
     ]
+
+
+async def _wait_for_flight(key, worker):
+    while key not in worker.tasks or worker.tasks[key].state != "flight":
+        await asyncio.sleep(0)
+
+
+@gen_cluster(client=True)
+async def test_gather_dep_do_not_handle_response_of_not_requested_tasks(c, s, a, b):
+    """At time of writing, the gather_dep implementation filtered tasks again
+    for in-flight state. The response parser, however, did not distinguish
+    resulting in unwanted missing-data signals to the scheduler, causing
+    potential rescheduling or data leaks.
+    This test may become obsolete if the implementation changes significantly.
+    """
+    import distributed
+
+    with mock.patch.object(distributed.worker.Worker, "gather_dep") as mocked_gather:
+        fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
+        fut2 = c.submit(inc, fut1, workers=[a.address], key="f2")
+        await fut2
+        fut4 = c.submit(sum, fut1, fut2, workers=[b.address], key="f4")
+        fut3 = c.submit(inc, fut1, workers=[b.address], key="f3")
+
+        fut2_key = fut2.key
+
+        await _wait_for_flight(fut2_key, b)
+
+        fut4.release()
+        while fut4.key in b.tasks:
+            await asyncio.sleep(0)
+
+    story_before = b.story(fut2.key)
+    assert fut2.key in mocked_gather.call_args.kwargs["to_gather"]
+    await Worker.gather_dep(b, **mocked_gather.call_args.kwargs)
+    story_after = b.story(fut2.key)
+    assert story_before == story_after
+    await fut3
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.comm.recent-messages-log-length": 1000,
+    },
+)
+async def test_gather_dep_no_longer_in_flight_tasks(c, s, a, b):
+    import distributed
+
+    with mock.patch.object(distributed.worker.Worker, "gather_dep") as mocked_gather:
+        fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
+        fut2 = c.submit(sum, fut1, fut1, workers=[b.address], key="f2")
+
+        fut1_key = fut1.key
+
+        await _wait_for_flight(fut1_key, b)
+
+        fut2.release()
+        while fut2.key in b.tasks:
+            await asyncio.sleep(0)
+
+    assert b.tasks[fut1.key] != "flight"
+    log_before = list(b.log)
+    await Worker.gather_dep(b, **mocked_gather.call_args.kwargs)
+    assert log_before == list(b.log)
