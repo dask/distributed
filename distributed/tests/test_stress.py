@@ -85,6 +85,9 @@ def test_cancel_stress_sync(loop):
                 c.cancel(f)
 
 
+@pytest.mark.xfail(
+    reason="Flaky and re-fails on rerun. See https://github.com/dask/distributed/issues/5388"
+)
 @pytest.mark.slow
 @gen_cluster(
     nthreads=[],
@@ -96,6 +99,9 @@ async def test_stress_creation_and_deletion(c, s):
     # Assertions are handled by the validate mechanism in the scheduler
     da = pytest.importorskip("dask.array")
 
+    def _disable_suspicious_counter(dask_worker):
+        dask_worker._suspicious_count_limit = None
+
     rng = da.random.RandomState(0)
     x = rng.random(size=(2000, 2000), chunks=(100, 100))
     y = ((x + 1).T + (x * 2) - x.mean(axis=1)).sum().round(2)
@@ -104,13 +110,15 @@ async def test_stress_creation_and_deletion(c, s):
     async def create_and_destroy_worker(delay):
         start = time()
         while time() < start + 5:
-            async with Nanny(s.address, nthreads=2):
+            async with Nanny(s.address, nthreads=2) as n:
+                await c.run(_disable_suspicious_counter, workers=[n.worker_address])
                 await asyncio.sleep(delay)
             print("Killed nanny")
 
     await asyncio.gather(*(create_and_destroy_worker(0.1 * i) for i in range(20)))
 
     async with Nanny(s.address, nthreads=2):
+        await c.run(_disable_suspicious_counter)
         assert await c.compute(z) == 8000884.93
 
 
@@ -173,10 +181,11 @@ def vsum(*args):
 
 @pytest.mark.avoid_ci
 @pytest.mark.slow
-@pytest.mark.timeout(1100)  # Override timeout from setup.cfg
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 80, timeout=1000)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 80)
 async def test_stress_communication(c, s, *workers):
     s.validate = False  # very slow otherwise
+    for w in workers:
+        w.validate = False
     da = pytest.importorskip("dask.array")
     # Test consumes many file descriptors and can hang if the limit is too low
     resource = pytest.importorskip("resource")
@@ -185,7 +194,7 @@ async def test_stress_communication(c, s, *workers):
     n = 20
     xs = [da.random.random((100, 100), chunks=(5, 5)) for i in range(n)]
     ys = [x + x.T for x in xs]
-    z = da.atop(vsum, "ij", *concat(zip(ys, ["ij"] * n)), dtype="float64")
+    z = da.blockwise(vsum, "ij", *concat(zip(ys, ["ij"] * n)), dtype="float64")
 
     future = c.compute(z.sum())
 

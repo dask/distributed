@@ -4,12 +4,7 @@ import socket
 import sys
 import time
 import traceback
-
-try:
-    from queue import Queue
-except ImportError:  # Python 2.7 fix
-    from Queue import Queue
-
+from queue import Queue
 from threading import Thread
 
 from tlz import merge

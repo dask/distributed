@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import atexit
 import copy
@@ -22,6 +24,7 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
+from typing import ClassVar
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
@@ -49,7 +52,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
-from . import versions as version_module
+from . import versions as version_module  # type: ignore
 from .batched import BatchedSend
 from .cfexecutor import ClientExecutor
 from .core import (
@@ -95,7 +98,9 @@ from .worker import get_client, get_worker, secede
 
 logger = logging.getLogger(__name__)
 
-_global_clients = weakref.WeakValueDictionary()
+_global_clients: weakref.WeakValueDictionary[
+    int, Client
+] = weakref.WeakValueDictionary()
 _global_client_index = [0]
 
 _current_client = ContextVar("_current_client", default=None)
@@ -105,7 +110,7 @@ DEFAULT_EXTENSIONS = [PubSubClientExtension]
 NO_DEFAULT_PLACEHOLDER = "_no_default_"
 
 
-def _get_global_client():
+def _get_global_client() -> Client | None:
     L = sorted(list(_global_clients), reverse=True)
     for k in L:
         c = _global_clients[k]
@@ -116,13 +121,13 @@ def _get_global_client():
     return None
 
 
-def _set_global_client(c):
+def _set_global_client(c: Client | None) -> None:
     if c is not None:
         _global_clients[_global_client_index[0]] = c
         _global_client_index[0] += 1
 
 
-def _del_global_client(c):
+def _del_global_client(c: Client) -> None:
     for k in list(_global_clients):
         try:
             if _global_clients[k] is c:
@@ -493,6 +498,22 @@ class AllExit(Exception):
     """Custom exception class to exit All(...) early."""
 
 
+def _handle_print(event):
+    _, msg = event
+    if isinstance(msg, dict) and "args" in msg and "kwargs" in msg:
+        print(*msg["args"], **msg["kwargs"])
+    else:
+        print(msg)
+
+
+def _handle_warn(event):
+    _, msg = event
+    if isinstance(msg, dict) and "args" in msg and "kwargs" in msg:
+        warnings.warn(*msg["args"], **msg["kwargs"])
+    else:
+        warnings.warn(msg)
+
+
 class Client:
     """Connect to and submit computation to a Dask cluster
 
@@ -574,7 +595,9 @@ class Client:
     distributed.LocalCluster:
     """
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[Client]] = weakref.WeakSet()
+
+    _default_event_handlers = {"print": _handle_print, "warn": _handle_warn}
 
     def __init__(
         self,
@@ -705,6 +728,7 @@ class Client:
             self._set_config = dask.config.set(
                 scheduler="dask.distributed", shuffle="tasks"
             )
+        self._event_handlers = {}
 
         self._stream_handlers = {
             "key-in-memory": self._handle_key_in_memory,
@@ -714,6 +738,7 @@ class Client:
             "task-erred": self._handle_task_erred,
             "restart": self._handle_restart,
             "error": self._handle_error,
+            "event": self._handle_event,
         }
 
         self._state_handlers = {
@@ -1014,6 +1039,9 @@ class Client:
 
         for pc in self._periodic_callbacks.values():
             pc.start()
+
+        for topic, handler in Client._default_event_handlers.items():
+            self.subscribe_topic(topic, handler)
 
         self._handle_scheduler_coroutine = asyncio.ensure_future(self._handle_report())
         self.coroutines.append(self._handle_scheduler_coroutine)
@@ -1354,8 +1382,6 @@ class Client:
 
         self.status = "closed"
 
-    _shutdown = _close
-
     def close(self, timeout=no_default):
         """Close this client
 
@@ -1659,14 +1685,14 @@ class Client:
 
         if batch_size and batch_size > 1 and total_length > batch_size:
             batches = list(
-                zip(*[partition_all(batch_size, iterable) for iterable in iterables])
+                zip(*(partition_all(batch_size, iterable) for iterable in iterables))
             )
             if isinstance(key, list):
                 keys = [list(element) for element in partition_all(batch_size, key)]
             else:
                 keys = [key for _ in range(len(batches))]
             return sum(
-                [
+                (
                     self.map(
                         func,
                         *batch,
@@ -1683,7 +1709,7 @@ class Client:
                         **kwargs,
                     )
                     for key, batch in zip(keys, batches)
-                ],
+                ),
                 [],
             )
 
@@ -2506,12 +2532,13 @@ class Client:
         )
         if not isinstance(ignore_modules, list):
             raise TypeError(
-                f"Ignored modules must be a list. Instead got ({type(ignore_modules)}, {ignore_modules})"
+                "Ignored modules must be a list. Instead got "
+                f"({type(ignore_modules)}, {ignore_modules})"
             )
 
+        pattern: re.Pattern | None
         if ignore_modules:
-            pattern = "|".join([f"(?:{mod})" for mod in ignore_modules])
-            pattern = re.compile(pattern)
+            pattern = re.compile("|".join([f"(?:{mod})" for mod in ignore_modules]))
         else:
             pattern = None
 
@@ -3570,6 +3597,61 @@ class Client:
         """
         return self.sync(self.scheduler.events, topic=topic)
 
+    async def _handle_event(self, topic, event):
+        if topic not in self._event_handlers:
+            self.unsubscribe_topic(topic)
+            return
+        handler = self._event_handlers[topic]
+        ret = handler(event)
+        if inspect.isawaitable(ret):
+            await ret
+
+    def subscribe_topic(self, topic, handler):
+        """Subscribe to a topic and execute a handler for every received event
+
+        Parameters
+        ----------
+        topic: str
+            The topic name
+        handler: callable or coroutine function
+            A handler called for every received event. The handler must accept a
+            single argument `event` which is a tuple `(timestamp, msg)` where
+            timestamp refers to the clock on the scheduler.
+
+        Example
+        -------
+
+        >>> import logging
+        >>> logger = logging.getLogger("myLogger")  # Log config not shown
+        >>> client.subscribe_topic("topic-name", lambda: logger.info)
+
+        See Also
+        --------
+        dask.distributed.Client.unsubscribe_topic
+        dask.distributed.Client.get_events
+        dask.distributed.Client.log_event
+        """
+        if topic in self._event_handlers:
+            logger.info("Handler for %s already set. Overwriting.", topic)
+        self._event_handlers[topic] = handler
+        msg = {"op": "subscribe-topic", "topic": topic, "client": self.id}
+        self._send_to_scheduler(msg)
+
+    def unsubscribe_topic(self, topic):
+        """Unsubscribe from a topic and remove event handler
+
+        See Also
+        --------
+        dask.distributed.Client.subscribe_topic
+        dask.distributed.Client.get_events
+        dask.distributed.Client.log_event
+        """
+        if topic in self._event_handlers:
+            msg = {"op": "unsubscribe-topic", "topic": topic, "client": self.id}
+            self._send_to_scheduler(msg)
+        else:
+            raise ValueError(f"No event handler known for topic {topic}.")
+
     def retire_workers(self, workers=None, close_workers=True, **kwargs):
         """Retire certain workers on the scheduler
 
@@ -4029,8 +4111,9 @@ class Client:
         responses = await method(plugin=dumps(plugin, protocol=4), name=name)
         for response in responses.values():
             if response["status"] == "error":
-                exc = response["exception"]
-                tb = response["traceback"]
+                _, exc, tb = clean_exception(
+                    response["exception"], response["traceback"]
+                )
                 raise exc.with_traceback(tb)
         return responses
 
@@ -4081,7 +4164,7 @@ class Client:
         ...         pass
         ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
-        ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
+        ...     def release_key(self, key: str, state: str, cause: str | None, reason: None, report: bool):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
@@ -4150,7 +4233,7 @@ class Client:
         ...         pass
         ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
-        ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
+        ...     def release_key(self, key: str, state: str, cause: str | None, reason: None, report: bool):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)

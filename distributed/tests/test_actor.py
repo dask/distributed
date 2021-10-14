@@ -50,7 +50,7 @@ class UsesCounter:
 
 
 class List:
-    L = []
+    L: list = []
 
     def __init__(self, dummy=None):
         self.L = []

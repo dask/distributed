@@ -60,6 +60,18 @@ distributed:
       - dask
       - distributed
 
+    active-memory-manager:
+      # Set to true to auto-start the Active Memory Manager on Scheduler start; if false
+      # you'll have to either manually start it with client.scheduler.amm_start() or run
+      # it once with client.scheduler.amm_run().
+      start: false
+      # Once started, run the AMM cycle every <interval>
+      interval: 2s
+      policies:
+        # Policies that should be executed at every cycle. Any additional keys in each
+        # object are passed as keyword arguments to the policy constructor.
+        - class: distributed.active_memory_manager.ReduceReplicas
+
   worker:
     blocked-handlers: []
     multiprocessing-method: spawn

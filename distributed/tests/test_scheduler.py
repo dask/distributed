@@ -5,7 +5,6 @@ import logging
 import operator
 import re
 import sys
-from collections import defaultdict
 from itertools import product
 from textwrap import dedent
 from time import sleep
@@ -18,16 +17,16 @@ from tlz import concat, first, frequencies, merge, valmap
 
 import dask
 from dask import delayed
-from dask.utils import apply, parse_timedelta, stringify, typename
+from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.comm import Comm
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import ConnectionPool, Status, connect, rpc
+from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.scheduler import MemoryState, Scheduler
-from distributed.utils import TimeoutError, tmpfile
+from distributed.utils import TimeoutError
 from distributed.utils_test import (
     captured_logger,
     cluster,
@@ -58,8 +57,6 @@ pytestmark = pytest.mark.ci1
 
 alice = "alice:1234"
 bob = "bob:1234"
-
-occupancy = defaultdict(lambda: 0)
 
 
 @gen_cluster()
@@ -196,7 +193,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         secondary_worker_key_fractions = []
         for i, keys in enumerate(x.__dask_keys__()):
             # Iterate along rows of the array.
-            keys = set(stringify(k) for k in keys)
+            keys = {stringify(k) for k in keys}
 
             # No more than 2 workers should have any keys
             assert sum(any(k in w.data for k in keys) for w in workers) <= 2
@@ -413,11 +410,9 @@ async def test_blocked_handlers_are_respected(s, a, b):
 
     response = await comm.read()
 
-    assert "exception" in response
-    assert isinstance(response["exception"], ValueError)
-    assert "'feed' handler has been explicitly disallowed" in repr(
-        response["exception"]
-    )
+    _, exc, _ = clean_exception(response["exception"], response["traceback"])
+    assert isinstance(exc, ValueError)
+    assert "'feed' handler has been explicitly disallowed" in repr(exc)
 
     await comm.close()
 
@@ -925,7 +920,7 @@ async def test_file_descriptors(c, s):
     num_fds_1 = proc.num_fds()
 
     N = 20
-    nannies = await asyncio.gather(*[Nanny(s.address, loop=s.loop) for _ in range(N)])
+    nannies = await asyncio.gather(*(Nanny(s.address, loop=s.loop) for _ in range(N)))
 
     while len(s.nthreads) < N:
         await asyncio.sleep(0.1)
@@ -955,7 +950,7 @@ async def test_file_descriptors(c, s):
     num_fds_6 = proc.num_fds()
     assert num_fds_6 < num_fds_5 + N
 
-    await asyncio.gather(*[n.close() for n in nannies])
+    await asyncio.gather(*(n.close() for n in nannies))
     await c.close()
 
     assert not s.rpc.open
@@ -1300,16 +1295,6 @@ async def test_non_existent_worker(c, s):
         await asyncio.sleep(0.300)
         assert not s.workers
         assert all(ts.state == "no-worker" for ts in s.tasks.values())
-
-
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
-async def test_correct_bad_time_estimate(c, s, *workers):
-    future = c.submit(slowinc, 1, delay=0)
-    await wait(future)
-    futures = [c.submit(slowinc, future, delay=0.1, pure=False) for i in range(20)]
-    await asyncio.sleep(0.5)
-    await wait(futures)
-    assert all(w.data for w in workers), [sorted(w.data) for w in workers]
 
 
 @pytest.mark.parametrize(
@@ -1996,14 +1981,7 @@ async def test_task_groups(c, s, a, b):
     assert tg.nbytes_total == tp.nbytes_total
     # It should map down to individual tasks
     assert tg.nbytes_total == sum(
-        [ts.get_nbytes() for ts in s.tasks.values() if ts.group is tg]
-    )
-    in_memory_ts = sum(
-        [
-            ts.get_nbytes()
-            for ts in s.tasks.values()
-            if ts.group is tg and ts.state == "memory"
-        ]
+        ts.get_nbytes() for ts in s.tasks.values() if ts.group is tg
     )
     tg = s.task_groups[y.name]
     assert tg.states["memory"] == 5
@@ -2099,8 +2077,8 @@ async def test_task_group_on_fire_and_forget(c, s, a, b):
 
 
 class BrokenComm(Comm):
-    peer_address = None
-    local_address = None
+    peer_address = ""
+    local_address = ""
 
     def close(self):
         pass
@@ -2939,7 +2917,7 @@ async def test_gather_on_worker(c, s, a, b):
     assert x_ts not in b_ws.has_what
     assert x_ts.who_has == {a_ws}
 
-    out = await s._gather_on_worker(b.address, {x.key: [a.address]})
+    out = await s.gather_on_worker(b.address, {x.key: [a.address]})
     assert out == set()
     assert a.data[x.key] == "x"
     assert b.data[x.key] == "x"
@@ -2955,14 +2933,14 @@ async def test_gather_on_worker_bad_recipient(c, s, a, b):
     x = await c.scatter("x")
     await b.close()
     assert s.workers.keys() == {a.address}
-    out = await s._gather_on_worker(b.address, {x.key: [a.address]})
+    out = await s.gather_on_worker(b.address, {x.key: [a.address]})
     assert out == {x.key}
 
 
 @gen_cluster(client=True, worker_kwargs={"timeout": "100ms"})
 async def test_gather_on_worker_bad_sender(c, s, a, b):
     """The only sender for a key is missing"""
-    out = await s._gather_on_worker(a.address, {"x": ["tcp://127.0.0.1:12345"]})
+    out = await s.gather_on_worker(a.address, {"x": ["tcp://127.0.0.1:12345"]})
     assert out == {"x"}
 
 
@@ -2974,7 +2952,7 @@ async def test_gather_on_worker_bad_sender_replicated(c, s, a, b, missing_first)
     bad_addr = "tcp://127.0.0.1:12345"
     # Order matters; test both
     addrs = [bad_addr, a.address] if missing_first else [a.address, bad_addr]
-    out = await s._gather_on_worker(b.address, {x.key: addrs})
+    out = await s.gather_on_worker(b.address, {x.key: addrs})
     assert out == set()
     assert a.data[x.key] == "x"
     assert b.data[x.key] == "x"
@@ -2983,7 +2961,7 @@ async def test_gather_on_worker_bad_sender_replicated(c, s, a, b, missing_first)
 @gen_cluster(client=True)
 async def test_gather_on_worker_key_not_on_sender(c, s, a, b):
     """The only sender for a key does not actually hold it"""
-    out = await s._gather_on_worker(a.address, {"x": [b.address]})
+    out = await s.gather_on_worker(a.address, {"x": [b.address]})
     assert out == {"x"}
 
 
@@ -2998,7 +2976,7 @@ async def test_gather_on_worker_key_not_on_sender_replicated(
     x = await client.scatter("x", workers=[a.address])
     # Order matters; test both
     addrs = [b.address, a.address] if missing_first else [a.address, b.address]
-    out = await s._gather_on_worker(c.address, {x.key: addrs})
+    out = await s.gather_on_worker(c.address, {x.key: addrs})
     assert out == set()
     assert a.data[x.key] == "x"
     assert c.data[x.key] == "x"
@@ -3015,8 +2993,8 @@ async def test_gather_on_worker_duplicate_task(client, s, a, b, c):
     assert x.key not in c.data
 
     out = await asyncio.gather(
-        s._gather_on_worker(c.address, {x.key: [a.address]}),
-        s._gather_on_worker(c.address, {x.key: [b.address]}),
+        s.gather_on_worker(c.address, {x.key: [a.address]}),
+        s.gather_on_worker(c.address, {x.key: [b.address]}),
     )
     assert out == [set(), set()]
     assert c.data[x.key] == "x"
@@ -3064,7 +3042,7 @@ async def test_delete_worker_data(c, s, a, b):
     assert b.data == {y.key: "y"}
     assert s.tasks.keys() == {x.key, y.key, z.key}
 
-    await s._delete_worker_data(a.address, [x.key, y.key])
+    await s.delete_worker_data(a.address, [x.key, y.key])
     assert a.data == {z.key: "z"}
     assert b.data == {y.key: "y"}
     assert s.tasks.keys() == {y.key, z.key}
@@ -3078,8 +3056,8 @@ async def test_delete_worker_data_double_delete(c, s, a):
     """
     x, y = await c.scatter(["x", "y"])
     await asyncio.gather(
-        s._delete_worker_data(a.address, [x.key]),
-        s._delete_worker_data(a.address, [x.key]),
+        s.delete_worker_data(a.address, [x.key]),
+        s.delete_worker_data(a.address, [x.key]),
     )
     assert a.data == {y.key: "y"}
     a_ws = s.workers[a.address]
@@ -3094,7 +3072,7 @@ async def test_delete_worker_data_bad_worker(s, a, b):
     """
     await a.close()
     assert s.workers.keys() == {b.address}
-    await s._delete_worker_data(a.address, ["x"])
+    await s.delete_worker_data(a.address, ["x"])
 
 
 @pytest.mark.parametrize("bad_first", [False, True])
@@ -3109,7 +3087,7 @@ async def test_delete_worker_data_bad_task(c, s, a, bad_first):
     assert s.tasks.keys() == {x.key, y.key}
 
     keys = ["notexist", x.key] if bad_first else [x.key, "notexist"]
-    await s._delete_worker_data(a.address, keys)
+    await s.delete_worker_data(a.address, keys)
     assert a.data == {y.key: "y"}
     assert s.tasks.keys() == {y.key}
     assert s.workers[a.address].nbytes == s.tasks[y.key].nbytes
@@ -3181,7 +3159,7 @@ async def test_worker_heartbeat_after_cancel(c, s, *workers):
     await c.cancel(futs)
 
     while any(w.tasks for w in workers):
-        await asyncio.gather(*[w.heartbeat() for w in workers])
+        await asyncio.gather(*(w.heartbeat() for w in workers))
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -3203,3 +3181,14 @@ async def test_worker_reconnect_task_memory_with_resources(c, s, a):
         assert ("no-worker", "memory") in {
             (start, finish) for (_, start, finish, _, _) in s.transition_log
         }
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
+async def test_set_restrictions(c, s, a, b):
+
+    f = c.submit(inc, 1, workers=[b.address])
+    await f
+    s.set_restrictions(worker={f.key: a.address})
+    assert s.tasks[f.key].worker_restrictions == {a.address}
+    s.reschedule(f)
+    await f

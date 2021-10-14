@@ -6,12 +6,16 @@ See :ref:`communications` for more.
 .. _UCX: https://github.com/openucx/ucx
 """
 import logging
+import os
 import struct
+import warnings
 import weakref
+from typing import TYPE_CHECKING
 
 import dask
 from dask.utils import parse_bytes
 
+from ..diagnostics.nvml import has_cuda_context
 from ..utils import ensure_ip, get_ip, get_ipv6, log_errors, nbytes
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, Listener
@@ -20,16 +24,26 @@ from .utils import ensure_concrete_host, from_frames, to_frames
 
 logger = logging.getLogger(__name__)
 
-
 # In order to avoid double init when forking/spawning new processes (multiprocess),
 # we make sure only to import and initialize UCX once at first use. This is also
 # required to ensure Dask configuration gets propagated to UCX, which needs
 # variables to be set before being imported.
-ucp = None
+if TYPE_CHECKING:
+    try:
+        import ucp
+        from ucp import create_endpoint as ucx_create_endpoint
+        from ucp import create_listener as ucx_create_listener
+    except ImportError:
+        pass
+else:
+    ucp = None  # type: ignore
+    ucx_create_endpoint = None  # type: ignore
+    ucx_create_listener = None  # type: ignore
+
 host_array = None
 device_array = None
-ucx_create_endpoint = None
-ucx_create_listener = None
+pre_existing_cuda_context = False
+cuda_context_created = False
 
 
 def synchronize_stream(stream=0):
@@ -42,7 +56,10 @@ def synchronize_stream(stream=0):
 
 
 def init_once():
-    global ucp, host_array, device_array, ucx_create_endpoint, ucx_create_listener
+    global ucp, host_array, device_array
+    global ucx_create_endpoint, ucx_create_listener
+    global pre_existing_cuda_context, cuda_context_created
+
     if ucp is not None:
         return
 
@@ -60,7 +77,34 @@ def init_once():
                 "CUDA support with UCX requires Numba for context management"
             )
 
+        cuda_visible_device = int(
+            os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0]
+        )
+        pre_existing_cuda_context = has_cuda_context()
+        if pre_existing_cuda_context is not False:
+            warnings.warn(
+                f"A CUDA context for device {pre_existing_cuda_context} already exists on process "
+                f"ID {os.getpid()}. This is often the result of a CUDA-enabled library calling a "
+                "CUDA runtime function before Dask-CUDA can spawn worker processes. Please make "
+                "sure any such function calls don't happen at import time or in the global scope "
+                "of a program."
+            )
+
         numba.cuda.current_context()
+
+        cuda_context_created = has_cuda_context()
+        if (
+            cuda_context_created is not False
+            and cuda_context_created != cuda_visible_device
+        ):
+            warnings.warn(
+                f"Worker with process ID {os.getpid()} should have a CUDA context assigned to "
+                f"device {cuda_visible_device}, but instead the CUDA context is on device "
+                "{cuda_context_created}. This is often the result of a CUDA-enabled library "
+                "calling a CUDA runtime function before Dask-CUDA can spawn worker processes. "
+                "Please make sure any such function calls don't happen at import time or in "
+                "the global scope of a program."
+            )
 
     import ucp as _ucp
 
@@ -220,11 +264,11 @@ class UCX(Comm):
 
                 # Send frames
 
-                # It is necessary to first synchronize the default stream before start sending
-                # We synchronize the default stream because UCX is not stream-ordered and
-                #  syncing the default stream will wait for other non-blocking CUDA streams.
-                # Note this is only sufficient if the memory being sent is not currently in use on
-                # non-blocking CUDA streams.
+                # It is necessary to first synchronize the default stream before start
+                # sending We synchronize the default stream because UCX is not
+                # stream-ordered and syncing the default stream will wait for other
+                # non-blocking CUDA streams. Note this is only sufficient if the memory
+                # being sent is not currently in use on non-blocking CUDA streams.
                 if any(cuda_send_frames):
                     synchronize_stream(0)
 
@@ -346,7 +390,7 @@ class UCXConnector(Connector):
             raise CommClosedError("Connection closed before handshake completed")
         return self.comm_class(
             ep,
-            local_addr=None,
+            local_addr="",
             peer_addr=self.prefix + address,
             deserialize=deserialize,
         )

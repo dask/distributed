@@ -120,7 +120,7 @@ Client Side
        await comm.close()
        print(result)
 
-   >>> asyncio.get_event_loop().run_until_complete(g())
+   >>> asyncio.get_event_loop().run_until_complete(f())
    3
 
    async def g():

@@ -1,6 +1,8 @@
 import logging
 from inspect import isawaitable
 
+from tornado.ioloop import IOLoop
+
 import dask.config
 from dask.utils import parse_timedelta
 
@@ -168,7 +170,7 @@ class Adaptive(AdaptiveCore):
 
         Returns
         -------
-        List of worker addresses to close, if any
+        List of worker names to close, if any
 
         See Also
         --------
@@ -204,5 +206,9 @@ class Adaptive(AdaptiveCore):
             await f
 
     @property
-    def loop(self):
-        return self.cluster.loop
+    def loop(self) -> IOLoop:
+        """Override Adaptive.loop"""
+        if self.cluster:
+            return self.cluster.loop
+        else:
+            return IOLoop.current()

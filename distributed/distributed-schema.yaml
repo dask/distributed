@@ -242,6 +242,31 @@ properties:
               A list of trusted root modules the schedular is allowed to import (incl. submodules). For security reasons, the
               scheduler does not import arbitrary Python modules.
 
+          active-memory-manager:
+            type: object
+            required: [start, interval, policies]
+            additionalProperties: false
+            properties:
+              start:
+                type: boolean
+                description: set to true to auto-start the AMM on Scheduler init;
+                  false to manually start it with client.scheduler.amm_start()
+              interval:
+                type: string
+                description:
+                  Time expression, e.g. "2s". Run the AMM cycle every <interval>.
+              policies:
+                type: array
+                items:
+                  type: object
+                  required: [class]
+                  properties:
+                    class:
+                      type: string
+                      description: fully qualified name of an ActiveMemoryManagerPolicy
+                        subclass
+                  additionalProperties:
+                    description: keyword arguments to the policy constructor, if any
 
       worker:
         type: object
