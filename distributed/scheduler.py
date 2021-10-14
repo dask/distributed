@@ -5858,23 +5858,8 @@ class Scheduler(SchedulerState, ServerNode):
         # TODO replace with worker_list
         if nanny:
             addresses = [parent._workers_dv[w].nanny for w in workers]
-            without_nanny = sum(addr is None for addr in addresses)
-            if without_nanny == len(addresses):
-                raise RuntimeError(
-                    f"Attempting to broadcast message {msg['op']!r} to Nanny "
-                    f"workers but none of the {without_nanny} workers use "
-                    "nannies, so they will ignore it. To fix, recreate the "
-                    "cluster and ensure the `worker_class` is set to "
-                    "'dask.distributed.Nanny'."
-                )
-            else:
-                logger.warning(
-                    f"Broadcasting message {msg['op']!r} to Nanny workers "
-                    f"but {without_nanny} workers are not using nannies, so they "
-                    "will ignore it. To fix, recreate the cluster and ensure that "
-                    "`worker_class` is set to 'dask.distributed.Nanny' for all "
-                    "workers."
-                )
+            if msg["op"] == "plugin_add":
+                self._check_nanny_workers(addresses)
         else:
             addresses = workers
 
@@ -7578,6 +7563,30 @@ class Scheduler(SchedulerState, ServerNode):
             )
         )
         return dict(zip(parent._workers_dv, results))
+
+    def _check_nanny_workers(self, addresses: list):
+        """Check if workers are using Nanny.
+
+        We should fail loudly when users try to register a nanny plugin
+        to workers that are not using nannies.
+        """
+        without_nanny = sum(addr is None for addr in addresses)
+        if without_nanny == len(addresses):
+            raise RuntimeError(
+                f"Attempting to registering plugin to Nanny "
+                f"workers but none of the {without_nanny} workers use "
+                "nannies, so they will ignore it. To fix, recreate the "
+                "cluster and ensure the `worker_class` is set to "
+                "'dask.distributed.Nanny'."
+            )
+        else:
+            logger.warning(
+                f"Registering plugin to Nanny workers "
+                f"but {without_nanny} workers are not using nannies, so they "
+                "will ignore it. To fix, recreate the cluster and ensure that "
+                "`worker_class` is set to 'dask.distributed.Nanny' for all "
+                "workers."
+            )
 
     ###########
     # Cleanup #

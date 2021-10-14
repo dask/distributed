@@ -3199,3 +3199,13 @@ async def test_worker_reconnect_task_memory_with_resources(c, s, a):
         assert ("no-worker", "memory") in {
             (start, finish) for (_, start, finish, _, _) in s.transition_log
         }
+
+
+@gen_cluster(
+    nthreads=[],
+)
+def test_check_nanny_workers_raises(s):
+    with pytest.raises(
+        RuntimeError, match="`worker_class` is set to 'dask.distributed.Nanny'"
+    ):
+        s._check_nanny_workers([None])
