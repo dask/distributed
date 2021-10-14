@@ -2765,10 +2765,10 @@ class SchedulerState:
 
             s: set = self._unknown_durations.pop(ts._prefix._name, set())
             tts: TaskState
+            steal = self.extensions.get("stealing")
             for tts in s:
                 if tts._processing_on:
                     self.set_duration_estimate(tts, tts._processing_on)
-                    steal = self.extensions.get("stealing")
                     if steal:
                         steal.put_key_in_stealable(tts)
 
@@ -7029,8 +7029,12 @@ class Scheduler(SchedulerState, ServerNode):
                 raise
 
     def set_restrictions(self, comm=None, worker=None):
+        ts: TaskState
         for key, restrictions in worker.items():
-            self.tasks[key]._worker_restrictions = set(restrictions)
+            ts = self.tasks[key]
+            if isinstance(restrictions, str):
+                restrictions = {restrictions}
+            ts._worker_restrictions = set(restrictions)
 
     def get_task_status(self, comm=None, keys=None):
         parent: SchedulerState = cast(SchedulerState, self)
@@ -7960,8 +7964,7 @@ def _reevaluate_occupancy_worker(state: SchedulerState, ws: WorkerState):
         return
     if ws._occupancy > old * 1.3 or old > ws._occupancy * 1.3:
         for ts in ws._processing:
-            steal.remove_key_from_stealable(ts)
-            steal.put_key_in_stealable(ts)
+            steal.recalculate_cost(ts)
 
 
 @cfunc

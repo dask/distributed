@@ -2724,21 +2724,26 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def handle_steal_request(self, key):
+    def handle_steal_request(self, key, stimulus_id):
         # There may be a race condition between stealing and releasing a task.
         # In this case the self.tasks is already cleared. The `None` will be
         # registered as `already-computing` on the other end
         ts = self.tasks.get(key)
         state = ts.state if ts is not None else None
 
-        response = {"op": "steal-response", "key": key, "state": state}
+        response = {
+            "op": "steal-response",
+            "key": key,
+            "state": state,
+            "stimulus_id": stimulus_id,
+        }
         self.batched_stream.send(response)
 
         if state in {"ready", "waiting", "constrained"}:
             # If task is marked as "constrained" we haven't yet assigned it an
             # `available_resources` to run on, that happens in
             # `transition_constrained_executing`
-            self.transition(ts, "forgotten", stimulus_id=f"steal-request-{time()}")
+            self.transition(ts, "forgotten", stimulus_id=stimulus_id)
 
     def release_key(
         self,
