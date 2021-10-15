@@ -2473,8 +2473,6 @@ async def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout
     client=True, Worker=Nanny, worker_kwargs={"memory_limit": "500 MiB"}, timeout=120
 )
 async def test_memory(c, s, *_):
-    pytest.importorskip("zict")
-
     # WorkerState objects, as opposed to the Nanny objects passed by gen_cluster
     a, b = s.workers.values()
 
