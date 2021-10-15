@@ -54,7 +54,7 @@ class WorkerThreadInterrupt(threading.ThreadError):
     pass
 
 
-def _async_raise(tid: int, exctype: BaseException = WorkerThreadInterrupt):
+def _async_raise(tid: int, exctype: type = WorkerThreadInterrupt):
     """raise exception in given thread"""
     import ctypes
 
