@@ -662,6 +662,12 @@ class Worker(ServerNode):
             self.memory_pause_fraction = dask.config.get(
                 "distributed.worker.memory.pause"
             )
+        if "thread_auto_interrupt" in kwargs:
+            self.interruptor = kwargs.pop("thread_auto_interrupt")
+        else:
+            self.interruptor = dask.config.get(
+                "distributed.worker.thread_auto_interrupt", False
+            )
 
         if isinstance(data, MutableMapping):
             self.data = data
@@ -2007,6 +2013,13 @@ class Worker(ServerNode):
         # See https://github.com/dask/distributed/pull/5046#discussion_r685093940
         ts.state = "cancelled"
         ts.done = False
+
+        if self.interruptor:
+            th = [th for th, k in self.active_threads.items() if k == ts.key]
+            if th:
+                logger.info("Interrupting thread %i for task %s", th[0], ts.key)
+                self.executor.interrupt(th[0])
+
         return {}, []
 
     def transition_long_running_memory(self, ts, value=no_value, *, stimulus_id):
@@ -2778,13 +2791,6 @@ class Worker(ServerNode):
 
             # task is released but still running - set thread exception
             # whether or not to do this automatically should be configurable
-            if ts.state == "executing":
-                self.executing_count -= 1
-                th = [th for th, k in self.active_threads.items() if k == key]
-                if th:
-                    logger.info("Interrupting thread %i for task %s", th[0], key)
-                    self.executor.interrupt(th[0])
-
             if ts.resource_restrictions is not None:
                 if ts.state == "executing":
                     for resource, quantity in ts.resource_restrictions.items():

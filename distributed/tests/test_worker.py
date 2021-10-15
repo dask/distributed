@@ -1782,10 +1782,13 @@ async def test_story(c, s, w):
 def donothing():
     import time
 
+    from distributed._concurrent_futures_thread import WorkerThreadInterrupt
+
     try:
-        for _ in range(100000):
+        for _ in range(100):
             time.sleep(0.01)
-    finally:
+        raise KeyboardInterrupt
+    except WorkerThreadInterrupt:
         get_worker().attr = "Quitting"
 
 
@@ -1793,6 +1796,7 @@ def donothing():
 async def test_interrupt(c, s, w):
     import concurrent.futures
 
+    w.interruptor = True
     fut0 = c.submit(donothing)
     await async_wait_for(lambda: bool(w.active_threads), 1)
     fut1 = c.submit(lambda: True)  # blocked
@@ -1808,6 +1812,7 @@ def test_interrupt_sync():
     client = Client(
         processes=False, asynchronous=False, n_workers=1, threads_per_worker=1
     )
+    client.cluster.workers[0].interruptor = True
     import concurrent.futures
     import time
 
