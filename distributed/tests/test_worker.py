@@ -3089,6 +3089,7 @@ async def _wait_for_flight(key, worker):
         await asyncio.sleep(0)
 
 
+@pytest.mark.xfail(reason="#5406")
 @gen_cluster(client=True)
 async def test_gather_dep_do_not_handle_response_of_not_requested_tasks(c, s, a, b):
     """At time of writing, the gather_dep implementation filtered tasks again
@@ -3122,6 +3123,7 @@ async def test_gather_dep_do_not_handle_response_of_not_requested_tasks(c, s, a,
     await fut3
 
 
+@pytest.mark.xfail(reason="#5406")
 @gen_cluster(
     client=True,
     config={
