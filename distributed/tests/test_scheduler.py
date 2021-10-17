@@ -41,6 +41,7 @@ from distributed.utils_test import (
     slowinc,
     tls_only_security,
     varying,
+    popen,
 )
 from distributed.worker import dumps_function, dumps_task, get_worker
 
@@ -3190,3 +3191,13 @@ async def test_set_restrictions(c, s, a, b):
     assert s.tasks[f.key].worker_restrictions == {a.address}
     s.reschedule(f)
     await f
+
+
+def test_cli_multiple_hosts(loop):
+    with popen(["dask-scheduler", "--no-dashboard", "--host=tcp://0.0.0.0:8700", "--host=tcp://0.0.0.0:8701"]):
+        c1 = Client("tcp://127.0.0.1:8700", loop=loop)
+        c2 = Client("tcp://127.0.0.1:8701", loop=loop)
+
+        assert c1.get_versions() == c2.get_versions()
+        c1.close()
+        c2.close()

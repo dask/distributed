@@ -24,7 +24,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 
 
 @click.command(context_settings=dict(ignore_unknown_options=True))
-@click.option("--host", type=str, default="", help="URI, IP or hostname of this server")
+@click.option("--host", type=str, help="URI, IP or hostname of this server", multiple=True)
 @click.option("--port", type=int, default=None, help="Serving port")
 @click.option(
     "--interface",
@@ -150,7 +150,7 @@ def main(
         )
         dashboard = bokeh
 
-    if port is None and (not host or not re.search(r":\d", host)):
+    if port is None and (not host or not all(re.search(r":\d", h) for h in host)):
         port = 8786
 
     sec = {
