@@ -5968,7 +5968,7 @@ class Scheduler(SchedulerState, ServerNode):
             await retry_operation(
                 self.rpc(addr=worker_address).free_keys,
                 keys=list(keys),
-                stimulus_id="rebalance/replicate",
+                stimulus_id=f"delete-data-{time()}",
             )
         except OSError as e:
             # This can happen e.g. if the worker is going through controlled shutdown;
