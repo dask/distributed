@@ -1596,7 +1596,7 @@ class Worker(ServerNode):
             self.batched_stream.send(msg)
         return {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
 
-    def handle_free_keys(self, comm=None, keys=None, reason=None):
+    def handle_free_keys(self, comm=None, keys=None, stimulus_id=None):
         """
         Handler to be called by the scheduler.
 
@@ -1607,14 +1607,14 @@ class Worker(ServerNode):
         still decide to hold on to the data and task since it is required by an
         upstream dependency.
         """
-        self.log.append(("free-keys", keys, reason))
+        self.log.append(("free-keys", keys, stimulus_id))
         recommendations = {}
         for key in keys:
             ts = self.tasks.get(key)
             if ts:
                 recommendations[ts] = "released" if ts.dependents else "forgotten"
 
-        self.transitions(recommendations, stimulus_id=reason)
+        self.transitions(recommendations, stimulus_id=stimulus_id)
 
     def handle_remove_replicas(self, keys, stimulus_id):
         """Stream handler notifying the worker that it might be holding unreferenced,
