@@ -22,6 +22,7 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
+from collections.abc import Callable
 from contextlib import contextmanager, nullcontext, suppress
 from glob import glob
 from itertools import count
@@ -54,6 +55,7 @@ from .deploy import SpecCluster
 from .diagnostics.plugin import WorkerPlugin
 from .metrics import time
 from .nanny import Nanny
+from .node import ServerNode
 from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (
@@ -770,7 +772,7 @@ async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
     await asyncio.gather(*(disconnect(addr, timeout, rpc_kwargs) for addr in addresses))
 
 
-def gen_test(timeout=_TEST_TIMEOUT):
+def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
     """Coroutine test
 
     @gen_test(timeout=5)
@@ -797,14 +799,14 @@ def gen_test(timeout=_TEST_TIMEOUT):
 
 
 async def start_cluster(
-    nthreads,
-    scheduler_addr,
-    loop,
-    security=None,
-    Worker=Worker,
-    scheduler_kwargs={},
-    worker_kwargs={},
-):
+    nthreads: list[tuple[str, int] | tuple[str, int, dict]],
+    scheduler_addr: str,
+    loop: IOLoop,
+    security: Security | dict[str, Any] | None = None,
+    Worker: type[ServerNode] = Worker,
+    scheduler_kwargs: dict[str, Any] = {},
+    worker_kwargs: dict[str, Any] = {},
+) -> tuple[Scheduler, list[ServerNode]]:
     s = await Scheduler(
         loop=loop,
         validate=True,
@@ -813,6 +815,7 @@ async def start_cluster(
         host=scheduler_addr,
         **scheduler_kwargs,
     )
+
     workers = [
         Worker(
             s.address,
@@ -822,7 +825,11 @@ async def start_cluster(
             loop=loop,
             validate=True,
             host=ncore[0],
-            **(merge(worker_kwargs, ncore[2]) if len(ncore) > 2 else worker_kwargs),
+            **(
+                merge(worker_kwargs, ncore[2])  # type: ignore
+                if len(ncore) > 2
+                else worker_kwargs
+            ),
         )
         for i, ncore in enumerate(nthreads)
     ]
@@ -854,21 +861,24 @@ async def end_cluster(s, workers):
 
 
 def gen_cluster(
-    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 2)],
-    ncores=None,
+    nthreads: list[tuple[str, int] | tuple[str, int, dict]] = [
+        ("127.0.0.1", 1),
+        ("127.0.0.1", 2),
+    ],
+    ncores: None = None,  # deprecated
     scheduler="127.0.0.1",
-    timeout=_TEST_TIMEOUT,
-    security=None,
-    Worker=Worker,
-    client=False,
-    scheduler_kwargs={},
-    worker_kwargs={},
-    client_kwargs={},
-    active_rpc_timeout=1,
-    config={},
-    clean_kwargs={},
-    allow_unclosed=False,
-):
+    timeout: float = _TEST_TIMEOUT,
+    security: Security | dict[str, Any] | None = None,
+    Worker: type[ServerNode] = Worker,
+    client: bool = False,
+    scheduler_kwargs: dict[str, Any] = {},
+    worker_kwargs: dict[str, Any] = {},
+    client_kwargs: dict[str, Any] = {},
+    active_rpc_timeout: float = 1,
+    config: dict[str, Any] = {},
+    clean_kwargs: dict[str, Any] = {},
+    allow_unclosed: bool = False,
+) -> Callable[[Callable], Callable]:
     from distributed import Client
 
     """ Coroutine test with small cluster
