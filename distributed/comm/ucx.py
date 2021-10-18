@@ -5,6 +5,7 @@ See :ref:`communications` for more.
 
 .. _UCX: https://github.com/openucx/ucx
 """
+import functools
 import logging
 import os
 import struct
@@ -166,6 +167,18 @@ def init_once():
             ucx_create_listener = EndpointReuse.create_listener
 
 
+def _close_comm(ref):
+    """Callback to close Dask Comm when UCX Endpoint closes or errors
+
+    Parameters
+    ----------
+        ref: weak reference to a Dask UCX comm
+    """
+    comm = ref()
+    if comm is not None:
+        comm._closed = True
+
+
 class UCX(Comm):
     """Comm object using UCP.
 
@@ -210,6 +223,17 @@ class UCX(Comm):
         self._peer_addr = peer_addr
         self.deserialize = deserialize
         self.comm_flag = None
+
+        # When the UCX endpoint closes or errors the registered callback
+        # is called.
+        if hasattr(self._ep, "set_close_callback"):
+            ref = weakref.ref(self)
+            self._ep.set_close_callback(functools.partial(_close_comm, ref))
+            self._closed = False
+            self._has_close_callback = True
+        else:
+            self._has_close_callback = False
+
         logger.debug("UCX.__init__ %s", self)
 
     @property
@@ -369,7 +393,13 @@ class UCX(Comm):
             raise CommClosedError("UCX Endpoint is closed")
 
     def closed(self):
-        return self._ep is None
+        if self._has_close_callback is True:
+            # The self._closed flag is separate from the endpoint's lifetime, even when
+            # the endpoint has closed or errored, there may be messages on its buffer
+            # still to be received, even though sending is not possible anymore.
+            return self._closed
+        else:
+            return self._ep is None
 
 
 class UCXConnector(Connector):
