@@ -2737,8 +2737,7 @@ class SchedulerState:
 
             if ws != ts._processing_on:  # someone else has this task
                 logger.info(
-                    "Unexpected worker completed task %s. Expected: %s, Got: %s, Key: %s",
-                    ts.key,
+                    "Unexpected worker completed task. Expected: %s, Got: %s, Key: %s",
                     ts._processing_on,
                     ws,
                     key,
@@ -5969,7 +5968,7 @@ class Scheduler(SchedulerState, ServerNode):
             await retry_operation(
                 self.rpc(addr=worker_address).free_keys,
                 keys=list(keys),
-                reason="rebalance/replicate",
+                stimulus_id="rebalance/replicate",
             )
         except OSError as e:
             # This can happen e.g. if the worker is going through controlled shutdown;
