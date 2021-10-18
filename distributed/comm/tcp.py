@@ -30,7 +30,7 @@ from ..threadpoolexecutor import ThreadPoolExecutor
 from ..utils import ensure_ip, get_ip, get_ipv6, nbytes
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, FatalCommClosedError, Listener
-from .registry import Backend, backends
+from .registry import Backend
 from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to_frames
 
 logger = logging.getLogger(__name__)
@@ -622,7 +622,3 @@ class TCPBackend(BaseTCPBackend):
 class TLSBackend(BaseTCPBackend):
     _connector_class = TLSConnector
     _listener_class = TLSListener
-
-
-backends["tcp"] = TCPBackend()
-backends["tls"] = TLSBackend()

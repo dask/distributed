@@ -10,11 +10,19 @@ from .addressing import (
     unparse_host_port,
 )
 from .core import Comm, CommClosedError, connect, listen
+from .registry import backends
 from .utils import get_tcp_server_address, get_tcp_server_addresses
 
 
 def _register_transports():
-    from . import inproc, tcp, ws
+    from . import asyncio_tcp, inproc, tcp, ws
+
+    if True:  # TODO: some kind of config
+        backends["tcp"] = asyncio_tcp.TCPBackend()
+        backends["tls"] = asyncio_tcp.TLSBackend()
+    else:
+        backends["tcp"] = tcp.TCPBackend()
+        backends["tls"] = tcp.TLSBackend()
 
     try:
         from . import ucx
