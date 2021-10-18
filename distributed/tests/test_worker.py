@@ -2444,7 +2444,6 @@ async def test_hold_on_to_replicas(c, s, *workers):
         await asyncio.sleep(0.01)
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_worker_reconnects_mid_compute(c, s, a, b):
     """Ensure that, if a worker disconnects while computing a result, the scheduler will
@@ -2513,7 +2512,6 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
         await asyncio.sleep(0.001)
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, a, b):
     """
