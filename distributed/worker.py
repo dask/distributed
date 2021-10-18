@@ -1761,7 +1761,7 @@ class Worker(ServerNode):
             if ts is None or ts.state != "memory":
                 continue
             if not ts.is_protected():
-                self.log.append(("remove-replica-confirmed", ts.key, stimulus_id))
+                self.log.append((ts.key, "remove-replica-confirmed", stimulus_id))
                 recommendations[ts] = "released" if ts.dependents else "forgotten"
             else:
                 rejected.append(key)
@@ -1802,7 +1802,7 @@ class Worker(ServerNode):
         """
         ts = self.tasks.get(key)
         if ts and ts.state in ("waiting", "ready"):
-            self.log.append(("cancel-compute", key, reason))
+            self.log.append((key, "cancel-compute", reason))
             ts.scheduler_holds_ref = False
             # All possible dependents of TS should not be in state Processing on
             # scheduler side and therefore should not be assigned to a worker,
@@ -1839,7 +1839,7 @@ class Worker(ServerNode):
         except KeyError:
             self.tasks[key] = ts = TaskState(key)
 
-        self.log.append(("register-replica", key, ts.state, stimulus_id, time()))
+        self.log.append((key, "register-replica", ts.state, stimulus_id, time()))
         ts.priority = ts.priority or priority
 
         recommendations = {}
@@ -1867,7 +1867,7 @@ class Worker(ServerNode):
         annotations=None,
         stimulus_id=None,
     ):
-        self.log.append(("compute-task", key, stimulus_id, time()))
+        self.log.append((key, "compute-task", stimulus_id, time()))
         try:
             ts = self.tasks[key]
             logger.debug(
@@ -2554,7 +2554,7 @@ class Worker(ServerNode):
                 self.waiting_for_data_count -= 1
                 recommendations[dep] = "ready"
 
-        self.log.append(("put-in-memory", ts.key, stimulus_id, time()))
+        self.log.append((ts.key, "put-in-memory", stimulus_id, time()))
         return recommendations, scheduler_messages
 
     def select_keys_for_gather(self, worker, dep):
@@ -2749,7 +2749,7 @@ class Worker(ServerNode):
                     elif not busy:
                         ts.who_has.discard(worker)
                         self.has_what[worker].discard(ts.key)
-                        self.log.append(("missing-dep", d))
+                        self.log.append((d, "missing-dep"))
                         self.batched_stream.send(
                             {"op": "missing-data", "errant_worker": worker, "key": d}
                         )
@@ -2882,9 +2882,9 @@ class Worker(ServerNode):
                 "Release key %s", {"key": key, "cause": cause, "reason": reason}
             )
             if cause:
-                self.log.append(("release-key", key, {"cause": cause}, reason))
+                self.log.append((key, "release-key", {"cause": cause}, reason))
             else:
-                self.log.append(("release-key", key, reason))
+                self.log.append((key, "release-key", reason))
             if key in self.data:
                 try:
                     del self.data[key]
@@ -3061,7 +3061,7 @@ class Worker(ServerNode):
             return function, args, kwargs
         except Exception as e:
             logger.error("Could not deserialize task", exc_info=True)
-            self.log.append(("deserialize-error", ts.key))
+            self.log.append((ts.key, "deserialize-error"))
             emsg = error_message(e)
             emsg.pop("status")
             self.transition(
