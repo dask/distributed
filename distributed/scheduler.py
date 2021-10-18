@@ -2737,8 +2737,7 @@ class SchedulerState:
 
             if ws != ts._processing_on:  # someone else has this task
                 logger.info(
-                    "Unexpected worker completed task, likely due to "
-                    "work stealing. Expected: %s, Got: %s, Key: %s",
+                    "Unexpected worker completed task. Expected: %s, Got: %s, Key: %s",
                     ts._processing_on,
                     ws,
                     key,
@@ -2835,7 +2834,7 @@ class SchedulerState:
             worker_msg = {
                 "op": "free-keys",
                 "keys": [key],
-                "reason": f"Memory->Released {key}",
+                "stimulus_id": f"memory-released-{time()}",
             }
             for ws in ts._who_has:
                 worker_msgs[ws._address] = [worker_msg]
@@ -2935,7 +2934,11 @@ class SchedulerState:
                 if dts._state == "erred":
                     recommendations[dts._key] = "waiting"
 
-            w_msg = {"op": "free-keys", "keys": [key], "reason": "Erred->Released"}
+            w_msg = {
+                "op": "free-keys",
+                "keys": [key],
+                "stimulus_id": f"erred-released-{time()}",
+            }
             for ws_addr in ts._erred_on:
                 worker_msgs[ws_addr] = [w_msg]
             ts._erred_on.clear()
@@ -3013,7 +3016,7 @@ class SchedulerState:
                     {
                         "op": "free-keys",
                         "keys": [key],
-                        "reason": f"processing-released-{time()}",
+                        "stimulus_id": f"processing-released-{time()}",
                     }
                 ]
 
@@ -4339,9 +4342,9 @@ class Scheduler(SchedulerState, ServerNode):
                         worker_msgs[address] = []
                     worker_msgs[address].append(
                         {
-                            "op": "free-keys",
+                            "op": "remove-replicas",
                             "keys": already_released_keys,
-                            "reason": f"reconnect-already-released-{time()}",
+                            "stimulus_id": f"reconnect-already-released-{time()}",
                         }
                     )
             for ts in list(parent._unrunnable):
@@ -4767,7 +4770,7 @@ class Scheduler(SchedulerState, ServerNode):
                 {
                     "op": "free-keys",
                     "keys": [key],
-                    "reason": f"already-released-or-forgotten-{time()}",
+                    "stimulus_id": f"already-released-or-forgotten-{time()}",
                 }
             ]
         elif ts._state == "memory":
@@ -5965,7 +5968,7 @@ class Scheduler(SchedulerState, ServerNode):
             await retry_operation(
                 self.rpc(addr=worker_address).free_keys,
                 keys=list(keys),
-                reason="rebalance/replicate",
+                stimulus_id=f"delete-data-{time()}",
             )
         except OSError as e:
             # This can happen e.g. if the worker is going through controlled shutdown;
@@ -7846,7 +7849,7 @@ def _propagate_forgotten(
                 {
                     "op": "free-keys",
                     "keys": [key],
-                    "reason": f"propagate-forgotten {ts.key}",
+                    "stimulus_id": f"propagate-forgotten-{time()}",
                 }
             ]
     state.remove_all_replicas(ts)

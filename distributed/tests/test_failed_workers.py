@@ -488,7 +488,7 @@ async def test_worker_same_host_replicas_missing(c, s, a, b, x):
         # artificially, without notifying the scheduler.
         # This can only succeed if B handles the missing data properly by
         # removing A from the known sources of keys
-        a.handle_free_keys(keys=["f1"], reason="Am I evil?")  # Yes, I am!
+        a.handle_free_keys(keys=["f1"], stimulus_id="Am I evil?")  # Yes, I am!
         result_fut = c.submit(sink, futures, workers=x.address)
 
         await result_fut
