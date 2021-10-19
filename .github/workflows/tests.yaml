@@ -134,3 +134,12 @@ jobs:
         with:
           name: ${{ env.TEST_ID }}
           path: reports
+      - name: Upload deadlock reports
+        # ensure this runs even if pytest fails
+        if: >
+          always() &&
+          (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ env.TEST_ID }}-deadlocks
+          path: test_timeout_reports
