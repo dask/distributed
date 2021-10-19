@@ -2968,7 +2968,7 @@ async def test_who_has_consistent_remove_replica(c, s, *workers):
 
     await f2
 
-    assert ("missing-dep", f1.key) in a.story(f1.key)
+    assert (f1.key, "missing-dep") in a.story(f1.key)
     assert a.tasks[f1.key].suspicious_count == 0
     assert s.tasks[f1.key].suspicious == 0
 

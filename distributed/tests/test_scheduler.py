@@ -1947,7 +1947,7 @@ class NoSchedulerDelayWorker(Worker):
     comparisons using times reported from workers.
     """
 
-    @property
+    @property  # type: ignore
     def scheduler_delay(self):
         return 0
 
