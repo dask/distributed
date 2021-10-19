@@ -109,7 +109,7 @@ PROCESSING = {
 READY = {"ready", "constrained"}
 
 
-DEFAULT_EXTENSIONS: list[type[PubSubWorkerExtension]] = [PubSubWorkerExtension]
+DEFAULT_EXTENSIONS: list[type] = [PubSubWorkerExtension]
 
 DEFAULT_METRICS: dict[str, Callable[[Worker], Any]] = {}
 
@@ -531,7 +531,7 @@ class Worker(ServerNode):
         memory_target_fraction: float | Literal[False] | None = None,
         memory_spill_fraction: float | Literal[False] | None = None,
         memory_pause_fraction: float | Literal[False] | None = None,
-        extensions: list[type[PubSubWorkerExtension]] | None = None,
+        extensions: list[type] | None = None,
         metrics: Mapping[str, Callable[[Worker], Any]] = DEFAULT_METRICS,
         startup_information: Mapping[
             str, Callable[[Worker], Any]
