@@ -2048,9 +2048,10 @@ class Client:
                         await asyncio.sleep(0.1)
                     if time() > start + timeout:
                         raise TimeoutError("No valid workers found")
-                    nthreads = await self.scheduler.ncores(workers=workers)
+                    # Exclude paused and closing_gracefully workers
+                    nthreads = await self.scheduler.ncores_running(workers=workers)
                 if not nthreads:
-                    raise ValueError("No valid workers")
+                    raise ValueError("No valid workers found")
 
                 _, who_has, nbytes = await scatter_to_workers(
                     nthreads, data2, report=False, rpc=self.rpc

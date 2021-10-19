@@ -784,20 +784,27 @@ async def test_story(c, s, a, b):
     assert s.story(x.key) == s.story(s.tasks[x.key])
 
 
-@gen_cluster(nthreads=[], client=True)
-async def test_scatter_no_workers(c, s):
+@pytest.mark.parametrize("direct", [False, True])
+@gen_cluster(client=True, nthreads=[])
+async def test_scatter_no_workers(c, s, direct):
     with pytest.raises(TimeoutError):
         await s.scatter(data={"x": 1}, client="alice", timeout=0.1)
 
     start = time()
     with pytest.raises(TimeoutError):
-        await c.scatter(123, timeout=0.1)
+        await c.scatter(123, timeout=0.1, direct=direct)
     assert time() < start + 1.5
 
-    w = Worker(s.address, nthreads=3)
-    await asyncio.gather(c.scatter(data={"y": 2}, timeout=5), w)
+    fut = c.scatter({"y": 2}, timeout=5, direct=direct)
+    await asyncio.sleep(0.1)
+    async with Worker(s.address) as w:
+        await fut
+        assert w.data["y"] == 2
 
-    assert w.data["y"] == 2
+    # Test race condition between worker init and scatter
+    w = Worker(s.address)
+    await asyncio.gather(c.scatter({"z": 3}, timeout=5, direct=direct), w)
+    assert w.data["z"] == 3
     await w.close()
 
 
