@@ -1101,24 +1101,23 @@ async def test_worker_breaks_and_returns(c, s, a):
 
 @gen_cluster(client=True, nthreads=[])
 async def test_no_workers_to_memory(c, s):
-    x = delayed(slowinc)(1, delay=0.4)
+    x = delayed(slowinc)(1, delay=10.0)
     y = delayed(slowinc)(x, delay=0.4)
     z = delayed(slowinc)(y, delay=0.4)
 
     yy, zz = c.persist([y, z])
 
-    while not s.tasks:
+    while len(s.tasks) < 3:
         await asyncio.sleep(0.01)
 
     w = Worker(s.address, nthreads=1)
     w.update_data(data={y.key: 3})
 
-    await w
-
     start = time()
-
-    while not s.workers:
+    await w
+    while not s.workers or s.workers[w.address].status != Status.running:
         await asyncio.sleep(0.01)
+    assert time() < start + 9  # Did not wait for x
 
     assert s.get_task_status(keys={x.key, y.key, z.key}) == {
         x.key: "released",
@@ -1289,7 +1288,11 @@ async def test_scheduler_file():
 async def test_non_existent_worker(c, s):
     with dask.config.set({"distributed.comm.timeouts.connect": "100ms"}):
         await s.add_worker(
-            address="127.0.0.1:5738", nthreads=2, nbytes={}, host_info={}
+            address="127.0.0.1:5738",
+            status="running",
+            nthreads=2,
+            nbytes={},
+            host_info={},
         )
         futures = c.map(inc, range(10))
         await asyncio.sleep(0.300)
@@ -1929,7 +1932,7 @@ async def test_default_task_duration_splits(c, s, a, b):
 
 
 @gen_test()
-async def test_no_danglng_asyncio_tasks():
+async def test_no_dangling_asyncio_tasks():
     start = asyncio.all_tasks()
     async with Scheduler(dashboard_address=":0") as s:
         async with Worker(s.address, name="0"):
@@ -3161,8 +3164,31 @@ async def test_worker_heartbeat_after_cancel(c, s, *workers):
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
+async def test_worker_reconnect_task_memory(c, s, a):
+    a.periodic_callbacks["heartbeat"].stop()
+
+    futs = c.map(inc, range(10))
+    res = c.submit(sum, futs)
+
+    while not a.executing_count and not a.data:
+        await asyncio.sleep(0.001)
+
+    await s.remove_worker(address=a.address, close=False)
+    while not res.done():
+        await a.heartbeat()
+
+    await res
+    assert ("no-worker", "memory") in {
+        (start, finish) for (_, start, finish, _, _) in s.transition_log
+    }
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_worker_reconnect_task_memory_with_resources(c, s, a):
     async with Worker(s.address, resources={"A": 1}) as b:
+        while s.workers[b.address].status != Status.running:
+            await asyncio.sleep(0.001)
+
         b.periodic_callbacks["heartbeat"].stop()
 
         futs = c.map(inc, range(10), resources={"A": 1})
@@ -3190,3 +3216,28 @@ async def test_set_restrictions(c, s, a, b):
     assert s.tasks[f.key].worker_restrictions == {a.address}
     s.reschedule(f)
     await f
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+async def test_avoid_paused_workers(c, s, w1, w2, w3):
+    w2.memory_pause_fraction = 1e-15
+    while s.workers[w2.address].status != Status.paused:
+        await asyncio.sleep(0.01)
+    futures = c.map(slowinc, range(8), delay=0.1)
+    while (len(w1.tasks), len(w2.tasks), len(w3.tasks)) != (4, 0, 4):
+        await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_unpause_schedules_unrannable_tasks(c, s, a):
+    a.memory_pause_fraction = 1e-15
+    while s.workers[a.address].status != Status.paused:
+        await asyncio.sleep(0.01)
+
+    fut = c.submit(inc, 1, key="x")
+    while not s.unrunnable:
+        await asyncio.sleep(0.001)
+    assert next(iter(s.unrunnable)).key == "x"
+
+    a.memory_pause_fraction = 0.8
+    assert await fut == 2
