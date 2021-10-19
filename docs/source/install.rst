@@ -28,7 +28,7 @@ To install distributed from source, clone the repository from `github
 
     git clone https://github.com/dask/distributed.git
     cd distributed
-    pip install .
+    python -m pip install .
 
 
 Notes
