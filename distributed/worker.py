@@ -1204,13 +1204,13 @@ class Worker(ServerNode):
             self._update_latency(end - start)
 
             if response["status"] == "missing":
-                # If running, wait 0.5s and then re-register self. Otherwise just exit.
+                # If running, wait up to 0.5s and then re-register self.
+                # Otherwise just exit.
                 start = time()
-                while self.status in RUNNING:
-                    if time() >= start + 0.5:
-                        await self._register_with_scheduler()
-                        return
+                while self.status in RUNNING and time() < start + 0.5:
                     await asyncio.sleep(0.01)
+                if self.status in RUNNING:
+                    await self._register_with_scheduler()
                 return
 
             self.scheduler_delay = response["time"] - middle
