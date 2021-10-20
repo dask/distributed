@@ -586,7 +586,7 @@ class Server:
                                 handler(**merge(extra, msg))
                         else:
                             logger.error("odd message %s", msg)
-                    await asyncio.sleep(0)
+                        await asyncio.sleep(0)
 
                 for func in every_cycle:
                     if is_coroutine_function(func):
