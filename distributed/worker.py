@@ -97,7 +97,7 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 no_value = "--no-value-sentinel--"
 
-# TaskState.status subsets
+# TaskState.state subsets
 PROCESSING = {
     "waiting",
     "ready",
