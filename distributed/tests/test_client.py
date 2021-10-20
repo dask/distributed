@@ -3650,51 +3650,46 @@ def test_reconnect(loop):
         "9393",
         "--no-dashboard",
     ]
-    with popen(scheduler_cli) as s:
+    with popen(scheduler_cli):
         c = Client("127.0.0.1:9393", loop=loop)
-        start = time()
-        while len(c.nthreads()) != 1:
-            sleep(0.1)
-            assert time() < start + 3
-
+        c.wait_for_workers(1, timeout=10)
         x = c.submit(inc, 1)
-        assert x.result() == 2
+        assert x.result(timeout=10) == 2
 
     start = time()
     while c.status != "connecting":
-        assert time() < start + 5
+        assert time() < start + 10
         sleep(0.01)
 
     assert x.status == "cancelled"
     with pytest.raises(CancelledError):
-        x.result()
+        x.result(timeout=10)
 
-    with popen(scheduler_cli) as s:
+    with popen(scheduler_cli):
         start = time()
         while c.status != "running":
             sleep(0.1)
-            assert time() < start + 5
+            assert time() < start + 10
         start = time()
         while len(c.nthreads()) != 1:
             sleep(0.05)
-            assert time() < start + 15
+            assert time() < start + 10
 
         x = c.submit(inc, 1)
-        assert x.result() == 2
+        assert x.result(timeout=10) == 2
 
     start = time()
     while True:
+        assert time() < start + 10
         try:
-            x.result()
+            x.result(timeout=10)
             assert False
         except CommClosedError:
             continue
         except CancelledError:
             break
-        assert time() < start + 5
-        sleep(0.1)
 
-    sync(loop, w.close)
+    sync(loop, w.close, timeout=1)
     c.close()
 
 
