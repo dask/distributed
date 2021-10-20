@@ -97,6 +97,7 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 no_value = "--no-value-sentinel--"
 
+# TaskState.state subsets
 PROCESSING = {
     "waiting",
     "ready",
@@ -108,6 +109,8 @@ PROCESSING = {
 }
 READY = {"ready", "constrained"}
 
+# Worker.status subsets
+RUNNING = {Status.running, Status.paused, Status.closing_gracefully}
 
 DEFAULT_EXTENSIONS: list[type] = [PubSubWorkerExtension]
 
@@ -1024,6 +1027,9 @@ class Worker(ServerNode):
     def status(self, value):
         """Override Server.status to notify the Scheduler of status changes"""
         ServerNode.status.__set__(self, value)
+        self._send_worker_status_change()
+
+    def _send_worker_status_change(self) -> None:
         if (
             self.batched_stream
             and self.batched_stream.comm
@@ -1032,6 +1038,8 @@ class Worker(ServerNode):
             self.batched_stream.send(
                 {"op": "worker-status-change", "status": self._status.name}
             )
+        elif self._status != Status.closed:
+            self.loop.call_later(0.05, self._send_worker_status_change)
 
     async def get_metrics(self):
         out = dict(
@@ -1105,6 +1113,7 @@ class Worker(ServerNode):
                         op="register-worker",
                         reply=False,
                         address=self.contact_address,
+                        status=self.status.name,
                         keys=list(self.data),
                         nthreads=self.nthreads,
                         name=self.name,
@@ -1195,14 +1204,15 @@ class Worker(ServerNode):
             self._update_latency(end - start)
 
             if response["status"] == "missing":
-                for i in range(10):
-                    if self.status not in (Status.running, Status.paused):
-                        break
-                    else:
-                        await asyncio.sleep(0.05)
-                else:
+                # If running, wait up to 0.5s and then re-register self.
+                # Otherwise just exit.
+                start = time()
+                while self.status in RUNNING and time() < start + 0.5:
+                    await asyncio.sleep(0.01)
+                if self.status in RUNNING:
                     await self._register_with_scheduler()
                 return
+
             self.scheduler_delay = response["time"] - middle
             self.periodic_callbacks["heartbeat"].callback_time = (
                 response["heartbeat-interval"] * 1000
@@ -1231,7 +1241,7 @@ class Worker(ServerNode):
             logger.exception(e)
             raise
         finally:
-            if self.reconnect and self.status in (Status.running, Status.paused):
+            if self.reconnect and self.status in RUNNING:
                 logger.info("Connection to scheduler broken.  Reconnecting...")
                 self.loop.add_callback(self.heartbeat)
             else:
@@ -1443,11 +1453,7 @@ class Worker(ServerNode):
                 logger.info("Stopping worker at %s", self.address)
             except ValueError:  # address not available if already closed
                 logger.info("Stopping worker")
-            if self.status not in (
-                Status.running,
-                Status.paused,
-                Status.closing_gracefully,
-            ):
+            if self.status not in RUNNING:
                 logger.info("Closed worker has not yet started: %s", self.status)
             self.status = Status.closing
 
@@ -1475,9 +1481,7 @@ class Worker(ServerNode):
                 # If this worker is the last one alive, clean up the worker
                 # initialized clients
                 if not any(
-                    w
-                    for w in Worker._instances
-                    if w != self and w.status in (Status.running, Status.paused)
+                    w for w in Worker._instances if w != self and w.status in RUNNING
                 ):
                     for c in Worker._initialized_clients:
                         # Regardless of what the client was initialized with
@@ -2607,7 +2611,7 @@ class Worker(ServerNode):
             Total number of bytes for all the dependencies in to_gather combined
         """
         cause: TaskState | None = None
-        if self.status not in (Status.running, Status.paused):
+        if self.status not in RUNNING:
             return
 
         with log_errors():
@@ -3619,7 +3623,7 @@ class Worker(ServerNode):
             raise
 
     def validate_state(self):
-        if self.status not in (Status.running, Status.paused):
+        if self.status not in RUNNING:
             return
         try:
             assert self.executing_count >= 0
@@ -3786,11 +3790,7 @@ def get_worker() -> Worker:
         return thread_state.execution_state["worker"]
     except AttributeError:
         try:
-            return first(
-                w
-                for w in Worker._instances
-                if w.status in (Status.running, Status.paused)
-            )
+            return first(w for w in Worker._instances if w.status in RUNNING)
         except StopIteration:
             raise ValueError("No workers found")
 

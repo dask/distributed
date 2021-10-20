@@ -71,7 +71,7 @@ from .utils import (
     sync,
     thread_state,
 )
-from .worker import Worker
+from .worker import RUNNING, Worker
 
 try:
     import dask.array  # register config
@@ -837,8 +837,10 @@ async def start_cluster(
     await asyncio.gather(*workers)
 
     start = time()
-    while len(s.workers) < len(nthreads) or any(
-        comm.comm is None for comm in s.stream_comms.values()
+    while (
+        len(s.workers) < len(nthreads)
+        or any(ws.status != Status.running for ws in s.workers.values())
+        or any(comm.comm is None for comm in s.stream_comms.values())
     ):
         await asyncio.sleep(0.01)
         if time() > start + 30:
@@ -1557,7 +1559,7 @@ def check_instances():
     for w in Worker._instances:
         with suppress(RuntimeError):  # closed IOLoop
             w.loop.add_callback(w.close, report=False, executor_wait=False)
-            if w.status in (Status.running, Status.paused):
+            if w.status in RUNNING:
                 w.loop.add_callback(w.close)
     Worker._instances.clear()
 
