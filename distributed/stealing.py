@@ -14,7 +14,11 @@ from .core import CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
 from .utils import log_errors
 
-LATENCY = 10e-3
+# Stealing requires multiple network bounces and if successful also task
+# submission which may include code serialization. Therefore, be very
+# conservative in the latency estimation to suppress too aggressive stealing
+# of small tasks
+LATENCY = 0.1
 
 logger = logging.getLogger(__name__)
 
