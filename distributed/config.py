@@ -9,33 +9,15 @@ import dask
 
 from .compatibility import logging_names
 
-
-try:
-    from jsonschema import Draft6Validator, ValidationError
-
-    VALIDATE_CONFIG = True
-except ImportError:
-    VALIDATE_CONFIG = False
-
-
 config = dask.config.config
-
 
 fn = os.path.join(os.path.dirname(__file__), "distributed.yaml")
 
 with open(fn) as f:
     defaults = yaml.safe_load(f)
 
-if VALIDATE_CONFIG:
-    fn = os.path.join(os.path.dirname(__file__), "distributed-schema.yaml")
-    dask.config.ensure_file(source=fn)
-
-    with open(fn) as f:
-        schema = yaml.safe_load(f)
-
-    dask.config.validators.append(Draft6Validator(schema))
-
-dask.config.update_defaults(defaults)
+fn = os.path.join(os.path.dirname(__file__), "distributed-schema.yaml")
+dask.config.update_defaults(defaults, schema=fn)
 
 aliases = {
     "allowed-failures": "distributed.scheduler.allowed-failures",
