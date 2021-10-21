@@ -354,13 +354,16 @@ async def test_locked_comm_intercept_write(loop):
     assert await fut == "pong"
 
 
+@pytest.mark.slow()
 def test_provide_stack_on_timeout():
     sleep_time = 30
 
     async def inner_test(c, s, a, b):
         await asyncio.sleep(sleep_time)
 
-    test = gen_cluster(client=True, timeout=0.5)(inner_test)
+    # If this timeout is too small, the cluster setup/teardown might take too
+    # long and the timeout error we'll receive will be different
+    test = gen_cluster(client=True, timeout=2)(inner_test)
 
     start = time()
     with pytest.raises(asyncio.TimeoutError) as exc:
