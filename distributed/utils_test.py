@@ -980,7 +980,9 @@ def gen_cluster(
                             task.cancel()
                             while not task.cancelled():
                                 await asyncio.sleep(0.01)
-                            raise TimeoutError(f"Test timeout.\n{buffer.getvalue()}")
+                            raise TimeoutError(
+                                f"Test timeout.\n{buffer.getvalue()}"
+                            ) from None
                         finally:
                             if client and c.status not in ("closing", "closed"):
                                 await c._close(fast=s.status == Status.closed)
