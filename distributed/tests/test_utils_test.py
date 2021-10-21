@@ -106,27 +106,6 @@ async def test_gen_cluster_set_config_nanny(c, s, a, b):
     await c.run_on_scheduler(assert_config)
 
 
-@gen_cluster(client=True)
-def test_gen_cluster_legacy_implicit(c, s, a, b):
-    assert isinstance(c, Client)
-    assert isinstance(s, Scheduler)
-    for w in [a, b]:
-        assert isinstance(w, Worker)
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
-    assert (yield c.submit(lambda: 123)) == 123
-
-
-@gen_cluster(client=True)
-@gen.coroutine
-def test_gen_cluster_legacy_explicit(c, s, a, b):
-    assert isinstance(c, Client)
-    assert isinstance(s, Scheduler)
-    for w in [a, b]:
-        assert isinstance(w, Worker)
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
-    assert (yield c.submit(lambda: 123)) == 123
-
-
 @pytest.mark.skip(reason="This hangs on travis")
 def test_gen_cluster_cleans_up_client(loop):
     import dask.context

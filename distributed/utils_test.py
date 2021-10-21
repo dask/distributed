@@ -919,7 +919,7 @@ def gen_cluster(
 
     def _(func):
         if not iscoroutinefunction(func):
-            func = gen.coroutine(func)
+            raise RuntimeError("gen_cluster only works for coroutine functions.")
 
         @functools.wraps(func)
         def test_func(*outer_args, **kwargs):
@@ -964,11 +964,11 @@ def gen_cluster(
                             )
                             args = [c] + args
                         try:
-                            future = func(*args, *outer_args, **kwargs)
-                            task = asyncio.create_task(future)
+                            coro = func(*args, *outer_args, **kwargs)
+                            task = asyncio.create_task(coro)
 
-                            future = asyncio.wait_for(asyncio.shield(task), timeout)
-                            result = await future
+                            coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
+                            result = await coro2
                             if s.validate:
                                 s.validate_state()
                         except asyncio.TimeoutError:
@@ -981,7 +981,7 @@ def gen_cluster(
                             while not task.cancelled():
                                 await asyncio.sleep(0.01)
                             raise TimeoutError(
-                                f"Test timeout.\n{buffer.getvalue()}"
+                                f"Test timeout after {timeout}s.\n{buffer.getvalue()}"
                             ) from None
                         finally:
                             if client and c.status not in ("closing", "closed"):

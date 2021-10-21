@@ -420,7 +420,7 @@ async def test_blocked_handlers_are_respected(s, a, b):
 @gen_cluster(
     nthreads=[], config={"distributed.scheduler.blocked-handlers": ["test-handler"]}
 )
-def test_scheduler_init_pulls_blocked_handlers_from_config(s):
+async def test_scheduler_init_pulls_blocked_handlers_from_config(s):
     assert s.blocked_handlers == ["test-handler"]
 
 
