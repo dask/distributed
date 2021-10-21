@@ -971,7 +971,7 @@ def gen_cluster(
                             result = await coro2
                             if s.validate:
                                 s.validate_state()
-                        except asyncio.TimeoutError:
+                        except asyncio.TimeoutError as e:
                             assert task
                             buffer = io.StringIO()
                             # This stack indicates where the coro/test is suspended
@@ -981,7 +981,7 @@ def gen_cluster(
                                 await asyncio.sleep(0.01)
                             raise TimeoutError(
                                 f"Test timeout after {timeout}s.\n{buffer.getvalue()}"
-                            )
+                            ) from e
                         finally:
                             if client and c.status not in ("closing", "closed"):
                                 await c._close(fast=s.status == Status.closed)
