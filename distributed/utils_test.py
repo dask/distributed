@@ -965,10 +965,22 @@ def gen_cluster(
                             args = [c] + args
                         try:
                             future = func(*args, *outer_args, **kwargs)
-                            future = asyncio.wait_for(future, timeout)
+                            task = asyncio.create_task(future)
+
+                            future = asyncio.wait_for(asyncio.shield(task), timeout)
                             result = await future
                             if s.validate:
                                 s.validate_state()
+                        except asyncio.TimeoutError:
+                            assert task
+                            buffer = io.StringIO()
+                            # This stack indicates where the coro/test is
+                            # suspended
+                            task.print_stack(file=buffer)
+                            task.cancel()
+                            while not task.cancelled():
+                                await asyncio.sleep(0.01)
+                            raise TimeoutError(f"Test timeout.\n{buffer.getvalue()}")
                         finally:
                             if client and c.status not in ("closing", "closed"):
                                 await c._close(fast=s.status == Status.closed)

@@ -373,3 +373,21 @@ async def test_locked_comm_intercept_write(loop):
     assert await write_queue.get() == (b.address, {"op": "ping", "reply": True})
     write_event.set()
     assert await fut == "pong"
+
+
+def test_provide_stack_on_timeout():
+    sleep_time = 30
+
+    async def inner_test(c, s, a, b):
+        await asyncio.sleep(sleep_time)
+
+    test = gen_cluster(client=True, timeout=0.5)(inner_test)
+
+    start = time()
+    with pytest.raises(asyncio.TimeoutError) as exc:
+        test()
+    end = time()
+    assert "inner_test" in str(exc)
+    assert "await asyncio.sleep(sleep_time)" in str(exc)
+    # ensure the task was properly
+    assert end - start < sleep_time / 2
