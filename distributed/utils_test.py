@@ -974,8 +974,7 @@ def gen_cluster(
                         except asyncio.TimeoutError:
                             assert task
                             buffer = io.StringIO()
-                            # This stack indicates where the coro/test is
-                            # suspended
+                            # This stack indicates where the coro/test is suspended
                             task.print_stack(file=buffer)
                             task.cancel()
                             while not task.cancelled():
