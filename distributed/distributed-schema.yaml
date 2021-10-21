@@ -1,6 +1,7 @@
 properties:
   distributed:
     type: object
+    additionalProperties: false
     properties:
 
       version:
@@ -8,6 +9,7 @@ properties:
 
       scheduler:
         type: object
+        additionalProperties: false
         properties:
 
           allowed-failures:
@@ -167,10 +169,12 @@ properties:
             description: |
               Configuration options for Dask's real-time dashboard
 
+            additionalProperties: false
             properties:
               status:
                 type: object
                 description: The main status page of the dashboard
+                additionalProperties: false
                 properties:
                   task-stream-length:
                     type: integer
@@ -181,6 +185,7 @@ properties:
                 type: object
                 description: |
                   The page which includes the full task stream history
+                additionalProperties: false
                 properties:
                   task-stream-length:
                     type: integer
@@ -191,6 +196,7 @@ properties:
                 type: object
                 description: |
                   Settings around securing the dashboard
+                additionalProperties: false
                 properties:
                   ca-file:
                     type:
@@ -214,6 +220,7 @@ properties:
               Settings for Dask's distributed Lock object
 
               See https://docs.dask.org/en/latest/futures.html#locks for more information
+            additionalProperties: false
             properties:
               lease-validation-interval:
                 type: string
@@ -227,6 +234,7 @@ properties:
           http:
             type: object
             decription: Settings for Dask's embedded HTTP Server
+            additionalProperties: false
             properties:
               routes:
                 type: array
@@ -260,8 +268,9 @@ properties:
                 items:
                   type: object
                   required: [class]
+                  additionalProperties: false
                   properties:
-                    class:
+                   class:
                       type: string
                       description: fully qualified name of an ActiveMemoryManagerPolicy
                         subclass
@@ -272,6 +281,7 @@ properties:
         type: object
         description: |
           Configuration settings for Dask Workers
+        additionalProperties: false
         properties:
           blocked-handlers:
             type: array
@@ -308,6 +318,7 @@ properties:
             type: object
             description: |
               The number of concurrent connections to allow to other workers
+            additionalProperties: false
             properties:
               incoming:
                 type: integer
@@ -360,6 +371,7 @@ properties:
 
               For example if your worker has a walltime of one hour,
               then you may want to set the lifetime.duration to "55 minutes"
+            additionalProperties: false
             properties:
               duration:
                 type:
@@ -391,6 +403,7 @@ properties:
               The workers periodically poll every worker thread to see what they are working on.
               This data gets collected into statistical profiling information,
               which is then periodically bundled together and sent along to the scheduler.
+            additionalProperties: false
             properties:
               interval:
                 type: string
@@ -419,6 +432,7 @@ properties:
             type: object
             description: >-
               Settings for memory management
+            additionalProperties: false
             properties:
               recent-to-old-time:
                 type: string
@@ -432,6 +446,7 @@ properties:
                 type: object
                 description: >-
                   Settings for memory rebalance operations
+                additionalProperties: false
                 properties:
                   measure:
                     enum:
@@ -505,6 +520,7 @@ properties:
           http:
             type: object
             decription: Settings for Dask's embedded HTTP Server
+            additionalProperties: false
             properties:
               routes:
                 type: array
@@ -518,6 +534,7 @@ properties:
         type: object
         description: |
           Configuration settings for Dask Nannies
+        additionalProperties: false
         properties:
 
           preload:
@@ -545,6 +562,7 @@ properties:
         description: |
           Configuration settings for Dask Clients
 
+        additionalProperties: false
         properties:
           heartbeat:
             type: string
@@ -561,6 +579,7 @@ properties:
       deploy:
         type: object
         description: Configuration settings for general Dask deployment
+        additionalProperties: false
         properties:
           lost-worker-timeout:
             type: string
@@ -576,6 +595,7 @@ properties:
       adaptive:
         type: object
         description: Configuration settings for Dask's adaptive scheduling
+        additionalProperties: false
         properties:
           interval:
             type: string
@@ -617,12 +637,14 @@ properties:
       comm:
         type: object
         description: Configuration settings for Dask communications
+        additionalProperties: false
         properties:
 
           retry:
             type: object
             description: |
               Some operations (such as gathering data) are subject to re-tries with the below parameters
+            additionalProperties: false
             properties:
 
               count:
@@ -633,6 +655,7 @@ properties:
 
               delay:
                 type: object
+                additionalProperties: false
                 properties:
                   min:
                     type: string
@@ -679,6 +702,7 @@ properties:
           zstd:
             type: object
             description: Options for the Z Standard compression scheme
+            additionalProperties: false
             properties:
               level:
                 type: integer
@@ -695,6 +719,7 @@ properties:
 
           timeouts:
             type: object
+            additionalProperties: false
             properties:
               connect:
                 type: string
@@ -719,6 +744,7 @@ properties:
 
           tls:
             type: object
+            additionalProperties: false
             properties:
               ciphers:
                 type:
@@ -735,6 +761,7 @@ properties:
               scheduler:
                 type: object
                 description: TLS information for the scheduler
+                additionalProperties: false
                 properties:
                   cert:
                     type:
@@ -754,6 +781,7 @@ properties:
               worker:
                 type: object
                 description: TLS information for the worker
+                additionalProperties: false
                 properties:
                   cert:
                     type:
@@ -773,6 +801,7 @@ properties:
               client:
                 type: object
                 description: TLS information for the client
+                additionalProperties: false
                 properties:
                   cert:
                     type:
@@ -793,6 +822,7 @@ properties:
             type: object
             description: |
               UCX provides access to other transport methods including NVLink and InfiniBand.
+            additionalProperties: false
             properties:
               cuda_copy:
                 type: boolean
@@ -838,6 +868,7 @@ properties:
 
           websockets:
             type: object
+            additionalProperties: false
             properties:
               shard:
                 type:
@@ -852,6 +883,7 @@ properties:
 
       diagnostics:
         type: object
+        additionalProperties: false
         properties:
           nvml:
             type: boolean
@@ -862,6 +894,7 @@ properties:
               diagnostics.
           computations:
             type: object
+            additionalProperties: false
             properties:
               max-history:
                 type: integer
@@ -877,7 +910,8 @@ properties:
 
       dashboard:
         type: object
-        properties:
+        additionalProperties: false
+            properties:
           link:
             type: string
             description: |
@@ -895,6 +929,7 @@ properties:
 
           prometheus:
             type: object
+            additionalProperties: false
             properties:
               namespace:
                 type: string
@@ -904,6 +939,7 @@ properties:
         type: object
         description: |
           Options for logs, event loops, and so on
+        additionalProperties: false
         properties:
           tick:
             type: object
@@ -918,7 +954,7 @@ properties:
               then it logs a warning saying that something has been stopping the event loop from smooth operation.
               This is typically caused by GIL holding operations,
               but could also be several other things.
-
+            additionalProperties: false
             properties:
               interval:
                 type: string
@@ -967,6 +1003,7 @@ properties:
             type: object
             description: |
               Options for the periodic system monitor
+            additionalProperties: false
             properties:
               interval:
                 type: string
@@ -976,6 +1013,7 @@ properties:
         type: object
         description: |
           Configuration options for the RAPIDS Memory Manager.
+        additionalProperties: false
         properties:
           pool-size:
             type: [integer, 'null']
