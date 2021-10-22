@@ -1,6 +1,68 @@
 Changelog
 =========
 
+2021.10.0
+---------
+
+Released on October 22, 2021
+
+- Ensure resumed flight tasks are still fetched (:pr:`5426`) `Florian Jetter`_
+- AMM high level documentation (:pr:`5456`) `crusaderky`_
+- Provide stack for suspended coro in test timeout (:pr:`5446`) `Florian Jetter`_
+- Handle ``UCXNotConnected`` error (:pr:`5449`) `Peter Andreas Entschev`_
+- Don't schedule tasks to paused workers (:pr:`5431`) `crusaderky`_
+- Use ``pip install .`` instead of calling ``setup.py`` (:pr:`5442`) `Matthias Bussonnier`_
+- Increase latency for stealing (:pr:`5390`) `Florian Jetter`_
+- Type annotations for ``Worker`` and ``gen_cluster`` (:pr:`5438`) `crusaderky`_
+- Ensure reconnecting workers do not loose required data (:pr:`5436`) `Florian Jetter`_
+- Mark ``test_gather_dep*`` as ``xfail`` (:pr:`5432`) `crusaderky`_
+- Remove ``zict``-related skips (:pr:`5429`) `James Bourbeau`_
+- Pass ``host`` through ``LocalCluster`` to workers (:pr:`5427`) `Jim Crist-Harif`_
+- Fixes ``async`` warnings in UCX tests (:pr:`5396`) `Peter Andreas Entschev`_
+- Resolve work stealing deadlock caused by race in ``move_task_confirm`` (:pr:`5379`) `Florian Jetter`_
+- Add scroll to dashboard dropdown (:pr:`5418`) `Jacob Tomlinson`_
+- Fix regression where unknown tasks were allowed to be stolen (:pr:`5392`) `Florian Jetter`_
+- Enable ``mypy`` in CI 2/2 (:pr:`5348`) `crusaderky`_
+- Rewrite ``test_client_timeout`` (:pr:`5397`) `crusaderky`_
+- Simple ``SSHCluster`` example (:pr:`5349`) `Ray Bell`_
+- Do not attempt to fetch keys which are no longer in flight (:pr:`5160`) `Florian Jetter`_
+- Revisit ``Scheduler.add_plugin`` / ``Scheduler.remove_plugin`` (:pr:`5394`) `crusaderky`_
+- Fix flaky ``test_WorkerPlugin_overwrite`` (:pr:`5398`) `crusaderky`_
+- Active Memory Manager to use bulk comms (:pr:`5357`) `crusaderky`_
+- Add coverage badge to ``README`` (:pr:`5382`) `James Bourbeau`_
+- Mark ``test_stress_creation_and_deletion`` as ``xfail`` (:pr:`5393`) `James Bourbeau`_
+- Mark ``test_worker_reconnects_mid_compute*`` tests as flaky (:pr:`5378`) `James Bourbeau`_
+- Use new Dask docs theme (:pr:`5391`) `Jacob Tomlinson`_
+- Remove ``pytest.mark.repeat`` from ``test_prometheus_collect_task_states`` (:pr:`5376`) `James Bourbeau`_
+- Log original exception upon compute failure (:pr:`5387`) `Florian Jetter`_
+- Add code coverage (:pr:`4670`) `James Bourbeau`_
+- Fix zombie worker tasks after missing transition (:pr:`5316`) `Florian Jetter`_
+- Add support for partial functions to ``iscoroutinefunction`` util (:pr:`5344`) `Michael Adkins`_
+- Mark ``distributed/tests/test_client.py::test_profile_server`` as flaky (:pr:`5375`) `James Bourbeau`_
+- Enable ``mypy`` in CI 1/2 (:pr:`5328`) `crusaderky`_
+- Ensure ``dask-worker`` and ``dask-scheduler`` pick up preload configuration values  (:pr:`5365`) `James Bourbeau`_
+- Use ``dask-spec`` for ``SSHCluster`` (:pr:`5191`) `Charles Blackmon-Luca`_
+- Update ``_cluster_info`` dict in ``__init__`` (:pr:`5305`) `Jacob Tomlinson`_
+- Use Dask temporary file utility  (:pr:`5361`) `James Bourbeau`_
+- Avoid deprecated random set sampling (:pr:`5360`) `James Bourbeau`_
+- Add check for unsupported NVML metrics (:pr:`5343`) `Charles Blackmon-Luca`_
+- Workers submit a reply to the scheduler if replica removal was rejected (:pr:`5356`) `Florian Jetter`_
+- Pickle exception and traceback immediately (:pr:`5338`) `Mads R. B. Kristensen`_
+- Reinstate: AMM ``ReduceReplicas`` to iterate only on replicated tasks (:pr:`5341`) `crusaderky`_
+- Sync worker status to the scheduler; new 'paused' status (:pr:`5330`) `crusaderky`_
+- Add pre-commit to environments (:pr:`5362`) `Ray Bell`_
+- Worker State Machine Refactor: clean up dead handlers (:pr:`5359`) `crusaderky`_
+- Bump ``RAPIDS_VER`` for gpuCI (:pr:`5358`) `Charles Blackmon-Luca`_
+- Generate Cython HTML annotations (:pr:`5321`) `crusaderky`_
+- Worker state machine refactor (:pr:`5046`) `Florian Jetter`_
+- ``fsspec`` and ``s3fs`` git tips are incompatible (:pr:`5346`) `crusaderky`_
+- Fix ``test_many_Progress`` and others (:pr:`5329`) `crusaderky`_
+- Run multiple AMMs in parallel (:pr:`5339`) `crusaderky`_
+- Enhance AMM docstrings (:pr:`5340`) `crusaderky`_
+- Run ``pyupgrade`` in CI (:pr:`5327`) `crusaderky`_
+- Fix typo in client side example ``foundations.rst`` (:pr:`5336`) `Genevieve Buckley`_
+
+
 2021.09.1
 ---------
 
@@ -2663,3 +2725,5 @@ significantly without many new features.
 .. _`David Chudzicki`: https://github.com/dchudz
 .. _`Walt Woods`: https://github.com/wwoods
 .. _`Tom Forbes`: https://github.com/orf
+.. _`Michael Adkins`: https://github.com/madkinsz
+.. _`Genevieve Buckley`: https://github.com/GenevieveBuckley
