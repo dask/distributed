@@ -102,7 +102,7 @@ pytestmark = pytest.mark.ci1
 
 @gen_cluster(client=True)
 async def test_submit(c, s, a, b):
-    x = c.submit(inc, 10)
+    x = c.submit(inc, 10, key="x")
     assert not x.done()
 
     assert isinstance(x, Future)
@@ -112,7 +112,7 @@ async def test_submit(c, s, a, b):
     assert result == 11
     assert x.done()
 
-    y = c.submit(inc, 20)
+    y = c.submit(inc, 20, key="y")
     z = c.submit(add, x, y)
 
     result = await z
