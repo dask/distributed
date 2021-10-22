@@ -109,9 +109,7 @@ Contents
 
    actors
    asynchronous
-   configuration
    ipython
-   prometheus
    http_services
    publish
    resources
