@@ -115,6 +115,7 @@ Contents
    resources
    task-launch
    tls
+   active_memory_manager
 
 .. toctree::
    :maxdepth: 1
