@@ -58,6 +58,7 @@ class BatchedSend:
 
     def start(self, comm):
         self.comm = comm
+        self.please_stop = False
         self.loop.add_callback(self._background_send)
 
     def closed(self):
@@ -98,6 +99,7 @@ class BatchedSend:
                 else:
                     self.recent_message_log.append("large-message")
                 self.byte_count += nbytes
+                payload = []  # lose ref
             except CommClosedError:
                 logger.info("Batched Comm Closed %r", self.comm, exc_info=True)
                 break
@@ -111,7 +113,9 @@ class BatchedSend:
                 logger.exception("Error in batched write")
                 break
             finally:
-                payload = None  # lose ref
+                # If anything failed we should not loose payload. If a new comm
+                # is provided we can still resubmit messages
+                self.buffer = payload + self.buffer
         else:
             # nobreak. We've been gracefully closed.
             self.stopped.set()
@@ -121,7 +125,6 @@ class BatchedSend:
         # there was an exception when using `comm`.
         # We can't close gracefully via `.close()` since we can't send messages.
         # So we just abort.
-        # This means that any messages in our buffer our lost.
         # To propagate exceptions, we rely on subsequent `BatchedSend.send`
         # calls to raise CommClosedErrors.
         self.stopped.set()
@@ -152,6 +155,7 @@ class BatchedSend:
         self.please_stop = True
         self.waker.set()
         yield self.stopped.wait(timeout=timeout)
+        payload = []
         if not self.comm.closed():
             try:
                 if self.buffer:
@@ -160,14 +164,15 @@ class BatchedSend:
                         payload, serializers=self.serializers, on_error="raise"
                     )
             except CommClosedError:
-                pass
+                # If we're closing and there is an error there is little we
+                # can do about this to recover.
+                logger.error("Lost %i payload messages.", len(payload))
             yield self.comm.close()
 
     def abort(self):
         if self.comm is None:
             return
         self.please_stop = True
-        self.buffer = []
         self.waker.set()
         if not self.comm.closed():
             self.comm.abort()

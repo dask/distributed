@@ -249,3 +249,25 @@ async def test_serializers():
         assert "function" in value
 
         assert comm.closed()
+
+
+@pytest.mark.asyncio
+async def test_retain_buffer_commclosed():
+    async with EchoServer() as e:
+        with captured_logger("distributed.batched") as caplog:
+            comm = await connect(e.address)
+
+            b = BatchedSend(interval="1s", serializers=["msgpack"])
+            b.start(comm)
+            b.send("foo")
+            assert b.buffer
+            await comm.close()
+            await asyncio.sleep(1)
+
+        assert "Batched Comm Closed" in caplog.getvalue()
+        assert b.buffer
+
+        new_comm = await connect(e.address)
+        b.start(new_comm)
+        assert await new_comm.read() == ("foo",)
+        assert not b.buffer

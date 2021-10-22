@@ -2568,11 +2568,9 @@ async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, 
 
     assert "Unexpected worker completed task" in s_logs.getvalue()
 
-    # Ensure that all in-memory tasks on A have been restored on the
-    # scheduler after reconnect
-    for ts in a.tasks.values():
-        if ts.state == "memory":
-            assert a.address in {ws.address for ws in s.tasks[ts.key].who_has}
+    sts = s.tasks[f3.key]
+    assert sts.state == "memory"
+    assert s.workers[a.address] in sts.who_has
 
     del f1, f2, f3
     while any(w.tasks for w in [a, b]):
@@ -3196,3 +3194,38 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
     args, kwargs = mocked_gather.call_args
     await Worker.gather_dep(b, *args, **kwargs)
     await fut3
+
+
+@gen_cluster(nthreads=[("", 1)])
+async def test_dont_loose_payload_reconnect(s, w):
+    """Ensure that payload of a BatchedSend is not lost if a worker reconnects"""
+    s.count = 0
+
+    def receive(worker, msg):
+        s.count += 1
+
+    s.stream_handlers["receive-msg"] = receive
+    w.batched_stream.next_deadline = w.loop.time() + 10_000
+
+    for x in range(100):
+        w.batched_stream.send({"op": "receive-msg", "msg": x})
+
+    await s.stream_comms[w.address].comm.close()
+    while not w.batched_stream.comm.closed():
+        await asyncio.sleep(0.1)
+    before = w.batched_stream.buffer.copy()
+    w.batched_stream.next_deadline = w.loop.time()
+    assert len(w.batched_stream.buffer) == 100
+    with captured_logger("distributed.batched") as caplog:
+        await w.batched_stream._background_send()
+
+    assert "Batched Comm Closed" in caplog.getvalue()
+    after = w.batched_stream.buffer.copy()
+
+    # Payload that couldn't be submitted is prepended
+    assert len(after) >= len(before)
+    assert after[: len(before)] == before
+
+    await w.heartbeat()
+    while not s.count == 100:
+        await asyncio.sleep(0.1)
