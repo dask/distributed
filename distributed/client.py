@@ -530,35 +530,41 @@ class Client:
     address , like ``Client()``.  In this case the Client creates a
     :class:`LocalCluster` in the background and connects to that.  Any extra
     keywords are passed from Client to LocalCluster in this case.  See the
-    LocalCluster documentation for more information.
+    :class:`LocalCluster` documentation for more information.
 
     Parameters
     ----------
     address: string, or Cluster
         This can be the address of a ``Scheduler`` server like a string
-        ``'127.0.0.1:8786'`` or a cluster object like ``LocalCluster()``
+        ``'127.0.0.1:8786'`` or a cluster object like ``LocalCluster()``.
     timeout: int
-        Timeout duration for initial connection to the scheduler
+        Timeout duration for initial connection to the scheduler.
     set_as_default: bool (True)
-        Use this Client as the global dask scheduler
+        Use this Client as the global dask scheduler.
     scheduler_file: string (optional)
-        Path to a file with scheduler information if available
+        Path to a file with scheduler information if available.
     security: Security or bool, optional
         Optional security information. If creating a local cluster can also
         pass in ``True``, in which case temporary self-signed credentials will
         be created automatically.
     asynchronous: bool (False by default)
         Set to True if using this client within async/await functions or within
-        Tornado gen.coroutines.  Otherwise this should remain False for normal
+        Tornado gen.coroutines. Otherwise this should remain False for normal
         use.
     name: string (optional)
         Gives the client a name that will be included in logs generated on
-        the scheduler for matters relating to this client
+        the scheduler for matters relating to this client.
+        If no value is given, Client name will be set using
+        ``dask.config.client-name``, if it is also empty, Client will have no
+        name.
     direct_to_workers: bool (optional)
         Whether or not to connect directly to the workers, or to ask
         the scheduler to serve as intermediary.
+        If no value is given, it attempts to connect once to a worker,
+        if this succeeds and the worker scheduler's address is similar to this
+        Client scheduler address, subsequent calls will be direct.
     heartbeat_interval: int
-        Time in milliseconds between heartbeats to scheduler
+        Time in milliseconds between heartbeats to scheduler.
     **kwargs:
         If you do not pass a scheduler address, Client will create a
         ``LocalCluster`` object, passing any extra keyword arguments.
