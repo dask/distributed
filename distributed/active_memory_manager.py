@@ -306,7 +306,7 @@ class ActiveMemoryManagerPolicy:
 
         .. code-block:: python
 
-           choice = yield "replicate", ts, None
+           choice = (yield "replicate", ts, None)
 
         ``choice`` is either a WorkerState or None; the latter is returned if the
         ActiveMemoryManager chose to disregard the request.

@@ -100,7 +100,9 @@ computation, this policy drops all excess replicas.
 
 .. note::
    This policy is incompatible with :meth:`~distributed.Client.replicate` and with the
-   ``broadcast`` parameter of :meth:`~distributed.Client.scatter`.
+   ``broadcast=True`` parameter of :meth:`~distributed.Client.scatter`. If you invoke
+   ``replicate`` to create additional replicas and then later run this policy, it will
+   delete all replicas but one (but not necessarily the new ones).
 
 
 Custom policies
@@ -141,6 +143,9 @@ define two methods:
     - Create more replicas of a task than there are workers
     - Create replicas of a task on workers that already hold them
     - Create replicas on paused or retiring workers
+
+    It is generally a good idea to design policies to be as simple as possible and let
+    the AMM take care of the edge cases above by ignoring some of the suggestions.
 
     Optionally, the ``run`` method may retrieve which worker the AMM just selected, as
     follows:
