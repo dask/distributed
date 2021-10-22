@@ -47,7 +47,7 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         self._frame_lengths = None
         self._frames = None
         self._frame_index = None
-        self._frame_nbytes_needed = None
+        self._frame_nbytes_needed = 0
 
     @property
     def local_addr(self):
@@ -57,7 +57,6 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             host, port = self._transport.get_extra_info("socket").getsockname()[:2]
             return unparse_host_port(host, port)
         except Exception:
-            breakpoint()  # TODO
             return "<closed>"
 
     @property
@@ -68,7 +67,6 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             host, port = self._transport.get_extra_info("peername")
             return unparse_host_port(host, port)
         except Exception:
-            breakpoint()  # TODO
             return "<closed>"
 
     @property
@@ -116,12 +114,8 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             self._reset_default_buffer()
         else:
             self._frame_nbytes_needed -= nbytes
-            if not self._frame_nbytes_needed:
-                self._frame_index += 1
-                if self._frame_index == self._nframes:
-                    self._message_completed()
-                else:
-                    self._frame_nbytes_needed = self._frame_lengths[self._frame_index]
+            if not self._frames_check_remaining():
+                self._message_completed()
 
     def _parse_next(self):
         if self._nframes is None:
@@ -162,10 +156,25 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             return True
         return False
 
+    def _frames_check_remaining(self):
+        # Current frame not filled
+        if self._frame_nbytes_needed:
+            return True
+        # Advance until next non-empty frame
+        while True:
+            self._frame_index += 1
+            if self._frame_index < self._nframes:
+                self._frame_nbytes_needed = self._frame_lengths[self._frame_index]
+                if self._frame_nbytes_needed:
+                    return True
+            else:
+                # No non-empty frames remain
+                return False
+
     def _parse_frames(self):
         while True:
             # Are we out of frames?
-            if self._frame_index == self._nframes:
+            if not self._frames_check_remaining():
                 self._message_completed()
                 return True
             # Are we out of data?
@@ -175,15 +184,12 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
 
             frame = self._frames[self._frame_index]
             n_read = min(self._frame_nbytes_needed, available)
-            frame[-self._frame_nbytes_needed : n_read] = self._default_buffer[
-                self._default_start : self._default_start + n_read
-            ]
+            frame[
+                -self._frame_nbytes_needed : (n_read - self._frame_nbytes_needed)
+                or None
+            ] = self._default_buffer[self._default_start : self._default_start + n_read]
             self._default_start += n_read
             self._frame_nbytes_needed -= n_read
-            if not self._frame_nbytes_needed:
-                self._frame_index += 1
-                if self._frame_index < self._nframes:
-                    self._frame_nbytes_needed = self._frame_lengths[self._frame_index]
 
     def _reset_default_buffer(self):
         start = self._default_start
@@ -202,6 +208,7 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         self._nframes = None
         self._frames = None
         self._frame_lengths = None
+        self._frame_nbytes_remaining = 0
 
     def connection_lost(self, exc=None):
         if exc is None:
@@ -283,7 +290,7 @@ class TCP(Comm):
         self._protocol = protocol
         self._local_addr = local_addr
         self._peer_addr = peer_addr
-        self._deserialize = deserialize
+        self.deserialize = deserialize
         self._closed = False
         super().__init__()
 
@@ -312,7 +319,7 @@ class TCP(Comm):
         try:
             return await from_frames(
                 frames,
-                deserialize=self._deserialize,
+                deserialize=self.deserialize,
                 deserializers=deserializers,
                 allow_offload=self.allow_offload,
             )
@@ -420,15 +427,16 @@ class TCPListener(Listener):
         comm_handler,
         deserialize=True,
         allow_offload=True,
+        default_host=None,
         default_port=0,
         **kwargs,
     ):
         self.ip, self.port = parse_host_port(address, default_port)
+        self.default_host = default_host
         self.comm_handler = comm_handler
         self.deserialize = deserialize
         self.allow_offload = allow_offload
         self._extra_kwargs = self._get_extra_kwargs(address, **kwargs)
-        self._active_handlers = weakref.WeakSet()
         self.bound_address = None
 
     def _get_extra_kwargs(self, address, **kwargs):
@@ -444,7 +452,7 @@ class TCPListener(Listener):
             deserialize=self.deserialize,
         )
         comm.allow_offload = self.allow_offload
-        self._active_handlers.add(asyncio.ensure_future(self._comm_handler(comm)))
+        asyncio.ensure_future(self._comm_handler(comm))
 
     async def _comm_handler(self, comm):
         try:
@@ -466,9 +474,6 @@ class TCPListener(Listener):
     def stop(self):
         # Stop listening
         self._handle.close()
-        # Cancel all active handlers
-        for handler in self._active_handlers:
-            handler.cancel()
         # TODO: stop should really be asynchronous
         asyncio.ensure_future(self._handle.wait_closed())
 
@@ -502,7 +507,7 @@ class TCPListener(Listener):
         The contact address as a string.
         """
         host, port = self.get_host_port()
-        host = ensure_concrete_host(host)
+        host = ensure_concrete_host(host, default_host=self.default_host)
         return self.prefix + unparse_host_port(host, port)
 
 
