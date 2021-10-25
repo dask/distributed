@@ -37,6 +37,7 @@ from distributed import (
     CancelledError,
     Executor,
     LocalCluster,
+    Lock,
     Nanny,
     TimeoutError,
     Worker,
@@ -99,6 +100,7 @@ from distributed.utils_test import (
     varying,
     wait_for,
 )
+from distributed.worker import WTSName
 
 pytestmark = pytest.mark.ci1
 
@@ -5353,27 +5355,36 @@ def test_warn_executor(loop, s, a, b):
     assert any("Client" in str(r.message) for r in record)
 
 
-@gen_cluster([("127.0.0.1", 4)] * 2, client=True)
-async def test_call_stack_future(c, s, a, b):
-    x = c.submit(slowdec, 1, delay=0.5)
-    future = c.submit(slowinc, 1, delay=0.5)
-    await asyncio.sleep(0.1)
-    results = await asyncio.gather(
-        c.call_stack(future), c.call_stack(keys=[future.key])
-    )
+@gen_cluster([("", 1)] * 1, client=True)
+async def test_call_stack_future(c, s, a):
+    lock = Lock()
+    async with lock:
+
+        def locked(l, x):
+            with l:
+                return x
+
+        x = c.submit(locked, lock, 2)
+        future = c.submit(locked, lock, 1)
+
+        while future.key not in a.tasks:
+            await asyncio.sleep(0.01)
+
+        results = await asyncio.gather(
+            c.call_stack(future), c.call_stack(keys=[future.key])
+        )
+
     assert all(list(first(result.values())) == [future.key] for result in results)
     assert results[0] == results[1]
     result = results[0]
     ts = a.tasks.get(future.key)
-    if ts is not None and ts.state == "executing":
-        w = a
-    else:
-        w = b
+    assert ts is not None
+    assert ts.state == WTSName.executing
 
-    assert list(result) == [w.address]
-    assert list(result[w.address]) == [future.key]
-    assert "slowinc" in str(result)
-    assert "slowdec" not in str(result)
+    assert list(result) == [a.address]
+    assert list(result[a.address]) == [future.key]
+    assert future.key in str(result)
+    assert x.key not in str(result)
 
 
 @gen_cluster([("127.0.0.1", 4)] * 2, client=True)
