@@ -127,16 +127,15 @@ WTSName = WorkerTaskStateName
 
 
 # TaskState.state subsets
-PROCESSING = {
+
+READY = {WTSName.ready, WTSName.constrained}
+PROCESSING = READY | {
     WTSName.waiting,
-    WTSName.ready,
-    WTSName.constrained,
     WTSName.executing,
     WTSName.long_running,
     WTSName.cancelled,
     WTSName.resumed,
 }
-READY = {WTSName.ready, WTSName.constrained}
 FETCH_INTENDED = {
     WTSName.missing,
     WTSName.fetch,
