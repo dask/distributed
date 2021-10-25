@@ -304,9 +304,9 @@ class ActiveMemoryManagerPolicy:
         You may optionally retrieve which worker it was decided the key will be
         replicated to or dropped from, as follows:
 
-        ```python
-        choice = yield "replicate", ts, None
-        ```
+        .. code-block:: python
+
+           choice = (yield "replicate", ts, None)
 
         ``choice`` is either a WorkerState or None; the latter is returned if the
         ActiveMemoryManager chose to disregard the request.

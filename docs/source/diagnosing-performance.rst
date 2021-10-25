@@ -19,9 +19,8 @@ identify performance issues.
 Fortunately, Dask collects a variety of diagnostic information during
 execution.  It does this both to provide performance feedback to users, but
 also for its own internal scheduling decisions.  The primary place to observe
-this feedback is the :doc:`diagnostic dashboard <web>`.  This document
-describes the various pieces of performance information available and how to
-access them.
+this feedback is the diagnostic dashboard.  This document describes the various
+pieces of performance information available and how to access them.
 
 
 Task start and stop times

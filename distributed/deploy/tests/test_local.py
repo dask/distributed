@@ -7,6 +7,7 @@ import weakref
 from distutils.version import LooseVersion
 from threading import Lock
 from time import sleep
+from urllib.parse import urlparse
 
 import pytest
 import tornado
@@ -1100,3 +1101,20 @@ async def test_cluster_info_sync():
 
         info = cluster.scheduler.get_metadata(keys=["cluster-manager-info"])
         assert info["foo"] == "bar"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("host", [None, "127.0.0.1"])
+@pytest.mark.parametrize("use_nanny", [True, False])
+async def test_cluster_host_used_throughout_cluster(host, use_nanny):
+    """Ensure that the `host` kwarg is propagated through scheduler, nanny, and workers"""
+    async with LocalCluster(host=host, asynchronous=True) as cluster:
+        url = urlparse(cluster.scheduler_address)
+        assert url.hostname == "127.0.0.1"
+        for worker in cluster.workers.values():
+            url = urlparse(worker.address)
+            assert url.hostname == "127.0.0.1"
+
+            if use_nanny:
+                url = urlparse(worker.process.worker_address)
+                assert url.hostname == "127.0.0.1"
