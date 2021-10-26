@@ -3826,6 +3826,7 @@ class Scheduler(SchedulerState, ServerNode):
             "broadcast": self.broadcast,
             "proxy": self.proxy,
             "ncores": self.get_ncores,
+            "ncores_running": self.get_ncores_running,
             "has_what": self.get_has_what,
             "who_has": self.get_who_has,
             "processing": self.get_processing,
@@ -5710,18 +5711,24 @@ class Scheduler(SchedulerState, ServerNode):
         Scheduler.broadcast:
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        start = time()
-        while not parent._workers_dv:
-            await asyncio.sleep(0.2)
-            if time() > start + timeout:
-                raise TimeoutError("No workers found")
+        ws: WorkerState
 
-        if workers is None:
-            ws: WorkerState
-            nthreads = {w: ws._nthreads for w, ws in parent._workers_dv.items()}
-        else:
-            workers = [self.coerce_address(w) for w in workers]
-            nthreads = {w: parent._workers_dv[w].nthreads for w in workers}
+        start = time()
+        while True:
+            if workers is None:
+                wss = parent._running
+            else:
+                workers = [self.coerce_address(w) for w in workers]
+                wss = {parent._workers_dv[w] for w in workers}
+                wss = {ws for ws in wss if ws._status == Status.running}
+
+            if wss:
+                break
+            if time() > start + timeout:
+                raise TimeoutError("No valid workers found")
+            await asyncio.sleep(0.1)
+
+        nthreads = {ws._address: ws.nthreads for ws in wss}
 
         assert isinstance(data, dict)
 
@@ -5732,10 +5739,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.update_data(who_has=who_has, nbytes=nbytes, client=client)
 
         if broadcast:
-            if broadcast == True:  # noqa: E712
-                n = len(nthreads)
-            else:
-                n = broadcast
+            n = len(nthreads) if broadcast is True else broadcast
             await self.replicate(keys=keys, workers=workers, n=n)
 
         self.log_event(
@@ -6451,7 +6455,12 @@ class Scheduler(SchedulerState, ServerNode):
 
         assert branching_factor > 0
         async with self._lock if lock else empty_context:
-            workers = {parent._workers_dv[w] for w in self.workers_list(workers)}
+            if workers is not None:
+                workers = {parent._workers_dv[w] for w in self.workers_list(workers)}
+                workers = {ws for ws in workers if ws._status == Status.running}
+            else:
+                workers = parent._running
+
             if n is None:
                 n = len(workers)
             else:
@@ -6988,6 +6997,15 @@ class Scheduler(SchedulerState, ServerNode):
             }
         else:
             return {w: ws._nthreads for w, ws in parent._workers_dv.items()}
+
+    def get_ncores_running(self, comm=None, workers=None):
+        parent: SchedulerState = cast(SchedulerState, self)
+        ncores = self.get_ncores(workers=workers)
+        return {
+            w: n
+            for w, n in ncores.items()
+            if parent._workers_dv[w].status == Status.running
+        }
 
     async def get_call_stack(self, comm=None, keys=None):
         parent: SchedulerState = cast(SchedulerState, self)

@@ -5734,6 +5734,33 @@ async def test_scatter_error_cancel(c, s, a, b):
     assert y.status == "error"  # not cancelled
 
 
+@pytest.mark.parametrize("workers_arg", [False, True])
+@pytest.mark.parametrize("direct", [False, True])
+@pytest.mark.parametrize("broadcast", [False, True, 10])
+@gen_cluster(client=True, nthreads=[("", 1)] * 10)
+async def test_scatter_and_replicate_avoid_paused_workers(
+    c, s, *workers, workers_arg, direct, broadcast
+):
+    paused_workers = [w for i, w in enumerate(workers) if i not in (3, 7)]
+    for w in paused_workers:
+        w.memory_pause_fraction = 1e-15
+    while any(s.workers[w.address].status != Status.paused for w in paused_workers):
+        await asyncio.sleep(0.01)
+
+    f = await c.scatter(
+        {"x": 1},
+        workers=[w.address for w in workers[1:-1]] if workers_arg else None,
+        broadcast=broadcast,
+        direct=direct,
+    )
+    if not broadcast:
+        await c.replicate(f, n=10)
+
+    expect = [i in (3, 7) for i in range(10)]
+    actual = [("x" in w.data) for w in workers]
+    assert actual == expect
+
+
 @pytest.mark.xfail(reason="GH#5409 Dask-Default-Threads are frequently detected")
 def test_no_threads_lingering():
     if threading.active_count() < 40:
