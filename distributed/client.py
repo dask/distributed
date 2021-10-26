@@ -80,6 +80,7 @@ from .utils import (
     LoopRunner,
     TimeoutError,
     format_dashboard_link,
+    get_source,
     has_keyword,
     log_errors,
     no_default,
@@ -4843,12 +4844,8 @@ class performance_report:
         await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
 
     async def __aexit__(self, typ, value, traceback, code=None):
-        if not code:
-            try:
-                frame = sys._getframe(self._stacklevel)
-                code = inspect.getsource(frame)
-            except Exception:
-                code = ""
+        if code is None:
+            code = get_source(self._stacklevel + 1)
         data = await get_client().scheduler.performance_report(
             start=self.start, last_count=self.last_count, code=code, mode=self.mode
         )
@@ -4859,11 +4856,7 @@ class performance_report:
         get_client().sync(self.__aenter__)
 
     def __exit__(self, typ, value, traceback):
-        try:
-            frame = sys._getframe(self._stacklevel)
-            code = inspect.getsource(frame)
-        except Exception:
-            code = ""
+        code = get_source(self._stacklevel + 1)
         get_client().sync(self.__aexit__, type, value, traceback, code=code)
 
 
