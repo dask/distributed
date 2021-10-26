@@ -80,7 +80,6 @@ from .utils import (
     LoopRunner,
     TimeoutError,
     format_dashboard_link,
-    get_source,
     has_keyword,
     log_errors,
     no_default,
@@ -2551,7 +2550,17 @@ class Client:
                 try:
                     return inspect.getsource(fr)
                 except OSError:
-                    break
+                    # Try to fine the source if we are in %%time or %%timeit magic.
+                    if (
+                        fr.f_code.co_filename in {"<timed exec>", "<magic-timeit>"}
+                        and "IPython" in sys.modules
+                    ):
+                        from IPython import get_ipython
+
+                        ip = get_ipython()
+                        if ip is not None:
+                            # The current cell
+                            return ip.history_manager._i00
         return "<Code not available>"
 
     def _graph_to_futures(
@@ -4844,9 +4853,10 @@ class performance_report:
         await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
 
     async def __aexit__(self, typ, value, traceback, code=None):
+        client = get_client()
         if code is None:
-            code = get_source(self._stacklevel + 1)
-        data = await get_client().scheduler.performance_report(
+            code = client._get_computation_code()
+        data = await client.scheduler.performance_report(
             start=self.start, last_count=self.last_count, code=code, mode=self.mode
         )
         with open(self.filename, "w") as f:
@@ -4856,8 +4866,9 @@ class performance_report:
         get_client().sync(self.__aenter__)
 
     def __exit__(self, typ, value, traceback):
-        code = get_source(self._stacklevel + 1)
-        get_client().sync(self.__aexit__, type, value, traceback, code=code)
+        client = get_client()
+        code = client._get_computation_code()
+        client.sync(self.__aexit__, type, value, traceback, code=code)
 
 
 class get_task_metadata:

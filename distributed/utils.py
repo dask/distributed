@@ -548,30 +548,6 @@ def is_kernel():
     return getattr(get_ipython(), "kernel", None) is not None
 
 
-def get_source(stacklevel):
-    """Try to get the source code from the frame ``stacklevel`` deep on the stack.
-
-    Returns empty string if this fails to find the source code.
-    """
-    try:
-        frame = sys._getframe(stacklevel)
-        code = inspect.getsource(frame)
-    except Exception:
-        code = ""
-        # Try to fine the source if we are in %%time or %%timeit magic.
-        if (
-            frame.f_code.co_filename in {"<timed exec>", "<magic-timeit>"}
-            and "IPython" in sys.modules
-        ):
-            from IPython import get_ipython
-
-            ip = get_ipython()
-            if ip is not None:
-                # The current cell
-                code = ip.history_manager._i00
-    return code
-
-
 hex_pattern = re.compile("[a-f]+")
 
 
