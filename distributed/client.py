@@ -378,7 +378,7 @@ class Future(WrappedKey):
             c = Client.current(allow_global=False)
         except ValueError:
             c = get_client(address)
-        self.__init__(key, c)
+        self.__init__(key, c, inform=False)  # HACK inform!!
         # TODO why was this here? Is it safe to remove?
         # c._send_to_scheduler(
         #     {

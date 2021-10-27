@@ -75,12 +75,16 @@ def gather_regroup(i: int, all_futures: list[dict[int, Future]]) -> pd.DataFrame
     "Given Futures for all shards, select Futures for this output partition, gather them, and concat."
     client = get_client()
     futures = [fs[i] for fs in all_futures if i in fs]
+    for f in futures:
+        # HACK: we disabled informing on deserialized futures, so manually mark them as finished
+        if not f.done():
+            f._state.finish()
     shards: list[QuickSizeof[pd.DataFrame]] = client.gather(futures, direct=True)
-    # Since every worker holds a reference to all futures until the very last task completes,
-    # forcibly cancel these futures now to allow memory to be released eagerly.
-    # This is safe because we're only cancelling futures for this output partition,
-    # and there's exactly one task for each output partition.
-    client.cancel(futures, force=True, _report=False)
+    # # Since every worker holds a reference to all futures until the very last task completes,
+    # # forcibly cancel these futures now to allow memory to be released eagerly.
+    # # This is safe because we're only cancelling futures for this output partition,
+    # # and there's exactly one task for each output partition.
+    # client.cancel(futures, force=True, _report=False)
 
     return _concat([s.obj for s in shards])
 
