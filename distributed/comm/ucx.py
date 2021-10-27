@@ -365,6 +365,7 @@ class UCX(Comm):
                 return msg
 
     async def close(self):
+        self._closed = True
         if self._ep is not None:
             try:
                 await self.ep.send(struct.pack("?Q", True, 0))
@@ -381,6 +382,7 @@ class UCX(Comm):
             self._ep = None
 
     def abort(self):
+        self._closed = True
         if self._ep is not None:
             self._ep.abort()
             self._ep = None
