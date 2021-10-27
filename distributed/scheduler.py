@@ -4958,7 +4958,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def stimulus_cancel(self, comm, keys=None, client=None, force=False, _report=True):
         """Stop execution on a list of keys"""
-        logger.info("Client %s requests to cancel %d keys", client, len(keys))
+        # logger.info("Client %s requests to cancel %d keys", client, len(keys))
         if client and _report:
             self.log_event(
                 client, {"action": "cancel", "count": len(keys), "force": force}
@@ -4985,7 +4985,7 @@ class Scheduler(SchedulerState, ServerNode):
         if force or ts._who_wants == {cs}:  # no one else wants this key
             for dts in list(ts._dependents):
                 self.cancel_key(dts._key, client, force=force)
-        logger.info("Scheduler cancels key %s.  Force=%s", key, force)
+        # logger.info("Scheduler cancels key %s.  Force=%s", key, force)
         if _report:
             self.report({"op": "cancelled-key", "key": key})
         clients = list(ts._who_wants) if force else [cs]
