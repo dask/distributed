@@ -1,6 +1,7 @@
 import os
 
 import pytest
+from multiprocessing import Process, Queue
 
 pytestmark = pytest.mark.gpu
 
@@ -40,12 +41,34 @@ def test_enable_disable_nvml():
         assert nvml.nvmlInitialized is True
 
 
+def run_has_cuda_context(queue):
+    try:
+        assert not nvml.has_cuda_context()
+
+        import numba.cuda
+
+        numba.cuda.current_context()
+        assert nvml.has_cuda_context() == 0
+
+        queue.put(None)
+
+    except Exception as e:
+        queue.put(e)
+
+
 def test_has_cuda_context():
     if nvml.device_get_count() < 1:
         pytest.skip("No GPUs available")
 
-    # The CI environment and other tests should not have create a CUDA context
-    assert not nvml.has_cuda_context()
+    # This test should be run in a new process so that it definitely doesn't have a CUDA context
+    # and uses a queue to pass exceptions back
+    queue = Queue()
+    p = Process(target=run_has_cuda_context, args=(queue,))
+    p.start()
+    p.join()  # this blocks until the process terminates
+    e = queue.get()
+    if e is not None:
+        raise e
 
 
 def test_1_visible_devices():
