@@ -573,6 +573,17 @@ async def test_gather(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_gather_mismatched_client(c, s, a, b):
+    c2 = await Client(s.address, asynchronous=True)
+
+    x = c.submit(inc, 10)
+    y = c2.submit(inc, 5)
+
+    with pytest.raises(ValueError, match="Futures created by another client"):
+        await c.gather([x, y])
+
+
+@gen_cluster(client=True)
 async def test_gather_lost(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
     y = c.submit(inc, 1, workers=b.address)
