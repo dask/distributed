@@ -97,7 +97,7 @@ def rearrange_by_column_scatter(
         column,
         npartitions,
         ignore_index,
-        f"shuffle-split-{token}",
+        f"shuffle-shards-{token}",
         row_size_estimate,
         meta=df,
         enforce_metadata=False,
