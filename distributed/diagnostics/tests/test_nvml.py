@@ -40,6 +40,14 @@ def test_enable_disable_nvml():
         assert nvml.nvmlInitialized is True
 
 
+def test_has_cuda_context():
+    if nvml.device_get_count() < 1:
+        pytest.skip("No GPUs available")
+
+    # The CI environment and other tests should not have create a CUDA context
+    assert not nvml.has_cuda_context()
+
+
 def test_1_visible_devices():
     if nvml.device_get_count() < 1:
         pytest.skip("No GPUs available")
