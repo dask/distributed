@@ -2191,15 +2191,17 @@ class Client:
             hash=hash,
         )
 
-    async def _cancel(self, futures, force=False):
+    async def _cancel(self, futures, force=False, _report=True):
         keys = list({stringify(f.key) for f in futures_of(futures)})
-        await self.scheduler.cancel(keys=keys, client=self.id, force=force)
+        await self.scheduler.cancel(
+            keys=keys, client=self.id, force=force, _report=_report
+        )
         for k in keys:
             st = self.futures.pop(k, None)
             if st is not None:
                 st.cancel()
 
-    def cancel(self, futures, asynchronous=None, force=False):
+    def cancel(self, futures, asynchronous=None, force=False, _report=True):
         """
         Cancel running futures
 
@@ -2213,7 +2215,13 @@ class Client:
         force : boolean (False)
             Cancel this future even if other clients desire it
         """
-        return self.sync(self._cancel, futures, asynchronous=asynchronous, force=force)
+        return self.sync(
+            self._cancel,
+            futures,
+            asynchronous=asynchronous,
+            force=force,
+            _report=_report,
+        )
 
     async def _retry(self, futures):
         keys = list({stringify(f.key) for f in futures_of(futures)})

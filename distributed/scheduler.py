@@ -4956,17 +4956,17 @@ class Scheduler(SchedulerState, ServerNode):
 
         return "OK"
 
-    def stimulus_cancel(self, comm, keys=None, client=None, force=False):
+    def stimulus_cancel(self, comm, keys=None, client=None, force=False, _report=True):
         """Stop execution on a list of keys"""
         logger.info("Client %s requests to cancel %d keys", client, len(keys))
-        if client:
+        if client and _report:
             self.log_event(
                 client, {"action": "cancel", "count": len(keys), "force": force}
             )
         for key in keys:
-            self.cancel_key(key, client, force=force)
+            self.cancel_key(key, client, force=force, _report=_report)
 
-    def cancel_key(self, key, client, retries=5, force=False):
+    def cancel_key(self, key, client, retries=5, force=False, _report=True):
         """Cancel a particular key and all dependents"""
         # TODO: this should be converted to use the transition mechanism
         parent: SchedulerState = cast(SchedulerState, self)
@@ -4986,7 +4986,8 @@ class Scheduler(SchedulerState, ServerNode):
             for dts in list(ts._dependents):
                 self.cancel_key(dts._key, client, force=force)
         logger.info("Scheduler cancels key %s.  Force=%s", key, force)
-        self.report({"op": "cancelled-key", "key": key})
+        if _report:
+            self.report({"op": "cancelled-key", "key": key})
         clients = list(ts._who_wants) if force else [cs]
         for cs in clients:
             self.client_releases_keys(keys=[key], client=cs._client_key)

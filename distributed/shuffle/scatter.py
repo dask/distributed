@@ -80,7 +80,7 @@ def gather_regroup(i: int, all_futures: list[dict[int, Future]]) -> pd.DataFrame
     # forcibly cancel these futures now to allow memory to be released eagerly.
     # This is safe because we're only cancelling futures for this output partition,
     # and there's exactly one task for each output partition.
-    client.cancel(futures, force=True)
+    client.cancel(futures, force=True, _report=False)
 
     return _concat([s.obj for s in shards])
 
