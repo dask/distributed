@@ -1,5 +1,6 @@
 import array
 import asyncio
+import contextvars
 import functools
 import io
 import os
@@ -552,6 +553,22 @@ def test_lru():
 async def test_offload():
     assert (await offload(inc, 1)) == 2
     assert (await offload(lambda x, y: x + y, 1, y=2)) == 3
+
+
+@pytest.mark.asyncio
+async def test_offload_preserves_contextvars():
+    var = contextvars.ContextVar("var", default="foo")
+
+    def change_var():
+        var.set("bar")
+        return var.get()
+
+    o1 = offload(var.get)
+    o2 = offload(change_var)
+
+    r1, r2 = await asyncio.gather(o1, o2)
+    assert (r1, r2) == ("foo", "bar")
+    assert var.get() == "foo"
 
 
 def test_serialize_for_cli_deprecated():
