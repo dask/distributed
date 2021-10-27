@@ -379,14 +379,15 @@ class Future(WrappedKey):
         except ValueError:
             c = get_client(address)
         self.__init__(key, c)
-        c._send_to_scheduler(
-            {
-                "op": "update-graph",
-                "tasks": {},
-                "keys": [stringify(self.key)],
-                "client": c.id,
-            }
-        )
+        # TODO why was this here? Is it safe to remove?
+        # c._send_to_scheduler(
+        #     {
+        #         "op": "update-graph",
+        #         "tasks": {},
+        #         "keys": [stringify(self.key)],
+        #         "client": c.id,
+        #     }
+        # )
 
     def __del__(self):
         try:
