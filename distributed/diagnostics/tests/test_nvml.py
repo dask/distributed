@@ -1,7 +1,7 @@
 import os
 
 import pytest
-from multiprocessing import Process, Queue
+import multiprocessing as mp
 
 pytestmark = pytest.mark.gpu
 
@@ -62,8 +62,9 @@ def test_has_cuda_context():
 
     # This test should be run in a new process so that it definitely doesn't have a CUDA context
     # and uses a queue to pass exceptions back
-    queue = Queue()
-    p = Process(target=run_has_cuda_context, args=(queue,))
+    ctx = mp.get_context("spawn")
+    queue = ctx.Queue()
+    p = ctx.Process(target=run_has_cuda_context, args=(queue,))
     p.start()
     p.join()  # this blocks until the process terminates
     e = queue.get()
