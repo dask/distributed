@@ -4991,7 +4991,7 @@ class Scheduler(SchedulerState, ServerNode):
         for cs in clients:
             self.client_releases_keys(keys=[key], client=cs._client_key)
 
-    def client_desires_keys(self, keys=None, client=None):
+    def client_desires_keys(self, keys=None, client=None, report=True):
         parent: SchedulerState = cast(SchedulerState, self)
         cs: ClientState = parent._clients.get(client)
         if cs is None:
@@ -5006,7 +5006,7 @@ class Scheduler(SchedulerState, ServerNode):
             ts._who_wants.add(cs)
             cs._wants_what.add(ts)
 
-            if ts._state in ("memory", "erred"):
+            if report and ts._state in ("memory", "erred"):
                 self.report_on_key(ts=ts, client=client)
 
     def client_releases_keys(self, keys=None, client=None):
@@ -6761,6 +6761,7 @@ class Scheduler(SchedulerState, ServerNode):
         who_has: dict,
         nbytes: dict,
         client=None,
+        report=True,
         serializers=None,
     ):
         """
@@ -6795,7 +6796,9 @@ class Scheduler(SchedulerState, ServerNode):
                 )
 
             if client:
-                self.client_desires_keys(keys=list(who_has), client=client)
+                self.client_desires_keys(
+                    keys=list(who_has), client=client, report=report
+                )
 
     def report_on_key(self, key: str = None, ts: TaskState = None, client: str = None):
         parent: SchedulerState = cast(SchedulerState, self)

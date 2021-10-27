@@ -2044,6 +2044,7 @@ class Client:
                 who_has={key: [local_worker.address] for key in data},
                 nbytes=valmap(sizeof, data),
                 client=self.id,
+                report=False,
             )
 
         else:
