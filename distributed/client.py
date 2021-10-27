@@ -2519,13 +2519,16 @@ class Client:
         return self.run(function, *args, **kwargs)
 
     @staticmethod
-    def _get_computation_code() -> str:
+    def _get_computation_code(stacklevel=None) -> str:
         """Walk up the stack to the user code and extract the code surrounding
         the compute/submit/persist call. All modules encountered which are
         blacklisted by the option
         `distributed.diagnostics.computations.ignore-modules` will be ignored.
         This can be used to blacklist commonly used libraries which wrap
         dask/distributed compute calls.
+
+        ``stacklevel`` may be used to explicitly indicate from which frame on
+        the stack to get the source code.
         """
 
         ignore_modules = dask.config.get(
@@ -2536,22 +2539,39 @@ class Client:
                 "Ignored modules must be a list. Instead got "
                 f"({type(ignore_modules)}, {ignore_modules})"
             )
-
-        pattern: re.Pattern | None
-        if ignore_modules:
-            pattern = re.compile("|".join([f"(?:{mod})" for mod in ignore_modules]))
+        if stacklevel is None:
+            pattern: re.Pattern | None
+            if ignore_modules:
+                pattern = re.compile("|".join([f"(?:{mod})" for mod in ignore_modules]))
+            else:
+                pattern = None
         else:
-            pattern = None
-
-        for fr, _ in traceback.walk_stack(None):
-            if pattern is None or (
-                not pattern.match(fr.f_globals.get("__name__", ""))
-                and fr.f_code.co_name not in ("<listcomp>", "<dictcomp>")
+            # stacklevel 0 or less - shows dask internals which likely isn't helpful
+            stacklevel = stacklevel if stacklevel > 0 else 1
+        for i, (fr, _) in enumerate(traceback.walk_stack(None), 1):
+            if stacklevel is not None:
+                if i != stacklevel:
+                    continue
+            elif pattern is not None and (
+                pattern.match(fr.f_globals.get("__name__", ""))
+                or fr.f_code.co_name in ("<listcomp>", "<dictcomp>")
             ):
-                try:
-                    return inspect.getsource(fr)
-                except OSError:
-                    break
+                continue
+            try:
+                return inspect.getsource(fr)
+            except OSError:
+                # Try to fine the source if we are in %%time or %%timeit magic.
+                if (
+                    fr.f_code.co_filename in {"<timed exec>", "<magic-timeit>"}
+                    and "IPython" in sys.modules
+                ):
+                    from IPython import get_ipython
+
+                    ip = get_ipython()
+                    if ip is not None:
+                        # The current cell
+                        return ip.history_manager._i00
+                break
         return "<Code not available>"
 
     def _graph_to_futures(
@@ -4844,13 +4864,10 @@ class performance_report:
         await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
 
     async def __aexit__(self, typ, value, traceback, code=None):
-        if not code:
-            try:
-                frame = sys._getframe(self._stacklevel)
-                code = inspect.getsource(frame)
-            except Exception:
-                code = ""
-        data = await get_client().scheduler.performance_report(
+        client = get_client()
+        if code is None:
+            code = client._get_computation_code(self._stacklevel + 1)
+        data = await client.scheduler.performance_report(
             start=self.start, last_count=self.last_count, code=code, mode=self.mode
         )
         with open(self.filename, "w") as f:
@@ -4860,12 +4877,9 @@ class performance_report:
         get_client().sync(self.__aenter__)
 
     def __exit__(self, typ, value, traceback):
-        try:
-            frame = sys._getframe(self._stacklevel)
-            code = inspect.getsource(frame)
-        except Exception:
-            code = ""
-        get_client().sync(self.__aexit__, type, value, traceback, code=code)
+        client = get_client()
+        code = client._get_computation_code(self._stacklevel + 1)
+        client.sync(self.__aexit__, type, value, traceback, code=code)
 
 
 class get_task_metadata:
