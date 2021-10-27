@@ -6791,9 +6791,10 @@ class Scheduler(SchedulerState, ServerNode):
                     ws: WorkerState = parent._workers_dv[w]
                     if ws not in ts._who_has:
                         parent.add_replica(ts, ws)
-                self.report(
-                    {"op": "key-in-memory", "key": key, "workers": list(workers)}
-                )
+                if report:
+                    self.report(
+                        {"op": "key-in-memory", "key": key, "workers": list(workers)}
+                    )
 
             if client:
                 self.client_desires_keys(
