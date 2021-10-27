@@ -6773,9 +6773,7 @@ class Scheduler(SchedulerState, ServerNode):
         """
         parent: SchedulerState = cast(SchedulerState, self)
         with log_errors():
-            who_has = {
-                k: [self.coerce_address(vv) for vv in v] for k, v in who_has.items()
-            }
+            # TODO add `coerce_address` back for some cases
             logger.debug("Update data %s", who_has)
 
             for key, workers in who_has.items():
