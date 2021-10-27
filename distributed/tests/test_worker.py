@@ -44,6 +44,7 @@ from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _LockedCommPool,
     captured_logger,
+    cluster,
     dec,
     div,
     gen_cluster,
@@ -963,6 +964,28 @@ async def test_get_client(c, s, a, b):
         await wait(c.submit(f, i))
 
     assert a._client is a_client
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 4)])
+async def test_get_client_threadsafe(c, s, a):
+    def f(x):
+        return get_client().id
+
+    futures = c.map(f, range(100))
+    ids = await c.gather(futures)
+    assert len(set(ids)) == 1
+
+
+def test_get_client_threadsafe_sync():
+    def f(x):
+        return get_client().id
+
+    with cluster(nworkers=1, worker_kwargs={"nthreads": 4}) as (scheduler, workers):
+        with Client(scheduler["address"]) as client:
+            futures = client.map(f, range(100))
+            ids = client.gather(futures)
+            assert len(set(ids)) == 1
+            assert set(ids) != {client.id}
 
 
 def test_get_client_sync(client):
