@@ -94,9 +94,9 @@ class Cluster:
         )
         self._cluster_info.update(info)
 
-        self.periodic_callbacks["sync-cluster-info"] = PeriodicCallback(
-            self._sync_cluster_info, self._sync_interval * 1000
-        )
+        # self.periodic_callbacks["sync-cluster-info"] = PeriodicCallback(
+        #     self._sync_cluster_info, self._sync_interval * 1000
+        # )
         for pc in self.periodic_callbacks.values():
             pc.start()
         self.status = Status.running
