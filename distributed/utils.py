@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import functools
 import importlib
 import inspect
@@ -1322,7 +1323,11 @@ def import_term(name: str):
 
 async def offload(fn, *args, **kwargs):
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_offload_executor, lambda: fn(*args, **kwargs))
+    # Retain context vars while deserializing; see https://bugs.python.org/issue34014
+    context = contextvars.copy_context()
+    return await loop.run_in_executor(
+        _offload_executor, lambda: context.run(fn, *args, **kwargs)
+    )
 
 
 class EmptyContext:
