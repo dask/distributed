@@ -660,4 +660,4 @@ def close_clusters():
         if cluster.shutdown_on_close:
             with suppress(gen.TimeoutError, TimeoutError):
                 if cluster.status != Status.closed:
-                    cluster.close(timeout=10)
+                    cluster.sync(cluster.close, asynchronous=False, callback_timeout=10)

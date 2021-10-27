@@ -210,7 +210,8 @@ class Cluster:
         )
 
     def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
-        asynchronous = asynchronous or self.asynchronous
+        if asynchronous is None:
+            asynchronous = self.asynchronous
         if asynchronous:
             future = func(*args, **kwargs)
             if callback_timeout is not None:
