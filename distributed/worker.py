@@ -449,7 +449,7 @@ class Worker(ServerNode):
         self.has_what = defaultdict(set)
         self.pending_data_per_worker = defaultdict(deque)
         self.nanny = nanny
-        self._lock = threading.Lock()
+        self._client_lock = threading.Lock()
 
         self.data_needed = []
 
@@ -3554,11 +3554,7 @@ class Worker(ServerNode):
 
     @property
     def client(self) -> Client:
-        with self._lock:
-            if self._client:
-                return self._client
-            else:
-                return self._get_client()
+        return self._get_client()
 
     def _get_client(self, timeout=None) -> Client:
         """Get local client attached to this worker
@@ -3569,56 +3565,60 @@ class Worker(ServerNode):
         --------
         get_client
         """
+        with self._client_lock:
+            if self._client:
+                return self._client
 
-        if timeout is None:
-            timeout = dask.config.get("distributed.comm.timeouts.connect")
+            if timeout is None:
+                timeout = dask.config.get("distributed.comm.timeouts.connect")
 
-        timeout = parse_timedelta(timeout, "s")
+            timeout = parse_timedelta(timeout, "s")
 
-        try:
-            from .client import default_client
+            try:
+                from .client import default_client
 
-            client = default_client()
-        except ValueError:  # no clients found, need to make a new one
-            pass
-        else:
-            # must be lazy import otherwise cyclic import
-            from distributed.deploy.cluster import Cluster
+                client = default_client()
+            except ValueError:  # no clients found, need to make a new one
+                pass
+            else:
+                # must be lazy import otherwise cyclic import
+                from distributed.deploy.cluster import Cluster
 
-            if (
-                client.scheduler
-                and client.scheduler.address == self.scheduler.address
-                # The below conditions should only happen in case a second
-                # cluster is alive, e.g. if a submitted task spawned its onwn
-                # LocalCluster, see gh4565
-                or (
-                    isinstance(client._start_arg, str)
-                    and client._start_arg == self.scheduler.address
-                    or isinstance(client._start_arg, Cluster)
-                    and client._start_arg.scheduler_address == self.scheduler.address
+                if (
+                    client.scheduler
+                    and client.scheduler.address == self.scheduler.address
+                    # The below conditions should only happen in case a second
+                    # cluster is alive, e.g. if a submitted task spawned its onwn
+                    # LocalCluster, see gh4565
+                    or (
+                        isinstance(client._start_arg, str)
+                        and client._start_arg == self.scheduler.address
+                        or isinstance(client._start_arg, Cluster)
+                        and client._start_arg.scheduler_address
+                        == self.scheduler.address
+                    )
+                ):
+                    self._client = client
+
+            if not self._client:
+                from .client import Client
+
+                asynchronous = self.loop is IOLoop.current()
+                self._client = Client(
+                    self.scheduler,
+                    loop=self.loop,
+                    security=self.security,
+                    set_as_default=True,
+                    asynchronous=asynchronous,
+                    direct_to_workers=True,
+                    name="worker",
+                    timeout=timeout,
                 )
-            ):
-                self._client = client
+                Worker._initialized_clients.add(self._client)
+                if not asynchronous:
+                    assert self._client.status == "running"
 
-        if not self._client:
-            from .client import Client
-
-            asynchronous = self.loop is IOLoop.current()
-            self._client = Client(
-                self.scheduler,
-                loop=self.loop,
-                security=self.security,
-                set_as_default=True,
-                asynchronous=asynchronous,
-                direct_to_workers=True,
-                name="worker",
-                timeout=timeout,
-            )
-            Worker._initialized_clients.add(self._client)
-            if not asynchronous:
-                assert self._client.status == "running"
-
-        return self._client
+            return self._client
 
     def get_current_task(self):
         """Get the key of the task we are currently running
