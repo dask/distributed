@@ -57,7 +57,8 @@ def split(
     # Also wrap in `QuickSizeof` to significantly speed up the worker storing each
     # shard in its zict buffer.
     shards_rekeyed = {
-        f"({name!r}, {input_partition_i}, {output_partition_i})": QuickSizeof(
+        # NOTE: this name is optimized to be easy for `key_split` to process
+        f"{name}-{input_partition_i}-{output_partition_i}": QuickSizeof(
             shard, len(shard) * row_size_estimate
         )
         for output_partition_i, shard in shards.items()
