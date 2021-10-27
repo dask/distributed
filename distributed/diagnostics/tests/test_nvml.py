@@ -1,7 +1,7 @@
+import multiprocessing as mp
 import os
 
 import pytest
-import multiprocessing as mp
 
 pytestmark = pytest.mark.gpu
 
