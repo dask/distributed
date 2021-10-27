@@ -2533,11 +2533,12 @@ class Worker(ServerNode):
                     worker,
                 )
 
-                start = time()
-                response = await get_data_from_worker(
-                    self.rpc, to_gather_keys, worker, who=self.address
-                )
-                stop = time()
+                with self.client.as_current():
+                    start = time()
+                    response = await get_data_from_worker(
+                        self.rpc, to_gather_keys, worker, who=self.address
+                    )
+                    stop = time()
                 if response["status"] == "busy":
                     return
 
