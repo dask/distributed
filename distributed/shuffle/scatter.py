@@ -38,6 +38,7 @@ def split(
     row_size_estimate: int,
     partition_info: dict[str, int] = None,
 ) -> dict[int, Future]:
+    "Split input partition into shards per output group; scatter shards and return Futures referencing them."
     assert isinstance(partition_info, dict), "partition_info is not a dict"
     client = get_client()
 
@@ -65,10 +66,12 @@ def split(
     # it writes the keys directly to the current worker, then informs the scheduler
     # that these keys exist on the current worker. No communications to other workers ever.
     futures: dict[str, Future] = client.scatter(shards_rekeyed)
+    # Switch keys back to output partition numbers so they're easier to select
     return dict(zip(shards, futures.values()))
 
 
 def gather_regroup(i: int, all_futures: list[dict[int, Future]]) -> pd.DataFrame:
+    "Given Futures for all shards, select Futures for this output partition, gather them, and concat."
     client = get_client()
     futures = [fs[i] for fs in all_futures if i in fs]
     shards: list[QuickSizeof[pd.DataFrame]] = client.gather(futures, direct=True)
