@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import logging
 from collections import defaultdict, deque
 from math import log2
 from time import time
+from typing import Any, Container
 
 from tlz import topk
 from tornado.ioloop import PeriodicCallback
@@ -12,7 +15,7 @@ from dask.utils import parse_timedelta
 from .comm.addressing import get_address_host
 from .core import CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
-from .utils import log_errors
+from .utils import log_errors, recursive_to_dict
 
 # Stealing requires multiple network bounces and if successful also task
 # submission which may include code serialization. Therefore, be very
@@ -78,6 +81,32 @@ class WorkStealing(SchedulerPlugin):
         self.in_flight_occupancy = defaultdict(lambda: 0)
 
         self.scheduler.stream_handlers["steal-response"] = self.move_task_confirm
+
+    def to_dict(self, *, exclude: Container[str] = None) -> dict[str, Any]:
+        """
+        A very verbose dictionary representation for debugging purposes.
+        Not type stable and not inteded for roundtrips.
+
+        Parameters
+        ----------
+        comm:
+        exclude:
+            A list of attributes which must not be present in the output.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        """
+        return recursive_to_dict(
+            {
+                "stealable_all": self.stealable_all,
+                "stealable": self.stealable,
+                "key_stealable": self.key_stealable,
+                "in_flight": self.in_flight,
+                "in_flight_occupancy": self.in_flight_occupancy,
+            },
+            exclude=exclude,
+        )
 
     def log(self, msg):
         return self.scheduler.log_event("stealing", msg)

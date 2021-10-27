@@ -26,7 +26,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import ClassVar
+from typing import Any, ClassVar, Container
 from typing import cast as pep484_cast
 
 import psutil
@@ -54,6 +54,7 @@ from . import versions as version_module
 from .active_memory_manager import ActiveMemoryManagerExtension
 from .batched import BatchedSend
 from .comm import (
+    Comm,
     get_address_host,
     normalize_address,
     resolve_address,
@@ -1725,6 +1726,33 @@ class TaskState:
         for ts in self._dependencies:
             nbytes += ts.get_nbytes()
         return nbytes
+
+    def to_dict(self, *, exclude: Container[str] = None) -> "dict[str, Any]":
+        """
+        A very verbose dictionary representation for debugging purposes.
+        Not type stable and not inteded for roundtrips.
+
+        Parameters
+        ----------
+        exclude:
+            A list of attributes which must not be present in the output.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        """
+        from distributed.utils import recursive_to_dict
+
+        if not exclude:
+            exclude = set()
+        return recursive_to_dict(
+            {
+                attr: getattr(self, attr)
+                for attr in self.__slots__
+                if attr not in exclude
+            },
+            exclude=exclude,
+        )
 
 
 class _StateLegacyMapping(Mapping):
@@ -3946,6 +3974,40 @@ class Scheduler(SchedulerState, ServerNode):
             },
         }
         return d
+
+    def to_dict(
+        self, comm: Comm = None, *, exclude: Container[str] = None
+    ) -> "dict[str, Any]":
+        """
+        A very verbose dictionary representation for debugging purposes.
+        Not type stable and not inteded for roundtrips.
+
+        Parameters
+        ----------
+        comm:
+        exclude:
+            A list of attributes which must not be present in the output.
+
+        See also
+        --------
+        Server.identity
+        Client.dump_cluster_state
+        """
+        from distributed.utils import recursive_to_dict
+
+        info = super().to_dict(exclude=exclude)
+        extra = {
+            "transition_log": self.transition_log,
+            "log": self.log,
+            "tasks": self.tasks,
+            "events": self.events,
+        }
+        info.update(extra)
+        extensions = {}
+        for name, ex in self.extensions.items():
+            if hasattr(ex, "to_dict"):
+                extensions[name] = ex.to_dict()
+        return recursive_to_dict(info, exclude=exclude)
 
     def get_worker_service_addr(self, worker, service_name, protocol=False):
         """

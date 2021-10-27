@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import functools
 import gc
 import inspect
@@ -7087,3 +7088,94 @@ def test_print_simple(capsys):
 
     out, err = capsys.readouterr()
     assert "Hello!:123" in out
+
+
+def _verify_cluster_dump(path, _format):
+    mode = "r"
+    _open = open
+    if _format == "msgpack":
+        import gzip
+
+        import msgpack
+
+        with gzip.open(path) as fd:
+            state = msgpack.unpack(fd)
+    else:
+        import yaml
+
+        with open(path) as fd:
+            state = yaml.load(fd)
+
+    assert isinstance(state, dict)
+    assert "scheduler_info" in state
+    assert "worker_info" in state
+
+
+@pytest.mark.parametrize("_format", ["msgpack", "json", "yaml"])
+def test_dump_cluster_state(c, s, a, b, tmp_path, _format):
+
+    if _format == "json":
+        ctx = pytest.raises(ValueError, match="Unsupported format")
+    else:
+        ctx = contextlib.nullcontext()
+
+    filename = tmp_path / "foo"
+    with ctx:
+        c.dump_cluster_state(
+            filename=filename,
+            format=_format,
+        )
+
+        _verify_cluster_dump(filename, _format)
+
+
+@pytest.mark.parametrize("_format", ["msgpack", "json", "yaml"])
+@gen_cluster(client=True)
+async def test_dump_cluster_state_async(c, s, a, b, tmp_path, _format):
+
+    if _format == "json":
+        ctx = pytest.raises(ValueError, match="Unsupported format")
+    else:
+        ctx = contextlib.nullcontext()
+
+    filename = tmp_path / "foo"
+    with ctx:
+        await c.dump_cluster_state(
+            filename=filename,
+            format=_format,
+        )
+
+        _verify_cluster_dump(filename, _format)
+
+
+@gen_cluster(client=True)
+async def test_dump_cluster_state_exclude(c, s, a, b, tmp_path):
+
+    futs = c.map(inc, range(10))
+    while len(s.tasks) != len(futs):
+        await asyncio.sleep(0.01)
+    exclude = [
+        # these are TaskState attributes
+        "_runspec",
+        "runspec",
+    ]
+    filename = tmp_path / "foo"
+    await c.dump_cluster_state(
+        filename=filename,
+        format="yaml",
+    )
+
+    with open(filename) as fd:
+        import yaml
+
+        state = yaml.load(fd)
+
+    assert "worker_info" in state
+    assert len(state["worker_info"]) == len(s.workers)
+    assert "scheduler_info" in state
+    assert "tasks" in state["scheduler_info"]
+    tasks = state["scheduler_info"]["tasks"]
+    assert len(tasks) == len(futs)
+    for k, task_dump in tasks.items():
+        assert not any(blocked in task_dump for blocked in exclude)
+        assert k in s.tasks

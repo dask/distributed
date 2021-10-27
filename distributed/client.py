@@ -24,7 +24,7 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import ClassVar
+from typing import Awaitable, ClassVar, Literal, Sequence
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
@@ -3480,6 +3480,97 @@ class Client:
         if not self.asynchronous:
             self.sync(self._update_scheduler_info)
         return self._scheduler_identity
+
+    async def _dump_cluster_state(
+        self,
+        filename: str,
+        exclude: Sequence[str] = None,
+        format: Literal["msgpack"] | Literal["yaml"] = "msgpack",
+    ) -> None:
+
+        scheduler_info = self.scheduler.dump_state()
+
+        worker_info = self.scheduler.broadcast(
+            msg=dict(
+                op="dump_state",
+                exclude=exclude,
+            ),
+        )
+
+        scheduler_info, worker_info = await asyncio.gather(scheduler_info, worker_info)
+        state = {
+            "scheduler_info": scheduler_info,
+            "worker_info": worker_info,
+        }
+        if format == "msgpack":
+            import gzip
+
+            import msgpack
+            import yaml
+
+            with gzip.open(filename, "wb") as fdg:
+                msgpack.pack(state, fdg)
+        elif format == "yaml":
+            import yaml
+
+            with open(filename, "w") as fd:
+                yaml.dump(state, fd)
+        else:
+            raise ValueError(
+                f"Unsupported format {format}. Possible values are `msgpack` or `yaml`"
+            )
+
+    def dump_cluster_state(
+        self,
+        filename: str,
+        exclude: Sequence[str] = None,
+        format: Literal["msgpack"] | Literal["yaml"] = "msgpack",
+    ) -> Awaitable | None:
+        """Extract a dump of the entire cluster state and persist to disk.
+        This is intended for debugging purposes only.
+
+        Warning: Memory usage on client side can be large.
+
+        Results will be stored in a dict::
+
+            {
+                "scheduler_info": {...},
+                "worker_info": {
+                    worker_addr: {...},  # worker attributes
+                    ...
+                }
+            }
+
+        Paramters
+        ---------
+        filename:
+            The output filename
+        exclude:
+            A sequence of attribute names which are supposed to be blacklisted
+            from the dump, e.g. to exclude code, tracebacks, logs, etc.
+        format:
+            Either msgpack or yaml. If msgpack is used (default), the output
+            will be stored in a gzipped file as msgpack.
+
+            To read::
+
+                import gzip, msgpack
+                with gzip.open("filename") as fd:
+                    state = msgpack.unpack(fd)
+
+            or::
+
+                import yaml
+                with open("filename") as fd:
+                    state = yaml.load(fd)
+
+        """
+        return self.sync(
+            self._dump_cluster_state,
+            filename=filename,
+            format=format,
+            exclude=exclude,
+        )
 
     def write_scheduler_file(self, scheduler_file):
         """Write the scheduler information to a json file.

@@ -142,4 +142,4 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: ${{ env.TEST_ID }}-deadlocks
-          path: test_timeout_reports
+          path: test_timeout_dump

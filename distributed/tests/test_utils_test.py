@@ -1,4 +1,5 @@
 import asyncio
+import os
 import pathlib
 import socket
 import threading
@@ -373,3 +374,30 @@ def test_provide_stack_on_timeout():
     assert "await asyncio.sleep(sleep_time)" in str(exc)
     # ensure the task was properly
     assert end - start < sleep_time / 2
+
+
+@pytest.mark.slow()
+def test_dump_cluster_state_timeout(tmp_path):
+    sleep_time = 30
+
+    async def inner_test(c, s, a, b):
+        await asyncio.sleep(sleep_time)
+
+    # If this timeout is too small, the cluster setup/teardown might take too
+    # long and the timeout error we'll receive will be different
+    test = gen_cluster(client=True, timeout=2, cluster_dump_directory=tmp_path)(
+        inner_test
+    )
+    with pytest.raises(asyncio.TimeoutError):
+        test()
+
+    _, dirs, files = next(os.walk(tmp_path))
+    assert not dirs
+    assert files == [inner_test.__name__]
+    import yaml
+
+    with open(tmp_path / files[0], "rb") as fd:
+        state = yaml.load(fd)
+
+    assert "scheduler_info" in state
+    assert "worker_info" in state
