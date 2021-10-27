@@ -1785,6 +1785,14 @@ class Client:
 
     async def _gather(self, futures, errors="raise", direct=None, local_worker=None):
         unpacked, future_set = unpack_remotedata(futures, byte_keys=True)
+        mismatched_futures = [f for f in future_set if f.client is not self]
+        if mismatched_futures:
+            raise ValueError(
+                "Cannot gather Futures created by another client. "
+                f"These are the {len(mismatched_futures)} (out of {len(futures)}) mismatched Futures and their client IDs "
+                f"(this client is {self.id}): "
+                f"{ {f: f.client.id for f in mismatched_futures} }"
+            )
         keys = [stringify(future.key) for future in future_set]
         bad_data = dict()
         data = {}
