@@ -100,6 +100,8 @@ def rearrange_by_column_scatter(
         f"shuffle-split-{token}",
         row_size_estimate,
         meta=df,
+        enforce_metadata=False,
+        transform_divisions=False,
     )
 
     all_futures = splits.__dask_keys__()
