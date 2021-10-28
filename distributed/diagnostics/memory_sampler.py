@@ -20,8 +20,8 @@ class MemorySampler:
 
     .. code-block:: python
 
-       client = distributed.Client()
-       ms = MemorySampler(client)
+       client = Client()
+       ms = MemorySampler()
 
        with ms.sample("run 1"):
            <run first workflow>
@@ -34,8 +34,8 @@ class MemorySampler:
 
     .. code-block:: python
 
-       client = await distributed.Client(asynchronous=True)
-       ms = MemorySampler(client)
+       client = await Client(asynchronous=True)
+       ms = MemorySampler()
 
        async with ms.sample("run 1"):
            <run first workflow>
