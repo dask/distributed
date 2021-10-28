@@ -7104,7 +7104,7 @@ def _verify_cluster_dump(path, _format):
         import yaml
 
         with open(path) as fd:
-            state = yaml.load(fd)
+            state = yaml.load(fd, Loader=yaml.Loader)
 
     assert isinstance(state, dict)
     assert "scheduler_info" in state
@@ -7168,7 +7168,7 @@ async def test_dump_cluster_state_exclude(c, s, a, b, tmp_path):
     with open(filename) as fd:
         import yaml
 
-        state = yaml.load(fd)
+        state = yaml.load(fd, Loader=yaml.Loader)
 
     assert "worker_info" in state
     assert len(state["worker_info"]) == len(s.workers)

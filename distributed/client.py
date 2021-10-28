@@ -24,9 +24,10 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import Awaitable, ClassVar, Literal, Sequence
+from typing import Awaitable, ClassVar, Sequence
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
+from typing_extensions import Literal
 
 import dask
 from dask.base import collections_to_dsk, normalize_token, tokenize
@@ -3561,8 +3562,12 @@ class Client:
             or::
 
                 import yaml
+                try:
+                    from yaml import CLoader as Loader
+                except ImportError:
+                    from yaml import Loader
                 with open("filename") as fd:
-                    state = yaml.load(fd)
+                    state = yaml.load(fd, Loader=Loader)
 
         """
         return self.sync(
