@@ -364,7 +364,7 @@ def test_provide_stack_on_timeout():
 
     # If this timeout is too small, the cluster setup/teardown might take too
     # long and the timeout error we'll receive will be different
-    test = gen_cluster(client=True, timeout=2)(inner_test)
+    test = gen_cluster(client=True, timeout=2, cluster_dump_directory=False)(inner_test)
 
     start = time()
     with pytest.raises(asyncio.TimeoutError) as exc:

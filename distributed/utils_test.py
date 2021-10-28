@@ -29,6 +29,8 @@ from itertools import count
 from time import sleep
 from typing import Any
 
+from typing_extensions import Literal
+
 from distributed.scheduler import Scheduler
 
 try:
@@ -880,7 +882,7 @@ def gen_cluster(
     config: dict[str, Any] = {},
     clean_kwargs: dict[str, Any] = {},
     allow_unclosed: bool = False,
-    cluster_dump_directory="test_timeout_dump",
+    cluster_dump_directory: str | Literal[False] = "test_timeout_dump",
 ) -> Callable[[Callable], Callable]:
     from distributed import Client
 
@@ -981,21 +983,22 @@ def gen_cluster(
                             if client:
                                 assert c
                                 try:
-                                    if not os.path.exists(cluster_dump_directory):
-                                        os.makedirs(cluster_dump_directory)
-                                    filename = os.path.join(
-                                        cluster_dump_directory, func.__name__
-                                    )
-                                    fut = c.dump_cluster_state(
-                                        filename,
-                                        # Test dumps should be small enough that
-                                        # there is no need for a compressed
-                                        # binary representation and readability
-                                        # is more important
-                                        format="yaml",
-                                    )
-                                    assert fut is not None
-                                    await fut
+                                    if cluster_dump_directory:
+                                        if not os.path.exists(cluster_dump_directory):
+                                            os.makedirs(cluster_dump_directory)
+                                        filename = os.path.join(
+                                            cluster_dump_directory, func.__name__
+                                        )
+                                        fut = c.dump_cluster_state(
+                                            filename,
+                                            # Test dumps should be small enough that
+                                            # there is no need for a compressed
+                                            # binary representation and readability
+                                            # is more important
+                                            format="yaml",
+                                        )
+                                        assert fut is not None
+                                        await fut
                                 except Exception:
                                     print(
                                         f"Exception {sys.exc_info()} while trying to dump cluster state."
