@@ -125,10 +125,88 @@ Also possibly (TBD) `shuffle-setup` could call an RPC on all the other workers i
 
 ### Spilling to disk
 
-Problems to solve:
-* ...
+1. Communication is initiated by the data producer, i.e. every participating Worker will receive incoming connections trying to submit data.
+2. Every participating Worker will receive incoming requests to accept data.
+3. Receiving and submitting data must happen concurrently.
+4. Submitting data requires GIL locking compute (groupby/split) // `transfer` task.
+5. Received and submitted data `shards` are expected to be much smaller than the final output partitions. The system must be capable of handling small reads/writes.
+6. There may be multiple shuffles happening and we need to be able to distinguish data accordingly when storing it.
+7. Write to disk must happen without blocking the main event loop.
+8. There is no clear correlation between number of incoming data connections and number of workers or number of input partitions. [1]
+9.  All incoming data combined will build M output partitions. M may be unequal to N.
+10. Any kind of regrouping, if necessary, must not block the main event loop.
+11. Every worker must be able to handle more incoming data than it has memory. Therefore, some spill-to-disk capabilities must be supported.
+12. Spilling may not be possible without bounds, see https://github.com/dask/distributed/issues/5364. It should be possible to use buffer data in memory.
+13. Assuming there is sufficient disk space available and individual shards are below `X` times the workers memory limit [2], a worker must never go out of memory.
+14. There should be a possibility to notify the Worker instrumentation about (un)managed memory and spilled disk to update.
+15. If a shuffle `Y` is aborted or retried, all data belonging to `Y` needs to be deleted from the worker, regardless of where it is stored (memory, disk, ..)
+16. Implementation is sufficiently well encapsulated to be unit-testable
 
-I'll let Florian fill this one in from discussion notes at https://docs.google.com/document/d/19tpd0pZgt969rXIPRfc7tulB7hzATCJ8m_MlDdsFpGg/edit?usp=sharing.
+[1] Data producer is encouraged to implement data buffering to avoid comm overhead.
+[2] `0<X<1`, accounting for data copies, buffer sizes, serialization and interpreter overhead.
+
+
+#### Data submission protocol
+
+Relevant requirements: 4., 6., 9. 10.,
+
+The data producer will perform a groupby [M, W] where M is the number of output partitions and W is the number of participating workers
+
+If the producer already splits by output partition we will not need to regroup on the receiver side. Concat could happen in the unpack method resolving us from any GIL/Thread problems.
+
+```python
+    # Does not need to be a *dict* but we'll need some kind of mapping, either by endoding or by data structure.
+    {
+        "W1": {
+            # Every element is a pandas dataframe / arrow table
+            "M1": ["W1-M1-N1", "W1-M1-N2", "W1-M1-N3"],
+            "M2": ["W1-M2-N1", "W1-M2-N2", "W1-M2-N3"],
+        },
+        "W1": {
+            "M1": ["W1-M1-N1", "W1-M1-N2", "W1-M1-N3"],
+            "M2": ["W1-M2-N1", "W1-M2-N2", "W1-M2-N3"],
+        },
+        ...
+    }
+```
+
+Receiving end
+
+```python
+# This is disk stuff!
+class ShardCollection:
+
+    def __init__(self):
+        self._buffer = []  # or memory view, whatever
+        self.thread = Thread() # likely need a thread for async
+
+    async def append(self, shard):
+        buffer.append(shard)
+        if buffer.full():
+            await self.dump_buffer_to_disk()
+
+    async def put(self):
+        pass
+
+    async def get(self):
+        load_data_to_buffer()
+        return self._buffer
+
+    def __del__(self):
+        delete_disk()
+        self._buffer = None
+
+
+Worker.data[key] = ShardCollection()
+```
+
+#### Asnychronous operations
+
+Due to 1., 2.
+
+#### Backpressure
+
+The prototype implementation in #XXX is not introducing data backpressure to deal with 11.
 
 ## Appendix
 
