@@ -1727,7 +1727,8 @@ class TaskState:
             nbytes += ts.get_nbytes()
         return nbytes
 
-    def to_dict(self, *, exclude: Container[str] = None) -> "dict[str, Any]":
+    @ccall
+    def to_dict(self, *, exclude: Container[str] = None):
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not inteded for roundtrips.
@@ -1749,7 +1750,7 @@ class TaskState:
             {
                 attr: getattr(self, attr)
                 for attr in self.__slots__
-                if attr not in exclude
+                if attr not in exclude and hasattr(self, attr)
             },
             exclude=exclude,
         )
