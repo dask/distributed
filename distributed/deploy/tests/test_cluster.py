@@ -1,10 +1,8 @@
-import pytest
-
 from types import CoroutineType
 
+import pytest
+
 from distributed.deploy.cluster import Cluster
-from tornado.ioloop import IOLoop
-from distributed.utils_test import loop_in_thread
 
 
 @pytest.mark.asyncio

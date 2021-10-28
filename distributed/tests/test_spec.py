@@ -1,4 +1,3 @@
-import uuid
 from unittest.mock import MagicMock
 
 from distributed.deploy.spec import (
