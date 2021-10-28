@@ -5,12 +5,12 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
 
 from tornado.ioloop import PeriodicCallback
-from typing_extensions import TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from .plugin import SchedulerPlugin
 
 if TYPE_CHECKING:
-    from ..client import Client
+    from ..client import Client  # circular dependency
 
 
 class MemorySampler:
