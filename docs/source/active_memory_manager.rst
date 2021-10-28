@@ -43,9 +43,12 @@ every two seconds. Alternatively, you can manually start/stop the AMM from the
 
 .. code-block:: python
 
-   >>> client.scheduler.amm_start()  # Start running every 2 seconds
-   >>> client.scheduler.amm_stop()  # Stop running periodically
-   >>> client.scheduler.amm_run_once()
+   >>> from distributed import active_memory_manager as amm
+   >>> amm.start(client)  # Start running every 2 seconds
+   >>> amm.stop(client)  # Stop running periodically
+   >>> amm.running(client)
+   False
+   >>> amm.run_once(client)
 
 
 Policies

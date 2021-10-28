@@ -249,8 +249,7 @@ properties:
             properties:
               start:
                 type: boolean
-                description: set to true to auto-start the AMM on Scheduler init;
-                  false to manually start it with client.scheduler.amm_start()
+                description: set to true to auto-start the AMM on Scheduler init
               interval:
                 type: string
                 description:

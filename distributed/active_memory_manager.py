@@ -70,13 +70,6 @@ class ActiveMemoryManagerExtension:
 
         if register:
             scheduler.extensions["amm"] = self
-            scheduler.handlers.update(
-                {
-                    "amm_run_once": self.run_once,
-                    "amm_start": self.start,
-                    "amm_stop": self.stop,
-                }
-            )
 
         if interval is None:
             interval = parse_timedelta(
@@ -88,22 +81,23 @@ class ActiveMemoryManagerExtension:
         if start:
             self.start()
 
-    def start(self, comm=None) -> None:
+    def start(self) -> None:
         """Start executing every ``self.interval`` seconds until scheduler shutdown"""
-        if self.started:
+        if self.running:
             return
         pc = PeriodicCallback(self.run_once, self.interval * 1000.0)
         self.scheduler.periodic_callbacks[f"amm-{id(self)}"] = pc
         pc.start()
 
-    def stop(self, comm=None) -> None:
+    def stop(self) -> None:
         """Stop periodic execution"""
         pc = self.scheduler.periodic_callbacks.pop(f"amm-{id(self)}", None)
         if pc:
             pc.stop()
 
     @property
-    def started(self) -> bool:
+    def running(self) -> bool:
+        """Return True if the AMM is being triggered periodically; False otherwise"""
         return f"amm-{id(self)}" in self.scheduler.periodic_callbacks
 
     def add_policy(self, policy: ActiveMemoryManagerPolicy) -> None:
@@ -112,7 +106,7 @@ class ActiveMemoryManagerExtension:
         self.policies.add(policy)
         policy.manager = self
 
-    def run_once(self, comm=None) -> None:
+    def run_once(self) -> None:
         """Run all policies once and asynchronously (fire and forget) enact their
         recommendations to replicate/drop keys
         """
@@ -299,7 +293,8 @@ class ActiveMemoryManagerPolicy:
         None,
     ]:
         """This method is invoked by the ActiveMemoryManager every few seconds, or
-        whenever the user invokes scheduler.amm_run_once().
+        whenever the user invokes :func:`distributed.active_memory_manager.run_once`
+        from the client.
         It is an iterator that must emit any of the following:
 
         - "replicate", <TaskState>, None

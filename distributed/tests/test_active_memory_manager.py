@@ -22,7 +22,7 @@ NO_AMM_START = {"distributed.scheduler.active-memory-manager.start": False}
     },
 )
 async def test_no_policies(c, s, a, b):
-    await c.scheduler.amm_run_once()
+    s.extensions["amm"].run_once()
 
 
 class DemoPolicy(ActiveMemoryManagerPolicy):
@@ -70,7 +70,7 @@ async def test_drop(c, s, *workers):
     futures = await c.scatter({"x": 123}, broadcast=True)
     assert len(s.tasks["x"].who_has) == 4
     # Also test the extension handler
-    await c.scheduler.amm_run_once()
+    s.extensions["amm"].run_once()
     while len(s.tasks["x"].who_has) > 1:
         await asyncio.sleep(0.01)
     # The last copy is never dropped even if the policy asks so
@@ -83,10 +83,10 @@ async def test_start_stop(c, s, a, b):
     x = c.submit(lambda: 123, key="x")
     await c.replicate(x, 2)
     assert len(s.tasks["x"].who_has) == 2
-    await c.scheduler.amm_start()
+    s.extensions["amm"].start()
     while len(s.tasks["x"].who_has) > 1:
         await asyncio.sleep(0.01)
-    await c.scheduler.amm_stop()
+    s.extensions["amm"].stop()
     # AMM is not running anymore
     await c.replicate(x, 2)
     await asyncio.sleep(0.2)
@@ -147,9 +147,9 @@ async def test_multi_start(c, s, a, b):
     m2 = ActiveMemoryManagerExtension(s, {p2}, register=False, start=True, interval=0.1)
     m3 = ActiveMemoryManagerExtension(s, {p3}, register=False, start=True, interval=0.1)
 
-    assert not m1.started
-    assert m2.started
-    assert m3.started
+    assert not m1.running
+    assert m2.running
+    assert m3.running
 
     futures = await c.scatter({"x": 1, "y": 2, "z": 3}, broadcast=True)
 
