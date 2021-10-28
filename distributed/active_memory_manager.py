@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import weakref
 from collections import defaultdict
 from collections.abc import Generator
 from typing import TYPE_CHECKING
@@ -14,6 +15,7 @@ from .metrics import time
 from .utils import import_term, log_errors
 
 if TYPE_CHECKING:
+    from .client import Client
     from .scheduler import Scheduler, TaskState, WorkerState
 
 
@@ -326,6 +328,38 @@ class ActiveMemoryManagerPolicy:
         can be inspected on ``self.manager.workers_memory``.
         """
         raise NotImplementedError("Virtual method")
+
+
+class AMMClientProxy:
+    """Convenience accessors to operate the AMM from the dask client
+
+    Usage: ``client.amm.start()`` etc.
+
+    All methods are asynchronous if the client is asynchronous and synchronous if the
+    client is synchronous.
+    """
+
+    _client: weakref.ref[Client]
+
+    def __init__(self, client: Client):
+        self._client = weakref.ref(client)
+
+    def _run(self, lambda_):
+        return self._client().run_on_scheduler(
+            lambda dask_scheduler: lambda_(dask_scheduler.extensions["amm"])
+        )
+
+    def start(self):
+        return self._run(lambda amm: amm.start())
+
+    def stop(self):
+        return self._run(lambda amm: amm.stop())
+
+    def run_once(self):
+        return self._run(lambda amm: amm.run_once())
+
+    def running(self):
+        return self._run(lambda amm: amm.running)
 
 
 class ReduceReplicas(ActiveMemoryManagerPolicy):

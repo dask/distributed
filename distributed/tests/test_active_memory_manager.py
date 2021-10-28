@@ -178,6 +178,25 @@ async def test_not_registered(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
+def test_client_proxy_sync(client):
+    assert not client.amm.running()
+    client.amm.start()
+    assert client.amm.running()
+    client.amm.stop()
+    assert not client.amm.running()
+    client.amm.run_once()
+
+
+@gen_cluster(client=True, config=NO_AMM_START)
+async def test_client_proxy_async(c, s, a, b):
+    assert not await c.amm.running()
+    await c.amm.start()
+    assert await c.amm.running()
+    await c.amm.stop()
+    assert not await c.amm.running()
+    await c.amm.run_once()
+
+
 @gen_cluster(client=True, config=demo_config("drop"))
 async def test_drop_not_in_memory(c, s, a, b):
     """ts.who_has is empty"""

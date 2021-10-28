@@ -4275,6 +4275,13 @@ class Client:
         """
         return self.sync(self._unregister_worker_plugin, name=name, nanny=nanny)
 
+    @property
+    def amm(self):
+        """Convenience accessors for the :doc:`active_memory_manager`"""
+        from .active_memory_manager import AMMClientProxy
+
+        return AMMClientProxy(self)
+
 
 class _WorkerSetupPlugin(WorkerPlugin):
     """This is used to support older setup functions as callbacks"""
