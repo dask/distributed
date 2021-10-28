@@ -295,8 +295,7 @@ class ActiveMemoryManagerPolicy:
         None,
     ]:
         """This method is invoked by the ActiveMemoryManager every few seconds, or
-        whenever the user invokes :func:`distributed.active_memory_manager.run_once`
-        from the client.
+        whenever the user invokes ``client.amm.run_once``.
         It is an iterator that must emit any of the following:
 
         - "replicate", <TaskState>, None
