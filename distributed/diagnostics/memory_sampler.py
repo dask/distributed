@@ -3,9 +3,9 @@ from __future__ import annotations
 import uuid
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from tornado.ioloop import PeriodicCallback
-from typing import TYPE_CHECKING
 
 from .plugin import SchedulerPlugin
 
