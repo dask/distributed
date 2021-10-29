@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import weakref
 from collections import defaultdict
-from collections.abc import Generator
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Generator
+from typing import TYPE_CHECKING, Any
 
 from tornado.ioloop import PeriodicCallback
 
@@ -338,14 +337,14 @@ class AMMClientProxy:
     client is synchronous.
     """
 
-    _client: weakref.ref[Client]
+    _client: Client
 
     def __init__(self, client: Client):
-        self._client = weakref.ref(client)
+        self._client = client
 
-    def _run(self, lambda_):
-        return self._client().run_on_scheduler(
-            lambda dask_scheduler: lambda_(dask_scheduler.extensions["amm"])
+    def _run(self, f: Callable[[ActiveMemoryManagerExtension], Any]):
+        return self._client.run_on_scheduler(
+            lambda dask_scheduler: f(dask_scheduler.extensions["amm"])
         )
 
     def start(self):
