@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 
 from tornado.ioloop import PeriodicCallback
 
-from .plugin import SchedulerPlugin
-
 if TYPE_CHECKING:
-    from ..client import Client  # circular dependency
+    # circular dependencies
+    from ..client import Client
+    from ..scheduler import Scheduler
 
 
 class MemorySampler:
@@ -43,64 +43,77 @@ class MemorySampler:
            <run second workflow>
        ...
        ms.plot()
-
-    Parameters
-    ==========
-    client: Client, optional
-        client used to connect to the scheduler.
-        default: use the global client
-    measure: str, optional
-        One of the measures from :class:`distributed.scheduler.MemoryState`.
-        default: "process"
-    interval: float, optional
-        sampling interval, in seconds.
-        default: 0.5
     """
 
-    client: Client
-    samples: dict[str, list[tuple[datetime, int]]]
-    plugin: MemorySamplerPlugin
+    samples: dict[str, list[tuple[float, int]]]
 
-    def __init__(
-        self, *, client: Client | None = None, measure: str = "process", interval=0.5
-    ):
-        from ..client import get_client
-
-        self.client = client or get_client()
+    def __init__(self):
         self.samples = {}
-        self.plugin = MemorySamplerPlugin(measure, interval)
 
-    def sample(self, label: str):
+    def sample(
+        self,
+        label: str | None = None,
+        *,
+        client: Client | None = None,
+        measure: str = "process",
+        interval: float = 0.5,
+    ):
         """Context manager that records memory usage in the cluster.
         This is synchronous if the client is synchronous and
         asynchronous if the client is asynchronous.
+
+        Parameters
+        ==========
+        label: str, optional
+            Tag to record the samples under in the self.samples dict
+        client: Client, optional
+            client used to connect to the scheduler.
+            default: use the global client
+        measure: str, optional
+            One of the measures from :class:`distributed.scheduler.MemoryState`.
+            default: "process"
+        interval: float, optional
+            sampling interval, in seconds.
+            default: 0.5
         """
-        if self.client.asynchronous:
-            return self._sample_async(label)
+        if not client:
+            from ..client import get_client
+
+            client = get_client()
+
+        if client.asynchronous:
+            return self._sample_async(label, client, measure, interval)
         else:
-            return self._sample_sync(label)
+            return self._sample_sync(label, client, measure, interval)
 
     @contextmanager
-    def _sample_sync(self, label: str):
-        self.client.register_scheduler_plugin(self.plugin)
+    def _sample_sync(
+        self, label: str | None, client: Client, measure: str, interval: float
+    ):
+        key = client.sync(
+            client.scheduler.memory_sampler_start,
+            client=client.id,
+            measure=measure,
+            interval=interval,
+        )
         try:
             yield
         finally:
-            samples = self.client.run_on_scheduler(
-                self.plugin.unregister_and_get_samples
-            )
-            self.samples[label] = samples
+            samples = client.sync(client.scheduler.memory_sampler_stop, key=key)
+            self.samples[label or key] = samples
 
     @asynccontextmanager
-    async def _sample_async(self, label: str):
-        await self.client.register_scheduler_plugin(self.plugin)
+    async def _sample_async(
+        self, label: str | None, client: Client, measure: str, interval: float
+    ):
+        key = await client.scheduler.memory_sampler_start(
+            client=client.id, measure=measure, interval=interval
+        )
         try:
             yield
         finally:
-            samples = await self.client.run_on_scheduler(
-                self.plugin.unregister_and_get_samples
-            )
-            self.samples[label] = samples
+            samples = await client.scheduler.memory_sampler_stop(key=key)
+            self.samples[label or key] = samples
 
     def to_pandas(self):
         """Return the data series as a pandas.Dataframe.
@@ -113,9 +126,10 @@ class MemorySampler:
             if not s_list:
                 continue
             s = pd.DataFrame(s_list).set_index(0)[1]
+            s.index = pd.to_datetime(s.index, unit="s")
             s.index -= s.index[0]
             if len(self.samples) > 1:
-                s = s.resample(f"{self.plugin.interval / 5}S").ffill()
+                s = s.resample("0.1S").ffill()
             ss[label] = s
 
         return pd.DataFrame(ss)
@@ -136,38 +150,47 @@ class MemorySampler:
         )
 
 
-class MemorySamplerPlugin(SchedulerPlugin):
-    """Server side of MemorySampler"""
+class MemorySamplerExtension:
+    """Scheduler extension - server side of MemorySampler"""
 
-    name: str
-    measure: str
-    interval: float
-    samples: list[tuple[datetime, int]]
-    pc: PeriodicCallback
+    scheduler: Scheduler
+    samples: dict[str, list[tuple[float, int]]]
 
-    def __init__(self, measure: str, interval: float):
-        self.name = f"MemorySampler-{uuid.uuid4()}"
-        self.measure = measure
-        self.interval = interval
-        self.samples = []
+    def __init__(self, scheduler: Scheduler):
+        self.scheduler = scheduler
+        self.scheduler.extensions["memory_sampler"] = self
+        self.scheduler.handlers["memory_sampler_start"] = self.start
+        self.scheduler.handlers["memory_sampler_stop"] = self.stop
+        self.samples = {}
 
-    async def start(self, scheduler):
+    def start(self, comm, client: str, measure: str, interval: float) -> str:
+        """Start periodically sampling memory"""
+        assert not measure.startswith("_")
+        assert isinstance(getattr(self.scheduler.memory, measure), int)
+
+        key = str(uuid.uuid4())
+        self.samples[key] = []
+
         def sample():
-            self.samples.append(
-                (datetime.now(), getattr(scheduler.memory, self.measure))
-            )
+            if client in self.scheduler.clients:
+                ts = datetime.now().timestamp()
+                nbytes = getattr(self.scheduler.memory, measure)
+                self.samples[key].append((ts, nbytes))
+            else:
+                self.stop(comm, key)
 
-        self.pc = PeriodicCallback(sample, self.interval * 1000)
-        self.pc.start()
+        pc = PeriodicCallback(sample, interval)
+        self.scheduler.periodic_callbacks["MemorySampler-" + key] = pc
+        pc.start()
 
-    async def stop(self):
-        self.pc.stop()
+        # Immediately collect the first sample; this also ensures there's always at
+        # least one sample
+        sample()
 
-    def unregister_and_get_samples(self, dask_scheduler):
-        """Remove self from scheduler and return the samples. This method is meant to be
-        invoked through Client.run_on_scheduler.
-        """
-        self = dask_scheduler.plugins[self.name]
-        dask_scheduler.remove_plugin(self.name)
-        self.pc.stop()
-        return self.samples
+        return key
+
+    def stop(self, comm, key: str):
+        """Stop sampling and return the samples"""
+        pc = self.scheduler.periodic_callbacks.pop("MemorySampler-" + key)
+        pc.stop()
+        return self.samples.pop(key)
