@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Generator
-from typing import TYPE_CHECKING, Any
+from collections.abc import Generator
+from typing import TYPE_CHECKING
 
 from tornado.ioloop import PeriodicCallback
 
@@ -13,7 +13,7 @@ from .core import Status
 from .metrics import time
 from .utils import import_term, log_errors
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: nocover
     from .client import Client
     from .scheduler import Scheduler, TaskState, WorkerState
 
@@ -71,6 +71,7 @@ class ActiveMemoryManagerExtension:
 
         if register:
             scheduler.extensions["amm"] = self
+            scheduler.handlers["amm_handler"] = self.amm_handler
 
         if interval is None:
             interval = parse_timedelta(
@@ -81,6 +82,14 @@ class ActiveMemoryManagerExtension:
             start = dask.config.get("distributed.scheduler.active-memory-manager.start")
         if start:
             self.start()
+
+    def amm_handler(self, comm, method: str):
+        """Scheduler handler, invoked from the Client by
+        :class:`~distributed.active_memory_manager.AMMClientProxy`
+        """
+        assert method in {"start", "stop", "run_once", "running"}
+        out = getattr(self, method)
+        return out() if callable(out) else out
 
     def start(self) -> None:
         """Start executing every ``self.interval`` seconds until scheduler shutdown"""
@@ -325,7 +334,7 @@ class ActiveMemoryManagerPolicy:
         The current memory usage on each worker, *downstream of all pending commands*,
         can be inspected on ``self.manager.workers_memory``.
         """
-        raise NotImplementedError("Virtual method")
+        raise NotImplementedError("Virtual method")  # pragma: nocover
 
 
 class AMMClientProxy:
@@ -342,22 +351,21 @@ class AMMClientProxy:
     def __init__(self, client: Client):
         self._client = client
 
-    def _run(self, f: Callable[[ActiveMemoryManagerExtension], Any]):
-        return self._client.run_on_scheduler(
-            lambda dask_scheduler: f(dask_scheduler.extensions["amm"])
-        )
+    def _run(self, method: str):
+        """Remotely invoke ActiveMemoryManagerExtension.amm_handler"""
+        return self._client.sync(self._client.scheduler.amm_handler, method=method)
 
     def start(self):
-        return self._run(lambda amm: amm.start())
+        return self._run("start")
 
     def stop(self):
-        return self._run(lambda amm: amm.stop())
+        return self._run("stop")
 
     def run_once(self):
-        return self._run(lambda amm: amm.run_once())
+        return self._run("run_once")
 
     def running(self):
-        return self._run(lambda amm: amm.running)
+        return self._run("running")
 
 
 class ReduceReplicas(ActiveMemoryManagerPolicy):

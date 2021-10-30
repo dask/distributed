@@ -86,7 +86,9 @@ async def test_start_stop(c, s, a, b):
     s.extensions["amm"].start()
     while len(s.tasks["x"].who_has) > 1:
         await asyncio.sleep(0.01)
+    s.extensions["amm"].start()  # Double start is a no-op
     s.extensions["amm"].stop()
+    s.extensions["amm"].stop()  # Double stop is a no-op
     # AMM is not running anymore
     await c.replicate(x, 2)
     await asyncio.sleep(0.2)
@@ -132,6 +134,9 @@ async def test_add_policy(c, s, a, b):
     m3.run_once()
     while len(s.tasks["z"].who_has) == 2:
         await asyncio.sleep(0.01)
+
+    with pytest.raises(TypeError):
+        m3.add_policy("not a policy")
 
 
 @gen_cluster(client=True, config=demo_config("drop", key="x", start=False))
