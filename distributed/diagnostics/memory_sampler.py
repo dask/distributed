@@ -123,8 +123,7 @@ class MemorySampler:
 
         ss = {}
         for (label, s_list) in self.samples.items():
-            if not s_list:
-                continue
+            assert s_list  # There's always at least one sasmple
             s = pd.DataFrame(s_list).set_index(0)[1]
             s.index = pd.to_datetime(s.index, unit="s")
             s.index -= s.index[0]
