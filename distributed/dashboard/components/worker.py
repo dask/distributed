@@ -157,11 +157,20 @@ class CommunicatingStream(DashboardComponent):
 
             hover = HoverTool(
                 point_policy="follow_mouse",
-                tooltips=[
-                    ("Transfer", "@transfer"),
-                    ("Keys", "@keys{safe}"),
-                    ("Direction", "$name"),
-                ],
+                tooltips="""
+                <div>
+                    <span style="font-size: 12px; font-weight: bold;">Transfer:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@transfer</span>
+                </div>
+                <div>
+                    <span style="font-size: 12px; font-weight: bold;">Keys:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@keys{safe}</span>
+                </div>
+                <div>
+                    <span style="font-size: 12px; font-weight: bold;">Direction:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">$name</span>
+                </div>
+                """,
             )
             fig.add_tools(
                 hover,
@@ -246,9 +255,14 @@ class CommunicatingTimeSeries(DashboardComponent):
             x_range=x_range,
             **kwargs,
         )
-        fig.line(source=self.source, x="x", y="in", color="red")
-        fig.line(source=self.source, x="x", y="out", color="blue")
+        fig.line(
+            source=self.source, x="x", y="in", color="red", legend_label="Incoming"
+        )
+        fig.line(
+            source=self.source, x="x", y="out", color="blue", legend_label="Outgoing"
+        )
 
+        fig.legend.location = "top_left"
         fig.add_tools(
             ResetTool(), PanTool(dimensions="width"), WheelZoomTool(dimensions="width")
         )
