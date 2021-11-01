@@ -303,7 +303,6 @@ async def test_stress():
         protocol="ucx",
         dashboard_address=":0",
         asynchronous=True,
-        processes=False,
         host=HOST,
     ) as cluster:
         async with Client(cluster, asynchronous=True):
