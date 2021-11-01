@@ -89,7 +89,8 @@ async def test_comm_objs():
     assert comm.peer_address == serv_comm.local_address
 
 
-def test_ucx_specific():
+@pytest.mark.asyncio
+async def test_ucx_specific():
     """
     Test concrete UCX API.
     """
@@ -98,52 +99,48 @@ def test_ucx_specific():
     # 2. Use dict in read / write, put seralization there.
     # 3. Test peer_address
     # 4. Test cleanup
-    async def f():
-        address = f"ucx://{HOST}:{0}"
+    address = f"ucx://{HOST}:{0}"
 
-        async def handle_comm(comm):
-            msg = await comm.read()
-            msg["op"] = "pong"
-            await comm.write(msg)
-            await comm.read()
-            assert comm.closed() is False
-            await comm.close()
-            assert comm.closed
+    async def handle_comm(comm):
+        msg = await comm.read()
+        msg["op"] = "pong"
+        await comm.write(msg)
+        await comm.read()
+        await comm.close()
+        assert comm.closed() is True
 
-        listener = await ucx.UCXListener(address, handle_comm)
-        host, port = listener.get_host_port()
-        assert host.count(".") == 3
-        assert port > 0
+    listener = await ucx.UCXListener(address, handle_comm)
+    host, port = listener.get_host_port()
+    assert host.count(".") == 3
+    assert port > 0
 
-        l = []
+    l = []
 
-        async def client_communicate(key, delay=0):
-            addr = "%s:%d" % (host, port)
-            comm = await connect(listener.contact_address)
-            # TODO: peer_address
-            # assert comm.peer_address == 'ucx://' + addr
-            assert comm.extra_info == {}
-            msg = {"op": "ping", "data": key}
-            await comm.write(msg)
-            if delay:
-                await asyncio.sleep(delay)
-            msg = await comm.read()
-            assert msg == {"op": "pong", "data": key}
-            await comm.write({"op": "client closed"})
-            l.append(key)
-            return comm
+    async def client_communicate(key, delay=0):
+        addr = "%s:%d" % (host, port)
+        comm = await connect(listener.contact_address)
+        # TODO: peer_address
+        # assert comm.peer_address == 'ucx://' + addr
+        assert comm.extra_info == {}
+        msg = {"op": "ping", "data": key}
+        await comm.write(msg)
+        if delay:
+            await asyncio.sleep(delay)
+        msg = await comm.read()
+        assert msg == {"op": "pong", "data": key}
+        await comm.write({"op": "client closed"})
+        l.append(key)
+        return comm
 
-        comm = await client_communicate(key=1234, delay=0.5)
+    comm = await client_communicate(key=1234, delay=0.5)
 
-        # Many clients at once
-        N = 2
-        futures = [client_communicate(key=i, delay=0.05) for i in range(N)]
-        await asyncio.gather(*futures)
-        assert set(l) == {1234} | set(range(N))
+    # Many clients at once
+    N = 2
+    futures = [client_communicate(key=i, delay=0.05) for i in range(N)]
+    await asyncio.gather(*futures)
+    assert set(l) == {1234} | set(range(N))
 
-        listener.stop()
-
-    asyncio.run(f())
+    listener.stop()
 
 
 @pytest.mark.asyncio
