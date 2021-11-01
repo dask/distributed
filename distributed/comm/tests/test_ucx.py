@@ -11,7 +11,7 @@ from distributed.comm import connect, listen, parse_address, ucx
 from distributed.comm.registry import backends, get_backend
 from distributed.deploy.local import LocalCluster
 from distributed.protocol import to_serialize
-from distributed.utils_test import gen_cluster, gen_test, inc
+from distributed.utils_test import inc
 
 try:
     HOST = ucp.get_address()
@@ -169,7 +169,7 @@ async def test_ping_pong_data():
     await serv_com.close()
 
 
-@gen_test()
+@pytest.mark.asyncio
 async def test_ucx_deserialize():
     # Note we see this error on some systems with this test:
     # `socket.gaierror: [Errno -5] No address associated with hostname`
@@ -256,7 +256,7 @@ async def test_large_cupy(n, cleanup):
     await serv_com.close()
 
 
-@gen_test()
+@pytest.mark.asyncio
 async def test_ping_pong_numba():
     np = pytest.importorskip("numpy")
     numba = pytest.importorskip("numba")
@@ -274,8 +274,8 @@ async def test_ping_pong_numba():
     assert result["op"] == "ping"
 
 
-@pytest.mark.parametrize("processes", [True, False])
 @pytest.mark.asyncio
+@pytest.mark.parametrize("processes", [True, False])
 async def test_ucx_localcluster(processes, cleanup):
     async with LocalCluster(
         protocol="ucx",
@@ -296,7 +296,7 @@ async def test_ucx_localcluster(processes, cleanup):
 
 
 @pytest.mark.slow
-@gen_test(timeout=240)
+@pytest.mark.asyncio
 async def test_stress():
     da = pytest.importorskip("dask.array")
 
@@ -322,21 +322,25 @@ async def test_stress():
                 await wait(x)
 
 
-@gen_cluster(client=True, scheduler_kwargs={"protocol": "ucx"})
-async def test_simple(c, s, a, b):
-    assert s.address.startswith("ucx://")
-    assert await c.submit(lambda x: x + 1, 10) == 11
+@pytest.mark.asyncio
+async def test_simple():
+    async with LocalCluster(protocol="ucx", asynchronous=True) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            assert cluster.scheduler_address.startswith("ucx://")
+            assert await client.submit(lambda x: x + 1, 10) == 11
 
 
-@gen_cluster(client=True, scheduler_kwargs={"protocol": "ucx"})
-async def test_transpose(c, s, a, b):
+@pytest.mark.asyncio
+async def test_transpose():
     da = pytest.importorskip("dask.array")
 
-    assert s.address.startswith("ucx://")
-    x = da.ones((10000, 10000), chunks=(1000, 1000)).persist()
-    await x
-    y = (x + x.T).sum()
-    await y
+    async with LocalCluster(protocol="ucx", asynchronous=True) as cluster:
+        async with Client(cluster, asynchronous=True):
+            assert cluster.scheduler_address.startswith("ucx://")
+            x = da.ones((10000, 10000), chunks=(1000, 1000)).persist()
+            await x
+            y = (x + x.T).sum()
+            await y
 
 
 @pytest.mark.asyncio
