@@ -178,7 +178,7 @@ class MemorySamplerExtension:
             else:
                 self.stop(comm, key)
 
-        pc = PeriodicCallback(sample, interval)
+        pc = PeriodicCallback(sample, interval * 1000)
         self.scheduler.periodic_callbacks["MemorySampler-" + key] = pc
         pc.start()
 
