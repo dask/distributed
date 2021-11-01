@@ -557,18 +557,14 @@ async def test_offload():
 
 @pytest.mark.asyncio
 async def test_offload_preserves_contextvars():
-    var = contextvars.ContextVar("var", default="foo")
+    var = contextvars.ContextVar("var")
 
-    def change_var():
-        var.set("bar")
-        return var.get()
+    async def set_var(v: str):
+        var.set(v)
+        r = await offload(var.get)
+        assert r == v
 
-    o1 = offload(var.get)
-    o2 = offload(change_var)
-
-    r1, r2 = await asyncio.gather(o1, o2)
-    assert (r1, r2) == ("foo", "bar")
-    assert var.get() == "foo"
+    await asyncio.gather(set_var("foo"), set_var("bar"))
 
 
 def test_serialize_for_cli_deprecated():
