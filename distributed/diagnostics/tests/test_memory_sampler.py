@@ -10,14 +10,13 @@ from distributed.utils_test import gen_cluster
 @gen_cluster(client=True)
 async def test_async(c, s, a, b):
     ms = MemorySampler()
-    async with ms.sample("foo", measure="managed"):
+    async with ms.sample("foo", measure="managed", interval=0.1):
         f = c.submit(lambda: 1)
         await f
-        await asyncio.sleep(0.7)
+        await asyncio.sleep(0.5)
 
-    assert len(ms.samples["foo"]) == 2
     assert ms.samples["foo"][0][1] == 0
-    assert ms.samples["foo"][1][1] > 0
+    assert ms.samples["foo"][-1][1] > 0
 
     # Test that there is no server-side memory leak
     assert not s.extensions["memory_sampler"].samples
@@ -25,14 +24,13 @@ async def test_async(c, s, a, b):
 
 def test_sync(client):
     ms = MemorySampler()
-    with ms.sample("foo", measure="managed"):
+    with ms.sample("foo", measure="managed", interval=0.1):
         f = client.submit(lambda: 1)
         f.result()
-        time.sleep(0.7)
+        time.sleep(0.5)
 
-    assert len(ms.samples["foo"]) == 2
     assert ms.samples["foo"][0][1] == 0
-    assert ms.samples["foo"][1][1] > 0
+    assert ms.samples["foo"][-1][1] > 0
 
 
 @gen_cluster(client=True)  # MemorySampler internally fetches the client
@@ -50,14 +48,16 @@ async def test_at_least_one_sample(c, s, a, b):
 @gen_cluster(client=True)
 async def test_multi_sample(c, s, a, b):
     ms = MemorySampler()
-    async with ms.sample("managed", measure="managed"), ms.sample("process"):
+    s1 = ms.sample("managed", measure="managed", interval=0.15)
+    s2 = ms.sample("process", interval=0.2)
+    async with s1, s2:
         idle_mem = s.memory.process
         f = c.submit(lambda: "x" * 100 * 2 ** 20)  # 100 MiB
         await f
         while s.memory.process < idle_mem + 80 * 2 ** 20:
             # Wait for heartbeat
             await asyncio.sleep(0.01)
-        await asyncio.sleep(0.7)
+        await asyncio.sleep(0.6)
 
     m = ms.samples["managed"]
     p = ms.samples["process"]
@@ -76,23 +76,21 @@ async def test_pandas(c, s, a, b):
     pytest.importorskip("matplotlib")
 
     ms = MemorySampler()
-    async with ms.sample("foo", measure="managed"):
+    async with ms.sample("foo", measure="managed", interval=0.15):
         f = c.submit(lambda: 1)
         await f
         await asyncio.sleep(0.7)
 
-    assert len(ms.samples["foo"]) == 2
     assert ms.samples["foo"][0][1] == 0
-    assert ms.samples["foo"][1][1] > 0
+    assert ms.samples["foo"][-1][1] > 0
 
     df = ms.to_pandas()
     assert isinstance(df, pd.DataFrame)
-    assert df.shape == (2, 1)
     assert df["foo"].iloc[0] == 0
-    assert df["foo"].iloc[1] > 0
+    assert df["foo"].iloc[-1] > 0
     assert df.index[0] == pd.Timedelta(0, unit="s")
     assert df.index[1] > pd.Timedelta(0, unit="s")
-    assert df.index[1] < pd.Timedelta(0.8, unit="s")
+    assert df.index[1] < pd.Timedelta(1.5, unit="s")
 
     plt = ms.plot(grid=True)
     assert plt
@@ -101,27 +99,27 @@ async def test_pandas(c, s, a, b):
 @pytest.mark.slow
 @gen_cluster(client=True)
 async def test_pandas_multiseries(c, s, a, b):
-    """Test that multiple series are upscaled and aligned to each other"""
+    """Test that multiple series are upsampled and aligned to each other"""
     pd = pytest.importorskip("pandas")
 
     ms = MemorySampler()
-    for label in ("foo", "bar"):
-        async with ms.sample(label, measure="managed"):
+    for (label, interval) in (("foo", 0.15), ("bar", 0.2)):
+        async with ms.sample(label, measure="managed", interval=interval):
             x = c.submit(lambda: 1, key="x")
             await x
-            await asyncio.sleep(1.2)
+            await asyncio.sleep(1.0)
         del x
         while "x" in s.tasks:
             await asyncio.sleep(0.01)
 
     for label in ("foo", "bar"):
-        assert len(ms.samples[label]) == 3
         assert ms.samples[label][0][1] == 0
         assert ms.samples[label][-1][1] > 0
 
     df = ms.to_pandas()
+    # One of the two series may be shorter than the other
+    df = df.ffill()
     # Rescaled to 0.1S
-    assert df.shape == (11, 2)
     assert df["foo"].iloc[0] == 0
     assert df["foo"].iloc[-1] > 0
     assert df["bar"].iloc[0] == 0
