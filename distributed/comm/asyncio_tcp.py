@@ -346,13 +346,13 @@ class TCP(Comm):
 
     async def close(self):
         """Flush and close the comm"""
-        self._finalizer.detach()
         await self._protocol._close()
+        self._finalizer.detach()
 
     def abort(self):
         """Hard close the comm"""
-        self._finalizer.detach()
         self._protocol._abort()
+        self._finalizer.detach()
 
     def closed(self):
         return self._protocol.is_closed
@@ -471,11 +471,10 @@ class TCPListener(Listener):
             **self._extra_kwargs,
         )
 
-    def stop(self):
+    async def stop(self):
         # Stop listening
         self._handle.close()
-        # TODO: stop should really be asynchronous
-        asyncio.ensure_future(self._handle.wait_closed())
+        await self._handle.wait_closed()
 
     def get_host_port(self):
         """

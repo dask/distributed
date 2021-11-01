@@ -43,7 +43,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from distributed.comm.tcp import TCP
+from distributed.comm.asyncio_tcp import TCP
 
 from . import system
 from .client import Client, _global_clients, default_client
@@ -1499,6 +1499,9 @@ def check_thread_leak():
             # TODO: Make sure profile thread is cleaned up
             # and remove the line below
             and "Profile" not in thread.name
+            # asyncio default executor thread pool is not shut down until loop
+            # is shut down
+            and "asyncio_" not in thread.name
         ]
         if not bad_threads:
             break
