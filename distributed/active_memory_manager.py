@@ -9,6 +9,7 @@ from tornado.ioloop import PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
+from .core import Status
 from .metrics import time
 from .utils import import_term, log_errors
 
@@ -234,11 +235,16 @@ class ActiveMemoryManagerExtension:
         if ts.state != "memory":
             return None
         if candidates is None:
-            candidates = set(self.scheduler.workers.values())
+            candidates = self.scheduler.running.copy()
+        else:
+            candidates &= self.scheduler.running
+
         candidates -= ts.who_has
         candidates -= pending_repl
         if not candidates:
             return None
+
+        # Select candidate with the lowest memory usage
         return min(candidates, key=self.workers_memory.__getitem__)
 
     def _find_dropper(
@@ -268,7 +274,13 @@ class ActiveMemoryManagerExtension:
         candidates -= {waiter_ts.processing_on for waiter_ts in ts.waiters}
         if not candidates:
             return None
-        return max(candidates, key=self.workers_memory.__getitem__)
+
+        # Select candidate with the highest memory usage.
+        # Drop from workers with status paused or closing_gracefully first.
+        return max(
+            candidates,
+            key=lambda ws: (ws.status != Status.running, self.workers_memory[ws]),
+        )
 
 
 class ActiveMemoryManagerPolicy:

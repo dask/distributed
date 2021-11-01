@@ -573,6 +573,17 @@ async def test_gather(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_gather_mismatched_client(c, s, a, b):
+    c2 = await Client(s.address, asynchronous=True)
+
+    x = c.submit(inc, 10)
+    y = c2.submit(inc, 5)
+
+    with pytest.raises(ValueError, match="Futures created by another client"):
+        await c.gather([x, y])
+
+
+@gen_cluster(client=True)
 async def test_gather_lost(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
     y = c.submit(inc, 1, workers=b.address)
@@ -5732,6 +5743,33 @@ async def test_scatter_error_cancel(c, s, a, b):
     assert y.status == "error"
     await asyncio.sleep(0.1)
     assert y.status == "error"  # not cancelled
+
+
+@pytest.mark.parametrize("workers_arg", [False, True])
+@pytest.mark.parametrize("direct", [False, True])
+@pytest.mark.parametrize("broadcast", [False, True, 10])
+@gen_cluster(client=True, nthreads=[("", 1)] * 10)
+async def test_scatter_and_replicate_avoid_paused_workers(
+    c, s, *workers, workers_arg, direct, broadcast
+):
+    paused_workers = [w for i, w in enumerate(workers) if i not in (3, 7)]
+    for w in paused_workers:
+        w.memory_pause_fraction = 1e-15
+    while any(s.workers[w.address].status != Status.paused for w in paused_workers):
+        await asyncio.sleep(0.01)
+
+    f = await c.scatter(
+        {"x": 1},
+        workers=[w.address for w in workers[1:-1]] if workers_arg else None,
+        broadcast=broadcast,
+        direct=direct,
+    )
+    if not broadcast:
+        await c.replicate(f, n=10)
+
+    expect = [i in (3, 7) for i in range(10)]
+    actual = [("x" in w.data) for w in workers]
+    assert actual == expect
 
 
 @pytest.mark.xfail(reason="GH#5409 Dask-Default-Threads are frequently detected")

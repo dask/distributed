@@ -6,6 +6,22 @@ Changelog
 
 Released on October 22, 2021
 
+.. note::
+
+    This release fixed a potential security vulnerability relating to
+    single-machine Dask clusters. Clusters started with
+    ``dask.distributed.LocalCluster`` or ``dask.distributed.Client()`` (which
+    defaults to using ``LocalCluster``) would mistakenly configure their
+    respective Dask workers to listen on external interfaces (typically with a
+    randomly selected high port) rather than only on ``localhost``. A Dask
+    cluster created using this method AND running on a machine that has these
+    ports exposed could be used by a sophisticated attacker to enable remote
+    code execution.  Users running on machines with standard firewalls in place
+    should not be affected. This vulnerability is documented in `CVE-2021-42343
+    <https://attackerkb.com/topics/oL1UXQct5f/cve-2021-42343>`__, and is fixed
+    in this release (:pr:`5427`). Thanks to Jean-Pierre van Riel for
+    discovering and reporting the issue.
+
 - Ensure resumed flight tasks are still fetched (:pr:`5426`) `Florian Jetter`_
 - AMM high level documentation (:pr:`5456`) `crusaderky`_
 - Provide stack for suspended coro in test timeout (:pr:`5446`) `Florian Jetter`_
