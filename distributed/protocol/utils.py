@@ -125,7 +125,9 @@ def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
             continue
 
         if mv.obj is not obj:
-            raise ValueError(f"{i}: memoryview has different buffer: {mv.obj} vs {obj}")
+            raise ValueError(
+                f"{i}: memoryview has different buffer: {mv.obj!r} vs {obj!r}"
+            )
         if not mv.contiguous:
             raise ValueError(f"{i}: memoryview non-contiguous")
         if mv.ndim != 1:
