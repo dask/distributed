@@ -10,11 +10,10 @@ from distributed.utils_test import gen_cluster
 @gen_cluster(client=True)
 async def test_async(c, s, a, b):
     ms = MemorySampler()
-    async with ms.sample("foo", measure="managed", interval=0.4):
-        await asyncio.sleep(0.2)
+    async with ms.sample("foo", measure="managed"):
         f = c.submit(lambda: 1)
         await f
-        await asyncio.sleep(0.4)
+        await asyncio.sleep(0.7)
 
     assert len(ms.samples["foo"]) == 2
     assert ms.samples["foo"][0][1] == 0
@@ -26,19 +25,18 @@ async def test_async(c, s, a, b):
 
 def test_sync(client):
     ms = MemorySampler()
-    with ms.sample("foo", measure="managed", interval=0.4):
-        time.sleep(0.2)
+    with ms.sample("foo", measure="managed"):
         f = client.submit(lambda: 1)
         f.result()
-        time.sleep(0.4)
+        time.sleep(0.7)
 
     assert len(ms.samples["foo"]) == 2
     assert ms.samples["foo"][0][1] == 0
     assert ms.samples["foo"][1][1] > 0
 
 
-@gen_cluster()
-async def test_at_least_one_sample(s, a, b):
+@gen_cluster(client=True)  # MemorySampler internally fetches the client
+async def test_at_least_one_sample(c, s, a, b):
     """The first sample is taken immediately"""
     ms = MemorySampler()
     async with ms.sample("foo"):
@@ -52,11 +50,10 @@ async def test_pandas(c, s, a, b):
     pytest.importorskip("matplotlib")
 
     ms = MemorySampler()
-    async with ms.sample("foo", measure="managed", interval=0.4):
-        await asyncio.sleep(0.2)
+    async with ms.sample("foo", measure="managed"):
         f = c.submit(lambda: 1)
         await f
-        await asyncio.sleep(0.4)
+        await asyncio.sleep(0.7)
 
     assert len(ms.samples["foo"]) == 2
     assert ms.samples["foo"][0][1] == 0
@@ -83,13 +80,13 @@ async def test_pandas_multiseries(c, s, a, b):
 
     ms = MemorySampler()
     for label in ("foo", "bar"):
-        async with ms.sample(label, measure="managed", interval=0.4):
-            await asyncio.sleep(0.2)
-            f = c.submit(lambda: 1)
-            await f
-            await asyncio.sleep(0.8)
-        del f
-        await asyncio.sleep(0.2)
+        async with ms.sample(label, measure="managed"):
+            x = c.submit(lambda: 1, key="x")
+            await x
+            await asyncio.sleep(1.2)
+        del x
+        while "x" in s.tasks:
+            await asyncio.sleep(0.01)
 
     for label in ("foo", "bar"):
         assert len(ms.samples[label]) == 3
@@ -98,11 +95,11 @@ async def test_pandas_multiseries(c, s, a, b):
 
     df = ms.to_pandas()
     # Rescaled to 0.1S
-    assert df.shape == (9, 2)
+    assert df.shape == (11, 2)
     assert df["foo"].iloc[0] == 0
     assert df["foo"].iloc[-1] > 0
     assert df["bar"].iloc[0] == 0
     assert df["bar"].iloc[-1] > 0
     assert df.index[0] == pd.Timedelta(0, unit="s")
     assert df.index[1] == pd.Timedelta(0.1, unit="s")
-    assert df.index[-1] == pd.Timedelta(0.8, unit="s")
+    assert df.index[-1] == pd.Timedelta(1.0, unit="s")
