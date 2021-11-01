@@ -40,7 +40,7 @@ API
 .. autoautosummary:: distributed.Future
    :methods:
 
-**Coordination**
+**Synchronization**
 
 .. currentmodule:: distributed
 
@@ -124,8 +124,8 @@ Future
    :members:
 
 
-Coordination
-------------
+Synchronization
+---------------
 
 .. autoclass:: Event
    :members:
