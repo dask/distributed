@@ -969,23 +969,35 @@ async def test_get_client(c, s, a, b):
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 4)])
 async def test_get_client_threadsafe(c, s, a):
     def f(x):
-        return get_client().id
+        client = get_client()
+        # use client just to prove it's working
+        future = client.submit(inc, x)
+        return client.id, future
 
     futures = c.map(f, range(100))
-    ids = await c.gather(futures)
+    ids, new_futures = zip(*await c.gather(futures))
     assert len(set(ids)) == 1
+
+    new_results = await c.gather(new_futures)
+    assert sorted(new_results) == list(range(1, 101))
 
 
 def test_get_client_threadsafe_sync():
     def f(x):
-        return get_client().id
+        client = get_client()
+        # use client just to prove it's working
+        future = client.submit(inc, x)
+        return client.id, future
 
     with cluster(nworkers=1, worker_kwargs={"nthreads": 4}) as (scheduler, workers):
         with Client(scheduler["address"]) as client:
             futures = client.map(f, range(100))
-            ids = client.gather(futures)
+            ids, new_futures = zip(*client.gather(futures))
             assert len(set(ids)) == 1
             assert set(ids) != {client.id}
+
+            new_results = client.gather(new_futures)
+            assert sorted(new_results) == list(range(1, 101))
 
 
 def test_get_client_sync(client):
