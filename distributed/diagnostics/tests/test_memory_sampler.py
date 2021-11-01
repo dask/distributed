@@ -126,4 +126,3 @@ async def test_pandas_multiseries(c, s, a, b):
     assert df["bar"].iloc[-1] > 0
     assert df.index[0] == pd.Timedelta(0, unit="s")
     assert df.index[1] == pd.Timedelta(0.1, unit="s")
-    assert df.index[-1] == pd.Timedelta(1.0, unit="s")
