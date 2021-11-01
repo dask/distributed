@@ -4,13 +4,10 @@ from collections.abc import Hashable, Mapping
 from functools import partial
 from typing import Any
 
+from zict import Buffer, File, Func
+
 from .protocol import deserialize_bytes, serialize_bytelist
 from .sizeof import safe_sizeof
-
-try:
-    from zict import Buffer, File, Func
-except ImportError:
-    raise ImportError("Please `python -m pip install zict` for spill-to-disk workers")
 
 
 class SpillBuffer(Buffer):

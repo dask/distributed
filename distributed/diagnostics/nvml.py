@@ -74,7 +74,10 @@ def has_cuda_context():
     init_once()
     for index in range(device_get_count()):
         handle = pynvml.nvmlDeviceGetHandleByIndex(index)
-        running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses_v2(handle)
+        if hasattr(pynvml, "nvmlDeviceGetComputeRunningProcesses_v2"):
+            running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses_v2(handle)
+        else:
+            running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
         for proc in running_processes:
             if os.getpid() == proc.pid:
                 return index

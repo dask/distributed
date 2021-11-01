@@ -8,6 +8,7 @@ from distributed.active_memory_manager import (
     ActiveMemoryManagerExtension,
     ActiveMemoryManagerPolicy,
 )
+from distributed.core import Status
 from distributed.utils_test import gen_cluster, inc, slowinc
 
 NO_AMM_START = {"distributed.scheduler.active-memory-manager.start": False}
@@ -328,6 +329,22 @@ async def test_drop_with_bad_candidates(c, s, a, b):
     assert s.tasks["x"].who_has == {ws0, ws1}
 
 
+@gen_cluster(client=True, nthreads=[("", 1)] * 10, config=demo_config("drop", n=1))
+async def test_drop_prefers_paused_workers(c, s, *workers):
+    x = await c.scatter({"x": 1}, broadcast=True)
+    ts = s.tasks["x"]
+    assert len(ts.who_has) == 10
+    ws = s.workers[workers[3].address]
+    workers[3].memory_pause_fraction = 1e-15
+    while ws.status != Status.paused:
+        await asyncio.sleep(0.01)
+
+    s.extensions["amm"].run_once()
+    while len(ts.who_has) != 9:
+        await asyncio.sleep(0.01)
+    assert ws not in ts.who_has
+
+
 @gen_cluster(nthreads=[("", 1)] * 4, client=True, config=demo_config("replicate", n=2))
 async def test_replicate(c, s, *workers):
     futures = await c.scatter({"x": 123})
@@ -434,6 +451,32 @@ async def test_replicate_to_candidates_with_key(c, s, a, b):
     s.extensions["amm"].run_once()
     await asyncio.sleep(0.2)
     assert s.tasks["x"].who_has == {ws0}
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 3, config=demo_config("replicate"))
+async def test_replicate_avoids_paused_workers_1(c, s, w0, w1, w2):
+    w1.memory_pause_fraction = 1e-15
+    while s.workers[w1.address].status != Status.paused:
+        await asyncio.sleep(0.01)
+
+    futures = await c.scatter({"x": 1}, workers=[w0.address])
+    s.extensions["amm"].run_once()
+    while "x" not in w2.data:
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.2)
+    assert "x" not in w1.data
+
+
+@gen_cluster(client=True, config=demo_config("replicate"))
+async def test_replicate_avoids_paused_workers_2(c, s, a, b):
+    b.memory_pause_fraction = 1e-15
+    while s.workers[b.address].status != Status.paused:
+        await asyncio.sleep(0.01)
+
+    futures = await c.scatter({"x": 1}, workers=[a.address])
+    s.extensions["amm"].run_once()
+    await asyncio.sleep(0.2)
+    assert "x" not in b.data
 
 
 @gen_cluster(

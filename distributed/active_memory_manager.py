@@ -9,6 +9,7 @@ from tornado.ioloop import PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
+from .core import Status
 from .metrics import time
 from .utils import import_term, log_errors
 
@@ -127,12 +128,12 @@ class ActiveMemoryManagerExtension:
                 # populate self.pending
                 self._run_policies()
 
-                drop_by_worker: defaultdict[WorkerState, set[TaskState]] = defaultdict(
-                    set
-                )
-                repl_by_worker: defaultdict[
-                    WorkerState, dict[TaskState, set[WorkerState]]
-                ] = defaultdict(dict)
+                drop_by_worker: (
+                    defaultdict[WorkerState, set[TaskState]]
+                ) = defaultdict(set)
+                repl_by_worker: (
+                    defaultdict[WorkerState, dict[TaskState, set[str]]]
+                ) = defaultdict(dict)
 
                 for ts, (pending_repl, pending_drop) in self.pending.items():
                     if not ts.who_has:
@@ -234,11 +235,16 @@ class ActiveMemoryManagerExtension:
         if ts.state != "memory":
             return None
         if candidates is None:
-            candidates = set(self.scheduler.workers.values())
+            candidates = self.scheduler.running.copy()
+        else:
+            candidates &= self.scheduler.running
+
         candidates -= ts.who_has
         candidates -= pending_repl
         if not candidates:
             return None
+
+        # Select candidate with the lowest memory usage
         return min(candidates, key=self.workers_memory.__getitem__)
 
     def _find_dropper(
@@ -268,7 +274,13 @@ class ActiveMemoryManagerExtension:
         candidates -= {waiter_ts.processing_on for waiter_ts in ts.waiters}
         if not candidates:
             return None
-        return max(candidates, key=self.workers_memory.__getitem__)
+
+        # Select candidate with the highest memory usage.
+        # Drop from workers with status paused or closing_gracefully first.
+        return max(
+            candidates,
+            key=lambda ws: (ws.status != Status.running, self.workers_memory[ws]),
+        )
 
 
 class ActiveMemoryManagerPolicy:
@@ -304,9 +316,9 @@ class ActiveMemoryManagerPolicy:
         You may optionally retrieve which worker it was decided the key will be
         replicated to or dropped from, as follows:
 
-        ```python
-        choice = yield "replicate", ts, None
-        ```
+        .. code-block:: python
+
+           choice = (yield "replicate", ts, None)
 
         ``choice`` is either a WorkerState or None; the latter is returned if the
         ActiveMemoryManager chose to disregard the request.

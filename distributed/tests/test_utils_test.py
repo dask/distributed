@@ -106,27 +106,6 @@ async def test_gen_cluster_set_config_nanny(c, s, a, b):
     await c.run_on_scheduler(assert_config)
 
 
-@gen_cluster(client=True)
-def test_gen_cluster_legacy_implicit(c, s, a, b):
-    assert isinstance(c, Client)
-    assert isinstance(s, Scheduler)
-    for w in [a, b]:
-        assert isinstance(w, Worker)
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
-    assert (yield c.submit(lambda: 123)) == 123
-
-
-@gen_cluster(client=True)
-@gen.coroutine
-def test_gen_cluster_legacy_explicit(c, s, a, b):
-    assert isinstance(c, Client)
-    assert isinstance(s, Scheduler)
-    for w in [a, b]:
-        assert isinstance(w, Worker)
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
-    assert (yield c.submit(lambda: 123)) == 123
-
-
 @pytest.mark.skip(reason="This hangs on travis")
 def test_gen_cluster_cleans_up_client(loop):
     import dask.context
@@ -373,3 +352,24 @@ async def test_locked_comm_intercept_write(loop):
     assert await write_queue.get() == (b.address, {"op": "ping", "reply": True})
     write_event.set()
     assert await fut == "pong"
+
+
+@pytest.mark.slow()
+def test_provide_stack_on_timeout():
+    sleep_time = 30
+
+    async def inner_test(c, s, a, b):
+        await asyncio.sleep(sleep_time)
+
+    # If this timeout is too small, the cluster setup/teardown might take too
+    # long and the timeout error we'll receive will be different
+    test = gen_cluster(client=True, timeout=2)(inner_test)
+
+    start = time()
+    with pytest.raises(asyncio.TimeoutError) as exc:
+        test()
+    end = time()
+    assert "inner_test" in str(exc)
+    assert "await asyncio.sleep(sleep_time)" in str(exc)
+    # ensure the task was properly
+    assert end - start < sleep_time / 2
