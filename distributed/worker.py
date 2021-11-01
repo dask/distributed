@@ -3588,7 +3588,7 @@ class Worker(ServerNode):
                     client.scheduler
                     and client.scheduler.address == self.scheduler.address
                     # The below conditions should only happen in case a second
-                    # cluster is alive, e.g. if a submitted task spawned its onwn
+                    # cluster is alive, e.g. if a submitted task spawned its own
                     # LocalCluster, see gh4565
                     or (
                         isinstance(client._start_arg, str)
