@@ -3565,6 +3565,10 @@ class Worker(ServerNode):
         --------
         get_client
         """
+        if self._client:
+            # Assuming `self._client` cannot become None again, this lets us skip the lock
+            # once a client already exists.
+            return self._client
         with self._client_lock:
             if self._client:
                 return self._client
