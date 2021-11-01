@@ -143,6 +143,7 @@ class CommunicatingStream(DashboardComponent):
                 height=0.9,
                 color="red",
                 alpha="alpha",
+                legend_label="Incoming",
             )
             fig.rect(
                 source=self.outgoing,
@@ -153,6 +154,7 @@ class CommunicatingStream(DashboardComponent):
                 height=0.9,
                 color="blue",
                 alpha="alpha",
+                legend_label="Outgoing",
             )
 
             hover = HoverTool(
@@ -172,6 +174,7 @@ class CommunicatingStream(DashboardComponent):
                 </div>
                 """,
             )
+
             fig.add_tools(
                 hover,
                 ResetTool(),
@@ -179,6 +182,7 @@ class CommunicatingStream(DashboardComponent):
                 WheelZoomTool(dimensions="width"),
             )
 
+            fig.legend.location = "top_left"
             self.root = fig
 
             self.last_incoming = 0
