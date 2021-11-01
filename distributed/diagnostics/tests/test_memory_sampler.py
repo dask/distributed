@@ -37,11 +37,37 @@ def test_sync(client):
 
 @gen_cluster(client=True)  # MemorySampler internally fetches the client
 async def test_at_least_one_sample(c, s, a, b):
-    """The first sample is taken immediately"""
+    """The first sample is taken immediately
+    Also test omitting the label
+    """
     ms = MemorySampler()
-    async with ms.sample("foo"):
+    async with ms.sample():
         pass
-    assert len(ms.samples["foo"]) == 1
+    assert len(next(iter(ms.samples.values()))) == 1
+
+
+@pytest.mark.slow
+@gen_cluster(client=True)
+async def test_multi_sample(c, s, a, b):
+    ms = MemorySampler()
+    async with ms.sample("managed", measure="managed"), ms.sample("process"):
+        idle_mem = s.memory.process
+        f = c.submit(lambda: "x" * 100 * 2 ** 20)  # 100 MiB
+        await f
+        while s.memory.process < idle_mem + 80 * 2 ** 20:
+            # Wait for heartbeat
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.7)
+
+    m = ms.samples["managed"]
+    p = ms.samples["process"]
+    assert len(m) >= 2
+    assert m[0][1] == 0
+    assert m[-1][1] >= 100 * 2 ** 20
+    assert len(p) >= 2
+    assert p[0][1] > 2 ** 20  # Assume > 1 MiB for idle process
+    assert p[-1][1] > p[0][1] + 80 * 2 ** 20
+    assert m[-1][1] < p[-1][1]
 
 
 @gen_cluster(client=True)
