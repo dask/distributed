@@ -54,7 +54,7 @@ class WorkerThreadInterrupt(threading.ThreadError):
     pass
 
 
-def _async_raise(tid: int, exctype: type = WorkerThreadInterrupt):
+def _set_thread_exception(tid: int, exctype: type = WorkerThreadInterrupt):
     """raise exception in given thread"""
     import ctypes
 
@@ -65,11 +65,6 @@ def _async_raise(tid: int, exctype: type = WorkerThreadInterrupt):
     )
     if res == 0:
         raise threading.ThreadError("No thread got set")
-    elif res != 1:  # pragma: no cover
-        # if res>1, somehow more than one thread was set, so immediately roll
-        # back and raise. Should never happen.
-        ctypes.pythonapi.PyThreadState_SetAsyncExc(tid, 0)
-        raise threading.ThreadError("PyThreadState_SetAsyncExc failed")
 
 
 class _WorkItem:
@@ -183,7 +178,8 @@ class ThreadPoolExecutor(_base.Executor):
             _threads_queues[t] = self._work_queue
 
     def interrupt(self, ident):
-        _async_raise(ident)
+        # inject exception into running thread
+        _set_thread_exception(ident, exctype=WorkerThreadInterrupt)
 
     def shutdown(self, wait=True):
         with self._shutdown_lock:

@@ -520,7 +520,7 @@ properties:
               Whether running threads might be interrupted with an injected exception.
               Interruption can happen when a task is released, but is currently running. The
               threads state will be set to exception and the task will usually end, rather
-              than running to completion, if this config value is Treu
+              than running to completion, if this config value is True
 
       nanny:
         type: object

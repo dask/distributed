@@ -1800,6 +1800,7 @@ async def test_interrupt(c, s, w):
     fut0 = c.submit(donothing)
     await async_wait_for(lambda: bool(w.active_threads), 1)
     fut1 = c.submit(lambda: True)  # blocked
+    await asyncio.sleep(0.01)
     assert not fut1.done()
     await fut0.cancel()
     with pytest.raises(concurrent.futures.CancelledError):

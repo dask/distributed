@@ -388,6 +388,11 @@ class Worker(ServerNode):
     lifetime_restart: bool
         Whether or not to restart a worker after it has reached its lifetime
         Default False
+    thread_auto_interrupt: bool
+          Whether running threads might be interrupted with an injected exception.
+          Interruption can happen when a task is released, but is currently running. The
+          threads state will be set to exception and the task will usually end, rather
+          than running to completion.
     kwargs: optional
         Additional parameters to ServerNode constructor
 
@@ -562,6 +567,7 @@ class Worker(ServerNode):
         lifetime: Any | None = None,
         lifetime_stagger: Any | None = None,
         lifetime_restart: bool | None = None,
+        thread_auto_interrupt: bool | None = None,
         **kwargs,
     ):
         self.tasks = {}
@@ -766,12 +772,11 @@ class Worker(ServerNode):
 
         self.memory_limit = parse_memory_limit(memory_limit, self.nthreads)
 
-        if "thread_auto_interrupt" in kwargs:
-            self.interruptor = kwargs.pop("thread_auto_interrupt")
-        else:
-            self.interruptor = dask.config.get(
-                "distributed.worker.thread_auto_interrupt", False
-            )
+        self.interruptor = (
+            thread_auto_interrupt
+            if thread_auto_interrupt is not None
+            else dask.config.get("distributed.worker.thread_auto_interrupt", False)
+        )
         self.memory_target_fraction = (
             memory_target_fraction
             if memory_target_fraction is not None
@@ -2149,6 +2154,7 @@ class Worker(ServerNode):
         if self.interruptor:
             # task is released but still running - set thread exception
             th = [th for th, k in self.active_threads.items() if k == ts.key]
+            # th might be empty if the task exited anyway in the meantime
             if th:
                 logger.info("Interrupting thread %i for task %s", th[0], ts.key)
                 self.executor.interrupt(th[0])
