@@ -183,8 +183,7 @@ properties:
                       The maximum number of tasks to include in the task stream plot
               tasks:
                 type: object
-                description: |
-                  The page which includes the full task stream history
+                description: The page which includes the full task stream history
                 additionalProperties: false
                 properties:
                   task-stream-length:
@@ -194,8 +193,7 @@ properties:
                       The maximum number of tasks to include in the task stream plot
               tls:
                 type: object
-                description: |
-                  Settings around securing the dashboard
+                description: Settings around securing the dashboard
                 additionalProperties: false
                 properties:
                   ca-file:
@@ -220,6 +218,7 @@ properties:
               Settings for Dask's distributed Lock object
 
               See https://docs.dask.org/en/latest/futures.html#locks for more information
+
             additionalProperties: false
             properties:
               lease-validation-interval:
@@ -268,9 +267,8 @@ properties:
                 items:
                   type: object
                   required: [class]
-                  additionalProperties: false
                   properties:
-                   class:
+                    class:
                       type: string
                       description: fully qualified name of an ActiveMemoryManagerPolicy
                         subclass
@@ -279,8 +277,7 @@ properties:
 
       worker:
         type: object
-        description: |
-          Configuration settings for Dask Workers
+        description: Configuration settings for Dask Workers
         additionalProperties: false
         properties:
           blocked-handlers:
@@ -318,6 +315,7 @@ properties:
             type: object
             description: |
               The number of concurrent connections to allow to other workers
+
             additionalProperties: false
             properties:
               incoming:
@@ -371,6 +369,7 @@ properties:
 
               For example if your worker has a walltime of one hour,
               then you may want to set the lifetime.duration to "55 minutes"
+
             additionalProperties: false
             properties:
               duration:
@@ -403,6 +402,7 @@ properties:
               The workers periodically poll every worker thread to see what they are working on.
               This data gets collected into statistical profiling information,
               which is then periodically bundled together and sent along to the scheduler.
+
             additionalProperties: false
             properties:
               interval:
@@ -430,8 +430,7 @@ properties:
 
           memory:
             type: object
-            description: >-
-              Settings for memory management
+            description: Settings for memory management
             additionalProperties: false
             properties:
               recent-to-old-time:
@@ -444,8 +443,7 @@ properties:
                   the duration of most dask tasks.
               rebalance:
                 type: object
-                description: >-
-                  Settings for memory rebalance operations
+                description: Settings for memory rebalance operations
                 additionalProperties: false
                 properties:
                   measure:
@@ -532,8 +530,7 @@ properties:
 
       nanny:
         type: object
-        description: |
-          Configuration settings for Dask Nannies
+        description: Configuration settings for Dask Nannies
         additionalProperties: false
         properties:
 
@@ -559,9 +556,7 @@ properties:
 
       client:
         type: object
-        description: |
-          Configuration settings for Dask Clients
-
+        description: Configuration settings for Dask Clients
         additionalProperties: false
         properties:
           heartbeat:
@@ -644,6 +639,7 @@ properties:
             type: object
             description: |
               Some operations (such as gathering data) are subject to re-tries with the below parameters
+
             additionalProperties: false
             properties:
 
@@ -822,6 +818,7 @@ properties:
             type: object
             description: |
               UCX provides access to other transport methods including NVLink and InfiniBand.
+
             additionalProperties: false
             properties:
               cuda_copy:
@@ -911,7 +908,7 @@ properties:
       dashboard:
         type: object
         additionalProperties: false
-            properties:
+        properties:
           link:
             type: string
             description: |
@@ -939,6 +936,7 @@ properties:
         type: object
         description: |
           Options for logs, event loops, and so on
+
         additionalProperties: false
         properties:
           tick:
@@ -954,6 +952,7 @@ properties:
               then it logs a warning saying that something has been stopping the event loop from smooth operation.
               This is typically caused by GIL holding operations,
               but could also be several other things.
+
             additionalProperties: false
             properties:
               interval:
@@ -1001,8 +1000,7 @@ properties:
 
           system-monitor:
             type: object
-            description: |
-              Options for the periodic system monitor
+            description: Options for the periodic system monitor
             additionalProperties: false
             properties:
               interval:
@@ -1011,8 +1009,7 @@ properties:
 
       rmm:
         type: object
-        description: |
-          Configuration options for the RAPIDS Memory Manager.
+        description: Configuration options for the RAPIDS Memory Manager.
         additionalProperties: false
         properties:
           pool-size:
