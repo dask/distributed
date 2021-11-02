@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import dataclasses
 from collections import defaultdict
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, NewType
 
 import pandas as pd
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 ShuffleId = NewType("ShuffleId", str)
 
 
-@dataclass
+@dataclasses.dataclass(frozen=True)
 class ShuffleMetadata:
     """
     Metadata every worker needs to share about a shuffle.
@@ -32,6 +33,11 @@ class ShuffleMetadata:
     column: str
     npartitions: int
 
+    def worker_for(self, output_partition: int) -> str:
+        # i = math.floor((output_partition / self.npartitions) * len(self.workers))
+        i = output_partition * len(self.workers) // self.npartitions
+        return self.workers[i]
+
 
 class Shuffle:
     "State for a single active shuffle"
@@ -47,7 +53,7 @@ class Shuffle:
 
     def add_partition(self, data: pd.DataFrame) -> None:
         for output_partition, data in data.groupby(self.metadata.column):
-            addr = self.worker_for(int(output_partition))
+            addr = self.metadata.worker_for(int(output_partition))
             # TODO this is exceptionally serial; move the sync-async boundary to the extension
             sync(
                 self.worker.loop,
@@ -58,12 +64,10 @@ class Shuffle:
             )
 
     def get_output_partition(self, i: int) -> pd.DataFrame:
-        return pd.concat(self.output_partitions.pop(i), copy=False)
-
-    def worker_for(self, output_partition: int) -> str:
-        # i = math.floor((output_partition / self.metadata.npartitions) * len(self.metadata.workers))
-        i = output_partition * len(self.metadata.workers) // self.metadata.npartitions
-        return self.metadata.workers[i]
+        parts = self.output_partitions.pop(i)
+        if parts:
+            return pd.concat(parts, copy=False)
+        return self.metadata.empty
 
 
 class ShuffleWorkerExtension:
@@ -109,7 +113,48 @@ class ShuffleWorkerExtension:
         # NOTE: in the future, this method will likely be async
         self._get_shuffle(shuffle_id).receive(output_partition, data)
 
-    def add_partition(self, shuffle_id: ShuffleId, data: pd.DataFrame) -> None:
+    def create_shuffle(self, metadata: ShuffleMetadata) -> None:
+        """
+        Task: Create a new shuffle and broadcast it to all workers.
+
+        Note: ``metadata`` is mutated. The ``workers`` field on ``metadata`` will be ignored.
+        """
+        # TODO would be nice to not have to have this, and have shuffles started implicitly
+        # by the first `receive`/`add_partition`, and have shuffle metadata be passed into
+        # tasks and from there into the extension (rather than stored within a `Shuffle`),
+        # since this would mean the setup task returns meaningful data, and isn't just
+        # side effects. However:
+        # 1. passing in metadata everywhere feels contrived when it would be so easy to store
+        # 2. it makes scheduling much harder, since it's a widely-shared common dep
+        #    (https://github.com/dask/distributed/pull/5325)
+        if metadata.id in self.shuffles:
+            raise ValueError(
+                f"Shuffle {id!r} is already registered on worker {self.worker.address}"
+            )
+
+        # TODO the client could be sync or async. Fix things so this is more graceful?
+        # OR, just come up with a different way to get peer addresses from the scheduler.
+        # 1. passing `asynchronous=False` to an async client won't make it sync
+        # 2. the behavior of `client.scheduler_info()` is different depending on `client.asynchronous`
+        client = self.worker.client
+        sync(client.loop, client._update_scheduler_info)
+        identity = client._scheduler_identity
+
+        # TODO worker restrictions, etc!
+        workers = list(identity["workers"])
+        metadata = dataclasses.replace(metadata, workers=workers)
+
+        sync(
+            self.worker.loop,
+            asyncio.gather,
+            *[
+                self.worker.rpc(addr).shuffle_init(metadata=metadata)
+                for addr in metadata.workers
+            ],
+        )
+        # Note that this will call `shuffle_init` on our own worker as well
+
+    def add_partition(self, data: pd.DataFrame, shuffle_id: ShuffleId) -> None:
         """
         Task: Hand off an input partition to the ShuffleExtension.
 
