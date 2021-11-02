@@ -110,7 +110,6 @@ async def test_worksteal_many_thieves(c, s, *workers):
     assert sum(map(len, s.has_what.values())) < 150
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, reason="GH#3574")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
 async def test_dont_steal_unknown_functions(c, s, a, b):
     futures = c.map(inc, range(100), workers=a.address, allow_other_workers=True)
@@ -118,12 +117,17 @@ async def test_dont_steal_unknown_functions(c, s, a, b):
     assert len(a.data) >= 95, [len(a.data), len(b.data)]
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 2,
+    config={"distributed.scheduler.work-stealing-interval": "10ms"},
+)
 async def test_eventually_steal_unknown_functions(c, s, a, b):
     futures = c.map(
         slowinc, range(10), delay=0.1, workers=a.address, allow_other_workers=True
     )
     await wait(futures)
+    assert not s.unknown_durations
     assert len(a.data) >= 3, [len(a.data), len(b.data)]
     assert len(b.data) >= 3, [len(a.data), len(b.data)]
 
@@ -597,9 +601,13 @@ def test_balance(inp, expected):
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2, Worker=Nanny, timeout=60)
 async def test_restart(c, s, a, b):
     futures = c.map(
-        slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
+        slowinc, range(100), delay=0.01, workers=a.address, allow_other_workers=True
     )
     while not s.processing[b.worker_address]:
+        await asyncio.sleep(0.01)
+
+    # Unknown tasks are never stolen therefore wait for a measurement
+    while not any(s.tasks[f.key].state == "memory" for f in futures):
         await asyncio.sleep(0.01)
 
     steal = s.extensions["stealing"]
@@ -693,7 +701,7 @@ async def test_dont_steal_already_released(c, s, a, b):
     while key in a.tasks and a.tasks[key].state != "released":
         await asyncio.sleep(0.05)
 
-    a.handle_steal_request(key)
+    a.handle_steal_request(key=key, stimulus_id="test")
     assert len(a.batched_stream.buffer) == 1
     msg = a.batched_stream.buffer[0]
     assert msg["op"] == "steal-response"
@@ -821,9 +829,13 @@ async def test_balance_with_longer_task(c, s, a, b):
         slowinc, 1, delay=5, workers=[a.address], priority=1
     )  # a surprisingly long task
     z = c.submit(
-        inc, x, workers=[a.address], allow_other_workers=True, priority=0
+        slowadd, x, 1, workers=[a.address], allow_other_workers=True, priority=0
     )  # a task after y, suggesting a, but open to b
+
+    # Allow task to be learned, otherwise it will not be stolen
+    _ = c.submit(slowadd, x, 2, workers=[b.address])
     await z
+    assert not y.done()
     assert z.key in b.data
 
 
@@ -860,3 +872,175 @@ async def test_blacklist_shuffle_split(c, s, a, b):
                     assert "split" not in ts.prefix.name
         await asyncio.sleep(0.001)
     await res
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 3,
+    config={
+        "distributed.scheduler.work-stealing-interval": 1_000_000,
+    },
+)
+async def test_steal_concurrent_simple(c, s, *workers):
+    steal = s.extensions["stealing"]
+    w0 = workers[0]
+    w1 = workers[1]
+    w2 = workers[2]
+    futs1 = c.map(
+        slowinc,
+        range(10),
+        key=[f"f1-{ix}" for ix in range(10)],
+        workers=[w0.address],
+    )
+
+    while not w0.tasks:
+        await asyncio.sleep(0.1)
+
+    # ready is a heap but we don't need last, just not the next
+    _, victim_key = w0.ready[-1]
+
+    ws0 = s.workers[w0.address]
+    ws1 = s.workers[w1.address]
+    ws2 = s.workers[w2.address]
+    victim_ts = s.tasks[victim_key]
+    steal.move_task_request(victim_ts, ws0, ws1)
+    steal.move_task_request(victim_ts, ws0, ws2)
+
+    await c.gather(futs1)
+
+    # First wins
+    assert ws1.has_what
+    assert not ws2.has_what
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.scheduler.work-stealing-interval": 1_000_000,
+    },
+)
+async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
+    # https://github.com/dask/distributed/issues/5370
+    steal = s.extensions["stealing"]
+    w0 = workers[0]
+    futs1 = c.map(
+        slowinc,
+        range(10),
+        key=[f"f1-{ix}" for ix in range(10)],
+    )
+    while not w0.tasks:
+        await asyncio.sleep(0.01)
+
+    # ready is a heap but we don't need last, just not the next
+    _, victim_key = w0.ready[-1]
+
+    victim_ts = s.tasks[victim_key]
+
+    wsA = victim_ts.processing_on
+    other_workers = [ws for ws in s.workers.values() if ws != wsA]
+    wsB = other_workers[0]
+
+    steal.move_task_request(victim_ts, wsA, wsB)
+
+    s.reschedule(victim_key)
+    await c.gather(futs1)
+
+    del futs1
+
+    assert all(v == 0 for v in steal.in_flight_occupancy.values())
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.scheduler.work-stealing-interval": 10,
+    },
+)
+async def test_get_story(c, s, *workers):
+    steal = s.extensions["stealing"]
+    futs = c.map(
+        slowinc, range(100), workers=[workers[0].address], allow_other_workers=True
+    )
+    collect = c.submit(sum, futs)
+    await collect
+    key = next(iter(workers[1].tasks))
+    ts = s.tasks[key]
+    msgs = steal.story(key)
+    msgs_ts = steal.story(ts)
+    assert msgs
+    assert msgs == msgs_ts
+    assert all(isinstance(m, tuple) for m in msgs)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 3,
+    config={
+        "distributed.scheduler.work-stealing-interval": 1_000_000,
+    },
+)
+async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
+    # https://github.com/dask/distributed/issues/5370
+    steal = s.extensions["stealing"]
+    w0 = workers[0]
+    futs1 = c.map(
+        slowinc,
+        range(10),
+        key=[f"f1-{ix}" for ix in range(10)],
+        workers=[w0.address],
+        allow_other_workers=True,
+    )
+    while not w0.active_keys:
+        await asyncio.sleep(0.01)
+
+    # ready is a heap but we don't need last, just not the next
+    victim_key = list(w0.active_keys)[0]
+
+    victim_ts = s.tasks[victim_key]
+
+    wsA = victim_ts.processing_on
+    other_workers = [ws for ws in s.workers.values() if ws != wsA]
+    wsB = other_workers[0]
+    wsC = other_workers[1]
+
+    steal.move_task_request(victim_ts, wsA, wsB)
+
+    s.set_restrictions(worker={victim_key: [wsB.address]})
+    s.reschedule(victim_key)
+    assert wsB == victim_ts.processing_on
+    # move_task_request is not responsible for respecting worker restrictions
+    steal.move_task_request(victim_ts, wsB, wsC)
+    await c.gather(futs1)
+
+    # If this turns out to be overly flaky, the following may be relaxed or
+    # removed. The point of this test is to not deadlock but verifying expected
+    # state is still a nice thing
+
+    # Either the last request goes through or both have been rejected since the
+    # computation was already done by the time the request comes in. This is
+    # unfortunately not stable even if we increase the compute time
+    if victim_ts.who_has != {wsC}:
+        msgs = steal.story(victim_ts)
+        assert len(msgs) == 2
+        assert all(msg[0] == "already-aborted" for msg in msgs), msgs
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+async def test_correct_bad_time_estimate(c, s, *workers):
+    """Initial time estimation causes the task to not be considered for
+    stealing. Following occupancy readjustments will re-enlist the keys since
+    the duration estimate is now significant.
+
+    This is done during reevaluate occupancy
+    """
+    steal = s.extensions["stealing"]
+    future = c.submit(slowinc, 1, delay=0)
+    await wait(future)
+    futures = [c.submit(slowinc, future, delay=0.1, pure=False) for i in range(20)]
+    while not any(f.key in s.tasks for f in futures):
+        await asyncio.sleep(0.001)
+    assert not any(s.tasks[f.key] in steal.key_stealable for f in futures)
+    await asyncio.sleep(0.5)
+    assert any(s.tasks[f.key] in steal.key_stealable for f in futures)
+    await wait(futures)
+    assert all(w.data for w in workers), [sorted(w.data) for w in workers]

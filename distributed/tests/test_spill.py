@@ -1,7 +1,5 @@
 import pytest
 
-pytest.importorskip("zict")
-
 from dask.sizeof import sizeof
 
 from distributed.spill import SpillBuffer
