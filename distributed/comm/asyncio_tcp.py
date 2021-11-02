@@ -81,7 +81,11 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
     def _close_from_finalizer(self, comm_repr):
         if self._transport is not None:
             logger.warning(f"Closing dangling comm `{comm_repr}`")
-            self._abort()
+            try:
+                self._abort()
+            except RuntimeError:
+                # This happens if the event loop is already closed
+                pass
 
     async def _close(self):
         if self._transport is not None:
@@ -462,19 +466,95 @@ class TCPListener(Listener):
             return
         await self.comm_handler(comm)
 
+    async def _start_all_interfaces_with_random_port(self):
+        """Due to a bug in asyncio, listening on `("", 0)` will result in two
+        different random ports being used (one for IPV4, one for IPV6), rather
+        than both interfaces sharing the same random port. We work around this
+        here. See https://bugs.python.org/issue45693 for more info."""
+        loop = asyncio.get_event_loop()
+        # Typically resolves to list with length == 2 (one IPV4, one IPV6).
+        infos = await loop.getaddrinfo(
+            None,
+            0,
+            family=socket.AF_UNSPEC,
+            type=socket.SOCK_STREAM,
+            flags=socket.AI_PASSIVE,
+            proto=0,
+        )
+        # This code is a simplified and modified version of that found in
+        # cpython here:
+        # https://github.com/python/cpython/blob/401272e6e660445d6556d5cd4db88ed4267a50b3/Lib/asyncio/base_events.py#L1439
+        servers = []
+        port = None
+        try:
+            for res in infos:
+                af, socktype, proto, canonname, sa = res
+                try:
+                    sock = socket.socket(af, socktype, proto)
+                except OSError:
+                    # Assume it's a bad family/type/protocol combination.
+                    continue
+                # Disable IPv4/IPv6 dual stack support (enabled by
+                # default on Linux) which makes a single socket
+                # listen on both address families.
+                if af == getattr(socket, "AF_INET6", None) and hasattr(
+                    socket, "IPPROTO_IPV6"
+                ):
+                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, True)
+
+                # If random port is already chosen, reuse it
+                if port is not None:
+                    sa = (sa[0], port, *sa[2:])
+                try:
+                    sock.bind(sa)
+                except OSError as err:
+                    raise OSError(
+                        err.errno,
+                        "error while attempting "
+                        "to bind on address %r: %s" % (sa, err.strerror.lower()),
+                    ) from None
+
+                # If random port hadn't already been chosen, cache this port to
+                # reuse for other interfaces
+                if port is None:
+                    port = sock.getsockname()[1]
+
+                # Create a new server for the socket
+                server = await loop.create_server(
+                    lambda: DaskCommProtocol(self._on_connection),
+                    sock=sock,
+                    **self._extra_kwargs,
+                )
+                servers.append(server)
+                sock = None
+        except BaseException:
+            # Close all opened servers
+            for server in servers:
+                server.close()
+            # If a socket was already created but not converted to a server
+            # yet, close that as well.
+            if sock is not None:
+                sock.close()
+
+        self._servers = servers
+
     async def start(self):
         loop = asyncio.get_event_loop()
-        self._handle = await loop.create_server(
-            lambda: DaskCommProtocol(self._on_connection),
-            host=self.ip,
-            port=self.port,
-            **self._extra_kwargs,
-        )
+        if not self.ip and not self.port:
+            await self._start_all_interfaces_with_random_port()
+        else:
+            server = await loop.create_server(
+                lambda: DaskCommProtocol(self._on_connection),
+                host=self.ip,
+                port=self.port,
+                **self._extra_kwargs,
+            )
+            self._servers = [server]
 
-    async def stop(self):
+    def stop(self):
         # Stop listening
-        self._handle.close()
-        await self._handle.wait_closed()
+        for server in self._servers:
+            server.close()
 
     def get_host_port(self):
         """
@@ -482,14 +562,14 @@ class TCPListener(Listener):
         """
         if self.bound_address is None:
 
-            def get_socket():
+            def get_socket(server):
                 for family in [socket.AF_INET, socket.AF_INET6]:
-                    for sock in self._handle.sockets:
-                        if sock.family == socket.AF_INET:
+                    for sock in server.sockets:
+                        if sock.family == family:
                             return sock
                 raise RuntimeError("No active INET socket found?")
 
-            sock = get_socket()
+            sock = get_socket(self._servers[0])
             self.bound_address = sock.getsockname()[:2]
         return self.bound_address
 
