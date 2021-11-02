@@ -67,6 +67,7 @@ from .proctitle import setproctitle
 from .protocol import pickle, to_serialize
 from .pubsub import PubSubWorkerExtension
 from .security import Security
+from .shuffle import ShuffleWorkerExtension
 from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .threadpoolexecutor import secede as tpe_secede
@@ -112,7 +113,7 @@ READY = {"ready", "constrained"}
 # Worker.status subsets
 RUNNING = {Status.running, Status.paused, Status.closing_gracefully}
 
-DEFAULT_EXTENSIONS: list[type] = [PubSubWorkerExtension]
+DEFAULT_EXTENSIONS: list[type] = [PubSubWorkerExtension, ShuffleWorkerExtension]
 
 DEFAULT_METRICS: dict[str, Callable[[Worker], Any]] = {}
 
