@@ -67,7 +67,6 @@ from .proctitle import setproctitle
 from .protocol import pickle, to_serialize
 from .pubsub import PubSubWorkerExtension
 from .security import Security
-from .shuffle import ShuffleWorkerExtension
 from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .threadpoolexecutor import secede as tpe_secede
@@ -92,6 +91,14 @@ from .utils_comm import gather_from_workers, pack_data, retry_operation
 from .utils_perf import ThrottledGC, disable_gc_diagnosis, enable_gc_diagnosis
 from .versions import get_versions
 
+try:
+    from .shuffle import ShuffleWorkerExtension
+except ImportError:
+    # pandas is not available
+    ShuffleWorkerExtension = None  # type: ignore
+    # https://github.com/python/mypy/issues/1297
+
+
 logger = logging.getLogger(__name__)
 
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
@@ -113,7 +120,9 @@ READY = {"ready", "constrained"}
 # Worker.status subsets
 RUNNING = {Status.running, Status.paused, Status.closing_gracefully}
 
-DEFAULT_EXTENSIONS: list[type] = [PubSubWorkerExtension, ShuffleWorkerExtension]
+DEFAULT_EXTENSIONS: list[type] = [PubSubWorkerExtension]
+if ShuffleWorkerExtension:
+    DEFAULT_EXTENSIONS.append(ShuffleWorkerExtension)
 
 DEFAULT_METRICS: dict[str, Callable[[Worker], Any]] = {}
 
