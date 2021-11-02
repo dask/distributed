@@ -2147,6 +2147,7 @@ class Worker(ServerNode):
         ts.done = False
 
         if self.interruptor:
+            # task is released but still running - set thread exception
             th = [th for th, k in self.active_threads.items() if k == ts.key]
             if th:
                 logger.info("Interrupting thread %i for task %s", th[0], ts.key)
@@ -2966,8 +2967,6 @@ class Worker(ServerNode):
             if key in self.threads:
                 del self.threads[key]
 
-            # task is released but still running - set thread exception
-            # whether or not to do this automatically should be configurable
             if ts.resource_restrictions is not None:
                 if ts.state == "executing":
                     for resource, quantity in ts.resource_restrictions.items():
