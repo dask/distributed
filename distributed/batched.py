@@ -1,5 +1,6 @@
 import logging
 from collections import deque
+from uuid import uuid4
 
 from tornado import gen, locks
 from tornado.ioloop import IOLoop
@@ -7,6 +8,7 @@ from tornado.ioloop import IOLoop
 import dask
 from dask.utils import parse_timedelta
 
+from .comm import Comm
 from .core import CommClosedError
 
 logger = logging.getLogger(__name__)
@@ -43,6 +45,7 @@ class BatchedSend:
         self.interval = parse_timedelta(interval, default="ms")
         self.waker = locks.Event()
         self.stopped = locks.Event()
+        self.stopped.set()
         self.please_stop = False
         self.buffer = []
         self.comm = None
@@ -56,13 +59,33 @@ class BatchedSend:
         self.serializers = serializers
         self._consecutive_failures = 0
 
-    def start(self, comm):
-        self.comm = comm
-        self.please_stop = False
-        self.loop.add_callback(self._background_send)
+    def start(self, comm: Comm):
+        """
+        Start the BatchedSend by providing an open Comm object.
+
+        Calling this again on an already started BatchedSend will raise a
+        `RuntimeError` if the provided Comm is different to the current one. If
+        the provided Comm is identical this is a noop.
+
+        In case the BatchedSend was already closed, this will use the newly
+        provided Comm to submit any accumulated messages in the buffer.
+        """
+        if self.closed():
+            if comm.closed():
+                raise RuntimeError("Comm already closed.")
+            self.comm = comm
+            self.please_stop = False
+            self.loop.add_callback(self._background_send)
+        elif self.comm is not comm:
+            raise RuntimeError("BatchedSend already started.")
 
     def closed(self):
-        return self.comm and self.comm.closed()
+        """True if the BatchedSend hasn't been started or has been closed
+        already."""
+        if self.comm is None or self.comm.closed():
+            return True
+        else:
+            return False
 
     def __repr__(self):
         if self.closed():
@@ -99,7 +122,8 @@ class BatchedSend:
                 else:
                     self.recent_message_log.append("large-message")
                 self.byte_count += nbytes
-                payload = []  # lose ref
+
+                payload.clear()  # lose ref
             except CommClosedError:
                 logger.info("Batched Comm Closed %r", self.comm, exc_info=True)
                 break
@@ -121,21 +145,27 @@ class BatchedSend:
             self.stopped.set()
             return
 
+        self.stopped.set()
         # If we've reached here, it means `break` was hit above and
         # there was an exception when using `comm`.
         # We can't close gracefully via `.close()` since we can't send messages.
         # So we just abort.
         # To propagate exceptions, we rely on subsequent `BatchedSend.send`
         # calls to raise CommClosedErrors.
-        self.stopped.set()
-        self.abort()
+
+        if self.comm:
+            self.comm.abort()
+        yield self.close()
 
     def send(self, *msgs):
         """Schedule a message for sending to the other side
 
-        This completes quickly and synchronously
+        This completes quickly and synchronously.
+
+        If the BatchedSend or Comm is already closed, this raises a
+        CommClosedError and does not accept any further messages to the buffer.
         """
-        if self.comm is not None and self.comm.closed():
+        if self.closed():
             raise CommClosedError(f"Comm {self.comm!r} already closed.")
 
         self.message_count += len(msgs)
@@ -146,7 +176,7 @@ class BatchedSend:
 
     @gen.coroutine
     def close(self, timeout=None):
-        """Flush existing messages and then close comm
+        """Flush existing messages and then close Comm
 
         If set, raises `tornado.util.TimeoutError` after a timeout.
         """
@@ -155,8 +185,8 @@ class BatchedSend:
         self.please_stop = True
         self.waker.set()
         yield self.stopped.wait(timeout=timeout)
-        payload = []
         if not self.comm.closed():
+            payload = []
             try:
                 if self.buffer:
                     self.buffer, payload = [], self.buffer
@@ -170,9 +200,13 @@ class BatchedSend:
             yield self.comm.close()
 
     def abort(self):
+        """Close the BatchedSend immediately, without waiting for any pending
+        operations to complete. Buffered data will be lost."""
         if self.comm is None:
             return
+        self.buffer = []
         self.please_stop = True
         self.waker.set()
         if not self.comm.closed():
             self.comm.abort()
+        self.comm = None

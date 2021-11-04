@@ -3197,35 +3197,76 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
 
 
 @gen_cluster(nthreads=[("", 1)])
-async def test_dont_loose_payload_reconnect(s, w):
+@pytest.mark.parametrize(
+    "sender",
+    [
+        "worker",
+        "scheduler",
+    ],
+)
+async def test_dont_loose_payload_reconnect_worker_sends(s, w, sender):
     """Ensure that payload of a BatchedSend is not lost if a worker reconnects"""
-    s.count = 0
+    while w.heartbeat_active:
+        await asyncio.sleep(0.1)
+    w.heartbeat_active = True
+
+    if sender == "worker":
+        sender = w
+        sender_stream = w.batched_stream
+        receiver = s
+        receiver_stream = s.stream_comms[w.address]
+    else:
+        sender = s
+        sender_stream = s.stream_comms[w.address]
+        receiver = w
+        receiver_stream = w.batched_stream
+
+    receiver.count = 0
 
     def receive(worker, msg):
-        s.count += 1
+        receiver.count += 1
 
-    s.stream_handlers["receive-msg"] = receive
-    w.batched_stream.next_deadline = w.loop.time() + 10_000
+    receiver.stream_handlers["receive-msg"] = receive
+
+    # Wait until the buffer is empty such that we can start cleanly (e.g.
+    # hearbeats, status updates, etc.)
+    while sender_stream.buffer:
+        await asyncio.sleep(0.01)
 
     for x in range(100):
-        w.batched_stream.send({"op": "receive-msg", "msg": x})
+        sender_stream.send({"op": "receive-msg", "msg": x})
 
-    await s.stream_comms[w.address].comm.close()
-    while not w.batched_stream.comm.closed():
+    receiver_stream.comm.abort()
+
+    # Batch_count increases with every attempt. Therefore, if it increases we
+    # know the background send ran once
+    before_batch_count = sender_stream.batch_count
+
+    before = sender_stream.buffer.copy()
+    assert len(sender_stream.buffer) == 100
+
+    while sender_stream.batch_count == before_batch_count:
         await asyncio.sleep(0.1)
-    before = w.batched_stream.buffer.copy()
-    w.batched_stream.next_deadline = w.loop.time()
-    assert len(w.batched_stream.buffer) == 100
-    with captured_logger("distributed.batched") as caplog:
-        await w.batched_stream._background_send()
 
-    assert "Batched Comm Closed" in caplog.getvalue()
-    after = w.batched_stream.buffer.copy()
+    # At the time of send, we already know it is failed and the caller should
+    # handle this exception and trigger a reconnect
+    # TODO: Is the transition engine robust to this??
+    new_message = {"op": "receive-msg", "msg": 100}
+    with pytest.raises(CommClosedError):
+        sender_stream.send(new_message)
+    assert new_message not in sender_stream.buffer
+
+    after = sender_stream.buffer.copy()
 
     # Payload that couldn't be submitted is prepended
     assert len(after) >= len(before)
     assert after[: len(before)] == before
 
+    # No message received, yet
+    assert s.count == 0
+
+    # Now, reconnect and everythign should stabilize again
+    w.heartbeat_active = False
     await w.heartbeat()
     while not s.count == 100:
         await asyncio.sleep(0.1)

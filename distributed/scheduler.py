@@ -5510,7 +5510,7 @@ class Scheduler(SchedulerState, ServerNode):
             await self.handle_stream(comm=comm, extra={"worker": worker})
         finally:
             if worker in self.stream_comms:
-                worker_comm.abort()
+                await worker_comm.close()
                 await self.remove_worker(address=worker)
 
     def add_plugin(

@@ -1,3 +1,5 @@
+import asyncio
+
 import ctypes
 import errno
 import functools
@@ -290,7 +292,15 @@ class TCP(Comm):
                     stream._total_write_index += each_frame_nbytes
 
             # start writing frames
-            stream.write(b"")
+            await stream.write(b"")
+            # FIXME: How do I test this? Why is the stream closed _sometimes_?
+            # Diving into tornado, so far, I can only confirm that once the
+            # write future has been awaited, the entire buffer has been written
+            # to the socket. Not sure if one loop iteration is sufficient in
+            # general or just sufficient for the local tests I've been running
+            await asyncio.sleep(0)
+            if stream.closed():
+                raise StreamClosedError()
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
@@ -333,6 +343,8 @@ class TCP(Comm):
             stream.close()
 
     def closed(self):
+        if self.stream and self.stream.closed():
+            self.abort()
         return self._closed
 
     @property
