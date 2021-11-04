@@ -43,9 +43,11 @@ async def test_BatchedSend():
         comm = await connect(e.address)
 
         b = BatchedSend(interval=10)
+        assert "<BatchedSend: closed>" == str(b)
+        assert "<BatchedSend: closed>" == repr(b)
+        b.start(comm)
         assert str(len(b.buffer)) in str(b)
         assert str(len(b.buffer)) in repr(b)
-        b.start(comm)
 
         await asyncio.sleep(0.020)
 
@@ -77,6 +79,125 @@ async def test_send_before_start():
         b.start(comm)
         result = await comm.read()
         assert result == ("hello", "world")
+
+
+@pytest.mark.asyncio
+async def test_closed_if_not_started():
+    async with EchoServer() as e:
+        comm = await connect(e.address)
+        b = BatchedSend(interval=10)
+        assert b.closed()
+        b.start(comm)
+        assert not b.closed()
+        await b.close()
+        assert b.closed()
+
+
+@pytest.mark.asyncio
+async def test_start_twice_with_closing():
+    async with EchoServer() as e:
+        comm = await connect(e.address)
+        comm2 = await connect(e.address)
+
+        b = BatchedSend(interval=10)
+        b.start(comm)
+
+        # Same comm is fine
+        b.start(comm)
+
+        await b.close()
+
+        b.start(comm2)
+
+        b.send("hello")
+        b.send("world")
+
+        result = await comm2.read()
+        assert result == ("hello", "world")
+
+
+@pytest.mark.asyncio
+async def test_start_twice_with_abort():
+    async with EchoServer() as e:
+        comm = await connect(e.address)
+        comm2 = await connect(e.address)
+
+        b = BatchedSend(interval=10)
+        b.start(comm)
+
+        # Same comm is fine
+        b.start(comm)
+
+        b.abort()
+
+        b.start(comm2)
+
+        b.send("hello")
+        b.send("world")
+
+        result = await comm2.read()
+        assert result == ("hello", "world")
+
+
+@pytest.mark.asyncio
+async def test_start_twice_with_abort_drops_payload():
+    async with EchoServer() as e:
+        comm = await connect(e.address)
+        comm2 = await connect(e.address)
+
+        b = BatchedSend(interval=10)
+        b.start(comm)
+        b.send("hello")
+        b.send("world")
+
+        # Same comm is fine
+        b.start(comm)
+
+        b.abort()
+
+        b.start(comm2)
+
+        with pytest.raises(asyncio.TimeoutError):
+            res = await asyncio.wait_for(comm2.read(), 0.01)
+            assert not res
+
+
+@pytest.mark.asyncio
+async def test_start_closed_comm():
+    async with EchoServer() as e:
+        comm = await connect(e.address)
+        await comm.close()
+
+        b = BatchedSend(interval="10ms")
+        with pytest.raises(RuntimeError, match="Comm already closed."):
+            b.start(comm)
+
+
+@pytest.mark.asyncio
+async def test_start_twice_without_closing():
+    async with EchoServer() as e:
+        comm = await connect(e.address)
+        comm2 = await connect(e.address)
+
+        b = BatchedSend(interval=10)
+        b.start(comm)
+
+        # Same comm is fine
+        b.start(comm)
+
+        # different comm only allowed if already closed
+        with pytest.raises(RuntimeError, match="BatchedSend already started"):
+            b.start(comm2)
+
+        b.send("hello")
+        b.send("world")
+
+        result = await comm.read()
+        assert result == ("hello", "world")
+
+        # This comm hasn't been used so there should be no message received
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(comm2.read(), 0.01)
 
 
 @pytest.mark.asyncio
@@ -113,8 +234,11 @@ async def test_send_before_close():
             await asyncio.sleep(0.01)
             assert time() < start + 5
 
+        msg = "123"
         with pytest.raises(CommClosedError):
-            b.send("123")
+            b.send(msg)
+
+        assert msg not in b.buffer
 
 
 @pytest.mark.asyncio

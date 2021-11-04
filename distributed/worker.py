@@ -1238,7 +1238,6 @@ class Worker(ServerNode):
                 comm, every_cycle=[self.ensure_communicating, self.ensure_computing]
             )
         except Exception as e:
-            self.batched_stream.please_stop = True
             logger.exception(e)
             raise
         finally:
