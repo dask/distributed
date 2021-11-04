@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import logging
 import socket
 import struct
@@ -94,7 +95,10 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         await self._is_closed
 
     def connection_made(self, transport):
+        if type(transport) is asyncio.selector_events._SelectorSocketTransport:
+            transport = _ZeroCopyWriter(transport)
         self._transport = transport
+        # self._transport = transport
         if self.on_connection is not None:
             self.on_connection(self)
 
@@ -640,3 +644,182 @@ class TCPBackend(Backend):
 class TLSBackend(TCPBackend):
     _connector_class = TLSConnector
     _listener_class = TLSListener
+
+
+_LARGE_BUF_LIMIT = 2048
+
+
+class _ZeroCopyWriter:
+    """The builtin socket transport in asyncio makes a bunch of copies, which
+    can make sending large amounts of data much slower. This hacks around that.
+    Note that this workaround isn't used on windows or uvloop"""
+
+    def __init__(self, transport):
+        self.transport = transport
+        self._buffers = collections.deque()
+        self._first_pos = 0
+        self._size = 0
+
+    def _buffer_append(self, data):
+        size = len(data)
+        if size > _LARGE_BUF_LIMIT:
+            self._buffers.append(memoryview(data))
+        elif size > 0:
+            if self._buffers:
+                last_buf = self._buffers[-1]
+                last_buf_typ = type(last_buf)
+                new_buf = last_buf_typ is memoryview or len(last_buf) > _LARGE_BUF_LIMIT
+            else:
+                new_buf = True
+
+            if new_buf:
+                self._buffers.append(data)
+            else:
+                if last_buf_typ is bytes:
+                    last_buf = self._buffers[-1] = bytearray(last_buf)
+                last_buf.extend(data)
+
+        self._size += size
+
+    def _buffer_peek_one(self):
+        b = self._buffers[0]
+        if not isinstance(b, memoryview):
+            b = memoryview(b)
+        return b[self._first_pos :]
+
+    def _buffer_peek_many(self):
+        pos = self._first_pos
+        buffers = []
+        size = 0
+        for b in self._buffers:
+            if pos:
+                if not isinstance(b, memoryview):
+                    b = memoryview(b)
+                b = b[pos:]
+                pos = 0
+            buffers.append(b)
+            size += len(b)
+            if size > 2 ** 17:
+                break
+        return buffers
+
+    def _buffer_advance(self, size):
+        pos = self._first_pos
+        self._size -= size
+        buffers = self._buffers
+        while size:
+            b = buffers[0]
+            b_len = len(b) - pos
+            if b_len <= size:
+                buffers.popleft()
+                size -= b_len
+                pos = 0
+            else:
+                pos += size
+                break
+        self._first_pos = pos
+
+    def write(self, data):
+        transport = self.transport
+
+        if transport._eof:
+            raise RuntimeError("Cannot call write() after write_eof()")
+        if transport._empty_waiter is not None:
+            raise RuntimeError("unable to write; sendfile is in progress")
+        if not data:
+            return
+        if transport._conn_lost:
+            return
+
+        if not self._buffers:
+            try:
+                n = transport._sock.send(data)
+            except (BlockingIOError, InterruptedError):
+                pass
+            except (SystemExit, KeyboardInterrupt):
+                raise
+            except BaseException as exc:
+                transport._fatal_error(exc, "Fatal write error on socket transport")
+                return
+            else:
+                data = data[n:]
+                if not data:
+                    return
+            # Not all was written; register write handler.
+            transport._loop._add_writer(transport._sock_fd, self._on_write_ready)
+
+        # Add it to the buffer.
+        self._buffer_append(data)
+        transport._maybe_pause_protocol()
+
+    def writelines(self, buffers):
+        waiting = bool(self._buffers)
+        for b in buffers:
+            self._buffer_append(b)
+        if not waiting:
+            try:
+                self._do_bulk_write()
+            except (BlockingIOError, InterruptedError):
+                pass
+            except (SystemExit, KeyboardInterrupt):
+                raise
+            except BaseException as exc:
+                self.transport._fatal_error(
+                    exc, "Fatal write error on socket transport"
+                )
+                return
+            if not self._buffers:
+                return
+            # Not all was written; register write handler.
+            self.transport._loop._add_writer(
+                self.transport._sock_fd, self._on_write_ready
+            )
+
+        self.transport._maybe_pause_protocol()
+
+    def is_closing(self):
+        return self.transport.is_closing()
+
+    def close(self):
+        return self.transport.close()
+
+    def abort(self):
+        return self.transport.abort()
+
+    def get_extra_info(self, key):
+        return self.transport.get_extra_info(key)
+
+    def _do_bulk_write(self):
+        # TODO: figure out why/when sendmsg is faster/slower
+        # buffers = self._buffer_peek_many()
+        # n = self.transport._sock.sendmsg(buffers)
+        n = self.transport._sock.send(self._buffer_peek_one())
+        if n:
+            self._buffer_advance(n)
+
+    def _on_write_ready(self):
+        transport = self.transport
+        if transport._conn_lost:
+            return
+        try:
+            self._do_bulk_write()
+        except (BlockingIOError, InterruptedError):
+            pass
+        except (SystemExit, KeyboardInterrupt):
+            raise
+        except BaseException as exc:
+            transport._loop._remove_writer(transport._sock_fd)
+            self._buffers.clear()
+            transport._fatal_error(exc, "Fatal write error on socket transport")
+            if transport._empty_waiter is not None:
+                transport._empty_waiter.set_exception(exc)
+        else:
+            transport._maybe_resume_protocol()
+            if not self._buffers:
+                transport._loop._remove_writer(transport._sock_fd)
+                if transport._empty_waiter is not None:
+                    transport._empty_waiter.set_result(None)
+                if transport._closing:
+                    transport._call_connection_lost(None)
+                elif transport._eof:
+                    transport._sock.shutdown(socket.SHUT_WR)
