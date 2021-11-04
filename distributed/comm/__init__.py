@@ -15,9 +15,15 @@ from .utils import get_tcp_server_address, get_tcp_server_addresses
 
 
 def _register_transports():
+    import os
+
     from . import asyncio_tcp, inproc, tcp, ws
 
-    if True:  # TODO: some kind of config
+    if os.getenv("DISTRIBUTED_USE_ASYNCIO_FOR_TCP", "").lower() not in (
+        "",
+        "0",
+        "false",
+    ):
         backends["tcp"] = asyncio_tcp.TCPBackend()
         backends["tls"] = asyncio_tcp.TLSBackend()
     else:

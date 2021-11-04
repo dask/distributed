@@ -131,11 +131,15 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         return self._parse_frames()
 
     def _parse_nframes(self):
-        if self._default_end - self._default_start > 8:
+        # TODO: we drop the message total size prefix (sent as part of the
+        # tornado-based tcp implementation), as it's not needed. If we ever
+        # drop that prefix entirely, we can adjust this code (change 16 -> 8
+        # and 8 -> 0).
+        if self._default_end - self._default_start >= 16:
             self._nframes = struct.unpack_from(
-                "<Q", self._default_buffer, offset=self._default_start
+                "<Q", self._default_buffer, offset=self._default_start + 8
             )[0]
-            self._default_start += 8
+            self._default_start += 16
             self._frame_lengths = []
             return True
         return False
@@ -260,11 +264,15 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
 
         nframes = len(frames)
         frames_nbytes = [nbytes(f) for f in frames]
-        header = struct.pack(f"{nframes + 1}Q", nframes, *frames_nbytes)
-        frames_nbytes_total = sum(frames_nbytes) + nbytes(header)
+        # TODO: the old TCP comm included an extra `msg_nbytes` prefix that
+        # isn't really needed. We include it here for backwards compatibility,
+        # but this could be removed if we ever want to make another breaking
+        # change to the comms.
+        msg_nbytes = sum(frames_nbytes) + (nframes + 1) * 8
+        header = struct.pack(f"{nframes + 2}Q", msg_nbytes, nframes, *frames_nbytes)
         frames = [header, *frames]
 
-        if frames_nbytes_total < 2 ** 17:  # 128kiB
+        if msg_nbytes < 2 ** 17:  # 128kiB
             # small enough, send in one go
             frames = [b"".join(frames)]
 
@@ -278,7 +286,7 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             self._drain_waiter = self._loop.create_future()
             await self._drain_waiter
 
-        return frames_nbytes_total
+        return msg_nbytes
 
 
 class TCP(Comm):
