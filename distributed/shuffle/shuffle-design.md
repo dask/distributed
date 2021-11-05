@@ -188,7 +188,22 @@ Backpressure will let workers that have too much data in memory tell their peers
 
 There are numerous ways to implement backpressure; I'm not sure yet how we'll do it for this system. But ultimately, it'll result in RPC calls to `shuffle_receive` informing the caller to slow down or stop in some way (by returning a value, or perhaps even just by blocking). In turn, this will cause `transfer` tasks on the callers to block when passing data into the `ShuffleExtension` until the backpressure has been resolved, preventing future `transfer` tasks from running.
 
+### Concurrency model
 
+Problems this solves:
+* Bridging between dask tasks, async comms, and any other work that needs to run in the background
+
+Dask tasks run in threads (or processes!), comms are async, and we may need to do other things in the background—both async and blocking—such as spilling to disk, serialization, re-grouping buffered shards, etc.
+
+The concurrency model in the proof-of-concept PR is quite complicated, involving both threads and coroutines running in the background, and multiple communication and synchronization mechanisms between them. Ideally, we'd like this to be simpler.
+
+Interestingly, most of the complexity comes from optimizations to make serialization and networking more efficient. When both serialization and networking are inefficient for many small pieces of data, it makes sense to buffer and periodically concatenate the data so that fewer, larger chunks are being transferred.
+
+If the serialization and networking layers could handle tiny writes efficiently—through their own internal buffering for network, or for smarter binary formats for serialization—then this application-level buffering complexity could go away. (Well really, it would still be there, but shifted down a level—which might be easier to reason about.)
+
+Concurrency also affects memory usage. With more concurrent tasks, there are more places for intermediate copies of data to overlap in time, and more chances to spike memory usage beyond its limits. Most of the POC's complexity around concurrency is adding synchronization to try to prevent this from happening. Though we want a simpler concurrency model, the top priority is memory stability, so we'd take extra locks, threads, or semaphores over memory spikes.
+
+Any concurrency will be rigorously tested for deadlocks. Ideally, it can be encapsulated into components to make testing and reasoning easier.
 
 #### Data submission protocol
 
