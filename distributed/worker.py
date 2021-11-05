@@ -2037,7 +2037,6 @@ class Worker(ServerNode):
     def transition_executing_rescheduled(self, ts, *, stimulus_id):
         for resource, quantity in ts.resource_restrictions.items():
             self.available_resources[resource] += quantity
-        self._executing.discard(ts)
 
         recs = {ts: "released"}
         smsgs = [{"op": "reschedule", "key": ts.key, "worker": self.address}]
@@ -2073,7 +2072,6 @@ class Worker(ServerNode):
     ):
         for resource, quantity in ts.resource_restrictions.items():
             self.available_resources[resource] += quantity
-        self._executing.discard(ts)
         return self.transition_generic_error(
             ts,
             exception,
@@ -2125,7 +2123,6 @@ class Worker(ServerNode):
             ts._next = "released"
             return {}, []
         next_state = ts._next
-        self._executing.discard(ts)
         self._in_flight_tasks.discard(ts)
 
         for resource, quantity in ts.resource_restrictions.items():
@@ -2155,7 +2152,6 @@ class Worker(ServerNode):
             for resource, quantity in ts.resource_restrictions.items():
                 self.available_resources[resource] += quantity
 
-        self._executing.discard(ts)
         self._in_flight_tasks.discard(ts)
         ts.coming_from = None
 
@@ -2169,7 +2165,6 @@ class Worker(ServerNode):
             assert not ts.waiting_for_data
             assert ts.key not in self.ready
 
-        self._executing.discard(ts)
         self.executed_count += 1
         return self.transition_generic_memory(ts, value=value, stimulus_id=stimulus_id)
 
@@ -2247,6 +2242,7 @@ class Worker(ServerNode):
     def transition_executing_long_running(self, ts, compute_duration, *, stimulus_id):
         ts.state = "long-running"
         self._executing.discard(ts)
+        # ^ NOTE: unlike other transitions, we remove from `_executing` now
         self.long_running.add(ts.key)
         smsgs = [
             {
@@ -2971,7 +2967,6 @@ class Worker(ServerNode):
             ts._next = None
             ts.done = False
 
-            self._executing.discard(ts)
             self._in_flight_tasks.discard(ts)
 
             self._notify_plugins(
@@ -3234,6 +3229,7 @@ class Worker(ServerNode):
                     )
             finally:
                 self.active_keys.discard(ts.key)
+                self._executing.discard(ts)
 
             key = ts.key
             # key *must* be still in tasks. Releasing it direclty is forbidden
