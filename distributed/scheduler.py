@@ -7078,17 +7078,12 @@ class Scheduler(SchedulerState, ServerNode):
 
     def set_metadata(self, comm=None, keys=None, value=None):
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            metadata = parent._task_metadata
-            for key in keys[:-1]:
-                if key not in metadata or not isinstance(metadata[key], (dict, list)):
-                    metadata[key] = {}
-                metadata = metadata[key]
-            metadata[keys[-1]] = value
-        except Exception:
-            import pdb
-
-            pdb.set_trace()
+        metadata = parent._task_metadata
+        for key in keys[:-1]:
+            if key not in metadata or not isinstance(metadata[key], (dict, list)):
+                metadata[key] = {}
+            metadata = metadata[key]
+        metadata[keys[-1]] = value
 
     def get_metadata(self, comm=None, keys=None, default=no_default):
         parent: SchedulerState = cast(SchedulerState, self)
