@@ -179,8 +179,15 @@ For this reason, we won't make any more guesses about how this is actually going
 
 Additionally, it would be nice if the buffer could integrate with the worker's reporting of managed memory and data spilled to disk. Obviously, we'd have to create the worker and scheduler interfaces for this first, but the buffer should at least track these numbers so we can eventually report them.
 
-[1] Data producer is encouraged to implement data buffering to avoid comm overhead.
-[2] `0<X<1`, accounting for data copies, buffer sizes, serialization and interpreter overhead.
+### Backpressure
+
+Problems this solves:
+* If workers can't write to disk fast enough, newly-received shards could pile up in memory and possibly kill them
+
+Backpressure will let workers that have too much data in memory tell their peers to stop sending them more data until they've caught up and spilled the excess memory to disk.
+
+There are numerous ways to implement backpressure; I'm not sure yet how we'll do it for this system. But ultimately, it'll result in RPC calls to `shuffle_receive` informing the caller to slow down or stop in some way (by returning a value, or perhaps even just by blocking). In turn, this will cause `transfer` tasks on the callers to block when passing data into the `ShuffleExtension` until the backpressure has been resolved, preventing future `transfer` tasks from running.
+
 
 
 #### Data submission protocol
