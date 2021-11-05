@@ -125,22 +125,59 @@ Also possibly (TBD) `shuffle-setup` could call an RPC on all the other workers i
 
 ### Spilling to disk
 
-1. Communication is initiated by the data producer, i.e. every participating Worker will receive incoming connections trying to submit data.
-2. Every participating Worker will receive incoming requests to accept data.
-3. Receiving and submitting data must happen concurrently.
-4. Submitting data requires GIL locking compute (groupby/split) // `transfer` task.
-5. Received and submitted data `shards` are expected to be much smaller than the final output partitions. The system must be capable of handling small reads/writes.
-6. There may be multiple shuffles happening and we need to be able to distinguish data accordingly when storing it.
-7. Write to disk must happen without blocking the main event loop.
-8. There is no clear correlation between number of incoming data connections and number of workers or number of input partitions. [1]
-9.  All incoming data combined will build M output partitions. M may be unequal to N.
-10. Any kind of regrouping, if necessary, must not block the main event loop.
-11. Every worker must be able to handle more incoming data than it has memory. Therefore, some spill-to-disk capabilities must be supported.
-12. Spilling may not be possible without bounds, see https://github.com/dask/distributed/issues/5364. It should be possible to use buffer data in memory.
-13. Assuming there is sufficient disk space available and individual shards are below `X` times the workers memory limit [2], a worker must never go out of memory.
-14. There should be a possibility to notify the Worker instrumentation about (un)managed memory and spilled disk to update.
-15. If a shuffle `Y` is aborted or retried, all data belonging to `Y` needs to be deleted from the worker, regardless of where it is stored (memory, disk, ..)
-16. Implementation is sufficiently well encapsulated to be unit-testable
+Problems this solves:
+* Shuffling larger-than-memory datasets requires writing some of the data to disk
+* Makes the worker memory requirement depend only on the size of each partition of the dataset, not the total size of the dataset
+* Applies backpressure to senders when spill-to-disk can't keep up with incoming data (see backpressure section)
+* Does all the above without blocking the event loop
+
+After the initial shuffling framework is built, we'll want to support larger-than-memory datasets. To do so, workers will spill some of the data they receive from peers to disk.
+
+For testability, we'll implement a standalone mechanism for this. Most likely, it'll be a key-value buffer that supports appends to keys, like:
+
+```python
+async? def append(**values: pd.DataFrame) -> None:
+    "Append key-value pairs to the dataset"
+    ...
+
+async? def get(key: str) -> pd.DataFrame:
+    "Get all data written to a key, concatenated"
+    ...
+
+async? def remove(key: str) -> None:
+    "Remove all data for a key"
+    ...
+
+async? def clear() -> None:
+    "Remove all data"
+    ...
+
+async? def set_available_memory(bytes: int) -> None:
+    """
+    Change the memory threshold for spilling to disk.
+
+    If current memory use is greater than the new threshold, this blocks until excess memory is spilled to disk.
+    """
+    # NOTE: necessary for concurrent shuffles: if a shuffle is already running and another wants to start,
+    # the first shuffle needs to spill excess data to disk so the two can share memory evenly.
+    ...
+```
+
+Note that the interface, purpose, and functionality are essentially the same as [partd](https://github.com/dask/partd). We may just use partd here, or modify partd such that it fits our needs, rather than implementing something new.
+
+Most likely, the writes to this buffer will be very small. If so, the system must handle small writes performantly.
+
+If a shuffle is aborted (error, cancellation, or retry), the buffer will be told to clean up all its data (both on disk and in memory).
+
+The buffer will have some way of applying backpressure on `append`s, so if it can't keep up with all the data it's being asked to write to disk, it can inform callers. This will be bubbled up to tell peer workers to slow down data sending (and possibly production) so this worker doesn't run out of memory.
+
+The buffer will handle serialization, transformation, and compression of the input data. Therefore, if it ends up being an async interface and this is event-loop-blocking work, it'll have a way to offload this work to threads.
+
+The implementation will depend a lot on our network serialization format, and our concurrency model. For example, if we were sending Arrow [`RecordBatches`](https://arrow.apache.org/docs/python/data.html#record-batches) over the network, already grouped by output partition, we could just write those serialized bytes straight to disk from an async comm handler (using [aiofiles](https://github.com/Tinche/aiofiles) or the like). On the other hand, if we're sending DataFrames over comms and deserializing them immediately on the receiving side (as in the proof-of-concept PR), then a lot more work will be involved: re-serializing them, potentially even accumulating an in-memory buffer of DataFrame shards to be re-concatenated, serialized, and compressed if the serialization scheme is inefficient for lots of small DataFrames.
+
+For this reason, we won't make any more guesses about how this is actually going to work.
+
+Additionally, it would be nice if the buffer could integrate with the worker's reporting of managed memory and data spilled to disk. Obviously, we'd have to create the worker and scheduler interfaces for this first, but the buffer should at least track these numbers so we can eventually report them.
 
 [1] Data producer is encouraged to implement data buffering to avoid comm overhead.
 [2] `0<X<1`, accounting for data copies, buffer sizes, serialization and interpreter overhead.
