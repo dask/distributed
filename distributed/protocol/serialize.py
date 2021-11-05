@@ -32,20 +32,23 @@ def dask_dumps(x, context=None):
     except TypeError:
         raise NotImplementedError(type_name)
     if has_keyword(dumps, "context"):
-        header, frames = dumps(x, context=context)
+        sub_header, frames = dumps(x, context=context)
     else:
-        header, frames = dumps(x)
+        sub_header, frames = dumps(x)
 
-    header["type"] = type_name
-    header["type-serialized"] = pickle.dumps(type(x), protocol=4)
-    header["serializer"] = "dask"
+    header = {
+        "sub-header": sub_header,
+        "type": type_name,
+        "type-serialized": pickle.dumps(type(x), protocol=4),
+        "serializer": "dask",
+    }
     return header, frames
 
 
 def dask_loads(header, frames):
     typ = pickle.loads(header["type-serialized"])
     loads = dask_deserialize.dispatch(typ)
-    return loads(header, frames)
+    return loads(header["sub-header"], frames)
 
 
 def pickle_dumps(x, context=None):
@@ -775,6 +778,7 @@ class ObjectDictSerializer:
             else:
                 if isinstance(v, dict):
                     h, f = self.serialize(v)
+                    h = {"nested-dict": h}
                 else:
                     h, f = serialize(v, serializers=(self.serializer, "pickle"))
                 header["complex"][k] = {
@@ -796,7 +800,11 @@ class ObjectDictSerializer:
         for k, d in header["complex"].items():
             h = d["header"]
             f = frames[d["start"] : d["stop"]]
-            v = deserialize(h, f)
+            nested_dict = h.get("nested-dict")
+            if nested_dict:
+                v = self.deserialize(nested_dict, f)
+            else:
+                v = deserialize(h, f)
             dd[k] = v
 
         return obj
