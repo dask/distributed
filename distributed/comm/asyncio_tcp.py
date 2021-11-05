@@ -98,7 +98,6 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         if type(transport) is asyncio.selector_events._SelectorSocketTransport:
             transport = _ZeroCopyWriter(transport)
         self._transport = transport
-        # self._transport = transport
         if self.on_connection is not None:
             self.on_connection(self)
 
@@ -661,63 +660,22 @@ class _ZeroCopyWriter:
         self._size = 0
 
     def _buffer_append(self, data):
-        size = len(data)
-        if size > _LARGE_BUF_LIMIT:
-            self._buffers.append(memoryview(data))
-        elif size > 0:
-            if self._buffers:
-                last_buf = self._buffers[-1]
-                last_buf_typ = type(last_buf)
-                new_buf = last_buf_typ is memoryview or len(last_buf) > _LARGE_BUF_LIMIT
-            else:
-                new_buf = True
+        data = memoryview(data).cast("B")
+        self._buffers.append(data)
+        self._size += len(data)
 
-            if new_buf:
-                self._buffers.append(data)
-            else:
-                if last_buf_typ is bytes:
-                    last_buf = self._buffers[-1] = bytearray(last_buf)
-                last_buf.extend(data)
-
-        self._size += size
-
-    def _buffer_peek_one(self):
-        b = self._buffers[0]
-        if not isinstance(b, memoryview):
-            b = memoryview(b)
-        return b[self._first_pos :]
-
-    def _buffer_peek_many(self):
-        pos = self._first_pos
-        buffers = []
-        size = 0
-        for b in self._buffers:
-            if pos:
-                if not isinstance(b, memoryview):
-                    b = memoryview(b)
-                b = b[pos:]
-                pos = 0
-            buffers.append(b)
-            size += len(b)
-            if size > 2 ** 17:
-                break
-        return buffers
+    def _buffer_peek(self):
+        return self._buffers[0][self._first_pos :]
 
     def _buffer_advance(self, size):
-        pos = self._first_pos
+        b = self._buffers[0]
         self._size -= size
-        buffers = self._buffers
-        while size:
-            b = buffers[0]
-            b_len = len(b) - pos
-            if b_len <= size:
-                buffers.popleft()
-                size -= b_len
-                pos = 0
-            else:
-                pos += size
-                break
-        self._first_pos = pos
+        b_len = len(b) - self._first_pos
+        if b_len == size:
+            self._buffers.popleft()
+            self._first_pos = 0
+        else:
+            self._first_pos += size
 
     def write(self, data):
         transport = self.transport
@@ -790,10 +748,8 @@ class _ZeroCopyWriter:
         return self.transport.get_extra_info(key)
 
     def _do_bulk_write(self):
-        # TODO: figure out why/when sendmsg is faster/slower
-        # buffers = self._buffer_peek_many()
-        # n = self.transport._sock.sendmsg(buffers)
-        n = self.transport._sock.send(self._buffer_peek_one())
+        buf = self._buffer_peek()
+        n = self.transport._sock.send(buf)
         if n:
             self._buffer_advance(n)
 
