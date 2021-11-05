@@ -2135,7 +2135,6 @@ class Worker(ServerNode):
         return recommendations, []
 
     def transition_executing_released(self, ts, *, stimulus_id):
-        self._executing.discard(ts)
         ts._previous = ts.state
         # See https://github.com/dask/distributed/pull/5046#discussion_r685093940
         ts.state = "cancelled"
