@@ -2060,6 +2060,7 @@ class Worker(ServerNode):
     def transition_generic_error(
         self, ts, exception, traceback, exception_text, traceback_text, *, stimulus_id
     ):
+        self._executing.discard(ts)
         ts.exception = exception
         ts.traceback = traceback
         ts.exception_text = exception_text
@@ -2073,7 +2074,6 @@ class Worker(ServerNode):
     ):
         for resource, quantity in ts.resource_restrictions.items():
             self.available_resources[resource] += quantity
-        self._executing.discard(ts)
         return self.transition_generic_error(
             ts,
             exception,
