@@ -24,12 +24,15 @@ from contextlib import contextmanager, suppress
 from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
+from typing import TYPE_CHECKING
 from typing import Any as AnyType
 from typing import ClassVar, Container, Sequence, overload
 
 import click
 import tblib.pickling_support
-from typing_extensions import Protocol
+
+if TYPE_CHECKING:
+    from typing_extensions import Protocol
 
 try:
     import resource
@@ -1443,11 +1446,13 @@ def __getattr__(name):
         raise AttributeError(f"module {__name__} has no attribute {name}")
 
 
-class SupportsToDict(Protocol):
-    def to_dict(
-        self, *, exclude: Container[str] | None = None, **kwargs
-    ) -> dict[str, AnyType]:
-        ...
+if TYPE_CHECKING:
+
+    class SupportsToDict(Protocol):
+        def to_dict(
+            self, *, exclude: Container[str] | None = None, **kwargs
+        ) -> dict[str, AnyType]:
+            ...
 
 
 @overload

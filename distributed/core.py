@@ -22,6 +22,8 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
+from distributed.utils import recursive_to_dict
+
 from . import profile, protocol
 from .comm import (
     Comm,
@@ -401,7 +403,6 @@ class Server:
         Server.identity
         Client.dump_cluster_state
         """
-        from distributed.utils import recursive_to_dict
 
         info = self.identity()
         extra = {

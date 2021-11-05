@@ -7091,24 +7091,26 @@ def test_print_simple(capsys):
 
 
 def _verify_cluster_dump(path, _format):
-    mode = "r"
-    _open = open
+    path = str(path)
     if _format == "msgpack":
         import gzip
 
         import msgpack
+
+        path += ".msgpack.gz"
 
         with gzip.open(path) as fd:
             state = msgpack.unpack(fd)
     else:
         import yaml
 
+        path += ".yaml"
         with open(path) as fd:
             state = yaml.load(fd, Loader=yaml.Loader)
 
     assert isinstance(state, dict)
-    assert "scheduler_info" in state
-    assert "worker_info" in state
+    assert "scheduler" in state
+    assert "workers" in state
 
 
 @pytest.mark.parametrize("_format", ["msgpack", "json", "yaml"])
@@ -7165,16 +7167,16 @@ async def test_dump_cluster_state_exclude(c, s, a, b, tmp_path):
         format="yaml",
     )
 
-    with open(filename) as fd:
+    with open(str(filename) + ".yaml") as fd:
         import yaml
 
         state = yaml.load(fd, Loader=yaml.Loader)
 
-    assert "worker_info" in state
-    assert len(state["worker_info"]) == len(s.workers)
-    assert "scheduler_info" in state
-    assert "tasks" in state["scheduler_info"]
-    tasks = state["scheduler_info"]["tasks"]
+    assert "workers" in state
+    assert len(state["workers"]) == len(s.workers)
+    assert "scheduler" in state
+    assert "tasks" in state["scheduler"]
+    tasks = state["scheduler"]["tasks"]
     assert len(tasks) == len(futs)
     for k, task_dump in tasks.items():
         assert not any(blocked in task_dump for blocked in exclude)

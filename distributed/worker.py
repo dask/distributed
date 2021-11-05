@@ -239,7 +239,6 @@ class TaskState:
         --------
         Client.dump_cluster_state
         """
-        from distributed.utils import recursive_to_dict
 
         if exclude is None:
             exclude = set()

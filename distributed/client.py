@@ -24,10 +24,12 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import Awaitable, ClassVar, Sequence
+from typing import TYPE_CHECKING, Awaitable, ClassVar, Sequence
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
-from typing_extensions import Literal
+
+if TYPE_CHECKING:
+    from typing_extensions import Literal
 
 import dask
 from dask.base import collections_to_dsk, normalize_token, tokenize
@@ -3500,10 +3502,14 @@ class Client:
 
         scheduler_info, worker_info = await asyncio.gather(scheduler_info, worker_info)
         state = {
-            "scheduler_info": scheduler_info,
-            "worker_info": worker_info,
+            "scheduler": scheduler_info,
+            "workers": worker_info,
         }
+        filename = str(filename)
         if format == "msgpack":
+            suffix = ".msgpack.gz"
+            if not filename.endswith(suffix):
+                filename += suffix
             import gzip
 
             import msgpack
@@ -3512,6 +3518,9 @@ class Client:
             with gzip.open(filename, "wb") as fdg:
                 msgpack.pack(state, fdg)
         elif format == "yaml":
+            suffix = ".yaml"
+            if not filename.endswith(suffix):
+                filename += suffix
             import yaml
 
             with open(filename, "w") as fd:
@@ -3523,7 +3532,7 @@ class Client:
 
     def dump_cluster_state(
         self,
-        filename: str,
+        filename: str = "dask-cluster-dump",
         exclude: Sequence[str] = None,
         format: Literal["msgpack"] | Literal["yaml"] = "msgpack",
     ) -> Awaitable | None:
@@ -3545,7 +3554,8 @@ class Client:
         Paramters
         ---------
         filename:
-            The output filename
+            The output filename. The appropriate file suffix (`.msgpack.gz` or
+            `.yaml`) will be appended automatically.
         exclude:
             A sequence of attribute names which are supposed to be blacklisted
             from the dump, e.g. to exclude code, tracebacks, logs, etc.

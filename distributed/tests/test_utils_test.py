@@ -393,11 +393,11 @@ def test_dump_cluster_state_timeout(tmp_path):
 
     _, dirs, files = next(os.walk(tmp_path))
     assert not dirs
-    assert files == [inner_test.__name__]
+    assert files == [inner_test.__name__ + ".yaml"]
     import yaml
 
     with open(tmp_path / files[0], "rb") as fd:
         state = yaml.load(fd, Loader=yaml.Loader)
 
-    assert "scheduler_info" in state
-    assert "worker_info" in state
+    assert "scheduler" in state
+    assert "workers" in state

@@ -27,9 +27,10 @@ from contextlib import contextmanager, nullcontext, suppress
 from glob import glob
 from itertools import count
 from time import sleep
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from typing_extensions import Literal
+if TYPE_CHECKING:
+    from typing_extensions import Literal
 
 from distributed.scheduler import Scheduler
 

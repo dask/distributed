@@ -49,6 +49,8 @@ from dask.highlevelgraph import HighLevelGraph
 from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta, tmpfile
 from dask.widgets import get_template
 
+from distributed.utils import recursive_to_dict
+
 from . import preloading, profile
 from . import versions as version_module
 from .active_memory_manager import ActiveMemoryManagerExtension
@@ -1742,7 +1744,6 @@ class TaskState:
         --------
         Client.dump_cluster_state
         """
-        from distributed.utils import recursive_to_dict
 
         if not exclude:
             exclude = set()
@@ -3994,7 +3995,6 @@ class Scheduler(SchedulerState, ServerNode):
         Server.identity
         Client.dump_cluster_state
         """
-        from distributed.utils import recursive_to_dict
 
         info = super().to_dict(exclude=exclude)
         extra = {
