@@ -57,7 +57,7 @@ The graph also has a secondary synchronization benefit, letting us bypass some d
 
 ### `ShuffleExtension`
 
-Problems to solve:
+Problems this solves:
 * Holding per-worker out-of-band state for an in-progress shuffle
 * Adding new handlers in an organized way for workers to transfer shuffle data
 * Doing the above cleanly with multiple concurrent shuffles (`merge`)
@@ -89,7 +89,7 @@ The `transfer` tasks will pass their input partitions into the `ShuffleExtension
 
 ### Retries and cancellation
 
-Problems to solve:
+Problems this solves:
 * Causing all tasks in the shuffle to rerun when a worker leaves
 * Cleaning up out-of-band state when a user cancels a shuffle, or it errors
 
@@ -107,7 +107,7 @@ Additionally, the scheduler informs workers whenever a `RerunGroup` is restarted
 
 ### Peer discovery and initialization
 
-Problems to solve:
+Problems this solves:
 * Workers need to all have the same list of peers participating in the shuffle (otherwise data could end up in two different places!)
 * Scheduler needs to be told where to run the `unpack` tasks which bring data back in-band
 
