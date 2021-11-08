@@ -246,60 +246,6 @@ Concurrency also affects memory usage. With more concurrent tasks, there are mor
 
 Any concurrency will be rigorously tested for deadlocks. Ideally, it can be encapsulated into components to make testing and reasoning easier.
 
-#### Data submission protocol
-
-Relevant requirements: 4., 6., 9. 10.,
-
-The data producer will perform a groupby [M, W] where M is the number of output partitions and W is the number of participating workers
-
-If the producer already splits by output partition we will not need to regroup on the receiver side. Concat could happen in the unpack method resolving us from any GIL/Thread problems.
-
-```python
-    # Does not need to be a *dict* but we'll need some kind of mapping, either by endoding or by data structure.
-    {
-        "W1": {
-            # Every element is a pandas dataframe / arrow table
-            "M1": ["W1-M1-N1", "W1-M1-N2", "W1-M1-N3"],
-            "M2": ["W1-M2-N1", "W1-M2-N2", "W1-M2-N3"],
-        },
-        "W1": {
-            "M1": ["W1-M1-N1", "W1-M1-N2", "W1-M1-N3"],
-            "M2": ["W1-M2-N1", "W1-M2-N2", "W1-M2-N3"],
-        },
-        ...
-    }
-```
-
-Receiving end
-
-```python
-# This is disk stuff!
-class ShardCollection:
-
-    def __init__(self):
-        self._buffer = []  # or memory view, whatever
-        self.thread = Thread() # likely need a thread for async
-
-    async def append(self, shard):
-        buffer.append(shard)
-        if buffer.full():
-            await self.dump_buffer_to_disk()
-
-    async def put(self):
-        pass
-
-    async def get(self):
-        load_data_to_buffer()
-        return self._buffer
-
-    def __del__(self):
-        delete_disk()
-        self._buffer = None
-
-
-Worker.data[key] = ShardCollection()
-```
-
 ### Data-transfer diagrams
 
 Some pretty pictures of the principle behind the data transfer:
