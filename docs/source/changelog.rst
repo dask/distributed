@@ -1,6 +1,14 @@
 Changelog
 =========
 
+2021.11.1
+---------
+
+Released on November 8, 2021
+
+- Revert "Avoid multiple blocking calls by gathering UCX frames" (:pr:`5505`) `Peter Andreas Entschev`_
+
+
 2021.11.0
 ---------
 
