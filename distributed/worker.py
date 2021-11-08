@@ -2092,19 +2092,21 @@ class Worker(ServerNode):
         ts.exception_text = exception_text
         ts.traceback_text = traceback_text
         ts.state = "error"
-        smsgs = [
-            {
-                "op": "task-erred",
-                "status": "error",
-                "key": ts.key,
-                "thread": self.threads.get(ts.key),
-                "exception": ts.exception,
-                "traceback": ts.traceback,
-                "exception_text": ts.exception_text,
-                "traceback_text": ts.traceback_text,
-            }
-        ]
-        return {}, smsgs
+        smsg = {
+            "op": "task-erred",
+            "status": "error",
+            "key": ts.key,
+            "thread": self.threads.get(ts.key),
+            "exception": ts.exception,
+            "traceback": ts.traceback,
+            "exception_text": ts.exception_text,
+            "traceback_text": ts.traceback_text,
+        }
+
+        if ts.startstops:
+            smsg["startstops"] = ts.startstops
+
+        return {}, [smsg]
 
     def transition_executing_error(
         self, ts, exception, traceback, exception_text, traceback_text, *, stimulus_id
