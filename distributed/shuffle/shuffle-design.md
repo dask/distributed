@@ -32,7 +32,8 @@ Non-goals:
 The implementation will be completed in multiple stages (order TBD after #1):
 1. Establish the patterns for how this out-of-band system will interact with distributed, in the simplest possible implementation with no optimizations.
 1. Retries (shuffle restarts automatically if a worker leaves)
-1. Improve performance with concurrency if possible
+1. Serialization
+1. Improve performance with concurrency and buffering if possible
 1. Spill-to-disk
 1. Backpressure
 1. Performance
@@ -179,6 +180,24 @@ For this reason, we won't make any more guesses about how this is actually going
 
 Additionally, it would be nice if the buffer could integrate with the worker's reporting of managed memory and data spilled to disk. Obviously, we'd have to create the worker and scheduler interfaces for this first, but the buffer should at least track these numbers so we can eventually report them.
 
+### Serialization
+
+Problems this solves:
+* Workers need to transfer data to each other
+* Buffer needs to write data to disk
+* Serialization performance determines where—and how much—we need to copy and reshape data
+* Ideally, serialization-deserialization roundtrips are minimized
+
+The performance characteristics of serialization (and networking) have a huge impact on how the `ShuffleExtension` is actually implemented to be performant.
+
+In the proof-of-concept PR, we used distributed's built-in serialization, which basically just pickles DataFrames. We assume this to be inefficient for lots of small DataFrames, so we regroup, buffer, and concatenate them in the background in order to be serializing and sending fewer, larger pieces of data.
+
+As a point of comparison, Arrow is designed for efficient streaming serialization with `RecordBatch`es. If, hypothetically, serializing 10,000 one-row DataFrames had the same cost with Arrow as serializing one 10,000-row DataFrame, then we might not need application-level buffering on the sending side, or regrouping on the receiving side, or buffering before writing to disk. This would massively simplify the implementation and the concurrency model (more below).
+
+Additionally, data sent over comms is serialized and deserialized automatically. In the (common) case where received data is almost immediately written to disk, deserializing only to re-serialize again both wastes time and creates extra temporary copies. In the POC PR, this is necessary, because we have to do another `groupby` on the received shards (since we concatenated them together on the sending side as an optimization). But if our serialization format supported small DataFrames well, then we could send shards pre-grouped by output partition, allowing us to write the serialized bytes straight to disk.
+
+Because serialization performance has such a large impact on all the other aspects of the system, I believe it should be the first thing we investigate after building the initial skeleton.
+
 ### Backpressure
 
 Problems this solves:
@@ -258,16 +277,6 @@ class ShardCollection:
 
 Worker.data[key] = ShardCollection()
 ```
-
-#### Asnychronous operations
-
-Due to 1., 2.
-
-#### Backpressure
-
-The prototype implementation in #XXX is not introducing data backpressure to deal with 11.
-
-## Appendix
 
 ### Data-transfer diagrams
 
