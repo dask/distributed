@@ -7111,6 +7111,7 @@ def _verify_cluster_dump(path, _format):
     assert isinstance(state, dict)
     assert "scheduler" in state
     assert "workers" in state
+    assert "versions" in state
 
 
 @pytest.mark.parametrize("_format", ["msgpack", "json", "yaml"])

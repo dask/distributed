@@ -3499,11 +3499,15 @@ class Client:
                 exclude=exclude,
             ),
         )
+        versions = self._get_versions()
+        scheduler_info, worker_info, versions_info = await asyncio.gather(
+            scheduler_info, worker_info, versions
+        )
 
-        scheduler_info, worker_info = await asyncio.gather(scheduler_info, worker_info)
         state = {
             "scheduler": scheduler_info,
             "workers": worker_info,
+            "versions": versions_info,
         }
         filename = str(filename)
         if format == "msgpack":
