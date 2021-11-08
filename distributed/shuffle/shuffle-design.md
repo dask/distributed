@@ -198,6 +198,28 @@ Additionally, data sent over comms is serialized and deserialized automatically.
 
 Because serialization performance has such a large impact on all the other aspects of the system, I believe it should be the first thing we investigate after building the initial skeleton.
 
+### Networking
+
+Problems this solves:
+* Workers need to send data to each other
+* Workers may need to reply to those messages, or send control signals to each other for backpressure (see below)
+* Performance characteristics of this (large vs small messages) affect other parts of implementation
+
+Similarly to serialization, the performance characteristics and guarantees of the networking system will determine how the shuffle system is implemented, and what optimizations it needs to run well.
+
+In the proof-of-concept PR, we use `Worker.rpc` to call `shuffle_receive` on peers and send them data. This is an un-batched connection; every send writes data to the underlying socket's application-level (Python) buffer, and eventually kernel buffer. The RPC doesn't return until the worker has sent a reply back, so delivery is confirmed. (Though I'm not sure if the implementation guarantees that that _particular_ message was received, just that _any_ response from the worker was received.)
+
+Because the comm is un-batched, the POC PR implements its own application-level batching by concatenating input DataFrames together, so messages are larger and less frequent. As mentioned in the [serialization](#Serialization) and [concurrency](#Concurrency-model) sections, this adds a lot of complexity.
+
+If the networking layer could handle many small messages better, this (combined with serialization improvements) could make the shuffle implementation much simpler. Some options for this:
+* Using `BatchedSend` on the comms to batch messages. Downsides: coordinating memory use could be trickier, since each `BatchedSend` would have its own buffer and not be aware of the global situation and how urgent it is for it to send its messages. Also `BatchedSend` has many bugs.
+* [Asyncio comms](https://github.com/dask/distributed/pull/5450) improving small-message performance. The throughput for small messages would still be much lower than large ones though—just less bad than it is now.
+* Careful [tuning](https://en.wikipedia.org/wiki/TCP_tuning) of socket options (`SO_RCVBUF`, `SO_RCVLOWAT`, `SO_SNDBUF`, `SO_SNDLOWAT`, `SO_SNDTIMEO`, [`TCP_FASTOPEN`](https://en.wikipedia.org/wiki/TCP_Fast_Open), [`TCP_NOTSENT_LOWAT`](https://blog.cloudflare.com/http-2-prioritization-with-nginx/)) to achieve similar batching and buffering at the transport layer (instead of the application layer duplicating—or possibly working against—transport layer buffering, as it does in the POC).
+
+There's also the question of protocol for confirming delivery of messages. Currently comms have an application-level protocol for this ([`send_recv`](https://github.com/dask/distributed/blob/a1b67b84226d3053517dffcb6f0c8fe8821eb8fb/distributed/core.py#L638-L640) writes to the comm, then waits for a message to be sent back). It's unclear if this application-level back-and-forth is actually necessary, or if TCP ACKs would be sufficient for this case. Of course, with an application-level protocol for backpressure (see below), we'd likely have to send back a response of some sort anyway, so it's probably not worth worrying about this.
+
+Finally, we should have a fastpath for when the worker needs to send data to itself. In a balanced shuffle, `1/N` (where N is the number of workers) of the data doesn't need to leave the worker that produced it. When `N` is small, bypassing serialization and networking and just handing off the DataFrame internally could provide a modest speedup.
+
 ### Backpressure
 
 Problems this solves:
