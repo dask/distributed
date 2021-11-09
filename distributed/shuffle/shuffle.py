@@ -7,8 +7,6 @@ from dask.dataframe import DataFrame
 from dask.delayed import Delayed, delayed
 from dask.highlevelgraph import HighLevelGraph
 
-from distributed import get_worker
-
 from .shuffle_extension import NewShuffleMetadata, ShuffleId, ShuffleWorkerExtension
 
 if TYPE_CHECKING:
@@ -16,6 +14,8 @@ if TYPE_CHECKING:
 
 
 def shuffle_setup(metadata: NewShuffleMetadata) -> None:
+    from distributed import get_worker
+
     worker = get_worker()
     extension: ShuffleWorkerExtension | None = worker.extensions.get("shuffle")
     if not extension:
@@ -27,11 +27,15 @@ def shuffle_setup(metadata: NewShuffleMetadata) -> None:
 
 
 def shuffle_transfer(input: pd.DataFrame, id: ShuffleId, setup=None) -> None:
+    from distributed import get_worker
+
     extension: ShuffleWorkerExtension = get_worker().extensions["shuffle"]
     extension.add_partition(input, id)
 
 
 def shuffle_unpack(id: ShuffleId, output_partition: int, barrier=None) -> pd.DataFrame:
+    from distributed import get_worker
+
     extension: ShuffleWorkerExtension = get_worker().extensions["shuffle"]
     return extension.get_output_partition(id, output_partition)
 

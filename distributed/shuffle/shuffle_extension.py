@@ -41,7 +41,11 @@ class ShuffleMetadata(NewShuffleMetadata):
     workers: list[str]
 
     def worker_for(self, output_partition: int) -> str:
-        # i = math.floor((output_partition / self.npartitions) * len(self.workers))
+        "Get the address of the worker which should hold this output partition number"
+        if output_partition >= self.npartitions:
+            raise IndexError(
+                f"Output partition {output_partition} does not exist in a shuffle producing {self.npartitions} partitions"
+            )
         i = output_partition * len(self.workers) // self.npartitions
         return self.workers[i]
 

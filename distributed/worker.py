@@ -44,7 +44,7 @@ from dask.utils import (
     typename,
 )
 
-from . import comm, preloading, profile, system, utils
+from . import comm, preloading, profile, shuffle, system, utils
 from .batched import BatchedSend
 from .comm import connect, get_address_host
 from .comm.addressing import address_from_user_args, parse_address
@@ -91,14 +91,6 @@ from .utils_comm import gather_from_workers, pack_data, retry_operation
 from .utils_perf import ThrottledGC, disable_gc_diagnosis, enable_gc_diagnosis
 from .versions import get_versions
 
-try:
-    from .shuffle import ShuffleWorkerExtension
-except ImportError:
-    # pandas is not available
-    ShuffleWorkerExtension = None  # type: ignore
-    # https://github.com/python/mypy/issues/1297
-
-
 logger = logging.getLogger(__name__)
 
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
@@ -121,8 +113,8 @@ READY = {"ready", "constrained"}
 RUNNING = {Status.running, Status.paused, Status.closing_gracefully}
 
 DEFAULT_EXTENSIONS: list[type] = [PubSubWorkerExtension]
-if ShuffleWorkerExtension:
-    DEFAULT_EXTENSIONS.append(ShuffleWorkerExtension)
+if shuffle.SHUFFLE_AVAILABLE:
+    DEFAULT_EXTENSIONS.append(shuffle.ShuffleWorkerExtension)
 
 DEFAULT_METRICS: dict[str, Callable[[Worker], Any]] = {}
 
