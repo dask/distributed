@@ -319,6 +319,17 @@ def SSHCluster(
     ... )
     >>> client = Client(cluster)
 
+    Create a cluster with two workers on each host:
+
+    >>> from dask.distributed import Client, SSHCluster
+    >>> cluster = SSHCluster(
+    ...     ["localhost", "localhost", "localhost", "localhost"],
+    ...     connect_options={"known_hosts": None},
+    ...     worker_options={"nthreads": 2, "nprocs": 2},
+    ...     scheduler_options={"port": 0, "dashboard_address": ":8797"}
+    ... )
+    >>> client = Client(cluster)
+
     An example using a different worker class, in particular the
     ``CUDAWorker`` from the ``dask-cuda`` project:
 
