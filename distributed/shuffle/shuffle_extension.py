@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, NewType
 
 import pandas as pd
@@ -15,8 +15,22 @@ if TYPE_CHECKING:
 ShuffleId = NewType("ShuffleId", str)
 
 
-@dataclasses.dataclass(frozen=True)
-class ShuffleMetadata:
+# NOTE: we use these dataclasses purely for type-checking benefits.
+# They take the place of positional arguments to `shuffle_init`,
+# which the type-checker can't validate when it's called as an RPC.
+
+
+@dataclass(frozen=True)
+class NewShuffleMetadata:
+    "Metadata to create a shuffle"
+    id: ShuffleId
+    empty: pd.DataFrame
+    column: str
+    npartitions: int
+
+
+@dataclass(frozen=True)
+class ShuffleMetadata(NewShuffleMetadata):
     """
     Metadata every worker needs to share about a shuffle.
 
@@ -24,14 +38,7 @@ class ShuffleMetadata:
     over the `ShuffleWorkerExtension.shuffle_init` RPC.
     """
 
-    # NOTE: instead of passing these fields as arguments to `shuffle_init`,
-    # we use this dataclass purely for type-checking benefits. (The type-checker
-    # cannot not understand RPCs over comms.)
-    id: ShuffleId
     workers: list[str]
-    empty: pd.DataFrame
-    column: str
-    npartitions: int
 
     def worker_for(self, output_partition: int) -> str:
         # i = math.floor((output_partition / self.npartitions) * len(self.workers))
@@ -113,11 +120,9 @@ class ShuffleWorkerExtension:
         # NOTE: in the future, this method will likely be async
         self._get_shuffle(shuffle_id).receive(output_partition, data)
 
-    def create_shuffle(self, metadata: ShuffleMetadata) -> None:
+    def create_shuffle(self, new_metadata: NewShuffleMetadata) -> None:
         """
         Task: Create a new shuffle and broadcast it to all workers.
-
-        Note: ``metadata`` is mutated. The ``workers`` field on ``metadata`` will be ignored.
         """
         # TODO would be nice to not have to have this, and have shuffles started implicitly
         # by the first `receive`/`add_partition`, and have shuffle metadata be passed into
@@ -127,7 +132,7 @@ class ShuffleWorkerExtension:
         # 1. passing in metadata everywhere feels contrived when it would be so easy to store
         # 2. it makes scheduling much harder, since it's a widely-shared common dep
         #    (https://github.com/dask/distributed/pull/5325)
-        if metadata.id in self.shuffles:
+        if new_metadata.id in self.shuffles:
             raise ValueError(
                 f"Shuffle {id!r} is already registered on worker {self.worker.address}"
             )
@@ -142,7 +147,13 @@ class ShuffleWorkerExtension:
 
         # TODO worker restrictions, etc!
         workers = list(identity["workers"])
-        metadata = dataclasses.replace(metadata, workers=workers)
+        metadata = ShuffleMetadata(
+            new_metadata.id,
+            new_metadata.empty,
+            new_metadata.column,
+            new_metadata.npartitions,
+            workers,
+        )
 
         sync(
             self.worker.loop,

@@ -9,13 +9,13 @@ from dask.highlevelgraph import HighLevelGraph
 
 from distributed import get_worker
 
-from .shuffle_extension import ShuffleId, ShuffleMetadata, ShuffleWorkerExtension
+from .shuffle_extension import NewShuffleMetadata, ShuffleId, ShuffleWorkerExtension
 
 if TYPE_CHECKING:
     import pandas as pd
 
 
-def shuffle_setup(metadata: ShuffleMetadata) -> None:
+def shuffle_setup(metadata: NewShuffleMetadata) -> None:
     worker = get_worker()
     extension: ShuffleWorkerExtension | None = worker.extensions.get("shuffle")
     if not extension:
@@ -49,9 +49,8 @@ def rearrange_by_column_service(
     token = tokenize(df, column, npartitions)
 
     setup = delayed(shuffle_setup)(
-        ShuffleMetadata(
+        NewShuffleMetadata(
             ShuffleId(token),
-            [],
             df._meta,
             column,
             npartitions,
