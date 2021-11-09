@@ -356,40 +356,26 @@ async def test_locked_comm_intercept_write(loop):
 
 
 @pytest.mark.slow()
-def test_provide_stack_on_timeout():
-    sleep_time = 30
-
-    async def inner_test(c, s, a, b):
-        await asyncio.sleep(sleep_time)
-
-    # If this timeout is too small, the cluster setup/teardown might take too
-    # long and the timeout error we'll receive will be different
-    test = gen_cluster(client=True, timeout=2, cluster_dump_directory=False)(inner_test)
-
-    start = time()
-    with pytest.raises(asyncio.TimeoutError) as exc:
-        test()
-    end = time()
-    assert "inner_test" in str(exc)
-    assert "await asyncio.sleep(sleep_time)" in str(exc)
-    # ensure the task was properly
-    assert end - start < sleep_time / 2
-
-
-@pytest.mark.slow()
 def test_dump_cluster_state_timeout(tmp_path):
     sleep_time = 30
 
     async def inner_test(c, s, a, b):
         await asyncio.sleep(sleep_time)
 
-    # If this timeout is too small, the cluster setup/teardown might take too
-    # long and the timeout error we'll receive will be different
-    test = gen_cluster(client=True, timeout=2, cluster_dump_directory=tmp_path)(
+    # This timeout includes cluster startup and teardown which sometimes can
+    # take a significant amount of time. For this particular test we would like
+    # to keep the _test timeout_ small because we intend to trigger it but the
+    # overall timeout large.
+    test = gen_cluster(client=True, timeout=5, cluster_dump_directory=tmp_path)(
         inner_test
     )
-    with pytest.raises(asyncio.TimeoutError):
-        test()
+    try:
+        with pytest.raises(asyncio.TimeoutError) as exc:
+            test()
+        assert "inner_test" in str(exc)
+        assert "await asyncio.sleep(sleep_time)" in str(exc)
+    except gen.TimeoutError:
+        pytest.xfail("Cluster startup or teardown took too long")
 
     _, dirs, files = next(os.walk(tmp_path))
     assert not dirs

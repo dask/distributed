@@ -134,7 +134,7 @@ jobs:
         with:
           name: ${{ env.TEST_ID }}
           path: reports
-      - name: Upload deadlock reports
+      - name: Upload timeout reports
         # ensure this runs even if pytest fails
         if: >
           always() &&
