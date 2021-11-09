@@ -224,7 +224,7 @@ class TaskState:
         nbytes = self.nbytes
         return nbytes if nbytes is not None else DEFAULT_DATA_SIZE
 
-    def to_dict(self, *, exclude: Container[str] = None) -> dict[str, Any]:
+    def _to_dict(self, *, exclude: Container[str] = None) -> dict[str, Any]:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not inteded for roundtrips.
@@ -1120,7 +1120,7 @@ class Worker(ServerNode):
             "memory_limit": self.memory_limit,
         }
 
-    def to_dict(
+    def _to_dict(
         self, comm: Comm = None, *, exclude: Container[str] = None
     ) -> dict[str, Any]:
         """
@@ -1138,7 +1138,7 @@ class Worker(ServerNode):
         Worker.identity
         Client.dump_cluster_state
         """
-        info = super().to_dict(exclude=exclude)
+        info = super()._to_dict(exclude=exclude)
         extra = {
             "status": self.status,
             "ready": self.ready,

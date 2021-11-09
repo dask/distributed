@@ -1730,7 +1730,7 @@ class TaskState:
         return nbytes
 
     @ccall
-    def to_dict(self, *, exclude: Container[str] = None):
+    def _to_dict(self, *, exclude: Container[str] = None):
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not inteded for roundtrips.
@@ -3974,7 +3974,7 @@ class Scheduler(SchedulerState, ServerNode):
         }
         return d
 
-    def to_dict(
+    def _to_dict(
         self, comm: Comm = None, *, exclude: Container[str] = None
     ) -> "dict[str, Any]":
         """
@@ -3993,7 +3993,7 @@ class Scheduler(SchedulerState, ServerNode):
         Client.dump_cluster_state
         """
 
-        info = super().to_dict(exclude=exclude)
+        info = super()._to_dict(exclude=exclude)
         extra = {
             "transition_log": self.transition_log,
             "log": self.log,
@@ -4003,8 +4003,8 @@ class Scheduler(SchedulerState, ServerNode):
         info.update(extra)
         extensions = {}
         for name, ex in self.extensions.items():
-            if hasattr(ex, "to_dict"):
-                extensions[name] = ex.to_dict()
+            if hasattr(ex, "_to_dict"):
+                extensions[name] = ex._to_dict()
         return recursive_to_dict(info, exclude=exclude)
 
     def get_worker_service_addr(self, worker, service_name, protocol=False):

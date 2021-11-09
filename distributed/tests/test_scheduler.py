@@ -3251,11 +3251,11 @@ async def test_unpause_schedules_unrannable_tasks(c, s, a):
 
 
 @gen_cluster(client=True)
-async def test_to_dict(c, s, a, b):
+async def test__to_dict(c, s, a, b):
     futs = c.map(inc, range(100))
 
     await c.gather(futs)
-    dct = Scheduler.to_dict(s)
+    dct = Scheduler._to_dict(s)
     assert list(dct.keys()) == [
         "type",
         "id",

@@ -82,7 +82,7 @@ class WorkStealing(SchedulerPlugin):
 
         self.scheduler.stream_handlers["steal-response"] = self.move_task_confirm
 
-    def to_dict(self, *, exclude: Container[str] = None) -> dict[str, Any]:
+    def _to_dict(self, *, exclude: Container[str] = None) -> dict[str, Any]:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not inteded for roundtrips.

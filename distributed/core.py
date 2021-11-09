@@ -150,7 +150,7 @@ class Server:
             "identity": self.identity,
             "echo": self.echo,
             "connection_stream": self.handle_stream,
-            "dump_state": self.to_dict,
+            "dump_state": self._to_dict,
         }
         self.handlers.update(handlers)
         if blocked_handlers is None:
@@ -385,7 +385,7 @@ class Server:
     def identity(self, comm=None) -> dict[str, str]:
         return {"type": type(self).__name__, "id": self.id}
 
-    def to_dict(
+    def _to_dict(
         self, comm: Comm = None, *, exclude: Container[str] = None
     ) -> dict[str, str]:
         """

@@ -1449,7 +1449,7 @@ def __getattr__(name):
 if TYPE_CHECKING:
 
     class SupportsToDict(Protocol):
-        def to_dict(
+        def _to_dict(
             self, *, exclude: Container[str] | None = None, **kwargs
         ) -> dict[str, AnyType]:
             ...
@@ -1485,18 +1485,20 @@ def recursive_to_dict(
 
 def recursive_to_dict(obj, exclude=None, seen=None):
     """
-    This is for debugging purposes only and calls `to_dict` methods on `obj` or
+    This is for debugging purposes only and calls ``_to_dict`` methods on ``obj`` or
     it's elements recursively, if available. The output of this function is
     intended to be json serializable.
 
     Parameters
     ----------
     exclude:
-        A list of attribute names to be excluded from the dump. This will be forwarded to the objects to_dict methods and these methods are required to ensure this.
+        A list of attribute names to be excluded from the dump.
+        This will be forwarded to the objects ``_to_dict`` methods and these methods
+        are required to ensure this.
     seen:
         Used internally to avoid infinite recursion. If an object has already
         been encountered, it's representation will be generated instead of its
-        to_dict. This is necessary since we have multiple cyclic referencing
+        ``_to_dict``. This is necessary since we have multiple cyclic referencing
         data structures.
     """
     if obj is None:
@@ -1510,8 +1512,8 @@ def recursive_to_dict(obj, exclude=None, seen=None):
     seen.add(id(obj))
     if isinstance(obj, type):
         return repr(obj)
-    if hasattr(obj, "to_dict"):
-        return obj.to_dict(exclude=exclude)
+    if hasattr(obj, "_to_dict"):
+        return obj._to_dict(exclude=exclude)
     if isinstance(obj, (deque, set)):
         obj = tuple(obj)
     if isinstance(obj, (list, tuple)):
