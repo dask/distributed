@@ -5,11 +5,11 @@ import sys
 import warnings
 import weakref
 from json import dumps
+from uuid import uuid4
 
 import dask
 import dask.config
 
-from ..core import Status
 from .spec import ProcessInterface, SpecCluster
 
 logger = logging.getLogger(__name__)
@@ -89,6 +89,7 @@ class Worker(Process):
         self.kwargs = kwargs
         self.name = name
         self.remote_python = remote_python
+        self.nprocs = self.kwargs.pop("nprocs", 1)
 
     async def start(self):
         import asyncssh  # import now to avoid adding to module startup time
@@ -125,11 +126,14 @@ class Worker(Process):
                 "'%s'"
                 % dumps(
                     {
-                        "cls": self.worker_class,
-                        "opts": {
-                            **self.kwargs,
-                            "name": self.name,
-                        },
+                        uuid4().hex[:10]: {
+                            "cls": self.worker_class,
+                            "opts": {
+                                **self.kwargs,
+                                "name": self.name,
+                            },
+                        }
+                        for i in range(self.nprocs)
                     }
                 ),
             ]
@@ -138,15 +142,14 @@ class Worker(Process):
         self.proc = await self.connection.create_process(cmd)
 
         # We watch stderr in order to get the address, then we return
-        while True:
+        started_workers = 0
+        while started_workers < self.nprocs:
             line = await self.proc.stderr.readline()
             if not line.strip():
                 raise Exception("Worker failed to start")
             logger.info(line.strip())
             if "worker at" in line:
-                self.address = line.split("worker at:")[1].strip()
-                self.status = Status.running
-                break
+                started_workers += 1
         logger.debug("%s", line)
         await super().start()
 
