@@ -1843,7 +1843,7 @@ class Worker(ServerNode):
                 continue
             if not ts.is_protected():
                 self.log.append((ts.key, "remove-replica-confirmed", stimulus_id))
-                recommendations[ts] = "released" if ts.dependents else "forgotten"
+                recommendations[ts] = "released"
             else:
                 rejected.append(key)
 
