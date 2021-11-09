@@ -3248,3 +3248,26 @@ async def test_unpause_schedules_unrannable_tasks(c, s, a):
 
     a.memory_pause_fraction = 0.8
     assert await fut == 2
+
+
+@gen_cluster(client=True)
+async def test_to_dict(c, s, a, b):
+    futs = c.map(inc, range(100))
+
+    await c.gather(futs)
+    dct = Scheduler.to_dict(s)
+    assert list(dct.keys()) == [
+        "type",
+        "id",
+        "address",
+        "services",
+        "started",
+        "workers",
+        "status",
+        "thread_id",
+        "transition_log",
+        "log",
+        "tasks",
+        "events",
+    ]
+    assert dct["tasks"][futs[0].key]

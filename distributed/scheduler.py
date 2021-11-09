@@ -1747,12 +1747,9 @@ class TaskState:
 
         if not exclude:
             exclude = set()
+        members = inspect.getmembers(self, lambda v: not callable(v))
         return recursive_to_dict(
-            {
-                attr: getattr(self, attr)
-                for attr in self.__slots__
-                if attr not in exclude and hasattr(self, attr)
-            },
+            {k: v for k, v in members if k not in exclude},
             exclude=exclude,
         )
 

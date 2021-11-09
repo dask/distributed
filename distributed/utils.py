@@ -1508,6 +1508,8 @@ def recursive_to_dict(obj, exclude=None, seen=None):
     if id(obj) in seen:
         return repr(obj)
     seen.add(id(obj))
+    if isinstance(obj, type):
+        return repr(obj)
     if hasattr(obj, "to_dict"):
         return obj.to_dict(exclude=exclude)
     if isinstance(obj, (deque, set)):
