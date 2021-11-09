@@ -2994,7 +2994,7 @@ class Worker(ServerNode):
             # If task is marked as "constrained" we haven't yet assigned it an
             # `available_resources` to run on, that happens in
             # `transition_constrained_executing`
-            self.transition(ts, "forgotten", stimulus_id=stimulus_id)
+            self.transition(ts, "released", stimulus_id=stimulus_id)
 
     def release_key(
         self,
