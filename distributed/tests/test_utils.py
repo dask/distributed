@@ -506,7 +506,7 @@ def test_is_valid_xml():
         assert is_valid_xml("<a>foo")
 
 
-def testformat_dashboard_link():
+def test_format_dashboard_link():
     with dask.config.set({"distributed.dashboard.link": "foo"}):
         assert format_dashboard_link("host", 1234) == "foo"
 
