@@ -5,7 +5,6 @@ import sys
 import warnings
 import weakref
 from json import dumps
-from uuid import uuid4
 
 import dask
 import dask.config
@@ -126,7 +125,7 @@ class Worker(Process):
                 "'%s'"
                 % dumps(
                     {
-                        uuid4().hex[:10]: {
+                        i: {
                             "cls": self.worker_class,
                             "opts": {
                                 **self.kwargs,
