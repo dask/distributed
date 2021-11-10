@@ -81,10 +81,19 @@ class Shuffle:
         await asyncio.gather(*tasks)
 
     def get_output_partition(self, i: int) -> pd.DataFrame:
-        parts = self.output_partitions.pop(i)
-        if parts:
-            return pd.concat(parts, copy=False)
-        return self.metadata.empty
+        assert (
+            self.metadata.worker_for(i) == self.worker.address
+        ), f"Output partition {i} belongs on {self.metadata.worker_for(i)}, not {self.worker.address}"
+        # ^ NOTE: this check isn't strictly necessary, just a nice validation to prevent incorrect
+        # data in the case something has gone very wrong
+
+        try:
+            parts = self.output_partitions.pop(i)
+        except KeyError:
+            return self.metadata.empty
+
+        assert parts, f"Empty entry for output partition {i}"
+        return pd.concat(parts, copy=False)
 
 
 class ShuffleWorkerExtension:

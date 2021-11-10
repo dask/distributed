@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import string
 from collections import Counter
 from typing import TYPE_CHECKING
@@ -133,6 +134,9 @@ async def test_add_partition(s: Scheduler, *workers: Worker):
     )
     await ext._add_partition(partition, new_metadata.id)
 
+    with pytest.raises(ValueError, match="not registered"):
+        await ext._add_partition(partition, ShuffleId("bar"))
+
     metadata = ext.shuffles[new_metadata.id].metadata
     for i, data in partition.groupby(new_metadata.column):
         addr = metadata.worker_for(int(i))
@@ -142,3 +146,54 @@ async def test_add_partition(s: Scheduler, *workers: Worker):
         assert_frame_equal(data, received[0])
 
     # TODO (resilience stage) test failed sends
+
+
+@gen_cluster([("", 1)] * 4)
+async def test_get_partition(s: Scheduler, *workers: Worker):
+    exts: dict[str, ShuffleWorkerExtension] = {
+        w.address: w.extensions["shuffle"] for w in workers
+    }
+
+    new_metadata = NewShuffleMetadata(
+        ShuffleId("foo"),
+        pd.DataFrame({"A": [], "partition": []}),
+        "partition",
+        8,
+    )
+
+    ext = next(iter(exts.values()))
+    await ext._create_shuffle(new_metadata)
+    metadata = ext.shuffles[new_metadata.id].metadata
+    p1 = pd.DataFrame(
+        {
+            "A": ["a", "b", "c", "d", "e", "f", "g", "h"],
+            "partition": [0, 1, 2, 3, 4, 5, 6, 6],
+        }
+    )
+    p2 = pd.DataFrame(
+        {
+            "A": ["a", "b", "c", "d", "e", "f", "g", "h"],
+            "partition": [0, 1, 2, 3, 0, 0, 2, 3],
+        }
+    )
+    await asyncio.gather(
+        ext._add_partition(p1, new_metadata.id), ext._add_partition(p2, new_metadata.id)
+    )
+
+    full = pd.concat([p1, p2])
+    expected_groups = full.groupby("partition")
+    for output_i in range(metadata.npartitions):
+        addr = metadata.worker_for(output_i)
+        ext = exts[addr]
+        result = ext.get_output_partition(metadata.id, output_i)
+        try:
+            expected = expected_groups.get_group(output_i)
+        except KeyError:
+            expected = metadata.empty
+        assert_frame_equal(expected, result)
+
+    with pytest.raises(ValueError, match="not registered"):
+        ext.get_output_partition(ShuffleId("bar"), 0)
+
+    with pytest.raises(AssertionError, match="belongs on"):
+        ext.get_output_partition(metadata.id, 0)
