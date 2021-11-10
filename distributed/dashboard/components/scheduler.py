@@ -3,6 +3,7 @@ import math
 import operator
 import os
 from collections import defaultdict
+from functools import lru_cache
 from numbers import Number
 
 import numpy as np
@@ -94,6 +95,11 @@ logos_dict = {
 }
 
 
+@lru_cache(maxsize=2048)
+def url_escape_cached(value: str):
+    return escape.url_escape(value)
+
+
 class Occupancy(DashboardComponent):
     """Occupancy (in time) per worker"""
 
@@ -172,7 +178,7 @@ class Occupancy(DashboardComponent):
                     "worker": [ws.address for ws in workers],
                     "ms": ms,
                     "color": color,
-                    "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
+                    "escaped_worker": [url_escape_cached(ws.address) for ws in workers],
                     "x": x,
                     "y": y,
                 }
@@ -487,7 +493,7 @@ class WorkersMemory(DashboardComponent):
                 "alpha": [1, 0.7, 0.4, 1] * len(workers),
                 "worker": quadlist(ws.address for ws in workers),
                 "escaped_worker": quadlist(
-                    escape.url_escape(ws.address) for ws in workers
+                    url_escape_cached(ws.address) for ws in workers
                 ),
                 "y": quadlist(range(len(workers))),
                 "proc_memory": quadlist(procmemory),
@@ -1511,7 +1517,7 @@ class CurrentLoad(DashboardComponent):
                 "nprocessing-half": [np / 2 for np in nprocessing],
                 "nprocessing-color": nprocessing_color,
                 "worker": [ws.address for ws in workers],
-                "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
+                "escaped_worker": [url_escape_cached(ws.address) for ws in workers],
                 "y": list(range(len(workers))),
             }
 
