@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Callable, NewType
 
 import pandas as pd
 
+from distributed.protocol import to_serialize
 from distributed.utils import sync
 
 if TYPE_CHECKING:
@@ -62,17 +63,22 @@ class Shuffle:
         assert data, f"Shuffle {self.metadata.id!r} received empty DataFrame"
         self.output_partitions[output_partition].append(data)
 
-    def add_partition(self, data: pd.DataFrame) -> None:
+    async def add_partition(self, data: pd.DataFrame) -> None:
+        tasks = []
+        # TODO grouping is blocking, should it be offloaded to a thread?
+        # It mostly doesn't release the GIL though, so may not make much difference.
         for output_partition, data in data.groupby(self.metadata.column):
             addr = self.metadata.worker_for(int(output_partition))
-            # TODO this is exceptionally serial; move the sync-async boundary to the extension
-            sync(
-                self.worker.loop,
-                self.worker.rpc(addr).shuffle_receive,
-                shuffle_id=self.metadata.id,
-                output_partition=output_partition,
-                data=data,
+            task = asyncio.create_task(
+                self.worker.rpc(addr).shuffle_receive(
+                    shuffle_id=self.metadata.id,
+                    output_partition=output_partition,
+                    data=to_serialize(data),
+                )
             )
+            tasks.append(task)
+
+        await asyncio.gather(*tasks)
 
     def get_output_partition(self, i: int) -> pd.DataFrame:
         parts = self.output_partitions.pop(i)
@@ -103,7 +109,7 @@ class ShuffleWorkerExtension:
         self.worker: Worker = worker
         self.shuffles: dict[ShuffleId, Shuffle] = {}
 
-    def shuffle_init(self, metadata: ShuffleMetadata) -> None:
+    def shuffle_init(self, comm: object, metadata: ShuffleMetadata) -> None:
         """
         Hander: Register a new shuffle that is about to begin.
         Using a shuffle with an already-known ID is an error.
@@ -115,7 +121,11 @@ class ShuffleWorkerExtension:
         self.shuffles[metadata.id] = Shuffle(metadata, self.worker)
 
     def shuffle_receive(
-        self, shuffle_id: ShuffleId, output_partition: int, data: pd.DataFrame
+        self,
+        comm: object,
+        shuffle_id: ShuffleId,
+        output_partition: int,
+        data: pd.DataFrame,
     ) -> None:
         """
         Hander: Receive an incoming shard of data from a peer worker.
@@ -125,6 +135,9 @@ class ShuffleWorkerExtension:
         self._get_shuffle(shuffle_id).receive(output_partition, data)
 
     def create_shuffle(self, new_metadata: NewShuffleMetadata) -> None:
+        sync(self.worker.loop, self._create_shuffle, new_metadata)
+
+    async def _create_shuffle(self, new_metadata: NewShuffleMetadata) -> None:
         """
         Task: Create a new shuffle and broadcast it to all workers.
         """
@@ -141,12 +154,13 @@ class ShuffleWorkerExtension:
                 f"Shuffle {id!r} is already registered on worker {self.worker.address}"
             )
 
-        # TODO the client could be sync or async. Fix things so this is more graceful?
-        # OR, just come up with a different way to get peer addresses from the scheduler.
-        # 1. passing `asynchronous=False` to an async client won't make it sync
-        # 2. the behavior of `client.scheduler_info()` is different depending on `client.asynchronous`
         client = self.worker.client
-        sync(client.loop, client._update_scheduler_info)
+        assert (
+            client.loop is self.worker.loop
+        ), f"Worker client is not using the worker's event loop: {client.loop} vs {self.worker.loop}"
+        # NOTE: `Client.scheduler_info()` doesn't actually do anything when the client is async,
+        # manually call into the method for now.
+        await client._update_scheduler_info()
         identity = client._scheduler_identity
 
         # TODO worker restrictions, etc!
@@ -159,17 +173,18 @@ class ShuffleWorkerExtension:
             workers,
         )
 
-        sync(
-            self.worker.loop,
-            asyncio.gather,
-            *[
-                self.worker.rpc(addr).shuffle_init(metadata=metadata)
+        await asyncio.gather(
+            *(
+                self.worker.rpc(addr).shuffle_init(metadata=to_serialize(metadata))
                 for addr in metadata.workers
-            ],
+            )
         )
         # Note that this will call `shuffle_init` on our own worker as well
 
     def add_partition(self, data: pd.DataFrame, shuffle_id: ShuffleId) -> None:
+        sync(self.worker.loop, self._add_partition, data, shuffle_id)
+
+    async def _add_partition(self, data: pd.DataFrame, shuffle_id: ShuffleId) -> None:
         """
         Task: Hand off an input partition to the ShuffleExtension.
 
@@ -177,7 +192,7 @@ class ShuffleWorkerExtension:
 
         Using an unknown ``shuffle_id`` is an error.
         """
-        self._get_shuffle(shuffle_id).add_partition(data)
+        await self._get_shuffle(shuffle_id).add_partition(data)
 
     def get_output_partition(
         self, shuffle_id: ShuffleId, output_partition: int

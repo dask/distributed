@@ -9,11 +9,15 @@ import pytest
 
 from distributed.utils_test import gen_cluster
 
-from ..shuffle_extension import ShuffleId, ShuffleMetadata, ShuffleWorkerExtension
+from ..shuffle_extension import (
+    NewShuffleMetadata,
+    ShuffleId,
+    ShuffleMetadata,
+    ShuffleWorkerExtension,
+)
 
 if TYPE_CHECKING:
-    from distributed.scheduler import Scheduler
-    from distributed.worker import Worker
+    from distributed import Scheduler, Worker
 
 
 @pytest.mark.parametrize("npartitions", [1, 2, 3, 5])
@@ -71,10 +75,31 @@ async def test_init(s: Scheduler, worker: Worker):
         [worker.address],
     )
 
-    ext.shuffle_init(metadata)
+    ext.shuffle_init(None, metadata)
     assert list(ext.shuffles) == [metadata.id]
 
     with pytest.raises(ValueError, match="already registered"):
-        ext.shuffle_init(metadata)
+        ext.shuffle_init(None, metadata)
 
     assert list(ext.shuffles) == [metadata.id]
+
+
+@gen_cluster([("", 1)] * 4)
+async def test_create(s: Scheduler, *workers: Worker):
+    exts: list[ShuffleWorkerExtension] = [w.extensions["shuffle"] for w in workers]
+
+    new_metadata = NewShuffleMetadata(
+        ShuffleId("foo"),
+        pd.DataFrame({"A": []}),
+        "A",
+        5,
+    )
+
+    await exts[0]._create_shuffle(new_metadata)
+    for ext in exts:
+        assert len(ext.shuffles) == 1
+        shuffle = ext.shuffles[new_metadata.id]
+        assert shuffle.metadata.workers == [w.address for w in workers]
+
+    with pytest.raises(ValueError, match="already registered"):
+        await exts[0]._create_shuffle(new_metadata)
