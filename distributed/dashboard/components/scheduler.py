@@ -5,6 +5,7 @@ import os
 from collections import defaultdict
 from functools import lru_cache
 from numbers import Number
+from typing import List
 
 import numpy as np
 from bokeh.core.properties import without_property_validation
@@ -443,11 +444,8 @@ class WorkersMemory(DashboardComponent):
 
     @without_property_validation
     def update(self):
-        def quadlist(i) -> list:
-            out = []
-            for ii in i:
-                out += [ii, ii, ii, ii]
-            return out
+        def quadlist(i) -> List[tuple]:
+            return [(ii, ii, ii, ii) for ii in i]
 
         with log_errors():
             workers = self.scheduler.workers.values()
