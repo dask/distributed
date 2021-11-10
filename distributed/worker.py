@@ -1580,6 +1580,13 @@ class Worker(ServerNode):
 
             self.stop_services()
 
+            # Give some time for a UCX scheduler to complete closing endpoints
+            # before closing self.batched_stream, otherwise the local endpoint
+            # may be closed too early and errors be raised on the scheduler when
+            # trying to send closing message.
+            if self._protocol == "ucx":
+                await asyncio.sleep(0.2)
+
             if (
                 self.batched_stream
                 and self.batched_stream.comm
