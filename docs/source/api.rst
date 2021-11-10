@@ -5,122 +5,92 @@ API
 
 .. currentmodule:: distributed
 
-**Client**
+
+Top-level functions
+-------------------
 
 .. autosummary::
-   Client
+   :toctree: generated/
 
-.. autoautosummary:: distributed.Client
-   :methods:
-
-.. currentmodule:: distributed
-
-.. autosummary::
    worker_client
    get_worker
    get_client
    secede
    rejoin
    Reschedule
-
-.. currentmodule:: distributed.recreate_tasks
-
-.. autosummary::
-   ReplayTaskClient.recreate_task_locally
-   ReplayTaskClient.recreate_error_locally
-
-.. currentmodule:: distributed
+   as_completed
+   wait
+   fire_and_forget
+   futures_of
 
 
-**Future**
+Recreate Tasks
+~~~~~~~~~~~~~~
 
 .. autosummary::
-   Future
+   :toctree: generated/
 
-.. autoautosummary:: distributed.Future
+   recreate_tasks.ReplayTaskClient.recreate_task_locally
+   recreate_tasks.ReplayTaskClient.recreate_error_locally
+
+Diagnostics
+~~~~~~~~~~~
+
+.. autosummary::
+   :toctree: generated/
+
+   diagnostics.progressbar.progress
+   get_task_stream
+   get_task_metadata
+   performance_report
+
+Utilities
+~~~~~~~~~
+
+.. autosummary::
+   :toctree: generated/
+
+   utils.Log
+   utils.Logs
+
+Client
+------
+
+.. autosummary::
+   :toctree: generated/
+
+   Client
+
+.. autoautosummary:: distributed.Client
+   :toctree: generated/
    :methods:
 
-**Client Coordination**
 
-.. currentmodule:: distributed
+Client Coordination
+~~~~~~~~~~~~~~~~~~~
 
 .. autosummary::
+   :toctree: generated/
+
    Event
    Lock
    MultiLock
    Queue
    Variable
-
-
-**Other**
-
-.. autosummary::
-   as_completed
-   distributed.diagnostics.progressbar.progress
-   wait
-   fire_and_forget
-   futures_of
-   get_task_stream
-   get_task_metadata
-   performance_report
-
-
-**Utilities**
-
-.. autosummary::
-   distributed.utils.Log
-   distributed.utils.Logs
-
-
-Asynchronous methods
---------------------
-
-Most methods and functions can be used equally well within a blocking or
-asynchronous environment using Tornado coroutines.  If used within a Tornado
-IOLoop then you should yield or await otherwise blocking operations
-appropriately.
-
-You must tell the client that you intend to use it within an asynchronous
-environment by passing the ``asynchronous=True`` keyword
-
-.. code-block:: python
-
-   # blocking
-   client = Client()
-   future = client.submit(func, *args)  # immediate, no blocking/async difference
-   result = client.gather(future)  # blocking
-
-   # asynchronous Python 2/3
-   client = yield Client(asynchronous=True)
-   future = client.submit(func, *args)  # immediate, no blocking/async difference
-   result = yield client.gather(future)  # non-blocking/asynchronous
-
-   # asynchronous Python 3
-   client = await Client(asynchronous=True)
-   future = client.submit(func, *args)  # immediate, no blocking/async difference
-   result = await client.gather(future)  # non-blocking/asynchronous
-
-The asynchronous variants must be run within a Tornado coroutine.  See the
-:doc:`Asynchronous <asynchronous>` documentation for more information.
-
-
-Client
-------
-
-.. currentmodule:: distributed
-
-.. autoclass:: Client
-   :members:
-
-.. autoclass:: distributed.recreate_tasks.ReplayTaskClient
-   :members:
-
+   Semaphore
 
 Future
 ------
 
-.. autoclass:: Future
-   :members:
+.. autosummary::
+   :toctree: generated/
+
+   Future
+
+.. autoautosummary:: distributed.Future
+   :toctree: generated/
+   :methods:
+
 
 Cluster
 -------
@@ -135,63 +105,32 @@ provide additional cluster objects.
 .. _dask-yarn: https://yarn.dask.org/en/latest/
 
 .. autosummary::
+   :toctree: generated/
+
    LocalCluster
+
+.. autoautosummary:: distributed.LocalCluster
+   :toctree: generated/
+   :methods:
+
+.. autosummary::
+   :toctree: generated/
+
    SpecCluster
 
-.. autoclass:: LocalCluster
-   :members:
-
-.. autoclass:: SpecCluster
-   :members:
-
-
-Other
------
-
-.. autoclass:: as_completed
-   :members:
-
-.. autofunction:: distributed.diagnostics.progressbar.progress
-.. autofunction:: wait
-.. autofunction:: fire_and_forget
-.. autofunction:: futures_of
-
-.. currentmodule:: distributed
-
-.. autofunction:: distributed.worker_client
-.. autofunction:: distributed.get_worker
-.. autofunction:: distributed.get_client
-.. autofunction:: distributed.secede
-.. autofunction:: distributed.rejoin
-.. autoclass:: distributed.Reschedule
-.. autoclass:: get_task_stream
-.. autoclass:: get_task_metadata
-.. autoclass:: performance_report
-
-.. autoclass:: Event
-   :members:
-.. autoclass:: Lock
-   :members:
-.. autoclass:: MultiLock
-   :members:
-.. autoclass:: Semaphore
-   :members:
-.. autoclass:: Queue
-   :members:
-.. autoclass:: Variable
-   :members:
-
-
-Utilities
----------
-
-.. autoclass:: distributed.utils.Log
-.. autoclass:: distributed.utils.Logs
-
+.. autoautosummary:: distributed.SpecCluster
+   :toctree: generated/
+   :methods:
 
 Adaptive
 --------
 
 .. currentmodule:: distributed.deploy
-.. autoclass:: Adaptive
-   :members:
+.. autosummary::
+   :toctree: generated/
+   
+   Adaptive
+
+.. autoautosummary:: distributed.Adaptive
+   :toctree: generated/
+   :methods:

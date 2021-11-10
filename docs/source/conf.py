@@ -1,4 +1,5 @@
 from __future__ import annotations
+from datetime import datetime
 
 #
 # Dask.distributed documentation build configuration file, created by
@@ -36,10 +37,16 @@ extensions = [
     "sphinx.ext.intersphinx",
     "numpydoc",
     "sphinx_click.ext",
+    "sphinx_remove_toctrees",
 ]
 
 numpydoc_show_class_members = False
 
+# Remove individual API pages from sphinx toctree to prevent long build times.
+# See https://github.com/dask/dask/issues/8227.
+remove_from_toctrees = ["generated/*"]
+autodoc_default_flags = ['members']
+autosummary_generate = True
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
@@ -57,7 +64,7 @@ master_doc = "index"
 
 # General information about the project.
 project = "Dask.distributed"
-copyright = "2016, Anaconda, Inc."
+copyright = f"2016-{datetime.now().year}, Anaconda, Inc. and contributors"
 author = "Anaconda, Inc."
 
 # The version info for the project you're documenting, acts as replacement for
@@ -381,8 +388,14 @@ extlinks = {
 # and the Numpy documentation.
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
-    "numpy": ("https://docs.scipy.org/doc/numpy", None),
-    "dask": ("https://docs.dask.org/en/latest", None),
+    "numpy": (
+        "https://numpy.org/doc/stable/",
+        "https://numpy.org/doc/stable/objects.inv",
+    ),
+    # "dask": (
+    #     "https://docs.dask.org/en/latest",
+    #     "https://docs.dask.org/en/latest/objects.inv",
+    # ),
     "bokeh": ("https://docs.bokeh.org/en/latest", None),
 }
 
@@ -443,6 +456,7 @@ class AutoAutoSummary(Autosummary):
     option_spec = {
         "methods": directives.unchanged,
         "attributes": directives.unchanged,
+        "toctree": directives.unchanged
     }
 
     required_arguments = 1
