@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 import pytest
+from pandas.testing import assert_frame_equal
 
 from distributed.utils_test import gen_cluster
 
@@ -51,7 +52,7 @@ def test_worker_for_distribution(npartitions: int, n_workers: int):
 async def test_installation(s: Scheduler, worker: Worker):
     ext = worker.extensions["shuffle"]
     assert isinstance(ext, ShuffleWorkerExtension)
-    assert worker.stream_handlers["shuffle_receive"] == ext.shuffle_receive
+    assert worker.handlers["shuffle_receive"] == ext.shuffle_receive
     assert worker.handlers["shuffle_init"] == ext.shuffle_init
 
     with pytest.raises(RuntimeError, match="from a different shuffle extension"):
@@ -59,7 +60,7 @@ async def test_installation(s: Scheduler, worker: Worker):
 
     # Nothing was changed by double-installation
     assert worker.extensions["shuffle"] is ext
-    assert worker.stream_handlers["shuffle_receive"] == ext.shuffle_receive
+    assert worker.handlers["shuffle_receive"] == ext.shuffle_receive
     assert worker.handlers["shuffle_init"] == ext.shuffle_init
 
 
@@ -100,6 +101,44 @@ async def test_create(s: Scheduler, *workers: Worker):
         assert len(ext.shuffles) == 1
         shuffle = ext.shuffles[new_metadata.id]
         assert shuffle.metadata.workers == [w.address for w in workers]
+        # ^ TODO is this order guaranteed?
 
     with pytest.raises(ValueError, match="already registered"):
         await exts[0]._create_shuffle(new_metadata)
+
+    # TODO (resilience stage) what happens if some workers already have
+    # the ID registered, but others don't?
+
+
+@gen_cluster([("", 1)] * 4)
+async def test_add_partition(s: Scheduler, *workers: Worker):
+    exts: dict[str, ShuffleWorkerExtension] = {
+        w.address: w.extensions["shuffle"] for w in workers
+    }
+
+    new_metadata = NewShuffleMetadata(
+        ShuffleId("foo"),
+        pd.DataFrame({"A": [], "partition": []}),
+        "partition",
+        8,
+    )
+
+    ext = next(iter(exts.values()))
+    await ext._create_shuffle(new_metadata)
+    partition = pd.DataFrame(
+        {
+            "A": ["a", "b", "c", "d", "e", "f", "g", "h"],
+            "partition": [0, 1, 2, 3, 4, 5, 6, 7],
+        }
+    )
+    await ext._add_partition(partition, new_metadata.id)
+
+    metadata = ext.shuffles[new_metadata.id].metadata
+    for i, data in partition.groupby(new_metadata.column):
+        addr = metadata.worker_for(int(i))
+        ext = exts[addr]
+        received = ext.shuffles[metadata.id].output_partitions[int(i)]
+        assert len(received) == 1
+        assert_frame_equal(data, received[0])
+
+    # TODO (resilience stage) test failed sends

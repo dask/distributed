@@ -60,7 +60,6 @@ class Shuffle:
         self.output_partitions: defaultdict[int, list[pd.DataFrame]] = defaultdict(list)
 
     def receive(self, output_partition: int, data: pd.DataFrame) -> None:
-        assert data, f"Shuffle {self.metadata.id!r} received empty DataFrame"
         self.output_partitions[output_partition].append(data)
 
     async def add_partition(self, data: pd.DataFrame) -> None:
@@ -78,6 +77,7 @@ class Shuffle:
             )
             tasks.append(task)
 
+        # TODO handle errors and cancellation here
         await asyncio.gather(*tasks)
 
     def get_output_partition(self, i: int) -> pd.DataFrame:
@@ -93,10 +93,7 @@ class ShuffleWorkerExtension:
     def __init__(self, worker: Worker) -> None:
         # Attach to worker
 
-        # TODO: use a stream handler or a normal handler?
-        # Note that I don't think you can return responses from stream handlers,
-        # which we will probably need to do for backpressure.
-        add_handler(worker.stream_handlers, self.shuffle_receive)
+        add_handler(worker.handlers, self.shuffle_receive)
         add_handler(worker.handlers, self.shuffle_init)
 
         existing_extension = worker.extensions.setdefault("shuffle", self)
@@ -141,7 +138,7 @@ class ShuffleWorkerExtension:
         """
         Task: Create a new shuffle and broadcast it to all workers.
         """
-        # TODO would be nice to not have to have this, and have shuffles started implicitly
+        # TODO would be nice to not have to have this method, and have shuffles started implicitly
         # by the first `receive`/`add_partition`, and have shuffle metadata be passed into
         # tasks and from there into the extension (rather than stored within a `Shuffle`),
         # since this would mean the setup task returns meaningful data, and isn't just
@@ -173,6 +170,8 @@ class ShuffleWorkerExtension:
             workers,
         )
 
+        # TODO handle errors from peers, and cancellation.
+        # If any peers can't start the shuffle, tell other peers to cancel it.
         await asyncio.gather(
             *(
                 self.worker.rpc(addr).shuffle_init(metadata=to_serialize(metadata))
