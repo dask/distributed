@@ -36,9 +36,9 @@ def test_worker_for_distribution(npartitions: int, n_workers: int):
 
     assignments = [metadata.worker_for(i) for i in range(metadata.npartitions)]
 
-    # Test `partition_range_for_worker`
+    # Test `partition_range`
     for w in metadata.workers:
-        first, last = metadata.partition_range_for_worker(w)
+        first, last = metadata.partition_range(w)
         assert all(
             [
                 first <= p_i <= last if a == w else p_i < first or p_i > last
@@ -76,6 +76,7 @@ async def test_installation(s: Scheduler, worker: Worker):
     assert isinstance(ext, ShuffleWorkerExtension)
     assert worker.handlers["shuffle_receive"] == ext.shuffle_receive
     assert worker.handlers["shuffle_init"] == ext.shuffle_init
+    assert worker.handlers["shuffle_inputs_done"] == ext.shuffle_inputs_done
 
     with pytest.raises(RuntimeError, match="from a different shuffle extension"):
         ShuffleWorkerExtension(worker)
@@ -84,6 +85,8 @@ async def test_installation(s: Scheduler, worker: Worker):
     assert worker.extensions["shuffle"] is ext
     assert worker.handlers["shuffle_receive"] == ext.shuffle_receive
     assert worker.handlers["shuffle_init"] == ext.shuffle_init
+    assert worker.handlers["shuffle_init"] == ext.shuffle_init
+    assert worker.handlers["shuffle_inputs_done"] == ext.shuffle_inputs_done
 
 
 @gen_cluster([("", 1)])
@@ -111,7 +114,7 @@ async def add_dummy_unpack_keys(
     new_metadata: NewShuffleMetadata, client: Client
 ) -> dict[str, Future]:
     """
-    Add dummy keys to the scheduler, so setting worker restrictions during `shuffle_create` succeeds.
+    Add dummy keys to the scheduler, so setting worker restrictions during `barrier` succeeds.
 
     Note: you must hang onto the Futures returned by this function, so they don't get released prematurely.
     """
@@ -128,8 +131,8 @@ async def add_dummy_unpack_keys(
     return fs
 
 
-@gen_cluster([("", 1)] * 4, client=True)
-async def test_create(c: Client, s: Scheduler, *workers: Worker):
+@gen_cluster([("", 1)] * 4)
+async def test_create(s: Scheduler, *workers: Worker):
     exts: list[ShuffleWorkerExtension] = [w.extensions["shuffle"] for w in workers]
 
     new_metadata = NewShuffleMetadata(
@@ -138,7 +141,6 @@ async def test_create(c: Client, s: Scheduler, *workers: Worker):
         "A",
         5,
     )
-    fs = await add_dummy_unpack_keys(new_metadata, c)
 
     metadata = await exts[0]._create_shuffle(new_metadata)
 
@@ -148,10 +150,6 @@ async def test_create(c: Client, s: Scheduler, *workers: Worker):
         shuffle = ext.shuffles[new_metadata.id]
         assert sorted(shuffle.metadata.workers) == sorted(w.address for w in workers)
 
-    # Check scheduler restrictions were set for unpack tasks
-    for key, i in zip(fs, range(new_metadata.npartitions)):
-        assert s.tasks[key].worker_restrictions == {metadata.worker_for(i)}
-
     # TODO (resilience stage) what happens if some workers already have
     # the ID registered, but others don't?
 
@@ -159,8 +157,8 @@ async def test_create(c: Client, s: Scheduler, *workers: Worker):
         await exts[0]._create_shuffle(new_metadata)
 
 
-@gen_cluster([("", 1)] * 4, client=True)
-async def test_add_partition(c: Client, s: Scheduler, *workers: Worker):
+@gen_cluster([("", 1)] * 4)
+async def test_add_partition(s: Scheduler, *workers: Worker):
     exts: dict[str, ShuffleWorkerExtension] = {
         w.address: w.extensions["shuffle"] for w in workers
     }
@@ -171,7 +169,6 @@ async def test_add_partition(c: Client, s: Scheduler, *workers: Worker):
         "partition",
         8,
     )
-    _ = await add_dummy_unpack_keys(new_metadata, c)
 
     ext = next(iter(exts.values()))
     metadata = await ext._create_shuffle(new_metadata)
@@ -197,6 +194,47 @@ async def test_add_partition(c: Client, s: Scheduler, *workers: Worker):
 
 
 @gen_cluster([("", 1)] * 4, client=True)
+async def test_barrier(c: Client, s: Scheduler, *workers: Worker):
+    exts: dict[str, ShuffleWorkerExtension] = {
+        w.address: w.extensions["shuffle"] for w in workers
+    }
+
+    new_metadata = NewShuffleMetadata(
+        ShuffleId("foo"),
+        pd.DataFrame({"A": [], "partition": []}),
+        "partition",
+        4,
+    )
+    fs = await add_dummy_unpack_keys(new_metadata, c)
+
+    ext = next(iter(exts.values()))
+    metadata = await ext._create_shuffle(new_metadata)
+    partition = pd.DataFrame(
+        {
+            "A": ["a", "b", "c"],
+            "partition": [0, 1, 2],
+        }
+    )
+    await ext._add_partition(partition, metadata.id)
+
+    await ext._barrier(metadata.id)
+
+    # Check scheduler restrictions were set for unpack tasks
+    for key, i in zip(fs, range(metadata.npartitions)):
+        assert s.tasks[key].worker_restrictions == {metadata.worker_for(i)}
+
+    # Check all workers have been informed of the barrier
+    for addr, ext in exts.items():
+        if metadata.npartitions_for(addr):
+            shuffle = ext.shuffles[metadata.id]
+            assert shuffle.transferred
+            assert not shuffle.done()
+        else:
+            # No output partitions on this worker; shuffle already cleaned up
+            assert not ext.shuffles
+
+
+@gen_cluster([("", 1)] * 4, client=True)
 async def test_get_partition(c: Client, s: Scheduler, *workers: Worker):
     exts: dict[str, ShuffleWorkerExtension] = {
         w.address: w.extensions["shuffle"] for w in workers
@@ -208,7 +246,7 @@ async def test_get_partition(c: Client, s: Scheduler, *workers: Worker):
         "partition",
         8,
     )
-    fs = await add_dummy_unpack_keys(new_metadata, c)
+    _ = await add_dummy_unpack_keys(new_metadata, c)
 
     ext = next(iter(exts.values()))
     metadata = await ext._create_shuffle(new_metadata)
@@ -225,8 +263,12 @@ async def test_get_partition(c: Client, s: Scheduler, *workers: Worker):
         }
     )
     await asyncio.gather(
-        ext._add_partition(p1, new_metadata.id), ext._add_partition(p2, new_metadata.id)
+        ext._add_partition(p1, metadata.id), ext._add_partition(p2, metadata.id)
     )
+    await ext._barrier(metadata.id)
+
+    with pytest.raises(AssertionError, match="belongs on"):
+        ext.get_output_partition(metadata.id, 7)
 
     full = pd.concat([p1, p2])
     expected_groups = full.groupby("partition")
@@ -240,8 +282,9 @@ async def test_get_partition(c: Client, s: Scheduler, *workers: Worker):
             expected = metadata.empty
         assert_frame_equal(expected, result)
 
-    with pytest.raises(ValueError, match="not registered"):
-        ext.get_output_partition(ShuffleId("bar"), 0)
+    # Once all partitions are retrieved, shuffles are cleaned up
+    for ext in exts.values():
+        assert not ext.shuffles
 
-    with pytest.raises(AssertionError, match="belongs on"):
+    with pytest.raises(ValueError, match="not registered"):
         ext.get_output_partition(metadata.id, 0)

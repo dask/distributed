@@ -40,8 +40,11 @@ def shuffle_unpack(id: ShuffleId, output_partition: int, barrier=None) -> pd.Dat
     return extension.get_output_partition(id, output_partition)
 
 
-def shuffle_barrier(transfers: list[None]) -> None:
-    pass
+def shuffle_barrier(id: ShuffleId, transfers: list[None]) -> None:
+    from distributed import get_worker
+
+    extension: ShuffleWorkerExtension = get_worker().extensions["shuffle"]
+    extension.barrier(id)
 
 
 def rearrange_by_column_p2p(
@@ -71,7 +74,7 @@ def rearrange_by_column_p2p(
     )
 
     barrier_key = "shuffle-barrier-" + token
-    barrier_dsk = {barrier_key: (shuffle_barrier, transferred.__dask_keys__())}
+    barrier_dsk = {barrier_key: (shuffle_barrier, token, transferred.__dask_keys__())}
     barrier = Delayed(
         barrier_key,
         HighLevelGraph.from_collections(

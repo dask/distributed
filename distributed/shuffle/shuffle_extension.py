@@ -51,7 +51,7 @@ class ShuffleMetadata(NewShuffleMetadata):
         i = len(self.workers) * output_partition // self.npartitions
         return self.workers[i]
 
-    def partition_range_for_worker(self, worker: str) -> tuple[int, int]:
+    def partition_range(self, worker: str) -> tuple[int, int]:
         "Get the output partition numbers (inclusive) that a worker will hold"
         i = self.workers.index(worker)
         first = math.ceil(self.npartitions * i / len(self.workers))
@@ -60,7 +60,7 @@ class ShuffleMetadata(NewShuffleMetadata):
 
     def npartitions_for(self, worker: str) -> int:
         "Get the number of output partitions a worker will hold"
-        first, last = self.partition_range_for_worker(worker)
+        first, last = self.partition_range(worker)
         return last - first + 1
 
 
@@ -71,11 +71,15 @@ class Shuffle:
         self.metadata = metadata
         self.worker = worker
         self.output_partitions: defaultdict[int, list[pd.DataFrame]] = defaultdict(list)
+        self.output_partitions_left = metadata.npartitions_for(worker.address)
+        self.transferred = False
 
     def receive(self, output_partition: int, data: pd.DataFrame) -> None:
+        assert not self.transferred, "`receive` called after barrier task"
         self.output_partitions[output_partition].append(data)
 
     async def add_partition(self, data: pd.DataFrame) -> None:
+        assert not self.transferred, "`add_partition` called after barrier task"
         tasks = []
         # TODO grouping is blocking, should it be offloaded to a thread?
         # It mostly doesn't release the GIL though, so may not make much difference.
@@ -94,12 +98,18 @@ class Shuffle:
         await asyncio.gather(*tasks)
 
     def get_output_partition(self, i: int) -> pd.DataFrame:
+        assert self.transferred, "`get_output_partition` called before barrier task"
         assert self.metadata.worker_for(i) == self.worker.address, (
             f"Output partition {i} belongs on {self.metadata.worker_for(i)}, "
             f"not {self.worker.address}. {self.metadata!r}"
         )
-        # ^ NOTE: this check isn't strictly necessary, just a nice validation to prevent incorrect
+        # ^ NOTE: this check isn't necessary, just a nice validation to prevent incorrect
         # data in the case something has gone very wrong
+
+        assert (
+            self.output_partitions_left > 0
+        ), f"No outputs remaining, but requested output partition {i} on {self.worker.address}."
+        self.output_partitions_left -= 1
 
         try:
             parts = self.output_partitions.pop(i)
@@ -108,6 +118,13 @@ class Shuffle:
 
         assert parts, f"Empty entry for output partition {i}"
         return pd.concat(parts, copy=False)
+
+    def inputs_done(self) -> None:
+        assert not self.transferred, "`inputs_done` called multiple times"
+        self.transferred = True
+
+    def done(self) -> bool:
+        return self.transferred and self.output_partitions_left == 0
 
 
 class ShuffleWorkerExtension:
@@ -118,6 +135,7 @@ class ShuffleWorkerExtension:
 
         add_handler(worker.handlers, self.shuffle_receive)
         add_handler(worker.handlers, self.shuffle_init)
+        add_handler(worker.handlers, self.shuffle_inputs_done)
 
         existing_extension = worker.extensions.setdefault("shuffle", self)
         if existing_extension is not self:
@@ -128,6 +146,10 @@ class ShuffleWorkerExtension:
         # Initialize
         self.worker: Worker = worker
         self.shuffles: dict[ShuffleId, Shuffle] = {}
+
+    # Handlers
+    ##########
+    # NOTE: handlers are not threadsafe, but they're called from async comms, so that's okay
 
     def shuffle_init(self, comm: object, metadata: ShuffleMetadata) -> None:
         """
@@ -151,8 +173,23 @@ class ShuffleWorkerExtension:
         Hander: Receive an incoming shard of data from a peer worker.
         Using an unknown ``shuffle_id`` is an error.
         """
-        # NOTE: in the future, this method will likely be async
         self._get_shuffle(shuffle_id).receive(output_partition, data)
+
+    def shuffle_inputs_done(self, comm: object, shuffle_id: ShuffleId) -> None:
+        """
+        Hander: Inform the extension that all input partitions have been handed off to extensions.
+        Using an unknown ``shuffle_id`` is an error.
+        """
+        shuffle = self._get_shuffle(shuffle_id)
+        shuffle.inputs_done()
+        if shuffle.done():
+            # If the shuffle has no output partitions, remove it now;
+            # `get_output_partition` will never be called.
+            # This happens when there are fewer output partitions than workers.
+            del self.shuffles[shuffle_id]
+
+    # Tasks
+    #######
 
     def create_shuffle(self, new_metadata: NewShuffleMetadata) -> ShuffleMetadata:
         return sync(self.worker.loop, self._create_shuffle, new_metadata)  # type: ignore
@@ -173,7 +210,7 @@ class ShuffleWorkerExtension:
         #    (https://github.com/dask/distributed/pull/5325)
         if new_metadata.id in self.shuffles:
             raise ValueError(
-                f"Shuffle {id!r} is already registered on worker {self.worker.address}"
+                f"Shuffle {new_metadata.id!r} is already registered on worker {self.worker.address}"
             )
 
         client = self.worker.client
@@ -185,7 +222,6 @@ class ShuffleWorkerExtension:
         await client._update_scheduler_info()
         identity = client._scheduler_identity
 
-        # TODO worker restrictions, etc!
         workers = list(identity["workers"])
         metadata = ShuffleMetadata(
             new_metadata.id,
@@ -195,13 +231,6 @@ class ShuffleWorkerExtension:
             workers,
         )
 
-        # Set worker restrictions for unpack tasks
-        name = "shuffle-unpack-" + metadata.id  # TODO single-source task name
-        restrictions = {
-            f"('{name}', {i})": [metadata.worker_for(i)]
-            for i in range(metadata.npartitions)
-        }
-
         # Start the shuffle on all peers
         # Note that this will call `shuffle_init` on our own worker as well
         await asyncio.gather(
@@ -209,11 +238,9 @@ class ShuffleWorkerExtension:
                 self.worker.rpc(addr).shuffle_init(metadata=to_serialize(metadata))
                 for addr in metadata.workers
             ),
-            self.worker.scheduler.set_restrictions(worker=restrictions),
         )
-        # TODO handle errors from peers or scheduler, and cancellation.
+        # TODO handle errors from peers, and cancellation.
         # If any peers can't start the shuffle, tell successful peers to cancel it.
-        # If scheduler can't set restrictions, tell all peers to cancel.
 
         return metadata  # NOTE: unused in tasks, just handy for tests
 
@@ -230,6 +257,59 @@ class ShuffleWorkerExtension:
         """
         await self._get_shuffle(shuffle_id).add_partition(data)
 
+    def barrier(self, shuffle_id: ShuffleId) -> None:
+        sync(self.worker.loop, self._barrier, shuffle_id)
+
+    async def _barrier(self, shuffle_id: ShuffleId) -> None:
+        """
+        Task: Note that the barrier task has been reached (`add_partition` called for all input partitions)
+
+        Using an unknown ``shuffle_id`` is an error. Calling this before all partitions have been
+        added is undefined.
+        """
+        # NOTE: in this basic shuffle implementation, doing things during the barrier
+        # is mostly unnecessary. We only need it to inform workers that don't receive
+        # any output partitions that they can clean up.
+        # (Otherwise, they'd have no way to know if they needed to keep the `Shuffle` around
+        # for more input partitions, which might come at some point. Workers that _do_ receive
+        # output partitions could infer this, since once `get_output_partition` gets called the
+        # first time, they can assume there are no more inputs.)
+        #
+        # Technically right now, we could call the `shuffle_inputs_done` RPC only on workers
+        # where `metadata.npartitions_for(worker) == 0`.
+        # However, when we have buffering, this barrier step will become important for
+        # all workers, since they'll use it to flush their buffers and send any leftover shards
+        # to their peers.
+
+        metadata = self._get_shuffle(shuffle_id).metadata
+
+        # Set worker restrictions for unpack tasks
+
+        # Could do this during `create_shuffle`, but we might as well overlap it with the time
+        # workers will be flushing buffers to each other.
+        name = "shuffle-unpack-" + metadata.id  # TODO single-source task name
+
+        # FIXME TODO XXX what about when culling means not all of the output tasks actually exist??!
+        # - these restrictions are invalid
+        # - get_output_partition won't be called enough times, so cleanup won't happen
+        # - also, we're transferring data we don't need to transfer
+        restrictions = {
+            f"('{name}', {i})": [metadata.worker_for(i)]
+            for i in range(metadata.npartitions)
+        }
+
+        # Tell all peers that we've reached the barrier
+
+        # Note that this will call `shuffle_inputs_done` on our own worker as well
+        await asyncio.gather(
+            *(
+                self.worker.rpc(worker).shuffle_inputs_done(shuffle_id=shuffle_id)
+                for worker in metadata.workers
+            ),
+            self.worker.scheduler.set_restrictions(worker=restrictions),
+        )
+        # TODO handle errors from workers and scheduler, and cancellation.
+
     def get_output_partition(
         self, shuffle_id: ShuffleId, output_partition: int
     ) -> pd.DataFrame:
@@ -238,7 +318,11 @@ class ShuffleWorkerExtension:
 
         Calling this for a ``shuffle_id`` which is unknown or incomplete is an error.
         """
-        return self._get_shuffle(shuffle_id).get_output_partition(output_partition)
+        shuffle = self._get_shuffle(shuffle_id)
+        output = shuffle.get_output_partition(output_partition)
+        if shuffle.done():
+            del self.shuffles[shuffle_id]
+        return output
 
     def _get_shuffle(self, shuffle_id: ShuffleId) -> Shuffle:
         "Get a shuffle by ID; raise ValueError if it's not registered."
