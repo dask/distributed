@@ -35,10 +35,31 @@ def test_worker_for_distribution(npartitions: int, n_workers: int):
     )
 
     assignments = [metadata.worker_for(i) for i in range(metadata.npartitions)]
+
+    # Test `partition_range_for_worker`
+    for w in metadata.workers:
+        first, last = metadata.partition_range_for_worker(w)
+        assert all(
+            [
+                first <= p_i <= last if a == w else p_i < first or p_i > last
+                for p_i, a in enumerate(assignments)
+            ]
+        )
+
     counter = Counter(assignments)
     assert len(counter) == min(npartitions, n_workers)
+
+    # Test `npartitions_for`
+    calculated_counter = {w: metadata.npartitions_for(w) for w in metadata.workers}
+    assert counter == {
+        w: count for w, count in calculated_counter.items() if count != 0
+    }
+    assert calculated_counter.keys() == set(metadata.workers)
+    # ^ this also checks that workers receiving 0 output partitions were calculated properly
+
+    # Test the distribution of worker assignments.
     # All workers should be assigned the same number of partitions, or if
-    # there's an odd number, one worker will be assigned one extra partition.
+    # there's an odd number, some workers will be assigned only one extra partition.
     counts = set(counter.values())
     assert len(counts) <= 2
     if len(counts) == 2:

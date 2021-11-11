@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, NewType
@@ -47,8 +48,20 @@ class ShuffleMetadata(NewShuffleMetadata):
             raise IndexError(
                 f"Output partition {output_partition} does not exist in a shuffle producing {self.npartitions} partitions"
             )
-        i = output_partition * len(self.workers) // self.npartitions
+        i = len(self.workers) * output_partition // self.npartitions
         return self.workers[i]
+
+    def partition_range_for_worker(self, worker: str) -> tuple[int, int]:
+        "Get the output partition numbers (inclusive) that a worker will hold"
+        i = self.workers.index(worker)
+        first = math.ceil(self.npartitions * i / len(self.workers))
+        last = math.ceil(self.npartitions * (i + 1) / len(self.workers)) - 1
+        return first, last
+
+    def npartitions_for(self, worker: str) -> int:
+        "Get the number of output partitions a worker will hold"
+        first, last = self.partition_range_for_worker(worker)
+        return last - first + 1
 
 
 class Shuffle:
