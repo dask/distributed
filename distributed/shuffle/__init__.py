@@ -6,12 +6,12 @@ else:
     del pandas
     SHUFFLE_AVAILABLE = True
 
-    from .shuffle import rearrange_by_column_service
+    from .shuffle import rearrange_by_column_p2p
     from .shuffle_extension import ShuffleId, ShuffleMetadata, ShuffleWorkerExtension
 
 __all__ = [
     "SHUFFLE_AVAILABLE",
-    "rearrange_by_column_service",
+    "rearrange_by_column_p2p",
     "ShuffleId",
     "ShuffleMetadata",
     "ShuffleWorkerExtension",

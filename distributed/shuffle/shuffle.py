@@ -44,7 +44,7 @@ def shuffle_barrier(transfers: list[None]) -> None:
     pass
 
 
-def rearrange_by_column_service(
+def rearrange_by_column_p2p(
     df: DataFrame,
     column: str,
     npartitions: int | None = None,
