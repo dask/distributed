@@ -321,7 +321,8 @@ class ShuffleWorkerExtension:
         shuffle = self._get_shuffle(shuffle_id)
         output = shuffle.get_output_partition(output_partition)
         if shuffle.done():
-            del self.shuffles[shuffle_id]
+            # key missing if another thread got to it first
+            self.shuffles.pop(shuffle_id, None)
         return output
 
     def _get_shuffle(self, shuffle_id: ShuffleId) -> Shuffle:
