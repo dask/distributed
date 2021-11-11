@@ -55,7 +55,7 @@ def rearrange_by_column_p2p(
     npartitions = npartitions or df.npartitions
     token = tokenize(df, column, npartitions)
 
-    setup = delayed(shuffle_setup)(
+    setup = delayed(shuffle_setup, pure=True)(
         NewShuffleMetadata(
             ShuffleId(token),
             df._meta,
