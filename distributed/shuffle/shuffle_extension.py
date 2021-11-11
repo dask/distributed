@@ -21,7 +21,7 @@ ShuffleId = NewType("ShuffleId", str)
 # which the type-checker can't validate when it's called as an RPC.
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class NewShuffleMetadata:
     "Metadata to create a shuffle"
     id: ShuffleId
@@ -30,7 +30,7 @@ class NewShuffleMetadata:
     npartitions: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class ShuffleMetadata(NewShuffleMetadata):
     """
     Metadata every worker needs to share about a shuffle.
@@ -81,9 +81,10 @@ class Shuffle:
         await asyncio.gather(*tasks)
 
     def get_output_partition(self, i: int) -> pd.DataFrame:
-        assert (
-            self.metadata.worker_for(i) == self.worker.address
-        ), f"Output partition {i} belongs on {self.metadata.worker_for(i)}, not {self.worker.address}"
+        assert self.metadata.worker_for(i) == self.worker.address, (
+            f"Output partition {i} belongs on {self.metadata.worker_for(i)}, "
+            f"not {self.worker.address}. {self.metadata!r}"
+        )
         # ^ NOTE: this check isn't strictly necessary, just a nice validation to prevent incorrect
         # data in the case something has gone very wrong
 
@@ -140,10 +141,12 @@ class ShuffleWorkerExtension:
         # NOTE: in the future, this method will likely be async
         self._get_shuffle(shuffle_id).receive(output_partition, data)
 
-    def create_shuffle(self, new_metadata: NewShuffleMetadata) -> None:
-        sync(self.worker.loop, self._create_shuffle, new_metadata)
+    def create_shuffle(self, new_metadata: NewShuffleMetadata) -> ShuffleMetadata:
+        return sync(self.worker.loop, self._create_shuffle, new_metadata)  # type: ignore
 
-    async def _create_shuffle(self, new_metadata: NewShuffleMetadata) -> None:
+    async def _create_shuffle(
+        self, new_metadata: NewShuffleMetadata
+    ) -> ShuffleMetadata:
         """
         Task: Create a new shuffle and broadcast it to all workers.
         """
@@ -179,15 +182,27 @@ class ShuffleWorkerExtension:
             workers,
         )
 
-        # TODO handle errors from peers, and cancellation.
-        # If any peers can't start the shuffle, tell other peers to cancel it.
+        # Set worker restrictions for unpack tasks
+        name = "shuffle-unpack-" + metadata.id  # TODO single-source task name
+        restrictions = {
+            f"('{name}', {i})": [metadata.worker_for(i)]
+            for i in range(metadata.npartitions)
+        }
+
+        # Start the shuffle on all peers
+        # Note that this will call `shuffle_init` on our own worker as well
         await asyncio.gather(
             *(
                 self.worker.rpc(addr).shuffle_init(metadata=to_serialize(metadata))
                 for addr in metadata.workers
-            )
+            ),
+            self.worker.scheduler.set_restrictions(worker=restrictions),
         )
-        # Note that this will call `shuffle_init` on our own worker as well
+        # TODO handle errors from peers or scheduler, and cancellation.
+        # If any peers can't start the shuffle, tell successful peers to cancel it.
+        # If scheduler can't set restrictions, tell all peers to cancel.
+
+        return metadata  # NOTE: unused in tasks, just handy for tests
 
     def add_partition(self, data: pd.DataFrame, shuffle_id: ShuffleId) -> None:
         sync(self.worker.loop, self._add_partition, data, shuffle_id)
