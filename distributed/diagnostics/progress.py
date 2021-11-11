@@ -7,7 +7,6 @@ from collections import defaultdict
 from timeit import default_timer
 
 from tlz import groupby, valmap
-from tornado.ioloop import PeriodicCallback
 
 from dask.base import tokenize
 from dask.utils import stringify
@@ -305,101 +304,63 @@ class GroupTiming(SchedulerPlugin):
     def __init__(self, scheduler):
         scheduler.add_plugin(self)
         self.scheduler = scheduler
+        self.dt = 1.0
+        now = time.time()
 
         # Timestamps for tracking compute durations by task group.
-        self.time: list[float] = [time.time()]
-        # The number of threads for the scheduler, used when estimating how occupied
-        # the workers are.
-        self.nthreads: list[int] = [self.scheduler.total_nthreads]
+        self.time: list[float] = [now, now]
         # The amount of compute since the last timestamp
         self.compute: dict[str, list[float]] = {}
 
-        # Tracking the previous compute time values for getting deltas.
-        self._prev_durations: dict[str, dict[str, float]] = {}
-
         for name, group in self.scheduler.task_groups.items():
-            self.compute[name] = [0.0]
-            self._prev_durations[name] = group.all_durations.copy()
+            self.compute[name] = [0.0, 0.0]
 
-        # Start a callback sampling how the computations are going.
-        # TODO: this samples every 1s. Should it be configurable?
-        group_timing_pc = PeriodicCallback(self.track_groups, 1.0 * 1000.0)
-        self.scheduler.periodic_callbacks["group-timing"] = group_timing_pc
-        group_timing_pc.start()
+    def transition(self, key, start, finish, *args, **kwargs):
+        if start == "processing" and finish == "memory":
 
-    def track_groups(self):
-        now = time.time()
-
-        total_dcompute = 0.0
-        groups = self.scheduler.task_groups
-        for name, group in groups.items():
-            if name not in self.compute:
-                # We wamt the time series to be of equal length, otherwise we
-                # are signing up for complex and costly interpolation later.
-                # If there is a new group, zero pad it in the past.
-                self.compute[name] = [0.0] * len(self.time)
-            if name not in self._prev_durations:
-                prev_compute = 0.0
+            # Possibly extend the timeseries if another dt has passed
+            now = time.time()
+            if self.time[-1] - self.time[-2] > self.dt:
+                self.time[-1] = self.time[-2] + self.dt
+                self.time.append(now)
+                for g in self.compute.values():
+                    g.append(0.0)
             else:
-                prev_compute = self._prev_durations[name]["compute"]
+                self.time[-1] = now
 
-            # Get the delta in compute.
-            compute = group.all_durations["compute"]
-            dcompute = compute - prev_compute
+            # Get the task
+            task = self.scheduler.tasks[key]
+            group = task.group
 
-            total_dcompute += dcompute
-            self.compute[name].append(dcompute)
-            self._prev_durations[name] = group.all_durations.copy()
+            # If the group is new, add it
+            if group.name not in self.compute:
+                self.compute[group.name] = [0.0] * len(self.time)
 
-        # If task groups have been forgotten by the scheduler, append zero
-        # delta compute for them.
-        missing_groups = set(self.compute.keys()) - set(groups.keys())
-        for name in missing_groups:
-            self.compute[name].append(0.0)
+            startstops = kwargs.get("startstops")
+            nthreads = self.scheduler.total_nthreads
+            if not startstops:
+                # TODO: log a useful warning here
+                return
+            for startstop in startstops:
+                stop = startstop["stop"]
+                start = startstop["start"]
+                action = startstop["action"]
+                if action == "compute":
+                    duration = stop - start
+                    idx = len(self.time) - 1
+                    while duration > 0 and idx > 0:
+                        dt = self.time[idx] - self.time[idx - 1]
+                        available_time = nthreads * dt - sum(
+                            (g[idx] for g in self.compute.values())
+                        )
+                        delta = (
+                            duration if duration < available_time else available_time
+                        )
+                        self.compute[group.name][idx] += delta
 
-        # Update the timestamps and thread trackers.
-        self.time.append(now)
-        self.nthreads.append(self.scheduler.total_nthreads)
-
-        # Above, we assigned the delta compute to this most recent time slice.
-        # However, we only get updates on tasks after they are done. If task takes
-        # longer than the sampling interval, the above is wrong! So here we identify
-        # "spillage" time, that is to say, compute time that can't have been entirely
-        # during the last time delta, and we spread that spillage time into the
-        # previous steps. It's approximate, but is much closer to reality than
-        # a worker being several hundred percent occupied.
-        idx = len(self.time) - 1  # current index with spillage
-        if idx == 0:
-            # Don't spread before the first index
-            return
-        nthreads = self.nthreads[idx]
-        dt = now - self.time[idx - 1]
-        while total_dcompute > dt * nthreads:
-            if idx == 0:
-                break
-
-            # Compute can't be more than dt * nthreads (at least in a synchronous
-            # task world).
-            spillage = total_dcompute - dt * nthreads
-            new_total_dcompute = 0.0
-            for name in self.compute:
-                val = spillage * self.compute[name][idx] / total_dcompute
-                self.compute[name][idx] -= val
-                self.compute[name][idx - 1] += val
-                new_total_dcompute += self.compute[name][idx - 1]
-
-            idx -= 1
-            total_dcompute = new_total_dcompute
-            dt = self.time[idx] - self.time[idx - 1]
-            nthreads = self.nthreads[idx]
+                        duration -= delta
+                        idx -= 1
 
     def restart(self, scheduler):
         self.time = []
-        self.nthreads = []
         self.compute = {}
-        self._prev_durations = {}
-
-    async def close(self):
-        group_timing_pc = self.scheduler.periodic_callbacks.pop("group-timing", None)
-        if group_timing_pc:
-            group_timing_pc.stop()
