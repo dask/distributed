@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 ShuffleId = NewType("ShuffleId", str)
 
 
-# NOTE: we use these dataclasses purely for type-checking benefits.
+# NOTE: we use these dataclasses primarily for type-checking benefits.
 # They take the place of positional arguments to `shuffle_init`,
 # which the type-checker can't validate when it's called as an RPC.
 
@@ -99,6 +99,7 @@ class Shuffle:
 
     def get_output_partition(self, i: int) -> pd.DataFrame:
         assert self.transferred, "`get_output_partition` called before barrier task"
+
         assert self.metadata.worker_for(i) == self.worker.address, (
             f"Output partition {i} belongs on {self.metadata.worker_for(i)}, "
             f"not {self.worker.address}. {self.metadata!r}"
@@ -200,14 +201,15 @@ class ShuffleWorkerExtension:
         """
         Task: Create a new shuffle and broadcast it to all workers.
         """
-        # TODO would be nice to not have to have this method, and have shuffles started implicitly
-        # by the first `receive`/`add_partition`, and have shuffle metadata be passed into
-        # tasks and from there into the extension (rather than stored within a `Shuffle`),
-        # since this would mean the setup task returns meaningful data, and isn't just
-        # side effects. However:
-        # 1. passing in metadata everywhere feels contrived when it would be so easy to store
-        # 2. it makes scheduling much harder, since it's a widely-shared common dep
+        # TODO would be nice to not have to have the RPC in this method, and have shuffles started implicitly
+        # by the first `receive`/`add_partition`. To do that, shuffle metadata would be passed into
+        # every task, and from there into the extension (rather than stored within a `Shuffle`),
+        # However:
+        # 1. It makes scheduling much harder, since it's a widely-shared common dep
         #    (https://github.com/dask/distributed/pull/5325)
+        # 2. Passing in metadata everywhere feels contrived when it would be so easy to store
+        # 3. The metadata may not be _that_ small (1000s of columns + 1000s of workers);
+        #    serializing and transferring it repeatedly adds overhead.
         if new_metadata.id in self.shuffles:
             raise ValueError(
                 f"Shuffle {new_metadata.id!r} is already registered on worker {self.worker.address}"
