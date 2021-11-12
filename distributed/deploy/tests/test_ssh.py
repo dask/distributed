@@ -45,6 +45,25 @@ async def test_basic():
 
 
 @pytest.mark.asyncio
+async def test_nprocs():
+    async with SSHCluster(
+        ["127.0.0.1"] * 3,
+        connect_options=dict(known_hosts=None),
+        asynchronous=True,
+        scheduler_options={"idle_timeout": "5s"},
+        worker_options={"death_timeout": "5s", "nprocs": 2},
+    ) as cluster:
+        assert len(cluster.workers) == 2
+        async with Client(cluster, asynchronous=True) as client:
+            client.wait_for_workers(4)
+            result = await client.submit(lambda x: x + 1, 10)
+            assert result == 11
+        assert not cluster._supports_scaling
+
+        assert "SSH" in repr(cluster)
+
+
+@pytest.mark.asyncio
 async def test_keywords():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
