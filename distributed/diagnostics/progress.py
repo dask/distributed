@@ -312,9 +312,6 @@ class GroupTiming(SchedulerPlugin):
         # The amount of compute since the last timestamp
         self.compute: dict[str, list[float]] = {}
 
-        for name, group in self.scheduler.task_groups.items():
-            self.compute[name] = [0.0, 0.0]
-
     def transition(self, key, start, finish, *args, **kwargs):
         if start == "processing" and finish == "memory":
             startstops = kwargs.get("startstops")
