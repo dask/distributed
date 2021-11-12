@@ -317,16 +317,21 @@ class GroupTiming(SchedulerPlugin):
 
     def transition(self, key, start, finish, *args, **kwargs):
         if start == "processing" and finish == "memory":
+            startstops = kwargs.get("startstops")
+            if not startstops:
+                logger.warn(
+                    f"Task {key} finished processing, but timing information seems to be missing"
+                )
+                return
 
             # Possibly extend the timeseries if another dt has passed
             now = time.time()
-            if self.time[-1] - self.time[-2] > self.dt:
+            self.time[-1] = now
+            while self.time[-1] - self.time[-2] > self.dt:
                 self.time[-1] = self.time[-2] + self.dt
                 self.time.append(now)
                 for g in self.compute.values():
                     g.append(0.0)
-            else:
-                self.time[-1] = now
 
             # Get the task
             task = self.scheduler.tasks[key]
@@ -336,31 +341,25 @@ class GroupTiming(SchedulerPlugin):
             if group.name not in self.compute:
                 self.compute[group.name] = [0.0] * len(self.time)
 
-            startstops = kwargs.get("startstops")
-            nthreads = self.scheduler.total_nthreads
-            if not startstops:
-                # TODO: log a useful warning here
-                return
             for startstop in startstops:
+                if startstop["action"] != "compute":
+                    continue
                 stop = startstop["stop"]
                 start = startstop["start"]
-                action = startstop["action"]
-                if action == "compute":
-                    duration = stop - start
-                    idx = len(self.time) - 1
-                    while duration > 0 and idx > 0:
-                        dt = self.time[idx] - self.time[idx - 1]
-                        available_time = nthreads * dt - sum(
-                            (g[idx] for g in self.compute.values())
-                        )
-                        delta = (
-                            duration if duration < available_time else available_time
-                        )
-                        self.compute[group.name][idx] += delta
+                idx = len(self.time) - 1
+                # If the stop time is after the most recent bin,
+                # roll back the current index
+                while idx > 0 and self.time[idx - 1] > stop:
+                    idx -= 1
+                # Allocate the timing information of the task to the time bins.
+                while idx > 0 and stop > start:
+                    delta = stop - max(self.time[idx - 1], start)
+                    self.compute[group.name][idx] += delta
 
-                        duration -= delta
-                        idx -= 1
+                    stop -= delta
+                    idx -= 1
 
     def restart(self, scheduler):
-        self.time = []
+        now = time.time()
+        self.time = [now, now]
         self.compute = {}
