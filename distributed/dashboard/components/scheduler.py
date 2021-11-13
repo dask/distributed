@@ -2,7 +2,7 @@ import logging
 import math
 import operator
 import os
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from numbers import Number
 
 import numpy as np
@@ -41,7 +41,7 @@ from bokeh.models.widgets.markups import Div
 from bokeh.palettes import Viridis11
 from bokeh.plotting import figure
 from bokeh.themes import Theme
-from bokeh.transform import cumsum, factor_cmap, linear_cmap
+from bokeh.transform import cumsum, factor_cmap, linear_cmap, stack
 from tlz import curry, pipe, valmap
 from tlz.curried import concat, groupby, map
 from tornado import escape
@@ -2628,6 +2628,8 @@ class TaskGroupProgress(DashboardComponent):
         )
         self._last_drawn = None
         self._last_transition_count = self.scheduler.transition_counter
+        self._renderers = OrderedDict()
+        self._line_renderers = OrderedDict()
 
     def _should_redraw(self) -> bool:
         """
@@ -2717,33 +2719,34 @@ class TaskGroupProgress(DashboardComponent):
             if self._should_redraw():
                 # Redraw the whole chart, including any new task groups.
                 new_data = self._get_timeseries(restrict_to_existing=False)
+                self.source.data = new_data
+
                 stackers = list(self.plugin.compute.keys())
                 colors = [color_of(key_split(k)) for k in stackers]
 
-                # Clear existing renderers.
-                while len(self.root.renderers):
-                    self.root.renderers.pop()
+                for i, (group, color) in enumerate(zip(stackers, colors)):
+                    if group in self._renderers:
+                        continue
 
-                self.source.data = new_data
-                self.root.varea_stack(
-                    stackers=stackers,
-                    x="time",
-                    color=colors,
-                    alpha=0.5,
-                    source=self.source,
-                )
-                # Hang on to the lines, since we will need these
-                # to actually attach the hover tool to a renderer.
-                # Since we don't want a proliferation of tooltips,
-                # just assign the hover tool to the last (top)
-                # renderer.
-                line_renderers = self.root.vline_stack(
-                    stackers=stackers,
-                    x="time",
-                    color=colors,
-                    alpha=1.0,
-                    source=self.source,
-                )
+                    renderer = self.root.varea(
+                        x="time",
+                        y1=stack(*stackers[:i]),
+                        y2=stack(*stackers[: i + 1]),
+                        color=color,
+                        alpha=0.5,
+                        source=self.source,
+                    )
+                    self._renderers[group] = renderer
+
+                    line_renderer = self.root.line(
+                        x="time",
+                        y=stack(*stackers[: i + 1]),
+                        color=color,
+                        alpha=1.0,
+                        source=self.source,
+                    )
+                    self._line_renderers[group] = line_renderer
+
                 # Create a custom tooltip that:
                 #   1. Includes nthreads
                 #   2. Filters out inactive task groups
@@ -2786,7 +2789,9 @@ class TaskGroupProgress(DashboardComponent):
                     ),  # sneak the color mapping into the callback
                     args={"source": self.source},
                 )
-                self.hover.renderers = line_renderers[-1:]
+                self.hover.renderers = [
+                    next(reversed(self._line_renderers.values()), None)
+                ]
                 self.hover.formatters = {"$index": formatter}
 
                 self._last_drawn = time()
