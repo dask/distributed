@@ -308,9 +308,11 @@ class GroupTiming(SchedulerPlugin):
         now = time.time()
 
         # Timestamps for tracking compute durations by task group.
-        self.time: list[float] = [now, now]
+        self.time: list[float] = [now] * 2
         # The amount of compute since the last timestamp
         self.compute: dict[str, list[float]] = {}
+        # The number of threads at the time
+        self.nthreads: list[float] = [scheduler.total_nthreads] * 2
 
     def transition(self, key, start, finish, *args, **kwargs):
         if start == "processing" and finish == "memory":
@@ -327,6 +329,7 @@ class GroupTiming(SchedulerPlugin):
             while self.time[-1] - self.time[-2] > self.dt:
                 self.time[-1] = self.time[-2] + self.dt
                 self.time.append(now)
+                self.nthreads.append(self.scheduler.total_nthreads)
                 for g in self.compute.values():
                     g.append(0.0)
 
@@ -358,5 +361,6 @@ class GroupTiming(SchedulerPlugin):
 
     def restart(self, scheduler):
         now = time.time()
-        self.time = [now, now]
+        self.time = [now] * 2
+        self.nthreads = [self.scheduler.total_nthreads] * 2
         self.compute = {}

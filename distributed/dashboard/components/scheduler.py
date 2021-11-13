@@ -2685,7 +2685,7 @@ class TaskGroupProgress(DashboardComponent):
             )
 
         new_data["time"] = timestamps * 1000.0  # bokeh likes milliseconds
-        new_data["nthreads"] = np.array(self.plugin.time)
+        new_data["nthreads"] = np.array(self.plugin.nthreads)
 
         # This is an enormous hack around a bokeh bug:
         # https://github.com/bokeh/bokeh/issues/11119
