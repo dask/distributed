@@ -2762,13 +2762,14 @@ class TaskGroupProgress(DashboardComponent):
                       if (k === "time" || k === "nthreads" || val < 1.e-3) {
                         continue;
                       }
+                      const label = k.length >= 20 ? k.slice(0, 20) + '…' : k;
 
                       // Unshift so that the ordering of the labels is the same as
                       // the ordering of the stackers.
                       divs.unshift(
                         '<div>'
                           + '<span style="font-weight: bold; color:' + color + ';">'
-                            + k
+                            + label
                           + '</span>'
                           + ': '
                           +  val.toFixed(1)
