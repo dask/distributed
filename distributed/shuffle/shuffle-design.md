@@ -33,6 +33,7 @@ The implementation will be completed in multiple stages (order TBD after #1):
 1. Establish the patterns for how this out-of-band system will interact with distributed, in the simplest possible implementation with no optimizations.
 1. Retries (shuffle restarts automatically if a worker leaves)
 1. Serialization
+1. Graph-culling optimization
 1. Improve performance with concurrency and buffering if possible
 1. Spill-to-disk
 1. Backpressure
@@ -52,7 +53,7 @@ Therefore, the primary purpose of the graph is to mediate between dask-managed d
 - Bring data produced out-of-band back into dask
 - Clean up when keys depending on the shuffle are cancelled
 
-The graph also has a secondary synchronization benefit, letting us bypass some difficult distributed problems (exactly-once initialization and cleanup tasks, determining when all peer-to-peer transfers are complete) by leaning on the scheduler.
+<!-- The graph also has a secondary synchronization benefit, letting us bypass some difficult distributed problems (exactly-once initialization and cleanup tasks, determining when all peer-to-peer transfers are complete) by leaning on the scheduler. -->
 
 ![diagram of graph](graph.png)
 
@@ -65,13 +66,33 @@ Problems this solves:
 * Coordinating multiple concurrent shuffles which may need to share limited resources (memory, threads, etc.)
 * Getting metrics back to the scheduler/dashboard, like managed memory & bytes spilled to disk (eventually)
 
-The `ShuffleExtension` will be built into distributed and added to workers automatically (like the `PubSubWorkerExtension`). It'll add a route to the worker; something like:
+The `ShuffleExtension` will be built into distributed and added to workers automatically (like the `PubSubWorkerExtension`). It'll add some routes to the worker; something like:
 
 ```python
-def shuffle_receive(comm, shuffle_id: str, data: DataFrame) -> None:
+def shuffle_receive(comm, shuffle_id: ShuffleId, data: DataFrame) -> None:
     """
-    Receive an incoming shard of data from a peer worker.
+    Handler: Receive an incoming shard of data from a peer worker.
     Using an unknown ``shuffle_id`` will first initialize any state needed for that new shuffle.
+    """
+    ...
+```
+
+It'll also expose functions to be called from tasks in the graph:
+```python
+async def add_partition(self, data: pd.DataFrame, shuffle_id: ShuffleId) -> None:
+    """
+    Task: Hand off an input partition to the ShuffleExtension.
+
+    This will block until the extension is ready to receive another input partition.
+    Using an unknown ``shuffle_id`` is an error.
+    """
+    ...
+
+async def get_output_partition(self, shuffle_id: ShuffleId, output_partition: int) -> pd.DataFrame:
+    """
+    Task: Retrieve a shuffled output partition from the ShuffleExtension.
+
+    Calling this for a ``shuffle_id`` which is unknown or incomplete is an error.
     """
     ...
 ```
@@ -88,11 +109,42 @@ Most of the implementation-specific logic will happen in the `ShuffleExtension`.
 
 The `transfer` tasks will pass their input partitions into the `ShuffleExtension`, blocking the task until the extension is ready to receive another input. Internally, the extension will do whatever it needs to do to transfer the data, using worker comms to call the `shuffle_receive` RPC on peer workers. Simultaneously, it'll handle any incoming data from other workers.
 
+### Scheduler Shuffle Extension
+
+Problems this solves:
+* Workers need to all have the same list of peers participating in the shuffle (otherwise data could end up in two different places!)
+* Scheduler needs to know where to run the `unpack` tasks which bring data back in-band
+
+A `ShuffleSchedulerPlugin` will also be built into distributed and added to the scheduler automatically. It'll add a handler to the scheduler, like:
+
+```python
+def get_workers_for_shuffle(self, com, id: ShuffleId) -> list[str]:
+    """
+    Get the list of worker addresses participating in a shuffle.
+    Using an unknown ``id`` registers the shuffle and initializes the list of workers.
+    All subsequent requests for the same ``id`` will return the same list.
+    """
+    ...
+```
+
+In the initial `transfer` tasks, each worker will call the `get_workers_for_shuffle` RPC on the scheduler. By centralizing this state on the scheduler, we can ensure each worker gets a consistent list of peers. Then the scheduler will watch transitions to determine when the shuffle is over and it can release this stored state.
+
+*Rejected alternative: a single `shuffle_setup` task.*
+Originally, we considered using a singular setup task in each shuffle's graph, which all the `transfer` tasks depended on. This task used `Client.scheduler_info()` to get the list of peers, with no scheduler plugin. This worked, with the problem that in a graph with multiple shuffles, all the setup tasks would run at the same time at the very beginning of the computation (since they had no dependencies, the scheduler would schedule them immediately). This was not ideal, since the list of workers could be quite outdated by the time the shuffle actually ran.
+
+The scheduler extension will probably take on more responsibilities in later stages of this shuffle implementation. For example, it might:
+* Set worker restrictions for output tasks (instead of doing this from workers via RPC in the barrier task)
+* Call an RPC on all workers that a shuffle is starting, so they can set up any necessary state (threads, etc.)
+* Skip the `RerunGroup` idea (described below) entirely; do it all in the plugin with a callback for remove_worker
+* Tell workers how many output tasks are actually in the graph, resolving the graph-culling issue (mentioned later)
+
 ### Retries and cancellation
 
 Problems this solves:
 * Causing all tasks in the shuffle to rerun when a worker leaves
 * Cleaning up out-of-band state when a user cancels a shuffle, or it errors
+
+*Note: this proposed system may not actually be sufficient, or may be so tuned to shuffling that it doesn't make sense as a public API. We may instead implement something like this just within the scheduler shuffle plugin.*
 
 Because most the tasks in the shuffle graph are impure and run for their side effects, restarting an in-progress shuffle requires rerunning _every_ task involved, even ones that appear to have successfully transitioned to `memory` and whose "results" are stored on non-yet-dead workers.
 
@@ -106,23 +158,35 @@ Additionally, the scheduler informs workers whenever a `RerunGroup` is restarted
 - Workers have a named `threading.Event` for each `RerunGroup` that any of their current tasks belong to. When the scheduler tells workers about a restart/cancellation, they `set()` the corresponding event so that some background thread can respond accordingly.
 - A `register_cancellation_handler(rerun_group: str, async_callback: Callable)` method on workers that registers an async function to be run when that group is cancelled/restarted. A potential upside (and potential deadlock) is that the scheduler's `cancel_rerun_group` RPC to workers could block on this callback completing, meaning the scheduler wouldn't treat the `RerunGroup` as successfully cancelled until every callback on every worker succeeded. That could give us some nice synchronization guarantees (which we may or many not actually need) ensuring a shuffle doesn't try to restart while it's also trying to shut down.
 
-### Peer discovery and initialization
+### Graph-rewrite on cull
 
 Problems this solves:
-* Workers need to all have the same list of peers participating in the shuffle (otherwise data could end up in two different places!)
-* Scheduler needs to be told where to run the `unpack` tasks which bring data back in-band
+* When only some output partitions of a shuffle are needed in downstream tasks, the shuffle still needs to behave correctly
+* In this case, the shuffle can also transfer less data as an optimization
+* Two shuffles of the same input—just with different output partitions culled—must produce correct data and not collide in key names
 
-We'll run a single `shuffle-setup` task before all the transfers to do some initialization.
+With code like `df2 = df.set_index("name").loc["Alice":"Bob"]`, graph culling removes the `shuffle_unpack` tasks for unused output partitions:
 
-First, it will ask the scheduler for the addresses of all workers that should participate in the shuffle (taking into account worker or resource restrictions). How this will be implemented is TBD.
+![culled shuffle graph](cull.png)
 
-Next, it will set worker restrictions on the `unpack` tasks, so each task will run on the worker that will receive that output partition. (This is computed just by binning the number of output partitions into the number of workers.) Note that we could also do this step in the barrier task; just seems nicer and potentially a tiny bit less overhead to do all scheduler comms in one place.
+In order to determine when the shuffle is over, each worker will depend on comparing how many times `get_output_partition` was called to how many output partitions belong on that worker. Because output partitions could be empty, it's not enough to just count how many partitions data was received for—the shuffle has to know this count ahead of time.
 
-It'll return the list of worker addresses. This will be input to all the `transfer` tasks, which use the same binning logic to decide where to send a given row of each input partition.
+If not all of the output partitions are actually retrieved (because the tasks to retrieve them were culled), the extension will never clean up, and all that extra data will just sit on the worker forever.
 
-Since this `shuffle-setup` task will be part of the `RerunGroup`, every time the shuffle is restarted, we'll recompute these peer addresses (accounting for any lost or gained workers) and reset any now-invalid worker restrictions on the `unpack` tasks (preventing deadlocks from waiting to schedule a task on a worker that doesn't exist).
+Additionally, we have an optimization opportunity: if we only need output partitions 1-3, then the extension can drop all input rows that don't match, vastly reducing the amount of data transferred.
 
-Also possibly (TBD) `shuffle-setup` could call an RPC on all the other workers informing them that a shuffle is about to happen. This is most likely unnecessary, but in case there are some resources that need to be initialized before any data moves around, this would give us an easy way to do it.
+Therefore, we propose adding another graph optimization step: after culling, we'll also inject the list of post-culling output partitions into the initial `transfer` tasks. Additionally, we'll need to change the keys of these `transfer` and `barrier` tasks, because they now produce different data.
+
+It's critical to change the keys, so that workloads like this behave correctly:
+```python
+shuffled = df.set_index("name")
+s1 = shuffled.loc["Alice":"Bob"].persist()
+sleep(10)
+s2 = shuffled.persist()
+```
+If there are some `transfer` tasks for `s1` running when `s2` gets submitted, the scheduler wouldn't run `s2`'s `transfer`s if they had the same keys as `s1`'s—it would just reuse `s1`s. However, those transfers would be doing something different (sending only some data vs all data).
+
+*Note: it's possible to make this situation behave correctly without a new graph optimization, by sending all data (even for unneeded partitions) and having the scheduler plugin tell workers at runtime via RPC when the shuffle is over. We'll do this in the initial implementation for simplicity, but expect the optimization to be quite valuable to users.*
 
 ### Spilling to disk
 
