@@ -2626,6 +2626,7 @@ class TaskGroupProgress(DashboardComponent):
             PanTool(dimensions="width"),
             WheelZoomTool(dimensions="width"),
         )
+        self.root.y_range = Range1d(0, max(self.plugin.nthreads))
         self._last_drawn = None
         self._last_transition_count = self.scheduler.transition_counter
         self._renderers = OrderedDict()
@@ -2721,6 +2722,10 @@ class TaskGroupProgress(DashboardComponent):
                 new_data = self._get_timeseries(restrict_to_existing=False)
                 self.source.data = new_data
 
+                max_nthreads = max(self.plugin.nthreads)
+                if self.root.y_range.end != max_nthreads:
+                    self.root.y_range.end = max_nthreads
+
                 stackers = list(self.plugin.compute.keys())
                 colors = [color_of(key_split(k)) for k in stackers]
 
@@ -2800,6 +2805,9 @@ class TaskGroupProgress(DashboardComponent):
             elif self._should_update():
                 # Update the data, only including existing columns, rather than redrawing
                 # the whole chart.
+                max_nthreads = max(self.plugin.nthreads)
+                if self.root.y_range.end != max_nthreads:
+                    self.root.y_range.end = max_nthreads
                 self.source.data = self._get_timeseries(restrict_to_existing=True)
                 self._last_transition_count = self.scheduler.transition_counter
 
