@@ -2669,26 +2669,35 @@ class TaskGroupProgress(DashboardComponent):
         which might have been added since the last time we rendered.
         This is important as we want to add new stackers very deliberately.
         """
-        n = len(self.plugin.time)
-        timestamps = np.array(self.plugin.time)
+        front = max(len(self.plugin.time) - self.npts, 0)
+        back = None
+        if len(self.plugin.compute):
+            agg = sum([np.array(v[front:]) for v in self.plugin.compute.values()])
+            front2 = len(agg) - len(np.trim_zeros(agg, trim="f"))
+            front += front2
+            back = len(np.trim_zeros(agg, trim="b")) - len(agg) or None
+
+        timestamps = np.array(self.plugin.time[front:back])
+        print(front, back)
+        n = len(timestamps)
         dt = np.diff(timestamps, prepend=timestamps[0] - 10.0)
 
         if restrict_to_existing:
             new_data = {
-                k: np.array(v) / dt
+                k: np.array(v[front:back]) / dt
                 for k, v in self.plugin.compute.items()
                 if k in self.source.data
             }
         else:
             new_data = valmap(
-                lambda x: np.array(x) / dt,
+                lambda x: np.array(x[front:back]) / dt,
                 self.plugin.compute,
             )
 
         new_data["time"] = (
             timestamps - self._offset
         ) * 1000.0  # bokeh likes milliseconds
-        new_data["nthreads"] = np.array(self.plugin.nthreads)
+        new_data["nthreads"] = np.array(self.plugin.nthreads[front:back])
 
         # This is an enormous hack around a bokeh bug:
         # https://github.com/bokeh/bokeh/issues/11119
