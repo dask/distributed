@@ -1,4 +1,5 @@
 import asyncio
+import os
 import pathlib
 import socket
 import threading
@@ -355,21 +356,34 @@ async def test_locked_comm_intercept_write(loop):
 
 
 @pytest.mark.slow()
-def test_provide_stack_on_timeout():
+def test_dump_cluster_state_timeout(tmp_path):
     sleep_time = 30
 
     async def inner_test(c, s, a, b):
         await asyncio.sleep(sleep_time)
 
-    # If this timeout is too small, the cluster setup/teardown might take too
-    # long and the timeout error we'll receive will be different
-    test = gen_cluster(client=True, timeout=2)(inner_test)
+    # This timeout includes cluster startup and teardown which sometimes can
+    # take a significant amount of time. For this particular test we would like
+    # to keep the _test timeout_ small because we intend to trigger it but the
+    # overall timeout large.
+    test = gen_cluster(client=True, timeout=5, cluster_dump_directory=tmp_path)(
+        inner_test
+    )
+    try:
+        with pytest.raises(asyncio.TimeoutError) as exc:
+            test()
+        assert "inner_test" in str(exc)
+        assert "await asyncio.sleep(sleep_time)" in str(exc)
+    except gen.TimeoutError:
+        pytest.xfail("Cluster startup or teardown took too long")
 
-    start = time()
-    with pytest.raises(asyncio.TimeoutError) as exc:
-        test()
-    end = time()
-    assert "inner_test" in str(exc)
-    assert "await asyncio.sleep(sleep_time)" in str(exc)
-    # ensure the task was properly
-    assert end - start < sleep_time / 2
+    _, dirs, files = next(os.walk(tmp_path))
+    assert not dirs
+    assert files == [inner_test.__name__ + ".yaml"]
+    import yaml
+
+    with open(tmp_path / files[0], "rb") as fd:
+        state = yaml.load(fd, Loader=yaml.Loader)
+
+    assert "scheduler" in state
+    assert "workers" in state

@@ -26,7 +26,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import ClassVar
+from typing import Any, ClassVar, Container
 from typing import cast as pep484_cast
 
 import psutil
@@ -49,11 +49,14 @@ from dask.highlevelgraph import HighLevelGraph
 from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta, tmpfile
 from dask.widgets import get_template
 
+from distributed.utils import recursive_to_dict
+
 from . import preloading, profile
 from . import versions as version_module
 from .active_memory_manager import ActiveMemoryManagerExtension
 from .batched import BatchedSend
 from .comm import (
+    Comm,
     get_address_host,
     normalize_address,
     resolve_address,
@@ -1727,6 +1730,30 @@ class TaskState:
         for ts in self._dependencies:
             nbytes += ts.get_nbytes()
         return nbytes
+
+    @ccall
+    def _to_dict(self, *, exclude: Container[str] = None):
+        """
+        A very verbose dictionary representation for debugging purposes.
+        Not type stable and not inteded for roundtrips.
+
+        Parameters
+        ----------
+        exclude:
+            A list of attributes which must not be present in the output.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        """
+
+        if not exclude:
+            exclude = set()
+        members = inspect.getmembers(self)
+        return recursive_to_dict(
+            {k: v for k, v in members if k not in exclude and not callable(v)},
+            exclude=exclude,
+        )
 
 
 class _StateLegacyMapping(Mapping):
@@ -3948,6 +3975,39 @@ class Scheduler(SchedulerState, ServerNode):
             },
         }
         return d
+
+    def _to_dict(
+        self, comm: Comm = None, *, exclude: Container[str] = None
+    ) -> "dict[str, Any]":
+        """
+        A very verbose dictionary representation for debugging purposes.
+        Not type stable and not inteded for roundtrips.
+
+        Parameters
+        ----------
+        comm:
+        exclude:
+            A list of attributes which must not be present in the output.
+
+        See also
+        --------
+        Server.identity
+        Client.dump_cluster_state
+        """
+
+        info = super()._to_dict(exclude=exclude)
+        extra = {
+            "transition_log": self.transition_log,
+            "log": self.log,
+            "tasks": self.tasks,
+            "events": self.events,
+        }
+        info.update(extra)
+        extensions = {}
+        for name, ex in self.extensions.items():
+            if hasattr(ex, "_to_dict"):
+                extensions[name] = ex._to_dict()
+        return recursive_to_dict(info, exclude=exclude)
 
     def get_worker_service_addr(self, worker, service_name, protocol=False):
         """
@@ -7080,17 +7140,12 @@ class Scheduler(SchedulerState, ServerNode):
 
     def set_metadata(self, comm=None, keys=None, value=None):
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            metadata = parent._task_metadata
-            for key in keys[:-1]:
-                if key not in metadata or not isinstance(metadata[key], (dict, list)):
-                    metadata[key] = {}
-                metadata = metadata[key]
-            metadata[keys[-1]] = value
-        except Exception:
-            import pdb
-
-            pdb.set_trace()
+        metadata = parent._task_metadata
+        for key in keys[:-1]:
+            if key not in metadata or not isinstance(metadata[key], (dict, list)):
+                metadata[key] = {}
+            metadata = metadata[key]
+        metadata[keys[-1]] = value
 
     def get_metadata(self, comm=None, keys=None, default=no_default):
         parent: SchedulerState = cast(SchedulerState, self)
