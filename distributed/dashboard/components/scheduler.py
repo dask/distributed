@@ -2709,6 +2709,7 @@ class TaskGroupProgress(DashboardComponent):
 
             new_data = valmap(extend, new_data)
             new_data["time"][n:] = new_data["time"][n - 1]
+            new_data["nthreads"][n:] = new_data["nthreads"][n - 1]
 
         return new_data
 
@@ -2733,6 +2734,13 @@ class TaskGroupProgress(DashboardComponent):
 
                 for i, (group, color) in enumerate(zip(stackers, colors)):
                     if group in self._renderers:
+                        if not np.count_nonzero(new_data[group]) > 0:
+                            self._renderers[group].visible = False
+                            self._line_renderers[group].visible = False
+                        else:
+                            self._renderers[group].visible = True
+                            self._line_renderers[group].visible = True
+
                         continue
 
                     renderer = self.root.varea(
@@ -2797,9 +2805,12 @@ class TaskGroupProgress(DashboardComponent):
                     ),  # sneak the color mapping into the callback
                     args={"source": self.source},
                 )
-                self.hover.renderers = [
-                    next(reversed(self._line_renderers.values()), None)
-                ]
+                top_line = None
+                for line in reversed(self._line_renderers.values()):
+                    if line.visible:
+                        top_line = line
+                        break
+                self.hover.renderers = [top_line]
                 self.hover.formatters = {"$index": formatter}
 
                 self._last_drawn = time()
