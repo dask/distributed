@@ -2575,7 +2575,7 @@ class TaskGroupProgress(DashboardComponent):
         self.source.add(np.array(self.plugin.time) * 1000.0, "time")
 
         x_range = DataRange1d(range_padding=0)
-        y_range = DataRange1d(range_padding=0)
+        y_range = Range1d(0, max(self.plugin.nthreads, default=8))
 
         self.root = figure(
             id="bk-task-group-progress-plot",
@@ -2626,8 +2626,8 @@ class TaskGroupProgress(DashboardComponent):
             PanTool(dimensions="width"),
             WheelZoomTool(dimensions="width"),
         )
-        self.root.y_range = Range1d(0, max(self.plugin.nthreads))
         self._last_drawn = None
+        self._offset = time()
         self._last_transition_count = self.scheduler.transition_counter
         self._renderers = OrderedDict()
         self._line_renderers = OrderedDict()
@@ -2685,7 +2685,9 @@ class TaskGroupProgress(DashboardComponent):
                 self.plugin.compute,
             )
 
-        new_data["time"] = timestamps * 1000.0  # bokeh likes milliseconds
+        new_data["time"] = (
+            timestamps - self._offset
+        ) * 1000.0  # bokeh likes milliseconds
         new_data["nthreads"] = np.array(self.plugin.nthreads)
 
         # This is an enormous hack around a bokeh bug:
@@ -2722,7 +2724,7 @@ class TaskGroupProgress(DashboardComponent):
                 new_data = self._get_timeseries(restrict_to_existing=False)
                 self.source.data = new_data
 
-                max_nthreads = max(self.plugin.nthreads)
+                max_nthreads = max(self.plugin.nthreads, default=8)
                 if self.root.y_range.end != max_nthreads:
                     self.root.y_range.end = max_nthreads
 
@@ -2805,7 +2807,7 @@ class TaskGroupProgress(DashboardComponent):
             elif self._should_update():
                 # Update the data, only including existing columns, rather than redrawing
                 # the whole chart.
-                max_nthreads = max(self.plugin.nthreads)
+                max_nthreads = max(self.plugin.nthreads, default=8)
                 if self.root.y_range.end != max_nthreads:
                     self.root.y_range.end = max_nthreads
                 self.source.data = self._get_timeseries(restrict_to_existing=True)
