@@ -19,7 +19,7 @@ from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Container
 
 if TYPE_CHECKING:
     from typing_extensions import Literal
@@ -46,7 +46,7 @@ from dask.utils import (
 
 from . import comm, preloading, profile, system, utils
 from .batched import BatchedSend
-from .comm import connect, get_address_host
+from .comm import Comm, connect, get_address_host
 from .comm.addressing import address_from_user_args, parse_address
 from .comm.utils import OFFLOAD_THRESHOLD
 from .core import (
@@ -83,6 +83,7 @@ from .utils import (
     log_errors,
     offload,
     parse_ports,
+    recursive_to_dict,
     silence_logging,
     thread_state,
     warn_on_duration,
@@ -222,6 +223,34 @@ class TaskState:
     def get_nbytes(self) -> int:
         nbytes = self.nbytes
         return nbytes if nbytes is not None else DEFAULT_DATA_SIZE
+
+    def _to_dict(self, *, exclude: Container[str] = None) -> dict[str, Any]:
+        """
+        A very verbose dictionary representation for debugging purposes.
+        Not type stable and not inteded for roundtrips.
+
+        Parameters
+        ----------
+        comm:
+        exclude:
+            A list of attributes which must not be present in the output.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        """
+
+        if exclude is None:
+            exclude = set()
+
+        return recursive_to_dict(
+            {
+                attr: getattr(self, attr)
+                for attr in self.__dict__.keys()
+                if attr not in exclude
+            },
+            exclude=exclude,
+        )
 
     def is_protected(self) -> bool:
         return self.state in PROCESSING or any(
@@ -1091,6 +1120,47 @@ class Worker(ServerNode):
             "memory_limit": self.memory_limit,
         }
 
+    def _to_dict(
+        self, comm: Comm = None, *, exclude: Container[str] = None
+    ) -> dict[str, Any]:
+        """
+        A very verbose dictionary representation for debugging purposes.
+        Not type stable and not inteded for roundtrips.
+
+        Parameters
+        ----------
+        comm:
+        exclude:
+            A list of attributes which must not be present in the output.
+
+        See also
+        --------
+        Worker.identity
+        Client.dump_cluster_state
+        """
+        info = super()._to_dict(exclude=exclude)
+        extra = {
+            "status": self.status,
+            "ready": self.ready,
+            "constrained": self.constrained,
+            "long_running": self.long_running,
+            "executing_count": self.executing_count,
+            "in_flight_tasks": self.in_flight_tasks,
+            "in_flight_workers": self.in_flight_workers,
+            "log": self.log,
+            "tasks": self.tasks,
+            "memory_limit": self.memory_limit,
+            "memory_target_fraction": self.memory_target_fraction,
+            "memory_spill_fraction": self.memory_spill_fraction,
+            "memory_pause_fraction": self.memory_pause_fraction,
+            "logs": self.get_logs(),
+            "config": dict(dask.config.config),
+            "incoming_transfer_log": list(self.incoming_transfer_log),
+            "outgoing_transfer_log": list(self.outgoing_transfer_log),
+        }
+        info.update(extra)
+        return recursive_to_dict(info, exclude=exclude)
+
     #####################
     # External Services #
     #####################
@@ -1509,6 +1579,13 @@ class Worker(ServerNode):
             self._workdir.release()
 
             self.stop_services()
+
+            # Give some time for a UCX scheduler to complete closing endpoints
+            # before closing self.batched_stream, otherwise the local endpoint
+            # may be closed too early and errors be raised on the scheduler when
+            # trying to send closing message.
+            if self._protocol == "ucx":
+                await asyncio.sleep(0.2)
 
             if (
                 self.batched_stream

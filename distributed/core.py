@@ -12,7 +12,7 @@ from collections import defaultdict
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import ClassVar
+from typing import ClassVar, Container
 
 import tblib
 from tlz import merge
@@ -22,8 +22,11 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
+from distributed.utils import recursive_to_dict
+
 from . import profile, protocol
 from .comm import (
+    Comm,
     CommClosedError,
     connect,
     get_address_host_port,
@@ -147,6 +150,7 @@ class Server:
             "identity": self.identity,
             "echo": self.echo,
             "connection_stream": self.handle_stream,
+            "dump_state": self._to_dict,
         }
         self.handlers.update(handlers)
         if blocked_handlers is None:
@@ -378,8 +382,36 @@ class Server:
             _, self._port = get_address_host_port(self.address)
         return self._port
 
-    def identity(self, comm=None):
+    def identity(self, comm=None) -> dict[str, str]:
         return {"type": type(self).__name__, "id": self.id}
+
+    def _to_dict(
+        self, comm: Comm = None, *, exclude: Container[str] = None
+    ) -> dict[str, str]:
+        """
+        A very verbose dictionary representation for debugging purposes.
+        Not type stable and not inteded for roundtrips.
+
+        Parameters
+        ----------
+        comm:
+        exclude:
+            A list of attributes which must not be present in the output.
+
+        See also
+        --------
+        Server.identity
+        Client.dump_cluster_state
+        """
+
+        info = self.identity()
+        extra = {
+            "address": self.address,
+            "status": self.status.name,
+            "thread_id": self.thread_id,
+        }
+        info.update(extra)
+        return recursive_to_dict(info, exclude=exclude)
 
     def echo(self, comm=None, data=None):
         return data
