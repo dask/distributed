@@ -132,7 +132,7 @@ class MemorySampler:
 
         ss = {}
         for (label, s_list) in self.samples.items():
-            assert s_list  # There's always at least one sasmple
+            assert s_list  # There's always at least one sample
             s = pd.DataFrame(s_list).set_index(0)[1]
             s.index = pd.to_datetime(s.index, unit="s")
             s.name = label
