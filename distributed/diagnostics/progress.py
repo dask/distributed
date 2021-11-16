@@ -304,10 +304,13 @@ class GroupTiming(SchedulerPlugin):
     def __init__(self, scheduler):
         scheduler.add_plugin(self)
         self.scheduler = scheduler
+
+        # Time bin size. TODO: make this configurable?
         self.dt = 1.0
         now = time.time()
 
         # Timestamps for tracking compute durations by task group.
+        # Start with length 2 so that we always can compute a valid dt later.
         self.time: list[float] = [now] * 2
         # The amount of compute since the last timestamp
         self.compute: dict[str, list[float]] = {}
@@ -315,6 +318,9 @@ class GroupTiming(SchedulerPlugin):
         self.nthreads: list[float] = [scheduler.total_nthreads] * 2
 
     def transition(self, key, start, finish, *args, **kwargs):
+        # We are mostly interested in when tasks complete for now, so just look
+        # for when processing transitions to memory. Later we could also extend
+        # this if we can come up with useful visual channels to show it in.
         if start == "processing" and finish == "memory":
             startstops = kwargs.get("startstops")
             if not startstops:
@@ -337,7 +343,8 @@ class GroupTiming(SchedulerPlugin):
             task = self.scheduler.tasks[key]
             group = task.group
 
-            # If the group is new, add it
+            # If the group is new, add it to the timeseries as if it has been
+            # here the whole time
             if group.name not in self.compute:
                 self.compute[group.name] = [0.0] * len(self.time)
 
@@ -348,7 +355,7 @@ class GroupTiming(SchedulerPlugin):
                 start = startstop["start"]
                 idx = len(self.time) - 1
                 # If the stop time is after the most recent bin,
-                # roll back the current index
+                # roll back the current index. Not clear how often this happens.
                 while idx > 0 and self.time[idx - 1] > stop:
                     idx -= 1
                 # Allocate the timing information of the task to the time bins.
@@ -361,6 +368,6 @@ class GroupTiming(SchedulerPlugin):
 
     def restart(self, scheduler):
         now = time.time()
-        self.time = [now] * 2
+        self.time = [now] * 2  # make sure to respect the requirement that len > 2
         self.nthreads = [self.scheduler.total_nthreads] * 2
         self.compute = {}

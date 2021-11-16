@@ -2565,6 +2565,7 @@ class TaskGroupProgress(DashboardComponent):
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
         self.source = ColumnDataSource()
+        # The length of timeseries to chart
         self.npts = 180
 
         if GroupTiming.name not in self.scheduler.plugins:
@@ -2575,7 +2576,7 @@ class TaskGroupProgress(DashboardComponent):
         self.source.add(np.array(self.plugin.time) * 1000.0, "time")
 
         x_range = DataRange1d(range_padding=0)
-        y_range = Range1d(0, max(self.plugin.nthreads, default=8))
+        y_range = Range1d(0, max(self.plugin.nthreads))
 
         self.root = figure(
             id="bk-task-group-progress-plot",
@@ -2629,25 +2630,32 @@ class TaskGroupProgress(DashboardComponent):
         self._last_drawn = None
         self._offset = time()
         self._last_transition_count = self.scheduler.transition_counter
+        # OrderedDict so we can make a reverse iterator later and get the
+        # most-recently-added glyphs.
         self._renderers = OrderedDict()
         self._line_renderers = OrderedDict()
 
-    def _should_redraw(self) -> bool:
+    def _should_add_new_renderers(self) -> bool:
         """
-        Whether to redraw the whole chart.
+        Whether to add new renderers to the chart.
 
-        We need to redraw the it every time we get new stackers, since their position
-        depends on the others (they are stacked). But redrawing is pretty expensive!
-        So we check to make sure we need to, and whether the scheduler seems busy.
+        When a new set of task groups enters the scheduler we'd like to start rendering
+        them. But it can be expensive to add new glyps, so we do it deliberately,
+        checking whether we have to do it and whether the scheduler seems busy.
         """
+        # Always draw if we have not before
         if not self._last_drawn:
             return True
+        # Don't draw if there have been no new tasks completed since the last update,
+        # or if the scheduler CPU is occupied.
         if (
             self._last_transition_count == self.scheduler.transition_counter
             or self.scheduler.proc.cpu_percent() > 50
         ):
             return False
 
+        # Only return true if there are new task groups that we have not yet added
+        # to the ColumnDataSource.
         return not set(self.plugin.compute.keys()) <= set(self.source.data.keys())
 
     def _should_update(self) -> bool:
@@ -2669,8 +2677,10 @@ class TaskGroupProgress(DashboardComponent):
         which might have been added since the last time we rendered.
         This is important as we want to add new stackers very deliberately.
         """
+        # Get the front/back indices for most recent npts bins out of the timeseries
         front = max(len(self.plugin.time) - self.npts, 0)
         back = None
+        # Remove any periods of zero compute at the front or back of the timeseries
         if len(self.plugin.compute):
             agg = sum([np.array(v[front:]) for v in self.plugin.compute.values()])
             front2 = len(agg) - len(np.trim_zeros(agg, trim="f"))
@@ -2678,7 +2688,6 @@ class TaskGroupProgress(DashboardComponent):
             back = len(np.trim_zeros(agg, trim="b")) - len(agg) or None
 
         timestamps = np.array(self.plugin.time[front:back])
-        print(front, back)
         n = len(timestamps)
         dt = np.diff(timestamps, prepend=timestamps[0] - 10.0)
 
@@ -2705,8 +2714,10 @@ class TaskGroupProgress(DashboardComponent):
         # as there is a JS race condition. This precludes easy streaming of the
         # data to the client. To work around this, we keep the length of the CDS
         # constant. If our data source is shorter, we zero-pad. If it's longer,
-        # we clip to the most recent data. This may need to be revisited, or
-        # ideally removed if the above bug is fixed.
+        # we clip to the most recent data.
+        #
+        # The above has been fixed, but a different regression is preventing us from
+        # upgrading right now: https://github.com/bokeh/bokeh/issues/11804.
         if n >= self.npts:
             new_data = valmap(lambda x: x[-self.npts :], new_data)
         else:
@@ -2729,12 +2740,13 @@ class TaskGroupProgress(DashboardComponent):
         it pretty defensively.
         """
         with log_errors():
-            if self._should_redraw():
-                # Redraw the whole chart, including any new task groups.
+            if self._should_add_new_renderers():
+                # Update the chart, allowing for new task groups to be added.
                 new_data = self._get_timeseries(restrict_to_existing=False)
                 self.source.data = new_data
 
-                max_nthreads = max(self.plugin.nthreads, default=8)
+                # Possibly update the y range if the number of threads has increased.
+                max_nthreads = max(self.plugin.nthreads)
                 if self.root.y_range.end != max_nthreads:
                     self.root.y_range.end = max_nthreads
 
@@ -2742,6 +2754,8 @@ class TaskGroupProgress(DashboardComponent):
                 colors = [color_of(key_split(k)) for k in stackers]
 
                 for i, (group, color) in enumerate(zip(stackers, colors)):
+                    # If we have already drawn the group, but it is all zero,
+                    # set it to be invisible.
                     if group in self._renderers:
                         if not np.count_nonzero(new_data[group]) > 0:
                             self._renderers[group].visible = False
@@ -2752,6 +2766,7 @@ class TaskGroupProgress(DashboardComponent):
 
                         continue
 
+                    # Draw the new area and line glyphs.
                     renderer = self.root.varea(
                         x="time",
                         y1=stack(*stackers[:i]),
@@ -2814,6 +2829,7 @@ class TaskGroupProgress(DashboardComponent):
                     ),  # sneak the color mapping into the callback
                     args={"source": self.source},
                 )
+                # Add the HoverTool to the top line renderer.
                 top_line = None
                 for line in reversed(self._line_renderers.values()):
                     if line.visible:
@@ -2825,11 +2841,12 @@ class TaskGroupProgress(DashboardComponent):
                 self._last_drawn = time()
                 self._last_transition_count = self.scheduler.transition_counter
             elif self._should_update():
-                # Update the data, only including existing columns, rather than redrawing
-                # the whole chart.
-                max_nthreads = max(self.plugin.nthreads, default=8)
+                # Possibly update the y range if new threads have been added
+                max_nthreads = max(self.plugin.nthreads)
                 if self.root.y_range.end != max_nthreads:
                     self.root.y_range.end = max_nthreads
+                # Update the data, only including existing columns, rather than redrawing
+                # the whole chart.
                 self.source.data = self._get_timeseries(restrict_to_existing=True)
                 self._last_transition_count = self.scheduler.transition_counter
 
