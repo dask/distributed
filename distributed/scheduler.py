@@ -64,6 +64,7 @@ from .comm import (
 )
 from .comm.addressing import addresses_from_user_args
 from .core import CommClosedError, Status, clean_exception, rpc, send_recv
+from .diagnostics.memory_sampler import MemorySamplerExtension
 from .diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from .event import EventExtension
 from .http import get_handlers
@@ -185,6 +186,7 @@ DEFAULT_EXTENSIONS = [
     SemaphoreExtension,
     EventExtension,
     ActiveMemoryManagerExtension,
+    MemorySamplerExtension,
 ]
 
 ALL_TASK_STATES = declare(
