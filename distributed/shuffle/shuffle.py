@@ -82,11 +82,26 @@ def rearrange_by_column_p2p(
         ),
     )
 
-    # TODO blockwise this part (not yet supported by dataframe IO interface)
     name = "shuffle-unpack-" + token
     dsk = {
         (name, i): (shuffle_unpack, token, i, barrier_key) for i in range(npartitions)
     }
+    # TODO use this blockwise (https://github.com/coiled/oss-engineering/issues/49)
+    # Changes task names, so breaks setting worker restrictions at the moment.
+    # Also maybe would be nice if the `DataFrameIOLayer` interface supported this?
+    # dsk = blockwise(
+    #     shuffle_unpack,
+    #     name,
+    #     "i",
+    #     token,
+    #     None,
+    #     BlockwiseDepDict({(i,): i for i in range(npartitions)}),
+    #     "i",
+    #     barrier_key,
+    #     None,
+    #     numblocks={},
+    # )
+
     return DataFrame(
         HighLevelGraph.from_collections(name, dsk, [barrier]),
         name,
