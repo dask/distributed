@@ -158,7 +158,7 @@ All times are intended to be from the scheduler's perspective.
 
 Analysing memory usage over time
 --------------------------------
-Users may want to know how the cluster-wide memory usage evolves over time as a
+You may want to know how the cluster-wide memory usage evolves over time as a
 computation progresses, or how two different implementations of the same algorithm
 compare memory-wise.
 
