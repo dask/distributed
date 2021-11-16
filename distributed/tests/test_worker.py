@@ -3196,3 +3196,52 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
     args, kwargs = mocked_gather.call_args
     await Worker.gather_dep(b, *args, **kwargs)
     await fut3
+
+
+@gen_cluster(client=True)
+async def test_get_worker_in_task(c: Client, s: Scheduler, *workers: Worker):
+    with pytest.raises(ValueError, match="Not running within a worker"):
+        get_worker()
+
+    def check_worker(expected: str):
+        w = get_worker()
+        assert w.address == expected
+
+    for w in workers:
+        await c.submit(check_worker, w.address, workers=[w.address]).result()
+
+
+@gen_cluster(client=True)
+async def test_get_worker_in_run(c: Client, s: Scheduler, *workers: Worker):
+    def check_worker(dask_worker: Worker):
+        w = get_worker()
+        assert w is dask_worker
+        return w.address
+
+    results = await c.run(check_worker)
+    assert results == {w.address: w.address for w in workers}
+
+
+@gen_cluster(client=True)
+async def test_get_worker_serialize_deserialize(
+    c: Client, s: Scheduler, a: Worker, b: Worker
+):
+    class Checker:
+        def __init__(self) -> None:
+            self.sender = None
+            self.receiver = None
+
+        def result(self):
+            return self.sender, self.receiver
+
+        def __getstate__(self):
+            return (get_worker().address,)
+
+        def __setstate__(self, state):
+            self.sender = state[0]
+            self.receiver = get_worker().address
+
+    f = c.submit(Checker, workers=[a.address])
+    moved = c.submit(Checker.result, f, workers=[b.address])
+    result = await moved.result()
+    assert result == (a.address, b.address)
