@@ -62,10 +62,13 @@ class MemorySampler:
         This is synchronous if the client is synchronous and
         asynchronous if the client is asynchronous.
 
+        The samples are recorded in ``self.samples[<label>]``.
+
         Parameters
         ==========
         label: str, optional
-            Tag to record the samples under in the self.samples dict
+            Tag to record the samples under in the self.samples dict.
+            Default: automatically generate a random label
         client: Client, optional
             client used to connect to the scheduler.
             Default: use the global client
@@ -120,7 +123,7 @@ class MemorySampler:
 
         Parameters
         ==========
-        align : bool (optional)
+        align : bool, optional
             If True, change the absolute timestamps into time deltas from the first
             sample of each series, so that different series can be visualized side by
             side. If False (the default), use absolute timestamps.
