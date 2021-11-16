@@ -172,30 +172,17 @@ This is done wrapping a computation with the
 
     client = Client(...)
     ms = MemorySampler()
-    with ms.sample("label 1"):
+    with ms.sample("collection 1"):
         collection1.compute()
-    with ms.sample("label 2"):
+    with ms.sample("collection 2"):
         collection2.compute()
     ...
-    ms.plot()
-
-Or with an asynchronous client:
-
-.. code-block:: python
-
-    from distributed import Client
-    from distributed.diagnostics import MemorySampler
-
-    client = Client(..., asynchronous=True)
-    ms = MemorySampler()
-    async with ms.sample("label 1"):
-        await client.compute(collection1)
-    async with ms.sample("label 2"):
-        await client.compute(collection2)
-    ...
-    ms.plot()
+    ms.plot(align=True)
 
 Sample output:
 
 .. image:: images/memory-sampler.svg
     :alt: Sample output of the MemorySampler
+
+.. autoclass:: distributed.diagnostics.MemorySampler
+   :members:

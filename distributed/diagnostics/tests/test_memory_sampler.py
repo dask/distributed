@@ -71,7 +71,8 @@ async def test_multi_sample(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_pandas(c, s, a, b):
+@pytest.mark.parametrize("align", [False, True])
+async def test_pandas(c, s, a, b, align):
     pd = pytest.importorskip("pandas")
     pytest.importorskip("matplotlib")
 
@@ -84,30 +85,37 @@ async def test_pandas(c, s, a, b):
     assert ms.samples["foo"][0][1] == 0
     assert ms.samples["foo"][-1][1] > 0
 
-    df = ms.to_pandas()
+    df = ms.to_pandas(align=align)
     assert isinstance(df, pd.DataFrame)
-    assert df["foo"].iloc[0] == 0
-    assert df["foo"].iloc[-1] > 0
-    assert df.index[0] == pd.Timedelta(0, unit="s")
-    assert df.index[1] > pd.Timedelta(0, unit="s")
-    assert df.index[1] < pd.Timedelta(1.5, unit="s")
+    if align:
+        assert isinstance(df.index, pd.TimedeltaIndex)
+        assert df["foo"].iloc[0] == 0
+        assert df["foo"].iloc[-1] > 0
+        assert df.index[0] == pd.Timedelta(0, unit="s")
+        assert pd.Timedelta(0, unit="s") < df.index[1]
+        assert df.index[1] < pd.Timedelta(1.5, unit="s")
+    else:
+        assert isinstance(df.index, pd.DatetimeIndex)
+        assert pd.Timedelta(0, unit="s") < df.index[1] - df.index[0]
+        assert df.index[1] - df.index[0] < pd.Timedelta(1.5, unit="s")
 
-    plt = ms.plot(grid=True)
+    plt = ms.plot(align=align, grid=True)
     assert plt
 
 
 @pytest.mark.slow
 @gen_cluster(client=True)
-async def test_pandas_multiseries(c, s, a, b):
+@pytest.mark.parametrize("align", [False, True])
+async def test_pandas_multiseries(c, s, a, b, align):
     """Test that multiple series are upsampled and aligned to each other"""
     pd = pytest.importorskip("pandas")
 
     ms = MemorySampler()
-    for (label, interval) in (("foo", 0.15), ("bar", 0.2)):
+    for (label, interval, final_sleep) in (("foo", 0.15, 1.0), ("bar", 0.2, 0.6)):
         async with ms.sample(label, measure="managed", interval=interval):
             x = c.submit(lambda: 1, key="x")
             await x
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(final_sleep)
         del x
         while "x" in s.tasks:
             await asyncio.sleep(0.01)
@@ -116,13 +124,20 @@ async def test_pandas_multiseries(c, s, a, b):
         assert ms.samples[label][0][1] == 0
         assert ms.samples[label][-1][1] > 0
 
-    df = ms.to_pandas()
-    # One of the two series may be shorter than the other
-    df = df.ffill()
-    # Rescaled to 0.1S
-    assert df["foo"].iloc[0] == 0
-    assert df["foo"].iloc[-1] > 0
-    assert df["bar"].iloc[0] == 0
-    assert df["bar"].iloc[-1] > 0
-    assert df.index[0] == pd.Timedelta(0, unit="s")
-    assert df.index[1] == pd.Timedelta(0.1, unit="s")
+    df = ms.to_pandas(align=align)
+    if align:
+        assert df.index[0] == pd.Timedelta(0, unit="s")
+
+        # ffill does not go beyond the end of the series
+        assert df["foo"].iloc[0] == 0
+        assert df["foo"].iloc[-1] > 0
+
+        assert df["bar"].iloc[0] == 0
+        assert pd.isna(df["bar"].iloc[-1])
+        assert df["bar"].ffill().iloc[-1] > 0
+
+    else:
+        assert df["foo"].iloc[0] == 0
+        assert pd.isna(df["foo"].iloc[-1])
+        assert pd.isna(df["bar"].iloc[0])
+        assert df["bar"].iloc[-1] > 0

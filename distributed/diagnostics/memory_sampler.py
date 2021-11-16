@@ -68,13 +68,13 @@ class MemorySampler:
             Tag to record the samples under in the self.samples dict
         client: Client, optional
             client used to connect to the scheduler.
-            default: use the global client
+            Default: use the global client
         measure: str, optional
             One of the measures from :class:`distributed.scheduler.MemoryState`.
-            default: "process"
+            Default: sample process memory
         interval: float, optional
             sampling interval, in seconds.
-            default: 0.5
+            Default: 0.5
         """
         if not client:
             from ..client import get_client
@@ -115,9 +115,15 @@ class MemorySampler:
             samples = await client.scheduler.memory_sampler_stop(key=key)
             self.samples[label or key] = samples
 
-    def to_pandas(self):
+    def to_pandas(self, *, align: bool = False):
         """Return the data series as a pandas.Dataframe.
-        The timeseries are resampled and aligned to each other.
+
+        Parameters
+        ==========
+        align : bool (optional)
+            If True, change the absolute timestamps into time deltas from the first
+            sample of each series, so that different series can be visualized side by
+            side. If False (the default), use absolute timestamps.
         """
         import pandas as pd
 
@@ -126,22 +132,33 @@ class MemorySampler:
             assert s_list  # There's always at least one sasmple
             s = pd.DataFrame(s_list).set_index(0)[1]
             s.index = pd.to_datetime(s.index, unit="s")
-            s.index -= s.index[0]
-            if len(self.samples) > 1:
-                s = s.resample("0.1S").ffill()
+            s.name = label
+            if align:
+                # convert datetime to timedelta from the first sample
+                s.index -= s.index[0]
             ss[label] = s
 
-        return pd.DataFrame(ss)
+        df = pd.DataFrame(ss)
 
-    def plot(self, **kwargs):
+        if len(ss) > 1:
+            # Forward-fill NaNs in the middle of a series created either by overlapping
+            # sampling time range or by align=True. Do not ffill series beyond their
+            # last sample.
+            df = df.ffill().where(~pd.isna(df.bfill()))
+
+        return df
+
+    def plot(self, *, align: bool = False, **kwargs):
         """Plot data series collected so far
 
         Parameters
         ==========
+        align : bool (optional)
+            See :meth:`~distributed.diagnostics.MemorySampler.to_pandas`
         kwargs
-            Passed verbatim to pandas.DataFrame.plot()
+            Passed verbatim to :meth:`pandas.DataFrame.plot`
         """
-        df = self.to_pandas() / 2 ** 30
+        df = self.to_pandas(align=align) / 2 ** 30
         return df.plot(
             xlabel="time",
             ylabel="Cluster memory (GiB)",
