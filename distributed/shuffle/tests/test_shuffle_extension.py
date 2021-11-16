@@ -34,6 +34,9 @@ def test_worker_for_distribution(npartitions: int, n_workers: int):
         list(string.ascii_lowercase[:n_workers]),
     )
 
+    with pytest.raises(AssertionError, match="Negative"):
+        metadata.worker_for(-1)
+
     assignments = [metadata.worker_for(i) for i in range(metadata.npartitions)]
 
     # Test `partition_range`

@@ -44,6 +44,7 @@ class ShuffleMetadata(NewShuffleMetadata):
 
     def worker_for(self, output_partition: int) -> str:
         "Get the address of the worker which should hold this output partition number"
+        assert output_partition >= 0, f"Negative output partition: {output_partition}"
         if output_partition >= self.npartitions:
             raise IndexError(
                 f"Output partition {output_partition} does not exist in a shuffle producing {self.npartitions} partitions"
