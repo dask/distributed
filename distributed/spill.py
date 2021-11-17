@@ -6,8 +6,9 @@ from functools import (  # noqa: F401 do we use this total ordering
     partial,
     total_ordering,
 )
-from typing import Any, Literal
+from typing import Any
 
+from typing_extensions import Literal
 from zict import Buffer, File, Func
 
 from .protocol import deserialize_bytes, serialize_bytelist
