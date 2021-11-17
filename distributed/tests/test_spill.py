@@ -80,3 +80,36 @@ def test_spillbuffer(tmpdir):
     assert set(buf.disk) == {"d", "e"}
     assert buf.spilled_by_key == {"d": slarge, "e": slarge}
     assert buf.spilled_total == slarge * 2
+
+
+def test_spillbuffer_disk_limit(tmpdir):
+    buf = SpillBuffer(str(tmpdir), target=200, disk_limit=500)
+
+    # Convenience aliases
+    assert buf.memory is buf.fast
+    assert buf.disk is buf.slow
+
+    assert not buf.spilled_by_key
+    assert buf.spilled_total == 0
+    assert buf.spilled_total_disk == 0
+
+    a, b, c = "a" * 100, "b" * 200, "c" * 200
+
+    s = sizeof(b)
+
+    buf["a"] = a
+    assert not buf.disk
+    assert not buf.spilled_by_key
+    assert buf.spilled_total == buf.spilled_total_disk == 0
+    assert set(buf.memory) == {"a"}
+
+    buf["b"] = b
+    assert set(buf.disk) == {"b"}
+    assert buf.spilled_by_key == {"b": s}
+    assert buf.spilled_total == s
+    assert buf.spilled_total_disk == len(buf.storage.d.get("b"))
+
+    # add a key that will go over the disk limit, should keep it in fast
+    buf["c"] = c
+    assert set(buf.memory) == {"a", "c"}
+    # this works but the count of what is in fast is off. since this will sum a -1 but

@@ -394,6 +394,9 @@ class Worker(ServerNode):
     memory_pause_fraction: float or False
         Fraction of memory at which we stop running new tasks
         (default: read from config key distributed.worker.memory.pause)
+    spill_limit: int, string or False (### NOT SURE WHAT TYPE YET)
+        Limit of number of bytes to be spilled on disk.
+        (default: read from config key distributed.worker.memory.spill-limit)
     executor: concurrent.futures.Executor, dict[str, concurrent.futures.Executor], "offload"
         The executor(s) to use. Depending on the type, it has the following meanings:
             - Executor instance: The default executor.
@@ -512,6 +515,7 @@ class Worker(ServerNode):
     memory_target_fraction: float | Literal[False]
     memory_spill_fraction: float | Literal[False]
     memory_pause_fraction: float | Literal[False]
+    spill_limit: int | Literal[False]
     data: MutableMapping[str, Any]  # {task key: task payload}
     actors: dict[str, Actor | None]
     loop: IOLoop
@@ -563,6 +567,7 @@ class Worker(ServerNode):
         memory_target_fraction: float | Literal[False] | None = None,
         memory_spill_fraction: float | Literal[False] | None = None,
         memory_pause_fraction: float | Literal[False] | None = None,
+        spill_limit: str | Literal[False] | None = None,
         extensions: list[type] | None = None,
         metrics: Mapping[str, Callable[[Worker], Any]] = DEFAULT_METRICS,
         startup_information: Mapping[
@@ -811,6 +816,12 @@ class Worker(ServerNode):
             else dask.config.get("distributed.worker.memory.pause")
         )
 
+        self.spill_limit = (
+            parse_bytes(spill_limit)
+            if spill_limit is not None
+            else dask.config.get("distributed.worker.memory.spill-limit")
+        )
+
         if isinstance(data, MutableMapping):
             self.data = data
         elif callable(data):
@@ -829,6 +840,7 @@ class Worker(ServerNode):
                     * (self.memory_target_fraction or self.memory_spill_fraction)
                 )
                 or sys.maxsize,
+                disk_limit=self.spill_limit,
             )
         else:
             self.data = {}
