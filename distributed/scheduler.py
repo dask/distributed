@@ -188,7 +188,7 @@ DEFAULT_EXTENSIONS = [
     ActiveMemoryManagerExtension,
     MemorySamplerExtension,
 ]
-DEFAULT_PLUGINS: tuple[SchedulerPlugin, ...] = (
+DEFAULT_PLUGINS: "tuple[SchedulerPlugin, ...]" = (
     (shuffle.ShuffleSchedulerPlugin(),) if shuffle.SHUFFLE_AVAILABLE else ()
 )
 # ^ TODO this assumes one Scheduler per process; probably a bad idea.

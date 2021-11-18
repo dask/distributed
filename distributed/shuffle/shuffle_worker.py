@@ -49,6 +49,11 @@ class ShuffleWorkerExtension:
     ##########
 
     def shuffle_init(self, id: ShuffleId, workers: list[str], n_out_tasks: int) -> None:
+        """
+        Handler: initialize a shuffle. Called by scheduler on all workers.
+
+        Must be called exactly once per ID.
+        """
         if id in self.shuffles:
             raise ValueError(
                 f"Shuffle {id!r} is already registered on worker {self.worker.address}"
@@ -71,6 +76,12 @@ class ShuffleWorkerExtension:
         output_partition: int,
         data: pd.DataFrame,
     ) -> None:
+        """
+        Handler: receive data from a peer.
+
+        The shuffle ID can be unknown.
+        Calling after the barrier task is an error.
+        """
         try:
             state = self.shuffles[id]
         except KeyError:
@@ -89,6 +100,13 @@ class ShuffleWorkerExtension:
         self.output_data[id][output_partition].append(data)
 
     async def shuffle_inputs_done(self, comm: object, id: ShuffleId) -> None:
+        """
+        Handler: note that the barrier task has been reached. Called by a peer.
+
+        The shuffle will be removed if this worker holds no output partitions for it.
+
+        Must be called exactly once per ID. Blocks until `shuffle_init` has been called.
+        """
         state = await self.get_shuffle(id)
         assert not state.barrier_reached, f"`inputs_done` called again for {id}"
         state.barrier_reached = True
@@ -105,6 +123,15 @@ class ShuffleWorkerExtension:
     async def add_partition(
         self, data: pd.DataFrame, id: ShuffleId, npartitions: int, column: str
     ) -> None:
+        """
+        Task: Hand off an input partition to the extension.
+
+        This will block until the extension is ready to receive another input partition.
+        Also blocks until `shuffle_init` has been called.
+
+        Using an unknown ``shuffle_id`` is an error.
+        Calling after the barrier task is an error.
+        """
         # Block until scheduler has called init
         state = await self.get_shuffle(id)
         assert not state.barrier_reached, f"`add_partition` for {id} after barrier"
@@ -121,9 +148,14 @@ class ShuffleWorkerExtension:
         await self.send_partition(data, column, id, npartitions, state.workers)
 
     async def barrier(self, id: ShuffleId) -> None:
-        # NOTE: requires workers list. This is guaranteed because it depends on `add_partition`,
-        # which got the workers list from the scheduler. So this task must run on a worker where
-        # `add_partition` has already run.
+        """
+        Task: Note that the barrier task has been reached (`add_partition` called for all input partitions)
+
+        Using an unknown ``shuffle_id`` is an error.
+        Must be called exactly once per ID.
+        Blocks until `shuffle_init` has been called (on all workers).
+        Calling this before all partitions have been added will cause `add_partition` to fail.
+        """
         state = await self.get_shuffle(id)
         assert not state.barrier_reached, f"`barrier` for {id} called multiple times"
 
@@ -140,13 +172,20 @@ class ShuffleWorkerExtension:
     async def get_output_partition(
         self, id: ShuffleId, i: int, empty: pd.DataFrame
     ) -> pd.DataFrame:
-        state = self.shuffles[id]
-        # ^ Don't need to `get_shuffle`; `shuffle_inputs_done` has run already and guarantees it's there
+        """
+        Task: Retrieve a shuffled output partition from the extension.
+
+        After calling on the final output partition remaining on this worker, the shuffle will be cleaned up.
+
+        Using an unknown ``shuffle_id`` is an error.
+        Requesting a partition which doesn't belong on this worker, or has already been retrieved, is an error.
+        """
+        state = await self.get_shuffle(id)  # should never have to wait
         assert state.barrier_reached, f"`get_output_partition` for {id} before barrier"
         assert (
             state.out_parts_left > 0
         ), f"No outputs remaining, but requested output partition {i} on {self.worker.address} for {id}."
-        # ^ Note: this is impossible with our cleanup-on-empty
+        # ^ Note: impossible with our cleanup-on-empty
 
         worker = worker_for(i, state.npartitions, state.workers)
         assert worker == self.worker.address, (
@@ -172,6 +211,7 @@ class ShuffleWorkerExtension:
     #########
 
     def remove(self, id: ShuffleId) -> None:
+        "Remove state for this shuffle. The shuffle must be complete and in a valid state."
         state = self.shuffles.pop(id)
         assert state.barrier_reached, f"Removed {id} before barrier"
         assert (
@@ -187,7 +227,8 @@ class ShuffleWorkerExtension:
             not data
         ), f"Removed {id}, which still has data for output partitions {list(data)}"
 
-    async def get_shuffle(self, id: ShuffleId):
+    async def get_shuffle(self, id: ShuffleId) -> ShuffleState:
+        "Get the `ShuffleState`, blocking until it's been received from the scheduler."
         try:
             return self.shuffles[id]
         except KeyError:
@@ -212,6 +253,7 @@ class ShuffleWorkerExtension:
         npartitions: int,
         workers: list[str],
     ) -> None:
+        "Split up an input partition and send its parts to peers."
         tasks = []
         # TODO grouping is blocking, should it be offloaded to a thread?
         # It mostly doesn't release the GIL though, so may not make much difference.
@@ -231,9 +273,11 @@ class ShuffleWorkerExtension:
 
     @property
     def loop(self) -> asyncio.AbstractEventLoop:
+        "The asyncio event loop for the worker"
         return self.worker.loop.asyncio_loop  # type: ignore
 
     def sync(self, coro: Coroutine[object, object, T]) -> T:
+        "Run an async function on the worker's event loop, synchronously from another thread."
         # Is it a bad idea not to use `distributed.utils.sync`?
         # It's much nicer to use asyncio, because among other things it gives us typechecking.
         return asyncio.run_coroutine_threadsafe(coro, self.loop).result()

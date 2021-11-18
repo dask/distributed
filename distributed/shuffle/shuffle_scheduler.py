@@ -38,6 +38,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         self.scheduler = scheduler
 
     def transfer(self, id: ShuffleId, key: str) -> None:
+        "Handle a `transfer` task for a shuffle being scheduled"
         state = self.shuffles.get(id, None)
         if state:
             assert (
@@ -69,6 +70,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         )
 
     def barrier(self, id: ShuffleId, key: str) -> None:
+        "Handle a `barrier` task for a shuffle being scheduled"
         state = self.shuffles[id]
         assert (
             not state.barrier_reached
@@ -108,6 +110,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             self.output_keys[dts.key] = id
 
     def unpack(self, id: ShuffleId, key: str) -> None:
+        "Handle an `unpack` task for a shuffle completing"
         # Check if all output keys are done
 
         # NOTE: we don't actually need this `unpack` step or tracking output keys;
@@ -137,6 +140,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             del self.shuffles[id]
 
     def erred(self, id: ShuffleId, key: str) -> None:
+        "Handle any task for a shuffle erroring"
         try:
             state = self.shuffles.pop(id)
         except KeyError:
@@ -151,6 +155,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                     del self.output_keys[k]
 
     def transition(self, key: str, start: str, finish: str, *args, **kwargs):
+        "Watch transitions for keys we care about"
         parts = parse_key(key)
         if parts and len(parts) == 3:
             prefix, group, id = parts
@@ -184,8 +189,10 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
 
     def worker_for_key(self, key: str, npartitions: int, workers: list[str]) -> str:
         "Worker address this task should be assigned to"
-        # Infer which output partition number this task is fetching by parsing its key
-        # FIXME this is so brittle.
+        # Infer which output partition number this task is fetching by parsing its key.
+        # We have to parse keys, instead of generating the list of expected keys, because
+        # blockwise fusion means they won't just be `shuffle-unpack-abcde`.
+        # FIXME this feels very hacky/brittle.
         # For example, after `df.set_index(...).to_delayed()`, you could create
         # keys that don't have indices in them, and get fused (because they should!).
         m = re.match(r"\(.+, (\d+)\)$", key)
@@ -202,6 +209,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
 
 
 def parse_key(key: str) -> list[str] | None:
+    "Split a shuffle key into its prefix, group, and shuffle ID, or None if not a shuffle key."
     if TASK_PREFIX in key[: len(TASK_PREFIX) + 2]:
         if key[0] == "(":
             key = key_split_group(key)
