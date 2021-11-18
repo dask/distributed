@@ -111,6 +111,7 @@ def test_kwargs():
 
 
 def test_repr_temp_keys():
+    pytest.importorskip("cryptography")
     sec = Security.temporary()
     representation = repr(sec)
     assert "Temporary (In-memory)" in representation
