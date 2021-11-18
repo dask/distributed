@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from distributed.diagnostics import SchedulerPlugin
 from distributed.utils import key_split_group
@@ -25,12 +25,12 @@ class ShuffleState:
 
 
 class ShuffleSchedulerPlugin(SchedulerPlugin):
+    name: ClassVar[str] = "ShuffleSchedulerPlugin"
     output_keys: dict[str, ShuffleId]
     shuffles: dict[ShuffleId, ShuffleState]
     scheduler: Scheduler
 
     def __init__(self) -> None:
-        super().__init__()
         self.shuffles = {}
         self.output_keys = {}
 

@@ -191,6 +191,7 @@ DEFAULT_EXTENSIONS = [
 DEFAULT_PLUGINS: tuple[SchedulerPlugin, ...] = (
     (shuffle.ShuffleSchedulerPlugin(),) if shuffle.SHUFFLE_AVAILABLE else ()
 )
+# ^ TODO this assumes one Scheduler per process; probably a bad idea.
 
 ALL_TASK_STATES = declare(
     set, {"released", "waiting", "no-worker", "processing", "erred", "memory"}
