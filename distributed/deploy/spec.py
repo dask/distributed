@@ -19,7 +19,13 @@ from dask.widgets import get_template
 from ..core import CommClosedError, Status, rpc
 from ..scheduler import Scheduler
 from ..security import Security
-from ..utils import LoopRunner, TimeoutError, import_term, silence_logging
+from ..utils import (
+    LoopRunner,
+    NoOpAwaitable,
+    TimeoutError,
+    import_term,
+    silence_logging,
+)
 from .adaptive import Adaptive
 from .cluster import Cluster
 
@@ -101,19 +107,6 @@ class ProcessInterface:
 
     async def __aexit__(self, *args, **kwargs):
         await self.close()
-
-
-class NoOpAwaitable:
-    """An awaitable object that always returns None.
-
-    Useful to return from a method that can be called in both asynchronous and
-    synchronous contexts"""
-
-    def __await__(self):
-        async def f():
-            return None
-
-        return f().__await__()
 
 
 class SpecCluster(Cluster):

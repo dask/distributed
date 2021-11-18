@@ -6,6 +6,7 @@ import sys
 import yaml
 
 import dask
+from dask.utils import import_required
 
 from .compatibility import logging_names
 
@@ -151,4 +152,25 @@ def initialize_logging(config):
             _initialize_logging_old_style(config)
 
 
+def initialize_event_loop(config):
+    event_loop = dask.config.get("distributed.admin.event-loop")
+    if event_loop == "uvloop":
+        uvloop = import_required(
+            "uvloop",
+            "The distributed.admin.event-loop configuration value "
+            "is set to 'uvloop' but the uvloop module is not installed"
+            "\n\n"
+            "Please either change the config value or install one of the following\n"
+            "    conda install uvloop\n"
+            "    pip install uvloop",
+        )
+        uvloop.install()
+    elif event_loop not in {"asyncio", "tornado"}:
+        raise ValueError(
+            "Expected distributed.admin.event-loop to be in ('asyncio', 'tornado', 'uvloop'), got %s"
+            % dask.config.get("distributed.admin.event-loop")
+        )
+
+
 initialize_logging(dask.config.config)
+initialize_event_loop(dask.config.config)

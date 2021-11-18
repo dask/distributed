@@ -53,7 +53,7 @@ try:
 except ImportError:
     single_key = first
 from tornado import gen
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import PeriodicCallback
 
 from . import versions as version_module  # type: ignore
 from .batched import BatchedSend
@@ -81,6 +81,8 @@ from .utils import (
     Any,
     CancelledError,
     LoopRunner,
+    NoOpAwaitable,
+    SyncMethodMixin,
     TimeoutError,
     format_dashboard_link,
     has_keyword,
@@ -517,7 +519,7 @@ def _handle_warn(event):
         warnings.warn(msg)
 
 
-class Client:
+class Client(SyncMethodMixin):
     """Connect to and submit computation to a Dask cluster
 
     The Client connects users to a Dask cluster.  It provides an asynchronous
@@ -620,6 +622,10 @@ class Client:
         connection_limit=512,
         **kwargs,
     ):
+        self._asynchronous = asynchronous
+        self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
+        self.io_loop = self.loop = self._loop_runner.loop
+
         if timeout == no_default:
             timeout = dask.config.get("distributed.comm.timeouts.connect")
         if timeout is not None:
@@ -702,9 +708,6 @@ class Client:
             self.connection_args = self.security.get_connection_args("client")
 
         self._connecting_to_scheduler = False
-        self._asynchronous = asynchronous
-        self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
-        self.io_loop = self.loop = self._loop_runner.loop
 
         self._gather_keys = None
         self._gather_future = None
@@ -798,26 +801,6 @@ class Client:
         raise ValueError("Not running inside the `as_current` context manager")
 
     @property
-    def asynchronous(self):
-        """Are we running in the event loop?
-
-        This is true if the user signaled that we might be when creating the
-        client as in the following::
-
-            client = Client(asynchronous=True)
-
-        However, we override this expectation if we can definitively tell that
-        we are running from a thread that is not the event loop.  This is
-        common when calling get_client() from within a worker task.  Even
-        though the client was originally created in asynchronous mode we may
-        find ourselves in contexts when it is better to operate synchronously.
-        """
-        try:
-            return self._asynchronous and self.loop is IOLoop.current()
-        except RuntimeError:
-            return False
-
-    @property
     def dashboard_link(self):
         """Link to the scheduler's dashboard.
 
@@ -853,22 +836,6 @@ class Client:
 
             return format_dashboard_link(host, port)
 
-    def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
-        callback_timeout = parse_timedelta(callback_timeout)
-        if (
-            asynchronous
-            or self.asynchronous
-            or getattr(thread_state, "asynchronous", False)
-        ):
-            future = func(*args, **kwargs)
-            if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
-            return future
-        else:
-            return sync(
-                self.loop, func, *args, callback_timeout=callback_timeout, **kwargs
-            )
-
     def _get_scheduler_info(self):
         from .scheduler import Scheduler
 
@@ -880,9 +847,7 @@ class Client:
             info = self.cluster.scheduler.identity()
             scheduler = self.cluster.scheduler
         elif (
-            self._loop_runner.is_started()
-            and self.scheduler
-            and not (self.asynchronous and self.loop is IOLoop.current())
+            self._loop_runner.is_started() and self.scheduler and not self.asynchronous
         ):
             info = sync(self.loop, self.scheduler.identity)
             scheduler = self.scheduler
@@ -940,7 +905,6 @@ class Client:
         self._loop_runner.start()
         if self._set_as_default:
             _set_global_client(self)
-        self.status = "connecting"
 
         if self.asynchronous:
             self._started = asyncio.ensure_future(self._start(**kwargs))
@@ -977,6 +941,8 @@ class Client:
             )
 
     async def _start(self, timeout=no_default, **kwargs):
+        self.status = "connecting"
+
         await self.rpc.start()
 
         if timeout == no_default:
@@ -1402,9 +1368,7 @@ class Client:
         # XXX handling of self.status here is not thread-safe
         if self.status in ["closed", "newly-created"]:
             if self.asynchronous:
-                future = asyncio.Future()
-                future.set_result(None)
-                return future
+                return NoOpAwaitable()
             return
         self.status = "closing"
 
