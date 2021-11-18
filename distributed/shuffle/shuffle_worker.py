@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Coroutine, TypeVar
 
 import pandas as pd
 
@@ -13,6 +13,8 @@ from .common import ShuffleId, npartitions_for, worker_for
 
 if TYPE_CHECKING:
     from distributed import Worker
+
+T = TypeVar("T")
 
 
 @dataclass
@@ -100,8 +102,8 @@ class ShuffleWorkerExtension:
     # Tasks
     #######
 
-    async def _add_partition(
-        self, id: ShuffleId, npartitions: int, column: str, data: pd.DataFrame
+    async def add_partition(
+        self, data: pd.DataFrame, id: ShuffleId, npartitions: int, column: str
     ) -> None:
         # Block until scheduler has called init
         state = await self.get_shuffle(id)
@@ -118,7 +120,7 @@ class ShuffleWorkerExtension:
         # Group and send data
         await self.send_partition(data, column, id, npartitions, state.workers)
 
-    async def _barrier(self, id: ShuffleId) -> None:
+    async def barrier(self, id: ShuffleId) -> None:
         # NOTE: requires workers list. This is guaranteed because it depends on `add_partition`,
         # which got the workers list from the scheduler. So this task must run on a worker where
         # `add_partition` has already run.
@@ -226,3 +228,12 @@ class ShuffleWorkerExtension:
 
         # TODO handle errors and cancellation here
         await asyncio.gather(*tasks)
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop:
+        return self.worker.loop.asyncio_loop  # type: ignore
+
+    def sync(self, coro: Coroutine[object, object, T]) -> T:
+        # Is it a bad idea not to use `distributed.utils.sync`?
+        # It's much nicer to use asyncio, because among other things it gives us typechecking.
+        return asyncio.run_coroutine_threadsafe(coro, self.loop).result()

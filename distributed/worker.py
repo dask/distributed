@@ -44,7 +44,7 @@ from dask.utils import (
     typename,
 )
 
-from . import comm, preloading, profile, system, utils
+from . import comm, preloading, profile, shuffle, system, utils
 from .batched import BatchedSend
 from .comm import Comm, connect, get_address_host
 from .comm.addressing import address_from_user_args, parse_address
@@ -114,6 +114,8 @@ READY = {"ready", "constrained"}
 RUNNING = {Status.running, Status.paused, Status.closing_gracefully}
 
 DEFAULT_EXTENSIONS: list[type] = [PubSubWorkerExtension]
+if shuffle.SHUFFLE_AVAILABLE:
+    DEFAULT_EXTENSIONS.append(shuffle.ShuffleWorkerExtension)
 
 DEFAULT_METRICS: dict[str, Callable[[Worker], Any]] = {}
 

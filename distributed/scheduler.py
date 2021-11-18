@@ -51,7 +51,7 @@ from dask.widgets import get_template
 
 from distributed.utils import recursive_to_dict
 
-from . import preloading, profile
+from . import preloading, profile, shuffle
 from . import versions as version_module
 from .active_memory_manager import ActiveMemoryManagerExtension
 from .batched import BatchedSend
@@ -188,6 +188,9 @@ DEFAULT_EXTENSIONS = [
     ActiveMemoryManagerExtension,
     MemorySamplerExtension,
 ]
+DEFAULT_PLUGINS: tuple[SchedulerPlugin, ...] = (
+    (shuffle.ShuffleSchedulerPlugin(),) if shuffle.SHUFFLE_AVAILABLE else ()
+)
 
 ALL_TASK_STATES = declare(
     set, {"released", "waiting", "no-worker", "processing", "erred", "memory"}
@@ -3623,7 +3626,7 @@ class Scheduler(SchedulerState, ServerNode):
         http_prefix="/",
         preload=None,
         preload_argv=(),
-        plugins=(),
+        plugins=DEFAULT_PLUGINS,
         **kwargs,
     ):
         self._setup_logging(logger)
