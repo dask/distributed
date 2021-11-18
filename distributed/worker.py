@@ -2306,10 +2306,15 @@ class Worker(ServerNode):
         )
 
     def transition_flight_released(self, ts, *, stimulus_id):
-        ts._previous = "flight"
-        # See https://github.com/dask/distributed/pull/5046#discussion_r685093940
-        ts.state = "cancelled"
-        return {}, []
+        if ts.done:
+            # FIXME: Is this even possible? Would an assert instead be more
+            # sensible?
+            return self.transition_generic_released(ts, stimulus_id=stimulus_id)
+        else:
+            ts._previous = "flight"
+            # See https://github.com/dask/distributed/pull/5046#discussion_r685093940
+            ts.state = "cancelled"
+            return {}, []
 
     def transition_cancelled_memory(self, ts, value, *, stimulus_id):
         return {ts: ts._next}, []
@@ -2399,9 +2404,15 @@ class Worker(ServerNode):
 
         self.log.append(
             (
+                # key
                 ts.key,
+                # initial
                 start,
+                # recommended
+                finish,
+                # final
                 ts.state,
+                # new recommendations
                 {ts.key: new for ts, new in recs.items()},
                 stimulus_id,
                 time(),
@@ -2440,10 +2451,17 @@ class Worker(ServerNode):
 
         remaining_recs = recommendations.copy()
         tasks = set()
+        exceptions = []
         while remaining_recs:
             ts, finish = remaining_recs.popitem()
             tasks.add(ts)
-            a_recs, a_smsgs = self._transition(ts, finish, stimulus_id=stimulus_id)
+            try:
+                a_recs, a_smsgs = self._transition(ts, finish, stimulus_id=stimulus_id)
+            except InvalidTransition:
+                logger.exception("Exception during transition")
+                exceptions.append(sys.exc_info())
+                continue
+
             remaining_recs.update(a_recs)
             smsgs += a_smsgs
 
@@ -2460,6 +2478,8 @@ class Worker(ServerNode):
                 "BatchedSend closed while transitioning tasks. %d tasks not sent.",
                 len(smsgs),
             )
+        # if exceptions:
+        #     raise exceptions[-1][1]
 
     def maybe_transition_long_running(self, ts, *, stimulus_id, compute_duration=None):
         if ts.state == "executing":
@@ -2867,7 +2887,10 @@ class Worker(ServerNode):
                     ts = self.tasks[d]
                     ts.done = True
                     if d in cancelled_keys:
-                        recommendations[ts] = "released"
+                        if ts.state == "cancelled":
+                            recommendations[ts] = "released"
+                        else:
+                            recommendations[ts] = "fetch"
                     elif d in data:
                         recommendations[ts] = ("memory", data[d])
                     elif busy:
