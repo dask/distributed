@@ -501,10 +501,17 @@ properties:
                 description: >-
                   When the process memory reaches this level the nanny process will kill
                   the worker (if a nanny is present)
+              
+              spill-limit:
+                oneOf:
+                  - {type: string}
+                  - {enum: [false]}
+                description: |
+                A limit on the spilling to disk, after this limit is hit we stop writing to disk. 
 
           http:
             type: object
-            decription: Settings for Dask's embedded HTTP Server
+            description: Settings for Dask's embedded HTTP Server
             properties:
               routes:
                 type: array
