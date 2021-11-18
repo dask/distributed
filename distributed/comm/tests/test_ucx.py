@@ -2,6 +2,8 @@ import asyncio
 
 import pytest
 
+import dask
+
 pytestmark = pytest.mark.gpu
 
 ucp = pytest.importorskip("ucp")
@@ -10,6 +12,7 @@ from distributed import Client, Scheduler, wait
 from distributed.comm import connect, listen, parse_address, ucx
 from distributed.comm.registry import backends, get_backend
 from distributed.deploy.local import LocalCluster
+from distributed.diagnostics.nvml import has_cuda_context
 from distributed.protocol import to_serialize
 from distributed.utils_test import inc
 
@@ -324,6 +327,20 @@ async def test_simple():
         async with Client(cluster, asynchronous=True) as client:
             assert cluster.scheduler_address.startswith("ucx://")
             assert await client.submit(lambda x: x + 1, 10) == 11
+
+
+@pytest.mark.asyncio
+async def test_cuda_context():
+    with dask.config.set({"distributed.comm.ucx.create_cuda_context": True}):
+        async with LocalCluster(
+            protocol="ucx", n_workers=1, asynchronous=True
+        ) as cluster:
+            async with Client(cluster, asynchronous=True) as client:
+                assert cluster.scheduler_address.startswith("ucx://")
+                assert has_cuda_context() == 0
+                worker_cuda_context = await client.run(has_cuda_context)
+                assert len(worker_cuda_context) == 1
+                assert list(worker_cuda_context.values())[0] == 0
 
 
 @pytest.mark.asyncio
