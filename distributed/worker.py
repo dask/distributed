@@ -645,7 +645,7 @@ class Worker(ServerNode):
             ("cancelled", "waiting"): self.transition_cancelled_waiting,
             ("cancelled", "forgotten"): self.transition_cancelled_forgotten,
             ("cancelled", "memory"): self.transition_cancelled_memory,
-            ("cancelled", "error"): self.transition_generic_error,
+            ("cancelled", "error"): self.transition_cancelled_error,
             ("resumed", "memory"): self.transition_generic_memory,
             ("resumed", "error"): self.transition_generic_error,
             ("resumed", "released"): self.transition_generic_released,
@@ -1774,13 +1774,14 @@ class Worker(ServerNode):
                 recommendations[ts] = ("memory", value)
             except KeyError:
                 self.tasks[key] = ts = TaskState(key)
-                recs, smsgs = self._put_key_in_memory(
-                    ts, value, stimulus_id=stimulus_id
-                )
-                recommendations.update(recs)
-                scheduler_messages += smsgs
-                ts.priority = None
-                ts.duration = None
+
+                try:
+                    recs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
+                except Exception as e:
+                    msg = error_message(e)
+                    recommendations = {ts: tuple(msg.values())}
+                else:
+                    recommendations.update(recs)
 
             self.log.append((key, "receive-from-scatter"))
 
@@ -1989,7 +1990,7 @@ class Worker(ServerNode):
             pass
         elif ts.state == "memory":
             recommendations[ts] = "memory"
-            scheduler_msgs.append(self.get_task_state_for_scheduler(ts))
+            scheduler_msgs.append(self._get_task_finished_msg(ts))
         elif ts.state in {
             "released",
             "fetch",
@@ -2127,6 +2128,32 @@ class Worker(ServerNode):
 
         return {}, []
 
+    def transition_cancelled_error(
+        self, ts, exception, traceback, exception_text, traceback_text, *, stimulus_id
+    ):
+        recs, msgs = {}, []
+        if ts._previous == "executing":
+            recs, msgs = self.transition_executing_error(
+                ts,
+                exception,
+                traceback,
+                exception_text,
+                traceback_text,
+                stimulus_id=stimulus_id,
+            )
+        elif ts._previous == "flight":
+            recs, msgs = self.transition_flight_error(
+                ts,
+                exception,
+                traceback,
+                exception_text,
+                traceback_text,
+                stimulus_id=stimulus_id,
+            )
+        if ts._next:
+            recs[ts] = ts._next
+        return recs, msgs
+
     def transition_generic_error(
         self, ts, exception, traceback, exception_text, traceback_text, *, stimulus_id
     ):
@@ -2134,9 +2161,22 @@ class Worker(ServerNode):
         ts.traceback = traceback
         ts.exception_text = exception_text
         ts.traceback_text = traceback_text
-        smsgs = [self.get_task_state_for_scheduler(ts)]
         ts.state = "error"
-        return {}, smsgs
+        smsg = {
+            "op": "task-erred",
+            "status": "error",
+            "key": ts.key,
+            "thread": self.threads.get(ts.key),
+            "exception": ts.exception,
+            "traceback": ts.traceback,
+            "exception_text": ts.exception_text,
+            "traceback_text": ts.traceback_text,
+        }
+
+        if ts.startstops:
+            smsg["startstops"] = ts.startstops
+
+        return {}, [smsg]
 
     def transition_executing_error(
         self, ts, exception, traceback, exception_text, traceback_text, *, stimulus_id
@@ -2228,9 +2268,14 @@ class Worker(ServerNode):
         self._executing.discard(ts)
         self._in_flight_tasks.discard(ts)
         ts.coming_from = None
-
-        recs, smsgs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
-        smsgs.append(self.get_task_state_for_scheduler(ts))
+        try:
+            recs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
+        except Exception as e:
+            msg = error_message(e)
+            recs = {ts: tuple(msg.values())}
+            return recs, []
+        assert ts.key in self.data or ts.key in self.actors
+        smsgs = [self._get_task_finished_msg(ts)]
         return recs, smsgs
 
     def transition_executing_memory(self, ts, value=no_value, *, stimulus_id):
@@ -2335,16 +2380,44 @@ class Worker(ServerNode):
         return {}, smsgs
 
     def transition_released_memory(self, ts, value, *, stimulus_id):
-        recs, smsgs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
-        smsgs.append({"op": "add-keys", "keys": [ts.key], "stimulus_id": stimulus_id})
-        return recs, smsgs
+        recommendations = {}
+        try:
+            recommendations = self._put_key_in_memory(
+                ts, value, stimulus_id=stimulus_id
+            )
+        except Exception as e:
+            msg = error_message(e)
+            recommendations[ts] = (
+                "error",
+                msg["exception"],
+                msg["traceback"],
+                msg["exception_text"],
+                msg["traceback_text"],
+            )
+            return recommendations, []
+        smsgs = [{"op": "add-keys", "keys": [ts.key], "stimulus_id": stimulus_id}]
+        return recommendations, smsgs
 
     def transition_flight_memory(self, ts, value, *, stimulus_id):
         self._in_flight_tasks.discard(ts)
         ts.coming_from = None
-        recs, smsgs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
-        smsgs.append({"op": "add-keys", "keys": [ts.key], "stimulus_id": stimulus_id})
-        return recs, smsgs
+        recommendations = {}
+        try:
+            recommendations = self._put_key_in_memory(
+                ts, value, stimulus_id=stimulus_id
+            )
+        except Exception as e:
+            msg = error_message(e)
+            recommendations[ts] = (
+                "error",
+                msg["exception"],
+                msg["traceback"],
+                msg["exception_text"],
+                msg["traceback_text"],
+            )
+            return recommendations, []
+        smsgs = [{"op": "add-keys", "keys": [ts.key], "stimulus_id": stimulus_id}]
+        return recommendations, smsgs
 
     def transition_released_forgotten(self, ts, *, stimulus_id):
         recommendations = {}
@@ -2570,70 +2643,69 @@ class Worker(ServerNode):
         for el in skipped_worker_in_flight:
             heapq.heappush(self.data_needed, el)
 
-    def get_task_state_for_scheduler(self, ts):
-        if ts.key in self.data or self.actors.get(ts.key):
-            typ = ts.type
-            if ts.nbytes is None or typ is None:
-                try:
-                    value = self.data[ts.key]
-                except KeyError:
-                    value = self.actors[ts.key]
-                ts.nbytes = sizeof(value)
-                typ = ts.type = type(value)
-                del value
+    def _get_task_finished_msg(self, ts):
+        if ts.key not in self.data and ts.key not in self.actors:
+            raise RuntimeError(f"Task {ts} not ready")
+        typ = ts.type
+        if ts.nbytes is None or typ is None:
             try:
-                typ_serialized = dumps_function(typ)
-            except PicklingError:
-                # Some types fail pickling (example: _thread.lock objects),
-                # send their name as a best effort.
-                typ_serialized = pickle.dumps(typ.__name__, protocol=4)
-            d = {
-                "op": "task-finished",
-                "status": "OK",
-                "key": ts.key,
-                "nbytes": ts.nbytes,
-                "thread": self.threads.get(ts.key),
-                "type": typ_serialized,
-                "typename": typename(typ),
-                "metadata": ts.metadata,
-            }
-        elif ts.exception is not None:
-            d = {
-                "op": "task-erred",
-                "status": "error",
-                "key": ts.key,
-                "thread": self.threads.get(ts.key),
-                "exception": ts.exception,
-                "traceback": ts.traceback,
-                "exception_text": ts.exception_text,
-                "traceback_text": ts.traceback_text,
-            }
-        else:
-            logger.error("Key not ready to send to worker, %s: %s", ts.key, ts.state)
-            return None
+                value = self.data[ts.key]
+            except KeyError:
+                value = self.actors[ts.key]
+            ts.nbytes = sizeof(value)
+            typ = ts.type = type(value)
+            del value
+        try:
+            typ_serialized = dumps_function(typ)
+        except PicklingError:
+            # Some types fail pickling (example: _thread.lock objects),
+            # send their name as a best effort.
+            typ_serialized = pickle.dumps(typ.__name__, protocol=4)
+        d = {
+            "op": "task-finished",
+            "status": "OK",
+            "key": ts.key,
+            "nbytes": ts.nbytes,
+            "thread": self.threads.get(ts.key),
+            "type": typ_serialized,
+            "typename": typename(typ),
+            "metadata": ts.metadata,
+        }
         if ts.startstops:
             d["startstops"] = ts.startstops
         return d
 
     def _put_key_in_memory(self, ts, value, *, stimulus_id):
+        """
+        Put a key into memory and set data related task state attributes.
+        On success, generate recommendations for dependents.
+
+        This method does not generate any scheduler messages since this method
+        cannot distinguish whether it has to be an `add-task` or a
+        `task-finished` signal. The caller is required to generate this message
+        on success.
+
+        Raises
+        ------
+        TypeError:
+            In case the data is put into the in memory buffer and an exception
+            occurs during spilling, this raises an exception. This has to be
+            handled by the caller since most callers generate scheduler messages
+            on success (see comment above) but we need to signal that this was
+            not successful.
+            Can only trigger if spill to disk is enabled and the task is not an
+            actor.
+        """
         if ts.key in self.data:
             ts.state = "memory"
-            return {}, []
+            return {}
 
         recommendations = {}
-        scheduler_messages = []
         if ts.key in self.actors:
             self.actors[ts.key] = value
         else:
             start = time()
-            try:
-                self.data[ts.key] = value
-            except Exception as e:
-                msg = error_message(e)
-                ts.exception = msg["exception"]
-                ts.traceback = msg["traceback"]
-                recommendations[ts] = ("error", msg["exception"], msg["traceback"])
-                return recommendations, []
+            self.data[ts.key] = value
             stop = time()
             if stop - start > 0.020:
                 ts.startstops.append(
@@ -2653,7 +2725,7 @@ class Worker(ServerNode):
                 recommendations[dep] = "ready"
 
         self.log.append((ts.key, "put-in-memory", stimulus_id, time()))
-        return recommendations, scheduler_messages
+        return recommendations
 
     def select_keys_for_gather(self, worker, dep):
         assert isinstance(dep, str)
@@ -2796,6 +2868,7 @@ class Worker(ServerNode):
         if self.status not in RUNNING:
             return
 
+        recommendations: dict[TaskState, str | tuple] = {}
         with log_errors():
             response = {}
             to_gather_keys: set[str] = set()
@@ -2862,6 +2935,10 @@ class Worker(ServerNode):
                     import pdb
 
                     pdb.set_trace()
+                msg = error_message(e)
+                for k in self.in_flight_workers[worker]:
+                    ts = self.tasks[k]
+                    recommendations[ts] = tuple(msg.values())
                 raise
             finally:
                 self.comm_nbytes -= total_nbytes
@@ -2872,8 +2949,6 @@ class Worker(ServerNode):
                     self.log.append(
                         ("busy-gather", worker, to_gather_keys, stimulus_id, time())
                     )
-
-                recommendations: dict[TaskState, str | tuple] = {}
 
                 for d in self.in_flight_workers.pop(worker):
                     ts = self.tasks[d]
@@ -2887,7 +2962,7 @@ class Worker(ServerNode):
                         recommendations[ts] = ("memory", data[d])
                     elif busy:
                         recommendations[ts] = "fetch"
-                    else:
+                    elif ts not in recommendations:
                         ts.who_has.discard(worker)
                         self.has_what[worker].discard(ts.key)
                         self.log.append((d, "missing-dep"))
