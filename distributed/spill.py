@@ -62,19 +62,19 @@ class SpillBuffer(Buffer):
         """
         return self.slow
 
-    # @staticmethod
-    def _weight(self, key: Hashable, value: Any) -> int:
+    @staticmethod
+    def _weight(key: Hashable, value: Any) -> int:
         # Disk limit will be false by default so we need to check we have a limit
         # otherwise the second condition is always true
         # this triggers the right path but will record -1 on the tracking of what's
         # on fast so not really working
-        if self.disk_limit and (
-            safe_sizeof(value) + self.spilled_total_disk > self.disk_limit
-        ):
-            print("spill-limit reached keeping task in memory")
-            return -1  # this should keep the key in fast
-        else:
-            return safe_sizeof(value)
+        # if self.disk_limit and (
+        #     safe_sizeof(value) + self.spilled_total_disk > self.disk_limit
+        # ):
+        #     print("spill-limit reached keeping task in memory")
+        #     return -1  # this should keep the key in fast
+        # else:
+        return safe_sizeof(value)
 
     def _on_evict(self, key: Hashable, value: Any) -> None:
         b = safe_sizeof(value)
@@ -86,7 +86,21 @@ class SpillBuffer(Buffer):
 
     def __setitem__(self, key: Hashable, value: Any) -> None:
         self.spilled_total -= self.spilled_by_key.pop(key, 0)
-        super().__setitem__(key, value)
+        # super().__setitem__(key, value)
+
+        if self.weight(key, value) <= self.n or (
+            self.disk_limit
+            and (safe_sizeof(value) + self.spilled_total_disk > self.disk_limit)
+        ):
+            print("im here")
+            if key in self.slow:
+                del self.slow[key]
+            self.fast[key] = value
+        else:
+            if key in self.fast:
+                del self.fast[key]
+            self.slow[key] = value
+
         if key in self.slow:
             # value is individually larger than target so it went directly to slow.
             # _on_evict was not called.
