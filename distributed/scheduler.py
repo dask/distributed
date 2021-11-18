@@ -1751,7 +1751,11 @@ class TaskState:
             exclude = set()
         members = inspect.getmembers(self)
         return recursive_to_dict(
-            {k: v for k, v in members if k not in exclude and not callable(v)},
+            {
+                k: v
+                for k, v in members
+                if not k.startswith("__") and k not in exclude and not callable(v)
+            },
             exclude=exclude,
         )
 
