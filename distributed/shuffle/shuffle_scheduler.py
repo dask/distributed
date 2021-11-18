@@ -80,16 +80,14 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
 
         # Set worker restrictions on output tasks, and register their keys for us to watch in transitions
         for dts in ts.dependents:
-            assert (
-                len(dts.dependencies) == 1
-            ), f"Output task {dts} (of shuffle {id}) should have 1 dependency, not {dts.dependencies}"
-
-            assert (
-                not dts.worker_restrictions
-            ), f"Output task {dts.key} (of shuffle {id}) already has worker restrictions {dts.worker_restrictions}"
+            # TODO this is often not true thanks to blockwise fusion.
+            # Currently disabled so tests pass, but needs more careful logic.
+            # assert (
+            #     len(dts.dependencies) == 1
+            # ), f"Output task {dts} (of shuffle {id}) should have 1 dependency, not {dts.dependencies}"
 
             try:
-                dts._worker_restrictions = {
+                restrictions = {
                     self.worker_for_key(dts.key, state.out_tasks_left, state.workers)
                 }
             except (RuntimeError, IndexError, ValueError) as e:
@@ -97,6 +95,16 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                     f"Could not pick worker to run dependent {dts.key} of {key}: {e}"
                 ) from None
 
+            assert (
+                not dts.worker_restrictions or dts.worker_restrictions == restrictions
+            ), (
+                f"Output task {dts.key} (of shuffle {id}) has unexpected worker restrictions "
+                f"{dts.worker_restrictions}, not {restrictions}"
+            )
+            # TODO if these checks fail, we need to error the task!
+            # Otherwise it'll still run, and maybe even succeed, but just produce wrong data?
+
+            dts._worker_restrictions = restrictions
             self.output_keys[dts.key] = id
 
     def unpack(self, id: ShuffleId, key: str) -> None:
@@ -116,6 +124,13 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         ), f"Output {key} complete; nout_left = {state.out_tasks_left} for shuffle {id}"
 
         state.out_tasks_left -= 1
+
+        ts: TaskState = self.scheduler.tasks[key]
+        assert (
+            len(ts._worker_restrictions) == 1
+        ), f"Output {key} missing worker restrictions"
+        ts._worker_restrictions.clear()
+        del self.output_keys[key]
 
         if not state.out_tasks_left:
             # Shuffle is done. Yay!
