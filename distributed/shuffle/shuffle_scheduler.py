@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from distributed.diagnostics import SchedulerPlugin
 from distributed.utils import key_split_group
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from distributed.scheduler import TaskState
 
 
-TASK_PREFIX = "('shuffle_"
+TASK_PREFIX = "shuffle"
 
 
 @dataclass
@@ -25,7 +25,6 @@ class ShuffleState:
 
 
 class ShuffleSchedulerPlugin(SchedulerPlugin):
-    started_prefixes: dict[str, Callable[[ShuffleId, str], None]]
     output_keys: dict[str, ShuffleId]
     shuffles: dict[ShuffleId, ShuffleState]
     scheduler: Scheduler
@@ -34,10 +33,6 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         super().__init__()
         self.shuffles = {}
         self.output_keys = {}
-        self.started_prefixes = {
-            f"{TASK_PREFIX}transfer-": self.transfer,
-            f"{TASK_PREFIX}barrier-": self.barrier,
-        }
 
     async def start(self, scheduler: Scheduler) -> None:
         self.scheduler = scheduler
@@ -141,20 +136,21 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                     del self.output_keys[k]
 
     def transition(self, key: str, start: str, finish: str, *args, **kwargs):
-        if key.startswith(TASK_PREFIX):
-            # transfer/barrier starting to run
-            if start == "waiting" and finish in ("processing", "memory"):
-                for prefix, handler in self.started_prefixes.items():
-                    if key.startswith(prefix):
-                        # Is this too brittle, assuming IDs are 32 characters?
-                        # Inferring from the key name is brittle in general...
-                        id = key[len(prefix) : len(prefix) + 32]
-                        return handler(ShuffleId(id), key)
+        parts = parse_key(key)
+        if parts and len(parts) == 3:
+            prefix, group, id = parts
 
-            # transfer/barrier task erred
-            elif finish == "erred":
-                id = key_split_group(key).split("-")[-1]
-                return self.erred(ShuffleId(id), key)
+            if prefix == TASK_PREFIX:
+                if start == "waiting" and finish in ("processing", "memory"):
+                    # transfer/barrier starting to run
+                    if group == "transfer":
+                        return self.transfer(ShuffleId(id), key)
+                    if group == "barrier":
+                        return self.barrier(ShuffleId(id), key)
+
+                # transfer/barrier task erred
+                elif finish == "erred":
+                    return self.erred(ShuffleId(id), key)
 
         # Task completed
         if start in ("waiting", "processing") and finish in (
@@ -181,10 +177,18 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         if not m:
             raise RuntimeError(f"{key} does not look like a DataFrame key")
 
-        idx = int(m.group(0))
+        idx = int(m.group(1))
         addr = worker_for(idx, npartitions, workers)
         if addr not in self.scheduler.workers:
             raise RuntimeError(
                 f"Worker {addr} for output partition {idx} no longer known"
             )
         return addr
+
+
+def parse_key(key: str) -> list[str] | None:
+    if TASK_PREFIX in key[: len(TASK_PREFIX) + 2]:
+        if key[0] == "(":
+            key = key_split_group(key)
+        return key.split("-")
+    return None

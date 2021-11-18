@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from dask.base import tokenize
 from dask.blockwise import BlockwiseDepDict, blockwise
 from dask.dataframe import DataFrame
-from dask.delayed import Delayed
+from dask.dataframe.core import partitionwise_graph
 from dask.highlevelgraph import HighLevelGraph
 
 from .common import ShuffleId
@@ -48,29 +48,28 @@ def rearrange_by_column_p2p(
     npartitions = npartitions or df.npartitions
     token = tokenize(df, column, npartitions)
 
-    transferred = df.map_partitions(
-        shuffle_transfer,
-        token,
-        npartitions,
-        column,
-        meta=df,
-        enforce_metadata=False,
-        transform_divisions=False,
+    # We use `partitionwise_graph` instead of `map_partitions` so we can pass in our own key.
+    # The scheduler needs the task key to contain the shuffle ID; it's the only way it knows
+    # what shuffle a task belongs to.
+    # (Yes, this is rather brittle.)
+    transfer_name = "shuffle-transfer-" + token
+    transfer_dsk = partitionwise_graph(
+        shuffle_transfer, transfer_name, df, token, npartitions, column
     )
 
-    barrier_key = "shuffle-barrier-" + token
-    barrier_dsk = {barrier_key: (shuffle_barrier, token, transferred.__dask_keys__())}
-    barrier = Delayed(
-        barrier_key,
-        HighLevelGraph.from_collections(
-            barrier_key, barrier_dsk, dependencies=[transferred]
-        ),
-    )
+    barrier_name = "shuffle-barrier-" + token
+    barrier_dsk = {
+        barrier_name: (
+            shuffle_barrier,
+            token,
+            [(transfer_name, i) for i in range(df.npartitions)],
+        )
+    }
 
-    name = "shuffle-unpack-" + token
-    dsk = blockwise(
+    unpack_name = "shuffle-unpack-" + token
+    unpack_dsk = blockwise(
         shuffle_unpack,
-        name,
+        unpack_name,
         "i",
         token,
         None,
@@ -78,14 +77,29 @@ def rearrange_by_column_p2p(
         "i",
         df._meta,
         None,
-        barrier_key,
+        barrier_name,
         None,
         numblocks={},
     )
 
+    hlg = HighLevelGraph(
+        {
+            transfer_name: transfer_dsk,
+            barrier_name: barrier_dsk,
+            unpack_name: unpack_dsk,
+            **df.dask.layers,
+        },
+        {
+            transfer_name: set(df.__dask_layers__()),
+            barrier_name: {transfer_name},
+            unpack_name: {barrier_name},
+            **df.dask.dependencies,
+        },
+    )
+
     return DataFrame(
-        HighLevelGraph.from_collections(name, dsk, [barrier]),
-        name,
+        hlg,
+        unpack_name,
         df._meta,
         [None] * (npartitions + 1),
     )
