@@ -17,7 +17,7 @@ to various exceptions appearing when you interact with your local client, such a
 
 Note the special case of ``KilledWorker``: this means that a particular task was
 tried on a worker, and it died, and then the same task was sent to another worker,
-which also died. After a configurable number of deaths (config key "
+which also died. After a configurable number of deaths (config key
 ``distributed.scheduler.allowed-failures``), Dask decides to blame the
 task itself, and returns this exception. Note, that it is possible for a task to be
 unfairly blamed - the worker happened to die while the task was active, perhaps
@@ -80,7 +80,7 @@ of distributed may do this automatically)
 
 For other errors, you might want to run the computation in your local client, if
 possible, or try grabbing just the task that errored and using
-:func:`recreate_error_locally <distributed.recreate_exceptions.ReplayExceptionClient.recreate_error_locally>`,
+:meth:`~distributed.recreate_tasks.ReplayTaskClient.recreate_error_locally`,
 as you would for ordinary exceptions happening during task execution.
 
 Specifically for connectivity problems (e.g., timeout exceptions in the worker

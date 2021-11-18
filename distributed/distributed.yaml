@@ -28,7 +28,7 @@ distributed:
     unknown-task-duration: 500ms  # Default duration for all tasks with unknown durations ("15m", "2h")
     default-task-durations:  # How long we expect function names to run ("1h", "1s") (helps for long tasks)
       rechunk-split: 1us
-      shuffle-split: 1us
+      split-shuffle: 1us
     validate: False         # Check scheduler state at every step for debugging
     dashboard:
       status:
@@ -59,6 +59,18 @@ distributed:
     allowed-imports:
       - dask
       - distributed
+
+    active-memory-manager:
+      # Set to true to auto-start the Active Memory Manager on Scheduler start; if false
+      # you'll have to either manually start it with client.amm.start() or run it once
+      # with client.amm.run_once().
+      start: false
+      # Once started, run the AMM cycle every <interval>
+      interval: 2s
+      policies:
+        # Policies that should be executed at every cycle. Any additional keys in each
+        # object are passed as keyword arguments to the policy constructor.
+        - class: distributed.active_memory_manager.ReduceReplicas
 
   worker:
     blocked-handlers: []
@@ -142,6 +154,10 @@ distributed:
   nanny:
     preload: []             # Run custom modules with Nanny
     preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.html
+    environ:
+      MALLOC_TRIM_THRESHOLD_: 65536
+      OMP_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
 
   client:
     heartbeat: 5s  # Interval between client heartbeats
@@ -165,17 +181,26 @@ distributed:
          min: 1s  # the first non-zero delay between re-tries
          max: 20s  # the maximum delay between re-tries
     compression: auto
+    shard: 64MiB
     offload: 10MiB # Size after which we choose to offload serialization to another thread
     default-scheme: tcp
     socket-backlog: 2048
     recent-messages-log-length: 0  # number of messages to keep for debugging
+    ucx:
+      cuda_copy: False  # enable cuda-copy
+      tcp: False  # enable tcp
+      nvlink: False  # enable cuda_ipc
+      infiniband: False # enable Infiniband
+      rdmacm: False # enable RDMACM
+      net-devices: null  # define what interface to use for UCX comm
+      reuse-endpoints: null  # enable endpoint reuse
 
     zstd:
       level: 3      # Compression level, between 1 and 22.
       threads: 0    # Threads to use. 0 for single-threaded, -1 to infer from cpu count.
 
     timeouts:
-      connect: 10s          # time before connecting fails
+      connect: 30s          # time before connecting fails
       tcp: 30s              # time before calling an unresponsive connection dead
 
     require-encryption: null # Whether to require encryption on non-local comms
@@ -195,8 +220,21 @@ distributed:
         key: null
         cert: null
 
+    websockets:
+      shard: 8MiB
+
   diagnostics:
     nvml: True
+    computations:
+      max-history: 100
+      ignore-modules:
+        - distributed
+        - dask
+        - xarray
+        - cudf
+        - cuml
+        - prefect
+        - xgboost
 
   ###################
   # Bokeh dashboard #
@@ -225,13 +263,5 @@ distributed:
     system-monitor:
       interval: 500ms
     event-loop: tornado
-rmm:
-  pool-size: null
-ucx:
-  cuda_copy: False  # enable cuda-copy
-  tcp: False  # enable tcp
-  nvlink: False  # enable cuda_ipc
-  infiniband: False # enable Infiniband
-  rdmacm: False # enable RDMACM
-  net-devices: null  # define what interface to use for UCX comm
-  reuse-endpoints: null  # enable endpoint reuse
+  rmm:
+    pool-size: null

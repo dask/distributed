@@ -8,11 +8,12 @@ from collections import defaultdict, deque
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
+from dask.utils import parse_timedelta
 
 from distributed.utils_comm import retry_operation
 
 from .metrics import time
-from .utils import log_errors, parse_timedelta, sync, thread_state
+from .utils import log_errors, sync, thread_state
 from .worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)

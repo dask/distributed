@@ -1,10 +1,13 @@
 import logging
 from inspect import isawaitable
 
+from tornado.ioloop import IOLoop
+
 import dask.config
+from dask.utils import parse_timedelta
 
 from ..protocol import pickle
-from ..utils import log_errors, parse_timedelta
+from ..utils import log_errors
 from .adaptive_core import AdaptiveCore
 
 logger = logging.getLogger(__name__)
@@ -85,7 +88,7 @@ class Adaptive(AdaptiveCore):
         wait_count=None,
         target_duration=None,
         worker_key=None,
-        **kwargs
+        **kwargs,
     ):
         self.cluster = cluster
         self.worker_key = worker_key
@@ -167,7 +170,7 @@ class Adaptive(AdaptiveCore):
 
         Returns
         -------
-        List of worker addresses to close, if any
+        List of worker names to close, if any
 
         See Also
         --------
@@ -177,7 +180,7 @@ class Adaptive(AdaptiveCore):
             target=target,
             key=pickle.dumps(self.worker_key) if self.worker_key else None,
             attribute="name",
-            **self._workers_to_close_kwargs
+            **self._workers_to_close_kwargs,
         )
 
     async def scale_down(self, workers):
@@ -203,5 +206,9 @@ class Adaptive(AdaptiveCore):
             await f
 
     @property
-    def loop(self):
-        return self.cluster.loop
+    def loop(self) -> IOLoop:
+        """Override Adaptive.loop"""
+        if self.cluster:
+            return self.cluster.loop
+        else:
+            return IOLoop.current()

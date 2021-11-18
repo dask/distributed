@@ -1,16 +1,20 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import struct
 import warnings
 import weakref
+from collections.abc import Callable
 from ssl import SSLError
-from typing import Callable
 
 from tornado import web
 from tornado.httpclient import HTTPClientError, HTTPRequest
 from tornado.httpserver import HTTPServer
 from tornado.iostream import StreamClosedError
 from tornado.websocket import WebSocketClosedError, WebSocketHandler, websocket_connect
+
+import dask
 
 from ..utils import ensure_bytes, nbytes
 from .addressing import parse_host_port, unparse_host_port
@@ -20,6 +24,12 @@ from .tcp import BaseTCPBackend, _expect_tls_context, convert_stream_closed_erro
 from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to_frames
 
 logger = logging.getLogger(__name__)
+
+MAX_MESSAGE_SIZE = 10_000_000_000
+
+BIG_BYTES_SHARD_SIZE = dask.utils.parse_bytes(
+    dask.config.get("distributed.comm.websockets.shard")
+)
 
 
 class WSHandler(WebSocketHandler):
@@ -69,6 +79,10 @@ class WSHandler(WebSocketHandler):
         super().close()
         self.closed = True
 
+    @property
+    def max_message_size(self) -> int:
+        return self.settings.get("websocket_max_message_size", MAX_MESSAGE_SIZE)
+
 
 class WSHandlerComm(Comm):
     def __init__(self, handler, deserialize=True, allow_offload=True):
@@ -106,6 +120,7 @@ class WSHandlerComm(Comm):
                 "recipient": self.remote_info,
                 **self.handshake_options,
             },
+            frame_split_size=BIG_BYTES_SHARD_SIZE,
         )
         n = struct.pack("Q", len(frames))
         try:
@@ -121,19 +136,11 @@ class WSHandlerComm(Comm):
         self.handler.close()
 
     @property
-    def local_address(self):
+    def local_address(self) -> str:
         return self.handler.request.host
 
     @property
-    def peer_address(self):
-        return self.handler.request.remote_ip + ":0"
-
-    @property
-    def _local_addr(self):
-        return self.handler.request.host
-
-    @property
-    def _peer_addr(self):
+    def peer_address(self) -> str:
         return self.handler.request.remote_ip + ":0"
 
     def closed(self):
@@ -153,10 +160,10 @@ class WS(Comm):
 
     def __init__(self, sock, deserialize=True, allow_offload=True):
         self._closed = False
-        Comm.__init__(self)
+        super().__init__()
         self.sock = sock
-        self._peer_addr = f"{self.prefix}{self.sock.parsed.netloc}"
         self._local_addr = f"{self.prefix}{self.sock.parsed.netloc}"
+        self._peer_addr = f"{self.prefix}{self.sock.parsed.netloc}"
         self.deserialize = deserialize
         self.allow_offload = allow_offload
         self._finalizer = weakref.finalize(self, self._get_finalizer())
@@ -203,6 +210,7 @@ class WS(Comm):
                 "recipient": self.remote_info,
                 **self.handshake_options,
             },
+            frame_split_size=BIG_BYTES_SHARD_SIZE,
         )
         n = struct.pack("Q", len(frames))
         try:
@@ -230,11 +238,11 @@ class WS(Comm):
         return not self.sock or self.sock.close_code or self._closed
 
     @property
-    def local_address(self):
+    def local_address(self) -> str:
         return f"{self.prefix}{self.sock.parsed.netloc}"
 
     @property
-    def peer_address(self):
+    def peer_address(self) -> str:
         return f"{self.prefix}{self.sock.parsed.netloc}"
 
     def _read_extra(self):
@@ -370,7 +378,7 @@ class WSConnector(Connector):
         kwargs = self._get_connect_args(**connection_args)
         try:
             request = HTTPRequest(f"{self.prefix}{address}", **kwargs)
-            sock = await websocket_connect(request, max_message_size=10_000_000_000)
+            sock = await websocket_connect(request, max_message_size=MAX_MESSAGE_SIZE)
             if sock.stream.closed() and sock.stream.error:
                 raise StreamClosedError(sock.stream.error)
         except StreamClosedError as e:

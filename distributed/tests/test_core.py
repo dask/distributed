@@ -2,17 +2,18 @@ import asyncio
 import os
 import socket
 import threading
-import warnings
 import weakref
 
 import pytest
 
 import dask
 
+from distributed.comm.core import CommClosedError
 from distributed.core import (
     ConnectionPool,
     Server,
     Status,
+    clean_exception,
     coerce_to_address,
     connect,
     pingpong,
@@ -39,10 +40,6 @@ from distributed.utils_test import (
     throws,
     tls_security,
 )
-
-
-def echo(comm, x):
-    return x
 
 
 class CountedObject:
@@ -73,39 +70,13 @@ def echo_no_serialize(comm, x):
 
 
 def test_server_status_is_always_enum():
-    """
-    Assignments with strings get converted to corresponding Enum variant
-    """
+    """Assignments with strings is forbidden"""
     server = Server({})
     assert isinstance(server.status, Status)
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("ignore")
-        assert server.status != Status.stopped
-        server.status = "stopped"
-    assert isinstance(server.status, Status)
+    assert server.status != Status.stopped
+    server.status = Status.stopped
     assert server.status == Status.stopped
-
-
-def test_server_status_assign_non_variant_raises():
-    server = Server({})
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("ignore")
-        with pytest.raises(AssertionError):
-            server.status = "I do not exists"
-
-
-def test_server_status_assign_with_variant_warns():
-    server = Server({})
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("default")
-        with pytest.warns(PendingDeprecationWarning):
-            server.status = "running"
-
-
-def test_server_status_assign_with_variant_raises_in_tests():
-    """That would be the default in user code"""
-    server = Server({})
-    with pytest.raises(PendingDeprecationWarning):
+    with pytest.raises(TypeError):
         server.status = "running"
 
 
@@ -165,9 +136,9 @@ def test_server_raises_on_blocked_handlers(loop):
         await comm.write({"op": "ping"})
         msg = await comm.read()
 
-        assert "exception" in msg
-        assert isinstance(msg["exception"], ValueError)
-        assert "'ping' handler has been explicitly disallowed" in repr(msg["exception"])
+        _, exception, _ = clean_exception(msg["exception"])
+        assert isinstance(exception, ValueError)
+        assert "'ping' handler has been explicitly disallowed" in repr(exception)
 
         await comm.close()
         server.stop()
@@ -442,16 +413,16 @@ async def test_rpc_with_many_connections_inproc():
 
 async def check_large_packets(listen_arg):
     """tornado has a 100MB cap by default"""
-    server = Server({"echo": echo})
+    server = Server({})
     await server.listen(listen_arg)
 
     data = b"0" * int(200e6)  # slightly more than 100MB
     async with rpc(server.address) as conn:
-        result = await conn.echo(x=data)
+        result = await conn.echo(data=data)
         assert result == data
 
         d = {"x": data}
-        result = await conn.echo(x=d)
+        result = await conn.echo(data=d)
         assert result == d
 
     server.stop()
@@ -543,17 +514,17 @@ async def test_connect_raises():
 
 @pytest.mark.asyncio
 async def test_send_recv_args():
-    server = Server({"echo": echo})
+    server = Server({})
     await server.listen(0)
 
     comm = await connect(server.address)
-    result = await send_recv(comm, op="echo", x=b"1")
+    result = await send_recv(comm, op="echo", data=b"1")
     assert result == b"1"
     assert not comm.closed()
-    result = await send_recv(comm, op="echo", x=b"2", reply=False)
+    result = await send_recv(comm, op="echo", data=b"2", reply=False)
     assert result is None
     assert not comm.closed()
-    result = await send_recv(comm, op="echo", x=b"3", close=True)
+    result = await send_recv(comm, op="echo", data=b"3", close=True)
     assert result == b"3"
     assert comm.closed()
 
@@ -579,12 +550,12 @@ async def test_connection_pool():
 
     # Reuse connections
     await asyncio.gather(
-        *[rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[:5]]
+        *(rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[:5])
     )
-    await asyncio.gather(*[rpc(s.address).ping() for s in servers[:5]])
-    await asyncio.gather(*[rpc("127.0.0.1:%d" % s.port).ping() for s in servers[:5]])
+    await asyncio.gather(*(rpc(s.address).ping() for s in servers[:5]))
+    await asyncio.gather(*(rpc("127.0.0.1:%d" % s.port).ping() for s in servers[:5]))
     await asyncio.gather(
-        *[rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[:5]]
+        *(rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[:5])
     )
     assert sum(map(len, rpc.available.values())) == 5
     assert sum(map(len, rpc.occupied.values())) == 0
@@ -593,14 +564,14 @@ async def test_connection_pool():
 
     # Clear out connections to make room for more
     await asyncio.gather(
-        *[rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[5:]]
+        *(rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[5:])
     )
     assert rpc.active == 0
     assert rpc.open == 5
 
     s = servers[0]
     await asyncio.gather(
-        *[rpc(ip="127.0.0.1", port=s.port).ping(delay=0.1) for i in range(3)]
+        *(rpc(ip="127.0.0.1", port=s.port).ping(delay=0.1) for i in range(3))
     )
     assert len(rpc.available["tcp://127.0.0.1:%d" % s.port]) == 3
 
@@ -612,6 +583,55 @@ async def test_connection_pool():
         assert time() < start + 2
 
     await rpc.close()
+
+
+@pytest.mark.asyncio
+async def test_connection_pool_close_while_connecting(monkeypatch):
+    """
+    Ensure a closed connection pool guarantees to have no connections left open
+    even if it is closed mid-connecting
+    """
+    from distributed.comm.registry import backends
+    from distributed.comm.tcp import TCPBackend, TCPConnector
+
+    class SlowConnector(TCPConnector):
+        async def connect(self, address, deserialize, **connection_args):
+            await asyncio.sleep(0.1)
+            return await super().connect(
+                address, deserialize=deserialize, **connection_args
+            )
+
+    class SlowBackend(TCPBackend):
+        _connector_class = SlowConnector
+
+    monkeypatch.setitem(backends, "tcp", SlowBackend())
+
+    server = Server({})
+    await server.listen("tcp://")
+
+    pool = await ConnectionPool(limit=2)
+
+    async def connect_to_server():
+        comm = await pool.connect(server.address)
+        pool.reuse(server.address, comm)
+
+    tasks = [asyncio.create_task(connect_to_server()) for _ in range(30)]
+
+    await asyncio.sleep(0)
+    assert pool._connecting
+    close_fut = asyncio.create_task(pool.close())
+
+    with pytest.raises(
+        CommClosedError, match="ConnectionPool not running. Status: Status.closed"
+    ):
+        await asyncio.gather(*tasks)
+
+    await close_fut
+    assert not pool.open
+    assert not pool._n_connecting
+
+    for t in tasks:
+        t.cancel()
 
 
 @pytest.mark.asyncio
@@ -634,7 +654,7 @@ async def test_connection_pool_respects_limit():
 
     pool = await ConnectionPool(limit=limit)
 
-    await asyncio.gather(*[do_ping(pool, s.port) for s in servers])
+    await asyncio.gather(*(do_ping(pool, s.port) for s in servers))
 
 
 @pytest.mark.asyncio
@@ -656,9 +676,9 @@ async def test_connection_pool_tls():
 
     rpc = await ConnectionPool(limit=5, connection_args=connection_args)
 
-    await asyncio.gather(*[rpc(s.address).ping() for s in servers[:5]])
-    await asyncio.gather(*[rpc(s.address).ping() for s in servers[::2]])
-    await asyncio.gather(*[rpc(s.address).ping() for s in servers])
+    await asyncio.gather(*(rpc(s.address).ping() for s in servers[:5]))
+    await asyncio.gather(*(rpc(s.address).ping() for s in servers[::2]))
+    await asyncio.gather(*(rpc(s.address).ping() for s in servers))
     assert rpc.active == 0
 
     await rpc.close()
@@ -676,8 +696,8 @@ async def test_connection_pool_remove():
 
     rpc = await ConnectionPool(limit=10)
     serv = servers.pop()
-    await asyncio.gather(*[rpc(s.address).ping() for s in servers])
-    await asyncio.gather(*[rpc(serv.address).ping() for i in range(3)])
+    await asyncio.gather(*(rpc(s.address).ping() for s in servers))
+    await asyncio.gather(*(rpc(serv.address).ping() for i in range(3)))
     await rpc.connect(serv.address)
     assert sum(map(len, rpc.available.values())) == 6
     assert sum(map(len, rpc.occupied.values())) == 1

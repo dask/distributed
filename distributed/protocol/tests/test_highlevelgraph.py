@@ -136,7 +136,7 @@ async def test_array_annotations(c, s, a, b):
     plugin = ExampleAnnotationPlugin(priority_fn=fn, qux=qux, resource=resource)
     s.add_plugin(plugin)
 
-    assert plugin in s.plugins
+    assert plugin in s.plugins.values()
 
     with dask.annotate(priority=fn, qux=qux):
         A = da.ones((10, 10), chunks=(2, 2))
@@ -161,7 +161,7 @@ async def test_dataframe_annotations(c, s, a, b):
     plugin = ExampleAnnotationPlugin(retries=retries)
     s.add_plugin(plugin)
 
-    assert plugin in s.plugins
+    assert plugin in s.plugins.values()
 
     df = dd.from_pandas(
         pd.DataFrame(

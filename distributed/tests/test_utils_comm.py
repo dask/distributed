@@ -43,8 +43,8 @@ async def test_gather_from_workers_permissive(c, s, a, b):
 
 
 class BrokenComm(Comm):
-    peer_address = None
-    local_address = None
+    peer_address = ""
+    local_address = ""
 
     def close(self):
         pass
@@ -56,10 +56,10 @@ class BrokenComm(Comm):
         pass
 
     def read(self, deserializers=None):
-        raise EnvironmentError
+        raise OSError()
 
     def write(self, msg, serializers=None, on_error=None):
-        raise EnvironmentError
+        raise OSError()
 
 
 class BrokenConnectionPool(ConnectionPool):

@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import asyncio
+import contextvars
 import functools
-import html
 import importlib
 import inspect
 import json
@@ -9,7 +11,6 @@ import multiprocessing
 import os
 import pkgutil
 import re
-import shutil
 import socket
 import sys
 import tempfile
@@ -24,16 +25,20 @@ from contextlib import contextmanager, suppress
 from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
+from typing import TYPE_CHECKING
 from typing import Any as AnyType
-from typing import Dict, List
+from typing import ClassVar, Container, Sequence, overload
 
 import click
 import tblib.pickling_support
 
+if TYPE_CHECKING:
+    from typing_extensions import Protocol
+
 try:
     import resource
 except ImportError:
-    resource = None
+    resource = None  # type: ignore
 
 import tlz as toolz
 from tornado import gen
@@ -41,22 +46,11 @@ from tornado.ioloop import IOLoop
 
 import dask
 from dask import istask
-
-# Import config serialization functions here for backward compatibility
-from dask.config import deserialize as deserialize_for_cli  # noqa
-from dask.config import serialize as serialize_for_cli  # noqa
-
-# provide format_bytes here for backwards compatibility
-from dask.utils import (  # noqa: F401
-    format_bytes,
-    format_time,
-    funcname,
-    parse_bytes,
-    parse_timedelta,
-)
+from dask.utils import parse_timedelta as _parse_timedelta
+from dask.widgets import get_template
 
 try:
-    from tornado.ioloop import PollIOLoop
+    from tornado.ioloop import PollIOLoop  # type: ignore
 except ImportError:
     PollIOLoop = None  # dropped in tornado 6.0
 
@@ -146,7 +140,7 @@ def _get_ip(host, port, family):
         sock.connect((host, port))
         ip = sock.getsockname()[0]
         return ip
-    except EnvironmentError as e:
+    except OSError as e:
         warnings.warn(
             "Couldn't detect a suitable IP address for "
             "reaching %r, defaulting to hostname: %s" % (host, e),
@@ -199,7 +193,7 @@ def get_ip_interface(ifname):
     for info in net_if_addrs[ifname]:
         if info.family == socket.AF_INET:
             return info.address
-    raise ValueError("interface %r doesn't have an IPv4 address" % (ifname,))
+    raise ValueError(f"interface {ifname!r} doesn't have an IPv4 address")
 
 
 async def All(args, quiet_exceptions=()):
@@ -286,7 +280,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
     """
     Run coroutine in loop running in separate thread.
     """
-    callback_timeout = parse_timedelta(callback_timeout, "s")
+    callback_timeout = _parse_timedelta(callback_timeout, "s")
     # Tornado's PollIOLoop doesn't raise when using closed, do it ourselves
     if PollIOLoop and (
         (isinstance(loop, PollIOLoop) and getattr(loop, "_closing", False))
@@ -329,7 +323,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
     loop.add_callback(f)
     if callback_timeout is not None:
         if not e.wait(callback_timeout):
-            raise TimeoutError("timed out after %s s." % (callback_timeout,))
+            raise TimeoutError(f"timed out after {callback_timeout} s.")
     else:
         while not e.is_set():
             e.wait(10)
@@ -358,7 +352,9 @@ class LoopRunner:
     """
 
     # All loops currently associated to loop runners
-    _all_loops = weakref.WeakKeyDictionary()
+    _all_loops: ClassVar[
+        weakref.WeakKeyDictionary[IOLoop, tuple[int, LoopRunner | None]]
+    ] = weakref.WeakKeyDictionary()
     _lock = threading.Lock()
 
     def __init__(self, loop=None, asynchronous=False):
@@ -411,8 +407,13 @@ class LoopRunner:
 
         def run_loop(loop=self._loop):
             loop.add_callback(loop_cb)
+            # run loop forever if it's not running already
             try:
-                loop.start()
+                if (
+                    getattr(loop, "asyncio_loop", None) is None
+                    or not loop.asyncio_loop.is_running()
+                ):
+                    loop.start()
             except Exception as e:
                 start_exc[0] = e
             finally:
@@ -429,11 +430,13 @@ class LoopRunner:
         if actual_thread is not thread:
             # Loop already running in other thread (user-launched)
             done_evt.wait(5)
-            if not isinstance(start_exc[0], RuntimeError):
+            if start_exc[0] is not None and not isinstance(start_exc[0], RuntimeError):
                 if not isinstance(
                     start_exc[0], Exception
                 ):  # track down infrequent error
-                    raise TypeError("not an exception", start_exc[0])
+                    raise TypeError(
+                        f"not an exception: {start_exc[0]!r}",
+                    )
                 raise start_exc[0]
             self._all_loops[self._loop] = count + 1, None
         else:
@@ -608,7 +611,7 @@ def key_split(s):
         return "Other"
 
 
-def key_split_group(x):
+def key_split_group(x) -> str:
     """A more fine-grained version of key_split
 
     >>> key_split_group(('x-2', 1))
@@ -639,7 +642,7 @@ def key_split_group(x):
     elif typ is bytes:
         return key_split_group(x.decode())
     else:
-        return key_split(x)
+        return "Other"
 
 
 @contextmanager
@@ -687,9 +690,14 @@ def ensure_ip(hostname):
     --------
     >>> ensure_ip('localhost')
     '127.0.0.1'
+    >>> ensure_ip('')  # Maps as localhost for binding e.g. 'tcp://:8811'
+    '127.0.0.1'
     >>> ensure_ip('123.123.123.123')  # pass through IP addresses
     '123.123.123.123'
     """
+    if not hostname:
+        hostname = "localhost"
+
     # Prefer IPv4 over IPv6, for compatibility
     families = [socket.AF_INET, socket.AF_INET6]
     for fam in families:
@@ -738,7 +746,7 @@ def validate_key(k):
     """Validate a key as received on a stream."""
     typ = type(k)
     if typ is not str and typ is not bytes:
-        raise TypeError("Unexpected key type %s (value: %r)" % (typ, k))
+        raise TypeError(f"Unexpected key type {typ} (value: {k!r})")
 
 
 def _maybe_complex(task):
@@ -835,25 +843,6 @@ def read_block(f, offset, length, delimiter=None):
     f.seek(offset)
     bytes = f.read(length)
     return bytes
-
-
-@contextmanager
-def tmpfile(extension=""):
-    extension = "." + extension.lstrip(".")
-    handle, filename = tempfile.mkstemp(extension)
-    os.close(handle)
-    os.remove(filename)
-
-    yield filename
-
-    if os.path.exists(filename):
-        try:
-            if os.path.isdir(filename):
-                shutil.rmtree(filename)
-            else:
-                os.remove(filename)
-        except OSError:  # sometimes we can't remove a generated temp file
-            pass
 
 
 def ensure_bytes(s):
@@ -982,34 +971,6 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
             return len(frame)
 
 
-def deprecated(*, version_removed: str = None):
-    """Decorator to mark a function as deprecated
-
-    Parameters
-    ----------
-    version_removed : str, optional
-        If specified, include the version in which the deprecated function
-        will be removed. Defaults to "a future release".
-    """
-
-    def decorator(func):
-        nonlocal version_removed
-        msg = f"{funcname(func)} is deprecated and will be removed in"
-        if version_removed is not None:
-            msg += f" version {version_removed}"
-        else:
-            msg += " a future release"
-
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            warnings.warn(msg, DeprecationWarning, stacklevel=2)
-            return func(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
-
-
 def json_load_robust(fn, load=json.load):
     """Reads a JSON file from disk that may be being written as we read"""
     while not os.path.exists(fn):
@@ -1028,7 +989,7 @@ def json_load_robust(fn, load=json.load):
 class DequeHandler(logging.Handler):
     """A logging.Handler that records records into a deque"""
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[DequeHandler]] = weakref.WeakSet()
 
     def __init__(self, *args, n=10000, **kwargs):
         self.deque = deque(maxlen=n)
@@ -1086,15 +1047,15 @@ if not is_server_extension:
 
         # TODO: Use tornado's AnyThreadEventLoopPolicy, instead of class below,
         # once tornado > 6.0.3 is available.
-        if WINDOWS and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+        if WINDOWS:
             # WindowsProactorEventLoopPolicy is not compatible with tornado 6
             # fallback to the pre-3.8 default of Selector
             # https://github.com/tornadoweb/tornado/issues/2608
-            BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy
+            BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy  # type: ignore
         else:
             BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
 
-        class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):
+        class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):  # type: ignore
             def get_event_loop(self):
                 try:
                     return super().get_event_loop()
@@ -1125,13 +1086,11 @@ def command_has_keyword(cmd, k):
         if isinstance(getattr(cmd, "main"), click.core.Command):
             cmd = cmd.main
         if isinstance(cmd, click.core.Command):
-            cmd_params = set(
-                [
-                    p.human_readable_name
-                    for p in cmd.params
-                    if isinstance(p, click.core.Option)
-                ]
-            )
+            cmd_params = {
+                p.human_readable_name
+                for p in cmd.params
+                if isinstance(p, click.core.Option)
+            }
             return k in cmd_params
 
     return False
@@ -1168,9 +1127,25 @@ def color_of(x, palette=palette):
     return palette[n % len(palette)]
 
 
-@functools.lru_cache(None)
-def iscoroutinefunction(f):
+def _iscoroutinefunction(f):
+    # Python < 3.8 does not support determining if `partial` objects wrap async funcs
+    if sys.version_info < (3, 8):
+        while isinstance(f, functools.partial):
+            f = f.func
     return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
+
+
+@functools.lru_cache(None)
+def _iscoroutinefunction_cached(f):
+    return _iscoroutinefunction(f)
+
+
+def iscoroutinefunction(f):
+    # Attempt to use lru_cache version and fall back to non-cached version if needed
+    try:
+        return _iscoroutinefunction_cached(f)
+    except TypeError:  # unhashable type
+        return _iscoroutinefunction(f)
 
 
 @contextmanager
@@ -1178,23 +1153,8 @@ def warn_on_duration(duration, msg):
     start = time()
     yield
     stop = time()
-    if stop - start > parse_timedelta(duration):
+    if stop - start > _parse_timedelta(duration):
         warnings.warn(msg, stacklevel=2)
-
-
-def typename(typ):
-    """Return name of type
-
-    Examples
-    --------
-    >>> from distributed import Scheduler
-    >>> typename(Scheduler)
-    'distributed.scheduler.Scheduler'
-    """
-    try:
-        return typ.__module__ + "." + typ.__name__
-    except AttributeError:
-        return str(typ)
 
 
 def format_dashboard_link(host, port):
@@ -1269,46 +1229,18 @@ def parse_ports(port):
 is_coroutine_function = iscoroutinefunction
 
 
-class Log(tuple):
-    """A container for a single log entry"""
-
-    level_styles = {
-        "WARNING": "font-weight: bold; color: orange;",
-        "CRITICAL": "font-weight: bold; color: orangered;",
-        "ERROR": "font-weight: bold; color: crimson;",
-    }
+class Log(str):
+    """A container for newline-delimited string of log entries"""
 
     def _repr_html_(self):
-        level, message = self
-
-        style = "font-family: monospace; margin: 0;"
-        style += self.level_styles.get(level, "")
-
-        return '<p style="{style}">{message}</p>'.format(
-            style=html.escape(style),
-            message=html.escape(message),
-        )
+        return get_template("log.html.j2").render(log=self)
 
 
-class Logs(list):
-    """A container for a list of log entries"""
+class Logs(dict):
+    """A container for a dict mapping names to strings of log entries"""
 
     def _repr_html_(self):
-        return "\n".join(Log(entry)._repr_html_() for entry in self)
-
-
-class MultiLogs(dict):
-    """A container for a dict mapping strings to lists of log entries"""
-
-    def _repr_html_(self):
-        summaries = [
-            "<details>\n"
-            "<summary style='display:list-item'>{title}</summary>\n"
-            "{logs}\n"
-            "</details>".format(title=title, logs=Logs(entries)._repr_html_())
-            for title, entries in sorted(self.items())
-        ]
-        return "\n".join(summaries)
+        return get_template("logs.html.j2").render(logs=self)
 
 
 def cli_keywords(d: dict, cls=None, cmd=None):
@@ -1338,6 +1270,8 @@ def cli_keywords(d: dict, cls=None, cmd=None):
     ...
     ValueError: Class distributed.worker.Worker does not support keyword x
     """
+    from dask.utils import typename
+
     if cls or cmd:
         for k in d:
             if not has_keyword(cls, k) and not command_has_keyword(cmd, k):
@@ -1348,11 +1282,11 @@ def cli_keywords(d: dict, cls=None, cmd=None):
                     )
                 elif cls:
                     raise ValueError(
-                        "Class %s does not support keyword %s" % (typename(cls), k)
+                        f"Class {typename(cls)} does not support keyword {k}"
                     )
                 else:
                     raise ValueError(
-                        "Module %s does not support keyword %s" % (typename(cmd), k)
+                        f"Module {typename(cmd)} does not support keyword {k}"
                     )
 
     def convert_value(v):
@@ -1362,7 +1296,7 @@ def cli_keywords(d: dict, cls=None, cmd=None):
         return out
 
     return sum(
-        [["--" + k.replace("_", "-"), convert_value(v)] for k, v in d.items()], []
+        (["--" + k.replace("_", "-"), convert_value(v)] for k, v in d.items()), []
     )
 
 
@@ -1393,7 +1327,11 @@ def import_term(name: str):
 
 async def offload(fn, *args, **kwargs):
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_offload_executor, lambda: fn(*args, **kwargs))
+    # Retain context vars while deserializing; see https://bugs.python.org/issue34014
+    context = contextvars.copy_context()
+    return await loop.run_in_executor(
+        _offload_executor, lambda: context.run(fn, *args, **kwargs)
+    )
 
 
 class EmptyContext:
@@ -1432,7 +1370,7 @@ class LRU(UserDict):
         super().__setitem__(key, value)
 
 
-def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> List[Dict]:
+def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list[dict]:
     """
     Examples
     --------
@@ -1483,3 +1421,125 @@ def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> List
 
         addresses.append({"address": host, "port": port})
     return addresses
+
+
+_deprecations = {
+    "deserialize_for_cli": "dask.config.deserialize",
+    "serialize_for_cli": "dask.config.serialize",
+    "format_bytes": "dask.utils.format_bytes",
+    "format_time": "dask.utils.format_time",
+    "funcname": "dask.utils.funcname",
+    "parse_bytes": "dask.utils.parse_bytes",
+    "parse_timedelta": "dask.utils.parse_timedelta",
+    "typename": "dask.utils.typename",
+    "tmpfile": "dask.utils.tmpfile",
+}
+
+
+def __getattr__(name):
+    if name in _deprecations:
+        use_instead = _deprecations[name]
+
+        warnings.warn(
+            f"{name} is deprecated and will be removed in a future release. "
+            f"Please use {use_instead} instead.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
+        return import_term(use_instead)
+    else:
+        raise AttributeError(f"module {__name__} has no attribute {name}")
+
+
+if TYPE_CHECKING:
+
+    class SupportsToDict(Protocol):
+        def _to_dict(
+            self, *, exclude: Container[str] | None = None, **kwargs
+        ) -> dict[str, AnyType]:
+            ...
+
+
+@overload
+def recursive_to_dict(
+    obj: SupportsToDict, exclude: Container[str] = None, seen: set[AnyType] = None
+) -> dict[str, AnyType]:
+    ...
+
+
+@overload
+def recursive_to_dict(
+    obj: Sequence, exclude: Container[str] = None, seen: set[AnyType] = None
+) -> Sequence:
+    ...
+
+
+@overload
+def recursive_to_dict(
+    obj: dict, exclude: Container[str] = None, seen: set[AnyType] = None
+) -> dict:
+    ...
+
+
+@overload
+def recursive_to_dict(
+    obj: None, exclude: Container[str] = None, seen: set[AnyType] = None
+) -> None:
+    ...
+
+
+def recursive_to_dict(obj, exclude=None, seen=None):
+    """
+    This is for debugging purposes only and calls ``_to_dict`` methods on ``obj`` or
+    it's elements recursively, if available. The output of this function is
+    intended to be json serializable.
+
+    Parameters
+    ----------
+    exclude:
+        A list of attribute names to be excluded from the dump.
+        This will be forwarded to the objects ``_to_dict`` methods and these methods
+        are required to ensure this.
+    seen:
+        Used internally to avoid infinite recursion. If an object has already
+        been encountered, it's representation will be generated instead of its
+        ``_to_dict``. This is necessary since we have multiple cyclic referencing
+        data structures.
+    """
+    if obj is None:
+        return None
+    if isinstance(obj, str):
+        return obj
+    if seen is None:
+        seen = set()
+    if id(obj) in seen:
+        return repr(obj)
+    seen.add(id(obj))
+    if isinstance(obj, type):
+        return repr(obj)
+    if hasattr(obj, "_to_dict"):
+        return obj._to_dict(exclude=exclude)
+    if isinstance(obj, (deque, set)):
+        obj = tuple(obj)
+    if isinstance(obj, (list, tuple)):
+        return tuple(
+            recursive_to_dict(
+                el,
+                exclude=exclude,
+                seen=seen,
+            )
+            for el in obj
+        )
+    elif isinstance(obj, dict):
+        res = {}
+        for k, v in obj.items():
+            k = recursive_to_dict(k, exclude=exclude, seen=seen)
+            try:
+                hash(k)
+            except TypeError:
+                k = str(k)
+            v = recursive_to_dict(v, exclude=exclude, seen=seen)
+            res[k] = v
+        return res
+    else:
+        return repr(obj)

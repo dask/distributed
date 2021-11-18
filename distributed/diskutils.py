@@ -1,4 +1,5 @@
-import errno
+from __future__ import annotations
+
 import glob
 import logging
 import os
@@ -6,6 +7,7 @@ import shutil
 import stat
 import tempfile
 import weakref
+from typing import ClassVar
 
 import dask
 
@@ -23,16 +25,21 @@ def is_locking_enabled():
 def safe_unlink(path):
     try:
         os.unlink(path)
-    except EnvironmentError as e:
+    except FileNotFoundError:
         # Perhaps it was removed by someone else?
-        if e.errno != errno.ENOENT:
-            logger.error("Failed to remove %r", str(e))
+        pass
+    except OSError as e:
+        logger.error(f"Failed to remove {path}: {e}")
 
 
 class WorkDir:
     """
     A temporary work directory inside a WorkSpace.
     """
+
+    dir_path: str
+    _lock_path: str
+    _finalizer: weakref.finalize
 
     def __init__(self, workspace, name=None, prefix=None):
         assert name is None or prefix is None
@@ -110,7 +117,7 @@ class WorkSpace:
 
     # Keep track of all locks known to this process, to avoid several
     # WorkSpaces to step on each other's toes
-    _known_locks = set()
+    _known_locks: ClassVar[set[str]] = set()
 
     def __init__(self, base_dir):
         self.base_dir = os.path.abspath(base_dir)
@@ -121,9 +128,8 @@ class WorkSpace:
     def _init_workspace(self):
         try:
             os.mkdir(self.base_dir)
-        except EnvironmentError as e:
-            if e.errno != errno.EEXIST:
-                raise
+        except FileExistsError:
+            pass
 
     def _global_lock(self, **kwargs):
         return locket.lock_file(self._global_lock_path, **kwargs)
@@ -174,7 +180,7 @@ class WorkSpace:
         for p in glob.glob(os.path.join(self.base_dir, "*" + DIR_LOCK_EXT)):
             try:
                 st = os.stat(p)
-            except EnvironmentError:
+            except OSError:
                 # May have been removed in the meantime
                 pass
             else:

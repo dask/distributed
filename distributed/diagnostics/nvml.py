@@ -26,7 +26,11 @@ def init_once():
     nvmlOwnerPID = os.getpid()
     try:
         pynvml.nvmlInit()
-    except pynvml.NVMLError_LibraryNotFound:
+    except (
+        pynvml.NVMLError_LibraryNotFound,
+        pynvml.NVMLError_DriverNotLoaded,
+        pynvml.NVMLError_Unknown,
+    ):
         nvmlLibraryNotFound = True
 
 
@@ -59,17 +63,66 @@ def _pynvml_handles():
     return pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
 
 
+def has_cuda_context():
+    """Check whether the current process already has a CUDA context created.
+
+    Returns
+    -------
+    ``False`` if current process has no CUDA context created, otherwise returns the
+    index of the device for which there's a CUDA context.
+    """
+    init_once()
+    for index in range(device_get_count()):
+        handle = pynvml.nvmlDeviceGetHandleByIndex(index)
+        if hasattr(pynvml, "nvmlDeviceGetComputeRunningProcesses_v2"):
+            running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses_v2(handle)
+        else:
+            running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+        for proc in running_processes:
+            if os.getpid() == proc.pid:
+                return index
+    return False
+
+
+def _get_utilization(h):
+    try:
+        return pynvml.nvmlDeviceGetUtilizationRates(h).gpu
+    except pynvml.NVMLError_NotSupported:
+        return None
+
+
+def _get_memory_used(h):
+    try:
+        return pynvml.nvmlDeviceGetMemoryInfo(h).used
+    except pynvml.NVMLError_NotSupported:
+        return None
+
+
+def _get_memory_total(h):
+    try:
+        return pynvml.nvmlDeviceGetMemoryInfo(h).total
+    except pynvml.NVMLError_NotSupported:
+        return None
+
+
+def _get_name(h):
+    try:
+        return pynvml.nvmlDeviceGetName(h).decode()
+    except pynvml.NVMLError_NotSupported:
+        return None
+
+
 def real_time():
     h = _pynvml_handles()
     return {
-        "utilization": pynvml.nvmlDeviceGetUtilizationRates(h).gpu,
-        "memory-used": pynvml.nvmlDeviceGetMemoryInfo(h).used,
+        "utilization": _get_utilization(h),
+        "memory-used": _get_memory_used(h),
     }
 
 
 def one_time():
     h = _pynvml_handles()
     return {
-        "memory-total": pynvml.nvmlDeviceGetMemoryInfo(h).total,
-        "name": pynvml.nvmlDeviceGetName(h).decode(),
+        "memory-total": _get_memory_total(h),
+        "name": _get_name(h),
     }

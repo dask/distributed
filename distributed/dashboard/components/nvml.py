@@ -1,5 +1,6 @@
 import math
 
+from bokeh.core.properties import without_property_validation
 from bokeh.models import (
     BasicTicker,
     ColumnDataSource,
@@ -15,7 +16,7 @@ from dask.utils import format_bytes
 
 from distributed.dashboard.components import DashboardComponent, add_periodic_callback
 from distributed.dashboard.components.scheduler import BOKEH_THEME, TICKS_1024, env
-from distributed.dashboard.utils import update, without_property_validation
+from distributed.dashboard.utils import update
 from distributed.diagnostics import nvml
 from distributed.utils import log_errors
 
@@ -49,7 +50,7 @@ class GPUCurrentLoad(DashboardComponent):
                 id="bk-gpu-memory-worker-plot",
                 width=int(width / 2),
                 name="gpu_memory_histogram",
-                **kwargs
+                **kwargs,
             )
             rect = memory.rect(
                 source=self.source,
@@ -67,7 +68,7 @@ class GPUCurrentLoad(DashboardComponent):
                 id="bk-gpu-utilization-worker-plot",
                 width=int(width / 2),
                 name="gpu_utilization_histogram",
-                **kwargs
+                **kwargs,
             )
             rect = utilization.rect(
                 source=self.source,
@@ -94,7 +95,6 @@ class GPUCurrentLoad(DashboardComponent):
                 )
                 fig.add_tools(tap)
 
-                fig.toolbar.logo = None
                 fig.toolbar_location = None
                 fig.yaxis.visible = False
 
@@ -159,7 +159,7 @@ class GPUCurrentLoad(DashboardComponent):
                 "escaped_worker": [escape.url_escape(w) for w in worker],
             }
 
-            self.memory_figure.title.text = "GPU Memory: %s / %s" % (
+            self.memory_figure.title.text = "GPU Memory: {} / {}".format(
                 format_bytes(sum(memory)),
                 format_bytes(memory_total),
             )

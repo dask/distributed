@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import asyncio
-import collections
 import copy
 import functools
 import gc
+import inspect
 import io
-import itertools
 import logging
 import logging.config
 import os
@@ -20,16 +21,23 @@ import threading
 import uuid
 import warnings
 import weakref
+from collections import defaultdict
+from collections.abc import Callable
 from contextlib import contextmanager, nullcontext, suppress
 from glob import glob
+from itertools import count
 from time import sleep
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from typing_extensions import Literal
 
 from distributed.scheduler import Scheduler
 
 try:
     import ssl
 except ImportError:
-    ssl = None
+    ssl = None  # type: ignore
 
 import pytest
 from tlz import assoc, memoize, merge
@@ -38,16 +46,19 @@ from tornado.ioloop import IOLoop
 
 import dask
 
+from distributed.comm.tcp import TCP
+
 from . import system
 from .client import Client, _global_clients, default_client
 from .comm import Comm
 from .compatibility import WINDOWS
 from .config import initialize_logging
-from .core import CommClosedError, Status, connect, rpc
+from .core import CommClosedError, ConnectionPool, Status, connect, rpc
 from .deploy import SpecCluster
 from .diagnostics.plugin import WorkerPlugin
 from .metrics import time
 from .nanny import Nanny
+from .node import ServerNode
 from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (
@@ -63,7 +74,7 @@ from .utils import (
     sync,
     thread_state,
 )
-from .worker import Worker
+from .worker import RUNNING, Worker
 
 try:
     import dask.array  # register config
@@ -331,6 +342,14 @@ def slowidentity(*args, **kwargs):
         return args
 
 
+class _UnhashableCallable:
+    # FIXME https://github.com/python/mypy/issues/4266
+    __hash__ = None  # type: ignore
+
+    def __call__(self, x):
+        return x + 1
+
+
 def run_for(duration, timer=time):
     """
     Burn CPU for *duration* seconds.
@@ -341,8 +360,8 @@ def run_for(duration, timer=time):
 
 
 # This dict grows at every varying() invocation
-_varying_dict = collections.defaultdict(int)
-_varying_key_gen = itertools.count()
+_varying_dict: defaultdict[str, int] = defaultdict(int)
+_varying_key_gen = count()
 
 
 class _ModuleSlot:
@@ -404,7 +423,7 @@ async def asyncinc(x, delay=0.02):
     return x + 1
 
 
-_readone_queues = {}
+_readone_queues: dict[Any, asyncio.Queue] = {}
 
 
 async def readone(comm):
@@ -753,16 +772,20 @@ async def disconnect(addr, timeout=3, rpc_kwargs=None):
 
 
 async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
-    await asyncio.gather(*[disconnect(addr, timeout, rpc_kwargs) for addr in addresses])
+    await asyncio.gather(*(disconnect(addr, timeout, rpc_kwargs) for addr in addresses))
 
 
-def gen_test(timeout=_TEST_TIMEOUT):
+def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
     """Coroutine test
 
     @gen_test(timeout=5)
     async def test_foo():
         await ...  # use tornado coroutines
     """
+    assert timeout, (
+        "timeout should always be set and it should be smaller than the global one from"
+        "pytest-timeout"
+    )
 
     def _(func):
         def test_func():
@@ -779,14 +802,14 @@ def gen_test(timeout=_TEST_TIMEOUT):
 
 
 async def start_cluster(
-    nthreads,
-    scheduler_addr,
-    loop,
-    security=None,
-    Worker=Worker,
-    scheduler_kwargs={},
-    worker_kwargs={},
-):
+    nthreads: list[tuple[str, int] | tuple[str, int, dict]],
+    scheduler_addr: str,
+    loop: IOLoop,
+    security: Security | dict[str, Any] | None = None,
+    Worker: type[ServerNode] = Worker,
+    scheduler_kwargs: dict[str, Any] = {},
+    worker_kwargs: dict[str, Any] = {},
+) -> tuple[Scheduler, list[ServerNode]]:
     s = await Scheduler(
         loop=loop,
         validate=True,
@@ -795,6 +818,7 @@ async def start_cluster(
         host=scheduler_addr,
         **scheduler_kwargs,
     )
+
     workers = [
         Worker(
             s.address,
@@ -804,24 +828,28 @@ async def start_cluster(
             loop=loop,
             validate=True,
             host=ncore[0],
-            **(merge(worker_kwargs, ncore[2]) if len(ncore) > 2 else worker_kwargs),
+            **(
+                merge(worker_kwargs, ncore[2])  # type: ignore
+                if len(ncore) > 2
+                else worker_kwargs
+            ),
         )
         for i, ncore in enumerate(nthreads)
     ]
-    # for w in workers:
-    #     w.rpc = workers[0].rpc
 
     await asyncio.gather(*workers)
 
     start = time()
-    while len(s.workers) < len(nthreads) or any(
-        comm.comm is None for comm in s.stream_comms.values()
+    while (
+        len(s.workers) < len(nthreads)
+        or any(ws.status != Status.running for ws in s.workers.values())
+        or any(comm.comm is None for comm in s.stream_comms.values())
     ):
         await asyncio.sleep(0.01)
-        if time() - start > 5:
-            await asyncio.gather(*[w.close(timeout=1) for w in workers])
+        if time() > start + 30:
+            await asyncio.gather(*(w.close(timeout=1) for w in workers))
             await s.close(fast=True)
-            raise Exception("Cluster creation timeout")
+            raise TimeoutError("Cluster creation timeout")
     return s, workers
 
 
@@ -832,27 +860,31 @@ async def end_cluster(s, workers):
         with suppress(TimeoutError, CommClosedError, EnvironmentError):
             await w.close(report=False)
 
-    await asyncio.gather(*[end_worker(w) for w in workers])
+    await asyncio.gather(*(end_worker(w) for w in workers))
     await s.close()  # wait until scheduler stops completely
     s.stop()
 
 
 def gen_cluster(
-    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 2)],
-    ncores=None,
+    nthreads: list[tuple[str, int] | tuple[str, int, dict]] = [
+        ("127.0.0.1", 1),
+        ("127.0.0.1", 2),
+    ],
+    ncores: None = None,  # deprecated
     scheduler="127.0.0.1",
-    timeout=_TEST_TIMEOUT,
-    security=None,
-    Worker=Worker,
-    client=False,
-    scheduler_kwargs={},
-    worker_kwargs={},
-    client_kwargs={},
-    active_rpc_timeout=1,
-    config={},
-    clean_kwargs={},
-    allow_unclosed=False,
-):
+    timeout: float = _TEST_TIMEOUT,
+    security: Security | dict[str, Any] | None = None,
+    Worker: type[ServerNode] = Worker,
+    client: bool = False,
+    scheduler_kwargs: dict[str, Any] = {},
+    worker_kwargs: dict[str, Any] = {},
+    client_kwargs: dict[str, Any] = {},
+    active_rpc_timeout: float = 1,
+    config: dict[str, Any] = {},
+    clean_kwargs: dict[str, Any] = {},
+    allow_unclosed: bool = False,
+    cluster_dump_directory: str | Literal[False] = "test_timeout_dump",
+) -> Callable[[Callable], Callable]:
     from distributed import Client
 
     """ Coroutine test with small cluster
@@ -861,23 +893,40 @@ def gen_cluster(
     async def test_foo(scheduler, worker1, worker2):
         await ...  # use tornado coroutines
 
+    @pytest.mark.parametrize("param", [1, 2, 3])
+    @gen_cluster()
+    async def test_foo(scheduler, worker1, worker2, param):
+        await ...  # use tornado coroutines
+
+    @gen_cluster()
+    async def test_foo(scheduler, worker1, worker2, pytest_fixture_a, pytest_fixture_b):
+        await ...  # use tornado coroutines
+
     See also:
         start
         end
     """
+    assert timeout, (
+        "timeout should always be set and it should be smaller than the global one from"
+        "pytest-timeout"
+    )
     if ncores is not None:
         warnings.warn("ncores= has moved to nthreads=", stacklevel=2)
         nthreads = ncores
 
+    scheduler_kwargs = merge(
+        {"dashboard": False, "dashboard_address": ":0"}, scheduler_kwargs
+    )
     worker_kwargs = merge(
-        {"memory_limit": system.MEMORY_LIMIT, "death_timeout": 10}, worker_kwargs
+        {"memory_limit": system.MEMORY_LIMIT, "death_timeout": 15}, worker_kwargs
     )
 
     def _(func):
         if not iscoroutinefunction(func):
-            func = gen.coroutine(func)
+            raise RuntimeError("gen_cluster only works for coroutine functions.")
 
-        def test_func():
+        @functools.wraps(func)
+        def test_func(*outer_args, **kwargs):
             result = None
             workers = []
             with clean(timeout=active_rpc_timeout, **clean_kwargs) as loop:
@@ -919,12 +968,49 @@ def gen_cluster(
                             )
                             args = [c] + args
                         try:
-                            future = func(*args)
-                            if timeout:
-                                future = asyncio.wait_for(future, timeout)
-                            result = await future
+                            coro = func(*args, *outer_args, **kwargs)
+                            task = asyncio.create_task(coro)
+
+                            coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
+                            result = await coro2
                             if s.validate:
                                 s.validate_state()
+                        except asyncio.TimeoutError as e:
+                            assert task
+                            buffer = io.StringIO()
+                            # This stack indicates where the coro/test is suspended
+                            task.print_stack(file=buffer)
+
+                            if client:
+                                assert c
+                                try:
+                                    if cluster_dump_directory:
+                                        if not os.path.exists(cluster_dump_directory):
+                                            os.makedirs(cluster_dump_directory)
+                                        filename = os.path.join(
+                                            cluster_dump_directory, func.__name__
+                                        )
+                                        fut = c.dump_cluster_state(
+                                            filename,
+                                            # Test dumps should be small enough that
+                                            # there is no need for a compressed
+                                            # binary representation and readability
+                                            # is more important
+                                            format="yaml",
+                                        )
+                                        assert fut is not None
+                                        await fut
+                                except Exception:
+                                    print(
+                                        f"Exception {sys.exc_info()} while trying to dump cluster state."
+                                    )
+
+                            task.cancel()
+                            while not task.cancelled():
+                                await asyncio.sleep(0.01)
+                            raise TimeoutError(
+                                f"Test timeout after {timeout}s.\n{buffer.getvalue()}"
+                            ) from e
                         finally:
                             if client and c.status not in ("closing", "closed"):
                                 await c._close(fast=s.status == Status.closed)
@@ -971,13 +1057,28 @@ def gen_cluster(
                 if getattr(w, "data", None):
                     try:
                         w.data.clear()
-                    except EnvironmentError:
+                    except OSError:
                         # zict backends can fail if their storage directory
                         # was already removed
                         pass
                     del w.data
 
             return result
+
+        # Patch the signature so pytest can inject fixtures
+        orig_sig = inspect.signature(func)
+        args = [None] * (1 + len(nthreads))  # scheduler, *workers
+        if client:
+            args.insert(0, None)
+
+        bound = orig_sig.bind_partial(*args)
+        test_func.__signature__ = orig_sig.replace(
+            parameters=[
+                p
+                for name, p in orig_sig.parameters.items()
+                if name not in bound.arguments
+            ]
+        )
 
         return test_func
 
@@ -999,7 +1100,7 @@ def terminate_process(proc):
         else:
             proc.send_signal(signal.SIGINT)
         try:
-            proc.wait(10)
+            proc.wait(30)
         finally:
             # Make sure we don't leave the process lingering around
             with suppress(OSError):
@@ -1050,10 +1151,10 @@ def wait_for_port(address, timeout=5):
     while True:
         timeout = deadline - time()
         if timeout < 0:
-            raise RuntimeError("Failed to connect to %s" % (address,))
+            raise RuntimeError(f"Failed to connect to {address}")
         try:
             sock = socket.create_connection(address, timeout=timeout)
-        except EnvironmentError:
+        except OSError:
             pass
         else:
             sock.close()
@@ -1067,7 +1168,7 @@ def wait_for(predicate, timeout, fail_func=None, period=0.001):
         if time() > deadline:
             if fail_func is not None:
                 fail_func()
-            pytest.fail("condition not reached until %s seconds" % (timeout,))
+            pytest.fail(f"condition not reached until {timeout} seconds")
 
 
 async def async_wait_for(predicate, timeout, fail_func=None, period=0.001):
@@ -1077,7 +1178,7 @@ async def async_wait_for(predicate, timeout, fail_func=None, period=0.001):
         if time() > deadline:
             if fail_func is not None:
                 fail_func()
-            pytest.fail("condition not reached until %s seconds" % (timeout,))
+            pytest.fail(f"condition not reached until {timeout} seconds")
 
 
 @memoize
@@ -1095,10 +1196,9 @@ def has_ipv6():
         serv.bind(("::", 0))
         serv.listen(5)
         cli = socket.create_connection(serv.getsockname()[:2])
-    except EnvironmentError:
-        return False
-    else:
         return True
+    except OSError:
+        return False
     finally:
         if cli is not None:
             cli.close()
@@ -1397,7 +1497,7 @@ def bump_rlimit(limit, desired):
         if soft < desired:
             resource.setrlimit(limit, (desired, max(hard, desired)))
     except Exception as e:
-        pytest.skip("rlimit too low (%s) and can't be increased: %s" % (soft, e))
+        pytest.skip(f"rlimit too low ({soft}) and can't be increased: {e}")
 
 
 def gen_tls_cluster(**kwargs):
@@ -1501,7 +1601,7 @@ def check_instances():
     for w in Worker._instances:
         with suppress(RuntimeError):  # closed IOLoop
             w.loop.add_callback(w.close, report=False, executor_wait=False)
-            if w.status == Status.running:
+            if w.status in RUNNING:
                 w.loop.add_callback(w.close)
     Worker._instances.clear()
 
@@ -1576,3 +1676,77 @@ class TaskStateMetadataPlugin(WorkerPlugin):
             ts.metadata["start_time"] = time()
         elif start == "executing" and finish == "memory":
             ts.metadata["stop_time"] = time()
+
+
+class LockedComm(TCP):
+    def __init__(self, comm, read_event, read_queue, write_event, write_queue):
+        self.write_event = write_event
+        self.write_queue = write_queue
+        self.read_event = read_event
+        self.read_queue = read_queue
+        self.comm = comm
+        assert isinstance(comm, TCP)
+
+    def __getattr__(self, name):
+        return getattr(self.comm, name)
+
+    async def write(self, msg, serializers=None, on_error="message"):
+        if self.write_queue:
+            await self.write_queue.put((self.comm.peer_address, msg))
+        if self.write_event:
+            await self.write_event.wait()
+        return await self.comm.write(msg, serializers=serializers, on_error=on_error)
+
+    async def read(self, deserializers=None):
+        msg = await self.comm.read(deserializers=deserializers)
+        if self.read_queue:
+            await self.read_queue.put((self.comm.peer_address, msg))
+        if self.read_event:
+            await self.read_event.wait()
+        return msg
+
+
+class _LockedCommPool(ConnectionPool):
+    """A ConnectionPool wrapper to intercept network traffic between servers
+
+    This wrapper can be attached to a running server to intercept outgoing read or write requests in test environments.
+
+    Examples
+    --------
+    >>> w = await Worker(...)
+    >>> read_event = asyncio.Event()
+    >>> read_queue = asyncio.Queue()
+    >>> w.rpc = _LockedCommPool(
+            w.rpc,
+            read_event=read_event,
+            read_queue=read_queue,
+        )
+    # It might be necessary to remove all existing comms
+    # if the wrapped pool has been used before
+    >>> w.remove(remote_address)
+
+    >>> async def ping_pong():
+            return await w.rpc(remote_address).ping()
+    >>> with pytest.raises(asyncio.TimeoutError):
+    >>>     await asyncio.wait_for(ping_pong(), 0.01)
+    >>> read_event.set()
+    >>> await ping_pong()
+    """
+
+    def __init__(
+        self, pool, read_event=None, read_queue=None, write_event=None, write_queue=None
+    ):
+        self.write_event = write_event
+        self.write_queue = write_queue
+        self.read_event = read_event
+        self.read_queue = read_queue
+        self.pool = pool
+
+    def __getattr__(self, name):
+        return getattr(self.pool, name)
+
+    async def connect(self, *args, **kwargs):
+        comm = await self.pool.connect(*args, **kwargs)
+        return LockedComm(
+            comm, self.read_event, self.read_queue, self.write_event, self.write_queue
+        )

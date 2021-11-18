@@ -9,20 +9,24 @@ dependencies:
   - bokeh
   - click
   - cloudpickle
+  - coverage
   - dask  # overridden by git tip below
   - filesystem-spec
   - h5py
   - ipykernel
   - ipywidgets
+  - jinja2
   - joblib
   - jupyter_client
   - msgpack-python
   - netcdf4
   - paramiko
+  - pre-commit
   - prometheus_client
   - psutil
   - pytest
   - pytest-asyncio<0.14.0
+  - pytest-cov
   - pytest-faulthandler
   - pytest-repeat
   - pytest-rerunfailures

@@ -353,7 +353,16 @@ To aggressively and automatically trim the memory in a production environment, y
 should instead set the environment variable ``MALLOC_TRIM_THRESHOLD_`` (note the final
 underscore) to 0 or a low number; see the `mallopt`_ man page for details. Reducing
 this value will increase the number of syscalls, and as a consequence may degrade
-performance. **The variable must be set before starting the ``dask-worker`` process.**
+performance.
+
+.. note::
+   The variable must be set before starting the ``dask-worker`` process.
+
+.. note::
+   If using a :ref:`nanny`, the ``MALLOC_TRIM_THRESHOLD_`` environment variable
+   will automatically be set to ``65536`` for the worker process which the nanny is
+   monitoring. You can modify this behavior using the ``distributed.nanny.environ``
+   configuration value.
 
 jemalloc
 ~~~~~~~~
@@ -369,12 +378,19 @@ On Linux:
     conda install jemalloc
     LD_PRELOAD=$CONDA_PREFIX/lib/libjemalloc.so dask-worker <...>
 
-On MacOS:
+On macOS:
 
 .. code-block:: bash
 
     conda install jemalloc
     DYLD_INSERT_LIBRARIES=$CONDA_PREFIX/lib/libjemalloc.dylib dask-worker <...>
+
+Alternatively on macOS, install globally with `homebrew`_:
+
+.. code-block:: bash
+
+    brew install jemalloc
+    DYLD_INSERT_LIBRARIES=$(brew --prefix jemalloc)/lib/libjemalloc.dylib dask-worker <...>
 
 `jemalloc`_ offers a wealth of configuration settings; please refer to its
 documentation.
@@ -399,6 +415,8 @@ This of course will be problematic if you have a genuine issue with unmanaged me
 e.g. memory leaks and/or suffer from heavy fragmentation.
 
 
+.. _nanny:
+
 Nanny
 -----
 
@@ -421,3 +439,4 @@ API Documentation
 .. _malloc_trim: https://man7.org/linux/man-pages/man3/malloc_trim.3.html
 .. _brk: https://www.man7.org/linux/man-pages/man2/brk.2.html
 .. _jemalloc: http://jemalloc.net
+.. _homebrew: https://brew.sh/

@@ -6,13 +6,13 @@
 @media (min-width: 0px) {
   #status-fluid {
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: 70px 2fr 6fr 2fr;
+    grid-template-rows: 90px 2fr 6fr 2fr;
   }
-  #status-nbytes-cluster {
+  #status-cluster-memory {
     grid-column: 1 / span 2;
     grid-row: 1;
   }
-  #status-nbytes-workers {
+  #status-workers-memory {
     grid-column: 1;
     grid-row: 2;
   }
@@ -33,13 +33,13 @@
 @media (min-width: 992px) {
   #status-fluid {
     grid-template-columns: 1fr 3fr;
-    grid-template-rows: 80px 4fr 1fr 1fr 4fr;
+    grid-template-rows: 100px 4fr 1fr 1fr 4fr;
   }
-  #status-nbytes-cluster {
+  #status-cluster-memory {
     grid-column: 1;
     grid-row: 1;
   }
-  #status-nbytes-workers {
+  #status-workers-memory {
     grid-column: 1;
     grid-row: 2 / span 2;
   }

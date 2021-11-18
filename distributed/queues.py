@@ -3,10 +3,10 @@ import logging
 import uuid
 from collections import defaultdict
 
-from dask.utils import stringify
+from dask.utils import parse_timedelta, stringify
 
 from .client import Client, Future
-from .utils import parse_timedelta, sync, thread_state
+from .utils import sync, thread_state
 from .worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class QueueExtension:
         self.scheduler.extensions["queues"] = self
 
     def create(self, comm=None, name=None, client=None, maxsize=0):
-        logger.debug("Queue name: {}".format(name))
+        logger.debug(f"Queue name: {name}")
         if name not in self.queues:
             self.queues[name] = asyncio.Queue(maxsize=maxsize)
             self.client_refcount[name] = 1
@@ -141,7 +141,7 @@ class Queue:
 
     .. warning::
 
-       This object is experimental and has known issues in Python 2
+       This object is experimental
 
     Parameters
     ----------

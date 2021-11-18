@@ -19,9 +19,8 @@ identify performance issues.
 Fortunately, Dask collects a variety of diagnostic information during
 execution.  It does this both to provide performance feedback to users, but
 also for its own internal scheduling decisions.  The primary place to observe
-this feedback is the :doc:`diagnostic dashboard <web>`.  This document
-describes the various pieces of performance information available and how to
-access them.
+this feedback is the diagnostic dashboard.  This document describes the various
+pieces of performance information available and how to access them.
 
 
 Task start and stop times
@@ -155,3 +154,35 @@ an estimate of differences.  All times recorded in workers take this estimated
 delay into account.  This helps, but still, imprecise measurements may exist.
 
 All times are intended to be from the scheduler's perspective.
+
+
+Analysing memory usage over time
+--------------------------------
+You may want to know how the cluster-wide memory usage evolves over time as a
+computation progresses, or how two different implementations of the same algorithm
+compare memory-wise.
+
+This is done wrapping a computation with the
+:class:`distributed.diagnostics.MemorySampler` context manager:
+
+.. code-block:: python
+
+    from distributed import Client
+    from distributed.diagnostics import MemorySampler
+
+    client = Client(...)
+    ms = MemorySampler()
+    with ms.sample("collection 1"):
+        collection1.compute()
+    with ms.sample("collection 2"):
+        collection2.compute()
+    ...
+    ms.plot(align=True)
+
+Sample output:
+
+.. image:: images/memory-sampler.svg
+    :alt: Sample output of the MemorySampler
+
+.. autoclass:: distributed.diagnostics.MemorySampler
+   :members:

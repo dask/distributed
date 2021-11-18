@@ -1,25 +1,33 @@
+from __future__ import annotations
+
 import importlib
 import traceback
 from array import array
 from enum import Enum
 from functools import partial
+from types import ModuleType
 
 import msgpack
 
 import dask
 from dask.base import normalize_token
+from dask.utils import typename
 
-from ..utils import ensure_bytes, has_keyword, typename
+from ..utils import ensure_bytes, has_keyword
 from . import pickle
 from .compression import decompress, maybe_compress
-from .utils import frame_split_size, msgpack_opts, pack_frames_prelude, unpack_frames
-
-lazy_registrations = {}
+from .utils import (
+    frame_split_size,
+    merge_memoryviews,
+    msgpack_opts,
+    pack_frames_prelude,
+    unpack_frames,
+)
 
 dask_serialize = dask.utils.Dispatch("dask_serialize")
 dask_deserialize = dask.utils.Dispatch("dask_deserialize")
 
-_cached_allowed_modules = {}
+_cached_allowed_modules: dict[str, ModuleType] = {}
 
 
 def dask_dumps(x, context=None):
@@ -30,20 +38,23 @@ def dask_dumps(x, context=None):
     except TypeError:
         raise NotImplementedError(type_name)
     if has_keyword(dumps, "context"):
-        header, frames = dumps(x, context=context)
+        sub_header, frames = dumps(x, context=context)
     else:
-        header, frames = dumps(x)
+        sub_header, frames = dumps(x)
 
-    header["type"] = type_name
-    header["type-serialized"] = pickle.dumps(type(x), protocol=4)
-    header["serializer"] = "dask"
+    header = {
+        "sub-header": sub_header,
+        "type": type_name,
+        "type-serialized": pickle.dumps(type(x), protocol=4),
+        "serializer": "dask",
+    }
     return header, frames
 
 
 def dask_loads(header, frames):
     typ = pickle.loads(header["type-serialized"])
     loads = dask_deserialize.dispatch(typ)
-    return loads(header, frames)
+    return loads(header["sub-header"], frames)
 
 
 def pickle_dumps(x, context=None):
@@ -356,7 +367,7 @@ def deserialize(header, frames, deserializers=None):
     ----------
     header : dict
     frames : list of bytes
-    deserializers : Optional[Dict[str, Tuple[Callable, Callable, bool]]]
+    deserializers : dict[str, tuple[Callable, Callable, bool]] | None
         An optional dict mapping a name to a (de)serializer.
         See `dask_serialize` and `dask_deserialize` for more.
 
@@ -406,7 +417,9 @@ def deserialize(header, frames, deserializers=None):
     return loads(header, frames)
 
 
-def serialize_and_split(x, serializers=None, on_error="message", context=None):
+def serialize_and_split(
+    x, serializers=None, on_error="message", context=None, size=None
+):
     """Serialize and split compressable frames
 
     This function is a drop-in replacement of `serialize()` that calls `serialize()`
@@ -428,7 +441,7 @@ def serialize_and_split(x, serializers=None, on_error="message", context=None):
         frames, header.get("compression") or [None] * len(frames)
     ):
         if compression is None:  # default behavior
-            sub_frames = frame_split_size(frame)
+            sub_frames = frame_split_size(frame, n=size)
             num_sub_frames.append(len(sub_frames))
             offsets.append(len(out_frames))
             out_frames.extend(sub_frames)
@@ -459,15 +472,18 @@ def merge_and_deserialize(header, frames, deserializers=None):
     deserialize
     serialize_and_split
     """
-    merged_frames = []
     if "split-num-sub-frames" not in header:
         merged_frames = frames
     else:
+        merged_frames = []
         for n, offset in zip(header["split-num-sub-frames"], header["split-offsets"]):
-            if n == 1:
-                merged_frames.append(frames[offset])
-            else:
-                merged_frames.append(bytearray().join(frames[offset : offset + n]))
+            subframes = frames[offset : offset + n]
+            try:
+                merged = merge_memoryviews(subframes)
+            except (ValueError, TypeError):
+                merged = bytearray().join(subframes)
+
+            merged_frames.append(merged)
 
     return deserialize(header, merged_frames, deserializers=deserializers)
 
@@ -771,6 +787,7 @@ class ObjectDictSerializer:
             else:
                 if isinstance(v, dict):
                     h, f = self.serialize(v)
+                    h = {"nested-dict": h}
                 else:
                     h, f = serialize(v, serializers=(self.serializer, "pickle"))
                 header["complex"][k] = {
@@ -792,7 +809,11 @@ class ObjectDictSerializer:
         for k, d in header["complex"].items():
             h = d["header"]
             f = frames[d["start"] : d["stop"]]
-            v = deserialize(h, f)
+            nested_dict = h.get("nested-dict")
+            if nested_dict:
+                v = self.deserialize(nested_dict, f)
+            else:
+                v = deserialize(h, f)
             dd[k] = v
 
         return obj

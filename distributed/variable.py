@@ -6,10 +6,10 @@ from contextlib import suppress
 
 from tlz import merge
 
-from dask.utils import stringify
+from dask.utils import parse_timedelta, stringify
 
 from .client import Client, Future
-from .utils import TimeoutError, log_errors, parse_timedelta
+from .utils import TimeoutError, log_errors
 from .worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)

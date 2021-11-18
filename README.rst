@@ -1,7 +1,7 @@
 Distributed
 ===========
 
-|Test Status| |Doc Status| |Gitter| |Version Status| |NumFOCUS|
+|Test Status| |Coverage| |Doc Status| |Discourse| |Version Status| |NumFOCUS|
 
 A library for distributed computation.  See documentation_ for more details.
 
@@ -11,9 +11,12 @@ A library for distributed computation.  See documentation_ for more details.
 .. |Doc Status| image:: https://readthedocs.org/projects/distributed/badge/?version=latest
    :target: https://distributed.dask.org
    :alt: Documentation Status
-.. |Gitter| image:: https://badges.gitter.im/Join%20Chat.svg
-   :alt: Join the chat at https://gitter.im/dask/dask
-   :target: https://gitter.im/dask/dask?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge
+.. |Coverage| image:: https://codecov.io/gh/dask/distributed/branch/main/graph/badge.svg
+   :target: https://codecov.io/gh/dask/distributed/branch/main
+   :alt: Coverage status
+.. |Discourse| image:: https://img.shields.io/discourse/users?logo=discourse&server=https%3A%2F%2Fdask.discourse.group
+   :alt: Discuss Dask-related things and ask for help
+   :target: https://dask.discourse.group
 .. |Version Status| image:: https://img.shields.io/pypi/v/distributed.svg
    :target: https://pypi.python.org/pypi/distributed/
 .. |NumFOCUS| image:: https://img.shields.io/badge/powered%20by-NumFOCUS-orange.svg?style=flat&colorA=E1523D&colorB=007D8A

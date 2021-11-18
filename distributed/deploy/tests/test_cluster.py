@@ -25,3 +25,21 @@ async def test_repr(cleanup):
     res = repr(cluster)
     expected = "Cluster(A, '<Not Connected>', workers=0, threads=0, memory=0 B)"
     assert res == expected
+
+
+@pytest.mark.asyncio
+async def test_logs_deprecated(cleanup):
+    cluster = Cluster(asynchronous=True)
+    with pytest.warns(FutureWarning, match="get_logs"):
+        cluster.logs()
+
+
+@pytest.mark.asyncio
+async def test_cluster_info():
+    class FooCluster(Cluster):
+        def __init__(self):
+            self._cluster_info["foo"] = "bar"
+            super().__init__(asynchronous=False)
+
+    cluster = FooCluster()
+    assert "foo" in cluster._cluster_info

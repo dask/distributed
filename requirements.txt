@@ -1,6 +1,7 @@
 click >= 6.7
 cloudpickle >= 1.5.0
-dask == 2021.06.1
+dask == 2021.11.1
+jinja2
 msgpack >= 0.6.0
 psutil >= 5.4.7
 sortedcontainers >= 2.0.4

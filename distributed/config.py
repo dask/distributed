@@ -48,6 +48,8 @@ aliases = {
     "log-length": "distributed.admin.log-length",
     "log-format": "distributed.admin.log-format",
     "pdb-on-err": "distributed.admin.pdb-on-err",
+    "ucx": "distributed.comm.ucx",
+    "rmm": "distributed.rmm",
 }
 
 dask.config.rename(aliases)

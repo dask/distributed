@@ -2,7 +2,15 @@ import pytest
 
 from distributed.protocol import dumps, loads, maybe_compress, msgpack, to_serialize
 from distributed.protocol.compression import compressions
-from distributed.protocol.serialize import Serialize, Serialized, deserialize, serialize
+from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
+from distributed.protocol.serialize import (
+    Serialize,
+    Serialized,
+    dask_deserialize,
+    dask_serialize,
+    deserialize,
+    serialize,
+)
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import nbytes
 
@@ -218,3 +226,30 @@ def test_maybe_compress_memoryviews():
     else:
         assert compression == "blosc"
         assert len(payload) < x.nbytes / 10
+
+
+@pytest.mark.parametrize("serializers", [("dask",), ("cuda",)])
+def test_preserve_header(serializers):
+    """
+    Test that a serialization family doesn't overwrite the headers
+    of the underlying registered dumps/loads functions.
+    """
+
+    class MyObj:
+        pass
+
+    @cuda_serialize.register(MyObj)
+    @dask_serialize.register(MyObj)
+    def _(x):
+        return {}, []
+
+    @cuda_deserialize.register(MyObj)
+    @dask_deserialize.register(MyObj)
+    def _(header, frames):
+        assert header == {}
+        assert frames == []
+        return MyObj()
+
+    header, frames = serialize(MyObj(), serializers=serializers)
+    o = deserialize(header, frames)
+    assert isinstance(o, MyObj)
