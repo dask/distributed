@@ -2451,16 +2451,10 @@ class Worker(ServerNode):
 
         remaining_recs = recommendations.copy()
         tasks = set()
-        exceptions = []
         while remaining_recs:
             ts, finish = remaining_recs.popitem()
             tasks.add(ts)
-            try:
-                a_recs, a_smsgs = self._transition(ts, finish, stimulus_id=stimulus_id)
-            except InvalidTransition:
-                logger.exception("Exception during transition")
-                exceptions.append(sys.exc_info())
-                continue
+            a_recs, a_smsgs = self._transition(ts, finish, stimulus_id=stimulus_id)
 
             remaining_recs.update(a_recs)
             smsgs += a_smsgs
@@ -2478,8 +2472,6 @@ class Worker(ServerNode):
                 "BatchedSend closed while transitioning tasks. %d tasks not sent.",
                 len(smsgs),
             )
-        # if exceptions:
-        #     raise exceptions[-1][1]
 
     def maybe_transition_long_running(self, ts, *, stimulus_id, compute_duration=None):
         if ts.state == "executing":
