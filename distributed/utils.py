@@ -317,8 +317,6 @@ class SyncMethodMixin:
 
 def in_async_call(loop, default=False):
     """Whether this call is currently within an async call"""
-    if getattr(thread_state, "asynchronous", 0):
-        return True
     try:
         return loop.asyncio_loop is asyncio.get_running_loop()
     except RuntimeError:
@@ -344,11 +342,6 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
 
     @gen.coroutine
     def f():
-        # We flag the thread state asynchronous, which will make sync() call
-        # within `func` use async semantic. In order to support concurrent
-        # calls to sync(), `asynchronous` is used as a ref counter.
-        thread_state.asynchronous = getattr(thread_state, "asynchronous", 0)
-        thread_state.asynchronous += 1
         try:
             if main_tid == threading.get_ident():
                 raise RuntimeError("sync() called from thread of running loop")
@@ -360,8 +353,6 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
         except Exception:
             error[0] = sys.exc_info()
         finally:
-            assert thread_state.asynchronous > 0
-            thread_state.asynchronous -= 1
             e.set()
 
     loop.add_callback(f)

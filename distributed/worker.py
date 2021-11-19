@@ -1412,7 +1412,6 @@ class Worker(ServerNode):
         await super().start()
 
         enable_gc_diagnosis()
-        thread_state.asynchronous = 1
 
         ports = parse_ports(self._start_port)
         for port in ports:
