@@ -2665,8 +2665,8 @@ class TaskGroupProgress(DashboardComponent):
         is busy.
         """
         return (
-            not self._last_transition_count == self.scheduler.transition_counter
-            and not self.scheduler.proc.cpu_percent() > 50
+            self._last_transition_count != self.scheduler.transition_counter
+            and self.scheduler.proc.cpu_percent() < 50
         )
 
     def _get_timeseries(self, restrict_to_existing=False):

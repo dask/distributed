@@ -305,8 +305,14 @@ class GroupTiming(SchedulerPlugin):
         scheduler.add_plugin(self)
         self.scheduler = scheduler
 
-        # Time bin size. TODO: make this configurable?
+        # Time bin size (in seconds). TODO: make this configurable?
         self.dt = 1.0
+
+        # Initialize our data structures.
+        self._init()
+
+    def _init(self):
+        """Shared initializatoin code between __init__ and restart"""
         now = time.time()
 
         # Timestamps for tracking compute durations by task group.
@@ -315,7 +321,7 @@ class GroupTiming(SchedulerPlugin):
         # The amount of compute since the last timestamp
         self.compute: dict[str, list[float]] = {}
         # The number of threads at the time
-        self.nthreads: list[float] = [scheduler.total_nthreads] * 2
+        self.nthreads: list[float] = [self.scheduler.total_nthreads] * 2
 
     def transition(self, key, start, finish, *args, **kwargs):
         # We are mostly interested in when tasks complete for now, so just look
@@ -367,7 +373,4 @@ class GroupTiming(SchedulerPlugin):
                     idx -= 1
 
     def restart(self, scheduler):
-        now = time.time()
-        self.time = [now] * 2  # make sure to respect the requirement that len > 2
-        self.nthreads = [self.scheduler.total_nthreads] * 2
-        self.compute = {}
+        self._init()
