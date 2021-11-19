@@ -1,6 +1,25 @@
 Changelog
 =========
 
+2021.11.2
+---------
+
+Released on November 19, 2021
+
+- Ensure cancelled error transition can properly release a key (:pr:`5528`) `Florian Jetter`_
+- Refactor release key (:pr:`5507`) `Florian Jetter`_
+- Fix deadlock caused by an erred task (executing->cancelled->error) (:pr:`5503`) `Florian Jetter`_
+- Resolve ``KeyError``-related deadlock (:pr:`5525`) `Florian Jetter`_
+- Remove extra quotation in worker failure docs (:pr:`5518`) `James Bourbeau`_
+- Ensure ``safe_sizeof`` warning is accurate (:pr:`5519`) `James Bourbeau`_
+- Visualize cluster-wide memory usage over time (:pr:`5477`) `crusaderky`_
+- AMM: redesign start/stop methods (:pr:`5476`) `crusaderky`_
+- Preserve ``contextvars`` during comm offload (:pr:`5486`) `Gabe Joseph`_
+- Deserialization: zero-copy merge subframes when possible (:pr:`5208`) `Gabe Joseph`_
+- Add support for multiple workers per SSH connection (:pr:`5506`) `Jacob Tomlinson`_
+- Client method to dump cluster state (:pr:`5470`) `Florian Jetter`_
+
+
 2021.11.1
 ---------
 
