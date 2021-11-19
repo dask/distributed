@@ -93,7 +93,6 @@ async def test_basic_state(c: Client, s: Scheduler, *workers: Worker):
     for ext in exts:
         assert not ext.shuffles
         assert not ext.output_data
-        assert not ext.waiting_for_metadata
 
     plugin = s.plugins[ShuffleSchedulerPlugin.name]
     assert isinstance(plugin, ShuffleSchedulerPlugin)

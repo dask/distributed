@@ -41,16 +41,15 @@ def shuffle_transfer(
     ext.sync(ext.add_partition(data, id, npartitions, column))
 
 
-def shuffle_unpack(
-    id: ShuffleId, i: int, empty: pd.DataFrame, barrier=None
-) -> pd.DataFrame:
-    ext = get_shuffle_extension()
-    return ext.sync(ext.get_output_partition(id, i, empty))
-
-
 def shuffle_barrier(id: ShuffleId, transfers: list[None]) -> None:
     ext = get_shuffle_extension()
     ext.sync(ext.barrier(id))
+
+
+def shuffle_unpack(
+    id: ShuffleId, i: int, empty: pd.DataFrame, barrier=None
+) -> pd.DataFrame:
+    return get_shuffle_extension().get_output_partition(id, i, empty)
 
 
 def rearrange_by_column_p2p(
