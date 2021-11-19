@@ -1,39 +1,42 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Hashable, Mapping
+from distutils.version import LooseVersion
 from functools import partial
 from typing import Any
 
-from zict import Buffer, File, Func
+import zict
 
 from .protocol import deserialize_bytes, serialize_bytelist
 from .sizeof import safe_sizeof
 
+logger = logging.getLogger(__name__)
 
-class SpillBuffer(Buffer):
+
+class SpillBuffer(zict.Buffer):
     """MutableMapping that automatically spills out dask key/value pairs to disk when
     the total size of the stored data exceeds the target
     """
 
-    spilled_by_key: dict[Hashable, int]
-    spilled_total: int
+    def __init__(self, spill_directory: str, target: int, max_spill: int | None = None):
+        if max_spill is not None and LooseVersion(zict.__version__) <= "2.0":
+            raise ValueError("zict > 2.0 required to set max_weight")
 
-    def __init__(self, spill_directory: str, target: int):
-        self.spilled_by_key = {}
-        self.spilled_total = 0
-        storage = Func(
-            partial(serialize_bytelist, on_error="raise"),
-            deserialize_bytes,
-            File(spill_directory),
-        )
         super().__init__(
-            {},
-            storage,
-            target,
-            weight=self._weight,
-            fast_to_slow_callbacks=[self._on_evict],
-            slow_to_fast_callbacks=[self._on_retrieve],
+            fast={},
+            slow=Slow(spill_directory, max_spill),
+            n=target,
+            weight=_in_memory_weight,
         )
+
+    def __setitem__(self, key, value):
+        try:
+            super().__setitem__(key, value)
+        except MaxSpillExceeded:
+            # key is in self.fast; no keys have been lost on eviction
+            # Note: requires zict > 2.0
+            pass
 
     @property
     def memory(self) -> Mapping[Hashable, Any]:
@@ -49,28 +52,45 @@ class SpillBuffer(Buffer):
         """
         return self.slow
 
-    @staticmethod
-    def _weight(key: Hashable, value: Any) -> int:
-        return safe_sizeof(value)
+    @property
+    def spilled_total(self) -> int:
+        return self.slow.total_weight
 
-    def _on_evict(self, key: Hashable, value: Any) -> None:
-        b = safe_sizeof(value)
-        self.spilled_by_key[key] = b
-        self.spilled_total += b
 
-    def _on_retrieve(self, key: Hashable, value: Any) -> None:
-        self.spilled_total -= self.spilled_by_key.pop(key)
+def _in_memory_weight(key: Hashable, value: Any) -> int:
+    return safe_sizeof(value)
 
-    def __setitem__(self, key: Hashable, value: Any) -> None:
-        self.spilled_total -= self.spilled_by_key.pop(key, 0)
-        super().__setitem__(key, value)
-        if key in self.slow:
-            # value is individually larger than target so it went directly to slow.
-            # _on_evict was not called.
-            b = safe_sizeof(value)
-            self.spilled_by_key[key] = b
-            self.spilled_total += b
 
-    def __delitem__(self, key: Hashable) -> None:
-        self.spilled_total -= self.spilled_by_key.pop(key, 0)
+class MaxSpillExceeded(Exception):
+    pass
+
+
+class Slow(zict.Func):
+    weight_by_key: dict[Hashable, int]
+    total_weight: int
+
+    def __init__(self, spill_directory: str, max_weight: int | None = None):
+        super().__init__(
+            partial(serialize_bytelist, on_error="raise"),
+            deserialize_bytes,
+            zict.File(spill_directory),
+        )
+        self.max_weight = max_weight
+        self.weight_by_key = {}
+        self.total_weight = 0
+
+    def __setitem__(self, key, value):
+        pickled = self.dump(value)
+        if self.total_weight + len(pickled) > self.max_weight:
+            # TODO don't spam the log file with hundreds of messages per second
+            logger.warning(
+                "Spill file on disk reached capacity; keeping data in memory"
+            )
+            # Stop callbacks and ensure that the key ends up in SpillBuffer.fast
+            raise MaxSpillExceeded()
+        self.total_weight += len(pickled)
+        self.d[key] = pickled
+
+    def __delitem__(self, key):
         super().__delitem__(key)
+        self.total_weight -= self.weight_by_key.pop(key)
