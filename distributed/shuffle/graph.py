@@ -18,7 +18,20 @@ if TYPE_CHECKING:
 def get_shuffle_extension() -> ShuffleWorkerExtension:
     from distributed import get_worker
 
-    return get_worker().extensions["shuffle"]
+    try:
+        worker = get_worker()
+    except ValueError as e:
+        raise RuntimeError(
+            "`shuffle='p2p'` requires Dask's distributed scheduler. This task is not running on a Worker; "
+            "please confirm that you've created a distributed Client and are submitting this computation through it."
+        ) from e
+    extension: ShuffleWorkerExtension | None = worker.extensions.get("shuffle")
+    if not extension:
+        raise RuntimeError(
+            f"The worker {worker.address} does not have a ShuffleExtension. "
+            "Is pandas installed on the worker?"
+        )
+    return extension
 
 
 def shuffle_transfer(
