@@ -81,16 +81,6 @@ async def test_installation(s: Scheduler, worker: Worker):
     assert worker.handlers["shuffle_init"] == ext.shuffle_init
     assert worker.handlers["shuffle_inputs_done"] == ext.shuffle_inputs_done
 
-    with pytest.raises(RuntimeError, match="from a different shuffle extension"):
-        ShuffleWorkerExtension(worker)
-
-    # Nothing was changed by double-installation
-    assert worker.extensions["shuffle"] is ext
-    assert worker.handlers["shuffle_receive"] == ext.shuffle_receive
-    assert worker.handlers["shuffle_init"] == ext.shuffle_init
-    assert worker.handlers["shuffle_init"] == ext.shuffle_init
-    assert worker.handlers["shuffle_inputs_done"] == ext.shuffle_inputs_done
-
 
 @gen_cluster([("", 1)])
 async def test_init(s: Scheduler, worker: Worker):

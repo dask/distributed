@@ -4,7 +4,7 @@ import asyncio
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, NewType
+from typing import TYPE_CHECKING, NewType
 
 import pandas as pd
 
@@ -138,16 +138,10 @@ class ShuffleWorkerExtension:
 
     def __init__(self, worker: Worker) -> None:
         # Attach to worker
-
-        add_handler(worker.handlers, self.shuffle_receive)
-        add_handler(worker.handlers, self.shuffle_init)
-        add_handler(worker.handlers, self.shuffle_inputs_done)
-
-        existing_extension = worker.extensions.setdefault("shuffle", self)
-        if existing_extension is not self:
-            raise RuntimeError(
-                f"Worker {worker} already has a 'shuffle' extension registered: {existing_extension}"
-            )
+        worker.handlers["shuffle_receive"] = self.shuffle_receive
+        worker.handlers["shuffle_init"] = self.shuffle_init
+        worker.handlers["shuffle_inputs_done"] = self.shuffle_inputs_done
+        worker.extensions["shuffle"] = self
 
         # Initialize
         self.worker: Worker = worker
@@ -340,13 +334,3 @@ class ShuffleWorkerExtension:
             raise ValueError(
                 f"Shuffle {shuffle_id!r} is not registered on worker {self.worker.address}"
             ) from None
-
-
-def add_handler(handlers: dict, handler: Callable) -> None:
-    "Add a handler to a worker's handlers dict, checking if it already exists."
-    existing_handler = handlers.setdefault(handler.__name__, handler)
-    if existing_handler is not handler:
-        raise RuntimeError(
-            f"Worker already has a {handler.__name__!r} handler registered "
-            f"from a different shuffle extension: {existing_handler}"
-        )
