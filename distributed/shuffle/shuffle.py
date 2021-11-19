@@ -13,38 +13,39 @@ if TYPE_CHECKING:
     import pandas as pd
 
 
-def shuffle_setup(metadata: NewShuffleMetadata) -> None:
+def get_ext() -> ShuffleWorkerExtension:
     from distributed import get_worker
 
-    worker = get_worker()
+    try:
+        worker = get_worker()
+    except ValueError as e:
+        raise RuntimeError(
+            "`shuffle='p2p'` requires Dask's distributed scheduler. This task is not running on a Worker; "
+            "please confirm that you've created a distributed Client and are submitting this computation through it."
+        ) from e
     extension: ShuffleWorkerExtension | None = worker.extensions.get("shuffle")
     if not extension:
         raise RuntimeError(
             f"The worker {worker.address} does not have a ShuffleExtension. "
             "Is pandas installed on the worker?"
         )
-    extension.create_shuffle(metadata)
+    return extension
+
+
+def shuffle_setup(metadata: NewShuffleMetadata) -> None:
+    get_ext().create_shuffle(metadata)
 
 
 def shuffle_transfer(input: pd.DataFrame, id: ShuffleId, setup=None) -> None:
-    from distributed import get_worker
-
-    extension: ShuffleWorkerExtension = get_worker().extensions["shuffle"]
-    extension.add_partition(input, id)
+    get_ext().add_partition(input, id)
 
 
 def shuffle_unpack(id: ShuffleId, output_partition: int, barrier=None) -> pd.DataFrame:
-    from distributed import get_worker
-
-    extension: ShuffleWorkerExtension = get_worker().extensions["shuffle"]
-    return extension.get_output_partition(id, output_partition)
+    return get_ext().get_output_partition(id, output_partition)
 
 
 def shuffle_barrier(id: ShuffleId, transfers: list[None]) -> None:
-    from distributed import get_worker
-
-    extension: ShuffleWorkerExtension = get_worker().extensions["shuffle"]
-    extension.barrier(id)
+    get_ext().barrier(id)
 
 
 def rearrange_by_column_p2p(
