@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import random
 
 import pytest
@@ -9,20 +10,13 @@ from distributed.active_memory_manager import (
     ActiveMemoryManagerPolicy,
 )
 from distributed.core import Status
-from distributed.utils_test import gen_cluster, inc, slowinc
+from distributed.utils_test import captured_logger, gen_cluster, inc, slowinc
 
 NO_AMM_START = {"distributed.scheduler.active-memory-manager.start": False}
 
 
-@gen_cluster(
-    client=True,
-    config={
-        "distributed.scheduler.active-memory-manager.start": False,
-        "distributed.scheduler.active-memory-manager.policies": [],
-    },
-)
-async def test_no_policies(c, s, a, b):
-    s.extensions["amm"].run_once()
+def captured_amm_logger():
+    return captured_logger("distributed.active_memory_manager", level=logging.DEBUG)
 
 
 class DemoPolicy(ActiveMemoryManagerPolicy):
@@ -65,12 +59,30 @@ def demo_config(action, key="x", n=10, candidates=None, start=False, interval=0.
     }
 
 
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.scheduler.active-memory-manager.start": False,
+        "distributed.scheduler.active-memory-manager.policies": [],
+    },
+)
+async def test_no_policies(c, s, a, b):
+    s.extensions["amm"].run_once()
+
+
 @gen_cluster(nthreads=[("", 1)] * 4, client=True, config=demo_config("drop"))
 async def test_drop(c, s, *workers):
+    with captured_amm_logger() as logs:
+        s.extensions["amm"].run_once()
+    # Logging is quiet if there are no suggestions
+    assert logs.getvalue() == ""
+
     futures = await c.scatter({"x": 123}, broadcast=True)
     assert len(s.tasks["x"].who_has) == 4
     # Also test the extension handler
-    s.extensions["amm"].run_once()
+    with captured_amm_logger() as logs:
+        s.extensions["amm"].run_once()
+    assert logs.getvalue() == "Enacting suggestions for 1 tasks\n"
     while len(s.tasks["x"].who_has) > 1:
         await asyncio.sleep(0.01)
     # The last copy is never dropped even if the policy asks so
@@ -517,9 +529,21 @@ async def test_replicate_avoids_paused_workers_2(c, s, a, b):
     },
 )
 async def test_ReduceReplicas(c, s, *workers):
+    with captured_amm_logger() as logs:
+        s.extensions["amm"].run_once()
+    # Logging is quiet if there are no suggestions
+    assert logs.getvalue() == ""
+
     futures = await c.scatter({"x": 123}, broadcast=True)
     assert len(s.tasks["x"].who_has) == 4
-    s.extensions["amm"].run_once()
+
+    with captured_amm_logger() as logs:
+        s.extensions["amm"].run_once()
+    assert logs.getvalue() == (
+        "ReduceReplicas: Dropping 3 superfluous replicas of 1 tasks\n"
+        "Enacting suggestions for 1 tasks\n"  # core AMM extension
+    )
+
     while len(s.tasks["x"].who_has) > 1:
         await asyncio.sleep(0.01)
 
