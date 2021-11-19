@@ -82,9 +82,11 @@ class Shuffle:
     async def add_partition(self, data: pd.DataFrame) -> None:
         assert not self.transferred, "`add_partition` called after barrier task"
         tasks = []
-        # TODO grouping is blocking, should it be offloaded to a thread?
-        # It mostly doesn't release the GIL though, so may not make much difference.
+        # NOTE: `groupby` blocks the event loop, but it also holds the GIL,
+        # so we don't bother offloading to a thread. See bpo-7946.
         for output_partition, data in data.groupby(self.metadata.column):
+            # NOTE: `column` must refer to an integer column, which is the output partition number for the row.
+            # This is always `_partitions`, added by `dask/dataframe/shuffle.py::shuffle`.
             addr = self.metadata.worker_for(int(output_partition))
             task = asyncio.create_task(
                 self.worker.rpc(addr).shuffle_receive(
@@ -95,7 +97,9 @@ class Shuffle:
             )
             tasks.append(task)
 
-        # TODO handle errors and cancellation here
+        # TODO Once RerunGroup logic exists (https://github.com/dask/distributed/issues/5403),
+        # handle errors and cancellation here in a way that lets other workers cancel & clean up their shuffles.
+        # Without it, letting errors kill the task is all we can do.
         await asyncio.gather(*tasks)
 
     def get_output_partition(self, i: int) -> pd.DataFrame:
