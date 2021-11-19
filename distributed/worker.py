@@ -2256,11 +2256,13 @@ class Worker(ServerNode):
         recommendations, smsgs = self.transition_generic_released(
             ts, stimulus_id=stimulus_id
         )
-        recommendations[ts] = next_state or recommendations.get(ts, "released")
+        if next_state != "released":
+            recommendations[ts] = next_state
         return recommendations, smsgs
 
     def transition_executing_released(self, ts, *, stimulus_id):
         ts._previous = ts.state
+        ts._next = "released"
         # See https://github.com/dask/distributed/pull/5046#discussion_r685093940
         ts.state = "cancelled"
         ts.done = False
@@ -2368,6 +2370,7 @@ class Worker(ServerNode):
             return self.transition_generic_released(ts, stimulus_id=stimulus_id)
         else:
             ts._previous = "flight"
+            ts._next = "released"
             # See https://github.com/dask/distributed/pull/5046#discussion_r685093940
             ts.state = "cancelled"
             return {}, []
@@ -3787,6 +3790,7 @@ class Worker(ServerNode):
     def validate_task_cancelled(self, ts):
         assert ts.key not in self.data
         assert ts._previous
+        assert ts._next
 
     def validate_task_resumed(self, ts):
         assert ts.key not in self.data
