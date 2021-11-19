@@ -19,13 +19,7 @@ from dask.widgets import get_template
 from ..core import CommClosedError, Status, rpc
 from ..scheduler import Scheduler
 from ..security import Security
-from ..utils import (
-    LoopRunner,
-    NoOpAwaitable,
-    TimeoutError,
-    import_term,
-    silence_logging,
-)
+from ..utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
 from .adaptive import Adaptive
 from .cluster import Cluster
 
@@ -249,9 +243,6 @@ class SpecCluster(Cluster):
                 level=silence_logs, root="bokeh"
             )
 
-        self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
-        self.loop = self._loop_runner.loop
-
         self._instances.add(self)
         self._correct_state_waiting = None
         self._name = name or type(self).__name__
@@ -259,6 +250,7 @@ class SpecCluster(Cluster):
 
         super().__init__(
             asynchronous=asynchronous,
+            loop=loop,
             name=name,
             scheduler_sync_interval=scheduler_sync_interval,
         )

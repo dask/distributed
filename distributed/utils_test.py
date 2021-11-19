@@ -72,7 +72,6 @@ from .utils import (
     mp_context,
     reset_logger_locks,
     sync,
-    thread_state,
 )
 from .worker import RUNNING, Worker
 
@@ -1652,9 +1651,6 @@ def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
                             logging.getLogger(name).setLevel(level)
 
                         yield loop
-
-                        with suppress(AttributeError):
-                            del thread_state.on_event_loop_thread
 
 
 @pytest.fixture

@@ -16,6 +16,7 @@ from ..objects import SchedulerInfo
 from ..utils import (
     Log,
     Logs,
+    LoopRunner,
     NoOpAwaitable,
     SyncMethodMixin,
     format_dashboard_link,
@@ -52,10 +53,19 @@ class Cluster(SyncMethodMixin):
     _supports_scaling = True
     _cluster_info: dict = {}
 
-    def __init__(self, asynchronous, quiet=False, name=None, scheduler_sync_interval=1):
+    def __init__(
+        self,
+        asynchronous=False,
+        loop=None,
+        quiet=False,
+        name=None,
+        scheduler_sync_interval=1,
+    ):
+        self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
+        self.loop = self._loop_runner.loop
+
         self.scheduler_info = {"workers": {}}
         self.periodic_callbacks = {}
-        self._asynchronous = asynchronous
         self._watch_worker_status_comm = None
         self._watch_worker_status_task = None
         self._cluster_manager_logs = []

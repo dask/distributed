@@ -622,10 +622,6 @@ class Client(SyncMethodMixin):
         connection_limit=512,
         **kwargs,
     ):
-        self._asynchronous = asynchronous
-        self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
-        self.io_loop = self.loop = self._loop_runner.loop
-
         if timeout == no_default:
             timeout = dask.config.get("distributed.comm.timeouts.connect")
         if timeout is not None:
@@ -707,6 +703,9 @@ class Client(SyncMethodMixin):
         else:
             self.connection_args = self.security.get_connection_args("client")
 
+        self._asynchronous = asynchronous
+        self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
+        self.io_loop = self.loop = self._loop_runner.loop
         self._connecting_to_scheduler = False
 
         self._gather_keys = None
@@ -1156,7 +1155,10 @@ class Client(SyncMethodMixin):
         self.close()
 
     def __del__(self):
-        self.close()
+        # If the loop never got assigned, we failed early in the constructor,
+        # nothing to do
+        if hasattr(self, "loop"):
+            self.close()
 
     def _inc_ref(self, key):
         with self._refcount_lock:
