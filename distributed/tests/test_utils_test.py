@@ -168,6 +168,22 @@ def test_gen_test_legacy_explicit():
     yield asyncio.sleep(0.01)
 
 
+@pytest.mark.parametrize("foo", ["True"])
+@gen_test()
+async def test_gen_test_parametrized(foo):
+    assert foo is True
+    await asyncio.sleep(0.01)
+
+
+@pytest.mark.parametrize("foo", ["True"])
+@pytest.mark.parametrize("bar", ["False"])
+@gen_test()
+async def test_gen_test_double_parametrized(foo, bar):
+    assert foo is True
+    assert bar is False
+    await asyncio.sleep(0.01)
+
+
 @contextmanager
 def _listen(delay=0):
     serv = socket.socket()

@@ -41,7 +41,6 @@ except ImportError:
 
 import pytest
 from tlz import assoc, memoize, merge
-from tornado import gen
 from tornado.ioloop import IOLoop
 
 import dask
@@ -778,6 +777,12 @@ async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
 def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
     """Coroutine test
 
+    @pytest.mark.parametrize("param", [1, 2, 3])
+    @gen_test(timeout=5)
+    async def test_foo(param)
+        await ... # use tornado coroutines
+
+
     @gen_test(timeout=5)
     async def test_foo():
         await ...  # use tornado coroutines
@@ -788,14 +793,21 @@ def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
     )
 
     def _(func):
-        def test_func():
+        @functools.wraps(func)
+        def test_func(*outer_args, **kwargs):
             with clean() as loop:
-                if iscoroutinefunction(func):
-                    cor = func
-                else:
-                    cor = gen.coroutine(func)
-                loop.run_sync(cor, timeout=timeout)
 
+                async def coro():
+                    coro = func(*outer_args, **kwargs)
+                    return coro
+
+                loop.run_sync(coro, timeout=timeout)
+
+        # Patch the signature so pytest can inject fixtures
+        orig_sig = inspect.signature(func)
+        test_func.__signature__ = orig_sig.replace(
+            parameters=[p for _, p in orig_sig.parameters.items()]
+        )
         return test_func
 
     return _
