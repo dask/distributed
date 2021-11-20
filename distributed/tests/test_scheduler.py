@@ -3236,7 +3236,7 @@ async def test_set_restrictions(c, s, a, b):
 @gen_cluster(
     nthreads=[],
 )
-def test_check_nanny_workers_raises(s):
+async def test_check_nanny_workers_raises(s):
     with pytest.raises(
         RuntimeError, match="`worker_class` is set to 'dask.distributed.Nanny'"
     ):
