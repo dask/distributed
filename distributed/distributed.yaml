@@ -62,8 +62,8 @@ distributed:
 
     active-memory-manager:
       # Set to true to auto-start the Active Memory Manager on Scheduler start; if false
-      # you'll have to either manually start it with client.scheduler.amm_start() or run
-      # it once with client.scheduler.amm_run().
+      # you'll have to either manually start it with client.amm.start() or run it once
+      # with client.amm.run_once().
       start: false
       # Once started, run the AMM cycle every <interval>
       interval: 2s
@@ -187,13 +187,14 @@ distributed:
     socket-backlog: 2048
     recent-messages-log-length: 0  # number of messages to keep for debugging
     ucx:
-      cuda_copy: False  # enable cuda-copy
-      tcp: False  # enable tcp
-      nvlink: False  # enable cuda_ipc
-      infiniband: False # enable Infiniband
-      rdmacm: False # enable RDMACM
+      cuda_copy: null  # enable cuda-copy
+      tcp: null  # enable tcp
+      nvlink: null  # enable cuda_ipc
+      infiniband: null  # enable Infiniband
+      rdmacm: null  # enable RDMACM
       net-devices: null  # define what interface to use for UCX comm
       reuse-endpoints: null  # enable endpoint reuse
+      create-cuda-context: null  # create CUDA context before UCX initialization
 
     zstd:
       level: 3      # Compression level, between 1 and 22.

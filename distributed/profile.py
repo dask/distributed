@@ -24,12 +24,15 @@ We represent this tree as a nested dictionary with the following form:
                    'children': {...}}}
     }
 """
+from __future__ import annotations
+
 import bisect
 import linecache
 import sys
 import threading
 from collections import defaultdict, deque
 from time import sleep
+from typing import Any
 
 import tlz as toolz
 
@@ -152,7 +155,7 @@ def merge(*args):
     }
 
 
-def create():
+def create() -> dict[str, Any]:
     return {
         "count": 0,
         "children": {},

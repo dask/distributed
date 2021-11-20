@@ -1,4 +1,5 @@
 import asyncio
+import os
 import pathlib
 import socket
 import threading
@@ -104,27 +105,6 @@ async def test_gen_cluster_set_config_nanny(c, s, a, b):
 
     await c.run(assert_config)
     await c.run_on_scheduler(assert_config)
-
-
-@gen_cluster(client=True)
-def test_gen_cluster_legacy_implicit(c, s, a, b):
-    assert isinstance(c, Client)
-    assert isinstance(s, Scheduler)
-    for w in [a, b]:
-        assert isinstance(w, Worker)
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
-    assert (yield c.submit(lambda: 123)) == 123
-
-
-@gen_cluster(client=True)
-@gen.coroutine
-def test_gen_cluster_legacy_explicit(c, s, a, b):
-    assert isinstance(c, Client)
-    assert isinstance(s, Scheduler)
-    for w in [a, b]:
-        assert isinstance(w, Worker)
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
-    assert (yield c.submit(lambda: 123)) == 123
 
 
 @pytest.mark.skip(reason="This hangs on travis")
@@ -373,3 +353,37 @@ async def test_locked_comm_intercept_write(loop):
     assert await write_queue.get() == (b.address, {"op": "ping", "reply": True})
     write_event.set()
     assert await fut == "pong"
+
+
+@pytest.mark.slow()
+def test_dump_cluster_state_timeout(tmp_path):
+    sleep_time = 30
+
+    async def inner_test(c, s, a, b):
+        await asyncio.sleep(sleep_time)
+
+    # This timeout includes cluster startup and teardown which sometimes can
+    # take a significant amount of time. For this particular test we would like
+    # to keep the _test timeout_ small because we intend to trigger it but the
+    # overall timeout large.
+    test = gen_cluster(client=True, timeout=5, cluster_dump_directory=tmp_path)(
+        inner_test
+    )
+    try:
+        with pytest.raises(asyncio.TimeoutError) as exc:
+            test()
+        assert "inner_test" in str(exc)
+        assert "await asyncio.sleep(sleep_time)" in str(exc)
+    except gen.TimeoutError:
+        pytest.xfail("Cluster startup or teardown took too long")
+
+    _, dirs, files = next(os.walk(tmp_path))
+    assert not dirs
+    assert files == [inner_test.__name__ + ".yaml"]
+    import yaml
+
+    with open(tmp_path / files[0], "rb") as fd:
+        state = yaml.load(fd, Loader=yaml.Loader)
+
+    assert "scheduler" in state
+    assert "workers" in state

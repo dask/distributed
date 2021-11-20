@@ -249,8 +249,7 @@ properties:
             properties:
               start:
                 type: boolean
-                description: set to true to auto-start the AMM on Scheduler init;
-                  false to manually start it with client.scheduler.amm_start()
+                description: set to true to auto-start the AMM on Scheduler init
               interval:
                 type: string
                 description:
@@ -835,6 +834,15 @@ properties:
                   introduced to resolve an issue with CUDA IPC that has been fixed in UCX 1.10, but
                   can cause establishing endpoints to be very slow, this is particularly noticeable in
                   clusters of more than a few dozen workers.
+              create-cuda-context:
+                type: [boolean, 'null']
+                description: |
+                  Creates a CUDA context before UCX is initialized. This is necessary to enable UCX to
+                  properly identify connectivity of GPUs with specialized networking hardware, such as
+                  InfiniBand. This permits UCX to choose transports automatically, without specifying
+                  additional variables for each transport, while ensuring optimal connectivity. When
+                  ``True``, a CUDA context will be created on the first device listed in
+                  ``CUDA_VISIBLE_DEVICES``.
 
           websockets:
             type: object

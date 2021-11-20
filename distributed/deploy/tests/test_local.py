@@ -7,6 +7,7 @@ import weakref
 from distutils.version import LooseVersion
 from threading import Lock
 from time import sleep
+from urllib.parse import urlparse
 
 import pytest
 import tornado
@@ -1100,3 +1101,56 @@ async def test_cluster_info_sync():
 
         info = cluster.scheduler.get_metadata(keys=["cluster-manager-info"])
         assert info["foo"] == "bar"
+
+
+@pytest.mark.asyncio
+async def test_cluster_info_sync_is_robust_to_network_blips(monkeypatch):
+    async with LocalCluster(
+        processes=False, asynchronous=True, scheduler_sync_interval="1ms"
+    ) as cluster:
+        assert cluster._cluster_info["name"] == cluster.name
+
+        error_called = False
+
+        async def error(*args, **kwargs):
+            nonlocal error_called
+            await asyncio.sleep(0.001)
+            error_called = True
+            raise OSError
+
+        # Temporarily patch the `set_metadata` RPC to error
+        with monkeypatch.context() as patch:
+            patch.setattr(cluster.scheduler_comm, "set_metadata", error)
+
+            # Set a new cluster_info value
+            cluster._cluster_info["foo"] = "bar"
+
+            # Wait for the bad method to be called at least once
+            while not error_called:
+                await asyncio.sleep(0.01)
+
+        # Check that cluster_info is resynced after the error condition is fixed
+        while "foo" not in cluster.scheduler.get_metadata(
+            keys=["cluster-manager-info"]
+        ):
+            await asyncio.sleep(0.01)
+
+        info = cluster.scheduler.get_metadata(keys=["cluster-manager-info"])
+        assert info["foo"] == "bar"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("host", [None, "127.0.0.1"])
+@pytest.mark.parametrize("use_nanny", [True, False])
+async def test_cluster_host_used_throughout_cluster(host, use_nanny):
+    """Ensure that the `host` kwarg is propagated through scheduler, nanny, and workers"""
+    async with LocalCluster(host=host, asynchronous=True) as cluster:
+        url = urlparse(cluster.scheduler_address)
+        assert url.hostname == "127.0.0.1"
+        for worker in cluster.workers.values():
+            url = urlparse(worker.address)
+            assert url.hostname == "127.0.0.1"
+
+            if use_nanny:
+                url = urlparse(worker.process.worker_address)
+                assert url.hostname == "127.0.0.1"
