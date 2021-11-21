@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import bisect
 import builtins
+import contextvars
 import errno
 import heapq
 import logging
@@ -19,10 +20,11 @@ from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import TYPE_CHECKING, Any, ClassVar, Container
+from typing import TYPE_CHECKING, Any, Awaitable, ClassVar, Container, TypeVar
+
+from typing_extensions import Concatenate, Literal, ParamSpec, TypeGuard
 
 if TYPE_CHECKING:
-    from typing_extensions import Literal
     from .diagnostics.plugin import WorkerPlugin
     from .actor import Actor
     from .client import Client
@@ -124,6 +126,51 @@ DEFAULT_DATA_SIZE = parse_bytes(
 )
 
 SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "task"])
+
+_current_worker: contextvars.ContextVar[Worker] = contextvars.ContextVar(
+    "current_worker"
+)
+
+P = ParamSpec("P")
+T = TypeVar("T")
+
+# All type-ignores here and next function are because mypy doesn't
+# properly support ParamSpec yet: https://github.com/python/mypy/issues/8645
+
+
+def is_coroutine_function(
+    user_callback: Callable[P, T | Awaitable[T]],  # type: ignore
+) -> TypeGuard[Callable[P, Awaitable[T]]]:  # type: ignore
+    # mypy/pyright doesn't support narrowing on `iscoroutinefunction`, so we define it ourselves.
+    # https://github.com/microsoft/pyright/issues/2142#issuecomment-891985575
+    return asyncio.iscoroutinefunction(user_callback)
+
+
+def as_current_worker(
+    f: Callable[Concatenate[Worker, P], T]  # type: ignore
+) -> Callable[Concatenate[Worker, P], T]:  # type: ignore
+    "Decorator that sets `_current_worker` to `self` while the function is running"
+
+    if is_coroutine_function(f):
+
+        async def inner_async(self: Worker, *args: P.args, **kwargs: P.kwargs) -> T:  # type: ignore
+            token = _current_worker.set(self)
+            try:
+                return await f(self, *args, **kwargs)
+            finally:
+                _current_worker.reset(token)
+
+        return inner_async
+    else:
+
+        def inner(self: Worker, *args: P.args, **kwargs: P.kwargs) -> T:  # type: ignore
+            token = _current_worker.set(self)
+            try:
+                return f(self, *args, **kwargs)
+            finally:
+                _current_worker.reset(token)
+
+        return inner
 
 
 class InvalidTransition(Exception):
@@ -536,6 +583,7 @@ class Worker(ServerNode):
     plugins: dict[str, WorkerPlugin]
     _pending_plugins: tuple[WorkerPlugin, ...]
 
+    @as_current_worker
     def __init__(
         self,
         scheduler_ip: str | None = None,
@@ -1399,6 +1447,7 @@ class Worker(ServerNode):
     # Lifecycle #
     #############
 
+    @as_current_worker
     async def start(self):
         if self.status and self.status in (
             Status.closed,
@@ -3386,6 +3435,7 @@ class Worker(ServerNode):
                         args2,
                         kwargs2,
                         self.execution_state,
+                        contextvars.copy_context(),
                         ts.key,
                         self.active_threads,
                         self.active_threads_lock,
@@ -4012,12 +4062,9 @@ def get_worker() -> Worker:
     worker_client
     """
     try:
-        return thread_state.execution_state["worker"]
-    except AttributeError:
-        try:
-            return first(w for w in Worker._instances if w.status in RUNNING)
-        except StopIteration:
-            raise ValueError("No workers found")
+        return _current_worker.get()
+    except LookupError:
+        raise ValueError("Not running within a worker") from None
 
 
 def get_client(address=None, timeout=None, resolve_address=True) -> Client:
@@ -4341,6 +4388,7 @@ def apply_function(
     args,
     kwargs,
     execution_state,
+    context: contextvars.Context,
     key,
     active_threads,
     active_threads_lock,
@@ -4359,7 +4407,8 @@ def apply_function(
     thread_state.execution_state = execution_state
     thread_state.key = key
 
-    msg = apply_function_simple(function, args, kwargs, time_delay)
+    msg = context.run(apply_function_simple, function, args, kwargs, time_delay)
+    # NOTE: context passed manually because of https://bugs.python.org/issue34014
 
     with active_threads_lock:
         del active_threads[ident]
