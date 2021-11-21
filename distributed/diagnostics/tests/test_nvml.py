@@ -24,6 +24,14 @@ def test_one_time():
     assert len(output["name"]) > 0
 
 
+def test_no_gpus_available():
+    if nvml.device_get_count() != 0:
+        pytest.skip("GPUs available")
+
+    with pytest.raises((nvml.NoGPUSAvailable, nvml.NVMLNotFound)):
+        nvml.one_time()
+
+
 def test_enable_disable_nvml():
     try:
         pynvml.nvmlShutdown()

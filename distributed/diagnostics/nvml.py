@@ -12,6 +12,14 @@ nvmlLibraryNotFound = False
 nvmlOwnerPID = None
 
 
+class NVMLNotFound(Exception):
+    pass
+
+
+class NoGPUSAvailable(Exception):
+    pass
+
+
 def init_once():
     global nvmlInitialized, nvmlLibraryNotFound, nvmlOwnerPID
 
@@ -46,9 +54,9 @@ def _pynvml_handles():
     count = device_get_count()
     if count == 0:
         if nvmlLibraryNotFound:
-            raise RuntimeError("PyNVML is installed, but NVML is not")
+            raise NVMLNotFound("PyNVML is installed, but NVML is not")
         else:
-            raise RuntimeError("No GPUs available")
+            raise NoGPUSAvailable("No GPUs available")
 
     try:
         cuda_visible_devices = [
