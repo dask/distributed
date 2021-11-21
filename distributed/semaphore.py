@@ -412,7 +412,7 @@ class Semaphore:
 
     @property
     def asynchronous(self):
-        return self.loop is IOLoop.current()
+        return self.loop is IOLoop.current(instance=False)
 
     async def _register(self):
         await retry_operation(

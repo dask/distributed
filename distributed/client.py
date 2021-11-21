@@ -813,7 +813,7 @@ class Client:
         find ourselves in contexts when it is better to operate synchronously.
         """
         try:
-            return self._asynchronous and self.loop is IOLoop.current()
+            return self._asynchronous and self.loop is IOLoop.current(instance=False)
         except RuntimeError:
             return False
 
@@ -882,7 +882,7 @@ class Client:
         elif (
             self._loop_runner.is_started()
             and self.scheduler
-            and not (self.asynchronous and self.loop is IOLoop.current())
+            and not (self.asynchronous and self.loop is IOLoop.current(instance=False))
         ):
             info = sync(self.loop, self.scheduler.identity)
             scheduler = self.scheduler

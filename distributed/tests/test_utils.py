@@ -446,7 +446,7 @@ def test_two_loop_runners(loop_in_thread):
 @gen_test()
 async def test_loop_runner_gen():
     runner = LoopRunner(asynchronous=True)
-    assert runner.loop is IOLoop.current()
+    assert runner.loop is IOLoop.current(instance=False)
     assert not runner.is_started()
     await asyncio.sleep(0.01)
     runner.start()
