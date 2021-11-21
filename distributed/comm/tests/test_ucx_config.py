@@ -79,6 +79,19 @@ async def test_ucx_config(cleanup):
             assert ucx_config.get("TLS") == "rc,tcp,rdmacm,cuda_copy"
         assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "rdmacm"
 
+    ucx = {
+        "nvlink": None,
+        "infiniband": None,
+        "rdmacm": None,
+        "net-devices": None,
+        "tcp": None,
+        "cuda_copy": None,
+    }
+
+    with dask.config.set({"distributed.comm.ucx": ucx}):
+        ucx_config = _scrub_ucx_config()
+        assert ucx_config == {}
+
 
 @pytest.mark.flaky(
     reruns=10, reruns_delay=5, condition=ucp.get_ucx_version() < (1, 11, 0)
