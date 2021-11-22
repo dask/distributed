@@ -118,6 +118,7 @@ async def test_gpu_metrics(s, a, b):
     )
 
 
+@pytest.mark.flaky(reruns=5, reruns_delay=2)
 @gen_cluster()
 async def test_gpu_monitoring_recent(s, a, b):
     if nvml.device_get_count() < 1:
