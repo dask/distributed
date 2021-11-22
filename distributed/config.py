@@ -171,7 +171,7 @@ def initialize_event_loop(config):
             # WindowsProactorEventLoopPolicy is not compatible with tornado 6
             # fallback to the pre-3.8 default of Selector
             # https://github.com/tornadoweb/tornado/issues/2608
-            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventPolicy())
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     else:
         raise ValueError(
             "Expected distributed.admin.event-loop to be in ('asyncio', 'tornado', 'uvloop'), got %s"
