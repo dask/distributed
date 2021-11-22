@@ -2568,10 +2568,10 @@ class TaskGroupProgress(DashboardComponent):
         # The length of timeseries to chart
         self.npts = 180
 
-        if GroupTiming.name not in self.scheduler.plugins:
-            self.scheduler.add_plugin(plugin=GroupTiming)
+        if GroupTiming.name not in scheduler.plugins:
+            scheduler.add_plugin(plugin=GroupTiming(scheduler))
 
-        self.plugin = self.scheduler.plugins[GroupTiming.name]
+        self.plugin = scheduler.plugins[GroupTiming.name]
 
         self.source.add(np.array(self.plugin.time) * 1000.0, "time")
 
@@ -2629,7 +2629,7 @@ class TaskGroupProgress(DashboardComponent):
         )
         self._last_drawn = None
         self._offset = time()
-        self._last_transition_count = self.scheduler.transition_counter
+        self._last_transition_count = scheduler.transition_counter
         # OrderedDict so we can make a reverse iterator later and get the
         # most-recently-added glyphs.
         self._renderers = OrderedDict()
