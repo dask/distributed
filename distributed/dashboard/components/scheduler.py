@@ -2596,37 +2596,13 @@ class TaskGroupProgress(DashboardComponent):
         self.root.yaxis.major_tick_line_alpha = 0
         self.root.xgrid.visible = False
 
-        # Add a hover that will show occupancy for all currently active
-        # task groups. This is a little tricky, bokeh doesn't (yet) support
-        # hit tests for stacked area charts: https://github.com/bokeh/bokeh/issues/9182
-        # Instead, show a single vline hover which lists the currently active task
-        # groups. A custom formatter in JS-land pulls the relevant data index and
-        # assembles the tooltip. The formatter is a no-op until we have the actual
-        # task groups we want to render.
-        formatter = CustomJSHover(code="return '';")
-        self.hover = HoverTool(
-            tooltips="""
-            <div>
-              <div style="font-size: 1.2em; font-weight: bold">
-                <b>Worker thread occupancy</b>
-              </div>
-              <div>
-                $index{custom}
-              </div>
-            </div>
-            """,
-            mode="vline",
-            line_policy="nearest",
-            attachment="vertical",
-            formatters={"$index": formatter},
-        )
         self.root.add_tools(
-            self.hover,
             BoxZoomTool(),
             ResetTool(),
             PanTool(dimensions="width"),
             WheelZoomTool(dimensions="width"),
         )
+        self._hover = None
         self._last_drawn = None
         self._offset = time()
         self._last_transition_count = scheduler.transition_counter
@@ -2767,57 +2743,86 @@ class TaskGroupProgress(DashboardComponent):
                     )
                     self._line_renderers[group] = line_renderer
 
-                # Create a custom tooltip that:
-                #   1. Includes nthreads
-                #   2. Filters out inactive task groups
-                #      (ones without any compute during the relevant dt)
-                #   3. Colors the labels appropriately.
-                formatter = CustomJSHover(
-                    code="""
-                    const colormap = %s;
-                    const divs = [];
-                    for (let k of Object.keys(source.data)) {
-                      const val = source.data[k][value];
-                      const color = colormap[k];
-                      if (k === "time" || k === "nthreads" || val < 1.e-3) {
-                        continue;
-                      }
-                      const label = k.length >= 20 ? k.slice(0, 20) + '…' : k;
+                # Don't add hover until there is something to show, as bokehjs seems to
+                # have trouble with custom hovers when there are no renderers.
+                if self.plugin.compute and self._hover is None:
+                    # Add a hover that will show occupancy for all currently active
+                    # task groups. This is a little tricky, bokeh doesn't (yet) support
+                    # hit tests for stacked area charts: https://github.com/bokeh/bokeh/issues/9182
+                    # Instead, show a single vline hover which lists the currently active task
+                    # groups. A custom formatter in JS-land pulls the relevant data index and
+                    # assembles the tooltip.
+                    formatter = CustomJSHover(code="return '';")
+                    self._hover = HoverTool(
+                        tooltips="""
+                        <div>
+                          <div style="font-size: 1.2em; font-weight: bold">
+                            <b>Worker thread occupancy</b>
+                          </div>
+                          <div>
+                            $index{custom}
+                          </div>
+                        </div>
+                        """,
+                        mode="vline",
+                        line_policy="nearest",
+                        attachment="vertical",
+                        formatters={"$index": formatter},
+                    )
+                    self.root.add_tools(self._hover)
 
-                      // Unshift so that the ordering of the labels is the same as
-                      // the ordering of the stackers.
-                      divs.unshift(
-                        '<div>'
-                          + '<span style="font-weight: bold; color:' + color + ';">'
-                            + label
-                          + '</span>'
-                          + ': '
-                          +  val.toFixed(1)
-                          + '</div>'
-                      )
+                if self._hover:
+                    # Create a custom tooltip that:
+                    #   1. Includes nthreads
+                    #   2. Filters out inactive task groups
+                    #      (ones without any compute during the relevant dt)
+                    #   3. Colors the labels appropriately.
+                    formatter = CustomJSHover(
+                        code="""
+                        const colormap = %s;
+                        const divs = [];
+                        for (let k of Object.keys(source.data)) {
+                          const val = source.data[k][value];
+                          const color = colormap[k];
+                          if (k === "time" || k === "nthreads" || val < 1.e-3) {
+                            continue;
+                          }
+                          const label = k.length >= 20 ? k.slice(0, 20) + '…' : k;
 
-                    }
-                    divs.unshift(
-                      '<div>'
-                        + '<span style="font-weight: bold; color: darkgrey;">nthreads: </span>'
-                        + source.data.nthreads[value]
-                        + '</div>'
-                    );
-                    return divs.join('\\n')
-                    """
-                    % dict(
-                        zip(stackers, colors)
-                    ),  # sneak the color mapping into the callback
-                    args={"source": self.source},
-                )
-                # Add the HoverTool to the top line renderer.
-                top_line = None
-                for line in reversed(self._line_renderers.values()):
-                    if line.visible:
-                        top_line = line
-                        break
-                self.hover.renderers = [top_line]
-                self.hover.formatters = {"$index": formatter}
+                          // Unshift so that the ordering of the labels is the same as
+                          // the ordering of the stackers.
+                          divs.unshift(
+                            '<div>'
+                              + '<span style="font-weight: bold; color:' + color + ';">'
+                                + label
+                              + '</span>'
+                              + ': '
+                              +  val.toFixed(1)
+                              + '</div>'
+                          )
+
+                        }
+                        divs.unshift(
+                          '<div>'
+                            + '<span style="font-weight: bold; color: darkgrey;">nthreads: </span>'
+                            + source.data.nthreads[value]
+                            + '</div>'
+                        );
+                        return divs.join('\\n')
+                        """
+                        % dict(
+                            zip(stackers, colors)
+                        ),  # sneak the color mapping into the callback
+                        args={"source": self.source},
+                    )
+                    # Add the HoverTool to the top line renderer.
+                    top_line = None
+                    for line in reversed(self._line_renderers.values()):
+                        if line.visible:
+                            top_line = line
+                            break
+                    self._hover.renderers = [top_line]
+                    self._hover.formatters = {"$index": formatter}
 
                 self._last_drawn = time()
                 self._last_transition_count = self.scheduler.transition_counter
