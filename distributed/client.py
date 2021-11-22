@@ -4273,7 +4273,7 @@ class Client:
 
         If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
         used then that will control idempotency.  If a plugin with that name has
-        already been registered then any future plugins will not run.
+        already been registered, then it will be removed and replaced by the new one.
 
         For alternatives to plugins, you may also wish to look into preload
         scripts.
