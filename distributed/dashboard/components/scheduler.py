@@ -2565,7 +2565,7 @@ class TaskGroupProgress(DashboardComponent):
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
         self.source = ColumnDataSource()
-        # The length of timeseries to chart
+        # The length of timeseries to chart (in units of plugin.dt)
         self.npts = 180
 
         if GroupTiming.name not in scheduler.plugins:
@@ -2687,9 +2687,13 @@ class TaskGroupProgress(DashboardComponent):
             front += front2
             back = len(np.trim_zeros(agg, trim="b")) - len(agg) or None
 
+        prepend = (
+            self.plugin.time[front - 1]
+            if front >= 1
+            else self.plugin.time[front] - self.plugin.dt
+        )
         timestamps = np.array(self.plugin.time[front:back])
-        n = len(timestamps)
-        dt = np.diff(timestamps, prepend=timestamps[0] - 10.0)
+        dt = np.diff(timestamps, prepend=prepend)
 
         if restrict_to_existing:
             new_data = {
@@ -2707,29 +2711,6 @@ class TaskGroupProgress(DashboardComponent):
             timestamps - self._offset
         ) * 1000.0  # bokeh likes milliseconds
         new_data["nthreads"] = np.array(self.plugin.nthreads[front:back])
-
-        # This is an enormous hack around a bokeh bug:
-        # https://github.com/bokeh/bokeh/issues/11119
-        # We cannot update the length of the CDS columns for stacked area charts
-        # as there is a JS race condition. This precludes easy streaming of the
-        # data to the client. To work around this, we keep the length of the CDS
-        # constant. If our data source is shorter, we zero-pad. If it's longer,
-        # we clip to the most recent data.
-        #
-        # The above has been fixed, but a different regression is preventing us from
-        # upgrading right now: https://github.com/bokeh/bokeh/issues/11804.
-        if n >= self.npts:
-            new_data = valmap(lambda x: x[-self.npts :], new_data)
-        else:
-
-            def extend(x):
-                tmp = np.zeros(self.npts)
-                tmp[: len(x)] = x
-                return tmp
-
-            new_data = valmap(extend, new_data)
-            new_data["time"][n:] = new_data["time"][n - 1]
-            new_data["nthreads"][n:] = new_data["nthreads"][n - 1]
 
         return new_data
 
