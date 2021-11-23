@@ -7206,7 +7206,7 @@ class Scheduler(SchedulerState, ServerNode):
         return {"metadata": plugin.metadata, "state": plugin.state}
 
     async def register_worker_plugin(self, comm, plugin, name=None):
-        """Registers a setup function, and call it on every worker"""
+        """Registers a worker plugin on all running and future workers"""
         self.worker_plugins[name] = plugin
 
         responses = await self.broadcast(
