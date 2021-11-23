@@ -95,7 +95,7 @@ class Worker(Process):
             import asyncssh  # import now to avoid adding to module startup time
         except ImportError:
             raise ImportError(
-                "Dask's SSHCluster requires the `asyncssh`, package to be installed. "
+                "Dask's SSHCluster requires the `asyncssh` package to be installed. "
                 "Please install it using pip or conda."
             )
 
@@ -190,7 +190,7 @@ class Scheduler(Process):
             import asyncssh  # import now to avoid adding to module startup time
         except ImportError:
             raise ImportError(
-                "Dask's SSHCluster requires the `asyncssh`, package to be installed. "
+                "Dask's SSHCluster requires the `asyncssh` package to be installed. "
                 "Please install it using pip or conda."
             )
 
