@@ -1499,7 +1499,7 @@ class Worker(ServerNode):
         )
         for msg in plugins_msgs:
             if msg["status"] != "OK":
-                raise msg["exception"].data
+                raise pickle.loads(msg["exception"].data)
         self._pending_plugins = ()
 
         await self._register_with_scheduler()
