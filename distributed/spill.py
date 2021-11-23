@@ -36,6 +36,12 @@ class SpillBuffer(zict.Buffer):
         except MaxSpillExceeded:
             # key is in self.fast; no keys have been lost on eviction
             # Note: requires zict > 2.0
+            # THIS ONLY WORKS WHEN TARGET < MAX SPILL AND KEY < TOT_WEIGHT BUT KEY> MAX SPILL
+            # WE TRY TO WRITE TO FAST CAN'T GO TO DISK CAN'T KEEP IN FAST
+            #
+            # WHEN THE TARGET  < MAX SPILL AND KEY > TARGET AND KEY >MAX SPILL
+            # WE SKIP LRU, WE GO THROUGH BUFFER SET ITEM WHICH IS PASSING WHEN RAISED
+            # MAX SPILL AND KEY IS NEITHER IN SLOW NOR FAST
             pass
 
     @property
@@ -81,15 +87,23 @@ class Slow(zict.Func):
 
     def __setitem__(self, key, value):
         pickled = self.dump(value)
-        if self.total_weight + len(pickled) > self.max_weight:
+        pickled_size = sum(
+            map(safe_sizeof, pickled)
+        )  # self.dump(value)  #this returns a list of len 3 then the size pof pickle is not the value we want
+        # print(f"{pickled= }")
+        print(f"{pickled_size= }")
+        if self.total_weight + pickled_size > self.max_weight:
             # TODO don't spam the log file with hundreds of messages per second
             logger.warning(
                 "Spill file on disk reached capacity; keeping data in memory"
             )
             # Stop callbacks and ensure that the key ends up in SpillBuffer.fast
             raise MaxSpillExceeded()
-        self.total_weight += len(pickled)
-        self.d[key] = pickled
+        self.weight_by_key[key] = pickled_size
+        self.total_weight += pickled_size
+        self.d[
+            key
+        ] = pickled  # this goes under a set item on File which does something to pickle
 
     def __delitem__(self, key):
         super().__delitem__(key)
