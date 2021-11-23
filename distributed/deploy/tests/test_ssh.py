@@ -27,6 +27,20 @@ def test_ssh_hosts_empty_list():
 
 
 @pytest.mark.asyncio
+async def test_ssh_cluster_raises_if_asyncssh_not_installed(monkeypatch):
+    monkeypatch.setitem(sys.modules, "asyncssh", None)
+    with pytest.raises(ImportError):
+        async with SSHCluster(
+            ["127.0.0.1"] * 3,
+            connect_options=[dict(known_hosts=None)] * 3,
+            asynchronous=True,
+            scheduler_options={"idle_timeout": "5s"},
+            worker_options={"death_timeout": "5s"},
+        ) as cluster:
+            assert not cluster
+
+
+@pytest.mark.asyncio
 async def test_basic():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
