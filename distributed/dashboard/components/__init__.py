@@ -1,44 +1,6 @@
-import asyncio
-from bisect import bisect
-from operator import add
-from time import time
 import weakref
 
-from bokeh.layouts import row, column
-from bokeh.models import (
-    ColumnDataSource,
-    Plot,
-    DataRange1d,
-    LinearAxis,
-    HoverTool,
-    BoxZoomTool,
-    ResetTool,
-    PanTool,
-    WheelZoomTool,
-    Range1d,
-    Quad,
-    TapTool,
-    OpenURL,
-    Button,
-    Select,
-)
-from bokeh.palettes import Spectral9
-from bokeh.plotting import figure
-import dask
-from tornado import gen
-
-from distributed.dashboard.utils import without_property_validation, BOKEH_VERSION
-from distributed import profile
-from distributed.utils import log_errors, parse_timedelta
-
-if dask.config.get("distributed.dashboard.export-tool"):
-    from distributed.dashboard.export_tool import ExportTool
-else:
-    ExportTool = None
-
-
-profile_interval = dask.config.get("distributed.worker.profile.interval")
-profile_interval = parse_timedelta(profile_interval, default="ms")
+from bokeh.core.properties import without_property_validation
 
 
 class DashboardComponent:
@@ -58,7 +20,7 @@ class DashboardComponent:
         self.root = None
 
     def update(self, messages):
-        """ Reads from bokeh.distributed.messages and updates self.source """
+        """Reads from bokeh.distributed.messages and updates self.source"""
 
 
 def add_periodic_callback(doc, component, interval):
@@ -78,6 +40,7 @@ def add_periodic_callback(doc, component, interval):
     _attach(doc, component)
 
 
+@without_property_validation
 def update(ref):
     comp = ref()
     if comp is not None:

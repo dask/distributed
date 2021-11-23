@@ -1,13 +1,13 @@
-from collections import deque
 import logging
+from collections import deque
 
-import dask
 from tornado import gen, locks
 from tornado.ioloop import IOLoop
 
-from .core import CommClosedError
-from .utils import parse_timedelta
+import dask
+from dask.utils import parse_timedelta
 
+from .core import CommClosedError
 
 logger = logging.getLogger(__name__)
 
@@ -98,8 +98,8 @@ class BatchedSend:
                 else:
                     self.recent_message_log.append("large-message")
                 self.byte_count += nbytes
-            except CommClosedError as e:
-                logger.info("Batched Comm Closed: %s", e)
+            except CommClosedError:
+                logger.info("Batched Comm Closed %r", self.comm, exc_info=True)
                 break
             except Exception:
                 # We cannot safely retry self.comm.write, as we have no idea
@@ -127,16 +127,16 @@ class BatchedSend:
         self.stopped.set()
         self.abort()
 
-    def send(self, msg):
+    def send(self, *msgs):
         """Schedule a message for sending to the other side
 
         This completes quickly and synchronously
         """
         if self.comm is not None and self.comm.closed():
-            raise CommClosedError
+            raise CommClosedError(f"Comm {self.comm!r} already closed.")
 
-        self.message_count += 1
-        self.buffer.append(msg)
+        self.message_count += len(msgs)
+        self.buffer.extend(msgs)
         # Avoid spurious wakeups if possible
         if self.next_deadline is None:
             self.waker.set()

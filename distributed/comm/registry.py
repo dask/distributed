@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 
 
@@ -54,29 +56,38 @@ class Backend(ABC):
 
 
 # The {scheme: Backend} mapping
-backends = {}
+backends: dict[str, Backend] = {}
 
 
-def get_backend(scheme):
+def get_backend(scheme: str, require: bool = True) -> Backend:
     """
     Get the Backend instance for the given *scheme*.
     It looks for matching scheme in dask's internal cache, and falls-back to
     package metadata for the group name ``distributed.comm.backends``
+
+    Parameters
+    ----------
+
+    require : bool
+        Verify that the backends requirements are properly installed. See
+        https://setuptools.readthedocs.io/en/latest/pkg_resources.html for more
+        information.
     """
 
     backend = backends.get(scheme)
     if backend is None:
         import pkg_resources
 
-        backend = next(
-            iter(
-                backend_class_ep.load()()
-                for backend_class_ep in pkg_resources.iter_entry_points(
-                    "distributed.comm.backends", scheme
-                )
-            ),
-            None,
-        )
+        backend = None
+        for backend_class_ep in pkg_resources.iter_entry_points(
+            "distributed.comm.backends", scheme
+        ):
+            # resolve and require are equivalent to load
+            backend_factory = backend_class_ep.resolve()
+            if require:
+                backend_class_ep.require()
+            backend = backend_factory()
+
         if backend is None:
             raise ValueError(
                 "unknown address scheme %r (known schemes: %s)"

@@ -1,12 +1,8 @@
 from time import sleep
 
-import pytest
-
-from distributed import Scheduler, Worker
 from distributed.diagnostics.progressbar import TextProgressBar, progress
 from distributed.metrics import time
-from distributed.utils_test import inc, div, gen_cluster
-from distributed.utils_test import client, loop, cluster_fixture  # noqa: F401
+from distributed.utils_test import div, gen_cluster, inc
 
 
 def test_text_progressbar(capsys, client):
@@ -40,24 +36,19 @@ async def test_TextProgressBar_error(c, s, a, b):
     assert progress.comm.closed()
 
 
-@pytest.mark.asyncio
-async def test_TextProgressBar_empty(capsys):
-    async with Scheduler(port=0) as s:
-        async with Worker(s.address, nthreads=1) as a:
-            async with Worker(s.address, nthreads=1) as b:
-                progress = TextProgressBar(
-                    [], scheduler=s.address, start=False, interval=0.01
-                )
-                await progress.listen()
+@gen_cluster()
+async def test_TextProgressBar_empty(s, a, b, capsys):
+    progress = TextProgressBar([], scheduler=s.address, start=False, interval=0.01)
+    await progress.listen()
 
-                assert progress.status == "finished"
-                check_bar_completed(capsys)
+    assert progress.status == "finished"
+    check_bar_completed(capsys)
 
 
 def check_bar_completed(capsys, width=40):
     out, err = capsys.readouterr()
     # trailing newline so grab next to last line for final state of bar
-    bar, percent, time = [i.strip() for i in out.split("\r")[-2].split("|")]
+    bar, percent, time = (i.strip() for i in out.split("\r")[-2].split("|"))
     assert bar == "[" + "#" * width + "]"
     assert percent == "100% Completed"
 

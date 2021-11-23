@@ -3,7 +3,6 @@ from datetime import timedelta
 
 from distributed import Event
 from distributed.utils_test import gen_cluster
-from distributed.utils_test import client, cluster_fixture, loop  # noqa F401
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 8)] * 2)

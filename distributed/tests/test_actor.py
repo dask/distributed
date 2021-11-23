@@ -5,10 +5,19 @@ from time import sleep
 import pytest
 
 import dask
-from distributed import Actor, ActorFuture, Client, Future, wait, Nanny
-from distributed.utils_test import cluster, gen_cluster
-from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
+
+from distributed import (
+    Actor,
+    ActorFuture,
+    Client,
+    Future,
+    Nanny,
+    as_completed,
+    get_client,
+    wait,
+)
 from distributed.metrics import time
+from distributed.utils_test import cluster, gen_cluster
 
 
 class Counter:
@@ -41,7 +50,7 @@ class UsesCounter:
 
 
 class List:
-    L = []
+    L: list = []
 
     def __init__(self, dummy=None):
         self.L = []
@@ -425,8 +434,8 @@ async def test_load_balance_map(c, s, *workers):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4, Worker=Nanny)
 async def bench_param_server(c, s, *workers):
+    np = pytest.importorskip("numpy")
     import dask.array as da
-    import numpy as np
 
     x = da.random.random((500000, 1000), chunks=(1000, 1000))
     x = x.persist()
@@ -465,8 +474,9 @@ async def bench_param_server(c, s, *workers):
     print(format_time(end - start))
 
 
-@pytest.mark.xfail(reason="unknown")
-@gen_cluster(client=True)
+@pytest.mark.slow
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
+@gen_cluster(client=True, timeout=120)
 async def test_compute(c, s, a, b):
     @dask.delayed
     def f(n, counter):
@@ -485,10 +495,8 @@ async def test_compute(c, s, a, b):
     result = await c.compute(final, actors=counter)
     assert result == 0 + 1 + 2 + 3 + 4
 
-    start = time()
     while a.data or b.data:
         await asyncio.sleep(0.01)
-        assert time() < start + 5
 
 
 def test_compute_sync(client):
@@ -515,7 +523,7 @@ def test_compute_sync(client):
     start = time()
     while any(client.run(check).values()):
         sleep(0.01)
-        assert time() < start + 2
+        assert time() < start + 30
 
 
 @gen_cluster(
@@ -566,6 +574,61 @@ async def test_waiter(c, s, a, b):
     await c.gather(futures)
 
 
+@gen_cluster(client=True, client_kwargs=dict(set_as_default=False))
+# ^ NOTE: without `set_as_default=False`, `get_client()` within worker would return
+# the same client instance the test is using (because it's all one process).
+# Even with this, both workers will share the same client instance.
+async def test_worker_actor_handle_is_weakref(c, s, a, b):
+    counter = c.submit(Counter, actor=True, workers=[a.address])
+
+    await c.submit(lambda _: None, counter, workers=[b.address])
+
+    del counter
+
+    start = time()
+    while a.actors or b.data:
+        await asyncio.sleep(0.1)
+        assert time() < start + 30
+
+
+def test_worker_actor_handle_is_weakref_sync(client):
+    workers = list(client.run(lambda: None))
+    counter = client.submit(Counter, actor=True, workers=[workers[0]])
+
+    client.submit(lambda _: None, counter, workers=[workers[1]]).result()
+
+    del counter
+
+    def check(dask_worker):
+        return len(dask_worker.data) + len(dask_worker.actors)
+
+    start = time()
+    while any(client.run(check).values()):
+        sleep(0.01)
+        assert time() < start + 30
+
+
+def test_worker_actor_handle_is_weakref_from_compute_sync(client):
+    workers = list(client.run(lambda: None))
+
+    with dask.annotate(workers=workers[0]):
+        counter = dask.delayed(Counter)()
+    with dask.annotate(workers=workers[1]):
+        intermediate = dask.delayed(lambda c: None)(counter)
+    with dask.annotate(workers=workers[0]):
+        final = dask.delayed(lambda x, c: x)(intermediate, counter)
+
+    final.compute(actors=counter, optimize_graph=False)
+
+    def worker_tasks_running(dask_worker):
+        return len(dask_worker.data) + len(dask_worker.actors)
+
+    start = time()
+    while any(client.run(worker_tasks_running).values()):
+        sleep(0.01)
+        assert time() < start + 30
+
+
 def test_one_thread_deadlock():
     with cluster(nworkers=2) as (cl, w):
         client = Client(cl["address"])
@@ -581,3 +644,91 @@ async def test_async_deadlock(client, s, a, b):
     ac2 = await client.submit(UsesCounter, actor=True, workers=[ac._address])
 
     assert (await ac2.ado_inc(ac)) == 1
+
+
+def test_exception():
+    class MyException(Exception):
+        pass
+
+    class Broken:
+        def method(self):
+            raise MyException
+
+        @property
+        def prop(self):
+            raise MyException
+
+    with cluster(nworkers=2) as (cl, w):
+        client = Client(cl["address"])
+        ac = client.submit(Broken, actor=True).result()
+        acfut = ac.method()
+        with pytest.raises(MyException):
+            acfut.result()
+
+        with pytest.raises(MyException):
+            ac.prop
+
+
+@gen_cluster(client=True)
+async def test_exception_async(client, s, a, b):
+    class MyException(Exception):
+        pass
+
+    class Broken:
+        def method(self):
+            raise MyException
+
+        @property
+        def prop(self):
+            raise MyException
+
+    ac = await client.submit(Broken, actor=True)
+    acfut = ac.method()
+    with pytest.raises(MyException):
+        await acfut
+
+    with pytest.raises(MyException):
+        await ac.prop
+
+
+def test_as_completed(client):
+    ac = client.submit(Counter, actor=True).result()
+    futures = [ac.increment() for _ in range(10)]
+    max = 0
+
+    for future in as_completed(futures):
+        value = future.result()
+        if value > max:
+            max = value
+
+    assert all(future.done() for future in futures)
+    assert max == 10
+
+
+@gen_cluster(client=True, timeout=3)
+async def test_actor_future_awaitable(client, s, a, b):
+    ac = await client.submit(Counter, actor=True)
+    futures = [ac.increment() for _ in range(10)]
+
+    assert all([isinstance(future, ActorFuture) for future in futures])
+
+    out = await asyncio.gather(*futures)
+    assert all([future.done() for future in futures])
+    assert max(out) == 10
+
+
+@gen_cluster(client=True)
+async def test_serialize_with_pickle(c, s, a, b):
+    class Foo:
+        def __init__(self):
+            self.actor = get_client().submit(Counter, actor=True).result()
+
+        def __getstate__(self):
+            return self.actor
+
+        def __setstate__(self, state):
+            self.actor = state
+
+    future = c.submit(Foo, workers=a.address)
+    foo = await future
+    assert isinstance(foo.actor, Actor)

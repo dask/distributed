@@ -1,5 +1,6 @@
 import pytest
-from distributed import LocalCluster, Client
+
+from distributed import Client, LocalCluster
 from distributed.utils import LoopRunner
 
 
@@ -10,7 +11,7 @@ def test_close_loop_sync(with_own_loop):
 
     # Setup simple cluster with one threaded worker.
     # Complex setup is not required here since we test only IO loop teardown.
-    cluster_params = dict(n_workers=1, dashboard_address=None, processes=False)
+    cluster_params = dict(n_workers=1, dashboard_address=":0", processes=False)
 
     loops_before = LoopRunner._all_loops.copy()
 

@@ -1,11 +1,11 @@
-from distributed.core import ConnectionPool
-from distributed.comm import Comm
-from distributed.utils_test import gen_cluster, loop  # noqa: F401
-from distributed.utils_comm import pack_data, subs_multiple, gather_from_workers, retry
-
 from unittest import mock
 
 import pytest
+
+from distributed.comm import Comm
+from distributed.core import ConnectionPool
+from distributed.utils_comm import gather_from_workers, pack_data, retry, subs_multiple
+from distributed.utils_test import gen_cluster
 
 
 def test_pack_data():
@@ -43,8 +43,8 @@ async def test_gather_from_workers_permissive(c, s, a, b):
 
 
 class BrokenComm(Comm):
-    peer_address = None
-    local_address = None
+    peer_address = ""
+    local_address = ""
 
     def close(self):
         pass
@@ -56,10 +56,10 @@ class BrokenComm(Comm):
         pass
 
     def read(self, deserializers=None):
-        raise EnvironmentError
+        raise OSError()
 
     def write(self, msg, serializers=None, on_error=None):
-        raise EnvironmentError
+        raise OSError()
 
 
 class BrokenConnectionPool(ConnectionPool):

@@ -1,12 +1,15 @@
-import pytest
 from time import sleep
 
+import pytest
+
+pytestmark = pytest.mark.gpu
+
 import dask
-from dask.utils import format_bytes
+
 from distributed import Client
-from distributed.utils_test import gen_test, loop, inc, cleanup, popen  # noqa: 401
-from distributed.utils import get_ip
 from distributed.comm.ucx import _scrub_ucx_config
+from distributed.utils import get_ip
+from distributed.utils_test import popen
 
 try:
     HOST = get_ip()
@@ -19,6 +22,7 @@ rmm = pytest.importorskip("rmm")
 
 @pytest.mark.asyncio
 async def test_ucx_config(cleanup):
+    ucx_110 = ucp.get_ucx_version() >= (1, 10, 0)
 
     ucx = {
         "nvlink": True,
@@ -26,13 +30,17 @@ async def test_ucx_config(cleanup):
         "rdmacm": False,
         "net-devices": "",
         "tcp": True,
-        "cuda_copy": True,
+        "cuda-copy": True,
     }
 
-    with dask.config.set(ucx=ucx):
+    with dask.config.set({"distributed.comm.ucx": ucx}):
         ucx_config = _scrub_ucx_config()
-        assert ucx_config.get("TLS") == "rc,tcp,sockcm,cuda_copy,cuda_ipc"
-        assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "sockcm"
+        if ucx_110:
+            assert ucx_config.get("TLS") == "rc,tcp,cuda_copy,cuda_ipc"
+            assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "tcp"
+        else:
+            assert ucx_config.get("TLS") == "rc,tcp,sockcm,cuda_copy,cuda_ipc"
+            assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "sockcm"
         assert ucx_config.get("NET_DEVICES") is None
 
     ucx = {
@@ -41,13 +49,17 @@ async def test_ucx_config(cleanup):
         "rdmacm": False,
         "net-devices": "mlx5_0:1",
         "tcp": True,
-        "cuda_copy": False,
+        "cuda-copy": False,
     }
 
-    with dask.config.set(ucx=ucx):
+    with dask.config.set({"distributed.comm.ucx": ucx}):
         ucx_config = _scrub_ucx_config()
-        assert ucx_config.get("TLS") == "rc,tcp,sockcm"
-        assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "sockcm"
+        if ucx_110:
+            assert ucx_config.get("TLS") == "rc,tcp"
+            assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "tcp"
+        else:
+            assert ucx_config.get("TLS") == "rc,tcp,sockcm"
+            assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "sockcm"
         assert ucx_config.get("NET_DEVICES") == "mlx5_0:1"
 
     ucx = {
@@ -55,18 +67,35 @@ async def test_ucx_config(cleanup):
         "infiniband": True,
         "rdmacm": True,
         "net-devices": "all",
-        "MEMTYPE_CACHE": "y",
         "tcp": True,
-        "cuda_copy": True,
+        "cuda-copy": True,
     }
 
-    with dask.config.set(ucx=ucx):
+    with dask.config.set({"distributed.comm.ucx": ucx}):
         ucx_config = _scrub_ucx_config()
-        assert ucx_config.get("TLS") == "rc,tcp,rdmacm,cuda_copy"
+        if ucx_110:
+            assert ucx_config.get("TLS") == "rc,tcp,cuda_copy"
+        else:
+            assert ucx_config.get("TLS") == "rc,tcp,rdmacm,cuda_copy"
         assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "rdmacm"
-        assert ucx_config.get("MEMTYPE_CACHE") == "y"
+
+    ucx = {
+        "nvlink": None,
+        "infiniband": None,
+        "rdmacm": None,
+        "net-devices": None,
+        "tcp": None,
+        "cuda-copy": None,
+    }
+
+    with dask.config.set({"distributed.comm.ucx": ucx}):
+        ucx_config = _scrub_ucx_config()
+        assert ucx_config == {}
 
 
+@pytest.mark.flaky(
+    reruns=10, reruns_delay=5, condition=ucp.get_ucx_version() < (1, 11, 0)
+)
 def test_ucx_config_w_env_var(cleanup, loop, monkeypatch):
     size = "1000.00 MB"
     monkeypatch.setenv("DASK_RMM__POOL_SIZE", size)
@@ -74,7 +103,7 @@ def test_ucx_config_w_env_var(cleanup, loop, monkeypatch):
     dask.config.refresh()
 
     port = "13339"
-    sched_addr = "ucx://%s:%s" % (HOST, port)
+    sched_addr = f"ucx://{HOST}:{port}"
 
     with popen(
         ["dask-scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port]
@@ -88,17 +117,17 @@ def test_ucx_config_w_env_var(cleanup, loop, monkeypatch):
                 "ucx",
                 "--no-nanny",
             ]
-        ) as w:
+        ):
             with Client(sched_addr, loop=loop, timeout=10) as c:
                 while not c.scheduler_info()["workers"]:
                     sleep(0.1)
 
-                # configured with 1G pool
-                rmm_usage = c.run_on_scheduler(rmm.get_info)
-                assert size == format_bytes(rmm_usage.free)
+                # Check for RMM pool resource type
+                rmm_resource = c.run_on_scheduler(
+                    rmm.mr.get_current_device_resource_type
+                )
+                assert rmm_resource == rmm.mr.PoolMemoryResource
 
-                # configured with 1G pool
-                worker_addr = list(c.scheduler_info()["workers"])[0]
-                worker_rmm_usage = c.run(rmm.get_info)
-                rmm_usage = worker_rmm_usage[worker_addr]
-                assert size == format_bytes(rmm_usage.free)
+                rmm_resource_workers = c.run(rmm.mr.get_current_device_resource_type)
+                for v in rmm_resource_workers.values():
+                    assert v == rmm.mr.PoolMemoryResource

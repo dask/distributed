@@ -6,11 +6,14 @@ import types
 import warnings
 from functools import partial
 
+import pkg_resources
+import pytest
+from tornado import ioloop
+from tornado.concurrent import Future
+
 import dask
 
 import distributed
-import pkg_resources
-import pytest
 from distributed.comm import (
     CommClosedError,
     connect,
@@ -29,7 +32,6 @@ from distributed.comm.tcp import TCP, TCPBackend, TCPConnector
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
 from distributed.utils import get_ip, get_ipv6
-from distributed.utils_test import loop  # noqa: F401
 from distributed.utils_test import (
     get_cert,
     get_client_ssl_context,
@@ -37,8 +39,6 @@ from distributed.utils_test import (
     has_ipv6,
     requires_ipv6,
 )
-from tornado import ioloop
-from tornado.concurrent import Future
 
 EXTERNAL_IP4 = get_ip()
 if has_ipv6():
@@ -109,7 +109,7 @@ async def debug_loop():
     while True:
         loop = ioloop.IOLoop.current()
         print(".", loop, loop._handlers)
-        await asyncio.sleep(0.50)
+        await asyncio.sleep(0.5)
 
 
 #
@@ -222,8 +222,7 @@ async def test_tcp_listener_does_not_call_handler_on_handshake_error():
     assert not handle_comm_called
 
     writer.close()
-    if hasattr(writer, "wait_closed"):  # always true for python >= 3.7, but not for 3.6
-        await writer.wait_closed()
+    await writer.wait_closed()
 
 
 @pytest.mark.asyncio
@@ -862,7 +861,7 @@ async def test_retry_connect(monkeypatch):
                 return await super().connect(address, deserialize, **connection_args)
             else:
                 self.failures += 1
-                raise IOError()
+                raise OSError()
 
     class UnreliableBackend(TCPBackend):
         _connector_class = UnreliableConnector
@@ -950,8 +949,8 @@ async def check_many_listeners(addr):
         listener = await listen(addr, handle_comm)
         listeners.append(listener)
 
-    assert len(set(l.listen_address for l in listeners)) == N
-    assert len(set(l.contact_address for l in listeners)) == N
+    assert len({l.listen_address for l in listeners}) == N
+    assert len({l.contact_address for l in listeners}) == N
 
     for listener in listeners:
         listener.stop()
@@ -1036,7 +1035,7 @@ async def check_deserialize(addr):
         assert isinstance(ser, Serialized)
         assert deserialize(ser.header, ser.frames) == 456
 
-        assert isinstance(to_ser, list)
+        assert isinstance(to_ser, (tuple, list)) and len(to_ser) == 1
         (to_ser,) = to_ser
         # The to_serialize() value could have been actually serialized
         # or not (it's a transport-specific optimization)
@@ -1050,6 +1049,8 @@ async def check_deserialize(addr):
         expected_msg = msg.copy()
         expected_msg["ser"] = 456
         expected_msg["to_ser"] = [123]
+        # Notice, we allow "to_ser" to be a tuple or a list
+        assert list(out_value.pop("to_ser")) == expected_msg.pop("to_ser")
         assert out_value == expected_msg
 
     await check_listener_deserialize(addr, False, msg, check_out_false)
@@ -1060,13 +1061,14 @@ async def check_deserialize(addr):
 
     # Test with long bytestrings, large enough to be transferred
     # as a separate payload
+    # TODO: currently bytestrings are not transferred as a separate payload
 
     _uncompressible = os.urandom(1024 ** 2) * 4  # end size: 8 MB
 
     msg = {
         "op": "update",
         "x": _uncompressible,
-        "to_ser": [to_serialize(_uncompressible)],
+        "to_ser": (to_serialize(_uncompressible),),
         "ser": Serialized(*serialize(_uncompressible)),
     }
     msg_orig = msg.copy()
@@ -1088,7 +1090,7 @@ async def check_deserialize(addr):
         else:
             assert isinstance(ser, Serialized)
             assert deserialize(ser.header, ser.frames) == _uncompressible
-            assert isinstance(to_ser, list)
+            assert isinstance(to_ser, tuple) and len(to_ser) == 1
             (to_ser,) = to_ser
             # The to_serialize() value could have been actually serialized
             # or not (it's a transport-specific optimization)
@@ -1104,7 +1106,6 @@ async def check_deserialize(addr):
     await check_connector_deserialize(addr, True, msg, partial(check_out, True))
 
 
-@pytest.mark.xfail(reason="intermittent failure on windows")
 @pytest.mark.asyncio
 async def test_tcp_deserialize():
     await check_deserialize("tcp://")
@@ -1198,8 +1199,12 @@ async def check_repr(a, b):
     assert "closed" not in repr(b)
     await a.close()
     assert "closed" in repr(a)
+    assert a.local_address in repr(a)
+    assert b.peer_address in repr(a)
     await b.close()
     assert "closed" in repr(b)
+    assert a.local_address in repr(b)
+    assert b.peer_address in repr(b)
 
 
 @pytest.mark.asyncio
@@ -1272,5 +1277,9 @@ def test_register_backend_entrypoint():
         "udp", mod.__name__, attrs=["UDPBackend"], dist=dist
     )
 
-    result = get_backend("udp")
+    # The require is disabled here since particularly unit tests may install
+    # dirty or dev versions which are conflicting with backend entrypoints if
+    # they are demanding for exact, stable versions. This should not fail the
+    # test
+    result = get_backend("udp", require=False)
     assert result == 1

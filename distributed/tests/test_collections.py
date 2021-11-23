@@ -2,17 +2,15 @@ from distutils.version import LooseVersion
 
 import pytest
 
-pytest.importorskip("numpy")
-pytest.importorskip("pandas")
+np = pytest.importorskip("numpy")
+pd = pytest.importorskip("pandas")
 
 import dask
-import dask.dataframe as dd
 import dask.bag as db
+import dask.dataframe as dd
+
 from distributed.client import wait
 from distributed.utils_test import gen_cluster
-from distributed.utils_test import client, cluster_fixture, loop  # noqa F401
-import numpy as np
-import pandas as pd
 
 PANDAS_VERSION = LooseVersion(pd.__version__)
 PANDAS_GT_100 = PANDAS_VERSION >= LooseVersion("1.0.0")
@@ -42,7 +40,7 @@ def assert_equal(a, b):
         assert a == b
 
 
-@gen_cluster(timeout=240, client=True)
+@gen_cluster(client=True)
 async def test_dataframes(c, s, a, b):
     df = pd.DataFrame(
         {"x": np.random.random(1000), "y": np.random.random(1000)},
@@ -50,8 +48,7 @@ async def test_dataframes(c, s, a, b):
     )
     ldf = dd.from_pandas(df, npartitions=10)
 
-    rdf = c.persist(ldf)
-
+    rdf = await c.persist(ldf)
     assert rdf.divisions == ldf.divisions
 
     remote = c.compute(rdf)

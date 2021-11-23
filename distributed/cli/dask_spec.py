@@ -1,13 +1,11 @@
 import asyncio
-import click
 import json
-import os
 import sys
+
+import click
 import yaml
 
-import dask.config
 from distributed.deploy.spec import run_spec
-from distributed.utils import deserialize_for_cli
 
 
 @click.command(context_settings=dict(ignore_unknown_options=True))
@@ -16,10 +14,6 @@ from distributed.utils import deserialize_for_cli
 @click.option("--spec-file", type=str, default=None, help="")
 @click.version_option()
 def main(args, spec: str, spec_file: str):
-
-    if "DASK_INTERNAL_INHERIT_CONFIG" in os.environ:
-        config = deserialize_for_cli(os.environ["DASK_INTERNAL_INHERIT_CONFIG"])
-        dask.config.update(dask.config.global_config, config)
 
     if spec and spec_file or not spec and not spec_file:
         print("Must specify exactly one of --spec and --spec-file")
@@ -38,9 +32,9 @@ def main(args, spec: str, spec_file: str):
     async def run():
         servers = await run_spec(_spec, *args)
         try:
-            await asyncio.gather(*[w.finished() for w in servers.values()])
+            await asyncio.gather(*(w.finished() for w in servers.values()))
         except KeyboardInterrupt:
-            await asyncio.gather(*[w.close() for w in servers.values()])
+            await asyncio.gather(*(w.close() for w in servers.values()))
 
     asyncio.get_event_loop().run_until_complete(run())
 

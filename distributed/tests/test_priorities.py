@@ -2,13 +2,13 @@ import asyncio
 
 import pytest
 
-from dask.core import flatten
 import dask
 from dask import delayed, persist
+from dask.core import flatten
 from dask.utils import stringify
 
-from distributed.utils_test import gen_cluster, inc, slowinc, slowdec
-from distributed import wait, Worker
+from distributed import Worker, wait
+from distributed.utils_test import gen_cluster, inc, slowdec, slowinc
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -67,23 +67,27 @@ async def test_persist(c, s):
 
 
 @gen_cluster(client=True)
-async def test_expand_compute(c, s, a, b):
-    low = delayed(inc)(1)
+async def test_annotate_compute(c, s, a, b):
+    with dask.annotate(priority=-1):
+        low = delayed(inc)(1)
+    with dask.annotate(priority=1):
+        high = delayed(inc)(2)
     many = [delayed(slowinc)(i, delay=0.1) for i in range(10)]
-    high = delayed(inc)(2)
 
-    low, many, high = c.compute([low, many, high], priority={low: -1, high: 1})
+    low, many, high = c.compute([low, many, high], optimize_graph=False)
     await wait(high)
     assert s.tasks[low.key].state == "processing"
 
 
 @gen_cluster(client=True)
-async def test_expand_persist(c, s, a, b):
-    low = delayed(inc)(1, dask_key_name="low")
+async def test_annotate_persist(c, s, a, b):
+    with dask.annotate(priority=-1):
+        low = delayed(inc)(1, dask_key_name="low")
+    with dask.annotate(priority=1):
+        high = delayed(inc)(2, dask_key_name="high")
     many = [delayed(slowinc)(i, delay=0.1) for i in range(4)]
-    high = delayed(inc)(2, dask_key_name="high")
 
-    low, high, x, y, z, w = persist(low, high, *many, priority={low: -1, high: 1})
+    low, high, x, y, z, w = persist(low, high, *many, optimize_graph=False)
     await wait(high)
     assert s.tasks[low.key].state == "processing"
 

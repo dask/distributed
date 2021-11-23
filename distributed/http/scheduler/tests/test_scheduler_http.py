@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 
@@ -9,8 +10,9 @@ from tornado.escape import url_escape
 from tornado.httpclient import AsyncHTTPClient, HTTPClientError
 
 from dask.sizeof import sizeof
+
 from distributed.utils import is_valid_xml
-from distributed.utils_test import gen_cluster, slowinc, inc
+from distributed.utils_test import gen_cluster, inc, slowinc
 
 
 @gen_cluster(client=True)
@@ -138,6 +140,8 @@ async def test_prometheus_collect_task_states(c, s, a, b):
 
     # submit a task which should show up in the prometheus scraping
     future = c.submit(slowinc, 1, delay=0.5)
+    while not any(future.key in w.tasks for w in [a, b]):
+        await asyncio.sleep(0.001)
 
     active_metrics, forgotten_tasks = await fetch_metrics()
     assert active_metrics.keys() == expected
@@ -147,7 +151,11 @@ async def test_prometheus_collect_task_states(c, s, a, b):
     res = await c.gather(future)
     assert res == 2
 
-    del future
+    future.release()
+
+    while any(future.key in w.tasks for w in [a, b]):
+        await asyncio.sleep(0.001)
+
     active_metrics, forgotten_tasks = await fetch_metrics()
     assert active_metrics.keys() == expected
     assert sum(active_metrics.values()) == 0.0

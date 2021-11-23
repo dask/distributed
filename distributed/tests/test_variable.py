@@ -1,18 +1,16 @@
 import asyncio
+import logging
 import random
 from datetime import timedelta
-from time import sleep, monotonic
-import logging
+from time import monotonic, sleep
 
 import pytest
 from tornado.ioloop import IOLoop
 
-from distributed import Client, Variable, worker_client, Nanny, wait, TimeoutError
-from distributed.metrics import time
+from distributed import Client, Nanny, TimeoutError, Variable, wait, worker_client
 from distributed.compatibility import WINDOWS
-from distributed.utils_test import gen_cluster, inc, div
-from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
-from distributed.utils_test import captured_logger
+from distributed.metrics import time
+from distributed.utils_test import captured_logger, div, gen_cluster, inc, popen
 
 
 @gen_cluster(client=True)
@@ -38,6 +36,25 @@ async def test_variable(c, s, a, b):
     while s.tasks:
         await asyncio.sleep(0.01)
         assert time() < start + 5
+
+
+def test_variable_in_task(loop):
+    # Ensure that we can create a Variable inside a task on a
+    # worker in a separate Python process than the client
+    with popen(["dask-scheduler", "--no-dashboard"]):
+        with popen(["dask-worker", "127.0.0.1:8786"]):
+            with Client("tcp://127.0.0.1:8786", loop=loop) as c:
+                c.wait_for_workers(1)
+
+                x = Variable("x")
+                x.set(123)
+
+                def foo():
+                    y = Variable("x")
+                    return y.get()
+
+                result = c.submit(foo).result()
+                assert result == 123
 
 
 @gen_cluster(client=True)
@@ -174,7 +191,7 @@ async def test_timeout_get(c, s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 5, Worker=Nanny, timeout=None)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 5, Worker=Nanny, timeout=60)
 async def test_race(c, s, *workers):
     NITERS = 50
 
@@ -199,10 +216,8 @@ async def test_race(c, s, *workers):
     results = await c.gather(futures)
     assert all(r > NITERS * 0.8 for r in results)
 
-    start = time()
     while len(s.wants_what["variable-x"]) != 1:
         await asyncio.sleep(0.01)
-        assert time() - start < 2
 
 
 @gen_cluster(client=True)

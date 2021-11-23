@@ -3,6 +3,7 @@ import pytest
 pytest.importorskip("bokeh")
 
 from dask import delayed
+
 from distributed.client import wait
 from distributed.diagnostics.progress_stream import progress_quads, progress_stream
 from distributed.utils_test import div, gen_cluster, inc

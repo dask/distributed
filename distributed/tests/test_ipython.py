@@ -2,11 +2,9 @@ from unittest import mock
 
 import pytest
 from tlz import first
-import tornado
 
 from distributed import Client
 from distributed.utils_test import cluster, mock_ipython
-from distributed.utils_test import loop, zmq_ctx  # noqa F401
 
 
 def need_functional_ipython(func):
@@ -15,11 +13,7 @@ def need_functional_ipython(func):
         import jupyter_client  # noqa: F401
     except ImportError:
         return pytest.mark.skip("need ipykernel and jupyter_client installed")(func)
-    if tornado.version_info >= (5,):
-        # https://github.com/ipython/ipykernel/issues/277
-        return pytest.mark.skip("IPython kernel broken with Tornado 5")(func)
-    else:
-        return func
+    return func
 
 
 @pytest.mark.ipython
@@ -31,9 +25,8 @@ def test_start_ipython_workers(loop, zmq_ctx):
         with Client(s["address"], loop=loop) as e:
             info_dict = e.start_ipython_workers()
             info = first(info_dict.values())
-            key = info.pop("key")
-            kc = BlockingKernelClient(**info)
-            kc.session.key = key
+            kc = BlockingKernelClient()
+            kc.load_connection_info(info)
             kc.start_channels()
             kc.wait_for_ready(timeout=10)
             msg_id = kc.execute("worker")
@@ -51,9 +44,8 @@ def test_start_ipython_scheduler(loop, zmq_ctx):
     with cluster(1) as (s, [a]):
         with Client(s["address"], loop=loop) as e:
             info = e.start_ipython_scheduler()
-            key = info.pop("key")
-            kc = BlockingKernelClient(**info)
-            kc.session.key = key
+            kc = BlockingKernelClient()
+            kc.load_connection_info(info)
             kc.start_channels()
             msg_id = kc.execute("scheduler")
             reply = kc.get_shell_msg(timeout=10)

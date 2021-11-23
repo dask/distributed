@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 
 from tornado import web
@@ -24,13 +26,13 @@ try:
             self.host = host
 
             # rewrite uri for jupyter-server-proxy handling
-            uri = "/proxy/%s/%s" % (str(port), proxied_path)
+            uri = f"/proxy/{str(port)}/{proxied_path}"
             self.request.uri = uri
 
             # slash is removed during regex in handler
             proxied_path = "/%s" % proxied_path
 
-            worker = "%s:%s" % (self.host, str(port))
+            worker = f"{self.host}:{str(port)}"
             if not check_worker_dashboard_exits(self.scheduler, worker):
                 msg = "Worker <%s> does not exist" % worker
                 self.set_status(400)
@@ -73,7 +75,7 @@ except ImportError:
         "python -m pip install jupyter-server-proxy"
     )
 
-    class GlobalProxyHandler(web.RequestHandler):
+    class GlobalProxyHandler(web.RequestHandler):  # type: ignore
         """Minimal Proxy handler when jupyter-server-proxy is not installed"""
 
         def initialize(self, dask_server=None, extra=None):
@@ -81,9 +83,9 @@ except ImportError:
             self.extra = extra or {}
 
         def get(self, port, host, proxied_path):
-            worker_url = "%s:%s/%s" % (host, str(port), proxied_path)
+            worker_url = f"{host}:{str(port)}/{proxied_path}"
             msg = """
-                <p> Try navigating to <a href=http://%s>%s</a> for your worker dashboard </p>
+                <p> Try navigating to <a href=http://{}>{}</a> for your worker dashboard </p>
 
                 <p>
                 Dask tried to proxy you to that page through your
@@ -101,7 +103,7 @@ except ImportError:
                 but less common in production clusters.  Your IT administrators
                 will know more
                 </p>
-            """ % (
+            """.format(
                 worker_url,
                 worker_url,
             )
@@ -129,4 +131,4 @@ def check_worker_dashboard_exits(scheduler, worker):
     return False
 
 
-routes = [(r"proxy/(\d+)/(.*?)/(.*)", GlobalProxyHandler, {})]
+routes: list[tuple] = [(r"proxy/(\d+)/(.*?)/(.*)", GlobalProxyHandler, {})]

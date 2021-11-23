@@ -1,8 +1,16 @@
 import pytest
 
-from distributed.protocol import loads, dumps, msgpack, maybe_compress, to_serialize
+from distributed.protocol import dumps, loads, maybe_compress, msgpack, to_serialize
 from distributed.protocol.compression import compressions
-from distributed.protocol.serialize import Serialize, Serialized, serialize, deserialize
+from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
+from distributed.protocol.serialize import (
+    Serialize,
+    Serialized,
+    dask_deserialize,
+    dask_serialize,
+    deserialize,
+    serialize,
+)
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import nbytes
 
@@ -26,8 +34,9 @@ def test_compression_2():
     pytest.importorskip("lz4")
     np = pytest.importorskip("numpy")
     x = np.random.random(10000)
-    header, payload = dumps(x.tobytes())
-    assert not header or not msgpack.loads(header, encoding="utf8").get("compression")
+    msg = dumps(to_serialize(x.tobytes()))
+    compression = msgpack.loads(msg[1]).get("compression")
+    assert all(c is None for c in compression)
 
 
 def test_compression_without_deserialization():
@@ -87,13 +96,12 @@ def test_maybe_compress_sample():
 
 def test_large_bytes():
     for tp in (bytes, bytearray):
-        msg = {"x": tp(b"0" * 1000000), "y": 1}
+        msg = {"x": to_serialize(tp(b"0" * 1000000)), "y": 1}
         frames = dumps(msg)
+        msg["x"] = msg["x"].data
         assert loads(frames) == msg
         assert len(frames[0]) < 1000
         assert len(frames[1]) < 1000
-
-        assert loads(frames, deserialize=False) == msg
 
 
 @pytest.mark.slow
@@ -218,3 +226,30 @@ def test_maybe_compress_memoryviews():
     else:
         assert compression == "blosc"
         assert len(payload) < x.nbytes / 10
+
+
+@pytest.mark.parametrize("serializers", [("dask",), ("cuda",)])
+def test_preserve_header(serializers):
+    """
+    Test that a serialization family doesn't overwrite the headers
+    of the underlying registered dumps/loads functions.
+    """
+
+    class MyObj:
+        pass
+
+    @cuda_serialize.register(MyObj)
+    @dask_serialize.register(MyObj)
+    def _(x):
+        return {}, []
+
+    @cuda_deserialize.register(MyObj)
+    @dask_deserialize.register(MyObj)
+    def _(header, frames):
+        assert header == {}
+        assert frames == []
+        return MyObj()
+
+    header, frames = serialize(MyObj(), serializers=serializers)
+    o = deserialize(header, frames)
+    assert isinstance(o, MyObj)

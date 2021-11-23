@@ -1,0 +1,11 @@
+{% for message in log.split("\n") %}
+    {% if "WARNING" in message %}
+        <p style="font-family: monospace; margin: 0; font-weight: bold; color: orange;">{{ message | html_escape }}</p>
+    {% elif "CRITICAL" in message %}
+        <p style="font-family: monospace; margin: 0; font-weight: bold; color: orangered;">{{ message | html_escape }}</p>
+    {% elif "ERROR" in message %}
+        <p style="font-family: monospace; margin: 0; font-weight: bold; color: crimson;">{{ message | html_escape }}</p>
+    {% else %}
+        <p style="font-family: monospace; margin: 0;">{{ message | html_escape }}</p>
+    {% endif %}
+{% endfor %}

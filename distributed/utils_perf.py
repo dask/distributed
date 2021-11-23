@@ -1,13 +1,12 @@
-from collections import deque
 import gc
 import logging
 import threading
+from collections import deque
 
 from dask.utils import format_bytes
 
 from .compatibility import PYPY
 from .metrics import thread_time
-
 
 logger = _logger = logging.getLogger(__name__)
 

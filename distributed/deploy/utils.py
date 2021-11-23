@@ -10,7 +10,7 @@ def nprocesses_nthreads(n=CPU_COUNT):
 
     Parameters
     ----------
-    n: int
+    n : int
         Number of available cores
 
     Examples

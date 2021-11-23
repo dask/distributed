@@ -237,7 +237,8 @@ The complete Python script for this example is shown below:
 
    import hdfs3
    from collections import defaultdict, Counter
-   from distributed import Client, progress
+   from distributed import Client
+   from distributed.diagnostics.progressbar import progress
 
    hdfs = hdfs3.HDFileSystem('NAMENODE_HOSTNAME', port=NAMENODE_PORT)
    client = Client('SCHEDULER_IP:SCHEDULER:PORT')

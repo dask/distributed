@@ -1,13 +1,11 @@
 """ utilities for package version introspection """
 
-from __future__ import print_function, division, absolute_import
 
+import importlib
+import os
 import platform
 import struct
-import os
 import sys
-import importlib
-
 
 required_packages = [
     ("dask", lambda p: p.__version__),
@@ -20,15 +18,14 @@ required_packages = [
 
 optional_packages = [
     ("numpy", lambda p: p.__version__),
+    ("pandas", lambda p: p.__version__),
     ("lz4", lambda p: p.__version__),
     ("blosc", lambda p: p.__version__),
 ]
 
 
 # only these scheduler packages will be checked for version mismatch
-scheduler_relevant_packages = set(pkg for pkg, _ in required_packages) | set(
-    ["lz4", "blosc"]
-)
+scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {"lz4", "blosc"}
 
 
 # notes to be displayed for mismatch packages
@@ -72,7 +69,7 @@ def get_system_info():
 
 
 def version_of_package(pkg):
-    """ Try a variety of common ways to get the version of a package """
+    """Try a variety of common ways to get the version of a package"""
     from contextlib import suppress
 
     with suppress(AttributeError):
@@ -85,7 +82,7 @@ def version_of_package(pkg):
 
 
 def get_package_info(pkgs):
-    """ get package versions for the passed required & optional packages """
+    """get package versions for the passed required & optional packages"""
 
     pversions = [("python", ".".join(map(str, sys.version_info)))]
     for pkg in pkgs:
@@ -136,12 +133,12 @@ def error_message(scheduler, workers, client, client_name="client"):
         )
         versions.add(client_version)
 
-        worker_versions = set(
+        worker_versions = {
             workers[w].get(pkg, "MISSING")
             if isinstance(workers[w], dict)
             else workers[w]
             for w in workers
-        )
+        }
         versions |= worker_versions
 
         if len(versions) <= 1:

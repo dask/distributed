@@ -1,14 +1,14 @@
 import datetime
-import tempfile
 import os
+import tempfile
 
 try:
     import ssl
 except ImportError:
-    ssl = None
+    ssl = None  # type: ignore
 
 import dask
-
+from dask.widgets import get_template
 
 __all__ = ("Security",)
 
@@ -46,6 +46,8 @@ class Security:
         Path to a key file for a worker, encoded in PEM format.
         Alternatively, the key may be appended to the cert file, and this
         parameter be omitted.
+    extra_conn_args : mapping, optional
+        Mapping with keyword arguments to pass down to connections.
     """
 
     __slots__ = (
@@ -58,16 +60,18 @@ class Security:
         "tls_scheduler_cert",
         "tls_worker_key",
         "tls_worker_cert",
+        "extra_conn_args",
     )
 
     def __init__(self, require_encryption=None, **kwargs):
         extra = set(kwargs).difference(self.__slots__)
         if extra:
             raise TypeError("Unknown parameters: %r" % sorted(extra))
+        self.extra_conn_args = kwargs.pop("extra_conn_args", {})
         if require_encryption is None:
             require_encryption = dask.config.get("distributed.comm.require-encryption")
         if require_encryption is None:
-            require_encryption = not not kwargs
+            require_encryption = bool(kwargs)
         self.require_encryption = require_encryption
         self._set_field(kwargs, "tls_ciphers", "distributed.comm.tls.ciphers")
         self._set_field(kwargs, "tls_ca_file", "distributed.comm.tls.ca-file")
@@ -83,7 +87,7 @@ class Security:
         self._set_field(kwargs, "tls_worker_cert", "distributed.comm.tls.worker.cert")
 
     @classmethod
-    def temporary(cls):
+    def temporary(cls, **kwargs):
         """Create a new temporary Security object.
 
         This creates a new self-signed key/cert pair suitable for securing
@@ -95,8 +99,7 @@ class Security:
         try:
             from cryptography import x509
             from cryptography.hazmat.backends import default_backend
-            from cryptography.hazmat.primitives import hashes
-            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives import hashes, serialization
             from cryptography.hazmat.primitives.asymmetric import rsa
             from cryptography.x509.oid import NameOID
         except ImportError:
@@ -141,6 +144,7 @@ class Security:
             tls_scheduler_cert=cert_contents,
             tls_worker_key=key_contents,
             tls_worker_cert=cert_contents,
+            **kwargs,
         )
 
     def _set_field(self, kwargs, field, config_name):
@@ -150,24 +154,41 @@ class Security:
             out = dask.config.get(config_name)
         setattr(self, field, out)
 
-    def __repr__(self):
+    def _attr_to_dict(self):
         keys = sorted(self.__slots__)
-        items = []
+        keys.remove("extra_conn_args")
+
+        attr = {}
+
         for k in keys:
             val = getattr(self, k)
             if val is not None:
                 if isinstance(val, str) and "\n" in val:
-                    items.append((k, "..."))
+                    attr[k] = "Temporary (In-memory)"
+                elif isinstance(val, str):
+                    attr[k] = f"Local ({os.path.abspath(val)})"
                 else:
-                    items.append((k, repr(val)))
-        return "Security(" + ", ".join("%s=%s" % (k, v) for k, v in items) + ")"
+                    attr[k] = val
+
+        return attr
+
+    def __repr__(self):
+        attr = self._attr_to_dict()
+        return (
+            "Security("
+            + ", ".join(f"{key}={value}" for key, value in attr.items())
+            + ")"
+        )
+
+    def _repr_html_(self):
+        return get_template("security.html.j2").render(security=self._attr_to_dict())
 
     def get_tls_config_for_role(self, role):
         """
         Return the TLS configuration for the given role, as a flat dict.
         """
         if role not in {"client", "scheduler", "worker"}:
-            raise ValueError("unknown role %r" % (role,))
+            raise ValueError(f"unknown role {role!r}")
         return {
             "ca_file": self.tls_ca_file,
             "ciphers": self.tls_ciphers,
@@ -223,6 +244,7 @@ class Security:
         return {
             "ssl_context": self._get_tls_context(tls, ssl.Purpose.SERVER_AUTH),
             "require_encryption": self.require_encryption,
+            "extra_conn_args": self.extra_conn_args,
         }
 
     def get_listen_args(self, role):

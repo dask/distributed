@@ -6,7 +6,6 @@ from bokeh.models import Tool
 from bokeh.resources import CDN
 from bokeh.util.compiler import JavaScript
 
-
 fn = __file__
 fn = os.path.join(os.path.dirname(fn), "export_tool.js")
 with open(fn) as f:
