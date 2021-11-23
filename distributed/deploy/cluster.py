@@ -1,8 +1,6 @@
 import asyncio
-import copy
 import datetime
 import logging
-import threading
 import uuid
 from contextlib import suppress
 from inspect import isawaitable
@@ -15,13 +13,21 @@ from dask.widgets import get_template
 
 from ..core import Status
 from ..objects import SchedulerInfo
-from ..utils import Log, Logs, format_dashboard_link, log_errors, sync, thread_state
+from ..utils import (
+    Log,
+    Logs,
+    LoopRunner,
+    NoOpAwaitable,
+    SyncMethodMixin,
+    format_dashboard_link,
+    log_errors,
+)
 from .adaptive import Adaptive
 
 logger = logging.getLogger(__name__)
 
 
-class Cluster:
+class Cluster(SyncMethodMixin):
     """Superclass for cluster objects
 
     This class contains common functionality for Dask Cluster manager classes.
@@ -47,10 +53,19 @@ class Cluster:
     _supports_scaling = True
     _cluster_info: dict = {}
 
-    def __init__(self, asynchronous, quiet=False, name=None, scheduler_sync_interval=1):
+    def __init__(
+        self,
+        asynchronous=False,
+        loop=None,
+        quiet=False,
+        name=None,
+        scheduler_sync_interval=1,
+    ):
+        self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
+        self.loop = self._loop_runner.loop
+
         self.scheduler_info = {"workers": {}}
         self.periodic_callbacks = {}
-        self._asynchronous = asynchronous
         self._watch_worker_status_comm = None
         self._watch_worker_status_task = None
         self._cluster_manager_logs = []
@@ -60,6 +75,7 @@ class Cluster:
         self._sync_interval = parse_timedelta(
             scheduler_sync_interval, default="seconds"
         )
+        self._sync_cluster_info_task = None
 
         if name is None:
             name = str(uuid.uuid4())[:8]
@@ -94,22 +110,55 @@ class Cluster:
         )
         self._cluster_info.update(info)
 
-        self.periodic_callbacks["sync-cluster-info"] = PeriodicCallback(
-            self._sync_cluster_info, self._sync_interval * 1000
-        )
+        # Start a background task for syncing cluster info with the scheduler
+        self._sync_cluster_info_task = asyncio.ensure_future(self._sync_cluster_info())
+
         for pc in self.periodic_callbacks.values():
             pc.start()
         self.status = Status.running
 
     async def _sync_cluster_info(self):
-        await self.scheduler_comm.set_metadata(
-            keys=["cluster-manager-info"],
-            value=copy.copy(self._cluster_info),
-        )
+        err_count = 0
+        warn_at = 5
+        max_interval = 10 * self._sync_interval
+        # Loop until the cluster is shutting down. We shouldn't really need
+        # this check (the `CancelledError` should be enough), but something
+        # deep in the comms code is silencing `CancelledError`s _some_ of the
+        # time, resulting in a cancellation not always bubbling back up to
+        # here. Relying on the status is fine though, not worth changing.
+        while self.status == Status.running:
+            try:
+                await self.scheduler_comm.set_metadata(
+                    keys=["cluster-manager-info"],
+                    value=self._cluster_info.copy(),
+                )
+                err_count = 0
+            except asyncio.CancelledError:
+                # Task is being closed. When we drop Python < 3.8 we can drop
+                # this check (since CancelledError is not a subclass of
+                # Exception then).
+                break
+            except Exception:
+                err_count += 1
+                # Only warn if multiple subsequent attempts fail, and only once
+                # per set of subsequent failed attempts. This way we're not
+                # excessively noisy during a connection blip, but we also don't
+                # silently fail.
+                if err_count == warn_at:
+                    logger.warning(
+                        "Failed to sync cluster info multiple times - perhaps "
+                        "there's a connection issue? Error:",
+                        exc_info=True,
+                    )
+            # Sleep, with error backoff
+            interval = min(max_interval, self._sync_interval * 1.5 ** err_count)
+            await asyncio.sleep(interval)
 
     async def _close(self):
         if self.status == Status.closed:
             return
+
+        self.status = Status.closing
 
         with suppress(AttributeError):
             self._adaptive.stop()
@@ -118,6 +167,11 @@ class Cluster:
             await self._watch_worker_status_comm.close()
         if self._watch_worker_status_task:
             await self._watch_worker_status_task
+
+        if self._sync_cluster_info_task:
+            self._sync_cluster_info_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._sync_cluster_info_task
 
         if self.scheduler_comm:
             await self.scheduler_comm.close_rpc()
@@ -131,9 +185,7 @@ class Cluster:
         # If the cluster is already closed, we're already done
         if self.status == Status.closed:
             if self.asynchronous:
-                future = asyncio.Future()
-                future.set_result(None)
-                return future
+                return NoOpAwaitable()
             else:
                 return
 
@@ -199,25 +251,6 @@ class Cluster:
         >>> cluster.scale(10)  # scale cluster to ten workers
         """
         raise NotImplementedError()
-
-    @property
-    def asynchronous(self):
-        return (
-            self._asynchronous
-            or getattr(thread_state, "asynchronous", False)
-            or hasattr(self.loop, "_thread_identity")
-            and self.loop._thread_identity == threading.get_ident()
-        )
-
-    def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
-        asynchronous = asynchronous or self.asynchronous
-        if asynchronous:
-            future = func(*args, **kwargs)
-            if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
-            return future
-        else:
-            return sync(self.loop, func, *args, **kwargs)
 
     def _log(self, log):
         """Log a message.

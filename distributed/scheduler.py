@@ -26,7 +26,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import ClassVar
+from typing import Any, ClassVar, Container
 from typing import cast as pep484_cast
 
 import psutil
@@ -49,11 +49,14 @@ from dask.highlevelgraph import HighLevelGraph
 from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta, tmpfile
 from dask.widgets import get_template
 
+from distributed.utils import recursive_to_dict
+
 from . import preloading, profile
 from . import versions as version_module
 from .active_memory_manager import ActiveMemoryManagerExtension
 from .batched import BatchedSend
 from .comm import (
+    Comm,
     get_address_host,
     normalize_address,
     resolve_address,
@@ -61,6 +64,7 @@ from .comm import (
 )
 from .comm.addressing import addresses_from_user_args
 from .core import CommClosedError, Status, clean_exception, rpc, send_recv
+from .diagnostics.memory_sampler import MemorySamplerExtension
 from .diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from .event import EventExtension
 from .http import get_handlers
@@ -182,6 +186,7 @@ DEFAULT_EXTENSIONS = [
     SemaphoreExtension,
     EventExtension,
     ActiveMemoryManagerExtension,
+    MemorySamplerExtension,
 ]
 
 ALL_TASK_STATES = declare(
@@ -1725,6 +1730,30 @@ class TaskState:
         for ts in self._dependencies:
             nbytes += ts.get_nbytes()
         return nbytes
+
+    @ccall
+    def _to_dict(self, *, exclude: Container[str] = None):
+        """
+        A very verbose dictionary representation for debugging purposes.
+        Not type stable and not inteded for roundtrips.
+
+        Parameters
+        ----------
+        exclude:
+            A list of attributes which must not be present in the output.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        """
+
+        if not exclude:
+            exclude = set()
+        members = inspect.getmembers(self)
+        return recursive_to_dict(
+            {k: v for k, v in members if k not in exclude and not callable(v)},
+            exclude=exclude,
+        )
 
 
 class _StateLegacyMapping(Mapping):
@@ -3826,6 +3855,7 @@ class Scheduler(SchedulerState, ServerNode):
             "broadcast": self.broadcast,
             "proxy": self.proxy,
             "ncores": self.get_ncores,
+            "ncores_running": self.get_ncores_running,
             "has_what": self.get_has_what,
             "who_has": self.get_who_has,
             "processing": self.get_processing,
@@ -3945,6 +3975,39 @@ class Scheduler(SchedulerState, ServerNode):
             },
         }
         return d
+
+    def _to_dict(
+        self, comm: Comm = None, *, exclude: Container[str] = None
+    ) -> "dict[str, Any]":
+        """
+        A very verbose dictionary representation for debugging purposes.
+        Not type stable and not inteded for roundtrips.
+
+        Parameters
+        ----------
+        comm:
+        exclude:
+            A list of attributes which must not be present in the output.
+
+        See also
+        --------
+        Server.identity
+        Client.dump_cluster_state
+        """
+
+        info = super()._to_dict(exclude=exclude)
+        extra = {
+            "transition_log": self.transition_log,
+            "log": self.log,
+            "tasks": self.tasks,
+            "events": self.events,
+        }
+        info.update(extra)
+        extensions = {}
+        for name, ex in self.extensions.items():
+            if hasattr(ex, "_to_dict"):
+                extensions[name] = ex._to_dict()
+        return recursive_to_dict(info, exclude=exclude)
 
     def get_worker_service_addr(self, worker, service_name, protocol=False):
         """
@@ -5710,18 +5773,24 @@ class Scheduler(SchedulerState, ServerNode):
         Scheduler.broadcast:
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        start = time()
-        while not parent._workers_dv:
-            await asyncio.sleep(0.2)
-            if time() > start + timeout:
-                raise TimeoutError("No workers found")
+        ws: WorkerState
 
-        if workers is None:
-            ws: WorkerState
-            nthreads = {w: ws._nthreads for w, ws in parent._workers_dv.items()}
-        else:
-            workers = [self.coerce_address(w) for w in workers]
-            nthreads = {w: parent._workers_dv[w].nthreads for w in workers}
+        start = time()
+        while True:
+            if workers is None:
+                wss = parent._running
+            else:
+                workers = [self.coerce_address(w) for w in workers]
+                wss = {parent._workers_dv[w] for w in workers}
+                wss = {ws for ws in wss if ws._status == Status.running}
+
+            if wss:
+                break
+            if time() > start + timeout:
+                raise TimeoutError("No valid workers found")
+            await asyncio.sleep(0.1)
+
+        nthreads = {ws._address: ws.nthreads for ws in wss}
 
         assert isinstance(data, dict)
 
@@ -5732,10 +5801,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.update_data(who_has=who_has, nbytes=nbytes, client=client)
 
         if broadcast:
-            if broadcast == True:  # noqa: E712
-                n = len(nthreads)
-            else:
-                n = broadcast
+            n = len(nthreads) if broadcast is True else broadcast
             await self.replicate(keys=keys, workers=workers, n=n)
 
         self.log_event(
@@ -6451,7 +6517,12 @@ class Scheduler(SchedulerState, ServerNode):
 
         assert branching_factor > 0
         async with self._lock if lock else empty_context:
-            workers = {parent._workers_dv[w] for w in self.workers_list(workers)}
+            if workers is not None:
+                workers = {parent._workers_dv[w] for w in self.workers_list(workers)}
+                workers = {ws for ws in workers if ws._status == Status.running}
+            else:
+                workers = parent._running
+
             if n is None:
                 n = len(workers)
             else:
@@ -6989,6 +7060,15 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             return {w: ws._nthreads for w, ws in parent._workers_dv.items()}
 
+    def get_ncores_running(self, comm=None, workers=None):
+        parent: SchedulerState = cast(SchedulerState, self)
+        ncores = self.get_ncores(workers=workers)
+        return {
+            w: n
+            for w, n in ncores.items()
+            if parent._workers_dv[w].status == Status.running
+        }
+
     async def get_call_stack(self, comm=None, keys=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState
@@ -7060,17 +7140,12 @@ class Scheduler(SchedulerState, ServerNode):
 
     def set_metadata(self, comm=None, keys=None, value=None):
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            metadata = parent._task_metadata
-            for key in keys[:-1]:
-                if key not in metadata or not isinstance(metadata[key], (dict, list)):
-                    metadata[key] = {}
-                metadata = metadata[key]
-            metadata[keys[-1]] = value
-        except Exception:
-            import pdb
-
-            pdb.set_trace()
+        metadata = parent._task_metadata
+        for key in keys[:-1]:
+            if key not in metadata or not isinstance(metadata[key], (dict, list)):
+                metadata[key] = {}
+            metadata = metadata[key]
+        metadata[keys[-1]] = value
 
     def get_metadata(self, comm=None, keys=None, default=no_default):
         parent: SchedulerState = cast(SchedulerState, self)
@@ -7131,7 +7206,7 @@ class Scheduler(SchedulerState, ServerNode):
         return {"metadata": plugin.metadata, "state": plugin.state}
 
     async def register_worker_plugin(self, comm, plugin, name=None):
-        """Registers a setup function, and call it on every worker"""
+        """Registers a worker plugin on all running and future workers"""
         self.worker_plugins[name] = plugin
 
         responses = await self.broadcast(

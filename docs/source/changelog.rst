@@ -1,6 +1,130 @@
 Changelog
 =========
 
+2021.11.2
+---------
+
+Released on November 19, 2021
+
+- Ensure cancelled error transition can properly release a key (:pr:`5528`) `Florian Jetter`_
+- Refactor release key (:pr:`5507`) `Florian Jetter`_
+- Fix deadlock caused by an erred task (executing->cancelled->error) (:pr:`5503`) `Florian Jetter`_
+- Resolve ``KeyError``-related deadlock (:pr:`5525`) `Florian Jetter`_
+- Remove extra quotation in worker failure docs (:pr:`5518`) `James Bourbeau`_
+- Ensure ``safe_sizeof`` warning is accurate (:pr:`5519`) `James Bourbeau`_
+- Visualize cluster-wide memory usage over time (:pr:`5477`) `crusaderky`_
+- AMM: redesign start/stop methods (:pr:`5476`) `crusaderky`_
+- Preserve ``contextvars`` during comm offload (:pr:`5486`) `Gabe Joseph`_
+- Deserialization: zero-copy merge subframes when possible (:pr:`5208`) `Gabe Joseph`_
+- Add support for multiple workers per SSH connection (:pr:`5506`) `Jacob Tomlinson`_
+- Client method to dump cluster state (:pr:`5470`) `Florian Jetter`_
+
+
+2021.11.1
+---------
+
+Released on November 8, 2021
+
+- Revert "Avoid multiple blocking calls by gathering UCX frames" (:pr:`5505`) `Peter Andreas Entschev`_
+
+
+2021.11.0
+---------
+
+Released on November 5, 2021
+
+- Fix ``cluster_info`` sync handling (:pr:`5488`) `Jim Crist-Harif`_
+- Serialization family to preserve headers of the underlying dumps functions (:pr:`5380`) `Mads R. B. Kristensen`_
+- Point users to Discourse (:pr:`5489`) `James Bourbeau`_
+- Avoid multiple blocking calls by gathering UCX frames (:pr:`5487`) `Peter Andreas Entschev`_
+- Update all UCX tests to use ``asyncio`` marker (:pr:`5484`) `Peter Andreas Entschev`_
+- Register UCX close callback (:pr:`5474`) `Peter Andreas Entschev`_
+- Use older version of ``pynvml.nvmlDeviceGetComputeRunningProcesses`` (:pr:`5469`) `Jacob Tomlinson`_
+- Check for Futures from the wrong ``Client`` in ``gather`` (:pr:`5468`) `Gabe Joseph`_
+- Fix ``performance_report`` when used with ``%%time`` or ``%%timeit`` magic (:pr:`5463`) `Erik Welch`_
+- Scatter and replicate to avoid paused workers (:pr:`5441`) `crusaderky`_
+- AMM to avoid paused workers (:pr:`5440`) `crusaderky`_
+- Update changelog with ``LocalCluster`` host security note (:pr:`5462`) `Jim Crist-Harif`_
+
+
+2021.10.0
+---------
+
+Released on October 22, 2021
+
+.. note::
+
+    This release fixed a potential security vulnerability relating to
+    single-machine Dask clusters. Clusters started with
+    ``dask.distributed.LocalCluster`` or ``dask.distributed.Client()`` (which
+    defaults to using ``LocalCluster``) would mistakenly configure their
+    respective Dask workers to listen on external interfaces (typically with a
+    randomly selected high port) rather than only on ``localhost``. A Dask
+    cluster created using this method AND running on a machine that has these
+    ports exposed could be used by a sophisticated attacker to enable remote
+    code execution.  Users running on machines with standard firewalls in place
+    should not be affected. This vulnerability is documented in `CVE-2021-42343
+    <https://attackerkb.com/topics/oL1UXQct5f/cve-2021-42343>`__, and is fixed
+    in this release (:pr:`5427`). Thanks to Jean-Pierre van Riel for
+    discovering and reporting the issue.
+
+- Ensure resumed flight tasks are still fetched (:pr:`5426`) `Florian Jetter`_
+- AMM high level documentation (:pr:`5456`) `crusaderky`_
+- Provide stack for suspended coro in test timeout (:pr:`5446`) `Florian Jetter`_
+- Handle ``UCXNotConnected`` error (:pr:`5449`) `Peter Andreas Entschev`_
+- Don't schedule tasks to paused workers (:pr:`5431`) `crusaderky`_
+- Use ``pip install .`` instead of calling ``setup.py`` (:pr:`5442`) `Matthias Bussonnier`_
+- Increase latency for stealing (:pr:`5390`) `Florian Jetter`_
+- Type annotations for ``Worker`` and ``gen_cluster`` (:pr:`5438`) `crusaderky`_
+- Ensure reconnecting workers do not loose required data (:pr:`5436`) `Florian Jetter`_
+- Mark ``test_gather_dep*`` as ``xfail`` (:pr:`5432`) `crusaderky`_
+- Remove ``zict``-related skips (:pr:`5429`) `James Bourbeau`_
+- Pass ``host`` through ``LocalCluster`` to workers (:pr:`5427`) `Jim Crist-Harif`_
+- Fixes ``async`` warnings in UCX tests (:pr:`5396`) `Peter Andreas Entschev`_
+- Resolve work stealing deadlock caused by race in ``move_task_confirm`` (:pr:`5379`) `Florian Jetter`_
+- Add scroll to dashboard dropdown (:pr:`5418`) `Jacob Tomlinson`_
+- Fix regression where unknown tasks were allowed to be stolen (:pr:`5392`) `Florian Jetter`_
+- Enable ``mypy`` in CI 2/2 (:pr:`5348`) `crusaderky`_
+- Rewrite ``test_client_timeout`` (:pr:`5397`) `crusaderky`_
+- Simple ``SSHCluster`` example (:pr:`5349`) `Ray Bell`_
+- Do not attempt to fetch keys which are no longer in flight (:pr:`5160`) `Florian Jetter`_
+- Revisit ``Scheduler.add_plugin`` / ``Scheduler.remove_plugin`` (:pr:`5394`) `crusaderky`_
+- Fix flaky ``test_WorkerPlugin_overwrite`` (:pr:`5398`) `crusaderky`_
+- Active Memory Manager to use bulk comms (:pr:`5357`) `crusaderky`_
+- Add coverage badge to ``README`` (:pr:`5382`) `James Bourbeau`_
+- Mark ``test_stress_creation_and_deletion`` as ``xfail`` (:pr:`5393`) `James Bourbeau`_
+- Mark ``test_worker_reconnects_mid_compute*`` tests as flaky (:pr:`5378`) `James Bourbeau`_
+- Use new Dask docs theme (:pr:`5391`) `Jacob Tomlinson`_
+- Remove ``pytest.mark.repeat`` from ``test_prometheus_collect_task_states`` (:pr:`5376`) `James Bourbeau`_
+- Log original exception upon compute failure (:pr:`5387`) `Florian Jetter`_
+- Add code coverage (:pr:`4670`) `James Bourbeau`_
+- Fix zombie worker tasks after missing transition (:pr:`5316`) `Florian Jetter`_
+- Add support for partial functions to ``iscoroutinefunction`` util (:pr:`5344`) `Michael Adkins`_
+- Mark ``distributed/tests/test_client.py::test_profile_server`` as flaky (:pr:`5375`) `James Bourbeau`_
+- Enable ``mypy`` in CI 1/2 (:pr:`5328`) `crusaderky`_
+- Ensure ``dask-worker`` and ``dask-scheduler`` pick up preload configuration values  (:pr:`5365`) `James Bourbeau`_
+- Use ``dask-spec`` for ``SSHCluster`` (:pr:`5191`) `Charles Blackmon-Luca`_
+- Update ``_cluster_info`` dict in ``__init__`` (:pr:`5305`) `Jacob Tomlinson`_
+- Use Dask temporary file utility  (:pr:`5361`) `James Bourbeau`_
+- Avoid deprecated random set sampling (:pr:`5360`) `James Bourbeau`_
+- Add check for unsupported NVML metrics (:pr:`5343`) `Charles Blackmon-Luca`_
+- Workers submit a reply to the scheduler if replica removal was rejected (:pr:`5356`) `Florian Jetter`_
+- Pickle exception and traceback immediately (:pr:`5338`) `Mads R. B. Kristensen`_
+- Reinstate: AMM ``ReduceReplicas`` to iterate only on replicated tasks (:pr:`5341`) `crusaderky`_
+- Sync worker status to the scheduler; new 'paused' status (:pr:`5330`) `crusaderky`_
+- Add pre-commit to environments (:pr:`5362`) `Ray Bell`_
+- Worker State Machine Refactor: clean up dead handlers (:pr:`5359`) `crusaderky`_
+- Bump ``RAPIDS_VER`` for gpuCI (:pr:`5358`) `Charles Blackmon-Luca`_
+- Generate Cython HTML annotations (:pr:`5321`) `crusaderky`_
+- Worker state machine refactor (:pr:`5046`) `Florian Jetter`_
+- ``fsspec`` and ``s3fs`` git tips are incompatible (:pr:`5346`) `crusaderky`_
+- Fix ``test_many_Progress`` and others (:pr:`5329`) `crusaderky`_
+- Run multiple AMMs in parallel (:pr:`5339`) `crusaderky`_
+- Enhance AMM docstrings (:pr:`5340`) `crusaderky`_
+- Run ``pyupgrade`` in CI (:pr:`5327`) `crusaderky`_
+- Fix typo in client side example ``foundations.rst`` (:pr:`5336`) `Genevieve Buckley`_
+
+
 2021.09.1
 ---------
 
@@ -2663,3 +2787,6 @@ significantly without many new features.
 .. _`David Chudzicki`: https://github.com/dchudz
 .. _`Walt Woods`: https://github.com/wwoods
 .. _`Tom Forbes`: https://github.com/orf
+.. _`Michael Adkins`: https://github.com/madkinsz
+.. _`Genevieve Buckley`: https://github.com/GenevieveBuckley
+.. _`Erik Welch`: https://github.com/eriknw

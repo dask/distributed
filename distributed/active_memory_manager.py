@@ -9,10 +9,12 @@ from tornado.ioloop import PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
+from .core import Status
 from .metrics import time
 from .utils import import_term, log_errors
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: nocover
+    from .client import Client
     from .scheduler import Scheduler, TaskState, WorkerState
 
 
@@ -69,13 +71,7 @@ class ActiveMemoryManagerExtension:
 
         if register:
             scheduler.extensions["amm"] = self
-            scheduler.handlers.update(
-                {
-                    "amm_run_once": self.run_once,
-                    "amm_start": self.start,
-                    "amm_stop": self.stop,
-                }
-            )
+            scheduler.handlers["amm_handler"] = self.amm_handler
 
         if interval is None:
             interval = parse_timedelta(
@@ -87,22 +83,31 @@ class ActiveMemoryManagerExtension:
         if start:
             self.start()
 
-    def start(self, comm=None) -> None:
+    def amm_handler(self, comm, method: str):
+        """Scheduler handler, invoked from the Client by
+        :class:`~distributed.active_memory_manager.AMMClientProxy`
+        """
+        assert method in {"start", "stop", "run_once", "running"}
+        out = getattr(self, method)
+        return out() if callable(out) else out
+
+    def start(self) -> None:
         """Start executing every ``self.interval`` seconds until scheduler shutdown"""
-        if self.started:
+        if self.running:
             return
         pc = PeriodicCallback(self.run_once, self.interval * 1000.0)
         self.scheduler.periodic_callbacks[f"amm-{id(self)}"] = pc
         pc.start()
 
-    def stop(self, comm=None) -> None:
+    def stop(self) -> None:
         """Stop periodic execution"""
         pc = self.scheduler.periodic_callbacks.pop(f"amm-{id(self)}", None)
         if pc:
             pc.stop()
 
     @property
-    def started(self) -> bool:
+    def running(self) -> bool:
+        """Return True if the AMM is being triggered periodically; False otherwise"""
         return f"amm-{id(self)}" in self.scheduler.periodic_callbacks
 
     def add_policy(self, policy: ActiveMemoryManagerPolicy) -> None:
@@ -111,7 +116,7 @@ class ActiveMemoryManagerExtension:
         self.policies.add(policy)
         policy.manager = self
 
-    def run_once(self, comm=None) -> None:
+    def run_once(self) -> None:
         """Run all policies once and asynchronously (fire and forget) enact their
         recommendations to replicate/drop keys
         """
@@ -234,11 +239,16 @@ class ActiveMemoryManagerExtension:
         if ts.state != "memory":
             return None
         if candidates is None:
-            candidates = set(self.scheduler.workers.values())
+            candidates = self.scheduler.running.copy()
+        else:
+            candidates &= self.scheduler.running
+
         candidates -= ts.who_has
         candidates -= pending_repl
         if not candidates:
             return None
+
+        # Select candidate with the lowest memory usage
         return min(candidates, key=self.workers_memory.__getitem__)
 
     def _find_dropper(
@@ -268,7 +278,13 @@ class ActiveMemoryManagerExtension:
         candidates -= {waiter_ts.processing_on for waiter_ts in ts.waiters}
         if not candidates:
             return None
-        return max(candidates, key=self.workers_memory.__getitem__)
+
+        # Select candidate with the highest memory usage.
+        # Drop from workers with status paused or closing_gracefully first.
+        return max(
+            candidates,
+            key=lambda ws: (ws.status != Status.running, self.workers_memory[ws]),
+        )
 
 
 class ActiveMemoryManagerPolicy:
@@ -287,7 +303,7 @@ class ActiveMemoryManagerPolicy:
         None,
     ]:
         """This method is invoked by the ActiveMemoryManager every few seconds, or
-        whenever the user invokes scheduler.amm_run_once().
+        whenever the user invokes ``client.amm.run_once``.
         It is an iterator that must emit any of the following:
 
         - "replicate", <TaskState>, None
@@ -304,9 +320,9 @@ class ActiveMemoryManagerPolicy:
         You may optionally retrieve which worker it was decided the key will be
         replicated to or dropped from, as follows:
 
-        ```python
-        choice = yield "replicate", ts, None
-        ```
+        .. code-block:: python
+
+           choice = (yield "replicate", ts, None)
 
         ``choice`` is either a WorkerState or None; the latter is returned if the
         ActiveMemoryManager chose to disregard the request.
@@ -318,7 +334,38 @@ class ActiveMemoryManagerPolicy:
         The current memory usage on each worker, *downstream of all pending commands*,
         can be inspected on ``self.manager.workers_memory``.
         """
-        raise NotImplementedError("Virtual method")
+        raise NotImplementedError("Virtual method")  # pragma: nocover
+
+
+class AMMClientProxy:
+    """Convenience accessors to operate the AMM from the dask client
+
+    Usage: ``client.amm.start()`` etc.
+
+    All methods are asynchronous if the client is asynchronous and synchronous if the
+    client is synchronous.
+    """
+
+    _client: Client
+
+    def __init__(self, client: Client):
+        self._client = client
+
+    def _run(self, method: str):
+        """Remotely invoke ActiveMemoryManagerExtension.amm_handler"""
+        return self._client.sync(self._client.scheduler.amm_handler, method=method)
+
+    def start(self):
+        return self._run("start")
+
+    def stop(self):
+        return self._run("stop")
+
+    def run_once(self):
+        return self._run("run_once")
+
+    def running(self):
+        return self._run("running")
 
 
 class ReduceReplicas(ActiveMemoryManagerPolicy):

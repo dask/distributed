@@ -2282,8 +2282,8 @@ class TaskGroupGraph(DashboardComponent):
     def update_layout(self):
 
         with log_errors():
-            # get dependecies per task group
-            # in some cases there are tg that have themeselves as dependencies, we remove those.
+            # Get dependecies per task group.
+            # In some cases there are tg that have themselves as dependencies - we remove those.
             dependencies = {
                 k: {ds.name for ds in ts.dependencies if ds.name != k}
                 for k, ts in self.scheduler.task_groups.items()

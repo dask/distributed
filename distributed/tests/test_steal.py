@@ -987,6 +987,8 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
         slowinc,
         range(10),
         key=[f"f1-{ix}" for ix in range(10)],
+        workers=[w0.address],
+        allow_other_workers=True,
     )
     while not w0.active_keys:
         await asyncio.sleep(0.01)

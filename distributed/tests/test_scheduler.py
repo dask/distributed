@@ -420,7 +420,7 @@ async def test_blocked_handlers_are_respected(s, a, b):
 @gen_cluster(
     nthreads=[], config={"distributed.scheduler.blocked-handlers": ["test-handler"]}
 )
-def test_scheduler_init_pulls_blocked_handlers_from_config(s):
+async def test_scheduler_init_pulls_blocked_handlers_from_config(s):
     assert s.blocked_handlers == ["test-handler"]
 
 
@@ -784,20 +784,27 @@ async def test_story(c, s, a, b):
     assert s.story(x.key) == s.story(s.tasks[x.key])
 
 
-@gen_cluster(nthreads=[], client=True)
-async def test_scatter_no_workers(c, s):
+@pytest.mark.parametrize("direct", [False, True])
+@gen_cluster(client=True, nthreads=[])
+async def test_scatter_no_workers(c, s, direct):
     with pytest.raises(TimeoutError):
         await s.scatter(data={"x": 1}, client="alice", timeout=0.1)
 
     start = time()
     with pytest.raises(TimeoutError):
-        await c.scatter(123, timeout=0.1)
+        await c.scatter(123, timeout=0.1, direct=direct)
     assert time() < start + 1.5
 
-    w = Worker(s.address, nthreads=3)
-    await asyncio.gather(c.scatter(data={"y": 2}, timeout=5), w)
+    fut = c.scatter({"y": 2}, timeout=5, direct=direct)
+    await asyncio.sleep(0.1)
+    async with Worker(s.address) as w:
+        await fut
+        assert w.data["y"] == 2
 
-    assert w.data["y"] == 2
+    # Test race condition between worker init and scatter
+    w = Worker(s.address)
+    await asyncio.gather(c.scatter({"z": 3}, timeout=5, direct=direct), w)
+    assert w.data["z"] == 3
     await w.close()
 
 
@@ -3241,3 +3248,26 @@ async def test_unpause_schedules_unrannable_tasks(c, s, a):
 
     a.memory_pause_fraction = 0.8
     assert await fut == 2
+
+
+@gen_cluster(client=True)
+async def test__to_dict(c, s, a, b):
+    futs = c.map(inc, range(100))
+
+    await c.gather(futs)
+    dct = Scheduler._to_dict(s)
+    assert list(dct.keys()) == [
+        "type",
+        "id",
+        "address",
+        "services",
+        "started",
+        "workers",
+        "status",
+        "thread_id",
+        "transition_log",
+        "log",
+        "tasks",
+        "events",
+    ]
+    assert dct["tasks"][futs[0].key]

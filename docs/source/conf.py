@@ -147,7 +147,7 @@ html_theme = "dask_sphinx_theme"
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ["_static"]
+html_static_path: list[str] = []
 
 # Add any extra paths that contain custom files (such as robots.txt or
 # .htaccess) here, relative to this directory. These files are copied
@@ -382,6 +382,7 @@ extlinks = {
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "numpy": ("https://docs.scipy.org/doc/numpy", None),
+    "pandas": ("https://pandas.pydata.org/docs", None),
     "dask": ("https://docs.dask.org/en/latest", None),
     "bokeh": ("https://docs.bokeh.org/en/latest", None),
 }
