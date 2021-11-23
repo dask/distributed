@@ -19,7 +19,7 @@ from dask.widgets import get_template
 from ..core import CommClosedError, Status, rpc
 from ..scheduler import Scheduler
 from ..security import Security
-from ..utils import LoopRunner, TimeoutError, import_term, silence_logging
+from ..utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
 from .adaptive import Adaptive
 from .cluster import Cluster
 
@@ -101,19 +101,6 @@ class ProcessInterface:
 
     async def __aexit__(self, *args, **kwargs):
         await self.close()
-
-
-class NoOpAwaitable:
-    """An awaitable object that always returns None.
-
-    Useful to return from a method that can be called in both asynchronous and
-    synchronous contexts"""
-
-    def __await__(self):
-        async def f():
-            return None
-
-        return f().__await__()
 
 
 class SpecCluster(Cluster):
@@ -256,9 +243,6 @@ class SpecCluster(Cluster):
                 level=silence_logs, root="bokeh"
             )
 
-        self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
-        self.loop = self._loop_runner.loop
-
         self._instances.add(self)
         self._correct_state_waiting = None
         self._name = name or type(self).__name__
@@ -266,6 +250,7 @@ class SpecCluster(Cluster):
 
         super().__init__(
             asynchronous=asynchronous,
+            loop=loop,
             name=name,
             scheduler_sync_interval=scheduler_sync_interval,
         )
