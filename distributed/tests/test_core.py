@@ -591,8 +591,8 @@ async def test_connection_pool_close_while_connecting(monkeypatch):
     Ensure a closed connection pool guarantees to have no connections left open
     even if it is closed mid-connecting
     """
-    from distributed.comm.asyncio_tcp import TCPBackend, TCPConnector
     from distributed.comm.registry import backends
+    from distributed.comm.tcp import TCPBackend, TCPConnector
 
     class SlowConnector(TCPConnector):
         async def connect(self, address, deserialize, **connection_args):

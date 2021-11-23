@@ -46,7 +46,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from distributed.comm.asyncio_tcp import TCP
+from distributed.comm.tcp import TCP
 
 from . import system
 from .client import Client, _global_clients, default_client

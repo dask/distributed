@@ -15,20 +15,27 @@ from .utils import get_tcp_server_address, get_tcp_server_addresses
 
 
 def _register_transports():
-    import os
+    import dask.config
 
-    from . import asyncio_tcp, inproc, tcp, ws
+    from . import inproc, ws
 
-    if os.getenv("DISTRIBUTED_USE_ASYNCIO_FOR_TCP", "").lower() not in (
-        "",
-        "0",
-        "false",
-    ):
+    tcp_backend = dask.config.get("distributed.comm.tcp.backend")
+
+    if tcp_backend == "asyncio":
+        from . import asyncio_tcp
+
         backends["tcp"] = asyncio_tcp.TCPBackend()
         backends["tls"] = asyncio_tcp.TLSBackend()
-    else:
+    elif tcp_backend == "tornado":
+        from . import tcp
+
         backends["tcp"] = tcp.TCPBackend()
         backends["tls"] = tcp.TLSBackend()
+    else:
+        raise ValueError(
+            f"Expected `distributed.comm.tcp.backend` to be in `('asyncio', "
+            f"'tornado')`, got {tcp_backend}"
+        )
 
     try:
         from . import ucx

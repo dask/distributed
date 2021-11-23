@@ -844,6 +844,14 @@ properties:
                   ``True``, a CUDA context will be created on the first device listed in
                   ``CUDA_VISIBLE_DEVICES``.
 
+          tcp:
+            type: object
+            properties:
+              backend:
+                type: string
+                description: |
+                  The TCP backend implementation to use. Must be either `tornado` or `asyncio`.
+
           websockets:
             type: object
             properties:

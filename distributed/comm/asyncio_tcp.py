@@ -478,10 +478,11 @@ class TCPListener(Listener):
         await self.comm_handler(comm)
 
     async def _start_all_interfaces_with_random_port(self):
-        """Due to a bug in asyncio, listening on `("", 0)` will result in two
-        different random ports being used (one for IPV4, one for IPV6), rather
-        than both interfaces sharing the same random port. We work around this
-        here. See https://bugs.python.org/issue45693 for more info."""
+        """Due to a design decision in asyncio, listening on `("", 0)` will
+        result in two different random ports being used (one for IPV4, one for
+        IPV6), rather than both interfaces sharing the same random port. We
+        work around this here. See https://bugs.python.org/issue45693 for more
+        info."""
         loop = asyncio.get_event_loop()
         # Typically resolves to list with length == 2 (one IPV4, one IPV6).
         infos = await loop.getaddrinfo(
@@ -546,21 +547,24 @@ class TCPListener(Listener):
             # yet, close that as well.
             if sock is not None:
                 sock.close()
+            raise
 
-        self._servers = servers
+        return servers
 
     async def start(self):
         loop = asyncio.get_event_loop()
         if not self.ip and not self.port:
-            await self._start_all_interfaces_with_random_port()
+            servers = await self._start_all_interfaces_with_random_port()
         else:
-            server = await loop.create_server(
-                lambda: DaskCommProtocol(self._on_connection),
-                host=self.ip,
-                port=self.port,
-                **self._extra_kwargs,
-            )
-            self._servers = [server]
+            servers = [
+                await loop.create_server(
+                    lambda: DaskCommProtocol(self._on_connection),
+                    host=self.ip,
+                    port=self.port,
+                    **self._extra_kwargs,
+                )
+            ]
+        self._servers = servers
 
     def stop(self):
         # Stop listening
@@ -645,37 +649,34 @@ class TLSBackend(TCPBackend):
     _listener_class = TLSListener
 
 
-_LARGE_BUF_LIMIT = 2048
-
-
 class _ZeroCopyWriter:
     """The builtin socket transport in asyncio makes a bunch of copies, which
     can make sending large amounts of data much slower. This hacks around that.
-    Note that this workaround isn't used on windows or uvloop"""
+
+    Note that this workaround isn't used with the windows ProactorEventLoop or
+    uvloop."""
 
     def __init__(self, transport):
         self.transport = transport
         self._buffers = collections.deque()
-        self._first_pos = 0
-        self._size = 0
+        self._offset = 0
 
     def _buffer_append(self, data):
-        data = memoryview(data).cast("B")
-        self._buffers.append(data)
-        self._size += len(data)
+        self._buffers.append(memoryview(data).cast("B"))
 
     def _buffer_peek(self):
-        return self._buffers[0][self._first_pos :]
+        offset = self._offset
+        buf = self._buffers[0]
+        return buf[offset:] if offset else buf
 
     def _buffer_advance(self, size):
         b = self._buffers[0]
-        self._size -= size
-        b_len = len(b) - self._first_pos
+        b_len = len(b) - self._offset
         if b_len == size:
             self._buffers.popleft()
-            self._first_pos = 0
+            self._offset = 0
         else:
-            self._first_pos += size
+            self._offset += size
 
     def write(self, data):
         transport = self.transport

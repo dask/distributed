@@ -31,7 +31,6 @@ from distributed import (
     get_worker,
     wait,
 )
-from distributed.comm.asyncio_tcp import TCPBackend
 from distributed.comm.registry import backends
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status, rpc
@@ -1538,6 +1537,7 @@ async def test_protocol_from_scheduler_address(cleanup, Worker):
 async def test_host_uses_scheduler_protocol(cleanup, monkeypatch):
     # Ensure worker uses scheduler's protocol to determine host address, not the default scheme
     # See https://github.com/dask/distributed/pull/4883
+    from distributed.comm.tcp import TCPBackend
 
     class BadBackend(TCPBackend):
         def get_address_host(self, loc):
