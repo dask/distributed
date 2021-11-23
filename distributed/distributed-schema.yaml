@@ -793,7 +793,7 @@ properties:
             description: |
               UCX provides access to other transport methods including NVLink and InfiniBand.
             properties:
-              cuda_copy:
+              cuda-copy:
                 type: [boolean, 'null']
                 description: |
                   Set environment variables to enable CUDA support over UCX. This may be used even if
