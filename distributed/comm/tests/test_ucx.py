@@ -331,7 +331,7 @@ async def test_simple():
 
 @pytest.mark.asyncio
 async def test_cuda_context():
-    with dask.config.set({"distributed.comm.ucx.create_cuda_context": True}):
+    with dask.config.set({"distributed.comm.ucx.create-cuda-context": True}):
         async with LocalCluster(
             protocol="ucx", n_workers=1, asynchronous=True
         ) as cluster:
