@@ -87,9 +87,7 @@ class Slow(zict.Func):
 
     def __setitem__(self, key, value):
         pickled = self.dump(value)
-        pickled_size = sum(
-            map(safe_sizeof, pickled)
-        )  # self.dump(value)  #this returns a list of len 3 then the size pof pickle is not the value we want
+        pickled_size = sum(len(frame) for frame in pickled)
         # print(f"{pickled= }")
         print(f"{pickled_size= }")
         if self.total_weight + pickled_size > self.max_weight:
