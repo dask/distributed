@@ -96,9 +96,11 @@ class Slow(zict.Func):
                 "Spill file on disk reached capacity; keeping data in memory"
             )
             # Stop callbacks and ensure that the key ends up in SpillBuffer.fast
+            self.total_weight -= self.weight_by_key[key].pop(key, 0)
+            self.d.pop(key, None)
             raise MaxSpillExceeded()
+        self.total_weight += pickled_size - self.weight_by_key.get(key, 0)
         self.weight_by_key[key] = pickled_size
-        self.total_weight += pickled_size
         self.d[
             key
         ] = pickled  # this goes under a set item on File which does something to pickle
