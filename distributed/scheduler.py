@@ -5679,7 +5679,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
 
     async def register_scheduler_plugin(
-        self, comm=None, plugin=None, name=None, idempotent=False
+        self, comm=None, plugin=None, name=None, idempotent=None
     ):
         """Register a plugin on the scheduler."""
         if not dask.config.get("distributed.scheduler.pickle"):
