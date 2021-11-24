@@ -5678,7 +5678,9 @@ class Scheduler(SchedulerState, ServerNode):
                 f"Could not find plugin {name!r} among the current scheduler plugins"
             )
 
-    async def register_scheduler_plugin(self, comm=None, plugin=None, name=None):
+    async def register_scheduler_plugin(
+        self, comm=None, plugin=None, name=None, idempotent=False
+    ):
         """Register a plugin on the scheduler."""
         if not dask.config.get("distributed.scheduler.pickle"):
             raise ValueError(
@@ -5694,7 +5696,7 @@ class Scheduler(SchedulerState, ServerNode):
             if inspect.isawaitable(result):
                 await result
 
-        self.add_plugin(plugin, name=name)
+        self.add_plugin(plugin, name=name, idempotent=idempotent)
 
     def worker_send(self, worker, msg):
         """Send message to worker
