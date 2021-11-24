@@ -64,11 +64,10 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
     def peer_addr(self):
         if self._transport is None:
             return "<closed>"
-        try:
-            host, port = self._transport.get_extra_info("peername")
-            return unparse_host_port(host, port)
-        except Exception:
-            return "<closed>"
+        peername = self._transport.get_extra_info("peername")
+        if peername is not None:
+            return unparse_host_port(*peername[:2])
+        return "<unknown>"
 
     @property
     def is_closed(self):
@@ -459,7 +458,6 @@ class TCPListener(Listener):
         return {}
 
     def _on_connection(self, protocol):
-        logger.debug("Incoming connection")
         comm = self.comm_class(
             protocol,
             local_addr=self.prefix + protocol.local_addr,
@@ -493,6 +491,8 @@ class TCPListener(Listener):
             flags=socket.AI_PASSIVE,
             proto=0,
         )
+        # Sort infos to always bind ipv4 before ipv6
+        infos = sorted(infos, key=lambda x: x[0].name)
         # This code is a simplified and modified version of that found in
         # cpython here:
         # https://github.com/python/cpython/blob/401272e6e660445d6556d5cd4db88ed4267a50b3/Lib/asyncio/base_events.py#L1439
