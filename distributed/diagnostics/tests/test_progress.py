@@ -208,7 +208,6 @@ async def test_group_timing(c, s, a, b):
     assert all([nt == s.total_nthreads for nt in p.nthreads])
     assert "slowinc" in p.compute
     assert "slowdec" in p.compute
-    print(p.compute)
     assert all([len(v) == len(p.time) for v in p.compute.values()])
     assert s.task_groups.keys() == p.compute.keys()
     assert all(
@@ -217,7 +216,6 @@ async def test_group_timing(c, s, a, b):
             for k, v in p.compute.items()
         ]
     )
-    print(s.task_groups)
 
     await s.restart()
     assert len(p.time) == 2
