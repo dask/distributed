@@ -96,10 +96,14 @@ class Slow(zict.Func):
                 "Spill file on disk reached capacity; keeping data in memory"
             )
             # Stop callbacks and ensure that the key ends up in SpillBuffer.fast
-            self.total_weight -= self.weight_by_key[key].pop(key, 0)
+            self.total_weight -= self.weight_by_key.pop(
+                key, 0
+            )  # isn't this taken care on delitem
             self.d.pop(key, None)
             raise MaxSpillExceeded()
-        self.total_weight += pickled_size - self.weight_by_key.get(key, 0)
+        print(f"{key = }")
+        print(f"{self.weight_by_key.get(key, 0) = }")
+        self.total_weight += pickled_size  # - self.weight_by_key.get(key, 0) seem to be not having any effect when overwriting a key because if key in slow in the buffer we delete it
         self.weight_by_key[key] = pickled_size
         self.d[
             key
@@ -107,4 +111,4 @@ class Slow(zict.Func):
 
     def __delitem__(self, key):
         super().__delitem__(key)
-        self.total_weight -= self.weight_by_key.pop(key)
+        self.total_weight -= self.weight_by_key.pop(key, 0)
