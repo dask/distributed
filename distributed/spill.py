@@ -23,7 +23,9 @@ class SpillBuffer(zict.Buffer):
     def __init__(
         self, spill_directory: str, target: int, max_spill: int | Literal[False] = False
     ):
-        if max_spill and LooseVersion(zict.__version__) <= "2.0":
+        if (
+            max_spill and LooseVersion(zict.__version__) <= "2.0"
+        ):  # this is not giving warning now because 2.0.0 > 2.0
             raise ValueError("zict > 2.0 required to set max_weight")
 
         super().__init__(
