@@ -36,12 +36,7 @@ class SpillBuffer(zict.Buffer):
         except MaxSpillExceeded:
             # key is in self.fast; no keys have been lost on eviction
             # Note: requires zict > 2.0
-            # THIS ONLY WORKS WHEN TARGET < MAX SPILL AND KEY < TOT_WEIGHT BUT KEY> MAX SPILL
-            # WE TRY TO WRITE TO FAST CAN'T GO TO DISK CAN'T KEEP IN FAST
-            #
-            # WHEN THE TARGET  < MAX SPILL AND KEY > TARGET AND KEY >MAX SPILL
-            # WE SKIP LRU, WE GO THROUGH BUFFER SET ITEM WHICH IS PASSING WHEN RAISED
-            # MAX SPILL AND KEY IS NEITHER IN SLOW NOR FAST
+
             pass
 
     @property
