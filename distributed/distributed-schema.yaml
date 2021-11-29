@@ -226,7 +226,7 @@ properties:
 
           http:
             type: object
-            decription: Settings for Dask's embedded HTTP Server
+            description: Settings for Dask's embedded HTTP Server
             properties:
               routes:
                 type: array
@@ -501,9 +501,16 @@ properties:
                   When the process memory reaches this level the nanny process will kill
                   the worker (if a nanny is present)
 
+              max-spill:
+                oneOf:
+                  - {type: string}
+                  - {enum: [false]}
+                description: |
+                Limit of number of bytes to be spilled on disk. 
+
           http:
             type: object
-            decription: Settings for Dask's embedded HTTP Server
+            description: Settings for Dask's embedded HTTP Server
             properties:
               routes:
                 type: array
