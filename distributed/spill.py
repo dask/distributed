@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 
 class SpillBuffer(zict.Buffer):
     """MutableMapping that automatically spills out dask key/value pairs to disk when
-    the total size of the stored data exceeds the target
+    the total size of the stored data exceeds the target. If max_spill is provided the
+    key/value pairs won't be spilled once this threshold has been reached.
     """
 
     def __init__(
