@@ -3549,8 +3549,8 @@ class Client(SyncMethodMixin):
                 }
             }
 
-        Paramters
-        ---------
+        Parameters
+        ----------
         filename:
             The output filename. The appropriate file suffix (`.msgpack.gz` or
             `.yaml`) will be appended automatically.
@@ -3723,8 +3723,8 @@ class Client(SyncMethodMixin):
             single argument `event` which is a tuple `(timestamp, msg)` where
             timestamp refers to the clock on the scheduler.
 
-        Example
-        -------
+        Examples
+        --------
 
         >>> import logging
         >>> logger = logging.getLogger("myLogger")  # Log config not shown
