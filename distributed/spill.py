@@ -7,6 +7,7 @@ from functools import partial
 from typing import Any
 
 import zict
+from typing_extensions import Literal
 
 from .protocol import deserialize_bytes, serialize_bytelist
 from .sizeof import safe_sizeof
@@ -19,8 +20,10 @@ class SpillBuffer(zict.Buffer):
     the total size of the stored data exceeds the target
     """
 
-    def __init__(self, spill_directory: str, target: int, max_spill: int | None = None):
-        if max_spill is not None and LooseVersion(zict.__version__) <= "2.0":
+    def __init__(
+        self, spill_directory: str, target: int, max_spill: int | Literal[False] = False
+    ):
+        if max_spill and LooseVersion(zict.__version__) <= "2.0":
             raise ValueError("zict > 2.0 required to set max_weight")
 
         super().__init__(
@@ -70,7 +73,7 @@ class Slow(zict.Func):
     weight_by_key: dict[Hashable, int]
     total_weight: int
 
-    def __init__(self, spill_directory: str, max_weight: int | None = None):
+    def __init__(self, spill_directory: str, max_weight: int | Literal[False] = False):
         super().__init__(
             partial(serialize_bytelist, on_error="raise"),
             deserialize_bytes,
@@ -83,9 +86,8 @@ class Slow(zict.Func):
     def __setitem__(self, key, value):
         pickled = self.dump(value)
         pickled_size = sum(len(frame) for frame in pickled)
-        # print(f"{pickled= }")
-        print(f"{pickled_size= }")
-        if self.total_weight + pickled_size > self.max_weight:
+
+        if self.max_weight and self.total_weight + pickled_size > self.max_weight:
             # TODO don't spam the log file with hundreds of messages per second
             logger.warning(
                 "Spill file on disk reached capacity; keeping data in memory"
