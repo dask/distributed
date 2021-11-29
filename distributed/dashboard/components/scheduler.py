@@ -56,7 +56,7 @@ from distributed.dashboard.components.shared import (
     ProfileTimePlot,
     SystemMonitor,
 )
-from distributed.dashboard.utils import BOKEH_VERSION, PROFILING, transpose, update
+from distributed.dashboard.utils import PROFILING, transpose, update
 from distributed.diagnostics.graph_layout import GraphLayout
 from distributed.diagnostics.progress_stream import color_of, progress_quads
 from distributed.diagnostics.task_stream import TaskStreamPlugin
@@ -1698,7 +1698,7 @@ class Events(DashboardComponent):
             color="color",
             size=50,
             alpha=0.5,
-            **{"legend_field" if BOKEH_VERSION >= "1.4" else "legend": "action"},
+            legend_field="action",
         )
         self.root.yaxis.axis_label = "Action"
         self.root.legend.location = "top_left"
@@ -1978,7 +1978,7 @@ class TaskGraph(DashboardComponent):
             color=node_colors,
             source=self.node_source,
             view=node_view,
-            **{"legend_field" if BOKEH_VERSION >= "1.4" else "legend": "state"},
+            legend_field="state",
         )
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
