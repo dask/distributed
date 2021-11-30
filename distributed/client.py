@@ -1470,7 +1470,8 @@ class Client(SyncMethodMixin):
         pure : bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
-            See :ref:`pure functions` for more details.
+            See `pure functions <https://distributed.dask.org/en/latest/client.html#pure-functions>`_
+            for more details.
         workers : string or iterable of strings
             A set of worker addresses or hostnames on which computations may be
             performed. Leave empty to default to all workers (common case)
@@ -1489,11 +1490,12 @@ class Client(SyncMethodMixin):
         resources : dict (defaults to {})
             Defines the ``resources`` each instance of this mapped task requires
             on the worker; e.g. ``{'GPU': 2}``.
-            See :doc:`worker resources <resources>` for details on defining
-            resources.
+            See `worker resources <https://distributed.dask.org/en/latest/resources.html>`_
+            for details on defining resources.
         actor : bool (default False)
             Whether this task should exist on the worker as a stateful actor.
-            See :doc:`actors` for additional details.
+            See `actors <https://distributed.dask.org/en/latest/actors.html>`_
+            for additional details.
         actors : bool (default False)
             Alias for `actor`
 
@@ -1594,7 +1596,8 @@ class Client(SyncMethodMixin):
         pure : bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
-            See :ref:`pure functions` for more details.
+            See `pure functions <https://distributed.dask.org/en/latest/client.html#pure-functions>`_
+            for more details.
         workers : string or iterable of strings
             A set of worker hostnames on which computations may be performed.
             Leave empty to default to all workers (common case)
@@ -1611,11 +1614,12 @@ class Client(SyncMethodMixin):
         resources : dict (defaults to {})
             Defines the `resources` each instance of this mapped task requires
             on the worker; e.g. ``{'GPU': 2}``.
-            See :doc:`worker resources <resources>` for details on defining
-            resources.
+            See `worker resources <https://distributed.dask.org/en/latest/resources.html>`_
+            for details on defining resources.
         actor : bool (default False)
             Whether these tasks should exist on the worker as stateful actors.
-            See :doc:`actors` for additional details.
+            See `actors <https://distributed.dask.org/en/latest/actors.html>`_
+            for additional details.
         actors : bool (default False)
             Alias for `actor`
         batch_size : int, optional
@@ -2648,8 +2652,8 @@ class Client(SyncMethodMixin):
         resources : dict (defaults to {})
             Defines the ``resources`` each instance of this mapped task requires
             on the worker; e.g. ``{'GPU': 2}``.
-            See :doc:`worker resources <resources>` for details on defining
-            resources.
+            See `worker resources <https://distributed.dask.org/en/latest/resources.html>`_
+            for details on defining resources.
         sync : bool (optional)
             Returns Futures if False or concrete values if True (default).
         direct : bool
@@ -2798,12 +2802,13 @@ class Client(SyncMethodMixin):
         resources : dict (defaults to {})
             Defines the `resources` each instance of this mapped task requires
             on the worker; e.g. ``{'GPU': 2}``.
-            See :doc:`worker resources <resources>` for details on defining
-            resources.
+            See `worker resources <https://distributed.dask.org/en/latest/resources.html>`_
+            for details on defining resources.
         actors : bool or dict (default None)
             Whether these tasks should exist on the worker as stateful actors.
             Specified on a global (True/False) or per-task (``{'x': True,
-            'y': False}``) basis. See :doc:`actors` for additional details.
+            'y': False}``) basis. See `actors <https://distributed.dask.org/en/latest/actors.html>`_
+            for additional details.
         **kwargs
             Options to pass to the graph optimize calls
 
@@ -2943,12 +2948,13 @@ class Client(SyncMethodMixin):
         resources : dict (defaults to {})
             Defines the `resources` each instance of this mapped task requires
             on the worker; e.g. ``{'GPU': 2}``.
-            See :doc:`worker resources <resources>` for details on defining
-            resources.
+            See `worker resources <https://distributed.dask.org/en/latest/resources.html>`_
+            for details on defining resources.
         actors : bool or dict (default None)
             Whether these tasks should exist on the worker as stateful actors.
             Specified on a global (True/False) or per-task (``{'x': True,
-            'y': False}``) basis. See :doc:`actors` for additional details.
+            'y': False}``) basis. See `actors <https://distributed.dask.org/en/latest/actors.html>`_
+            for additional details.
         **kwargs
             Options to pass to the graph optimize calls
 
@@ -4353,7 +4359,7 @@ class Client(SyncMethodMixin):
 
     @property
     def amm(self):
-        """Convenience accessors for the :doc:`active_memory_manager`"""
+        """Convenience accessors for the `active_memory_manager <https://distributed.dask.org/en/latest/active_memory_manager.html>`_"""
         from .active_memory_manager import AMMClientProxy
 
         return AMMClientProxy(self)
