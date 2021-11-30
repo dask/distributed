@@ -3307,7 +3307,7 @@ async def test_non_idempotent_plugins(s):
 
     class NonIdempotentPlugin(SchedulerPlugin):
         def __init__(self, instance=None):
-            self.name = "idempotentplugin"
+            self.name = "nonidempotentplugin"
             self.instance = instance
             self.status = None
 
@@ -3316,9 +3316,9 @@ async def test_non_idempotent_plugins(s):
 
     first = NonIdempotentPlugin(instance="first")
     await s.register_scheduler_plugin(plugin=dumps(first), idempotent=False)
-    assert "idempotentplugin" in s.plugins
+    assert "nonidempotentplugin" in s.plugins
 
     second = NonIdempotentPlugin(instance="second")
     await s.register_scheduler_plugin(plugin=dumps(second), idempotent=False)
-    assert "idempotentplugin" in s.plugins
-    assert s.plugins["idempotentplugin"].instance == "second"
+    assert "nonidempotentplugin" in s.plugins
+    assert s.plugins["nonidempotentplugin"].instance == "second"
