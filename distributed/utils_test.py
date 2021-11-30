@@ -804,10 +804,7 @@ def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
                 loop.run_sync(coro, timeout=timeout)
 
         # Patch the signature so pytest can inject fixtures
-        orig_sig = inspect.signature(func)
-        test_func.__signature__ = orig_sig.replace(
-            parameters=[p for _, p in orig_sig.parameters.items()]
-        )
+        test_func.__signature__ = inspect.signature(func)
         return test_func
 
     return _
