@@ -152,13 +152,18 @@ async def test_gen_cluster_tls(e, s, a, b):
     assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
 
 
+@pytest.mark.xfail(
+    reason="Test should always fail to ensure the body of the test function was run",
+    strict=True,
+)
 @gen_test()
 async def test_gen_test():
     await asyncio.sleep(0.01)
+    assert False
 
 
 @pytest.mark.xfail(
-    reason="Test should fail to ensure the body of the test function was run",
+    reason="Test should always fail to ensure the body of the test function was run",
     strict=True,
 )
 @gen_test()
@@ -168,7 +173,7 @@ def test_gen_test_legacy_implicit():
 
 
 @pytest.mark.xfail(
-    reason="Test should fail to ensure the body of the test function was run",
+    reason="Test should always fail to ensure the body of the test function was run",
     strict=True,
 )
 @gen_test()
