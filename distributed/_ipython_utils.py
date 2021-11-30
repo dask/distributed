@@ -211,6 +211,8 @@ def start_ipython(ip=None, ns=None, log=None):
     evt = Event()
 
     def _start():
+        # Create a new event loop for the new thread
+        loop = IOLoop()
         app.initialize([])
         app.kernel.pre_handler_hook = noop
         app.kernel.post_handler_hook = noop
@@ -220,8 +222,8 @@ def start_ipython(ip=None, ns=None, log=None):
         if ns:
             app.kernel.shell.user_ns.update(ns)
         evt.set()
-        # start the app's IOLoop in its thread
-        IOLoop.current().start()
+        # Start the event loop
+        loop.start()
 
     zmq_loop_thread = Thread(target=_start)
     zmq_loop_thread.daemon = True

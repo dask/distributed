@@ -77,6 +77,7 @@ from .utils import (
     get_ip,
     has_arg,
     import_file,
+    in_async_call,
     iscoroutinefunction,
     json_load_robust,
     key_split,
@@ -1411,7 +1412,6 @@ class Worker(ServerNode):
         await super().start()
 
         enable_gc_diagnosis()
-        thread_state.on_event_loop_thread = True
 
         ports = parse_ports(self._start_port)
         for port in ports:
@@ -3954,7 +3954,7 @@ class Worker(ServerNode):
         if not self._client:
             from .client import Client
 
-            asynchronous = self.loop is IOLoop.current()
+            asynchronous = in_async_call(self.loop)
             self._client = Client(
                 self.scheduler,
                 loop=self.loop,

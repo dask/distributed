@@ -5034,12 +5034,13 @@ async def test_get_client(c, s, a, b):
     assert c.asynchronous
 
     def f(x):
-        client = get_client()
-        future = client.submit(inc, x)
         import distributed
 
+        client = get_client()
         assert not client.asynchronous
         assert client is distributed.tmp_client
+
+        future = client.submit(inc, x)
         return future.result()
 
     import distributed
