@@ -3282,7 +3282,6 @@ async def test_idempotent_plugins(s):
         def __init__(self, instance=None):
             self.name = "idempotentplugin"
             self.instance = instance
-            self.status = None
 
         def start(self, scheduler):
             if self.instance != "first":
@@ -3309,10 +3308,6 @@ async def test_non_idempotent_plugins(s):
         def __init__(self, instance=None):
             self.name = "nonidempotentplugin"
             self.instance = instance
-            self.status = None
-
-        def start(self, scheduler):
-            pass
 
     first = NonIdempotentPlugin(instance="first")
     await s.register_scheduler_plugin(plugin=dumps(first), idempotent=False)
