@@ -5691,6 +5691,12 @@ class Scheduler(SchedulerState, ServerNode):
             )
         plugin = loads(plugin)
 
+        if name is None:
+            name = _get_plugin_name(plugin)
+
+        if name in self.plugins and idempotent:
+            return
+
         if hasattr(plugin, "start"):
             result = plugin.start(self)
             if inspect.isawaitable(result):
