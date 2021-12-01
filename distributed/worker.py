@@ -567,7 +567,7 @@ class Worker(ServerNode):
         memory_target_fraction: float | Literal[False] | None = None,
         memory_spill_fraction: float | Literal[False] | None = None,
         memory_pause_fraction: float | Literal[False] | None = None,
-        max_spill: str | Literal[False] | None = None,
+        max_spill: float | str | Literal[False] | None = None,
         extensions: list[type] | None = None,
         metrics: Mapping[str, Callable[[Worker], Any]] = DEFAULT_METRICS,
         startup_information: Mapping[
