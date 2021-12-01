@@ -4,10 +4,10 @@ import logging
 from collections.abc import Hashable, Mapping
 from distutils.version import LooseVersion
 from functools import partial
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import zict
-from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from typing_extensions import Literal
 
@@ -27,9 +27,9 @@ class SpillBuffer(zict.Buffer):
         self, spill_directory: str, target: int, max_spill: int | Literal[False] = False
     ):
         if (
-            max_spill and LooseVersion(zict.__version__) <= "2.0"
-        ):  # this is not giving warning now because 2.0.0 > 2.0
-            raise ValueError("zict > 2.0 required to set max_weight")
+            max_spill is not False and LooseVersion(zict.__version__) <= "2.0"
+        ):  # FIX ME WHEN zict is released us LooseVersion(zict.__version__) <= "2.0.0"
+            raise ValueError("zict > 2.0.0 required to set max_weight")
 
         super().__init__(
             fast={},
