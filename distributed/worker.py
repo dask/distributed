@@ -816,11 +816,9 @@ class Worker(ServerNode):
             else dask.config.get("distributed.worker.memory.pause")
         )
 
-        self.max_spill = (
-            parse_bytes(max_spill)
-            if max_spill is not None
-            else dask.config.get("distributed.worker.memory.max-spill")
-        )
+        if max_spill is None:
+            max_spill = dask.config.get("distributed.worker.memory.max-spill")
+        self.max_spill = False if max_spill is False else parse_bytes(max_spill)
 
         if isinstance(data, MutableMapping):
             self.data = data
