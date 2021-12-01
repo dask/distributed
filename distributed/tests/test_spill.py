@@ -142,7 +142,7 @@ def test_spillbuffer_maxlim(tmpdir):
         buf["d"] = d
 
     assert (
-        len(logs_d.getvalue().rstrip().split("\n")) == 2
+        logs_d.getvalue().count("disk reached capacity") == 2
     )  # we have two spill exceptions raised
 
     assert set(buf.fast) == {"c", "d"}
@@ -167,7 +167,7 @@ def test_spillbuffer_maxlim(tmpdir):
         buf["a"] = a_large
 
     assert (
-        len(logs_alarge.getvalue().rstrip().split("\n")) == 2
+        logs_alarge.getvalue().count("disk reached capacity") == 2
     )  # we have two spill exceptions raised
 
     assert set(buf.fast) == {"a", "d"}
@@ -187,7 +187,7 @@ def test_spillbuffer_maxlim(tmpdir):
         buf["d"] = d_large
 
     assert (
-        len(logs_dlarge.getvalue().rstrip().split("\n")) == 2
+        logs_dlarge.getvalue().count("disk reached capacity") == 2
     )  # we have two spill exceptions raised
 
     assert set(buf.fast) == {"a", "d"}
