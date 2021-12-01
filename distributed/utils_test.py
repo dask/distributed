@@ -41,6 +41,7 @@ except ImportError:
 
 import pytest
 from tlz import assoc, memoize, merge
+from tornado import gen
 from tornado.ioloop import IOLoop
 
 import dask
@@ -792,15 +793,15 @@ def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
     )
 
     def _(func):
-        @functools.wraps(func)
         def test_func(*outer_args, **kwargs):
             with clean() as loop:
+                injected_func = functools.partial(func, *outer_args, **kwargs)
+                if iscoroutinefunction(func):
+                    cor = injected_func
+                else:
+                    cor = gen.coroutine(injected_func)
 
-                async def coro():
-                    coro = func(*outer_args, **kwargs)
-                    return coro
-
-                loop.run_sync(coro, timeout=timeout)
+                loop.run_sync(cor, timeout=timeout)
 
         # Patch the signature so pytest can inject fixtures
         test_func.__signature__ = inspect.signature(func)

@@ -152,14 +152,24 @@ async def test_gen_cluster_tls(e, s, a, b):
     assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
 
 
+@pytest.mark.xfail(
+    reason="Test should always fail to ensure the body of the test function was run",
+    strict=True,
+)
 @gen_test()
 async def test_gen_test():
     await asyncio.sleep(0.01)
+    assert False
 
 
+@pytest.mark.xfail(
+    reason="Test should always fail to ensure the body of the test function was run",
+    strict=True,
+)
 @gen_test()
 def test_gen_test_legacy_implicit():
     yield asyncio.sleep(0.01)
+    assert False
 
 
 @gen_test()
@@ -168,20 +178,24 @@ def test_gen_test_legacy_explicit():
     yield asyncio.sleep(0.01)
 
 
-@pytest.mark.parametrize("foo", ["True"])
+@pytest.mark.parametrize("foo", [True])
 @gen_test()
 async def test_gen_test_parametrized(foo):
     assert foo is True
-    await asyncio.sleep(0.01)
 
 
-@pytest.mark.parametrize("foo", ["True"])
-@pytest.mark.parametrize("bar", ["False"])
+@pytest.mark.parametrize("foo", [True])
+@pytest.mark.parametrize("bar", [False])
 @gen_test()
 async def test_gen_test_double_parametrized(foo, bar):
     assert foo is True
     assert bar is False
-    await asyncio.sleep(0.01)
+
+
+@gen_test()
+async def test_gen_test_pytest_fixture(tmp_path, c):
+    assert isinstance(tmp_path, pathlib.Path)
+    assert isinstance(c, Client)
 
 
 @contextmanager
