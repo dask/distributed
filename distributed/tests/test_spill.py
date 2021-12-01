@@ -141,3 +141,36 @@ def test_spillbuffer_maxlim(tmpdir):
     assert buf.fast.weights == {"c": sc, "d": sd}
     assert buf["d"] == d
     assert buf.fast.total_weight == sc + sd
+
+    # Overwrite a key that was in slow, but the size of the new key is larger than max_spill
+    # We overwrite `a` with something bigger than max_spill, it will try to write in slow
+    # it will trigger exception and locate it in fast, where it will trigger total_weight being
+    # bigger than the target and the LRU dict has more than one element, causing this to evict
+    # `c` (lower priority) with no compalins since we have room on slow. But this condition
+    # self.total_weight > self.n and len(self.d) > 1 is still true on the LRU (we have `a` and `d`
+    # here) so it'll try to evict `d` but it doesn't fit in slow, which will trigger another exception
+    # kepping it finally on fast
+
+    a_large = "a" * 500
+    psize_alarge = sum(len(frame) for frame in serialize_bytelist(a_large))
+    assert psize_alarge > 600  # size of max_spill
+
+    buf["a"] = a_large
+    assert set(buf.fast) == {"a", "d"}
+    assert set(buf.slow) == {"b", "c"}
+    assert buf.fast.total_weight == sd + sizeof(a_large)
+    assert buf.slow.total_weight == 2 * psize_b
+
+    # Overwrite a key that was in fast, but the size of the new key is larger than max_spill
+    # We overwrite `d` with something bigger than max_spill, it will try to write in slow
+    # it will trigger exception and locate it in fast, where it will trigger total_weight being
+    # bigger than the target and the LRU dict has more than one element, this will try to evict
+    # `a` (lower priority) but it will fail because it doesn't fit in slow, which will trigger
+    # another exception kepping it finally on fast
+
+    d_large = "d" * 500
+    buf["d"] = d_large
+    assert set(buf.fast) == {"a", "d"}
+    assert set(buf.slow) == {"b", "c"}
+    assert buf.fast.total_weight == 2 * sizeof(a_large)
+    assert buf.slow.total_weight == 2 * psize_b
