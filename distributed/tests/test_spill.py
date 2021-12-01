@@ -1,9 +1,12 @@
+import logging
+
 import pytest
 
 from dask.sizeof import sizeof
 
 from distributed.protocol import serialize_bytelist
 from distributed.spill import SpillBuffer
+from distributed.utils_test import captured_logger
 
 
 def test_spillbuffer(tmpdir):
@@ -135,8 +138,13 @@ def test_spillbuffer_maxlim(tmpdir):
     # size of d > target, d should go to slow but slow reached the max_spill limit then d
     # will end up on fast with c (which can't be move to slow because it won't fit either)
     sd = sizeof(d)
+    with captured_logger(logging.getLogger("distributed.spill")) as logs_d:
+        buf["d"] = d
 
-    buf["d"] = d
+    assert (
+        len(logs_d.getvalue().rstrip().split("\n")) == 2
+    )  # we have two spill exceptions raised
+
     assert set(buf.fast) == {"c", "d"}
     assert buf.fast.weights == {"c": sc, "d": sd}
     assert buf["d"] == d
@@ -155,7 +163,13 @@ def test_spillbuffer_maxlim(tmpdir):
     psize_alarge = sum(len(frame) for frame in serialize_bytelist(a_large))
     assert psize_alarge > 600  # size of max_spill
 
-    buf["a"] = a_large
+    with captured_logger(logging.getLogger("distributed.spill")) as logs_alarge:
+        buf["a"] = a_large
+
+    assert (
+        len(logs_alarge.getvalue().rstrip().split("\n")) == 2
+    )  # we have two spill exceptions raised
+
     assert set(buf.fast) == {"a", "d"}
     assert set(buf.slow) == {"b", "c"}
     assert buf.fast.total_weight == sd + sizeof(a_large)
@@ -169,7 +183,13 @@ def test_spillbuffer_maxlim(tmpdir):
     # another exception kepping it finally on fast
 
     d_large = "d" * 500
-    buf["d"] = d_large
+    with captured_logger(logging.getLogger("distributed.spill")) as logs_dlarge:
+        buf["d"] = d_large
+
+    assert (
+        len(logs_dlarge.getvalue().rstrip().split("\n")) == 2
+    )  # we have two spill exceptions raised
+
     assert set(buf.fast) == {"a", "d"}
     assert set(buf.slow) == {"b", "c"}
     assert buf.fast.total_weight == 2 * sizeof(a_large)
