@@ -7,7 +7,9 @@ from functools import partial
 from typing import Any
 
 import zict
-from typing_extensions import Literal
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from typing_extensions import Literal
 
 from .protocol import deserialize_bytes, serialize_bytelist
 from .sizeof import safe_sizeof
