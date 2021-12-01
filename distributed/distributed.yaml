@@ -145,7 +145,7 @@ distributed:
       pause: 0.80  # fraction at which we pause worker threads
       terminate: 0.95  # fraction at which we terminate the worker
 
-      #max spill to disk
+      # max size of the spill file on disk (e.g. "10 GB")
       max-spill: False
 
     http:
