@@ -1470,7 +1470,7 @@ class Client(SyncMethodMixin):
         pure : bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
-            See `pure functions <https://distributed.dask.org/en/latest/client.html#pure-functions>`_
+            See `pure functions <https://distributed.dask.org/en/stable/client.html#pure-functions>`_
             for more details.
         workers : string or iterable of strings
             A set of worker addresses or hostnames on which computations may be
@@ -1490,11 +1490,11 @@ class Client(SyncMethodMixin):
         resources : dict (defaults to {})
             Defines the ``resources`` each instance of this mapped task requires
             on the worker; e.g. ``{'GPU': 2}``.
-            See `worker resources <https://distributed.dask.org/en/latest/resources.html>`_
+            See `worker resources <https://distributed.dask.org/en/stable/resources.html>`_
             for details on defining resources.
         actor : bool (default False)
             Whether this task should exist on the worker as a stateful actor.
-            See `actors <https://distributed.dask.org/en/latest/actors.html>`_
+            See `actors <https://distributed.dask.org/en/stable/actors.html>`_
             for additional details.
         actors : bool (default False)
             Alias for `actor`
@@ -1596,7 +1596,7 @@ class Client(SyncMethodMixin):
         pure : bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
-            See `pure functions <https://distributed.dask.org/en/latest/client.html#pure-functions>`_
+            See `pure functions <https://distributed.dask.org/en/stable/client.html#pure-functions>`_
             for more details.
         workers : string or iterable of strings
             A set of worker hostnames on which computations may be performed.
@@ -1614,11 +1614,11 @@ class Client(SyncMethodMixin):
         resources : dict (defaults to {})
             Defines the `resources` each instance of this mapped task requires
             on the worker; e.g. ``{'GPU': 2}``.
-            See `worker resources <https://distributed.dask.org/en/latest/resources.html>`_
+            See `worker resources <https://distributed.dask.org/en/stable/resources.html>`_
             for details on defining resources.
         actor : bool (default False)
             Whether these tasks should exist on the worker as stateful actors.
-            See `actors <https://distributed.dask.org/en/latest/actors.html>`_
+            See `actors <https://distributed.dask.org/en/stable/actors.html>`_
             for additional details.
         actors : bool (default False)
             Alias for `actor`
@@ -2652,7 +2652,7 @@ class Client(SyncMethodMixin):
         resources : dict (defaults to {})
             Defines the ``resources`` each instance of this mapped task requires
             on the worker; e.g. ``{'GPU': 2}``.
-            See `worker resources <https://distributed.dask.org/en/latest/resources.html>`_
+            See `worker resources <https://distributed.dask.org/en/stable/resources.html>`_
             for details on defining resources.
         sync : bool (optional)
             Returns Futures if False or concrete values if True (default).
@@ -2802,12 +2802,12 @@ class Client(SyncMethodMixin):
         resources : dict (defaults to {})
             Defines the `resources` each instance of this mapped task requires
             on the worker; e.g. ``{'GPU': 2}``.
-            See `worker resources <https://distributed.dask.org/en/latest/resources.html>`_
+            See `worker resources <https://distributed.dask.org/en/stable/resources.html>`_
             for details on defining resources.
         actors : bool or dict (default None)
             Whether these tasks should exist on the worker as stateful actors.
             Specified on a global (True/False) or per-task (``{'x': True,
-            'y': False}``) basis. See `actors <https://distributed.dask.org/en/latest/actors.html>`_
+            'y': False}``) basis. See `actors <https://distributed.dask.org/en/stable/actors.html>`_
             for additional details.
         **kwargs
             Options to pass to the graph optimize calls
@@ -2948,12 +2948,12 @@ class Client(SyncMethodMixin):
         resources : dict (defaults to {})
             Defines the `resources` each instance of this mapped task requires
             on the worker; e.g. ``{'GPU': 2}``.
-            See `worker resources <https://distributed.dask.org/en/latest/resources.html>`_
+            See `worker resources <https://distributed.dask.org/en/stable/resources.html>`_
             for details on defining resources.
         actors : bool or dict (default None)
             Whether these tasks should exist on the worker as stateful actors.
             Specified on a global (True/False) or per-task (``{'x': True,
-            'y': False}``) basis. See `actors <https://distributed.dask.org/en/latest/actors.html>`_
+            'y': False}``) basis. See `actors <https://distributed.dask.org/en/stable/actors.html>`_
             for additional details.
         **kwargs
             Options to pass to the graph optimize calls
@@ -4169,7 +4169,7 @@ class Client(SyncMethodMixin):
     def register_scheduler_plugin(self, plugin, name=None, **kwargs):
         """Register a scheduler plugin.
 
-        See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
+        See https://distributed.readthedocs.io/en/stable/plugins.html#scheduler-plugins
 
         Parameters
         ----------
@@ -4359,7 +4359,7 @@ class Client(SyncMethodMixin):
 
     @property
     def amm(self):
-        """Convenience accessors for the `active_memory_manager <https://distributed.dask.org/en/latest/active_memory_manager.html>`_"""
+        """Convenience accessors for the `active_memory_manager <https://distributed.dask.org/en/stable/active_memory_manager.html>`_"""
         from .active_memory_manager import AMMClientProxy
 
         return AMMClientProxy(self)
