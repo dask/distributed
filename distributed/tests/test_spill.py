@@ -24,34 +24,34 @@ def test_spillbuffer(tmpdir):
     assert 100 < s < 200
 
     buf["a"] = a
-    assert not buf.disk
+    assert not buf.slow
     assert not buf.slow.weight_by_key
     assert buf.slow.total_weight == 0
     assert buf["a"] == a
 
     buf["b"] = b
-    assert not buf.disk
+    assert not buf.slow
     assert not buf.slow.weight_by_key
     assert buf.slow.total_weight == 0
 
     buf["c"] = c
-    assert set(buf.disk) == {"a"}
+    assert set(buf.slow) == {"a"}
     assert buf.slow.weight_by_key == {"a": pickle_size}
     assert buf.slow.total_weight == pickle_size
 
     assert buf["a"] == a
-    assert set(buf.disk) == {"b"}
+    assert set(buf.slow) == {"b"}
     assert buf.slow.weight_by_key == {"b": pickle_size}
     assert buf.slow.total_weight == pickle_size
 
     buf["d"] = d
-    assert set(buf.disk) == {"b", "c"}
+    assert set(buf.slow) == {"b", "c"}
     assert buf.slow.weight_by_key == {"b": pickle_size, "c": pickle_size}
     assert buf.slow.total_weight == pickle_size * 2
 
     # Deleting an in-memory key does not automatically move spilled keys back to memory
     del buf["a"]
-    assert set(buf.disk) == {"b", "c"}
+    assert set(buf.slow) == {"b", "c"}
     assert buf.slow.weight_by_key == {"b": pickle_size, "c": pickle_size}
     assert buf.slow.total_weight == pickle_size * 2
     with pytest.raises(KeyError):
@@ -59,7 +59,7 @@ def test_spillbuffer(tmpdir):
 
     # Deleting a spilled key updates the metadata
     del buf["b"]
-    assert set(buf.disk) == {"c"}
+    assert set(buf.slow) == {"c"}
     assert buf.slow.weight_by_key == {"c": pickle_size}
     assert buf.slow.total_weight == pickle_size
     with pytest.raises(KeyError):
@@ -67,7 +67,7 @@ def test_spillbuffer(tmpdir):
 
     # Updating a spilled key moves it to the top of the LRU and to memory
     buf["c"] = c * 2
-    assert set(buf.disk) == {"d"}
+    assert set(buf.slow) == {"d"}
     assert buf.slow.weight_by_key == {"d": pickle_size}
     assert buf.slow.total_weight == pickle_size
 
@@ -76,13 +76,13 @@ def test_spillbuffer(tmpdir):
     pickle_large_size = sum(len(frame) for frame in serialize_bytelist(e))
 
     buf["e"] = e
-    assert set(buf.disk) == {"d", "e"}
+    assert set(buf.slow) == {"d", "e"}
     assert buf.slow.weight_by_key == {"d": pickle_size, "e": pickle_large_size}
     assert buf.slow.total_weight == pickle_size + pickle_large_size
 
     # Updating a spilled key with another larger than target updates slow directly
     buf["d"] = "d" * 500
-    assert set(buf.disk) == {"d", "e"}
+    assert set(buf.slow) == {"d", "e"}
     assert buf.slow.weight_by_key == {"d": pickle_large_size, "e": pickle_large_size}
     assert buf.slow.total_weight == pickle_large_size * 2
 
@@ -102,9 +102,9 @@ def test_spillbuffer_maxlim(tmpdir):
 
     # size of a is bigger than target and is smaller than max_spill, key should be in slow
     buf["a"] = a
-    assert not buf.memory
+    assert not buf.fast
     assert not buf.fast.weights
-    assert set(buf.disk) == {"a"}
+    assert set(buf.slow) == {"a"}
     assert buf.slow.weight_by_key == {"a": psize_a}
     assert buf.slow.total_weight == psize_a
     assert buf["a"] == a
@@ -112,7 +112,7 @@ def test_spillbuffer_maxlim(tmpdir):
     # size of b is smaller than target key should be in fast
     sb = sizeof(b)
     buf["b"] = b
-    assert set(buf.memory) == {"b"}
+    assert set(buf.fast) == {"b"}
     assert buf.fast.weights == {"b": sb}
     assert buf["b"] == b
     assert buf.fast.total_weight == sb
@@ -123,12 +123,12 @@ def test_spillbuffer_maxlim(tmpdir):
     psize_b = sum(len(frame) for frame in serialize_bytelist(b))
 
     buf["c"] = c
-    assert set(buf.memory) == {"c"}
+    assert set(buf.fast) == {"c"}
     assert buf.fast.weights == {"c": sc}
     assert buf["c"] == c
     assert buf.fast.total_weight == sc
 
-    assert set(buf.disk) == {"a", "b"}
+    assert set(buf.slow) == {"a", "b"}
     assert buf.slow.weight_by_key == {"a": psize_a, "b": psize_b}
     assert buf.slow.total_weight == psize_a + psize_b
 
@@ -137,7 +137,7 @@ def test_spillbuffer_maxlim(tmpdir):
     sd = sizeof(d)
 
     buf["d"] = d
-    assert set(buf.memory) == {"c", "d"}
+    assert set(buf.fast) == {"c", "d"}
     assert buf.fast.weights == {"c": sc, "d": sd}
     assert buf["d"] == d
     assert buf.fast.total_weight == sc + sd
