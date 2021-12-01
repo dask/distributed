@@ -91,7 +91,6 @@ class Slow(zict.Func):
     def __setitem__(self, key, value):
         pickled = self.dump(value)
         pickled_size = sum(len(frame) for frame in pickled)
-
         if self.max_weight and self.total_weight + pickled_size > self.max_weight:
             # TODO don't spam the log file with hundreds of messages per second
             logger.warning(
@@ -100,9 +99,10 @@ class Slow(zict.Func):
             # Stop callbacks and ensure that the key ends up in SpillBuffer.fast
             self.total_weight -= self.weight_by_key.pop(
                 key, 0
-            )  # isn't this taken care on delitem
+            )  # isn't this taken care when we pop an item? triggering del
             self.d.pop(key, None)
             raise MaxSpillExceeded()
+
         self.total_weight += pickled_size  # - self.weight_by_key.get(key, 0) seem to be not having any effect when overwriting a key because if key in slow in the buffer we delete it
         self.weight_by_key[key] = pickled_size
         self.d[
