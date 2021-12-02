@@ -442,32 +442,31 @@ async def test_io_loop(s):
 @gen_cluster(client=True, nthreads=[])
 async def test_spill_to_disk(c, s):
     np = pytest.importorskip("numpy")
-    w = await Worker(
+    async with Worker(
         s.address,
         loop=s.loop,
         memory_limit=1200 / 0.6,
         memory_pause_fraction=None,
         memory_spill_fraction=None,
-    )
+    ) as w:
 
-    x = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="x")
-    await wait(x)
-    y = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="y")
-    await wait(y)
+        x = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="x")
+        await wait(x)
+        y = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="y")
+        await wait(y)
 
-    assert set(w.data) == {x.key, y.key}
-    assert set(w.data.memory) == {x.key, y.key}
+        assert set(w.data) == {x.key, y.key}
+        assert set(w.data.memory) == {x.key, y.key}
 
-    z = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="z")
-    await wait(z)
-    assert set(w.data) == {x.key, y.key, z.key}
-    assert set(w.data.memory) == {y.key, z.key}
-    assert set(w.data.disk) == {x.key}
+        z = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="z")
+        await wait(z)
+        assert set(w.data) == {x.key, y.key, z.key}
+        assert set(w.data.memory) == {y.key, z.key}
+        assert set(w.data.disk) == {x.key}
 
-    await x
-    assert set(w.data.memory) == {x.key, z.key}
-    assert set(w.data.disk) == {y.key}
-    await w.close()
+        await x
+        assert set(w.data.memory) == {x.key, z.key}
+        assert set(w.data.disk) == {y.key}
 
 
 @gen_cluster(client=True)
