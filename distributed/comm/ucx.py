@@ -25,6 +25,8 @@ from .utils import ensure_concrete_host, from_frames, to_frames
 
 logger = logging.getLogger(__name__)
 
+# TRIGGER CI
+
 # In order to avoid double init when forking/spawning new processes (multiprocess),
 # we make sure only to import and initialize UCX once at first use. This is also
 # required to ensure Dask configuration gets propagated to UCX, which needs
