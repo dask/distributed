@@ -1147,9 +1147,9 @@ class Worker(ServerNode):
             "memory_spill_fraction": self.memory_spill_fraction,
             "memory_pause_fraction": self.memory_pause_fraction,
             "logs": self.get_logs(),
-            "config": dict(dask.config.config),
-            "incoming_transfer_log": list(self.incoming_transfer_log),
-            "outgoing_transfer_log": list(self.outgoing_transfer_log),
+            "config": dask.config.config,
+            "incoming_transfer_log": self.incoming_transfer_log,
+            "outgoing_transfer_log": self.outgoing_transfer_log,
         }
         info.update(extra)
         return recursive_to_dict(info, exclude=exclude)

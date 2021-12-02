@@ -4001,14 +4001,10 @@ class Scheduler(SchedulerState, ServerNode):
             "log": self.log,
             "tasks": self.tasks,
             "events": self.events,
+            "extensions": self.extensions,
         }
-        info.update(extra)
-        extensions = {}
-        for name, ex in self.extensions.items():
-            if hasattr(ex, "_to_dict"):
-                extensions[name] = ex._to_dict()
-        info["extensions"] = extensions
-        return recursive_to_dict(info, exclude=exclude)
+        info.update(recursive_to_dict(extra, exclude=exclude))
+        return info
 
     def get_worker_service_addr(self, worker, service_name, protocol=False):
         """
