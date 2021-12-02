@@ -331,7 +331,7 @@ async def test_simple():
 
 @pytest.mark.asyncio
 async def test_cuda_context():
-    with dask.config.set({"distributed.comm.ucx.create_cuda_context": True}):
+    with dask.config.set({"distributed.comm.ucx.create-cuda-context": True}):
         async with LocalCluster(
             protocol="ucx", n_workers=1, asynchronous=True
         ) as cluster:
@@ -361,3 +361,8 @@ async def test_transpose():
 async def test_ucx_protocol(cleanup, port):
     async with Scheduler(protocol="ucx", port=port, dashboard_address=":0") as s:
         assert s.address.startswith("ucx://")
+
+
+def test_ucx_unreachable():
+    with pytest.raises(OSError, match="Timed out trying to connect to"):
+        Client("ucx://255.255.255.255:12345", timeout=1)
