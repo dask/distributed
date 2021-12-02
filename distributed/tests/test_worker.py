@@ -469,6 +469,54 @@ async def test_spill_to_disk(c, s):
         assert set(w.data.disk) == {y.key}
 
 
+@gen_cluster(client=True, nthreads=[])
+async def test_spill_to_disk_constrained(c, s):
+    np = pytest.importorskip("numpy")
+    async with Worker(
+        s.address,
+        loop=s.loop,
+        memory_limit=1600,
+        memory_pause_fraction=None,
+        memory_spill_fraction=None,
+        max_spill=600,
+    ) as w:
+
+        # since memory_spill_fraction=None spills starts at 1600*0.7=1120
+        # size of x on disk would be 425 (it fits)
+        # size of z on disk would be 726 (does not fit)
+
+        x = c.submit(
+            np.random.randint, 0, 255, size=200, dtype="u1", key="x"
+        )  # size on memory 200
+        await wait(x)
+        y = c.submit(
+            np.random.randint, 0, 255, size=500, dtype="u1", key="y"
+        )  # size on memory 500
+        await wait(y)
+
+        assert set(w.data) == {x.key, y.key}
+        assert set(w.data.memory) == {x.key, y.key}
+
+        z = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="z")
+        await wait(z)
+        assert set(w.data) == {x.key, y.key, z.key}
+        assert set(w.data.memory) == {
+            y.key,
+            z.key,
+        }  # z does not fit in disk keep in memory
+        assert set(w.data.disk) == {x.key}  # target memory exceeded evict x
+
+        zb = c.submit(np.random.randint, 0, 255, size=1700, dtype="u1", key="zb")
+        await wait(zb)
+        assert set(w.data) == {x.key, y.key, z.key, zb.key}
+        assert set(w.data.memory) == {
+            y.key,
+            z.key,
+            zb.key,
+        }  # zb does not fit in disk keep in memory
+        assert set(w.data.disk) == {x.key}  # only x fits on disk
+
+
 @gen_cluster(client=True)
 async def test_access_key(c, s, a, b):
     def f(i):
