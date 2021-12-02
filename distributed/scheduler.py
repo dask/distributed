@@ -1732,7 +1732,7 @@ class TaskState:
         return nbytes
 
     @ccall
-    def _to_dict(self, *, exclude: "Container[str]" = ()) -> dict:
+    def _to_dict(self, *, exclude: "Container[str]" = ()):  # -> dict
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
