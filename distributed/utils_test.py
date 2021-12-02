@@ -855,9 +855,9 @@ async def start_cluster(
 async def end_cluster(s, workers):
     logger.debug("Closing out test cluster")
 
-    async def end_worker(w):
+    async def end_worker(w: Worker):
         with suppress(TimeoutError, CommClosedError, EnvironmentError):
-            await w.close(report=False)
+            await w.close(report=False, timeout=2)
 
     await asyncio.gather(*(end_worker(w) for w in workers))
     await s.close()  # wait until scheduler stops completely
@@ -1005,7 +1005,7 @@ def gen_cluster(
                                     )
 
                             task.cancel()
-                            while not task.cancelled():
+                            while not task.done():
                                 await asyncio.sleep(0.01)
                             raise TimeoutError(
                                 f"Test timeout after {timeout}s.\n{buffer.getvalue()}"
