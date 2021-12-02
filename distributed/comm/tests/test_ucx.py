@@ -363,6 +363,10 @@ async def test_ucx_protocol(cleanup, port):
         assert s.address.startswith("ucx://")
 
 
+@pytest.mark.skipif(
+    not hasattr(ucp._libs.exceptions, "UCXUnreachable"),
+    reason="Requires UCX-Py support for UCXUnreachable exception",
+)
 def test_ucx_unreachable():
     with pytest.raises(OSError, match="Timed out trying to connect to"):
         Client("ucx://255.255.255.255:12345", timeout=1)
