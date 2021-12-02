@@ -361,3 +361,8 @@ async def test_transpose():
 async def test_ucx_protocol(cleanup, port):
     async with Scheduler(protocol="ucx", port=port, dashboard_address=":0") as s:
         assert s.address.startswith("ucx://")
+
+
+def test_ucx_unreachable():
+    with pytest.raises(OSError, match="Timed out trying to connect to"):
+        Client("ucx://255.255.255.255:12345", timeout=1)
