@@ -4,7 +4,7 @@ import logging
 from collections import defaultdict, deque
 from math import log2
 from time import time
-from typing import Any, Container
+from typing import Container
 
 from tlz import topk
 from tornado.ioloop import PeriodicCallback
@@ -82,7 +82,7 @@ class WorkStealing(SchedulerPlugin):
 
         self.scheduler.stream_handlers["steal-response"] = self.move_task_confirm
 
-    def _to_dict(self, *, exclude: Container[str] = None) -> dict[str, Any]:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not inteded for roundtrips.

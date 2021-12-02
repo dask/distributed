@@ -3255,11 +3255,12 @@ async def test__to_dict(c, s, a, b):
     futs = c.map(inc, range(100))
 
     await c.gather(futs)
-    dct = Scheduler._to_dict(s)
-    assert list(dct.keys()) == [
+    d = Scheduler._to_dict(s)
+    assert d.keys() == {
         "type",
         "id",
         "address",
+        "extensions",
         "services",
         "started",
         "workers",
@@ -3269,5 +3270,5 @@ async def test__to_dict(c, s, a, b):
         "log",
         "tasks",
         "events",
-    ]
-    assert dct["tasks"][futs[0].key]
+    }
+    assert d["tasks"][futs[0].key]

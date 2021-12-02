@@ -225,7 +225,7 @@ class TaskState:
         nbytes = self.nbytes
         return nbytes if nbytes is not None else DEFAULT_DATA_SIZE
 
-    def _to_dict(self, *, exclude: Container[str] = None) -> dict[str, Any]:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not inteded for roundtrips.
@@ -240,16 +240,8 @@ class TaskState:
         --------
         Client.dump_cluster_state
         """
-
-        if exclude is None:
-            exclude = set()
-
         return recursive_to_dict(
-            {
-                attr: getattr(self, attr)
-                for attr in self.__dict__.keys()
-                if attr not in exclude
-            },
+            {k: v for k, v in self.__dict__.items() if k not in exclude},
             exclude=exclude,
         )
 
@@ -1122,8 +1114,8 @@ class Worker(ServerNode):
         }
 
     def _to_dict(
-        self, comm: Comm = None, *, exclude: Container[str] = None
-    ) -> dict[str, Any]:
+        self, comm: Comm | None = None, *, exclude: Container[str] = ()
+    ) -> dict:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not inteded for roundtrips.
