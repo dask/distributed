@@ -27,7 +27,10 @@ from contextlib import contextmanager, nullcontext, suppress
 from glob import glob
 from itertools import count
 from time import sleep
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from typing_extensions import Literal
 
 from distributed.scheduler import Scheduler
 
@@ -69,7 +72,6 @@ from .utils import (
     mp_context,
     reset_logger_locks,
     sync,
-    thread_state,
 )
 from .worker import RUNNING, Worker
 
@@ -880,6 +882,7 @@ def gen_cluster(
     config: dict[str, Any] = {},
     clean_kwargs: dict[str, Any] = {},
     allow_unclosed: bool = False,
+    cluster_dump_directory: str | Literal[False] = "test_timeout_dump",
 ) -> Callable[[Callable], Callable]:
     from distributed import Client
 
@@ -976,6 +979,31 @@ def gen_cluster(
                             buffer = io.StringIO()
                             # This stack indicates where the coro/test is suspended
                             task.print_stack(file=buffer)
+
+                            if client:
+                                assert c
+                                try:
+                                    if cluster_dump_directory:
+                                        if not os.path.exists(cluster_dump_directory):
+                                            os.makedirs(cluster_dump_directory)
+                                        filename = os.path.join(
+                                            cluster_dump_directory, func.__name__
+                                        )
+                                        fut = c.dump_cluster_state(
+                                            filename,
+                                            # Test dumps should be small enough that
+                                            # there is no need for a compressed
+                                            # binary representation and readability
+                                            # is more important
+                                            format="yaml",
+                                        )
+                                        assert fut is not None
+                                        await fut
+                                except Exception:
+                                    print(
+                                        f"Exception {sys.exc_info()} while trying to dump cluster state."
+                                    )
+
                             task.cancel()
                             while not task.cancelled():
                                 await asyncio.sleep(0.01)
@@ -1623,9 +1651,6 @@ def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
                             logging.getLogger(name).setLevel(level)
 
                         yield loop
-
-                        with suppress(AttributeError):
-                            del thread_state.on_event_loop_thread
 
 
 @pytest.fixture

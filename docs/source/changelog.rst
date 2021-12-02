@@ -1,6 +1,52 @@
 Changelog
 =========
 
+2021.11.2
+---------
+
+Released on November 19, 2021
+
+- Ensure cancelled error transition can properly release a key (:pr:`5528`) `Florian Jetter`_
+- Refactor release key (:pr:`5507`) `Florian Jetter`_
+- Fix deadlock caused by an erred task (executing->cancelled->error) (:pr:`5503`) `Florian Jetter`_
+- Resolve ``KeyError``-related deadlock (:pr:`5525`) `Florian Jetter`_
+- Remove extra quotation in worker failure docs (:pr:`5518`) `James Bourbeau`_
+- Ensure ``safe_sizeof`` warning is accurate (:pr:`5519`) `James Bourbeau`_
+- Visualize cluster-wide memory usage over time (:pr:`5477`) `crusaderky`_
+- AMM: redesign start/stop methods (:pr:`5476`) `crusaderky`_
+- Preserve ``contextvars`` during comm offload (:pr:`5486`) `Gabe Joseph`_
+- Deserialization: zero-copy merge subframes when possible (:pr:`5208`) `Gabe Joseph`_
+- Add support for multiple workers per SSH connection (:pr:`5506`) `Jacob Tomlinson`_
+- Client method to dump cluster state (:pr:`5470`) `Florian Jetter`_
+
+
+2021.11.1
+---------
+
+Released on November 8, 2021
+
+- Revert "Avoid multiple blocking calls by gathering UCX frames" (:pr:`5505`) `Peter Andreas Entschev`_
+
+
+2021.11.0
+---------
+
+Released on November 5, 2021
+
+- Fix ``cluster_info`` sync handling (:pr:`5488`) `Jim Crist-Harif`_
+- Serialization family to preserve headers of the underlying dumps functions (:pr:`5380`) `Mads R. B. Kristensen`_
+- Point users to Discourse (:pr:`5489`) `James Bourbeau`_
+- Avoid multiple blocking calls by gathering UCX frames (:pr:`5487`) `Peter Andreas Entschev`_
+- Update all UCX tests to use ``asyncio`` marker (:pr:`5484`) `Peter Andreas Entschev`_
+- Register UCX close callback (:pr:`5474`) `Peter Andreas Entschev`_
+- Use older version of ``pynvml.nvmlDeviceGetComputeRunningProcesses`` (:pr:`5469`) `Jacob Tomlinson`_
+- Check for Futures from the wrong ``Client`` in ``gather`` (:pr:`5468`) `Gabe Joseph`_
+- Fix ``performance_report`` when used with ``%%time`` or ``%%timeit`` magic (:pr:`5463`) `Erik Welch`_
+- Scatter and replicate to avoid paused workers (:pr:`5441`) `crusaderky`_
+- AMM to avoid paused workers (:pr:`5440`) `crusaderky`_
+- Update changelog with ``LocalCluster`` host security note (:pr:`5462`) `Jim Crist-Harif`_
+
+
 2021.10.0
 ---------
 
@@ -2743,3 +2789,4 @@ significantly without many new features.
 .. _`Tom Forbes`: https://github.com/orf
 .. _`Michael Adkins`: https://github.com/madkinsz
 .. _`Genevieve Buckley`: https://github.com/GenevieveBuckley
+.. _`Erik Welch`: https://github.com/eriknw

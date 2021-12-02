@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from collections.abc import Generator
 from typing import TYPE_CHECKING
@@ -13,8 +14,11 @@ from .core import Status
 from .metrics import time
 from .utils import import_term, log_errors
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: nocover
+    from .client import Client
     from .scheduler import Scheduler, TaskState, WorkerState
+
+logger = logging.getLogger(__name__)
 
 
 class ActiveMemoryManagerExtension:
@@ -48,6 +52,7 @@ class ActiveMemoryManagerExtension:
         # The following parameters are exposed so that one may create, run, and throw
         # away on the fly a specialized manager, separate from the main one.
         policies: set[ActiveMemoryManagerPolicy] | None = None,
+        *,
         register: bool = True,
         start: bool | None = None,
         interval: float | None = None,
@@ -70,13 +75,7 @@ class ActiveMemoryManagerExtension:
 
         if register:
             scheduler.extensions["amm"] = self
-            scheduler.handlers.update(
-                {
-                    "amm_run_once": self.run_once,
-                    "amm_start": self.start,
-                    "amm_stop": self.stop,
-                }
-            )
+            scheduler.handlers["amm_handler"] = self.amm_handler
 
         if interval is None:
             interval = parse_timedelta(
@@ -88,22 +87,31 @@ class ActiveMemoryManagerExtension:
         if start:
             self.start()
 
-    def start(self, comm=None) -> None:
+    def amm_handler(self, comm, method: str):
+        """Scheduler handler, invoked from the Client by
+        :class:`~distributed.active_memory_manager.AMMClientProxy`
+        """
+        assert method in {"start", "stop", "run_once", "running"}
+        out = getattr(self, method)
+        return out() if callable(out) else out
+
+    def start(self) -> None:
         """Start executing every ``self.interval`` seconds until scheduler shutdown"""
-        if self.started:
+        if self.running:
             return
         pc = PeriodicCallback(self.run_once, self.interval * 1000.0)
         self.scheduler.periodic_callbacks[f"amm-{id(self)}"] = pc
         pc.start()
 
-    def stop(self, comm=None) -> None:
+    def stop(self) -> None:
         """Stop periodic execution"""
         pc = self.scheduler.periodic_callbacks.pop(f"amm-{id(self)}", None)
         if pc:
             pc.stop()
 
     @property
-    def started(self) -> bool:
+    def running(self) -> bool:
+        """Return True if the AMM is being triggered periodically; False otherwise"""
         return f"amm-{id(self)}" in self.scheduler.periodic_callbacks
 
     def add_policy(self, policy: ActiveMemoryManagerPolicy) -> None:
@@ -112,7 +120,7 @@ class ActiveMemoryManagerExtension:
         self.policies.add(policy)
         policy.manager = self
 
-    def run_once(self, comm=None) -> None:
+    def run_once(self) -> None:
         """Run all policies once and asynchronously (fire and forget) enact their
         recommendations to replicate/drop keys
         """
@@ -128,52 +136,9 @@ class ActiveMemoryManagerExtension:
                 # populate self.pending
                 self._run_policies()
 
-                drop_by_worker: (
-                    defaultdict[WorkerState, set[TaskState]]
-                ) = defaultdict(set)
-                repl_by_worker: (
-                    defaultdict[WorkerState, dict[TaskState, set[str]]]
-                ) = defaultdict(dict)
-
-                for ts, (pending_repl, pending_drop) in self.pending.items():
-                    if not ts.who_has:
-                        continue
-                    who_has = {ws_snd.address for ws_snd in ts.who_has - pending_drop}
-                    assert who_has  # Never drop the last replica
-                    for ws_rec in pending_repl:
-                        assert ws_rec not in ts.who_has
-                        repl_by_worker[ws_rec][ts] = who_has
-                    for ws in pending_drop:
-                        assert ws in ts.who_has
-                        drop_by_worker[ws].add(ts)
-
-                # Fire-and-forget enact recommendations from policies
-                stimulus_id = str(time())
-                for ws_rec, ts_to_who_has in repl_by_worker.items():
-                    self.scheduler.stream_comms[ws_rec.address].send(
-                        {
-                            "op": "acquire-replicas",
-                            "keys": [ts.key for ts in ts_to_who_has],
-                            "stimulus_id": "acquire-replicas-" + stimulus_id,
-                            "priorities": {ts.key: ts.priority for ts in ts_to_who_has},
-                            "who_has": {ts.key: v for ts, v in ts_to_who_has.items()},
-                        },
-                    )
-
-                for ws, tss in drop_by_worker.items():
-                    # The scheduler immediately forgets about the replica and suggests
-                    # the worker to drop it. The worker may refuse, at which point it
-                    # will send back an add-keys message to reinstate it.
-                    for ts in tss:
-                        self.scheduler.remove_replica(ts, ws)
-                    self.scheduler.stream_comms[ws.address].send(
-                        {
-                            "op": "remove-replicas",
-                            "keys": [ts.key for ts in tss],
-                            "stimulus_id": "remove-replicas-" + stimulus_id,
-                        }
-                    )
-
+                if self.pending:
+                    logger.debug("Enacting suggestions for %d tasks", len(self.pending))
+                    self._enact_suggestions()
             finally:
                 del self.workers_memory
                 del self.pending
@@ -282,6 +247,54 @@ class ActiveMemoryManagerExtension:
             key=lambda ws: (ws.status != Status.running, self.workers_memory[ws]),
         )
 
+    def _enact_suggestions(self) -> None:
+        """Iterate through self.pending, which was filled by self._run_policies(), and
+        push the suggestions to the workers through bulk comms. Return immediately.
+        """
+        drop_by_worker: (defaultdict[WorkerState, set[TaskState]]) = defaultdict(set)
+        repl_by_worker: (
+            defaultdict[WorkerState, dict[TaskState, set[str]]]
+        ) = defaultdict(dict)
+
+        for ts, (pending_repl, pending_drop) in self.pending.items():
+            if not ts.who_has:
+                continue
+            who_has = {ws_snd.address for ws_snd in ts.who_has - pending_drop}
+            assert who_has  # Never drop the last replica
+            for ws_rec in pending_repl:
+                assert ws_rec not in ts.who_has
+                repl_by_worker[ws_rec][ts] = who_has
+            for ws in pending_drop:
+                assert ws in ts.who_has
+                drop_by_worker[ws].add(ts)
+
+        # Fire-and-forget enact recommendations from policies
+        stimulus_id = str(time())
+        for ws_rec, ts_to_who_has in repl_by_worker.items():
+            self.scheduler.stream_comms[ws_rec.address].send(
+                {
+                    "op": "acquire-replicas",
+                    "keys": [ts.key for ts in ts_to_who_has],
+                    "stimulus_id": "acquire-replicas-" + stimulus_id,
+                    "priorities": {ts.key: ts.priority for ts in ts_to_who_has},
+                    "who_has": {ts.key: v for ts, v in ts_to_who_has.items()},
+                },
+            )
+
+        for ws, tss in drop_by_worker.items():
+            # The scheduler immediately forgets about the replica and suggests the
+            # worker to drop it. The worker may refuse, at which point it will send back
+            # an add-keys message to reinstate it.
+            for ts in tss:
+                self.scheduler.remove_replica(ts, ws)
+            self.scheduler.stream_comms[ws.address].send(
+                {
+                    "op": "remove-replicas",
+                    "keys": [ts.key for ts in tss],
+                    "stimulus_id": "remove-replicas-" + stimulus_id,
+                }
+            )
+
 
 class ActiveMemoryManagerPolicy:
     """Abstract parent class"""
@@ -299,7 +312,7 @@ class ActiveMemoryManagerPolicy:
         None,
     ]:
         """This method is invoked by the ActiveMemoryManager every few seconds, or
-        whenever the user invokes scheduler.amm_run_once().
+        whenever the user invokes ``client.amm.run_once``.
         It is an iterator that must emit any of the following:
 
         - "replicate", <TaskState>, None
@@ -330,7 +343,38 @@ class ActiveMemoryManagerPolicy:
         The current memory usage on each worker, *downstream of all pending commands*,
         can be inspected on ``self.manager.workers_memory``.
         """
-        raise NotImplementedError("Virtual method")
+        raise NotImplementedError("Virtual method")  # pragma: nocover
+
+
+class AMMClientProxy:
+    """Convenience accessors to operate the AMM from the dask client
+
+    Usage: ``client.amm.start()`` etc.
+
+    All methods are asynchronous if the client is asynchronous and synchronous if the
+    client is synchronous.
+    """
+
+    _client: Client
+
+    def __init__(self, client: Client):
+        self._client = client
+
+    def _run(self, method: str):
+        """Remotely invoke ActiveMemoryManagerExtension.amm_handler"""
+        return self._client.sync(self._client.scheduler.amm_handler, method=method)
+
+    def start(self):
+        return self._run("start")
+
+    def stop(self):
+        return self._run("stop")
+
+    def run_once(self):
+        return self._run("run_once")
+
+    def running(self):
+        return self._run("running")
 
 
 class ReduceReplicas(ActiveMemoryManagerPolicy):
@@ -339,6 +383,9 @@ class ReduceReplicas(ActiveMemoryManagerPolicy):
     """
 
     def run(self):
+        nkeys = 0
+        ndrop = 0
+
         for ts in self.manager.scheduler.replicated_tasks:
             desired_replicas = 1  # TODO have a marker on TaskState
 
@@ -348,11 +395,20 @@ class ReduceReplicas(ActiveMemoryManagerPolicy):
             # worker, don't double count them.
             nwaiters = len({waiter.processing_on or waiter for waiter in ts.waiters})
 
-            ndrop = len(ts.who_has) - max(desired_replicas, nwaiters)
+            ndrop_key = len(ts.who_has) - max(desired_replicas, nwaiters)
             if ts in self.manager.pending:
                 pending_repl, pending_drop = self.manager.pending[ts]
-                ndrop += len(pending_repl) - len(pending_drop)
+                ndrop_key += len(pending_repl) - len(pending_drop)
 
-            # ndrop could be negative, which for range() is the same as 0.
-            for _ in range(ndrop):
-                yield "drop", ts, None
+            if ndrop_key > 0:
+                nkeys += 1
+                ndrop += ndrop_key
+                for _ in range(ndrop_key):
+                    yield "drop", ts, None
+
+        if ndrop:
+            logger.debug(
+                "ReduceReplicas: Dropping %d superfluous replicas of %d tasks",
+                ndrop,
+                nkeys,
+            )

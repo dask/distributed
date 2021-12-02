@@ -30,7 +30,7 @@ async def test_ucx_config(cleanup):
         "rdmacm": False,
         "net-devices": "",
         "tcp": True,
-        "cuda_copy": True,
+        "cuda-copy": True,
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
@@ -49,7 +49,7 @@ async def test_ucx_config(cleanup):
         "rdmacm": False,
         "net-devices": "mlx5_0:1",
         "tcp": True,
-        "cuda_copy": False,
+        "cuda-copy": False,
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
@@ -68,7 +68,7 @@ async def test_ucx_config(cleanup):
         "rdmacm": True,
         "net-devices": "all",
         "tcp": True,
-        "cuda_copy": True,
+        "cuda-copy": True,
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
@@ -78,6 +78,19 @@ async def test_ucx_config(cleanup):
         else:
             assert ucx_config.get("TLS") == "rc,tcp,rdmacm,cuda_copy"
         assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "rdmacm"
+
+    ucx = {
+        "nvlink": None,
+        "infiniband": None,
+        "rdmacm": None,
+        "net-devices": None,
+        "tcp": None,
+        "cuda-copy": None,
+    }
+
+    with dask.config.set({"distributed.comm.ucx": ucx}):
+        ucx_config = _scrub_ucx_config()
+        assert ucx_config == {}
 
 
 @pytest.mark.flaky(

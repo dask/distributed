@@ -7,8 +7,9 @@ usage of workers across the Dask cluster. It is disabled by default.
 Memory imbalance and duplication
 --------------------------------
 Whenever a Dask task returns data, it is stored on the worker that executed the task for
-as long as it's a dependency of other tasks, is referenced by a ``Client`` through a
-``Future``, or is part of a :doc:`published dataset <publish>`.
+as long as it's a dependency of other tasks, is referenced by a
+:class:`~distributed.Client` through a :class:`~distributed.Future`, or is part of a
+:doc:`published dataset <publish>`.
 
 Dask assigns tasks to workers following criteria of CPU occupancy, :doc:`resources`, and
 locality. In the trivial use case of tasks that are not connected to each other, take
@@ -38,13 +39,15 @@ The AMM can be enabled through the :doc:`Dask configuration file <configuration>
 
 The above is the recommended setup and will run all enabled *AMM policies* (see below)
 every two seconds. Alternatively, you can manually start/stop the AMM from the
-``Client`` or trigger a one-off iteration:
+:class:`~distributed.Client` or trigger a one-off iteration:
 
 .. code-block:: python
 
-   >>> client.scheduler.amm_start()  # Start running every 2 seconds
-   >>> client.scheduler.amm_stop()  # Stop running periodically
-   >>> client.scheduler.amm_run_once()
+   >>> client.amm.start()  # Start running every 2 seconds
+   >>> client.amm.stop()  # Stop running periodically
+   >>> client.amm.running()
+   False
+   >>> client.amm.run_once()
 
 
 Policies
@@ -57,6 +60,10 @@ long as they don't harm data integrity. These suggestions can be of two types:
   This should not be confused with replication caused by task dependencies.
 - Delete one or more replicas of an in-memory task. The AMM will never delete the last
   replica of a task, even if a policy asks to.
+
+There are no "move" operations. A move is performed in two passes: first a policy
+creates a copy; in the next AMM iteration, the same or another policy deletes the
+original (if the copy succeeded).
 
 Unless a policy puts constraints on which workers should be impacted, the AMM will
 automatically create replicas on workers with the lowest memory usage first and delete
@@ -90,7 +97,7 @@ Built-in policies
 ReduceReplicas
 ++++++++++++++
 class
-    ``distributed.active_memory_manager.ReduceReplicas``
+    :class:`distributed.active_memory_manager.ReduceReplicas`
 parameters
     None
 
@@ -101,8 +108,9 @@ computation, this policy drops all excess replicas.
 .. note::
    This policy is incompatible with :meth:`~distributed.Client.replicate` and with the
    ``broadcast=True`` parameter of :meth:`~distributed.Client.scatter`. If you invoke
-   ``replicate`` to create additional replicas and then later run this policy, it will
-   delete all replicas but one (but not necessarily the new ones).
+   :meth:`~distributed.Client.replicate` to create additional replicas and then later
+   run this policy, it will delete all replicas but one (but not necessarily the new
+   ones).
 
 
 Custom policies
@@ -128,7 +136,7 @@ define two methods:
         Create one replica of the target task on the worker with the lowest memory among
         the listed candidates.
     ``yield "drop", <TaskState>, None``
-        Delete one replica of the target task one the worker with the highest memory
+        Delete one replica of the target task on the worker with the highest memory
         usage across the whole cluster.
     ``yield "drop", <TaskState>, {<WorkerState>, <WorkerState>, ...}``
         Delete one replica of the target task on the worker with the highest memory
@@ -160,8 +168,8 @@ The ``run`` method can access the following attributes:
     The :class:`~distributed.active_memory_manager.ActiveMemoryManagerExtension` that
     the policy is attached to
 ``self.manager.scheduler``
-    :class:`~distributed.Scheduler` to which the suggestions will be applied. From there
-    you can access various attributes such as ``tasks`` and ``workers``.
+    :class:`~distributed.scheduler.Scheduler` to which the suggestions will be applied.
+    From there you can access various attributes such as ``tasks`` and ``workers``.
 ``self.manager.workers_memory``
     Read-only mapping of ``{WorkerState: bytes}``. bytes is the expected RAM usage of
     the worker after all suggestions accepted so far in the current AMM iteration, from
@@ -186,8 +194,8 @@ Example
 The following custom policy ensures that keys "foo" and "bar" are replicated on all
 workers at all times. New workers will receive a replica soon after connecting to the
 scheduler. The policy will do nothing if the target keys are not in memory somewhere or
-if all workers already hold a replica.
-Note that this example is incompatible with the ``ReduceReplicas`` built-in policy.
+if all workers already hold a replica. Note that this example is incompatible with the
+:class:`~distributed.active_memory_manager.ReduceReplicas` built-in policy.
 
 In mymodule.py (it must be accessible by the scheduler):
 
@@ -243,5 +251,9 @@ API reference
 
 .. autoclass:: distributed.active_memory_manager.ActiveMemoryManagerPolicy
    :members:
+
+.. autoclass:: distributed.active_memory_manager.AMMClientProxy
+   :members:
+   :undoc-members:
 
 .. autoclass:: distributed.active_memory_manager.ReduceReplicas

@@ -5,6 +5,7 @@ See :ref:`communications` for more.
 
 .. _UCX: https://github.com/openucx/ucx
 """
+import functools
 import logging
 import os
 import struct
@@ -69,7 +70,9 @@ def init_once():
     # We ensure the CUDA context is created before initializing UCX. This can't
     # be safely handled externally because communications in Dask start before
     # preload scripts run.
-    if "TLS" in ucx_config and "cuda_copy" in ucx_config["TLS"]:
+    if dask.config.get("distributed.comm.ucx.create-cuda-context") is True or (
+        "TLS" in ucx_config and "cuda_copy" in ucx_config["TLS"]
+    ):
         try:
             import numba.cuda
         except ImportError:
@@ -166,6 +169,18 @@ def init_once():
             ucx_create_listener = EndpointReuse.create_listener
 
 
+def _close_comm(ref):
+    """Callback to close Dask Comm when UCX Endpoint closes or errors
+
+    Parameters
+    ----------
+        ref: weak reference to a Dask UCX comm
+    """
+    comm = ref()
+    if comm is not None:
+        comm._closed = True
+
+
 class UCX(Comm):
     """Comm object using UCP.
 
@@ -210,6 +225,17 @@ class UCX(Comm):
         self._peer_addr = peer_addr
         self.deserialize = deserialize
         self.comm_flag = None
+
+        # When the UCX endpoint closes or errors the registered callback
+        # is called.
+        if hasattr(self._ep, "set_close_callback"):
+            ref = weakref.ref(self)
+            self._ep.set_close_callback(functools.partial(_close_comm, ref))
+            self._closed = False
+            self._has_close_callback = True
+        else:
+            self._has_close_callback = False
+
         logger.debug("UCX.__init__ %s", self)
 
     @property
@@ -341,6 +367,7 @@ class UCX(Comm):
                 return msg
 
     async def close(self):
+        self._closed = True
         if self._ep is not None:
             try:
                 await self.ep.send(struct.pack("?Q", True, 0))
@@ -357,6 +384,7 @@ class UCX(Comm):
             self._ep = None
 
     def abort(self):
+        self._closed = True
         if self._ep is not None:
             self._ep.abort()
             self._ep = None
@@ -369,7 +397,13 @@ class UCX(Comm):
             raise CommClosedError("UCX Endpoint is closed")
 
     def closed(self):
-        return self._ep is None
+        if self._has_close_callback is True:
+            # The self._closed flag is separate from the endpoint's lifetime, even when
+            # the endpoint has closed or errored, there may be messages on its buffer
+            # still to be received, even though sending is not possible anymore.
+            return self._closed
+        else:
+            return self._ep is None
 
 
 class UCXConnector(Connector):
@@ -386,6 +420,7 @@ class UCXConnector(Connector):
         except (ucp.exceptions.UCXCloseError, ucp.exceptions.UCXCanceled,) + (
             getattr(ucp.exceptions, "UCXConnectionReset", ()),
             getattr(ucp.exceptions, "UCXNotConnected", ()),
+            getattr(ucp.exceptions, "UCXUnreachable", ()),
         ):
             raise CommClosedError("Connection closed before handshake completed")
         return self.comm_class(
@@ -543,7 +578,7 @@ def _scrub_ucx_config():
         if any(
             [
                 dask.config.get("distributed.comm.ucx.nvlink"),
-                dask.config.get("distributed.comm.ucx.cuda_copy"),
+                dask.config.get("distributed.comm.ucx.cuda-copy"),
             ]
         ):
             tls = tls + ",cuda_copy"
