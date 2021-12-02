@@ -364,7 +364,7 @@ async def test_ucx_protocol(cleanup, port):
 
 
 @pytest.mark.skipif(
-    not hasattr(ucp._libs.exceptions, "UCXUnreachable"),
+    not hasattr(ucp.exceptions, "UCXUnreachable"),
     reason="Requires UCX-Py support for UCXUnreachable exception",
 )
 def test_ucx_unreachable():
