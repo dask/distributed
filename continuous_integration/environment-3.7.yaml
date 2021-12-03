@@ -44,6 +44,7 @@ dependencies:
   - zict
   - zstandard
   - pip:
+      - git+https://github.com/ncclementi/zict@slow_raises #remove this after zict merged
       - git+https://github.com/dask/dask
       - git+https://github.com/jcrist/crick  # Only tested here
       - keras
