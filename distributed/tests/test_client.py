@@ -23,6 +23,7 @@ from time import sleep
 
 import psutil
 import pytest
+import yaml
 from tlz import concat, first, identity, isdistinct, merge, pluck, valmap
 
 import dask
@@ -7165,7 +7166,6 @@ async def test_dump_cluster_state_async(c, s, a, b, tmp_path, _format):
 
 @gen_cluster(client=True)
 async def test_dump_cluster_state_exclude(c, s, a, b, tmp_path):
-
     futs = c.map(inc, range(10))
     while len(s.tasks) != len(futs):
         await asyncio.sleep(0.01)
@@ -7175,15 +7175,10 @@ async def test_dump_cluster_state_exclude(c, s, a, b, tmp_path):
         "runspec",
     ]
     filename = tmp_path / "foo"
-    await c.dump_cluster_state(
-        filename=filename,
-        format="yaml",
-    )
+    await c.dump_cluster_state(filename=filename, format="yaml")
 
-    with open(str(filename) + ".yaml") as fd:
-        import yaml
-
-        state = yaml.load(fd, Loader=yaml.Loader)
+    with open(f"{filename}.yaml") as fd:
+        state = yaml.safe_load(fd)
 
     assert "workers" in state
     assert len(state["workers"]) == len(s.workers)

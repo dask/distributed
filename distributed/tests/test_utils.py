@@ -7,6 +7,7 @@ import os
 import queue
 import socket
 import traceback
+from collections import deque
 from time import sleep
 
 import pytest
@@ -37,6 +38,7 @@ from distributed.utils import (
     open_port,
     parse_ports,
     read_block,
+    recursive_to_dict,
     seek_delimiter,
     set_thread_state,
     sync,
@@ -633,3 +635,62 @@ def test_iscoroutinefunction_nested_partial():
     assert iscoroutinefunction(
         functools.partial(functools.partial(my_async_callable, 1), 2)
     )
+
+
+def test_recursive_to_dict():
+    class C:
+        def __init__(self, x):
+            self.x = x
+
+        def __repr__(self):
+            return "<C>"
+
+        def _to_dict(self, *, exclude):
+            assert exclude == ["foo"]
+            return ["C:", recursive_to_dict(self.x, exclude=exclude)]
+
+    class D:
+        def __repr__(self):
+            return "<D>"
+
+    inp = [
+        1,
+        1.1,
+        True,
+        False,
+        None,
+        "foo",
+        b"bar",
+        C,
+        C(1),
+        D(),
+        (1, 2),
+        [3, 4],
+        {5, 6},
+        frozenset([7, 8]),
+        deque([9, 10]),
+    ]
+    expect = [
+        1,
+        1.1,
+        True,
+        False,
+        None,
+        "foo",
+        "b'bar'",
+        "<class 'test_utils.test_recursive_to_dict.<locals>.C'>",
+        ["C:", 1],
+        "<D>",
+        [1, 2],
+        [3, 4],
+        list({5, 6}),
+        list(frozenset([7, 8])),
+        [9, 10],
+    ]
+    assert recursive_to_dict(inp, exclude=["foo"]) == expect
+
+    # Test recursion
+    a = []
+    c = C(a)
+    a.append(c)
+    assert recursive_to_dict(a, exclude=["foo"]) == [["C:", "[<C>]"]]

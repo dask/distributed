@@ -378,8 +378,8 @@ class Server:
         return {"type": type(self).__name__, "id": self.id}
 
     def _to_dict(
-        self, comm: Comm = None, *, exclude: Container[str] = None
-    ) -> dict[str, str]:
+        self, comm: Comm | None = None, *, exclude: Container[str] = ()
+    ) -> dict:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not inteded for roundtrips.
@@ -395,7 +395,6 @@ class Server:
         Server.identity
         Client.dump_cluster_state
         """
-
         info = self.identity()
         extra = {
             "address": self.address,
