@@ -2202,8 +2202,9 @@ class Worker(ServerNode):
     def transition_resumed_fetch(self, ts, *, stimulus_id):
         """`resumed` is an intermediate degenerate state which splits further up
         into two states depending on what the last signal / next state is
-        intended to be.
-        There are only two viable choices depending on whether the task is required to be fetched from another worker `resumed(fetch)` or the task shall be computed on this worker `resumed(waiting)`.
+        intended to be. There are only two viable choices depending on whether
+        the task is required to be fetched from another worker `resumed(fetch)`
+        or the task shall be computed on this worker `resumed(waiting)`.
 
         The only viable state transitions ending up here are
 
@@ -2213,7 +2214,8 @@ class Worker(ServerNode):
 
         executing -> cancelled -> resumed(fetch)
 
-        depending on the origin. Equally, only `fetch`, `waiting` or `released` are allowed output states.
+        depending on the origin. Equally, only `fetch`, `waiting` or `released`
+        are allowed output states.
 
         See also `transition_resumed_waiting`
         """
@@ -3006,18 +3008,6 @@ class Worker(ServerNode):
                     self.log.append(
                         ("busy-gather", worker, to_gather_keys, stimulus_id, time())
                     )
-
-                # Task was scheduled to be fetched
-                # Received signal handle_compute
-                # Task is transitioned to cancelled -> resumed (next: execute)
-                # Get_data from worker finishes with empty result, i.e. this worker had outdated information and remote does not have data for the requested key
-                #  (or raises exception due to connection failures)
-
-                # this result parser will then continue with the last signal `handle_compute` and should transition the key to execute
-                # This is currently implemented in transitino_rescheduled_next but should not be controlled via a "fetch" recommendation since a flight->fetch may be triggered elsewhere as well (e.g. handle_acquire_replica)
-
-                # flight -> cancelled - handle_compute -> resumed(next:executing)
-                # - handle_acquire_replica ->> flight
 
                 for d in self.in_flight_workers.pop(worker):
                     ts = self.tasks[d]
