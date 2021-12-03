@@ -1497,9 +1497,20 @@ class Worker(ServerNode):
         plugins_msgs = await asyncio.gather(
             *(self.plugin_add(plugin=plugin) for plugin in self._pending_plugins)
         )
+        plugins_exceptions = []
         for msg in plugins_msgs:
             if msg["status"] != "OK":
-                raise pickle.loads(msg["exception"].data)
+                exc = pickle.loads(msg["exception"].data)
+                plugins_exceptions.append(pickle.loads(msg["exception"].data))
+        if len(plugins_exceptions) >= 1:
+            if len(plugins_exceptions) > 1:
+                logger.error(
+                    "Multiple plugin exceptions raised. All exceptions will be logged, the first is raised."
+                )
+                for exc in plugins_exceptions:
+                    logger.error(repr(exc))
+            raise plugins_exceptions[0]
+
         self._pending_plugins = ()
 
         await self._register_with_scheduler()

@@ -397,6 +397,34 @@ async def test_plugin_exception(cleanup):
 
 
 @pytest.mark.asyncio
+async def test_plugin_multiple_exceptions(cleanup):
+    class MyPlugin1:
+        def setup(self, worker=None):
+            raise ValueError("MyPlugin1 Error")
+
+    class MyPlugin2:
+        def setup(self, worker=None):
+            raise RuntimeError("MyPlugin2 Error")
+
+    async with Scheduler(port=0) as s:
+        # There's no guarantee on the order of which exception is raised first
+        with pytest.raises((ValueError, RuntimeError), match="MyPlugin.* Error"):
+            with captured_logger("distributed.worker") as logger:
+                async with Worker(
+                    s.address,
+                    plugins={
+                        MyPlugin1(),
+                        MyPlugin2(),
+                    },
+                ) as w:
+                    pass
+
+            text = logger.getvalue()
+            assert "MyPlugin1 Error" in text
+            assert "MyPlugin2 Error" in text
+
+
+@pytest.mark.asyncio
 async def test_plugin_internal_exception(cleanup):
     async with Scheduler(port=0) as s:
         with pytest.raises(UnicodeDecodeError, match="codec can't decode"):
