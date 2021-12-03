@@ -38,6 +38,7 @@ from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
+from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
@@ -390,6 +391,19 @@ async def test_plugin_exception(cleanup):
                 s.address,
                 plugins={
                     MyPlugin(),
+                },
+            ) as w:
+                pass
+
+
+@pytest.mark.asyncio
+async def test_plugin_internal_exception(cleanup):
+    async with Scheduler(port=0) as s:
+        with pytest.raises(UnicodeDecodeError, match="codec can't decode"):
+            async with Worker(
+                s.address,
+                plugins={
+                    b"corrupting pickle" + pickle.dumps(lambda: None, protocol=4),
                 },
             ) as w:
                 pass
