@@ -91,8 +91,8 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         # Per-message state
         self._using_default_buffer = True
 
-        self._default_buffer = memoryview(bytearray(min_read_size))
-        self._default_len = min_read_size
+        self._default_len = max(min_read_size, 16)  # need at least 16 bytes of buffer
+        self._default_buffer = memoryview(bytearray(self._default_len))
         self._default_start = 0
         self._default_end = 0
 
@@ -146,9 +146,15 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         await self._is_closed
 
     def connection_made(self, transport):
+        # XXX: When using asyncio, the default builtin transport makes
+        # excessive copies when buffering. For the case of TCP on asyncio (no
+        # TLS) we patch around that with a wrapper class that handles the write
+        # side with minimal copying.
         if type(transport) is asyncio.selector_events._SelectorSocketTransport:
-            transport = _ZeroCopyWriter(transport)
+            transport = _ZeroCopyWriter(self, transport)
         self._transport = transport
+        # Set the buffer limits to something more optimal for large data transfer.
+        self._transport.set_write_buffer_limits(high=512 * 1024)  # 512 KiB
         if self.on_connection is not None:
             self.on_connection(self)
 
@@ -235,12 +241,12 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
 
     def _parse_frames(self):
         while True:
+            available = self._default_end - self._default_start
             # Are we out of frames?
             if not self._frames_check_remaining():
                 self._message_completed()
-                return True
+                return bool(available)
             # Are we out of data?
-            available = self._default_end - self._default_start
             if not available:
                 return False
 
@@ -315,6 +321,10 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
     async def write(self, frames):
         if self._exception:
             raise self._exception
+        elif self._paused:
+            # Wait until there's room in the write buffer
+            self._drain_waiter = self._loop.create_future()
+            await self._drain_waiter
 
         # Ensure all memoryviews are in single-byte format
         frames = [f.cast("B") if isinstance(f, memoryview) else f for f in frames]
@@ -334,11 +344,6 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             self._transport.writelines(buffers)
         else:
             self._transport.write(buffers[0])
-        if self._transport.is_closing():
-            await asyncio.sleep(0)
-        elif self._paused:
-            self._drain_waiter = self._loop.create_future()
-            await self._drain_waiter
 
         return msg_nbytes
 
@@ -458,7 +463,7 @@ class TCPConnector(Connector):
     comm_class = TCP
 
     async def connect(self, address, deserialize=True, **kwargs):
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         ip, port = parse_host_port(address)
 
         kwargs = self._get_extra_kwargs(address, **kwargs)
@@ -533,7 +538,7 @@ class TCPListener(Listener):
         IPV6), rather than both interfaces sharing the same random port. We
         work around this here. See https://bugs.python.org/issue45693 for more
         info."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         # Typically resolves to list with length == 2 (one IPV4, one IPV6).
         infos = await loop.getaddrinfo(
             None,
@@ -604,7 +609,7 @@ class TCPListener(Listener):
         return servers
 
     async def start(self):
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         if not self.ip and not self.port:
             servers = await self._start_all_interfaces_with_random_port()
         else:
@@ -711,13 +716,68 @@ class _ZeroCopyWriter:
     SENDMSG_MAX_SIZE = 1024 * 1024  # 1 MiB
     SENDMSG_MAX_COUNT = 16
 
-    def __init__(self, transport):
+    def __init__(self, protocol, transport):
+        self.protocol = protocol
         self.transport = transport
+        self._loop = asyncio.get_running_loop()
+
+        # This class mucks with the builtin asyncio transport's internals.
+        # Check that the bits we touch still exist.
+        for attr in [
+            "_sock",
+            "_sock_fd",
+            "_fatal_error",
+            "_eof",
+            "_closing",
+            "_conn_lost",
+            "_call_connection_lost",
+        ]:
+            assert hasattr(transport, attr)
+        # Likewise, this calls a few internal methods of `loop`, ensure they
+        # still exist.
+        for attr in ["_add_writer", "_remove_writer"]:
+            assert hasattr(self._loop, attr)
+
         self._buffers = collections.deque()
+        self._offset = 0
+        self._size = 0
+        self._protocol_paused = False
+        self.set_write_buffer_limits()
+
+    def set_write_buffer_limits(self, high=None, low=None):
+        if high is None:
+            if low is None:
+                high = 64 * 1024  # 64 KiB
+            else:
+                high = 4 * low
+        if low is None:
+            low = high // 4
+        self._high_water = high
+        self._low_water = low
+        self._maybe_pause_protocol()
+
+    def _maybe_pause_protocol(self):
+        if not self._protocol_paused and self._size > self._high_water:
+            self._protocol_paused = True
+            self.protocol.pause_writing()
+
+    def _maybe_resume_protocol(self):
+        if self._protocol_paused and self._size <= self._low_water:
+            self._protocol_paused = False
+            self.protocol.resume_writing()
+
+    def _buffer_clear(self):
+        self._buffers.clear()
+        self._size = 0
         self._offset = 0
 
     def _buffer_append(self, data):
-        self._buffers.append(memoryview(data))
+        if not isinstance(data, memoryview):
+            data = memoryview(data)
+        if data.format != "B":
+            data = data.cast("B")
+        self._size += len(data)
+        self._buffers.append(data)
 
     def _buffer_peek(self):
         offset = self._offset
@@ -736,6 +796,8 @@ class _ZeroCopyWriter:
         return buffers
 
     def _buffer_advance(self, size):
+        self._size -= size
+
         offset = self._offset
         buffers = self._buffers
         while size:
@@ -755,8 +817,6 @@ class _ZeroCopyWriter:
 
         if transport._eof:
             raise RuntimeError("Cannot call write() after write_eof()")
-        if transport._empty_waiter is not None:
-            raise RuntimeError("unable to write; sendfile is in progress")
         if not data:
             return
         if transport._conn_lost:
@@ -777,11 +837,11 @@ class _ZeroCopyWriter:
                 if not data:
                     return
             # Not all was written; register write handler.
-            transport._loop._add_writer(transport._sock_fd, self._on_write_ready)
+            self._loop._add_writer(transport._sock_fd, self._on_write_ready)
 
         # Add it to the buffer.
         self._buffer_append(data)
-        transport._maybe_pause_protocol()
+        self._maybe_pause_protocol()
 
     def writelines(self, buffers):
         waiting = bool(self._buffers)
@@ -802,19 +862,16 @@ class _ZeroCopyWriter:
             if not self._buffers:
                 return
             # Not all was written; register write handler.
-            self.transport._loop._add_writer(
-                self.transport._sock_fd, self._on_write_ready
-            )
+            self._loop._add_writer(self.transport._sock_fd, self._on_write_ready)
 
-        self.transport._maybe_pause_protocol()
-
-    def is_closing(self):
-        return self.transport.is_closing()
+        self._maybe_pause_protocol()
 
     def close(self):
+        self._buffer_clear()
         return self.transport.close()
 
     def abort(self):
+        self._buffer_clear()
         return self.transport.abort()
 
     def get_extra_info(self, key):
@@ -840,17 +897,13 @@ class _ZeroCopyWriter:
         except (SystemExit, KeyboardInterrupt):
             raise
         except BaseException as exc:
-            transport._loop._remove_writer(transport._sock_fd)
+            self._loop._remove_writer(transport._sock_fd)
             self._buffers.clear()
             transport._fatal_error(exc, "Fatal write error on socket transport")
-            if transport._empty_waiter is not None:
-                transport._empty_waiter.set_exception(exc)
         else:
-            transport._maybe_resume_protocol()
+            self._maybe_resume_protocol()
             if not self._buffers:
-                transport._loop._remove_writer(transport._sock_fd)
-                if transport._empty_waiter is not None:
-                    transport._empty_waiter.set_result(None)
+                self._loop._remove_writer(transport._sock_fd)
                 if transport._closing:
                     transport._call_connection_lost(None)
                 elif transport._eof:
