@@ -12,7 +12,7 @@ except ImportError:
 
 import dask
 
-from ..utils import ensure_ip, get_ip, get_ipv6, nbytes
+from ..utils import ensure_ip, get_ip, get_ipv6
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, Listener
 from .registry import Backend
@@ -62,8 +62,6 @@ def coalesce_buffers(buffers, target_buffer_size=64 * 1024, small_buffer_size=20
             csize = 0
 
     for b in buffers:
-        if isinstance(b, memoryview):
-            b = b.cast("B")
         size = len(b)
         if size <= small_buffer_size:
             concat.append(b)
@@ -318,8 +316,11 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         if self._exception:
             raise self._exception
 
+        # Ensure all memoryviews are in single-byte format
+        frames = [f.cast("B") if isinstance(f, memoryview) else f for f in frames]
+
         nframes = len(frames)
-        frames_nbytes = [nbytes(f) for f in frames]
+        frames_nbytes = [len(f) for f in frames]
         # TODO: the old TCP comm included an extra `msg_nbytes` prefix that
         # isn't really needed. We include it here for backwards compatibility,
         # but this could be removed if we ever want to make another breaking
@@ -716,7 +717,7 @@ class _ZeroCopyWriter:
         self._offset = 0
 
     def _buffer_append(self, data):
-        self._buffers.append(memoryview(data).cast("B"))
+        self._buffers.append(memoryview(data))
 
     def _buffer_peek(self):
         offset = self._offset
