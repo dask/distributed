@@ -1,4 +1,5 @@
 import os
+from platform import uname
 
 import dask
 
@@ -63,6 +64,13 @@ def _pynvml_handles():
     return pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
 
 
+def _in_wsl():
+    """Check if we are in Windows Subsystem for Linux; some PyNVML queries are not supported there.
+    Taken from https://www.scivision.dev/python-detect-wsl/
+    """
+    return "microsoft-standard" in uname().release
+
+
 def has_cuda_context():
     """Check whether the current process already has a CUDA context created.
 
@@ -74,10 +82,17 @@ def has_cuda_context():
     init_once()
     for index in range(device_get_count()):
         handle = pynvml.nvmlDeviceGetHandleByIndex(index)
-        if hasattr(pynvml, "nvmlDeviceGetComputeRunningProcesses_v2"):
-            running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses_v2(handle)
-        else:
-            running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+        try:
+            if hasattr(pynvml, "nvmlDeviceGetComputeRunningProcesses_v2"):
+                running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses_v2(
+                    handle
+                )
+            else:
+                running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+        except pynvml.NVMLError_Unknown:
+            if _in_wsl():
+                return False
+            raise
         for proc in running_processes:
             if os.getpid() == proc.pid:
                 return index
