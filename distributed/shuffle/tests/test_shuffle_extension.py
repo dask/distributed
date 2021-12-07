@@ -39,9 +39,9 @@ def test_worker_for_distribution(npartitions: int, n_workers: int):
 
     assignments = [metadata.worker_for(i) for i in range(metadata.npartitions)]
 
-    # Test `partition_range`
+    # Test internal `_partition_range` method
     for w in metadata.workers:
-        first, last = metadata.partition_range(w)
+        first, last = metadata._partition_range(w)
         assert all(
             [
                 first <= p_i <= last if a == w else p_i < first or p_i > last

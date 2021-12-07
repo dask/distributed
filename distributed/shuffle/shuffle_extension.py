@@ -52,7 +52,7 @@ class ShuffleMetadata(NewShuffleMetadata):
         i = len(self.workers) * output_partition // self.npartitions
         return self.workers[i]
 
-    def partition_range(self, worker: str) -> tuple[int, int]:
+    def _partition_range(self, worker: str) -> tuple[int, int]:
         "Get the output partition numbers (inclusive) that a worker will hold"
         i = self.workers.index(worker)
         first = math.ceil(self.npartitions * i / len(self.workers))
@@ -61,7 +61,7 @@ class ShuffleMetadata(NewShuffleMetadata):
 
     def npartitions_for(self, worker: str) -> int:
         "Get the number of output partitions a worker will hold"
-        first, last = self.partition_range(worker)
+        first, last = self._partition_range(worker)
         return last - first + 1
 
 
