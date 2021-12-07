@@ -2677,7 +2677,6 @@ async def test_gather_dep_exception_one_task(c, s, a, b):
 
     event = asyncio.Event()
     write_queue = asyncio.Queue()
-    event.clear()
     b.rpc = _LockedCommPool(b.rpc, write_event=event, write_queue=write_queue)
     b.rpc.remove(a.address)
 
@@ -2852,23 +2851,27 @@ async def test_acquire_replicas_already_in_flight(c, s, *nannies):
 
     class SlowToFly:
         def __getstate__(self):
-            sleep(1.5)
+            sleep(0.9)
             return {}
 
     a, b = s.workers
     x = c.submit(SlowToFly, workers=[a], key="x")
     await wait(x)
-    y = c.submit(lambda x: x, x, workers=[b], key="y")
-    await asyncio.sleep(0.5)
+    y = c.submit(lambda x: 123, x, workers=[b], key="y")
+    await asyncio.sleep(0.3)
     start = time()
     _acquire_replicas(s, b, x)
-    await asyncio.sleep(0.5)
+    assert await y == 123
 
     story = await c.run(lambda dask_worker: dask_worker.story("x"), workers=[b])
     events = [ev for ev in story[b] if ev[-1] >= start]
-    assert len(events) == 2
+
+    assert len(events) == 5
     assert events[0][:3] == ("x", "ensure-task-exists", "flight")
     assert events[1][:4] == ("x", "flight", "fetch", "flight")
+    assert events[2][:1] == ("receive-dep",)
+    assert events[3][:2] == ("x", "put-in-memory")
+    assert events[4][:4] == ("x", "flight", "memory", "memory")
 
 
 @gen_cluster(client=True)
