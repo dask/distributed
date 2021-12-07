@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import importlib
 import logging
@@ -24,6 +26,7 @@ from dask.utils import tmpfile
 import distributed
 from distributed import (
     Client,
+    Future,
     Nanny,
     Reschedule,
     default_client,
@@ -2732,10 +2735,12 @@ async def test_gather_dep_exception_one_task_2(c, s, a, b):
     await fut2
 
 
-def _acquire_replicas(scheduler, worker, *futures):
+def _acquire_replicas(
+    scheduler: Scheduler, worker: Worker | str, *futures: Future
+) -> None:
     keys = [f.key for f in futures]
-
-    scheduler.stream_comms[worker.address].send(
+    address = worker if isinstance(worker, str) else worker.address
+    scheduler.stream_comms[address].send(
         {
             "op": "acquire-replicas",
             "keys": keys,
@@ -2748,14 +2753,17 @@ def _acquire_replicas(scheduler, worker, *futures):
     )
 
 
-def _remove_replicas(scheduler, worker, *futures):
+def _remove_replicas(
+    scheduler: Scheduler, worker: Worker | str, *futures: Future
+) -> None:
     keys = [f.key for f in futures]
-    ws = scheduler.workers[worker.address]
+    address = worker if isinstance(worker, str) else worker.address
+    ws = scheduler.workers[address]
     for k in keys:
         ts = scheduler.tasks[k]
         if ws in ts.who_has:
             scheduler.remove_replica(ts, ws)
-    scheduler.stream_comms[ws.address].send(
+    scheduler.stream_comms[address].send(
         {
             "op": "remove-replicas",
             "keys": keys,
@@ -2833,6 +2841,31 @@ async def test_acquire_replicas_many(c, s, *workers):
 
     while any(w.tasks for w in workers):
         await asyncio.sleep(0.001)
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny)
+async def test_acquire_replicas_already_in_flight(c, s, *nannies):
+    """Trying to acquire a replica that is already in flight is a no-op"""
+
+    class SlowToFly:
+        def __getstate__(self):
+            sleep(1.5)
+            return {}
+
+    a, b = s.workers
+    x = c.submit(SlowToFly, workers=[a], key="x")
+    await wait(x)
+    y = c.submit(lambda x: x, x, workers=[b], key="y")
+    await asyncio.sleep(0.5)
+    start = time()
+    _acquire_replicas(s, b, x)
+    await asyncio.sleep(0.5)
+
+    story = await c.run(lambda dask_worker: dask_worker.story(x.key), workers=[b])
+    events = [ev for ev in story[b] if ev[-1] >= start]
+    assert events[0][:3] == ("x", "ensure-task-exists", "flight")
+    assert events[1][:4] == ("x", "flight", "fetch", "flight")
 
 
 @gen_cluster(client=True)
