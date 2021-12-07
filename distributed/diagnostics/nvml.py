@@ -1,4 +1,5 @@
 import os
+from platform import uname
 
 import dask
 
@@ -16,7 +17,7 @@ def _in_wsl():
     """Check if we are in Windows Subsystem for Linux; some PyNVML queries are not supported there.
     Taken from https://www.scivision.dev/python-detect-wsl/
     """
-    return "microsoft-standard" in os.uname().release
+    return "microsoft-standard" in uname().release
 
 
 def init_once():
