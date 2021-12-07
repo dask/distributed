@@ -70,7 +70,9 @@ def init_once():
     # We ensure the CUDA context is created before initializing UCX. This can't
     # be safely handled externally because communications in Dask start before
     # preload scripts run.
-    if "TLS" in ucx_config and "cuda_copy" in ucx_config["TLS"]:
+    if dask.config.get("distributed.comm.ucx.create-cuda-context") is True or (
+        "TLS" in ucx_config and "cuda_copy" in ucx_config["TLS"]
+    ):
         try:
             import numba.cuda
         except ImportError:
@@ -418,6 +420,7 @@ class UCXConnector(Connector):
         except (ucp.exceptions.UCXCloseError, ucp.exceptions.UCXCanceled,) + (
             getattr(ucp.exceptions, "UCXConnectionReset", ()),
             getattr(ucp.exceptions, "UCXNotConnected", ()),
+            getattr(ucp.exceptions, "UCXUnreachable", ()),
         ):
             raise CommClosedError("Connection closed before handshake completed")
         return self.comm_class(
@@ -575,7 +578,7 @@ def _scrub_ucx_config():
         if any(
             [
                 dask.config.get("distributed.comm.ucx.nvlink"),
-                dask.config.get("distributed.comm.ucx.cuda_copy"),
+                dask.config.get("distributed.comm.ucx.cuda-copy"),
             ]
         ):
             tls = tls + ",cuda_copy"

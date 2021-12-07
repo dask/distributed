@@ -169,10 +169,10 @@ async def test_executing_cancelled_error(c, s, w):
     # refactoring. Below verifies some implementation specific test assumptions
 
     story = w.story(fut.key)
-    start_finish = [(msg[1], msg[2]) for msg in story if len(msg) == 6]
-    assert ("executing", "cancelled") in start_finish
-    assert ("cancelled", "error") in start_finish
-    assert ("error", "released") in start_finish
+    start_finish = [(msg[1], msg[2], msg[3]) for msg in story if len(msg) == 7]
+    assert ("executing", "released", "cancelled") in start_finish
+    assert ("cancelled", "error", "error") in start_finish
+    assert ("error", "released", "released") in start_finish
 
 
 @gen_cluster(client=True)
