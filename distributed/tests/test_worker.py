@@ -2796,7 +2796,9 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
     await futC
     while fut.key not in b.tasks or not b.tasks[fut.key].state == "memory":
         await asyncio.sleep(0.005)
-    assert len(s.who_has[fut.key]) == 2
+
+    while len(s.who_has[fut.key]) != 2:
+        await asyncio.sleep(0.005)
 
     # Ensure that both the replica and an ordinary dependency pass through the
     # same communication channel
