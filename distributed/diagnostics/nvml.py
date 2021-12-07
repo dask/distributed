@@ -13,10 +13,17 @@ nvmlLibraryNotFound = False
 nvmlOwnerPID = None
 
 
+def _in_wsl():
+    """Check if we are in Windows Subsystem for Linux; some PyNVML queries are not supported there.
+    Taken from https://www.scivision.dev/python-detect-wsl/
+    """
+    return "microsoft-standard" in uname().release
+
+
 def init_once():
     global nvmlInitialized, nvmlLibraryNotFound, nvmlOwnerPID
 
-    if dask.config.get("distributed.diagnostics.nvml") is False:
+    if dask.config.get("distributed.diagnostics.nvml") is False or _in_wsl():
         nvmlInitialized = False
         return
 
@@ -64,13 +71,6 @@ def _pynvml_handles():
     return pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
 
 
-def _in_wsl():
-    """Check if we are in Windows Subsystem for Linux; some PyNVML queries are not supported there.
-    Taken from https://www.scivision.dev/python-detect-wsl/
-    """
-    return "microsoft-standard" in uname().release
-
-
 def has_cuda_context():
     """Check whether the current process already has a CUDA context created.
 
@@ -80,19 +80,14 @@ def has_cuda_context():
     index of the device for which there's a CUDA context.
     """
     init_once()
+    if nvmlLibraryNotFound or not nvmlInitialized:
+        return False
     for index in range(device_get_count()):
         handle = pynvml.nvmlDeviceGetHandleByIndex(index)
-        try:
-            if hasattr(pynvml, "nvmlDeviceGetComputeRunningProcesses_v2"):
-                running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses_v2(
-                    handle
-                )
-            else:
-                running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
-        except pynvml.NVMLError_Unknown:
-            if _in_wsl():
-                return False
-            raise
+        if hasattr(pynvml, "nvmlDeviceGetComputeRunningProcesses_v2"):
+            running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses_v2(handle)
+        else:
+            running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
         for proc in running_processes:
             if os.getpid() == proc.pid:
                 return index
