@@ -1,11 +1,11 @@
 name: Debug passwordless `ssh localhost`
 
-on: []
-# on: [pull_request]  # Uncomment to enable
+on: [pull_request]  # Uncomment to enable
 
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    if: false  # comment to enable
     strategy:
       fail-fast: false
       matrix:
