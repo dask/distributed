@@ -793,9 +793,9 @@ def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
     )
 
     def _(func):
-        def test_func(*outer_args, **kwargs):
+        def test_func(*args, **kwargs):
             with clean() as loop:
-                injected_func = functools.partial(func, *outer_args, **kwargs)
+                injected_func = functools.partial(func, *args, **kwargs)
                 if iscoroutinefunction(func):
                     cor = injected_func
                 else:
