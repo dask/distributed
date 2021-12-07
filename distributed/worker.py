@@ -2374,7 +2374,7 @@ class Worker(ServerNode):
 
     def transition_flight_fetch(self, ts, *, stimulus_id):
         # If this transition is called after the flight coroutine has finished,
-        # we can reset the task and transition to fetch again. If it is not, yet
+        # we can reset the task and transition to fetch again. If it is not yet
         # finished, this should be a no-op
         if ts.done:
             recommendations, smsgs = self.transition_generic_released(
