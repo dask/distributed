@@ -84,6 +84,9 @@ def has_cuda_context():
         return False
     for index in range(device_get_count()):
         handle = pynvml.nvmlDeviceGetHandleByIndex(index)
+        # TODO: WSL doesn't support this NVML query yet; when NVML monitoring is enabled
+        # there we may need to wrap this in a try/except block.
+        # See https://github.com/dask/distributed/pull/5568
         if hasattr(pynvml, "nvmlDeviceGetComputeRunningProcesses_v2"):
             running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses_v2(handle)
         else:
