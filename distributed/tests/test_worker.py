@@ -2864,8 +2864,9 @@ async def test_acquire_replicas_already_in_flight(c, s, *nannies):
     _acquire_replicas(s, b, x)
     await asyncio.sleep(0.5)
 
-    story = await c.run(lambda dask_worker: dask_worker.story(x.key), workers=[b])
+    story = await c.run(lambda dask_worker: dask_worker.story("x"), workers=[b])
     events = [ev for ev in story[b] if ev[-1] >= start]
+    assert len(events) == 2
     assert events[0][:3] == ("x", "ensure-task-exists", "flight")
     assert events[1][:4] == ("x", "flight", "fetch", "flight")
 
