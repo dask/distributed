@@ -110,6 +110,7 @@ PROCESSING = {
     "resumed",
 }
 READY = {"ready", "constrained"}
+FETCH_INTENDED = {"missing", "fetch", "flight", "cancelled", "resumed"}
 
 # Worker.status subsets
 RUNNING = {Status.running, Status.paused, Status.closing_gracefully}
@@ -225,7 +226,7 @@ class TaskState:
         nbytes = self.nbytes
         return nbytes if nbytes is not None else DEFAULT_DATA_SIZE
 
-    def _to_dict(self, *, exclude: Container[str] = None) -> dict[str, Any]:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not inteded for roundtrips.
@@ -240,16 +241,8 @@ class TaskState:
         --------
         Client.dump_cluster_state
         """
-
-        if exclude is None:
-            exclude = set()
-
         return recursive_to_dict(
-            {
-                attr: getattr(self, attr)
-                for attr in self.__dict__.keys()
-                if attr not in exclude
-            },
+            {k: v for k, v in self.__dict__.items() if k not in exclude},
             exclude=exclude,
         )
 
@@ -650,8 +643,8 @@ class Worker(ServerNode):
             ("resumed", "memory"): self.transition_generic_memory,
             ("resumed", "error"): self.transition_generic_error,
             ("resumed", "released"): self.transition_generic_released,
-            ("resumed", "waiting"): self.transition_rescheduled_next,
-            ("resumed", "fetch"): self.transition_rescheduled_next,
+            ("resumed", "waiting"): self.transition_resumed_waiting,
+            ("resumed", "fetch"): self.transition_resumed_fetch,
             ("constrained", "executing"): self.transition_constrained_executing,
             ("constrained", "released"): self.transition_generic_released,
             ("error", "released"): self.transition_generic_released,
@@ -1122,8 +1115,8 @@ class Worker(ServerNode):
         }
 
     def _to_dict(
-        self, comm: Comm = None, *, exclude: Container[str] = None
-    ) -> dict[str, Any]:
+        self, comm: Comm | None = None, *, exclude: Container[str] = ()
+    ) -> dict:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not inteded for roundtrips.
@@ -1155,9 +1148,9 @@ class Worker(ServerNode):
             "memory_spill_fraction": self.memory_spill_fraction,
             "memory_pause_fraction": self.memory_pause_fraction,
             "logs": self.get_logs(),
-            "config": dict(dask.config.config),
-            "incoming_transfer_log": list(self.incoming_transfer_log),
-            "outgoing_transfer_log": list(self.outgoing_transfer_log),
+            "config": dask.config.config,
+            "incoming_transfer_log": self.incoming_transfer_log,
+            "outgoing_transfer_log": self.outgoing_transfer_log,
         }
         info.update(extra)
         return recursive_to_dict(info, exclude=exclude)
@@ -2206,11 +2199,53 @@ class Worker(ServerNode):
             stimulus_id=stimulus_id,
         )
 
-    def transition_rescheduled_next(self, ts, *, stimulus_id):
-        next_state = ts._next
-        recs, smsgs = self.transition_generic_released(ts, stimulus_id=stimulus_id)
-        recs[ts] = next_state
-        return recs, smsgs
+    def transition_resumed_fetch(self, ts, *, stimulus_id):
+        """`resumed` is an intermediate degenerate state which splits further up
+        into two states depending on what the last signal / next state is
+        intended to be. There are only two viable choices depending on whether
+        the task is required to be fetched from another worker `resumed(fetch)`
+        or the task shall be computed on this worker `resumed(waiting)`.
+
+        The only viable state transitions ending up here are
+
+        flight -> cancelled -> resumed(waiting)
+
+        or
+
+        executing -> cancelled -> resumed(fetch)
+
+        depending on the origin. Equally, only `fetch`, `waiting` or `released`
+        are allowed output states.
+
+        See also `transition_resumed_waiting`
+        """
+        # if the next state is already intended to be fetch or if the
+        # coro/thread is still running (ts.done==False), this is a noop
+        if ts._next == "fetch":
+            return {}, []
+        ts._next = "fetch"
+
+        if ts.done:
+            next_state = ts._next
+            recs, smsgs = self.transition_generic_released(ts, stimulus_id=stimulus_id)
+            recs[ts] = next_state
+            return recs, smsgs
+        return {}, []
+
+    def transition_resumed_waiting(self, ts, *, stimulus_id):
+        """
+        See transition_resumed_fetch
+        """
+        if ts._next == "waiting":
+            return {}, []
+        ts._next = "waiting"
+
+        if ts.done:
+            next_state = ts._next
+            recs, smsgs = self.transition_generic_released(ts, stimulus_id=stimulus_id)
+            recs[ts] = next_state
+            return recs, smsgs
+        return {}, []
 
     def transition_cancelled_fetch(self, ts, *, stimulus_id):
         if ts.done:
@@ -2338,16 +2373,17 @@ class Worker(ServerNode):
         return {}, []
 
     def transition_flight_fetch(self, ts, *, stimulus_id):
-        self._in_flight_tasks.discard(ts)
-        ts.coming_from = None
-
-        for w in ts.who_has:
-            self.pending_data_per_worker[w].append(ts.key)
-        ts.state = "fetch"
-        ts.done = False
-        heapq.heappush(self.data_needed, (ts.priority, ts.key))
-
-        return {}, []
+        # If this transition is called after the flight coroutine has finished,
+        # we can reset the task and transition to fetch again. If it is not yet
+        # finished, this should be a no-op
+        if ts.done:
+            recommendations, smsgs = self.transition_generic_released(
+                ts, stimulus_id=stimulus_id
+            )
+            recommendations[ts] = "fetch"
+            return recommendations, smsgs
+        else:
+            return {}, []
 
     def transition_flight_error(
         self, ts, exception, traceback, exception_text, traceback_text, *, stimulus_id
@@ -2777,9 +2813,9 @@ class Worker(ServerNode):
         Returns
         -------
         in_flight_keys:
-            The subset of keys in to_gather_keys in state `flight`
+            The subset of keys in to_gather_keys in state `flight` or `resumed`
         cancelled_keys:
-            The subset of tasks in to_gather_keys in state `cancelled`
+            The subset of tasks in to_gather_keys in state `cancelled` or `memory`
         cause:
             The task to attach startstops of this transfer to
         """
@@ -2789,9 +2825,18 @@ class Worker(ServerNode):
             ts = self.tasks.get(key)
             if ts is None:
                 continue
+
+            # At this point, a task has been transitioned fetch->flight
+            # flight is only allowed to be transitioned into
+            # {memory, resumed, cancelled}
+            # resumed and cancelled will block any further transition until this
+            # coro has been finished
+
             if ts.state in ("flight", "resumed"):
                 in_flight_tasks.add(ts)
-            elif ts.state == "cancelled":
+            # If the key is already in memory, the fetch should not happen which
+            # is signalled by the cancelled_keys
+            elif ts.state in {"cancelled", "memory"}:
                 cancelled_keys.add(key)
             else:
                 raise RuntimeError(
@@ -3049,14 +3094,14 @@ class Worker(ServerNode):
                         # Do not mutate the input dict. That's rude
                         workers = set(workers) - {self.address}
                     dep_ts = self.tasks[dep]
-                    dep_ts.who_has.update(workers)
+                    if dep_ts.state in FETCH_INTENDED:
+                        dep_ts.who_has.update(workers)
 
-                    if dep_ts.state == "missing":
-                        recommendations[dep_ts] = "fetch"
+                        if dep_ts.state == "missing":
+                            recommendations[dep_ts] = "fetch"
 
-                    for worker in workers:
-                        self.has_what[worker].add(dep)
-                        if dep_ts.state in ("fetch", "flight", "missing"):
+                        for worker in workers:
+                            self.has_what[worker].add(dep)
                             self.pending_data_per_worker[worker].append(dep_ts.key)
 
             self.transitions(recommendations=recommendations, stimulus_id=stimulus_id)

@@ -16,7 +16,7 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Awaitable, Collection, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager, suppress
@@ -24,7 +24,7 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import TYPE_CHECKING, Awaitable, ClassVar, Sequence
+from typing import TYPE_CHECKING, ClassVar
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
@@ -3481,8 +3481,8 @@ class Client(SyncMethodMixin):
     async def _dump_cluster_state(
         self,
         filename: str,
-        exclude: Sequence[str] = None,
-        format: Literal["msgpack"] | Literal["yaml"] = "msgpack",
+        exclude: Collection[str],
+        format: Literal["msgpack", "yaml"],
     ) -> None:
 
         scheduler_info = self.scheduler.dump_state()
@@ -3503,23 +3503,36 @@ class Client(SyncMethodMixin):
             "workers": worker_info,
             "versions": versions_info,
         }
+
+        def tuple_to_list(node):
+            if isinstance(node, (list, tuple)):
+                return [tuple_to_list(el) for el in node]
+            elif isinstance(node, dict):
+                return {k: tuple_to_list(v) for k, v in node.items()}
+            else:
+                return node
+
+        # lists are converted to tuples by the RPC
+        state = tuple_to_list(state)
+
         filename = str(filename)
         if format == "msgpack":
-            suffix = ".msgpack.gz"
-            if not filename.endswith(suffix):
-                filename += suffix
             import gzip
 
             import msgpack
-            import yaml
+
+            suffix = ".msgpack.gz"
+            if not filename.endswith(suffix):
+                filename += suffix
 
             with gzip.open(filename, "wb") as fdg:
                 msgpack.pack(state, fdg)
         elif format == "yaml":
+            import yaml
+
             suffix = ".yaml"
             if not filename.endswith(suffix):
                 filename += suffix
-            import yaml
 
             with open(filename, "w") as fd:
                 yaml.dump(state, fd)
@@ -3531,8 +3544,8 @@ class Client(SyncMethodMixin):
     def dump_cluster_state(
         self,
         filename: str = "dask-cluster-dump",
-        exclude: Sequence[str] = None,
-        format: Literal["msgpack"] | Literal["yaml"] = "msgpack",
+        exclude: Collection[str] = (),
+        format: Literal["msgpack", "yaml"] = "msgpack",
     ) -> Awaitable | None:
         """Extract a dump of the entire cluster state and persist to disk.
         This is intended for debugging purposes only.
@@ -3549,13 +3562,13 @@ class Client(SyncMethodMixin):
                 }
             }
 
-        Paramters
-        ---------
+        Parameters
+        ----------
         filename:
             The output filename. The appropriate file suffix (`.msgpack.gz` or
             `.yaml`) will be appended automatically.
         exclude:
-            A sequence of attribute names which are supposed to be blacklisted
+            A collection of attribute names which are supposed to be blacklisted
             from the dump, e.g. to exclude code, tracebacks, logs, etc.
         format:
             Either msgpack or yaml. If msgpack is used (default), the output

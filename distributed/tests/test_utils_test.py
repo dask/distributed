@@ -172,10 +172,15 @@ def test_gen_test_legacy_implicit():
     assert False
 
 
+@pytest.mark.xfail(
+    reason="Test should always fail to ensure the body of the test function was run",
+    strict=True,
+)
 @gen_test()
 @gen.coroutine
 def test_gen_test_legacy_explicit():
     yield asyncio.sleep(0.01)
+    assert False
 
 
 @pytest.mark.parametrize("foo", [True])

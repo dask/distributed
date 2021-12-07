@@ -26,7 +26,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import Any, ClassVar, Container
+from typing import ClassVar, Container
 from typing import cast as pep484_cast
 
 import psutil
@@ -1732,10 +1732,10 @@ class TaskState:
         return nbytes
 
     @ccall
-    def _to_dict(self, *, exclude: Container[str] = None):
+    def _to_dict(self, *, exclude: "Container[str]" = ()):  # -> dict
         """
         A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
+        Not type stable and not intended for roundtrips.
 
         Parameters
         ----------
@@ -1746,12 +1746,13 @@ class TaskState:
         --------
         Client.dump_cluster_state
         """
-
-        if not exclude:
-            exclude = set()
         members = inspect.getmembers(self)
         return recursive_to_dict(
-            {k: v for k, v in members if k not in exclude and not callable(v)},
+            {
+                k: v
+                for k, v in members
+                if not k.startswith("_") and k not in exclude and not callable(v)
+            },
             exclude=exclude,
         )
 
@@ -3977,8 +3978,8 @@ class Scheduler(SchedulerState, ServerNode):
         return d
 
     def _to_dict(
-        self, comm: Comm = None, *, exclude: Container[str] = None
-    ) -> "dict[str, Any]":
+        self, comm: "Comm | None" = None, *, exclude: "Container[str]" = ()
+    ) -> dict:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not inteded for roundtrips.
@@ -3994,20 +3995,16 @@ class Scheduler(SchedulerState, ServerNode):
         Server.identity
         Client.dump_cluster_state
         """
-
         info = super()._to_dict(exclude=exclude)
         extra = {
             "transition_log": self.transition_log,
             "log": self.log,
             "tasks": self.tasks,
             "events": self.events,
+            "extensions": self.extensions,
         }
-        info.update(extra)
-        extensions = {}
-        for name, ex in self.extensions.items():
-            if hasattr(ex, "_to_dict"):
-                extensions[name] = ex._to_dict()
-        return recursive_to_dict(info, exclude=exclude)
+        info.update(recursive_to_dict(extra, exclude=exclude))
+        return info
 
     def get_worker_service_addr(self, worker, service_name, protocol=False):
         """
@@ -5678,7 +5675,9 @@ class Scheduler(SchedulerState, ServerNode):
                 f"Could not find plugin {name!r} among the current scheduler plugins"
             )
 
-    async def register_scheduler_plugin(self, comm=None, plugin=None, name=None):
+    async def register_scheduler_plugin(
+        self, comm=None, plugin=None, name=None, idempotent=None
+    ):
         """Register a plugin on the scheduler."""
         if not dask.config.get("distributed.scheduler.pickle"):
             raise ValueError(
@@ -5689,12 +5688,18 @@ class Scheduler(SchedulerState, ServerNode):
             )
         plugin = loads(plugin)
 
+        if name is None:
+            name = _get_plugin_name(plugin)
+
+        if name in self.plugins and idempotent:
+            return
+
         if hasattr(plugin, "start"):
             result = plugin.start(self)
             if inspect.isawaitable(result):
                 await result
 
-        self.add_plugin(plugin, name=name)
+        self.add_plugin(plugin, name=name, idempotent=idempotent)
 
     def worker_send(self, worker, msg):
         """Send message to worker
