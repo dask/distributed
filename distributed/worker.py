@@ -3102,8 +3102,7 @@ class Worker(ServerNode):
 
                         for worker in workers:
                             self.has_what[worker].add(dep)
-                            if dep_ts.state in FETCH_INTENDED:
-                                self.pending_data_per_worker[worker].append(dep_ts.key)
+                            self.pending_data_per_worker[worker].append(dep_ts.key)
 
             self.transitions(recommendations=recommendations, stimulus_id=stimulus_id)
         except Exception as e:
