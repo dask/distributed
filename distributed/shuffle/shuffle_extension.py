@@ -214,14 +214,7 @@ class ShuffleWorkerExtension:
                 f"Shuffle {new_metadata.id!r} is already registered on worker {self.worker.address}"
             )
 
-        client = self.worker.client
-        assert (
-            client.loop is self.worker.loop
-        ), f"Worker client is not using the worker's event loop: {client.loop} vs {self.worker.loop}"
-        # NOTE: `Client.scheduler_info()` doesn't actually do anything when the client is async,
-        # manually call into the method for now.
-        await client._update_scheduler_info()
-        identity = client._scheduler_identity
+        identity = await self.worker.scheduler.identity()
 
         workers = list(identity["workers"])
         metadata = ShuffleMetadata(
