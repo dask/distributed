@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import itertools
 import logging
 import random
@@ -110,11 +111,122 @@ async def test_worksteal_many_thieves(c, s, *workers):
     assert sum(map(len, s.has_what.values())) < 150
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
-async def test_dont_steal_unknown_functions(c, s, a, b):
-    futures = c.map(inc, range(100), workers=a.address, allow_other_workers=True)
-    await wait(futures)
-    assert len(a.data) >= 95, [len(a.data), len(b.data)]
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 2,
+    config={"distributed.scheduler.work-stealing-interval": "10ms"},
+)
+async def test_stop_plugin(c, s, a, b):
+    steal = s.extensions["stealing"]
+
+    await steal.stop()
+    futs = c.map(slowinc, range(10), workers=[a.address], allow_other_workers=True)
+    await c.gather(futs)
+    assert len(a.data) == 10
+
+    # nothing happens
+    for _ in range(10):
+        await steal.stop()
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 2,
+    config={"distributed.scheduler.work-stealing-interval": "1ms"},
+)
+async def test_stop_in_flight(c, s, a, b):
+    steal = s.extensions["stealing"]
+    num_tasks = 10
+    futs = c.map(
+        slowinc, range(num_tasks), workers=[a.address], allow_other_workers=True
+    )
+    while not steal.in_flight:
+        await asyncio.sleep(0)
+
+    assert steal.in_flight
+    await steal.stop()
+    assert not steal.in_flight
+
+    assert len(a.data) != num_tasks
+    del futs
+    while s.tasks or a.tasks or b.tasks:
+        await asyncio.sleep(0.1)
+
+    futs = c.map(
+        slowinc, range(num_tasks), workers=[a.address], allow_other_workers=True
+    )
+    await c.gather(futs)
+    assert len(a.data) == num_tasks
+
+    del futs
+    while s.tasks or a.tasks or b.tasks:
+        await asyncio.sleep(0.1)
+    futs = c.map(
+        slowinc, range(num_tasks), workers=[a.address], allow_other_workers=True
+    )
+    while not len(a.tasks) == num_tasks:
+        await asyncio.sleep(0.01)
+    assert len(b.tasks) == 0
+    await steal.start()
+    await c.gather(futs)
+    assert len(a.tasks) != num_tasks
+    assert len(b.tasks) != 0
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 2,
+    config={"distributed.scheduler.work-stealing-interval": "10ms"},
+)
+async def test_allow_tasks_stolen_before_first_completes(c, s, a, b):
+    # https://github.com/dask/distributed/issues/5564
+    from distributed import Semaphore
+
+    steal = s.extensions["stealing"]
+    await steal.stop()
+    lock = await Semaphore(max_leases=1)
+
+    # We will reuse the same function such that multiple dispatches have the
+    # same task prefix. This ensures that we have tasks queued up but all of
+    # them are still classified as unknown.
+    # The lock allows us to control the duration of the first task without
+    # delaying test runtime or flakyness
+    def blocked_task(x, lock):
+        if x == 0:
+            with lock:
+                return x
+        return x
+
+    async with lock:
+        first = c.submit(blocked_task, 0, lock, workers=[a.address], key="f-0")
+        # Ensure the task is indeed blocked
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(first, 0.01)
+        assert first.key in a.tasks
+
+        more_tasks = c.map(
+            blocked_task,
+            # zero is a sentinel for using the lock.
+            # Start counting at one for non-blocking funcs
+            range(1, 11),
+            lock=lock,
+            workers=[a.address],
+            key=[f"f-{ix}" for ix in range(1, 11)],
+            allow_other_workers=True,
+        )
+        # All tasks are put on A since this is what we asked for. Only work
+        # stealing should rebalance the tasks once we allow for it
+        while not len(a.tasks) == 11:
+            await asyncio.sleep(0.1)
+
+        assert len(b.tasks) == 0
+
+        await steal.start()
+        # A is still blocked by executing task f-1 so this can only pass if
+        # workstealing moves the tasks to B
+        await c.gather(more_tasks)
+        assert len(b.data) == 10
+    await first
 
 
 @gen_cluster(
@@ -802,21 +914,18 @@ async def test_lose_task(c, s, a, b):
     assert "Error" not in out
 
 
-@gen_cluster(client=True)
-async def test_worker_stealing_interval(c, s, a, b):
+@pytest.mark.parametrize("interval, expected", [(None, 100), ("500ms", 500), (2, 2)])
+@gen_cluster(nthreads=[])
+async def test_parse_stealing_interval(s, interval, expected):
     from distributed.scheduler import WorkStealing
 
-    ws = WorkStealing(s)
-    assert ws._pc.callback_time == 100
-
-    with dask.config.set({"distributed.scheduler.work-stealing-interval": "500ms"}):
+    if interval:
+        ctx = dask.config.set({"distributed.scheduler.work-stealing-interval": "500ms"})
+    else:
+        ctx = contextlib.nullcontext()
+    with ctx:
         ws = WorkStealing(s)
-    assert ws._pc.callback_time == 500
-
-    # Default unit is `ms`
-    with dask.config.set({"distributed.scheduler.work-stealing-interval": 2}):
-        ws = WorkStealing(s)
-    assert ws._pc.callback_time == 2
+        s.periodic_callbacks["stealing"].callback_time == expected
 
 
 @gen_cluster(client=True)
