@@ -777,6 +777,12 @@ async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
 def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
     """Coroutine test
 
+    @pytest.mark.parametrize("param", [1, 2, 3])
+    @gen_test(timeout=5)
+    async def test_foo(param)
+        await ... # use tornado coroutines
+
+
     @gen_test(timeout=5)
     async def test_foo():
         await ...  # use tornado coroutines
@@ -787,14 +793,18 @@ def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
     )
 
     def _(func):
-        def test_func():
+        def test_func(*args, **kwargs):
             with clean() as loop:
+                injected_func = functools.partial(func, *args, **kwargs)
                 if iscoroutinefunction(func):
-                    cor = func
+                    cor = injected_func
                 else:
-                    cor = gen.coroutine(func)
+                    cor = gen.coroutine(injected_func)
+
                 loop.run_sync(cor, timeout=timeout)
 
+        # Patch the signature so pytest can inject fixtures
+        test_func.__signature__ = inspect.signature(func)
         return test_func
 
     return _

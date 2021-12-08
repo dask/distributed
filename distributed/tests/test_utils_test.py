@@ -183,6 +183,26 @@ def test_gen_test_legacy_explicit():
     assert False
 
 
+@pytest.mark.parametrize("foo", [True])
+@gen_test()
+async def test_gen_test_parametrized(foo):
+    assert foo is True
+
+
+@pytest.mark.parametrize("foo", [True])
+@pytest.mark.parametrize("bar", [False])
+@gen_test()
+async def test_gen_test_double_parametrized(foo, bar):
+    assert foo is True
+    assert bar is False
+
+
+@gen_test()
+async def test_gen_test_pytest_fixture(tmp_path, c):
+    assert isinstance(tmp_path, pathlib.Path)
+    assert isinstance(c, Client)
+
+
 @contextmanager
 def _listen(delay=0):
     serv = socket.socket()
