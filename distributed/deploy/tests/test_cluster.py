@@ -53,8 +53,7 @@ async def test_sync_defaults_to_cluster_setting(
     asynchronous_cluster, loop_in_thread, cleanup
 ):
 
-    cluster = Cluster(asynchronous=asynchronous_cluster)
-    cluster.loop = loop_in_thread
+    cluster = Cluster(asynchronous=asynchronous_cluster, loop=loop_in_thread)
 
     async def foo():
         return 1
@@ -73,9 +72,7 @@ async def test_sync_defaults_to_cluster_setting(
 async def test_sync_allows_override_of_asychronous(
     asynchronous_cluster, loop_in_thread, cleanup
 ):
-
-    cluster = Cluster(asynchronous=asynchronous_cluster)
-    cluster.loop = loop_in_thread
+    cluster = Cluster(asynchronous=asynchronous_cluster, loop=loop_in_thread)
 
     async def foo():
         return 1

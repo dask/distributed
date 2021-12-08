@@ -61,6 +61,7 @@ class Cluster(SyncMethodMixin):
         name=None,
         scheduler_sync_interval=1,
     ):
+        self._asynchronous = asynchronous
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.loop = self._loop_runner.loop
 
