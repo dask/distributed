@@ -69,7 +69,7 @@ async def test_nprocs():
     ) as cluster:
         assert len(cluster.workers) == 2
         async with Client(cluster, asynchronous=True) as client:
-            client.wait_for_workers(4)
+            await client.wait_for_workers(4)
             result = await client.submit(lambda x: x + 1, 10)
             assert result == 11
         assert not cluster._supports_scaling
