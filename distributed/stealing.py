@@ -143,7 +143,7 @@ class WorkStealing(SchedulerPlugin):
         del self.stealable[worker]
 
     def teardown(self):
-        self._pc.stop()
+        self.scheduler.periodic_callbacks["stealing"].stop()
 
     def transition(
         self, key, start, finish, compute_start=None, compute_stop=None, *args, **kwargs

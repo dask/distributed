@@ -368,7 +368,7 @@ async def test_dont_steal_worker_restrictions(c, s, a, b):
     assert len(a.tasks) == 100
     assert len(b.tasks) == 0
 
-    result = s.extensions["stealing"].balance()
+    s.extensions["stealing"].balance()
 
     await asyncio.sleep(0.1)
 
@@ -488,10 +488,12 @@ async def test_steal_resource_restrictions(c, s, a):
     await b.close()
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 5)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 5,
+    config={"distributed.scheduler.work-stealing-interval": "20ms"},
+)
 async def test_balance_without_dependencies(c, s, *workers):
-    s.extensions["stealing"]._pc.callback_time = 20
-
     def slow(x):
         y = random.random() * 0.1
         sleep(y)
@@ -534,10 +536,12 @@ async def test_dont_steal_executing_tasks_2(c, s, a, b):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)] * 10,
-    config={"distributed.scheduler.default-task-durations": {"slowidentity": 0.2}},
+    config={
+        "distributed.scheduler.default-task-durations": {"slowidentity": 0.2},
+        "distributed.scheduler.work-stealing-interval": "20ms",
+    },
 )
 async def test_dont_steal_few_saturated_tasks_many_workers(c, s, a, *rest):
-    s.extensions["stealing"]._pc.callback_time = 20
     x = c.submit(mul, b"0", 100000000, workers=a.address)  # 100 MB
     await wait(x)
 
@@ -553,10 +557,12 @@ async def test_dont_steal_few_saturated_tasks_many_workers(c, s, a, *rest):
     client=True,
     nthreads=[("127.0.0.1", 1)] * 10,
     worker_kwargs={"memory_limit": MEMORY_LIMIT},
-    config={"distributed.scheduler.default-task-durations": {"slowidentity": 0.2}},
+    config={
+        "distributed.scheduler.default-task-durations": {"slowidentity": 0.2},
+        "distributed.scheduler.work-stealing-interval": "20ms",
+    },
 )
 async def test_steal_when_more_tasks(c, s, a, *rest):
-    s.extensions["stealing"]._pc.callback_time = 20
     x = c.submit(mul, b"0", 50000000, workers=a.address)  # 50 MB
     await wait(x)
 
@@ -575,7 +581,8 @@ async def test_steal_when_more_tasks(c, s, a, *rest):
         "distributed.scheduler.default-task-durations": {
             "slowidentity": 0.2,
             "slow2": 1,
-        }
+        },
+        "distributed.scheduler.work-stealing-interval": "20ms",
     },
 )
 async def test_steal_more_attractive_tasks(c, s, a, *rest):
@@ -583,7 +590,6 @@ async def test_steal_more_attractive_tasks(c, s, a, *rest):
         sleep(1)
         return x
 
-    s.extensions["stealing"]._pc.callback_time = 20
     x = c.submit(mul, b"0", 100000000, workers=a.address)  # 100 MB
     await wait(x)
 
@@ -603,7 +609,7 @@ def func(x):
 
 async def assert_balanced(inp, expected, c, s, *workers):
     steal = s.extensions["stealing"]
-    steal._pc.stop()
+    await steal.stop()
 
     counter = itertools.count()
     tasks = list(concat(inp))
@@ -862,12 +868,15 @@ async def test_dont_steal_long_running_tasks(c, s, a, b):
         ) <= 1
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 5)] * 2)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 5)] * 2,
+    config={"distributed.scheduler.work-stealing-interval": "20ms"},
+)
 async def test_cleanup_repeated_tasks(c, s, a, b):
     class Foo:
         pass
 
-    s.extensions["stealing"]._pc.callback_time = 20
     await c.submit(slowidentity, -1, delay=0.1)
     objects = [c.submit(Foo, pure=False, workers=a.address) for _ in range(50)]
 
