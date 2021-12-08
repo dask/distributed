@@ -489,6 +489,36 @@ async def test_steal_resource_restrictions(c, s, a):
     await b.close()
 
 
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1, {"resources": {"A": 2, "C": 1}})])
+async def test_steal_resource_restrictions_asym_diff(c, s, a):
+    # See https://github.com/dask/distributed/issues/5565
+    future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
+    await future
+
+    futures = c.map(slowinc, range(100), delay=0.2, resources={"A": 1})
+    while len(a.tasks) < 101:
+        await asyncio.sleep(0.01)
+    assert len(a.tasks) == 101
+
+    b = await Worker(
+        s.address,
+        loop=s.loop,
+        nthreads=1,
+        resources={
+            "A": 4,
+            "B": 5,
+        },
+    )
+
+    while not b.tasks or len(a.tasks) == 101:
+        await asyncio.sleep(0.01)
+
+    assert len(b.tasks) > 0
+    assert len(a.tasks) < 101
+
+    await b.close()
+
+
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)] * 5,
