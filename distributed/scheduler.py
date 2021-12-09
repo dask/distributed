@@ -196,6 +196,8 @@ globals()["ALL_TASK_STATES"] = ALL_TASK_STATES
 COMPILED = declare(bint, compiled)
 globals()["COMPILED"] = COMPILED
 
+_taskstate_to_dict_guard: bool = False
+
 
 @final
 @cclass
@@ -1731,8 +1733,6 @@ class TaskState:
             nbytes += ts.get_nbytes()
         return nbytes
 
-    _to_dict_guard: bool = False
-
     @ccall
     def _to_dict(self, *, exclude: "Container[str]" = ()):  # -> dict | str
         """
@@ -1752,9 +1752,10 @@ class TaskState:
         # should neatly appear under Scheduler.tasks. This also prevents a
         # RecursionError during particularly heavy loads, which have been observed to
         # happen whenever there's an acyclic dependency chain of ~200+ tasks.
-        if TaskState._to_dict_guard:
+        global _taskstate_to_dict_guard
+        if _taskstate_to_dict_guard:
             return repr(self)
-        TaskState._to_dict_guard = True
+        _taskstate_to_dict_guard = True
         try:
             members = inspect.getmembers(self)
             return recursive_to_dict(
@@ -1766,7 +1767,7 @@ class TaskState:
                 exclude=exclude,
             )
         finally:
-            TaskState._to_dict_guard = False
+            _taskstate_to_dict_guard = False
 
 
 class _StateLegacyMapping(Mapping):
