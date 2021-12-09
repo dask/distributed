@@ -1,9 +1,6 @@
 name: test-report
 
 on:
-  push: # TODO: revert before merge.
-    branches:
-      - distributed-test-report
   schedule:
     - cron: "47 6 * * *"
 
@@ -42,15 +39,8 @@ jobs:
           mkdir deploy
           mv test_report.html deploy/
 
-      # TODO: revert before merge
-      - name: Upload report
-        uses: actions/upload-artifact@v2
+      - name: Deploy 🚀
+        uses: JamesIves/github-pages-deploy-action@4.1.7
         with:
-          name: test_report.html
-          path: deploy/test_report.html
-
-      #- name: Deploy 🚀
-      #  uses: JamesIves/github-pages-deploy-action@4.1.7
-      #  with:
-      #    branch: gh-pages
-      #    folder: deploy
+          branch: gh-pages
+          folder: deploy
