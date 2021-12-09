@@ -148,20 +148,24 @@ def error_message(scheduler, workers, client, client_name="client"):
         elif len(worker_versions) == 0:
             worker_versions = None
 
-        errs.append((pkg, client_version, scheduler_version, worker_versions))
+        level = "Critical" if pkg in ["python", "dask", "distributed"] else "Warning"
+
+        errs.append((pkg, client_version, scheduler_version, worker_versions, level))
         if pkg in notes_mismatch_package.keys():
             notes.append(f"-  {pkg}: {notes_mismatch_package[pkg]}")
 
     out = {"warning": "", "error": ""}
 
     if errs:
-        err_table = asciitable(["Package", client_name, "scheduler", "workers"], errs)
-        err_msg = f"Mismatched versions found\n\n{err_table}"
+        err_table = asciitable(
+            ["Package", client_name, "scheduler", "workers", "level"], errs
+        )
+        err_msg = f"Mismatched versions found, may case instability. Please address critical mismatches before continuing.\n\n{err_table}"
         if notes:
             err_msg += "\nNotes: \n{}".format("\n".join(notes))
         out["warning"] += err_msg
 
-        for name, c, s, ws in errs:
+        for name, c, s, ws, l in errs:
             if not isinstance(ws, set):
                 ws = {ws}
 
