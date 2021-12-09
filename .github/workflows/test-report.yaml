@@ -8,6 +8,8 @@ jobs:
   test-report:
     name: pre-commit hooks
     runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v2
 
