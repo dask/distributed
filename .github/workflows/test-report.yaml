@@ -3,6 +3,7 @@ name: Generate Longitudinal Test Report
 on:
   schedule:
     - cron: "47 6 * * *"
+  workflow_dispatch:
 
 jobs:
   test-report:
