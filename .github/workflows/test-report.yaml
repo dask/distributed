@@ -1,9 +1,6 @@
 name: test-report
 
 on:
-  push:
-    branches:
-      - test-report
   schedule:
     - cron: "47 6 * * *"
 
