@@ -1,0 +1,41 @@
+name: test-report
+
+on: push
+  #schedule: 
+  #  - cron: "21 6 * * *"
+
+jobs:
+  test-report:
+    name: pre-commit hooks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Setup Conda Environment
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          miniforge-variant: Mambaforge
+          miniforge-version: latest
+          condarc-file: continuous_integration/condarc
+          use-mamba: true
+          python-version: 3.9
+          environment-file: continuous_integration/scripts/test-report-environment.yml
+          activate-environment: dask-distributed
+
+      - name: Show conda options
+        shell: bash -l {0}
+        run: conda config --show
+
+      - name: mamba list
+        shell: bash -l {0}
+        run: mamba list
+
+      - name: Generate report
+        shell: bash -l {0}
+        run: python continuous_integration/scripts/test_report.py
+
+      - name: Upload test report 
+        uses: actions/upload-artifact@v2
+        with:
+          name: test_report.html 
+          path: test_report.html
