@@ -1731,8 +1731,10 @@ class TaskState:
             nbytes += ts.get_nbytes()
         return nbytes
 
+    _to_dict_guard: bool = False
+
     @ccall
-    def _to_dict(self, *, exclude: "Container[str]" = ()):  # -> dict
+    def _to_dict(self, *, exclude: "Container[str]" = ()):  # -> dict | str
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
@@ -1746,15 +1748,25 @@ class TaskState:
         --------
         Client.dump_cluster_state
         """
-        members = inspect.getmembers(self)
-        return recursive_to_dict(
-            {
-                k: v
-                for k, v in members
-                if not k.startswith("_") and k not in exclude and not callable(v)
-            },
-            exclude=exclude,
-        )
+        # When a task references another task, just print the task repr. All tasks
+        # should neatly appear under Scheduler.tasks. This also prevents a
+        # RecursionError during particularly heavy loads, which have been observed to
+        # happen whenever there's an acyclic dependency chain of ~200+ tasks.
+        if TaskState._to_dict_guard:
+            return repr(self)
+        TaskState._to_dict_guard = True
+        try:
+            members = inspect.getmembers(self)
+            return recursive_to_dict(
+                {
+                    k: v
+                    for k, v in members
+                    if not k.startswith("_") and k not in exclude and not callable(v)
+                },
+                exclude=exclude,
+            )
+        finally:
+            TaskState._to_dict_guard = False
 
 
 class _StateLegacyMapping(Mapping):
