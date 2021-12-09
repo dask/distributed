@@ -293,4 +293,4 @@ if __name__ == "__main__":
         .configure_axis(labelLimit=1000)  # test names are long
         .resolve_scale(x="shared")  # enforce aligned x axes
     )
-    altair_saver.save(chart, "test_report.html")
+    altair_saver.save(chart, "test_report.html", embed_options={"renderer": "svg"})

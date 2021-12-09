@@ -1,8 +1,11 @@
 name: test-report
 
 on:
+  push:
+    branches:
+      - test-report
   schedule:
-    - cron: "23 15 * * *"
+    - cron: "23 6 * * *"
 
 jobs:
   test-report:
