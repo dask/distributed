@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 import sys
 import warnings
@@ -85,7 +86,7 @@ class Worker(Process):
         self.scheduler = scheduler
         self.worker_class = worker_class
         self.connect_options = connect_options
-        self.kwargs = kwargs
+        self.kwargs = copy.copy(kwargs)
         self.name = name
         self.remote_python = remote_python
         self.nprocs = self.kwargs.pop("nprocs", 1)
@@ -135,7 +136,6 @@ class Worker(Process):
                             "cls": self.worker_class,
                             "opts": {
                                 **self.kwargs,
-                                "name": self.name,
                             },
                         }
                         for i in range(self.nprocs)
@@ -143,6 +143,7 @@ class Worker(Process):
                 ),
             ]
         )
+        print(cmd)
 
         self.proc = await self.connection.create_process(cmd)
 
