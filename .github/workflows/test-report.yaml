@@ -5,7 +5,7 @@ on:
     branches:
       - test-report
   schedule:
-    - cron: "23 6 * * *"
+    - cron: "47 15 * * *"
 
 jobs:
   test-report:
