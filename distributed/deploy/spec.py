@@ -320,9 +320,12 @@ class SpecCluster(Cluster):
                         retire_list.append(w_name)
                         spec = self._old_specs.get(w_name, None)
                         if spec and "group" in spec:
-                            retire_list.extend((str(w_name) + suffix) for suffix in spec["group"])
+                            retire_list.extend(
+                                (str(w_name) + suffix) for suffix in spec["group"]
+                            )
                     await self.scheduler_comm.retire_workers(
-                        names=list(retire_list), remove=True, close_workers=False)
+                        names=list(retire_list), remove=True, close_workers=False
+                    )
                 tasks = [
                     asyncio.create_task(self.workers[w].close())
                     for w in to_close
@@ -479,13 +482,15 @@ class SpecCluster(Cluster):
             names_map = {}
             for name, spec in self.worker_spec.items():
                 if "group" in spec:
-                    w_names = set((str(name) + suffix) for suffix in spec["group"])
+                    w_names = {(str(name) + suffix) for suffix in spec["group"]}
                 else:
-                    w_names = set([name])
+                    w_names = {name}
                 group_map[name] = w_names
                 for w_name in w_names:
                     names_map[w_name] = name
-            launched_names = {v["name"] for v in self.scheduler_info["workers"].values()}
+            launched_names = {
+                v["name"] for v in self.scheduler_info["workers"].values()
+            }
             not_launched_names = set(names_map) - launched_names
             not_launched_workers = set()
             for w_name in not_launched_names:
