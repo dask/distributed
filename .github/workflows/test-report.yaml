@@ -2,7 +2,7 @@ name: test-report
 
 on:
   schedule:
-    - cron: "21 6 * * *"
+    - cron: "23 15 * * *"
 
 jobs:
   test-report:
