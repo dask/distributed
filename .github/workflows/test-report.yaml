@@ -1,4 +1,4 @@
-name: test-report
+name: Generate Longitudinal Test Report
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
 
 jobs:
   test-report:
-    name: test-report
+    name: Generate Longitudinal Test Report
     runs-on: ubuntu-latest
     env:
       GITHUB_TOKEN: ${{ github.token }}
