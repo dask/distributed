@@ -6,7 +6,7 @@ on: push
 
 jobs:
   test-report:
-    name: pre-commit hooks
+    name: test-report
     runs-on: ubuntu-latest
     env:
       GITHUB_TOKEN: ${{ github.token }}
@@ -34,10 +34,13 @@ jobs:
 
       - name: Generate report
         shell: bash -l {0}
-        run: python continuous_integration/scripts/test_report.py
+        run: |
+          python continuous_integration/scripts/test_report.py
+          mkdir deploy
+          mv test_report.html deploy/
 
-      - name: Upload test report 
-        uses: actions/upload-artifact@v2
+      - name: Deploy 🚀
+        uses: JamesIves/github-pages-deploy-action@4.1.7
         with:
-          name: test_report.html 
-          path: test_report.html
+          branch: gh-pages
+          folder: deploy
