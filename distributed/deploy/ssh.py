@@ -143,7 +143,6 @@ class Worker(Process):
                 ),
             ]
         )
-        print(cmd)
 
         self.proc = await self.connection.create_process(cmd)
 
