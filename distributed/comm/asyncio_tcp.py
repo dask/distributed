@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 import asyncio
 import collections
 import logging
+import os
 import socket
 import struct
 import weakref
+from typing import Any
 
 try:
     import ssl
@@ -24,7 +28,11 @@ logger = logging.getLogger(__name__)
 _COMM_CLOSED = object()
 
 
-def coalesce_buffers(buffers, target_buffer_size=64 * 1024, small_buffer_size=2048):
+def coalesce_buffers(
+    buffers: list[bytes],
+    target_buffer_size: int = 64 * 1024,
+    small_buffer_size: int = 2048,
+) -> list[bytes]:
     """Given a list of buffers, coalesce them into a new list of buffers that
     minimizes both copying and tiny writes.
 
@@ -47,8 +55,8 @@ def coalesce_buffers(buffers, target_buffer_size=64 * 1024, small_buffer_size=20
     if sum(map(len, buffers)) <= target_buffer_size:
         return [b"".join(buffers)]
 
-    out_buffers = []
-    concat = []  # A list of buffers to concatenate
+    out_buffers: list[bytes] = []
+    concat: list[bytes] = []  # A list of buffers to concatenate
     csize = 0  # The total size of the concatenated buffers
 
     def flush():
@@ -77,40 +85,72 @@ def coalesce_buffers(buffers, target_buffer_size=64 * 1024, small_buffer_size=20
 
 
 class DaskCommProtocol(asyncio.BufferedProtocol):
+    """Manages a state machine for parsing the message framing used by dask.
+
+    Parameters
+    ----------
+    on_connection : callable, optional
+        A callback to call on connection, used server side for handling
+        incoming connections.
+    min_read_size : int, optional
+        The minimum buffer size to pass to ``socket.recv_into``. Larger sizes
+        will result in fewer recv calls, at the cost of more copying. For
+        request-response comms (where only one message may be in the queue at a
+        time), a smaller value is likely more performant.
+    """
+
     def __init__(self, on_connection=None, min_read_size=128 * 1024):
         super().__init__()
         self.on_connection = on_connection
-        self._exception = None
-        self._queue = asyncio.Queue()
-        self._transport = None
-        self._paused = False
-        self._drain_waiter = None
         self._loop = asyncio.get_running_loop()
+        # On error (or close) this contains an exception to raise to the caller
+        self._exception: Exception | None = None
+        # A queue of received messages
+        self._queue = asyncio.Queue()
+        # The corresponding transport, set on `connection_made`
+        self._transport = None
+        # Is the protocol paused?
+        self._paused = False
+        # If the protocol is paused, this holds a future to wait on until it's
+        # unpaused.
+        self._drain_waiter: asyncio.Future | None = None
+        # A future for waiting until the protocol is actually closed
         self._is_closed = self._loop.create_future()
+
+        # In the interest of reducing the number of `recv` calls, we always
+        # want to provide the opportunity to read `min_read_size` bytes from
+        # the socket (since memcpy is much faster than recv). Each read event
+        # may read into either a default buffer (of size `min_read_size`), or
+        # directly into one of the message frames (if the frame size is >
+        # `min_read_size`).
 
         # Per-message state
         self._using_default_buffer = True
 
         self._default_len = max(min_read_size, 16)  # need at least 16 bytes of buffer
         self._default_buffer = memoryview(bytearray(self._default_len))
+        # Index in default_buffer pointing to the first unparsed byte
         self._default_start = 0
+        # Index in default_buffer pointing to the last written byte
         self._default_end = 0
 
-        self._nframes = None
-        self._frame_lengths = None
-        self._frames = None
-        self._frame_index = None
-        self._frame_nbytes_needed = 0
+        # Each message is composed of one or more frames, these attributes
+        # are filled in as the message is parsed, and cleared once a message
+        # is fully parsed.
+        self._nframes: int | None = None
+        self._frame_lengths: list[int] | None = None
+        self._frames: list[memoryview] | None = None
+        self._frame_index: int | None = None  # current frame to parse
+        self._frame_nbytes_needed: int = 0  # nbytes left for parsing current frame
 
     @property
     def local_addr(self):
         if self._transport is None:
             return "<closed>"
-        try:
-            host, port = self._transport.get_extra_info("socket").getsockname()[:2]
-            return unparse_host_port(host, port)
-        except Exception:
-            return "<closed>"
+        sockname = self._transport.get_extra_info("sockname")
+        if sockname is not None:
+            return unparse_host_port(*sockname[:2])
+        return "<unknown>"
 
     @property
     def peer_addr(self):
@@ -159,6 +199,9 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             self.on_connection(self)
 
     def get_buffer(self, sizehint):
+        """Get a buffer to read into for this read event"""
+        # Read into the default buffer if there are no frames or the current
+        # frame is small. Otherwise read directly into the current frame.
         if self._frames is None or self._frame_nbytes_needed < self._default_len:
             self._using_default_buffer = True
             return self._default_buffer[self._default_end :]
@@ -173,24 +216,28 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
 
         if self._using_default_buffer:
             self._default_end += nbytes
-            while self._parse_next():
-                pass
-            self._reset_default_buffer()
+            self._parse_default_buffer()
         else:
             self._frame_nbytes_needed -= nbytes
             if not self._frames_check_remaining():
                 self._message_completed()
 
-    def _parse_next(self):
-        if self._nframes is None:
-            if not self._parse_nframes():
-                return False
-        if len(self._frame_lengths) < self._nframes:
-            if not self._parse_frame_lengths():
-                return False
-        return self._parse_frames()
+    def _parse_default_buffer(self):
+        """Parse all messages in the default buffer."""
+        while True:
+            if self._nframes is None:
+                if not self._parse_nframes():
+                    break
+            if len(self._frame_lengths) < self._nframes:
+                if not self._parse_frame_lengths():
+                    break
+            if not self._parse_frames():
+                break
+        self._reset_default_buffer()
 
     def _parse_nframes(self):
+        """Fill in `_nframes` from the default buffer. Returns True if
+        successful, False if more data is needed"""
         # TODO: we drop the message total size prefix (sent as part of the
         # tornado-based tcp implementation), as it's not needed. If we ever
         # drop that prefix entirely, we can adjust this code (change 16 -> 8
@@ -205,6 +252,8 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         return False
 
     def _parse_frame_lengths(self):
+        """Fill in `_frame_lengths` from the default buffer. Returns True if
+        successful, False if more data is needed"""
         needed = self._nframes - len(self._frame_lengths)
         available = (self._default_end - self._default_start) // 8
         n_read = min(available, needed)
@@ -240,6 +289,8 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
                 return False
 
     def _parse_frames(self):
+        """Fill in `_frames` from the default buffer. Returns True if
+        successful, False if more data is needed"""
         while True:
             available = self._default_end - self._default_start
             # Are we out of frames?
@@ -260,18 +311,22 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             self._frame_nbytes_needed -= n_read
 
     def _reset_default_buffer(self):
+        """Reset the default buffer for the next read event"""
         start = self._default_start
         end = self._default_end
 
         if start < end and start != 0:
+            # Still some unparsed data, copy it to the front of the buffer
             self._default_buffer[: end - start] = self._default_buffer[start:end]
             self._default_start = 0
             self._default_end = end - start
         elif start == end:
+            # All data is parsed, just reset the indices
             self._default_start = 0
             self._default_end = 0
 
     def _message_completed(self):
+        """Push a completed message to the queue and reset per-message state"""
         self._queue.put_nowait(self._frames)
         self._nframes = None
         self._frames = None
@@ -308,7 +363,8 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             if not waiter.done():
                 waiter.set_result(None)
 
-    async def read(self):
+    async def read(self) -> list[bytes]:
+        """Read a single message from the comm."""
         # Even if comm is closed, we still yield all received data before
         # erroring
         if self._queue is not None:
@@ -316,15 +372,17 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             if out is not _COMM_CLOSED:
                 return out
             self._queue = None
+        assert self._exception is not None
         raise self._exception
 
-    async def write(self, frames):
+    async def write(self, frames: list[bytes]) -> int:
+        """Write a message to the comm."""
         if self._exception:
             raise self._exception
         elif self._paused:
             # Wait until there's room in the write buffer
             self._drain_waiter = self._loop.create_future()
-            await self._drain_waiter
+            await self._drain_waiter  # type: ignore
 
         # Ensure all memoryviews are in single-byte format
         frames = [f.cast("B") if isinstance(f, memoryview) else f for f in frames]
@@ -706,6 +764,8 @@ class TLSBackend(TCPBackend):
     _listener_class = TLSListener
 
 
+# This class is based on parts of `asyncio.selector_events._SelectorSocketTransport`
+# (https://github.com/python/cpython/blob/dc4a212bd305831cb4b187a2e0cc82666fcb15ca/Lib/asyncio/selector_events.py#L757).
 class _ZeroCopyWriter:
     """The builtin socket transport in asyncio makes a bunch of copies, which
     can make sending large amounts of data much slower. This hacks around that.
@@ -713,8 +773,19 @@ class _ZeroCopyWriter:
     Note that this workaround isn't used with the windows ProactorEventLoop or
     uvloop."""
 
-    SENDMSG_MAX_SIZE = 1024 * 1024  # 1 MiB
-    SENDMSG_MAX_COUNT = 16
+    # We use sendmsg for scatter IO if it's available. Since bookkeeping
+    # scatter IO has a small cost, we want to minimize the amount of processing
+    # we do for each send call. We assume the system send buffer is < 4 MiB
+    # (which would be very large), and set a limit on the number of buffers to
+    # pass to sendmsg.
+    SENDMSG_MAX_SIZE = 4 * 1024 * 1024  # 4 MiB
+    if hasattr(socket.socket, "sendmsg"):
+        try:
+            SENDMSG_MAX_COUNT = os.sysconf("SC_IOV_MAX")
+        except Exception:
+            SENDMSG_MAX_COUNT = 16  # Should be supported on all systems
+    else:
+        SENDMSG_MAX_COUNT = 1  # sendmsg not supported, use send instead
 
     def __init__(self, protocol, transport):
         self.protocol = protocol
@@ -738,13 +809,18 @@ class _ZeroCopyWriter:
         for attr in ["_add_writer", "_remove_writer"]:
             assert hasattr(self._loop, attr)
 
-        self._buffers = collections.deque()
-        self._offset = 0
+        # A deque of buffers to send
+        self._buffers: collections.deque[memoryview] = collections.deque()
+        # The total size of all bytes left to send in _buffers
         self._size = 0
+        # Is the backing protocol paused?
         self._protocol_paused = False
+        # Initialize the buffer limits
         self.set_write_buffer_limits()
 
-    def set_write_buffer_limits(self, high=None, low=None):
+    def set_write_buffer_limits(self, high: int = None, low: int = None):
+        """Set the write buffer limits"""
+        # Copied almost verbatim from asyncio.transports._FlowControlMixin
         if high is None:
             if low is None:
                 high = 64 * 1024  # 64 KiB
@@ -757,21 +833,24 @@ class _ZeroCopyWriter:
         self._maybe_pause_protocol()
 
     def _maybe_pause_protocol(self):
+        """If the high water mark has been reached, pause the protocol"""
         if not self._protocol_paused and self._size > self._high_water:
             self._protocol_paused = True
             self.protocol.pause_writing()
 
     def _maybe_resume_protocol(self):
+        """If the low water mark has been reached, unpause the protocol"""
         if self._protocol_paused and self._size <= self._low_water:
             self._protocol_paused = False
             self.protocol.resume_writing()
 
     def _buffer_clear(self):
+        """Clear the send buffer"""
         self._buffers.clear()
         self._size = 0
-        self._offset = 0
 
-    def _buffer_append(self, data):
+    def _buffer_append(self, data: bytes) -> None:
+        """Append new data to the send buffer"""
         if not isinstance(data, memoryview):
             data = memoryview(data)
         if data.format != "B":
@@ -779,15 +858,12 @@ class _ZeroCopyWriter:
         self._size += len(data)
         self._buffers.append(data)
 
-    def _buffer_peek(self):
-        offset = self._offset
+    def _buffer_peek(self) -> list[memoryview]:
+        """Get one or more buffers to write to the socket"""
         buffers = []
         size = 0
         count = 0
         for b in self._buffers:
-            if offset:
-                b = b[offset:]
-                offset = 0
             buffers.append(b)
             size += len(b)
             count += 1
@@ -795,24 +871,23 @@ class _ZeroCopyWriter:
                 break
         return buffers
 
-    def _buffer_advance(self, size):
+    def _buffer_advance(self, size: int) -> None:
+        """Advance the buffer index forward by `size`"""
         self._size -= size
 
-        offset = self._offset
         buffers = self._buffers
         while size:
             b = buffers[0]
-            b_len = len(b) - offset
+            b_len = len(b)
             if b_len <= size:
                 buffers.popleft()
                 size -= b_len
-                offset = 0
             else:
-                offset += size
+                buffers[0] = b[size:]
                 break
-        self._offset = offset
 
-    def write(self, data):
+    def write(self, data: bytes) -> None:
+        # Copied almost verbatim from asyncio.selector_events._SelectorSocketTransport
         transport = self.transport
 
         if transport._eof:
@@ -843,7 +918,8 @@ class _ZeroCopyWriter:
         self._buffer_append(data)
         self._maybe_pause_protocol()
 
-    def writelines(self, buffers):
+    def writelines(self, buffers: list[bytes]) -> None:
+        # Based on modified version of `write` above
         waiting = bool(self._buffers)
         for b in buffers:
             self._buffer_append(b)
@@ -866,18 +942,18 @@ class _ZeroCopyWriter:
 
         self._maybe_pause_protocol()
 
-    def close(self):
+    def close(self) -> None:
         self._buffer_clear()
         return self.transport.close()
 
-    def abort(self):
+    def abort(self) -> None:
         self._buffer_clear()
         return self.transport.abort()
 
-    def get_extra_info(self, key):
+    def get_extra_info(self, key: str) -> Any:
         return self.transport.get_extra_info(key)
 
-    def _do_bulk_write(self):
+    def _do_bulk_write(self) -> None:
         buffers = self._buffer_peek()
         if len(buffers) == 1:
             n = self.transport._sock.send(buffers[0])
@@ -886,7 +962,8 @@ class _ZeroCopyWriter:
             n = self.transport._sock.sendmsg(buffers)
             self._buffer_advance(n)
 
-    def _on_write_ready(self):
+    def _on_write_ready(self) -> None:
+        # Copied almost verbatim from asyncio.selector_events._SelectorSocketTransport
         transport = self.transport
         if transport._conn_lost:
             return
