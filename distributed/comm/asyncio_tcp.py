@@ -7,6 +7,7 @@ import os
 import socket
 import struct
 import weakref
+from itertools import islice
 from typing import Any
 
 try:
@@ -43,17 +44,11 @@ def coalesce_buffers(
         The target intermediate buffer size from concatenating small buffers
         together. Coalesced buffers will be no larger than approximately this size.
     small_buffer_size : int, optional
-        Buffers <= this size are considered "small" and may be copied. Buffers
-        larger than this may also be copied if the total message length is less
-        than ``target_buffer_size``.
+        Buffers <= this size are considered "small" and may be copied.
     """
     # Nothing to do
     if len(buffers) == 1:
         return buffers
-
-    # If the whole message can be sent in <= target_buffer_size, always concatenate
-    if sum(map(len, buffers)) <= target_buffer_size:
-        return [b"".join(buffers)]
 
     out_buffers: list[bytes] = []
     concat: list[bytes] = []  # A list of buffers to concatenate
@@ -103,8 +98,6 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         super().__init__()
         self.on_connection = on_connection
         self._loop = asyncio.get_running_loop()
-        # On error (or close) this contains an exception to raise to the caller
-        self._exception: Exception | None = None
         # A queue of received messages
         self._queue = asyncio.Queue()
         # The corresponding transport, set on `connection_made`
@@ -115,7 +108,7 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         # unpaused.
         self._drain_waiter: asyncio.Future | None = None
         # A future for waiting until the protocol is actually closed
-        self._is_closed = self._loop.create_future()
+        self._closed_waiter = self._loop.create_future()
 
         # In the interest of reducing the number of `recv` calls, we always
         # want to provide the opportunity to read `min_read_size` bytes from
@@ -145,7 +138,7 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
 
     @property
     def local_addr(self):
-        if self._transport is None:
+        if self.is_closed:
             return "<closed>"
         sockname = self._transport.get_extra_info("sockname")
         if sockname is not None:
@@ -154,7 +147,7 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
 
     @property
     def peer_addr(self):
-        if self._transport is None:
+        if self.is_closed:
             return "<closed>"
         peername = self._transport.get_extra_info("peername")
         if peername is not None:
@@ -166,12 +159,12 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         return self._transport is None
 
     def _abort(self):
-        if self._transport is not None:
+        if not self.is_closed:
             self._transport, transport = None, self._transport
             transport.abort()
 
     def _close_from_finalizer(self, comm_repr):
-        if self._transport is not None:
+        if not self.is_closed:
             logger.warning(f"Closing dangling comm `{comm_repr}`")
             try:
                 self._abort()
@@ -180,10 +173,10 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
                 pass
 
     async def _close(self):
-        if self._transport is not None:
+        if not self.is_closed:
             self._transport, transport = None, self._transport
             transport.close()
-        await self._is_closed
+        await self._closed_waiter
 
     def connection_made(self, transport):
         # XXX: When using asyncio, the default builtin transport makes
@@ -334,11 +327,8 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         self._frame_nbytes_remaining = 0
 
     def connection_lost(self, exc=None):
-        if exc is None:
-            exc = CommClosedError("Connection closed")
-        self._exception = exc
         self._transport = None
-        self._is_closed.set_result(None)
+        self._closed_waiter.set_result(None)
 
         # Unblock read, if any
         self._queue.put_nowait(_COMM_CLOSED)
@@ -349,7 +339,7 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             if waiter is not None:
                 self._drain_waiter = None
                 if not waiter.done():
-                    waiter.set_exception(exc)
+                    waiter.set_exception(CommClosedError("Connection closed"))
 
     def pause_writing(self):
         self._paused = True
@@ -372,13 +362,12 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             if out is not _COMM_CLOSED:
                 return out
             self._queue = None
-        assert self._exception is not None
-        raise self._exception
+        raise CommClosedError("Connection closed")
 
     async def write(self, frames: list[bytes]) -> int:
         """Write a message to the comm."""
-        if self._exception:
-            raise self._exception
+        if self.is_closed:
+            raise CommClosedError("Connection closed")
         elif self._paused:
             # Wait until there's room in the write buffer
             self._drain_waiter = self._loop.create_future()
@@ -396,7 +385,11 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         msg_nbytes = sum(frames_nbytes) + (nframes + 1) * 8
         header = struct.pack(f"{nframes + 2}Q", msg_nbytes, nframes, *frames_nbytes)
 
-        buffers = coalesce_buffers([header, *frames])
+        if msg_nbytes < 4 * 1024:
+            # Always concatenate small messages
+            buffers = [b"".join([header, *frames])]
+        else:
+            buffers = coalesce_buffers([header, *frames])
 
         if len(buffers) > 1:
             self._transport.writelines(buffers)
@@ -778,7 +771,6 @@ class _ZeroCopyWriter:
     # we do for each send call. We assume the system send buffer is < 4 MiB
     # (which would be very large), and set a limit on the number of buffers to
     # pass to sendmsg.
-    SENDMSG_MAX_SIZE = 4 * 1024 * 1024  # 4 MiB
     if hasattr(socket.socket, "sendmsg"):
         try:
             SENDMSG_MAX_COUNT = os.sysconf("SC_IOV_MAX")
@@ -860,16 +852,7 @@ class _ZeroCopyWriter:
 
     def _buffer_peek(self) -> list[memoryview]:
         """Get one or more buffers to write to the socket"""
-        buffers = []
-        size = 0
-        count = 0
-        for b in self._buffers:
-            buffers.append(b)
-            size += len(b)
-            count += 1
-            if size > self.SENDMSG_MAX_SIZE or count == self.SENDMSG_MAX_COUNT:
-                break
-        return buffers
+        return list(islice(self._buffers, self.SENDMSG_MAX_COUNT))
 
     def _buffer_advance(self, size: int) -> None:
         """Advance the buffer index forward by `size`"""
@@ -957,10 +940,9 @@ class _ZeroCopyWriter:
         buffers = self._buffer_peek()
         if len(buffers) == 1:
             n = self.transport._sock.send(buffers[0])
-            self._buffer_advance(n)
         else:
             n = self.transport._sock.sendmsg(buffers)
-            self._buffer_advance(n)
+        self._buffer_advance(n)
 
     def _on_write_ready(self) -> None:
         # Copied almost verbatim from asyncio.selector_events._SelectorSocketTransport
