@@ -2826,7 +2826,7 @@ class SchedulerState:
                 if tts._processing_on:
                     self.set_duration_estimate(tts, tts._processing_on)
                     if steal:
-                        steal.put_key_in_stealable(tts)
+                        steal.recalculate_cost(tts)
 
             ############################
             # Update State Information #

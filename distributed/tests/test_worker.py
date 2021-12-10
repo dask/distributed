@@ -1212,7 +1212,7 @@ async def test_get_current_task(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
 async def test_reschedule(c, s, a, b):
-    s.extensions["stealing"]._pc.stop()
+    await s.extensions["stealing"].stop()
     a_address = a.address
 
     def f(x):
@@ -2604,7 +2604,7 @@ async def test_forget_dependents_after_release(c, s, a):
 @gen_cluster(client=True)
 async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
     stealing_ext = s.extensions["stealing"]
-    stealing_ext._pc.stop()
+    await stealing_ext.stop()
     from distributed.utils import ThreadPoolExecutor
 
     class CountingThreadPool(ThreadPoolExecutor):
