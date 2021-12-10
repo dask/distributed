@@ -302,7 +302,6 @@ class GroupTiming(SchedulerPlugin):
     name = "group-timing"
 
     def __init__(self, scheduler):
-        scheduler.add_plugin(self)
         self.scheduler = scheduler
 
         # Time bin size (in seconds). TODO: make this configurable?
