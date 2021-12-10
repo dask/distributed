@@ -2766,7 +2766,7 @@ class TaskGroupProgress(DashboardComponent):
                         """,
                         mode="vline",
                         line_policy="nearest",
-                        attachment="vertical",
+                        attachment="horizontal",
                         formatters={"$index": formatter},
                     )
                     self.root.add_tools(self._hover)
