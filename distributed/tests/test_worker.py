@@ -35,7 +35,6 @@ from distributed import (
     wait,
 )
 from distributed.comm.registry import backends
-from distributed.comm.tcp import TCPBackend
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
@@ -1541,6 +1540,7 @@ async def test_protocol_from_scheduler_address(cleanup, Worker):
 async def test_host_uses_scheduler_protocol(cleanup, monkeypatch):
     # Ensure worker uses scheduler's protocol to determine host address, not the default scheme
     # See https://github.com/dask/distributed/pull/4883
+    from distributed.comm.tcp import TCPBackend
 
     class BadBackend(TCPBackend):
         def get_address_host(self, loc):
@@ -1956,7 +1956,6 @@ async def test_worker_client_uses_default_no_close(c, s, a):
 @gen_cluster(nthreads=[("127.0.0.1", 0)])
 async def test_worker_client_closes_if_created_on_worker_one_worker(s, a):
     async with Client(s.address, set_as_default=False, asynchronous=True) as c:
-
         with pytest.raises(ValueError):
             default_client()
 

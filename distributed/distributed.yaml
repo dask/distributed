@@ -221,6 +221,9 @@ distributed:
         key: null
         cert: null
 
+    tcp:
+      backend: tornado  # The backend to use for TCP, one of {tornado, asyncio}
+
     websockets:
       shard: 8MiB
 
