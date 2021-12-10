@@ -1020,7 +1020,7 @@ async def test_balance_many_workers(c, s, *workers):
 @nodebug
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 30)
 async def test_balance_many_workers_2(c, s, *workers):
-    s.extensions["stealing"]._pc.callback_time = 100000000
+    await s.extensions["stealing"].stop()
     futures = c.map(slowinc, range(90), delay=0.2)
     await wait(futures)
     assert {len(w.has_what) for w in s.workers.values()} == {3}

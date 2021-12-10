@@ -199,10 +199,11 @@ async def test_allow_tasks_stolen_before_first_completes(c, s, a, b):
 
     async with lock:
         first = c.submit(blocked_task, 0, lock, workers=[a.address], key="f-0")
+        while first.key not in a.tasks:
+            await asyncio.sleep(0.001)
         # Ensure the task is indeed blocked
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(first, 0.01)
-        assert first.key in a.tasks
 
         more_tasks = c.map(
             blocked_task,
