@@ -5129,7 +5129,7 @@ async def test_long_running_not_in_occupancy(c, s, a):
 
     f = c.submit(long_running, l)
     while f.key not in s.tasks:
-        await asyncio.sleep(0)
+        await asyncio.sleep(0.01)
     assert s.workers[a.address].occupancy == parse_timedelta(
         dask.config.get("distributed.scheduler.unknown-task-duration")
     )

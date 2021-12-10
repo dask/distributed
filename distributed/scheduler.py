@@ -3560,8 +3560,7 @@ class SchedulerState:
             return
         if ws._occupancy > old * 1.3 or old > ws._occupancy * 1.3:
             for ts in ws._processing:
-                steal.remove_key_from_stealable(ts)
-                steal.put_key_in_stealable(ts)
+                steal.recalculate_cost(ts)
 
 
 class Scheduler(SchedulerState, ServerNode):
@@ -5549,7 +5548,9 @@ class Scheduler(SchedulerState, ServerNode):
         ws._occupancy -= occ
         parent._total_occupancy -= occ
         # Cannot remove from processing since we're using this for things like
-        # idleness detection
+        # idleness detection. Idle workers are typically targeted for
+        # downscaling but we should not downscale workers with long running
+        # tasks
         ws._processing[ts] = 0
         ws._long_running.add(ts)
         self.check_idle_saturated(ws)
