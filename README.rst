@@ -8,7 +8,7 @@ A library for distributed computation.  See documentation_ for more details.
 .. _documentation: https://distributed.dask.org
 .. |Test Status| image:: https://github.com/dask/distributed/workflows/Tests/badge.svg?branch=main
    :target: https://github.com/dask/distributed/actions?query=workflow%3A%22Tests%22
-.. |Longitudinal Report| image:: image:: https://github.com/dask/distributed/workflows/Test%20Report/badge.svg?branch=main
+.. |Longitudinal Report| image:: https://github.com/dask/distributed/workflows/Test%20Report/badge.svg?branch=main
    :target: https://dask.github.io/distributed/test_report.html
    :alt: Longitudinal test report
 .. |Doc Status| image:: https://readthedocs.org/projects/distributed/badge/?version=latest
