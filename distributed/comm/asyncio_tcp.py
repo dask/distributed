@@ -370,8 +370,8 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             raise CommClosedError("Connection closed")
         elif self._paused:
             # Wait until there's room in the write buffer
-            self._drain_waiter = self._loop.create_future()
-            await self._drain_waiter  # type: ignore
+            drain_waiter = self._drain_waiter = self._loop.create_future()
+            await drain_waiter
 
         # Ensure all memoryviews are in single-byte format
         frames = [f.cast("B") if isinstance(f, memoryview) else f for f in frames]
