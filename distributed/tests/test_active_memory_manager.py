@@ -70,7 +70,7 @@ async def test_no_policies(c, s, a, b):
     s.extensions["amm"].run_once()
 
 
-@gen_cluster(nthreads=[("", 1)] * 4, client=True, config=demo_config("drop"))
+@gen_cluster(nthreads=[("", 1)] * 4, client=True, config=demo_config("drop", n=5))
 async def test_drop(c, s, *workers):
     with captured_amm_logger() as logs:
         s.extensions["amm"].run_once()
@@ -82,7 +82,11 @@ async def test_drop(c, s, *workers):
     # Also test the extension handler
     with captured_amm_logger() as logs:
         s.extensions["amm"].run_once()
-    assert logs.getvalue() == "Enacting suggestions for 1 tasks\n"
+    assert logs.getvalue() == (
+        "(drop, <TaskState 'x' memory>, None) rejected: less than 2 replicas exist\n"
+        "(drop, <TaskState 'x' memory>, None) rejected: less than 2 replicas exist\n"
+        "Enacting suggestions for 1 tasks\n"
+    )
     while len(s.tasks["x"].who_has) > 1:
         await asyncio.sleep(0.01)
     # The last copy is never dropped even if the policy asks so
@@ -570,7 +574,7 @@ class DropEverything(ActiveMemoryManagerPolicy):
             self.manager.policies.remove(self)
 
 
-async def _tensordot_stress(c):
+async def tensordot_stress(c):
     da = pytest.importorskip("dask.array")
 
     rng = da.random.RandomState(0)
@@ -580,7 +584,7 @@ async def _tensordot_stress(c):
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/5371")
+@pytest.mark.avoid_ci(reason="distributed#5371")
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 4,
@@ -600,11 +604,11 @@ async def test_drop_stress(c, s, *nannies):
 
     See also: test_ReduceReplicas_stress
     """
-    await _tensordot_stress(c)
+    await tensordot_stress(c)
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/5371")
+@pytest.mark.avoid_ci(reason="distributed#5371")
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 4,
@@ -623,4 +627,4 @@ async def test_ReduceReplicas_stress(c, s, *nannies):
     test_drop_stress above, this test does not stop running after a few seconds - the
     policy must not disrupt the computation too much.
     """
-    await _tensordot_stress(c)
+    await tensordot_stress(c)
