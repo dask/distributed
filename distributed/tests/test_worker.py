@@ -1568,17 +1568,18 @@ async def test_worker_listens_on_same_interface_by_default(cleanup, Worker):
 @gen_cluster(client=True)
 async def test_close_gracefully(c, s, a, b):
     futures = c.map(slowinc, range(200), delay=0.1)
-    while not b.data:
-        await asyncio.sleep(0.1)
 
+    while not b.data:
+        await asyncio.sleep(0.01)
     mem = set(b.data)
-    proc = [ts for ts in b.tasks.values() if ts.state == "executing"]
+    proc = {ts for ts in b.tasks.values() if ts.state == "executing"}
+    assert proc
 
     await b.close_gracefully()
 
     assert b.status == Status.closed
     assert b.address not in s.workers
-    assert mem.issubset(set(a.data))
+    assert mem.issubset(a.data.keys())
     for ts in proc:
         assert ts.state in ("executing", "memory")
 

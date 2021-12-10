@@ -1847,7 +1847,7 @@ class Worker(ServerNode):
                 {"op": "add-keys", "keys": rejected, "stimulus_id": stimulus_id}
             )
 
-        self.transitions(recommendations=recommendations, stimulus_id=stimulus_id)
+        self.transitions(recommendations, stimulus_id=stimulus_id)
 
         return "OK"
 
@@ -1889,7 +1889,6 @@ class Worker(ServerNode):
         self, comm=None, keys=None, priorities=None, who_has=None, stimulus_id=None
     ):
         recommendations = {}
-        scheduler_msgs = []
         for k in keys:
             ts = self.ensure_task_exists(
                 k,
@@ -1900,9 +1899,6 @@ class Worker(ServerNode):
                 recommendations[ts] = "fetch"
 
         self.update_who_has(who_has, stimulus_id=stimulus_id)
-
-        for msg in scheduler_msgs:
-            self.batched_stream.send(msg)
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
     def ensure_task_exists(
@@ -2680,7 +2676,7 @@ class Worker(ServerNode):
             self.comm_nbytes += total_nbytes
             self.in_flight_workers[worker] = to_gather
             recommendations = {self.tasks[d]: ("flight", worker) for d in to_gather}
-            self.transitions(recommendations=recommendations, stimulus_id=stimulus_id)
+            self.transitions(recommendations, stimulus_id=stimulus_id)
 
             self.loop.add_callback(
                 self.gather_dep,
@@ -3030,9 +3026,7 @@ class Worker(ServerNode):
                         )
                         recommendations[ts] = "fetch"
                 del data, response
-                self.transitions(
-                    recommendations=recommendations, stimulus_id=stimulus_id
-                )
+                self.transitions(recommendations, stimulus_id=stimulus_id)
                 self.ensure_computing()
 
                 if not busy:
@@ -3104,7 +3098,7 @@ class Worker(ServerNode):
                             self.has_what[worker].add(dep)
                             self.pending_data_per_worker[worker].append(dep_ts.key)
 
-            self.transitions(recommendations=recommendations, stimulus_id=stimulus_id)
+            self.transitions(recommendations, stimulus_id=stimulus_id)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
