@@ -4179,7 +4179,8 @@ class Scheduler(SchedulerState, ServerNode):
             self.log_event(worker, {"action": "close-worker"})
             # FIXME: This does not handle nannies
             self.worker_send(worker, {"op": "close", "report": False})
-            await self.remove_worker(address=worker, safe=safe)
+            # Already sent close, don't send close again in remove_worker call
+            await self.remove_worker(address=worker, safe=safe, close=False)
 
     ###########
     # Stimuli #

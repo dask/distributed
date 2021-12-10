@@ -314,6 +314,7 @@ class SpecCluster(Cluster):
 
             to_close = set(self.workers) - set(self.worker_spec)
             if to_close:
+                retired = {}
                 if self.scheduler.status == Status.running:
                     retire_list = []
                     for w_name in to_close:
@@ -323,18 +324,38 @@ class SpecCluster(Cluster):
                             retire_list.extend(
                                 (str(w_name) + suffix) for suffix in spec["group"]
                             )
-                    await self.scheduler_comm.retire_workers(
-                        names=list(retire_list), remove=True, close_workers=False
+                    # This removes workers the Scheduler knows about
+                    # (ie, observed and registered Worker processes)
+                    retired_w = await self.scheduler_comm.retire_workers(
+                        names=list(retire_list), remove=False, close_workers=True
                     )
+                    retired.update(retired_w)
+                # closing a worker via retire_workers will also close its
+                # corresponding Nanny if it has one. So mark it as retired too
+                retired_nannies = { w.address: w
+                    for r_addr, r in retired.items() for w_id, w in self.workers.items()
+                    if r.get("nanny", "") == w.address
+                }
+                retired.update(retired_nannies)
+
+                # This removes workers the SpecCluster knows about
+                # Eg, Nannies, SSH workers, Distributed/VM Workers
                 tasks = [
                     asyncio.create_task(self.workers[w].close())
                     for w in to_close
                     if w in self.workers
+                       and self.workers[w].address not in retired
                 ]
-                await asyncio.wait(tasks)
-                for task in tasks:  # for tornado gen.coroutine support
-                    with suppress(RuntimeError):
-                        await task
+                tasks.extend(
+                    asyncio.create_task(r.process.stopped.wait()) for r in retired_nannies.values() if r.process
+                )
+                if tasks:
+                    await asyncio.wait(tasks)
+                    for task in tasks:  # for tornado gen.coroutine support
+                        with suppress(RuntimeError):
+                            await task
+                else:
+                    await asyncio.sleep(0)
             for name in to_close:
                 if name in self.workers:
                     del self.workers[name]
