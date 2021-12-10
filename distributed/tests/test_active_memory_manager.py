@@ -596,7 +596,6 @@ async def tensordot_stress(c):
             {"class": "distributed.tests.test_active_memory_manager.DropEverything"},
         ],
     },
-    timeout=120,
 )
 async def test_drop_stress(c, s, *nannies):
     """A policy which suggests dropping everything won't break a running computation,
@@ -620,7 +619,6 @@ async def test_drop_stress(c, s, *nannies):
             {"class": "distributed.active_memory_manager.ReduceReplicas"},
         ],
     },
-    timeout=120,
 )
 async def test_ReduceReplicas_stress(c, s, *nannies):
     """Running ReduceReplicas compulsively won't break a running computation. Unlike
