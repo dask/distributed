@@ -994,8 +994,9 @@ def gen_cluster(
                                 assert c
                                 try:
                                     if cluster_dump_directory:
-                                        if not os.path.exists(cluster_dump_directory):
-                                            os.makedirs(cluster_dump_directory)
+                                        os.makedirs(
+                                            cluster_dump_directory, exist_ok=True
+                                        )
                                         filename = os.path.join(
                                             cluster_dump_directory, func.__name__
                                         )
@@ -1011,7 +1012,8 @@ def gen_cluster(
                                         await fut
                                 except Exception:
                                     print(
-                                        f"Exception {sys.exc_info()} while trying to dump cluster state."
+                                        f"Exception {sys.exc_info()} while trying to "
+                                        "dump cluster state."
                                     )
 
                             task.cancel()
