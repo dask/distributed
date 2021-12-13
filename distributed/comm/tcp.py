@@ -385,9 +385,20 @@ class RequireEncryptionMixin:
 
 
 class BaseTCPConnector(Connector, RequireEncryptionMixin):
-    _executor = ThreadPoolExecutor(2, thread_name_prefix="TCP-Executor")
-    _resolver = netutil.ExecutorResolver(close_executor=False, executor=_executor)
-    client = TCPClient(resolver=_resolver)
+    @property
+    def client(self):
+        # The `TCPClient` is cached on the class itself to avoid creating
+        # excess `ThreadPoolExecutor`s. We delay creation until inside an async
+        # function to avoid accessing an IOLoop from a context where a backing
+        # event loop doesn't exist.
+        cls = type(self)
+        if not hasattr(type(self), "_client"):
+            _executor = ThreadPoolExecutor(2, thread_name_prefix="TCP-Executor")
+            _resolver = netutil.ExecutorResolver(
+                close_executor=False, executor=_executor
+            )
+            cls._client = TCPClient(resolver=_resolver)
+        return cls._client
 
     async def connect(self, address, deserialize=True, **connection_args):
         self._check_encryption(address, connection_args)
