@@ -692,6 +692,13 @@ async def test_broadcast_on_error(s, a, b):
     assert out == {b.address: b"pong"}
 
 
+@gen_cluster()
+async def test_broadcast_deprecation(s, a, b):
+    with pytest.warns(FutureWarning):
+        out = await s.broadcast(msg={"op": "ping"}, workers=True)
+    assert out == {a.address: b"pong", b.address: b"pong"}
+
+
 @gen_cluster(nthreads=[])
 async def test_worker_name(s):
     w = await Worker(s.address, name="alice")

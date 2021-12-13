@@ -6038,7 +6038,7 @@ class Scheduler(SchedulerState, ServerNode):
                 elif on_error == "return":
                     return e
                 elif on_error == "return_pickle":
-                    return dumps(e)
+                    return dumps(e, protocol=4)
                 elif on_error == "ignore":
                     return ERROR
                 else:
