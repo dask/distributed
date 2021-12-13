@@ -3355,8 +3355,7 @@ async def test_TaskState__to_dict(c, s, a):
     x = c.submit(inc, 1, key="x")
     y = c.submit(inc, x, key="y")
     z = c.submit(inc, 2, key="z")
-    while len(a.tasks) < 3:
-        await asyncio.sleep(0.01)
+    await wait([x, y, z])
 
     tasks = a._to_dict()["tasks"]
 
