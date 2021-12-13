@@ -693,7 +693,7 @@ def test_recursive_to_dict():
     a = []
     c = C(a)
     a += [c, c]
-    # The blacklist of already-seen objects is reentrant: a is converted to string when
+    # The blocklist of already-seen objects is reentrant: a is converted to string when
     # found inside itself; c must *not* be converted to string the second time it's
     # found, because it's outside of itself.
     assert recursive_to_dict(a, exclude=["foo"]) == [

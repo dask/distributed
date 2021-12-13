@@ -279,33 +279,33 @@ async def test_dont_steal_fast_tasks_compute_time(c, s, *workers):
 
 
 @gen_cluster(client=True)
-async def test_dont_steal_fast_tasks_blacklist(c, s, a, b):
+async def test_dont_steal_fast_tasks_blocklist(c, s, a, b):
     # create a dependency
     x = c.submit(slowinc, 1, workers=[b.address])
 
-    # If the blacklist of fast tasks is tracked somewhere else, this needs to be
-    # changed. This test requires *any* key which is blacklisted.
+    # If the blocklist of fast tasks is tracked somewhere else, this needs to be
+    # changed. This test requires *any* key which is blocked.
     from distributed.stealing import fast_tasks
 
-    blacklisted_key = next(iter(fast_tasks))
+    blocked_key = next(iter(fast_tasks))
 
-    def fast_blacklisted(x, y=None):
+    def fast_blocked(x, y=None):
         # The task should observe a certain computation time such that we can
-        # ensure that it is not stolen due to the blacklisting. If it is too
+        # ensure that it is not stolen due to the blocking. If it is too
         # fast, the standard mechanism shouldn't allow stealing
         import time
 
         time.sleep(0.01)
 
     futures = c.map(
-        fast_blacklisted,
+        fast_blocked,
         range(100),
         y=x,
         # Submit the task to one worker but allow it to be distributed else,
         # i.e. this is not a task restriction
         workers=[a.address],
         allow_other_workers=True,
-        key=blacklisted_key,
+        key=blocked_key,
     )
 
     await wait(futures)
@@ -959,7 +959,7 @@ async def test_balance_with_longer_task(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_blacklist_shuffle_split(c, s, a, b):
+async def test_blocklist_shuffle_split(c, s, a, b):
 
     pd = pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
@@ -978,9 +978,9 @@ async def test_blacklist_shuffle_split(c, s, a, b):
     prefixes = set(s.task_prefixes.keys())
     from distributed.stealing import fast_tasks
 
-    blacklisted = fast_tasks & prefixes
-    assert blacklisted
-    assert any(["split" in prefix for prefix in blacklisted])
+    blocked = fast_tasks & prefixes
+    assert blocked
+    assert any(["split" in prefix for prefix in blocked])
 
     stealable = s.extensions["stealing"].stealable
     while not res.done():
