@@ -385,6 +385,8 @@ class RequireEncryptionMixin:
 
 
 class BaseTCPConnector(Connector, RequireEncryptionMixin):
+    _executor = ThreadPoolExecutor(2, thread_name_prefix="TCP-Executor")
+
     @property
     def client(self):
         # The `TCPClient` is cached on the class itself to avoid creating
@@ -393,11 +395,10 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         # event loop doesn't exist.
         cls = type(self)
         if not hasattr(type(self), "_client"):
-            _executor = ThreadPoolExecutor(2, thread_name_prefix="TCP-Executor")
-            _resolver = netutil.ExecutorResolver(
-                close_executor=False, executor=_executor
+            resolver = netutil.ExecutorResolver(
+                close_executor=False, executor=cls._executor
             )
-            cls._client = TCPClient(resolver=_resolver)
+            cls._client = TCPClient(resolver=resolver)
         return cls._client
 
     async def connect(self, address, deserialize=True, **connection_args):
