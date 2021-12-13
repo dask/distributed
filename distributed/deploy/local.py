@@ -56,8 +56,8 @@ class LocalCluster(SpecCluster):
         Set to True if using this cluster within async/await functions or within
         Tornado gen.coroutines.  This should remain False for normal use.
     blocked_handlers: List[str]
-        A list of strings specifying a blacklist of handlers to disallow on the Scheduler,
-        like ``['feed', 'run_function']``
+        A list of strings specifying a blocklist of handlers to disallow on the
+        Scheduler, like ``['feed', 'run_function']``
     service_kwargs: Dict[str, Dict]
         Extra keywords to hand to the running services
     security : Security or bool, optional
