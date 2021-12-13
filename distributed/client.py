@@ -2393,7 +2393,7 @@ class Client(SyncMethodMixin):
         nanny: bool = False,
         workers: list[str] | None = None,
         wait: bool = True,
-        on_error: Literal["raise", "return", "ignore"],
+        on_error: Literal["raise", "return", "ignore"] = "raise",
         **kwargs,
     ):
         responses = await self.scheduler.broadcast(
