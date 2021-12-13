@@ -2554,9 +2554,9 @@ class Client(SyncMethodMixin):
     def _get_computation_code(stacklevel=None) -> str:
         """Walk up the stack to the user code and extract the code surrounding
         the compute/submit/persist call. All modules encountered which are
-        blacklisted by the option
+        ignored through the option
         `distributed.diagnostics.computations.ignore-modules` will be ignored.
-        This can be used to blacklist commonly used libraries which wrap
+        This can be used to exclude commonly used libraries which wrap
         dask/distributed compute calls.
 
         ``stacklevel`` may be used to explicitly indicate from which frame on
@@ -3626,7 +3626,7 @@ class Client(SyncMethodMixin):
             The output filename. The appropriate file suffix (`.msgpack.gz` or
             `.yaml`) will be appended automatically.
         exclude:
-            A collection of attribute names which are supposed to be blacklisted
+            A collection of attribute names which are supposed to be excluded
             from the dump, e.g. to exclude code, tracebacks, logs, etc.
         format:
             Either msgpack or yaml. If msgpack is used (default), the output
