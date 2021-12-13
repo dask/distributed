@@ -52,4 +52,4 @@ conda config --show-sources
 conda list --show-channel-urls
 
 gpuci_logger "Python py.test for distributed"
-py.test $WORKSPACE/distributed -v -m gpu --runslow --junitxml="$WORKSPACE/junit-distributed.xml"
+py.test -s $WORKSPACE/distributed/comm/tests/test_ucx_config.py::test_ucx_config_w_env_var -v -m gpu --runslow --junitxml="$WORKSPACE/junit-distributed.xml"

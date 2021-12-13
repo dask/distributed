@@ -103,6 +103,7 @@ def test_ucx_config_w_env_var(cleanup, loop):
 
     port = "13339"
     sched_addr = f"ucx://{HOST}:{port}"
+    print(f"\n\n{sched_addr = }\n\n")
 
     with popen(
         ["dask-scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port],
@@ -122,6 +123,8 @@ def test_ucx_config_w_env_var(cleanup, loop):
             with Client(sched_addr, loop=loop, timeout=10) as c:
                 while not c.scheduler_info()["workers"]:
                     sleep(0.1)
+
+                print(f"\n\n{c.scheduler_info() = }\n\n")
 
                 # Check for RMM pool resource type
                 rmm_resource = c.run_on_scheduler(
