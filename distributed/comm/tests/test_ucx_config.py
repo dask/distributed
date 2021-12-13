@@ -124,17 +124,35 @@ def test_ucx_config_w_env_var(cleanup, loop):
                 while not c.scheduler_info()["workers"]:
                     sleep(0.1)
 
-                print(f"\n\n{c.scheduler_info() = }\n\n")
-                print(f"\n\n{c.get_versions() = }\n\n")
+                from pprint import pprint
+
+                print("\n\nc.scheduler_info()")
+                pprint(c.scheduler_info())
+                print("\n\nc.get_versions()")
+                pprint(c.get_versions())
 
                 def _foo():
                     import sys
 
-                    return sys.executable
+                    import dask
 
-                print(f"\n\n{_foo() = }\n\n")
-                print(f"\n\n{c.run_on_scheduler(_foo) = }\n\n")
-                print(f"\n\n{c.run(_foo) = }\n\n")
+                    import distributed
+
+                    result = {
+                        "executable": sys.executable,
+                        "dask_version": dask.__version__,
+                        "dask_file": dask.__file__,
+                        "distributed_version": distributed.__version__,
+                        "distributed_file": distributed.__file__,
+                    }
+                    return result
+
+                print("\n\n_foo()")
+                pprint(_foo())
+                print("\n\nc.run_on_scheduler(_foo)")
+                pprint(c.run_on_scheduler(_foo))
+                print("\n\nc.run(_foo)")
+                pprint(c.run(_foo))
 
                 # Check for RMM pool resource type
                 rmm_resource = c.run_on_scheduler(
