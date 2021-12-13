@@ -40,7 +40,6 @@ except ImportError:
     ssl = None  # type: ignore
 
 import pytest
-import yaml
 from tlz import assoc, memoize, merge
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -50,7 +49,6 @@ import dask
 from distributed.comm.tcp import TCP
 
 from . import system
-from . import versions as version_module
 from .client import Client, _global_clients, default_client
 from .comm import Comm
 from .compatibility import WINDOWS
@@ -992,13 +990,31 @@ def gen_cluster(
                             # This stack indicates where the coro/test is suspended
                             task.print_stack(file=buffer)
 
-                            if cluster_dump_directory:
-                                await dump_cluster_state(
-                                    s,
-                                    ws,
-                                    output_dir=cluster_dump_directory,
-                                    func_name=func.__name__,
-                                )
+                            if client:
+                                assert c
+                                try:
+                                    if cluster_dump_directory:
+                                        os.makedirs(
+                                            cluster_dump_directory, exist_ok=True
+                                        )
+                                        filename = os.path.join(
+                                            cluster_dump_directory, func.__name__
+                                        )
+                                        fut = c.dump_cluster_state(
+                                            filename,
+                                            # Test dumps should be small enough that
+                                            # there is no need for a compressed
+                                            # binary representation and readability
+                                            # is more important
+                                            format="yaml",
+                                        )
+                                        assert fut is not None
+                                        await fut
+                                except Exception:
+                                    print(
+                                        f"Exception {sys.exc_info()} while trying to "
+                                        "dump cluster state."
+                                    )
 
                             task.cancel()
                             while not task.cancelled():
@@ -1078,41 +1094,6 @@ def gen_cluster(
         return test_func
 
     return _
-
-
-async def dump_cluster_state(
-    s: Scheduler, ws: list[ServerNode], output_dir: str, func_name: str
-) -> None:
-    """A variant of Client.dump_cluster_state, which does not expect on any of the below
-    to work:
-
-    - Having a client at all
-    - Client->Scheduler comms
-    - Scheduler->Worker comms (unless using Nannies)
-    """
-    scheduler_info = s._to_dict()
-    workers_info: dict[str, Any]
-    versions_info = version_module.get_versions()
-
-    if not ws or isinstance(ws[0], Worker):
-        workers_info = {w.address: w._to_dict() for w in ws}
-    else:
-        workers_info = await s.broadcast(msg={"op": "dump_state"}, on_error="return")
-        workers_info = {
-            k: repr(v) if isinstance(v, Exception) else v
-            for k, v in workers_info.items()
-        }
-
-    state = {
-        "scheduler": scheduler_info,
-        "workers": workers_info,
-        "versions": versions_info,
-    }
-    os.makedirs(output_dir, exist_ok=True)
-    fname = os.path.join(output_dir, func_name) + ".yaml"
-    with open(fname, "w") as fh:
-        yaml.safe_dump(state, fh)  # Automatically convert tuples to lists
-    print(f"Dumped cluster state to {fname}")
 
 
 def raises(func, exc=Exception):

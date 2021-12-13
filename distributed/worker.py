@@ -127,8 +127,6 @@ DEFAULT_DATA_SIZE = parse_bytes(
 
 SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "task"])
 
-_taskstate_to_dict_guard = False
-
 
 class InvalidTransition(Exception):
     pass
@@ -228,7 +226,7 @@ class TaskState:
         nbytes = self.nbytes
         return nbytes if nbytes is not None else DEFAULT_DATA_SIZE
 
-    def _to_dict(self, *, exclude: Container[str] = ()) -> dict | str:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not inteded for roundtrips.
@@ -243,21 +241,10 @@ class TaskState:
         --------
         Client.dump_cluster_state
         """
-        # When a task references another task, just print the task repr. All tasks
-        # should neatly appear under Worker.tasks. This also prevents a RecursionError
-        # during particularly heavy loads, which have been observed to happen whenever
-        # there's an acyclic dependency chain of ~200+ tasks.
-        global _taskstate_to_dict_guard
-        if _taskstate_to_dict_guard:
-            return repr(self)
-        _taskstate_to_dict_guard = True
-        try:
-            return recursive_to_dict(
-                {k: v for k, v in self.__dict__.items() if k not in exclude},
-                exclude=exclude,
-            )
-        finally:
-            _taskstate_to_dict_guard = False
+        return recursive_to_dict(
+            {k: v for k, v in self.__dict__.items() if k not in exclude},
+            exclude=exclude,
+        )
 
     def is_protected(self) -> bool:
         return self.state in PROCESSING or any(
