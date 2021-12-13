@@ -125,6 +125,16 @@ def test_ucx_config_w_env_var(cleanup, loop):
                     sleep(0.1)
 
                 print(f"\n\n{c.scheduler_info() = }\n\n")
+                print(f"\n\n{c.get_versions() = }\n\n")
+
+                def _foo():
+                    import sys
+
+                    return sys.executable
+
+                print(f"\n\n{_foo() = }\n\n")
+                print(f"\n\n{c.run_on_scheduler(_foo) = }\n\n")
+                print(f"\n\n{c.run(_foo) = }\n\n")
 
                 # Check for RMM pool resource type
                 rmm_resource = c.run_on_scheduler(
