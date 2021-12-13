@@ -16,7 +16,7 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Awaitable, Collection, Iterator
+from collections.abc import Collection, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager, suppress
@@ -2344,9 +2344,9 @@ class Client(SyncMethodMixin):
 
     async def _run_on_scheduler(self, function, *args, wait=True, **kwargs):
         response = await self.scheduler.run_function(
-            function=dumps(function, protocol=4),
-            args=dumps(args, protocol=4),
-            kwargs=dumps(kwargs, protocol=4),
+            function=dumps(function),
+            args=dumps(args),
+            kwargs=dumps(kwargs),
             wait=wait,
         )
         if response["status"] == "error":
@@ -2387,30 +2387,65 @@ class Client(SyncMethodMixin):
         return self.sync(self._run_on_scheduler, function, *args, **kwargs)
 
     async def _run(
-        self, function, *args, nanny=False, workers=None, wait=True, **kwargs
+        self,
+        function,
+        *args,
+        nanny: bool = False,
+        workers: list[str] | None = None,
+        wait: bool = True,
+        on_error: Literal["raise", "return", "ignore"],
+        **kwargs,
     ):
         responses = await self.scheduler.broadcast(
             msg=dict(
                 op="run",
-                function=dumps(function, protocol=4),
-                args=dumps(args, protocol=4),
+                function=dumps(function),
+                args=dumps(args),
                 wait=wait,
-                kwargs=dumps(kwargs, protocol=4),
+                kwargs=dumps(kwargs),
             ),
             workers=workers,
             nanny=nanny,
+            on_error="return_pickle",
         )
         results = {}
         for key, resp in responses.items():
-            if resp["status"] == "OK":
-                results[key] = resp["result"]
+            if isinstance(resp, bytes):
+                # Pickled RPC exception
+                exc = loads(resp)
+                assert isinstance(exc, Exception)
             elif resp["status"] == "error":
-                typ, exc, tb = clean_exception(**resp)
-                raise exc.with_traceback(tb)
+                # Exception raised by the remote function
+                _, exc, tb = clean_exception(**resp)
+                exc = exc.with_traceback(tb)
+            else:
+                assert resp["status"] == "OK"
+                results[key] = resp["result"]
+                continue
+
+            if on_error == "raise":
+                raise exc
+            elif on_error == "return":
+                results[key] = exc
+            elif on_error != "ignore":
+                raise ValueError(
+                    "on_error must be 'raise', 'return', or 'ignore'; "
+                    f"got {on_error!r}"
+                )
+
         if wait:
             return results
 
-    def run(self, function, *args, **kwargs):
+    def run(
+        self,
+        function,
+        *args,
+        workers: list[str] | None = None,
+        wait: bool = True,
+        nanny: bool = False,
+        on_error: Literal["raise", "return", "ignore"] = "raise",
+        **kwargs,
+    ):
         """
         Run a function on all workers outside of task scheduling system
 
@@ -2437,6 +2472,17 @@ class Client(SyncMethodMixin):
             Whether to run ``function`` on the nanny. By default, the function
             is run on the worker process.  If specified, the addresses in
             ``workers`` should still be the worker addresses, not the nanny addresses.
+        on_error: "raise" | "return" | "ignore"
+            If the function raises an error on a worker:
+
+            raise
+                (default) Re-raise the exception on the client.
+                The output from other workers will be lost.
+            return
+                Return the Exception object instead of the function output for
+                the worker
+            ignore
+                Ignore the exception and remove the worker from the result dict
 
         Examples
         --------
@@ -2469,7 +2515,16 @@ class Client(SyncMethodMixin):
 
         >>> c.run(print_state, wait=False)  # doctest: +SKIP
         """
-        return self.sync(self._run, function, *args, **kwargs)
+        return self.sync(
+            self._run,
+            function,
+            *args,
+            workers=workers,
+            wait=wait,
+            nanny=nanny,
+            on_error=on_error,
+            **kwargs,
+        )
 
     @_deprecated(use_instead="Client.run which detects async functions automatically")
     def run_coroutine(self, function, *args, **kwargs):
@@ -3487,20 +3542,23 @@ class Client(SyncMethodMixin):
 
         scheduler_info = self.scheduler.dump_state()
 
-        worker_info = self.scheduler.broadcast(
-            msg=dict(
-                op="dump_state",
-                exclude=exclude,
-            ),
+        workers_info = self.scheduler.broadcast(
+            msg={"op": "dump_state", "exclude": exclude},
+            on_error="return_pickle",
         )
-        versions = self._get_versions()
-        scheduler_info, worker_info, versions_info = await asyncio.gather(
-            scheduler_info, worker_info, versions
+        versions_info = self._get_versions()
+        scheduler_info, workers_info, versions_info = await asyncio.gather(
+            scheduler_info, workers_info, versions_info
         )
+        # Unpickle RPC errors and convert them to string
+        workers_info = {
+            k: repr(loads(v)) if isinstance(v, bytes) else v
+            for k, v in workers_info.items()
+        }
 
         state = {
             "scheduler": scheduler_info,
-            "workers": worker_info,
+            "workers": workers_info,
             "versions": versions_info,
         }
 
@@ -3546,7 +3604,7 @@ class Client(SyncMethodMixin):
         filename: str = "dask-cluster-dump",
         exclude: Collection[str] = (),
         format: Literal["msgpack", "yaml"] = "msgpack",
-    ) -> Awaitable | None:
+    ):
         """Extract a dump of the entire cluster state and persist to disk.
         This is intended for debugging purposes only.
 
@@ -3872,7 +3930,8 @@ class Client(SyncMethodMixin):
             scheduler = await self.scheduler.versions()  # this raises
 
         workers = await self.scheduler.broadcast(
-            msg={"op": "versions", "packages": packages}
+            msg={"op": "versions", "packages": packages},
+            on_error="ignore",
         )
         result = {"scheduler": scheduler, "workers": workers, "client": client}
 
@@ -4169,8 +4228,7 @@ class Client(SyncMethodMixin):
             plugin = plugin(**kwargs)
 
         return await self.scheduler.register_scheduler_plugin(
-            plugin=dumps(plugin, protocol=4),
-            name=name,
+            plugin=dumps(plugin), name=name
         )
 
     def register_scheduler_plugin(self, plugin, name=None, **kwargs):
@@ -4226,7 +4284,7 @@ class Client(SyncMethodMixin):
         else:
             method = self.scheduler.register_worker_plugin
 
-        responses = await method(plugin=dumps(plugin, protocol=4), name=name)
+        responses = await method(plugin=dumps(plugin), name=name)
         for response in responses.values():
             if response["status"] == "error":
                 _, exc, tb = clean_exception(

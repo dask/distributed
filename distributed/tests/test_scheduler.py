@@ -24,7 +24,7 @@ from distributed.comm import Comm
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
-from distributed.protocol.pickle import dumps
+from distributed.protocol.pickle import dumps, loads
 from distributed.scheduler import MemoryState, Scheduler
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
@@ -669,6 +669,27 @@ async def test_broadcast_nanny(s, a, b):
 
     result3 = await s.broadcast(msg={"op": "identity"}, hosts=[a.ip], nanny=True)
     assert result1 == result3
+
+
+@gen_cluster(config={"distributed.comm.timeouts.connect": "200ms"})
+async def test_broadcast_on_error(s, a, b):
+    a.stop()
+
+    with pytest.raises(OSError):
+        await s.broadcast(msg={"op": "ping"}, on_error="raise")
+    with pytest.raises(ValueError, match="on_error must be"):
+        await s.broadcast(msg={"op": "ping"}, on_error="invalid")
+
+    out = await s.broadcast(msg={"op": "ping"}, on_error="return")
+    assert isinstance(out[a.address], OSError)
+    assert out[b.address] == b"pong"
+
+    out = await s.broadcast(msg={"op": "ping"}, on_error="return_pickle")
+    assert isinstance(loads(out[a.address]), OSError)
+    assert out[b.address] == b"pong"
+
+    out = await s.broadcast(msg={"op": "ping"}, on_error="ignore")
+    assert out == {b.address: b"pong"}
 
 
 @gen_cluster(nthreads=[])
