@@ -231,7 +231,7 @@ class TaskState:
     def _to_dict(self, *, exclude: Container[str] = ()) -> dict | str:
         """
         A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
+        Not type stable and not intended for roundtrips.
 
         Parameters
         ----------
