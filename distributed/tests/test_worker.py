@@ -3311,3 +3311,56 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
     args, kwargs = mocked_gather.call_args
     await Worker.gather_dep(b, *args, **kwargs)
     await fut3
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_Worker__to_dict(c, s, a):
+    x = c.submit(inc, 1, key="x")
+    await wait(x)
+    d = a._to_dict()
+    assert d.keys() == {
+        "type",
+        "id",
+        "scheduler",
+        "nthreads",
+        "ncores",
+        "memory_limit",
+        "address",
+        "status",
+        "thread_id",
+        "ready",
+        "constrained",
+        "long_running",
+        "executing_count",
+        "in_flight_tasks",
+        "in_flight_workers",
+        "log",
+        "tasks",
+        "memory_target_fraction",
+        "memory_spill_fraction",
+        "memory_pause_fraction",
+        "logs",
+        "config",
+        "incoming_transfer_log",
+        "outgoing_transfer_log",
+    }
+    assert d["tasks"]["x"]["key"] == "x"
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_TaskState__to_dict(c, s, a):
+    """tasks that are listed as dependencies of other tasks are dumped as a short repr
+    and always appear in full under Worker.tasks
+    """
+    x = c.submit(inc, 1, key="x")
+    y = c.submit(inc, x, key="y")
+    z = c.submit(inc, 2, key="z")
+    await wait([x, y, z])
+
+    tasks = a._to_dict()["tasks"]
+
+    assert isinstance(tasks["x"], dict)
+    assert isinstance(tasks["y"], dict)
+    assert isinstance(tasks["z"], dict)
+    assert tasks["x"]["dependents"] == ["<TaskState 'y' memory>"]
+    assert tasks["y"]["dependencies"] == ["<TaskState 'x' memory>"]

@@ -1,3 +1,4 @@
+import os
 from time import sleep
 
 import pytest
@@ -96,17 +97,16 @@ async def test_ucx_config(cleanup):
 @pytest.mark.flaky(
     reruns=10, reruns_delay=5, condition=ucp.get_ucx_version() < (1, 11, 0)
 )
-def test_ucx_config_w_env_var(cleanup, loop, monkeypatch):
-    size = "1000.00 MB"
-    monkeypatch.setenv("DASK_RMM__POOL_SIZE", size)
-
-    dask.config.refresh()
+def test_ucx_config_w_env_var(cleanup, loop):
+    env = os.environ.copy()
+    env["DASK_RMM__POOL_SIZE"] = "1000.00 MB"
 
     port = "13339"
     sched_addr = f"ucx://{HOST}:{port}"
 
     with popen(
-        ["dask-scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port]
+        ["dask-scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port],
+        env=env,
     ) as sched:
         with popen(
             [
@@ -116,7 +116,8 @@ def test_ucx_config_w_env_var(cleanup, loop, monkeypatch):
                 "--protocol",
                 "ucx",
                 "--no-nanny",
-            ]
+            ],
+            env=env,
         ):
             with Client(sched_addr, loop=loop, timeout=10) as c:
                 while not c.scheduler_info()["workers"]:
