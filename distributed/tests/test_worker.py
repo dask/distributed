@@ -45,6 +45,7 @@ from distributed.utils import TimeoutError
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _LockedCommPool,
+    assert_story,
     captured_logger,
     dec,
     div,
@@ -1797,23 +1798,11 @@ async def test_story_with_deps(c, s, a, b):
     assert story == []
     story = b.story(key)
 
-    pruned_story = []
-    stimulus_ids = set()
     # Story now includes randomized stimulus_ids and timestamps.
-    for msg in story:
-        assert isinstance(msg, tuple), msg
-        assert isinstance(msg[-1], float), msg
-        assert msg[-1] > time() - 60, msg
-        pruned_msg = list(msg)
-        stimulus_ids.add(msg[-2])
-        pruned_story.append(tuple(pruned_msg[:-2]))
-
+    stimulus_ids = {ev[-2] for ev in story}
     assert len(stimulus_ids) == 3, stimulus_ids
-    stimulus_id = pruned_story[0][-1]
-    assert isinstance(stimulus_id, str)
-    assert stimulus_id.startswith("compute-task")
     # This is a simple transition log
-    expected_story = [
+    expected = [
         (key, "compute-task"),
         (key, "released", "waiting", "waiting", {dep.key: "fetch"}),
         (key, "waiting", "ready", "ready", {}),
@@ -1821,47 +1810,22 @@ async def test_story_with_deps(c, s, a, b):
         (key, "put-in-memory"),
         (key, "executing", "memory", "memory", {}),
     ]
-    assert pruned_story == expected_story
+    assert_story(story, expected)
 
-    dep_story = dep.key
-
-    story = b.story(dep_story)
-    pruned_story = []
-    stimulus_ids = set()
-    for msg in story:
-        assert isinstance(msg, tuple), msg
-        assert isinstance(msg[-1], float), msg
-        assert msg[-1] > time() - 60, msg
-        pruned_msg = list(msg)
-        stimulus_ids.add(msg[-2])
-        pruned_story.append(tuple(pruned_msg[:-2]))
-
+    story = b.story(dep.key)
+    stimulus_ids = {ev[-2] for ev in story}
     assert len(stimulus_ids) == 2, stimulus_ids
-    stimulus_id = pruned_story[0][-1]
-    assert isinstance(stimulus_id, str)
-    expected_story = [
-        (dep_story, "ensure-task-exists", "released"),
-        (dep_story, "released", "fetch", "fetch", {}),
-        (
-            "gather-dependencies",
-            a.address,
-            {dep.key},
-        ),
-        (dep_story, "fetch", "flight", "flight", {}),
-        (
-            "request-dep",
-            a.address,
-            {dep.key},
-        ),
-        (
-            "receive-dep",
-            a.address,
-            {dep.key},
-        ),
-        (dep_story, "put-in-memory"),
-        (dep_story, "flight", "memory", "memory", {res.key: "ready"}),
+    expected = [
+        (dep.key, "ensure-task-exists", "released"),
+        (dep.key, "released", "fetch", "fetch", {}),
+        ("gather-dependencies", a.address, {dep.key}),
+        (dep.key, "fetch", "flight", "flight", {}),
+        ("request-dep", a.address, {dep.key}),
+        ("receive-dep", a.address, {dep.key}),
+        (dep.key, "put-in-memory"),
+        (dep.key, "flight", "memory", "memory", {res.key: "ready"}),
     ]
-    assert pruned_story == expected_story
+    assert_story(story, expected)
 
 
 @gen_cluster(client=True)
@@ -2793,27 +2757,33 @@ async def test_acquire_replicas(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_acquire_replicas_same_channel(c, s, a, b):
-    fut = c.submit(inc, 1, workers=[a.address], key="f-replica")
+    futA = c.submit(inc, 1, workers=[a.address], key="f-A")
     futB = c.submit(inc, 2, workers=[a.address], key="f-B")
     futC = c.submit(inc, futB, workers=[b.address], key="f-C")
-    await fut
+    await futA
 
-    _acquire_replicas(s, b, fut)
+    _acquire_replicas(s, b, futA)
 
     await futC
-    while fut.key not in b.tasks or not b.tasks[fut.key].state == "memory":
+    while futA.key not in b.tasks or not b.tasks[futA.key].state == "memory":
         await asyncio.sleep(0.005)
 
-    while len(s.who_has[fut.key]) != 2:
+    while len(s.who_has[futA.key]) != 2:
         await asyncio.sleep(0.005)
 
     # Ensure that both the replica and an ordinary dependency pass through the
     # same communication channel
 
-    for f in [fut, futB]:
-        assert any("request-dep" in msg for msg in b.story(f.key))
-        assert any("gather-dependencies" in msg for msg in b.story(f.key))
-        assert any(f.key in msg["keys"] for msg in b.incoming_transfer_log)
+    for fut in (futA, futB):
+        assert_story(
+            b.story(fut.key),
+            [
+                ("gather-dependencies", a.address, {fut.key}),
+                ("request-dep", a.address, {fut.key}),
+            ],
+            which="any",
+        )
+        assert any(fut.key in msg["keys"] for msg in b.incoming_transfer_log)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
@@ -2863,15 +2833,19 @@ async def test_acquire_replicas_already_in_flight(c, s, *nannies):
     _acquire_replicas(s, b, x)
     assert await y == 123
 
-    story = await c.run(lambda dask_worker: dask_worker.story("x"), workers=[b])
-    events = [ev for ev in story[b] if ev[-1] >= start]
-
-    assert len(events) == 5
-    assert events[0][:3] == ("x", "ensure-task-exists", "flight")
-    assert events[1][:4] == ("x", "flight", "fetch", "flight")
-    assert events[2][:1] == ("receive-dep",)
-    assert events[3][:2] == ("x", "put-in-memory")
-    assert events[4][:4] == ("x", "flight", "memory", "memory")
+    story = await c.run(lambda dask_worker: dask_worker.story("x"))
+    assert_story(
+        story[b],
+        [
+            ("x", "ensure-task-exists", "flight"),
+            ("x", "flight", "fetch", "flight", {}),
+            ("receive-dep", a, {"x"}),
+            ("x", "put-in-memory"),
+            ("x", "flight", "memory", "memory", {"y": "ready"}),
+        ],
+        which="all",
+        start=start,
+    )
 
 
 @gen_cluster(client=True)
@@ -3007,7 +2981,11 @@ async def test_who_has_consistent_remove_replica(c, s, *workers):
 
     await f2
 
-    assert (f1.key, "missing-dep") in a.story(f1.key)
+    assert_story(
+        a.story(f1.key),
+        [(f1.key, "missing-dep")],
+        which="any",
+    )
     assert a.tasks[f1.key].suspicious_count == 0
     assert s.tasks[f1.key].suspicious == 0
 
@@ -3059,8 +3037,13 @@ async def test_missing_released_zombie_tasks_2(c, s, a, b):
     while b.tasks:
         await asyncio.sleep(0.01)
 
-    story = b.story(ts)
-    assert any("missing" in msg for msg in story)
+    assert_story(
+        b.story(ts),
+        [
+            ("f1", "missing", "released", "released", {"f1": "forgotten"}),
+        ],
+        which="any",
+    )
 
 
 @pytest.mark.slow
@@ -3240,7 +3223,7 @@ async def test_gather_dep_do_not_handle_response_of_not_requested_tasks(c, s, a,
     assert fut2.key not in b.tasks
     f2_story = b.story(fut2.key)
     assert f2_story
-    assert not any("missing-dep" in msg for msg in b.story(fut2.key))
+    assert not any("missing-dep" in msg for msg in f2_story)
     await fut3
 
 
@@ -3274,8 +3257,10 @@ async def test_gather_dep_no_longer_in_flight_tasks(c, s, a, b):
 
     assert fut2.key not in b.tasks
     f1_story = b.story(fut1.key)
+    f2_story = b.story(fut2.key)
     assert f1_story
-    assert not any("missing-dep" in msg for msg in b.story(fut2.key))
+    assert f2_story
+    assert not any("missing-dep" in msg for msg in f2_story)
 
 
 @pytest.mark.parametrize("intermediate_state", ["resumed", "cancelled"])

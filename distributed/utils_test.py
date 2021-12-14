@@ -1761,3 +1761,105 @@ class _LockedCommPool(ConnectionPool):
         return LockedComm(
             comm, self.read_event, self.read_queue, self.write_event, self.write_queue
         )
+
+
+def assert_story(
+    story: list[tuple],
+    expect: list[tuple],
+    which: Literal["any", "all"] = "all",
+    *,
+    regex: bool = False,
+    start: float | None = None,
+    stop: float | None = None,
+) -> None:
+    """Match a task story, as returned by Worker.story, to a regular expression match
+
+    Parameters
+    ==========
+    story: list[tuple]
+        Output of Worker.story
+    expect: list[tuple]
+        On each event, the match must contain exactly 2 less fields than the story
+        (the last two fields are always the stimulus_id and the timestamp).
+        None matches any object.
+    which: "any" or "all"
+        all
+            story and match must contain exactly the same number of events (rows).
+            This is the default.
+        any
+            story may contain more events than match. Extra events are ignored.
+    regex: bool, optional
+        If True, top-level strings in the match will be treated as regular expressions.
+        If False (the default), they will be treated as exact matches.
+    start: float, optional
+        Epoch timestamp. Events of the story before this timestamp will be removed
+        before comparing against the match.
+    stop: float, optional
+        Epoch timestamp. Events of the story after this timestamp will be removed
+        before comparing against the match.
+    """
+    now = time()
+    prev_ts = 0.0
+    for ev in story:
+        try:
+            assert len(ev) > 2
+            assert isinstance(ev, tuple)
+            assert isinstance(ev[-2], str) and ev[-2]  # stimulus_id
+            assert isinstance(ev[-1], float)  # timestamp
+            assert ev[-1] >= prev_ts
+            assert ev[-1] > now - 3600  # all events are in the last hour
+            prev_ts = ev[-1]
+        except AssertionError:
+            raise AssertionError(
+                f"malformed story event: {ev}\nin story:\n{_format_story(story)}"
+            )
+
+    orig_story = story
+    if start:
+        story = [ev for ev in story if ev[-1] >= start]
+    if stop:
+        story = [ev for ev in story if ev[-1] <= stop]
+
+    try:
+        if which == "all":
+            assert len(story) == len(expect)
+            assert all(
+                _match_story_event(event, ev_expect, regex=regex)
+                for event, ev_expect in zip(story, expect)
+            )
+        elif which == "any":
+            story_it = iter(story)
+            for ev_expect in expect:
+                while True:
+                    event = next(story_it)
+                    if _match_story_event(event, ev_expect, regex=regex):
+                        break
+        else:
+            raise ValueError(f"which must be 'any' or 'all'; got {which!r}")
+    except (AssertionError, StopIteration):
+        raise AssertionError(
+            f"\nassert_story(story, expect, which={which}, regex={regex}, "
+            f"start={start}, stop={stop}) failed:\n"
+            f"story:\n{_format_story(orig_story)}\n"
+            f"expect:\n{_format_story(expect)}"
+        ) from None
+
+
+def _format_story(story: list[tuple]) -> str:
+    if not story:
+        return "(empty story)"
+    return "- " + "\n- ".join(str(ev) for ev in story)
+
+
+def _match_story_event(event: tuple, expect: tuple, *, regex: bool) -> bool:
+    # Remove (stimulus_id, timestamp)
+    event = event[:-2]
+    if len(event) != len(expect):
+        return False
+    for a, b in zip(event, expect):
+        if isinstance(b, str) and regex:
+            if not isinstance(a, str) or not re.match(b, a):
+                return False
+        elif b is not None and a != b:
+            return False
+    return True
