@@ -1083,7 +1083,7 @@ def gen_cluster(
 async def dump_cluster_state(
     s: Scheduler, ws: list[ServerNode], output_dir: str, func_name: str
 ) -> None:
-    """A variant of Client.dump_cluster_state, which does not expect on any of the below
+    """A variant of Client.dump_cluster_state, which does not rely on any of the below
     to work:
 
     - Having a client at all
