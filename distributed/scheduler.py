@@ -196,6 +196,8 @@ globals()["ALL_TASK_STATES"] = ALL_TASK_STATES
 COMPILED = declare(bint, compiled)
 globals()["COMPILED"] = COMPILED
 
+_taskstate_to_dict_guard: bool = False
+
 
 @final
 @cclass
@@ -1732,7 +1734,7 @@ class TaskState:
         return nbytes
 
     @ccall
-    def _to_dict(self, *, exclude: "Container[str]" = ()):  # -> dict
+    def _to_dict(self, *, exclude: "Container[str]" = ()):  # -> dict | str
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
@@ -1746,15 +1748,26 @@ class TaskState:
         --------
         Client.dump_cluster_state
         """
-        members = inspect.getmembers(self)
-        return recursive_to_dict(
-            {
-                k: v
-                for k, v in members
-                if not k.startswith("_") and k not in exclude and not callable(v)
-            },
-            exclude=exclude,
-        )
+        # When a task references another task, just print the task repr. All tasks
+        # should neatly appear under Scheduler.tasks. This also prevents a
+        # RecursionError during particularly heavy loads, which have been observed to
+        # happen whenever there's an acyclic dependency chain of ~200+ tasks.
+        global _taskstate_to_dict_guard
+        if _taskstate_to_dict_guard:
+            return repr(self)
+        _taskstate_to_dict_guard = True
+        try:
+            members = inspect.getmembers(self)
+            return recursive_to_dict(
+                {
+                    k: v
+                    for k, v in members
+                    if not k.startswith("_") and k not in exclude and not callable(v)
+                },
+                exclude=exclude,
+            )
+        finally:
+            _taskstate_to_dict_guard = False
 
 
 class _StateLegacyMapping(Mapping):
@@ -2813,7 +2826,7 @@ class SchedulerState:
                 if tts._processing_on:
                     self.set_duration_estimate(tts, tts._processing_on)
                     if steal:
-                        steal.put_key_in_stealable(tts)
+                        steal.recalculate_cost(tts)
 
             ############################
             # Update State Information #
@@ -6181,14 +6194,14 @@ class Scheduler(SchedulerState, ServerNode):
         Parameters
         ----------
         keys: optional
-            whitelist of dask keys that should be considered for moving. All other keys
+            allowlist of dask keys that should be considered for moving. All other keys
             will be ignored. Note that this offers no guarantee that a key will actually
             be moved (e.g. because it is unnecessary or because there are no viable
             recipient workers for it).
         workers: optional
-            whitelist of workers addresses to be considered as senders or recipients.
+            allowlist of workers addresses to be considered as senders or recipients.
             All other workers will be ignored. The mean cluster occupancy will be
-            calculated only using the whitelisted workers.
+            calculated only using the allowed workers.
         """
         parent: SchedulerState = cast(SchedulerState, self)
 
@@ -6239,15 +6252,15 @@ class Scheduler(SchedulerState, ServerNode):
 
         The big-O complexity is O(wt + ke*log(we)), where
 
-        - wt is the total number of workers on the cluster (or the number of whitelisted
+        - wt is the total number of workers on the cluster (or the number of allowed
           workers, if explicitly stated by the user)
         - we is the number of workers that are eligible to be senders or recipients
-        - kt is the total number of keys on the cluster (or on the whitelisted workers)
+        - kt is the total number of keys on the cluster (or on the allowed workers)
         - ke is the number of keys that need to be moved in order to achieve a balanced
           cluster
 
         There is a degenerate edge case O(wt + kt*log(we)) when kt is much greater than
-        the number of whitelisted keys, or when most keys are replicated or cannot be
+        the number of allowed keys, or when most keys are replicated or cannot be
         moved for some other reason.
 
         Returns list of tuples to feed into _rebalance_move_data:

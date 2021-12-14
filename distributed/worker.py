@@ -127,6 +127,8 @@ DEFAULT_DATA_SIZE = parse_bytes(
 
 SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "task"])
 
+_taskstate_to_dict_guard = False
+
 
 class InvalidTransition(Exception):
     pass
@@ -220,16 +222,16 @@ class TaskState:
         self._next = None
 
     def __repr__(self):
-        return f"<Task {self.key!r} {self.state}>"
+        return f"<TaskState {self.key!r} {self.state}>"
 
     def get_nbytes(self) -> int:
         nbytes = self.nbytes
         return nbytes if nbytes is not None else DEFAULT_DATA_SIZE
 
-    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict | str:
         """
         A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
+        Not type stable and not intended for roundtrips.
 
         Parameters
         ----------
@@ -241,10 +243,21 @@ class TaskState:
         --------
         Client.dump_cluster_state
         """
-        return recursive_to_dict(
-            {k: v for k, v in self.__dict__.items() if k not in exclude},
-            exclude=exclude,
-        )
+        # When a task references another task, just print the task repr. All tasks
+        # should neatly appear under Worker.tasks. This also prevents a RecursionError
+        # during particularly heavy loads, which have been observed to happen whenever
+        # there's an acyclic dependency chain of ~200+ tasks.
+        global _taskstate_to_dict_guard
+        if _taskstate_to_dict_guard:
+            return repr(self)
+        _taskstate_to_dict_guard = True
+        try:
+            return recursive_to_dict(
+                {k: v for k, v in self.__dict__.items() if k not in exclude},
+                exclude=exclude,
+            )
+        finally:
+            _taskstate_to_dict_guard = False
 
     def is_protected(self) -> bool:
         return self.state in PROCESSING or any(
@@ -1847,7 +1860,7 @@ class Worker(ServerNode):
                 {"op": "add-keys", "keys": rejected, "stimulus_id": stimulus_id}
             )
 
-        self.transitions(recommendations=recommendations, stimulus_id=stimulus_id)
+        self.transitions(recommendations, stimulus_id=stimulus_id)
 
         return "OK"
 
@@ -1889,7 +1902,6 @@ class Worker(ServerNode):
         self, comm=None, keys=None, priorities=None, who_has=None, stimulus_id=None
     ):
         recommendations = {}
-        scheduler_msgs = []
         for k in keys:
             ts = self.ensure_task_exists(
                 k,
@@ -1900,9 +1912,6 @@ class Worker(ServerNode):
                 recommendations[ts] = "fetch"
 
         self.update_who_has(who_has, stimulus_id=stimulus_id)
-
-        for msg in scheduler_msgs:
-            self.batched_stream.send(msg)
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
     def ensure_task_exists(
@@ -2680,7 +2689,7 @@ class Worker(ServerNode):
             self.comm_nbytes += total_nbytes
             self.in_flight_workers[worker] = to_gather
             recommendations = {self.tasks[d]: ("flight", worker) for d in to_gather}
-            self.transitions(recommendations=recommendations, stimulus_id=stimulus_id)
+            self.transitions(recommendations, stimulus_id=stimulus_id)
 
             self.loop.add_callback(
                 self.gather_dep,
@@ -3030,9 +3039,7 @@ class Worker(ServerNode):
                         )
                         recommendations[ts] = "fetch"
                 del data, response
-                self.transitions(
-                    recommendations=recommendations, stimulus_id=stimulus_id
-                )
+                self.transitions(recommendations, stimulus_id=stimulus_id)
                 self.ensure_computing()
 
                 if not busy:
@@ -3104,7 +3111,7 @@ class Worker(ServerNode):
                             self.has_what[worker].add(dep)
                             self.pending_data_per_worker[worker].append(dep_ts.key)
 
-            self.transitions(recommendations=recommendations, stimulus_id=stimulus_id)
+            self.transitions(recommendations, stimulus_id=stimulus_id)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
