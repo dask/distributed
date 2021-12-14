@@ -2781,7 +2781,6 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
                 ("gather-dependencies", a.address, {fut.key}),
                 ("request-dep", a.address, {fut.key}),
             ],
-            which="any",
         )
         assert any(fut.key in msg["keys"] for msg in b.incoming_transfer_log)
 
@@ -2830,7 +2829,6 @@ async def test_acquire_replicas_already_in_flight(c, s, *nannies, run):
     await wait(x)
     y = c.submit(lambda x: 123, x, workers=[b], key="y")
     await asyncio.sleep(0.3)
-    start = time()
     _acquire_replicas(s, b, x)
     assert await y == 123
 
@@ -2844,8 +2842,6 @@ async def test_acquire_replicas_already_in_flight(c, s, *nannies, run):
             ("x", "put-in-memory"),
             ("x", "flight", "memory", "memory", {"y": "ready"}),
         ],
-        which="all",
-        start=start,
     )
 
 
@@ -2982,11 +2978,7 @@ async def test_who_has_consistent_remove_replica(c, s, *workers):
 
     await f2
 
-    assert_story(
-        a.story(f1.key),
-        [(f1.key, "missing-dep")],
-        which="any",
-    )
+    assert_story(a.story(f1.key), [(f1.key, "missing-dep")])
     assert a.tasks[f1.key].suspicious_count == 0
     assert s.tasks[f1.key].suspicious == 0
 
@@ -3040,10 +3032,7 @@ async def test_missing_released_zombie_tasks_2(c, s, a, b):
 
     assert_story(
         b.story(ts),
-        [
-            ("f1", "missing", "released", "released", {"f1": "forgotten"}),
-        ],
-        which="any",
+        [("f1", "missing", "released", "released", {"f1": "forgotten"})],
     )
 
 
