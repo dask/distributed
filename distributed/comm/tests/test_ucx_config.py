@@ -103,7 +103,6 @@ def test_ucx_config_w_env_var(cleanup, loop):
 
     port = "13339"
     sched_addr = f"ucx://{HOST}:{port}"
-    print(f"\n\n{sched_addr = }\n\n")
 
     with popen(
         ["dask-scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port],
@@ -123,36 +122,6 @@ def test_ucx_config_w_env_var(cleanup, loop):
             with Client(sched_addr, loop=loop, timeout=10) as c:
                 while not c.scheduler_info()["workers"]:
                     sleep(0.1)
-
-                from pprint import pprint
-
-                print("\n\nc.scheduler_info()")
-                pprint(c.scheduler_info())
-                print("\n\nc.get_versions()")
-                pprint(c.get_versions())
-
-                def _foo():
-                    import sys
-
-                    import dask
-
-                    import distributed
-
-                    result = {
-                        "executable": sys.executable,
-                        "dask_version": dask.__version__,
-                        "dask_file": dask.__file__,
-                        "distributed_version": distributed.__version__,
-                        "distributed_file": distributed.__file__,
-                    }
-                    return result
-
-                print("\n\n_foo()")
-                pprint(_foo())
-                print("\n\nc.run_on_scheduler(_foo)")
-                pprint(c.run_on_scheduler(_foo))
-                print("\n\nc.run(_foo)")
-                pprint(c.run(_foo))
 
                 # Check for RMM pool resource type
                 rmm_resource = c.run_on_scheduler(
