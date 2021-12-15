@@ -1522,6 +1522,7 @@ async def test_interface_async(cleanup, loop, Worker):
                 assert all("127.0.0.1" == d["host"] for d in info["workers"].values())
 
 
+@pytest.mark.gpu
 @pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
 async def test_protocol_from_scheduler_address(cleanup, Worker):

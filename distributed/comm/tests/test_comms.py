@@ -537,6 +537,7 @@ async def check_client_server(
     listener.stop()
 
 
+@pytest.mark.gpu
 @pytest.mark.asyncio
 async def test_ucx_client_server():
     pytest.importorskip("distributed.comm.ucx")
