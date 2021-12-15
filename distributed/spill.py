@@ -45,8 +45,17 @@ class SpillBuffer(zict.Buffer):
         except MaxSpillExceeded:
             # key is in self.fast; no keys have been lost on eviction
             # Note: requires zict > 2.0
-
+            # TODO don't spam the log file with hundreds of messages per second
+            logger.warning(
+                "Spill file on disk reached capacity; keeping data in memory"
+            )
             pass
+        except OSError:
+            logger.warning(
+                "Spill file on disk failed",
+                exec_info=True,
+            )
+            pass  # can't remember if we want to raise here
 
     @property
     def memory(self) -> Mapping[Hashable, Any]:
@@ -90,16 +99,23 @@ class Slow(zict.Func):
         self.total_weight = 0
 
     def __setitem__(self, key, value):
-        pickled = self.dump(value)
-        pickled_size = sum(len(frame) for frame in pickled)
+        try:
+            pickled = self.dump(value)
+            pickled_size = sum(len(frame) for frame in pickled)
+        except TypeError:  # This is the error raised when fail to serialize
+            logger.warning(
+                "Failed to pickle",
+                exc_info=True,
+            )
+            return  # This result on a separate problem
+            # distributed/distributed/worker.py", line 2302, in transition_generic_memory
+            # assert ts.key in self.data or ts.key in self.actors
+            # AssertionError
+
         if (
             self.max_weight is not False
             and self.total_weight + pickled_size > self.max_weight
         ):
-            # TODO don't spam the log file with hundreds of messages per second
-            logger.warning(
-                "Spill file on disk reached capacity; keeping data in memory"
-            )
             # Stop callbacks and ensure that the key ends up in SpillBuffer.fast
             self.total_weight -= self.weight_by_key.pop(
                 key, 0

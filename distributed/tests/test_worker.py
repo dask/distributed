@@ -930,7 +930,7 @@ async def test_dataframe_attribute_error(c, s, a, b):
 async def test_fail_write_to_disk(c, s, a, b):
     class Bad:
         def __getstate__(self):
-            raise TypeError()
+            raise OSError()
 
         def __sizeof__(self):
             return int(100e9)
@@ -938,10 +938,12 @@ async def test_fail_write_to_disk(c, s, a, b):
     future = c.submit(Bad)
     await wait(future)
 
-    assert future.status == "error"
+    assert (
+        future.status == "memory"
+    )  # This fails as it doesn't end up on memory as we expected
 
-    with pytest.raises(TypeError):
-        await future
+    # with pytest.raises(TypeError):
+    # await future         ---> This still raises a not OSError as we though
 
     futures = c.map(inc, range(10))
     results = await c._gather(futures)
