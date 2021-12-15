@@ -45,7 +45,7 @@ from distributed.utils import TimeoutError
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _LockedCommPool,
-    assert_story,
+    assert_worker_story,
     captured_logger,
     dec,
     div,
@@ -1810,7 +1810,7 @@ async def test_story_with_deps(c, s, a, b):
         (key, "put-in-memory"),
         (key, "executing", "memory", "memory", {}),
     ]
-    assert_story(story, expected)
+    assert_worker_story(story, expected)
 
     story = b.story(dep.key)
     stimulus_ids = {ev[-2] for ev in story}
@@ -1825,7 +1825,7 @@ async def test_story_with_deps(c, s, a, b):
         (dep.key, "put-in-memory"),
         (dep.key, "flight", "memory", "memory", {res.key: "ready"}),
     ]
-    assert_story(story, expected)
+    assert_worker_story(story, expected)
 
 
 @gen_cluster(client=True)
@@ -2775,7 +2775,7 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
     # same communication channel
 
     for fut in (futA, futB):
-        assert_story(
+        assert_worker_story(
             b.story(fut.key),
             [
                 ("gather-dependencies", a.address, {fut.key}),
@@ -2833,7 +2833,7 @@ async def test_acquire_replicas_already_in_flight(c, s, *nannies, run):
     assert await y == 123
 
     story = await c.run(lambda dask_worker: dask_worker.story("x"))
-    assert_story(
+    assert_worker_story(
         story[b],
         [
             ("x", "ensure-task-exists", "flight"),
@@ -2978,7 +2978,7 @@ async def test_who_has_consistent_remove_replica(c, s, *workers):
 
     await f2
 
-    assert_story(a.story(f1.key), [(f1.key, "missing-dep")])
+    assert_worker_story(a.story(f1.key), [(f1.key, "missing-dep")])
     assert a.tasks[f1.key].suspicious_count == 0
     assert s.tasks[f1.key].suspicious == 0
 
@@ -3030,7 +3030,7 @@ async def test_missing_released_zombie_tasks_2(c, s, a, b):
     while b.tasks:
         await asyncio.sleep(0.01)
 
-    assert_story(
+    assert_worker_story(
         b.story(ts),
         [("f1", "missing", "released", "released", {"f1": "forgotten"})],
     )

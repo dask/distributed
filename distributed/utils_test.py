@@ -1763,7 +1763,7 @@ class _LockedCommPool(ConnectionPool):
         )
 
 
-def assert_story(story: list[tuple], expect: list[tuple]) -> None:
+def assert_worker_story(story: list[tuple], expect: list[tuple]) -> None:
     """Test the output of ``Worker.story``
 
     Parameters
@@ -1773,11 +1773,10 @@ def assert_story(story: list[tuple], expect: list[tuple]) -> None:
     expect: list[tuple]
         Expected events. Each expected event must contain exactly 2 less fields than the
         story (the last two fields are always the stimulus_id and the timestamp).
-        ``None`` is a wildcard that matches any one element in an event.
 
     ``story`` may contain more events than ``expect``. Extra events are ignored.
     """
-    now = time()
+    one_hour_ago = time() - 3600
     prev_ts = 0.0
     for ev in story:
         try:
@@ -1786,7 +1785,7 @@ def assert_story(story: list[tuple], expect: list[tuple]) -> None:
             assert isinstance(ev[-2], str) and ev[-2]  # stimulus_id
             assert isinstance(ev[-1], float)  # timestamp
             assert ev[-1] >= prev_ts
-            assert ev[-1] > now - 3600  # all events are in the last hour
+            assert ev[-1] > one_hour_ago
             prev_ts = ev[-1]
         except AssertionError:
             raise AssertionError(
@@ -1798,11 +1797,12 @@ def assert_story(story: list[tuple], expect: list[tuple]) -> None:
         for ev_expect in expect:
             while True:
                 event = next(story_it)
-                if _match_story_event(event, ev_expect):
+                # Ignore (stimulus_id, timestamp)
+                if event[:-2] == ev_expect:
                     break
-    except (AssertionError, StopIteration):
+    except StopIteration:
         raise AssertionError(
-            f"\nassert_story(story, expect) failed:\n"
+            f"\nassert_worker_story(story, expect) failed:\n"
             f"story:\n{_format_story(story)}\n"
             f"expect:\n{_format_story(expect)}"
         ) from None
@@ -1812,14 +1812,3 @@ def _format_story(story: list[tuple]) -> str:
     if not story:
         return "(empty story)"
     return "- " + "\n- ".join(str(ev) for ev in story)
-
-
-def _match_story_event(event: tuple, expect: tuple) -> bool:
-    # Remove (stimulus_id, timestamp)
-    event = event[:-2]
-    if len(event) != len(expect):
-        return False
-    for a, b in zip(event, expect):
-        if b is not None and a != b:
-            return False
-    return True
