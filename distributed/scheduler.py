@@ -6033,6 +6033,7 @@ class Scheduler(SchedulerState, ServerNode):
                     self.rpc.reuse(addr, comm)
                 return resp
             except Exception as e:
+                logger.error(f"broadcast to {addr} failed: {e.__class__.__name__}: {e}")
                 if on_error == "raise":
                     raise
                 elif on_error == "return":
