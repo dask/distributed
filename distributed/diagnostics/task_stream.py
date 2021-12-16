@@ -33,6 +33,8 @@ class TaskStreamPlugin(SchedulerPlugin):
         if start == "processing":
             if key not in self.scheduler.tasks:
                 return
+            if not kwargs.get("startstops", []):
+                return
             kwargs["key"] = key
             if finish == "memory" or finish == "erred":
                 self.buffer.append(kwargs)
