@@ -209,12 +209,13 @@ def test_spillbuffer_bad_key(tmpdir):
         def __sizeof__(self):
             return int(self.size)
 
-    # bad data individually larger than spill threshold (200*0.7=140)
+    # bad data individually larger than spill threshold target 200
 
-    a = Bad(size=130)
-    assert sizeof(a) > 140
+    a = Bad(size=200)
+    assert sizeof(a) > 200
 
     # 1a Ideally when trying to write to disk, this will fail and stay in fast but it's not happening
     # Because before trying to write to disk, we try to serialize to get the size to see if it's bigger
     # than max spill. Hence we are having a  WARNING - Failed to pickle
     buf["a"] = a
+    breakpoint()
