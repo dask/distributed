@@ -2814,9 +2814,8 @@ async def test_acquire_replicas_many(c, s, *workers):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("run", list(range(10)))  # TEMP shake down flaky test
 @gen_cluster(client=True, Worker=Nanny)
-async def test_acquire_replicas_already_in_flight(c, s, *nannies, run):
+async def test_acquire_replicas_already_in_flight(c, s, *nannies):
     """Trying to acquire a replica that is already in flight is a no-op"""
 
     class SlowToFly:
