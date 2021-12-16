@@ -194,3 +194,27 @@ def test_spillbuffer_maxlim(tmpdir):
     assert set(buf.slow) == {"b", "c"}
     assert buf.fast.total_weight == 2 * sizeof(a_large)
     assert buf.slow.total_weight == 2 * psize_b
+
+
+def test_spillbuffer_bad_key(tmpdir):
+    buf = SpillBuffer(str(tmpdir), target=200, max_spill=600)
+
+    class Bad:
+        def __init__(self, size):
+            self.size = size
+
+        def __getstate__(self):
+            raise OSError()
+
+        def __sizeof__(self):
+            return int(self.size)
+
+    # bad data individually larger than spill threshold (200*0.7=140)
+
+    a = Bad(size=130)
+    assert sizeof(a) > 140
+
+    # 1a Ideally when trying to write to disk, this will fail and stay in fast but it's not happening
+    # Because before trying to write to disk, we try to serialize to get the size to see if it's bigger
+    # than max spill. Hence we are having a  WARNING - Failed to pickle
+    buf["a"] = a
