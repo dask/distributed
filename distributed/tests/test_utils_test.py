@@ -432,6 +432,7 @@ def test_assert_worker_story():
         ("bar", "id2", now),
         ("baz", {1: 2}, "id2", now),
     ]
+    # strict=False
     assert_worker_story(story, [("foo",), ("bar",), ("baz", {1: 2})])
     assert_worker_story(story, [])
     assert_worker_story(story, [("foo",)])
@@ -448,6 +449,17 @@ def test_assert_worker_story():
     assert_worker_story([("foo", "id1", now)], [("foo",)])
     with pytest.raises(AssertionError):
         assert_worker_story([], [("foo",)])
+
+    # strict=True
+    assert_worker_story([], [], strict=True)
+    assert_worker_story([("foo", "id1", now)], [("foo",)])
+    assert_worker_story(story, [("foo",), ("bar",), ("baz", {1: 2})], strict=True)
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [("foo",), ("bar",)], strict=True)
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [("foo",), ("baz", {1: 2})], strict=True)
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [], strict=True)
 
 
 @pytest.mark.parametrize(

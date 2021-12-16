@@ -1810,7 +1810,7 @@ async def test_story_with_deps(c, s, a, b):
         (key, "put-in-memory"),
         (key, "executing", "memory", "memory", {}),
     ]
-    assert_worker_story(story, expected)
+    assert_worker_story(story, expected, strict=True)
 
     story = b.story(dep.key)
     stimulus_ids = {ev[-2] for ev in story}
@@ -1825,7 +1825,7 @@ async def test_story_with_deps(c, s, a, b):
         (dep.key, "put-in-memory"),
         (dep.key, "flight", "memory", "memory", {res.key: "ready"}),
     ]
-    assert_worker_story(story, expected)
+    assert_worker_story(story, expected, strict=True)
 
 
 @gen_cluster(client=True)
@@ -2835,12 +2835,18 @@ async def test_acquire_replicas_already_in_flight(c, s, *nannies):
     assert_worker_story(
         story[b],
         [
+            ("x", "ensure-task-exists", "released"),
+            ("x", "released", "fetch", "fetch", {}),
+            ("gather-dependencies", a, {"x"}),
+            ("x", "fetch", "flight", "flight", {}),
+            ("request-dep", a, {"x"}),
             ("x", "ensure-task-exists", "flight"),
             ("x", "flight", "fetch", "flight", {}),
             ("receive-dep", a, {"x"}),
             ("x", "put-in-memory"),
             ("x", "flight", "memory", "memory", {"y": "ready"}),
         ],
+        strict=True,
     )
 
 
