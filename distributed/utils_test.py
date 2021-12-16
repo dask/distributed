@@ -1774,9 +1774,9 @@ def assert_worker_story(story: list[tuple], expect: list[tuple]) -> None:
         Expected events. Each expected event must contain exactly 2 less fields than the
         story (the last two fields are always the stimulus_id and the timestamp).
 
-    ``story`` may contain more events than ``expect``. Extra events are ignored.
+    story may contain more events than expect. Extra events are ignored.
     """
-    one_hour_ago = time() - 3600
+    now = time()
     prev_ts = 0.0
     for ev in story:
         try:
@@ -1784,12 +1784,12 @@ def assert_worker_story(story: list[tuple], expect: list[tuple]) -> None:
             assert isinstance(ev, tuple)
             assert isinstance(ev[-2], str) and ev[-2]  # stimulus_id
             assert isinstance(ev[-1], float)  # timestamp
-            assert ev[-1] >= prev_ts
-            assert ev[-1] > one_hour_ago
+            assert prev_ts <= ev[-1]  # timestamps are monotonic ascending
+            assert now - 3600 < ev[-1] <= now  # timestamps are within the last hour
             prev_ts = ev[-1]
         except AssertionError:
             raise AssertionError(
-                f"malformed story event: {ev}\nin story:\n{_format_story(story)}"
+                f"Malformed story event: {ev}\nin story:\n{_format_story(story)}"
             )
 
     try:
@@ -1802,7 +1802,7 @@ def assert_worker_story(story: list[tuple], expect: list[tuple]) -> None:
                     break
     except StopIteration:
         raise AssertionError(
-            f"\nassert_worker_story(story, expect) failed:\n"
+            f"assert_worker_story failed\n"
             f"story:\n{_format_story(story)}\n"
             f"expect:\n{_format_story(expect)}"
         ) from None
