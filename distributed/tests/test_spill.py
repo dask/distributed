@@ -218,4 +218,3 @@ def test_spillbuffer_bad_key(tmpdir):
     # Because before trying to write to disk, we try to serialize to get the size to see if it's bigger
     # than max spill. Hence we are having a  WARNING - Failed to pickle
     buf["a"] = a
-    breakpoint()
