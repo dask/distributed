@@ -75,6 +75,7 @@ distributed:
   worker:
     blocked-handlers: []
     multiprocessing-method: spawn
+    thread_auto_interrupt: False
     use-file-locking: True
     connections:            # Maximum concurrent connections for data
       outgoing: 50          # This helps to control network saturation

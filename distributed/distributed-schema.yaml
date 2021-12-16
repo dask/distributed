@@ -513,6 +513,14 @@ properties:
                   These modules will have a ``routes`` keyword that gets added to the main HTTP Server.
                   This is also a list that can be extended with user defined modules.
 
+          thread_auto_interrupt:
+            type: boolean
+            description: |
+              Whether running threads might be interrupted with an injected exception.
+              Interruption can happen when a task is released, but is currently running. The
+              threads state will be set to exception and the task will usually end, rather
+              than running to completion, if this config value is True
+
       nanny:
         type: object
         description: |
