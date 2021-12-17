@@ -24,7 +24,9 @@ def test_spillbuffer(tmpdir):
     pickle_size = sum(len(frame) for frame in serialize_bytelist(a))
 
     # Test assumption made by this test, mostly for non CPython implementations
-    assert 100 < s < 200
+    assert 100 < inmem_size < 200
+    assert 100 < pickle_size < 200
+    assert inmem_size != pickle_size
 
     buf["a"] = a
     assert not buf.slow
