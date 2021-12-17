@@ -1802,8 +1802,10 @@ def assert_worker_story(
             assert isinstance(ev, tuple)
             assert isinstance(ev[-2], str) and ev[-2]  # stimulus_id
             assert isinstance(ev[-1], float)  # timestamp
-            assert prev_ts <= ev[-1]  # timestamps are monotonic ascending
-            assert now - 3600 < ev[-1] <= now  # timestamps are within the last hour
+            assert prev_ts <= ev[-1]  # Timestamps are monotonic ascending
+            # Timestamps are within the last hour. It's been observed that a timestamp
+            # generated in a Nanny process can be a few milliseconds in the future.
+            assert now - 3600 < ev[-1] <= now + 1
             prev_ts = ev[-1]
         except AssertionError:
             raise AssertionError(
