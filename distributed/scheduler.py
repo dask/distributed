@@ -26,8 +26,11 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import ClassVar, Container
+from typing import TYPE_CHECKING, ClassVar, Container
 from typing import cast as pep484_cast
+
+if TYPE_CHECKING:
+    from typing_extensions import Literal
 
 import psutil
 from sortedcontainers import SortedDict, SortedSet
@@ -73,7 +76,7 @@ from .metrics import time
 from .multi_lock import MultiLockExtension
 from .node import ServerNode
 from .proctitle import setproctitle
-from .protocol.pickle import loads
+from .protocol.pickle import dumps, loads
 from .publish import PublishExtension
 from .pubsub import PubSubSchedulerExtension
 from .queues import QueueExtension
@@ -5982,22 +5985,30 @@ class Scheduler(SchedulerState, ServerNode):
     async def broadcast(
         self,
         comm=None,
-        msg=None,
-        workers=None,
-        hosts=None,
-        nanny=False,
+        *,
+        msg: dict,
+        workers: "list[str] | None" = None,
+        hosts: "list[str] | None" = None,
+        nanny: bool = False,
         serializers=None,
-    ):
+        on_error: "Literal['raise', 'return', 'return_pickle', 'ignore']" = "raise",
+    ) -> dict:  # dict[str, Any]
         """Broadcast message to workers, return all results"""
         parent: SchedulerState = cast(SchedulerState, self)
-        if workers is None or workers is True:
+        if workers is True:
+            warnings.warn(
+                "workers=True is deprecated; pass workers=None or omit instead",
+                category=FutureWarning,
+            )
+            workers = None
+        if workers is None:
             if hosts is None:
                 workers = list(parent._workers_dv)
             else:
                 workers = []
         if hosts is not None:
             for host in hosts:
-                dh: dict = parent._host_info.get(host)
+                dh: dict = parent._host_info.get(host)  # type: ignore
                 if dh is not None:
                     workers.extend(dh["addresses"])
         # TODO replace with worker_list
@@ -6007,20 +6018,40 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             addresses = workers
 
+        ERROR = object()
+
         async def send_message(addr):
-            comm = await self.rpc.connect(addr)
-            comm.name = "Scheduler Broadcast"
             try:
-                resp = await send_recv(comm, close=True, serializers=serializers, **msg)
-            finally:
-                self.rpc.reuse(addr, comm)
-            return resp
+                comm = await self.rpc.connect(addr)
+                comm.name = "Scheduler Broadcast"
+                try:
+                    resp = await send_recv(
+                        comm, close=True, serializers=serializers, **msg
+                    )
+                finally:
+                    self.rpc.reuse(addr, comm)
+                return resp
+            except Exception as e:
+                logger.error(f"broadcast to {addr} failed: {e.__class__.__name__}: {e}")
+                if on_error == "raise":
+                    raise
+                elif on_error == "return":
+                    return e
+                elif on_error == "return_pickle":
+                    return dumps(e, protocol=4)
+                elif on_error == "ignore":
+                    return ERROR
+                else:
+                    raise ValueError(
+                        "on_error must be 'raise', 'return', 'return_pickle', "
+                        f"or 'ignore'; got {on_error!r}"
+                    )
 
         results = await All(
             [send_message(address) for address in addresses if address is not None]
         )
 
-        return dict(zip(workers, results))
+        return {k: v for k, v in zip(workers, results) if v is not ERROR}
 
     async def proxy(self, comm=None, msg=None, worker=None, serializers=None):
         """Proxy a communication through the scheduler to some other worker"""
