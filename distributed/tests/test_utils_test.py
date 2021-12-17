@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from time import sleep
 
 import pytest
+import yaml
 from tornado import gen
 
 from distributed import Client, Nanny, Scheduler, Worker, config, default_client
@@ -18,6 +19,7 @@ from distributed.utils_test import (
     _UnhashableCallable,
     assert_worker_story,
     cluster,
+    dump_cluster_state,
     gen_cluster,
     gen_test,
     inc,
@@ -480,3 +482,69 @@ def test_assert_worker_story():
 def test_assert_worker_story_malformed_story(story):
     with pytest.raises(AssertionError, match="Malformed story event"):
         assert_worker_story(story, [])
+
+
+@gen_cluster()
+async def test_dump_cluster_state(s, a, b, tmpdir):
+    await dump_cluster_state(s, [a, b], str(tmpdir), "dump")
+    with open(f"{tmpdir}/dump.yaml") as fh:
+        out = yaml.safe_load(fh)
+
+    assert out.keys() == {"scheduler", "workers", "versions"}
+    assert out["workers"].keys() == {a.address, b.address}
+
+
+@gen_cluster(nthreads=[])
+async def test_dump_cluster_state_no_workers(s, tmpdir):
+    await dump_cluster_state(s, [], str(tmpdir), "dump")
+    with open(f"{tmpdir}/dump.yaml") as fh:
+        out = yaml.safe_load(fh)
+
+    assert out.keys() == {"scheduler", "workers", "versions"}
+    assert out["workers"] == {}
+
+
+@gen_cluster(Worker=Nanny)
+async def test_dump_cluster_state_nannies(s, a, b, tmpdir):
+    await dump_cluster_state(s, [a, b], str(tmpdir), "dump")
+    with open(f"{tmpdir}/dump.yaml") as fh:
+        out = yaml.safe_load(fh)
+
+    assert out.keys() == {"scheduler", "workers", "versions"}
+    assert out["workers"].keys() == s.workers.keys()
+
+
+@gen_cluster()
+async def test_dump_cluster_state_unresponsive_local_worker(s, a, b, tmpdir):
+    a.stop()
+    await dump_cluster_state(s, [a, b], str(tmpdir), "dump")
+    with open(f"{tmpdir}/dump.yaml") as fh:
+        out = yaml.safe_load(fh)
+
+    assert out.keys() == {"scheduler", "workers", "versions"}
+    assert isinstance(out["workers"][a.address], dict)
+    assert isinstance(out["workers"][b.address], dict)
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    config={"distributed.comm.timeouts.connect": "200ms"},
+)
+async def test_dump_cluster_unresponsive_remote_worker(c, s, a, b, tmpdir):
+    addr1, addr2 = s.workers
+    clog_fut = asyncio.create_task(
+        c.run(lambda dask_scheduler: dask_scheduler.stop(), workers=[addr1])
+    )
+    await asyncio.sleep(0.2)
+
+    await dump_cluster_state(s, [a, b], str(tmpdir), "dump")
+    with open(f"{tmpdir}/dump.yaml") as fh:
+        out = yaml.safe_load(fh)
+
+    assert out.keys() == {"scheduler", "workers", "versions"}
+    assert isinstance(out["workers"][addr2], dict)
+    assert out["workers"][addr1].startswith("OSError('Timed out trying to connect to")
+
+    clog_fut.cancel()
