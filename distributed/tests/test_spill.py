@@ -17,6 +17,7 @@ def test_spillbuffer(tmpdir):
 
     assert not buf.slow.weight_by_key
     assert buf.slow.total_weight == 0
+    assert buf.spilled_total == 0
 
     a, b, c, d = "a" * 100, "b" * 100, "c" * 100, "d" * 100
     s = sizeof(a)  # this is size of a in memory
