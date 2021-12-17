@@ -313,16 +313,8 @@ class WorkStealing(SchedulerPlugin):
             _log_msg = [key, state, victim.address, thief.address, stimulus_id]
 
             if ts.state != "processing":
-                self.log(("not-processing", *_log_msg))
-                old_thief = thief.occupancy
-                new_thief = sum(thief.processing.values())
-                old_victim = victim.occupancy
-                new_victim = sum(victim.processing.values())
-                thief.occupancy = new_thief
-                victim.occupancy = new_victim
-                self.scheduler.total_occupancy += (
-                    new_thief - old_thief + new_victim - old_victim
-                )
+                self.scheduler._reevaluate_occupancy_worker(thief)
+                self.scheduler._reevaluate_occupancy_worker(victim)
             elif (
                 state in _WORKER_STATE_UNDEFINED
                 or state in _WORKER_STATE_CONFIRM

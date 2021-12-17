@@ -31,7 +31,7 @@ import dask
 import dask.bag as db
 from dask import delayed
 from dask.optimization import SubgraphCallable
-from dask.utils import stringify, tmpfile
+from dask.utils import parse_timedelta, stringify, tmpfile
 
 from distributed import (
     CancelledError,
@@ -5154,6 +5154,42 @@ async def test_secede_balances(c, s, a, b):
     assert b.executed_count > 0
 
     assert results == [sum(map(inc, range(10)))] * 10
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_long_running_not_in_occupancy(c, s, a):
+    # https://github.com/dask/distributed/issues/5332
+    from distributed import Lock
+
+    l = Lock()
+    await l.acquire()
+
+    def long_running(lock):
+        sleep(0.1)
+        secede()
+        lock.acquire()
+
+    f = c.submit(long_running, l)
+    while f.key not in s.tasks:
+        await asyncio.sleep(0.01)
+    assert s.workers[a.address].occupancy == parse_timedelta(
+        dask.config.get("distributed.scheduler.unknown-task-duration")
+    )
+
+    while s.workers[a.address].occupancy:
+        await asyncio.sleep(0.01)
+    await a.heartbeat()
+
+    ts = s.tasks[f.key]
+    ws = s.workers[a.address]
+    s.set_duration_estimate(ts, ws)
+    assert s.workers[a.address].occupancy == 0
+
+    s.reevaluate_occupancy(0)
+    assert s.workers[a.address].occupancy == 0
+    await l.release()
+
+    await f
 
 
 @gen_cluster(client=True)
