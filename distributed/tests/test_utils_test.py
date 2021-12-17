@@ -17,6 +17,7 @@ from distributed.utils import get_ip
 from distributed.utils_test import (
     _LockedCommPool,
     _UnhashableCallable,
+    assert_worker_story,
     cluster,
     dump_cluster_state,
     gen_cluster,
@@ -424,6 +425,63 @@ def test_dump_cluster_state_timeout(tmp_path):
 
     assert "scheduler" in state
     assert "workers" in state
+
+
+def test_assert_worker_story():
+    now = time()
+    story = [
+        ("foo", "id1", now - 600),
+        ("bar", "id2", now),
+        ("baz", {1: 2}, "id2", now),
+    ]
+    # strict=False
+    assert_worker_story(story, [("foo",), ("bar",), ("baz", {1: 2})])
+    assert_worker_story(story, [])
+    assert_worker_story(story, [("foo",)])
+    assert_worker_story(story, [("foo",), ("bar",)])
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [("foo", "nomatch")])
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [("baz",)])
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [("baz", {1: 3})])
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [("foo",), ("bar",), ("baz", "extra"), ("+1",)])
+    assert_worker_story([], [])
+    assert_worker_story([("foo", "id1", now)], [("foo",)])
+    with pytest.raises(AssertionError):
+        assert_worker_story([], [("foo",)])
+
+    # strict=True
+    assert_worker_story([], [], strict=True)
+    assert_worker_story([("foo", "id1", now)], [("foo",)])
+    assert_worker_story(story, [("foo",), ("bar",), ("baz", {1: 2})], strict=True)
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [("foo",), ("bar",)], strict=True)
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [("foo",), ("baz", {1: 2})], strict=True)
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [], strict=True)
+
+
+@pytest.mark.parametrize(
+    "story",
+    [
+        [()],  # Missing payload, stimulus_id, ts
+        [("foo",)],  # Missing (stimulus_id, ts)
+        [("foo", "bar")],  # Missing ts
+        [("foo", "bar", "baz")],  # ts is not a float
+        [("foo", "bar", time() + 3600)],  # ts is in the future
+        [("foo", "bar", time() - 7200)],  # ts is too old
+        [("foo", 123, time())],  # stimulus_id is not a string
+        [("foo", "", time())],  # stimulus_id is an empty string
+        [("", time())],  # no payload
+        [("foo", "id", time()), ("foo", "id", time() - 10)],  # timestamps out of order
+    ],
+)
+def test_assert_worker_story_malformed_story(story):
+    with pytest.raises(AssertionError, match="Malformed story event"):
+        assert_worker_story(story, [])
 
 
 @gen_cluster()
