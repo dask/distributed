@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from typing_extensions import Literal
 
+from distributed.compatibility import MACOS
 from distributed.scheduler import Scheduler
 
 try:
@@ -1761,3 +1762,73 @@ class _LockedCommPool(ConnectionPool):
         return LockedComm(
             comm, self.read_event, self.read_queue, self.write_event, self.write_queue
         )
+
+
+def xfail_ssl_issue5601():
+    """Work around https://github.com/dask/distributed/issues/5601 where any test that
+    inits Security.temporary() crashes on MacOS GitHub Actions CI
+    """
+    pytest.importorskip("cryptography")
+    try:
+        Security.temporary()
+    except ImportError:
+        if MACOS:
+            pytest.xfail(reason="distributed#5601")
+        raise
+
+
+def assert_worker_story(
+    story: list[tuple], expect: list[tuple], *, strict: bool = False
+) -> None:
+    """Test the output of ``Worker.story``
+
+    Parameters
+    ==========
+    story: list[tuple]
+        Output of Worker.story
+    expect: list[tuple]
+        Expected events. Each expected event must contain exactly 2 less fields than the
+        story (the last two fields are always the stimulus_id and the timestamp).
+    strict: bool, optional
+        If True, the story must contain exactly as many events as expect.
+        If False (the default), the story may contain more events than expect; extra
+        events are ignored.
+    """
+    now = time()
+    prev_ts = 0.0
+    for ev in story:
+        try:
+            assert len(ev) > 2
+            assert isinstance(ev, tuple)
+            assert isinstance(ev[-2], str) and ev[-2]  # stimulus_id
+            assert isinstance(ev[-1], float)  # timestamp
+            assert prev_ts <= ev[-1]  # timestamps are monotonic ascending
+            assert now - 3600 < ev[-1] <= now  # timestamps are within the last hour
+            prev_ts = ev[-1]
+        except AssertionError:
+            raise AssertionError(
+                f"Malformed story event: {ev}\nin story:\n{_format_story(story)}"
+            )
+
+    try:
+        if strict and len(story) != len(expect):
+            raise StopIteration()
+        story_it = iter(story)
+        for ev_expect in expect:
+            while True:
+                event = next(story_it)
+                # Ignore (stimulus_id, timestamp)
+                if event[:-2] == ev_expect:
+                    break
+    except StopIteration:
+        raise AssertionError(
+            f"assert_worker_story(strict={strict}) failed\n"
+            f"story:\n{_format_story(story)}\n"
+            f"expect:\n{_format_story(expect)}"
+        ) from None
+
+
+def _format_story(story: list[tuple]) -> str:
+    if not story:
+        return "(empty story)"
+    return "- " + "\n- ".join(str(ev) for ev in story)

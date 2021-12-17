@@ -5466,8 +5466,7 @@ class Scheduler(SchedulerState, ServerNode):
     def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("handle missing data key=%s worker=%s", key, errant_worker)
-        self.log.append(("missing", key, errant_worker))
-
+        self.log_event(errant_worker, {"action": "missing-data", "key": key})
         ts: TaskState = parent._tasks.get(key)
         if ts is None:
             return
