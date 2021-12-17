@@ -125,11 +125,10 @@ class Slow(zict.Func):
             # To be caught by SpillBuffer.__setitem__
             raise MaxSpillExceeded()
 
-        self.total_weight += pickled_size  # - self.weight_by_key.get(key, 0) seem to be not having any effect when overwriting a key because if key in slow in the buffer we delete it
+        assert key not in self.weight_by_key  # Thanks to Buffer.__setitem__
         self.weight_by_key[key] = pickled_size
-        self.d[
-            key
-        ] = pickled  # this goes under a set item on File which does something to pickle
+        self.total_weight += pickled_size
+        self.d[key] = pickled  # pickle and store to disk through File
 
     def __delitem__(self, key):
         super().__delitem__(key)
