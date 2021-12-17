@@ -121,6 +121,7 @@ class Slow(zict.Func):
                 key, 0
             )  # isn't this taken care when we pop an item? triggering del
             self.d.pop(key, None)
+            # To be caught by SpillBuffer.__setitem__
             raise MaxSpillExceeded()
 
         self.total_weight += pickled_size  # - self.weight_by_key.get(key, 0) seem to be not having any effect when overwriting a key because if key in slow in the buffer we delete it
