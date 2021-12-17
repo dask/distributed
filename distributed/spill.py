@@ -85,6 +85,7 @@ class MaxSpillExceeded(Exception):
 
 
 class Slow(zict.Func):
+    max_weight: int | Literal[False]
     weight_by_key: dict[Hashable, int]
     total_weight: int
 
