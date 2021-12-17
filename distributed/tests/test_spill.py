@@ -30,7 +30,9 @@ def test_spillbuffer(tmpdir):
 
     buf["a"] = a
     assert not buf.slow
-    assert not buf.slow.weight_by_key
+    assert buf.fast.weights == {"a": inmem_size}
+    assert buf.fast.total_weight == inmem_size
+    assert buf.slow.weight_by_key == {}
     assert buf.slow.total_weight == 0
     assert buf["a"] == a
 
@@ -92,14 +94,9 @@ def test_spillbuffer(tmpdir):
     assert buf.slow.total_weight == pickle_large_size * 2
 
 
+@pytest.mark.skipif(LooseVersion(zict.__version__) <= "2.0.0")
 def test_spillbuffer_maxlim(tmpdir):
     buf = SpillBuffer(str(tmpdir), target=200, max_spill=600)
-    # Convenience aliases
-    assert buf.memory is buf.fast
-    assert buf.disk is buf.slow
-
-    assert not buf.slow.weight_by_key
-    assert buf.slow.total_weight == 0
 
     a, b, c, d = "a" * 200, "b" * 100, "c" * 100, "d" * 200
 
