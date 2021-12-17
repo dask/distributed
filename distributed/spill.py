@@ -132,4 +132,4 @@ class Slow(zict.Func):
 
     def __delitem__(self, key):
         super().__delitem__(key)
-        self.total_weight -= self.weight_by_key.pop(key, 0)
+        self.total_weight -= self.weight_by_key.pop(key)
