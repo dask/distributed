@@ -20,8 +20,7 @@ def test_spillbuffer(tmpdir):
     assert buf.spilled_total == 0
 
     a, b, c, d = "a" * 100, "b" * 100, "c" * 100, "d" * 100
-    s = sizeof(a)  # this is size of a in memory
-
+    inmem_size = sizeof(a)
     pickle_size = sum(len(frame) for frame in serialize_bytelist(a))
 
     # Test assumption made by this test, mostly for non CPython implementations
