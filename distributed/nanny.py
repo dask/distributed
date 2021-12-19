@@ -346,7 +346,7 @@ class Nanny(ServerNode):
 
         return self
 
-    async def kill(self, comm=None, timeout=2):
+    async def kill(self, comm=None, timeout=2, executor_wait=True):
         """Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
@@ -357,7 +357,9 @@ class Nanny(ServerNode):
             return "OK"
 
         deadline = self.loop.time() + timeout
-        await self.process.kill(timeout=0.8 * (deadline - self.loop.time()))
+        await self.process.kill(
+            timeout=0.8 * (deadline - self.loop.time()), executor_wait=executor_wait
+        )
 
     async def instantiate(self, comm=None) -> Status:
         """Start a local worker process
@@ -468,7 +470,7 @@ class Nanny(ServerNode):
     async def restart(self, comm=None, timeout=30, executor_wait=True):
         async def _():
             if self.process is not None:
-                await self.kill()
+                await self.kill(executor_wait=executor_wait)
                 await self.instantiate()
 
         try:
