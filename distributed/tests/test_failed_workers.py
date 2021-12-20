@@ -25,7 +25,7 @@ from distributed.utils_test import (
     slowadd,
     slowinc,
 )
-from distributed.worker import WTSName
+from distributed.worker import WTSS
 
 pytestmark = pytest.mark.ci1
 
@@ -542,9 +542,9 @@ async def test_forget_data_not_supposed_to_have(s, a, b):
     from distributed.worker import TaskState
 
     ts = TaskState("key")
-    ts.state = WTSName.flight
+    ts.state = WTSS.flight
     a.tasks["key"] = ts
-    recommendations = {ts: (WTSName.memory, 123)}
+    recommendations = {ts: (WTSS.memory, 123)}
     a.transitions(recommendations, stimulus_id="test")
 
     assert a.data

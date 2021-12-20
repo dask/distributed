@@ -12,17 +12,17 @@ from distributed.utils_test import (
     inc,
     slowinc,
 )
-from distributed.worker import Worker, WTSName
+from distributed.worker import WTSS, Worker
 
 
-async def wait_for_state(key: str, state: WTSName, dask_worker: Worker) -> None:
+async def wait_for_state(key: str, state: WTSS, dask_worker: Worker) -> None:
     while key not in dask_worker.tasks or dask_worker.tasks[key].state != state:
         await asyncio.sleep(0.005)
 
 
 async def wait_for_cancelled(key: str, dask_worker: Worker) -> None:
     while key in dask_worker.tasks:
-        if dask_worker.tasks[key].state == WTSName.cancelled:
+        if dask_worker.tasks[key].state == WTSS.cancelled:
             return
         await asyncio.sleep(0.005)
     assert False
@@ -31,7 +31,7 @@ async def wait_for_cancelled(key: str, dask_worker: Worker) -> None:
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_release(c, s, a):
     fut = c.submit(slowinc, 1, delay=1)
-    await wait_for_state(fut.key, WTSName.executing, a)
+    await wait_for_state(fut.key, WTSS.executing, a)
     fut.release()
     await wait_for_cancelled(fut.key, a)
 
@@ -39,7 +39,7 @@ async def test_abort_execution_release(c, s, a):
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_reschedule(c, s, a):
     fut = c.submit(slowinc, 1, delay=1)
-    await wait_for_state(fut.key, WTSName.executing, a)
+    await wait_for_state(fut.key, WTSS.executing, a)
     fut.release()
     await wait_for_cancelled(fut.key, a)
     fut = c.submit(slowinc, 1, delay=0.1)
@@ -49,7 +49,7 @@ async def test_abort_execution_reschedule(c, s, a):
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_add_as_dependency(c, s, a):
     fut = c.submit(slowinc, 1, delay=1)
-    await wait_for_state(fut.key, WTSName.executing, a)
+    await wait_for_state(fut.key, WTSS.executing, a)
     fut.release()
     await wait_for_cancelled(fut.key, a)
 
@@ -61,7 +61,7 @@ async def test_abort_execution_add_as_dependency(c, s, a):
 @gen_cluster(client=True)
 async def test_abort_execution_to_fetch(c, s, a, b):
     fut = c.submit(slowinc, 1, delay=2, key="f1", workers=[a.worker_address])
-    await wait_for_state(fut.key, WTSName.executing, a)
+    await wait_for_state(fut.key, WTSS.executing, a)
     fut.release()
     await wait_for_cancelled(fut.key, a)
 
@@ -126,11 +126,11 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, a, b):
         fut1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
         fut2 = c.submit(inc, fut1, workers=[b.address])
 
-        await wait_for_state(fut1.key, WTSName.flight, b)
+        await wait_for_state(fut1.key, WTSS.flight, b)
 
         # Close in scheduler to ensure we transition and reschedule task properly
         await s.close_worker(worker=a.address)
-        await wait_for_state(fut1.key, WTSName.resumed, b)
+        await wait_for_state(fut1.key, WTSS.resumed, b)
 
     lock.release()
     assert await fut2 == 3
@@ -155,10 +155,10 @@ async def test_executing_cancelled_error(c, s, w):
             raise RuntimeError()
 
     fut = c.submit(wait_and_raise)
-    await wait_for_state(fut.key, WTSName.executing, w)
+    await wait_for_state(fut.key, WTSS.executing, w)
 
     fut.release()
-    await wait_for_state(fut.key, WTSName.cancelled, w)
+    await wait_for_state(fut.key, WTSS.cancelled, w)
     await lock.release()
 
     # At this point we do not fetch the result of the future since the future
@@ -203,10 +203,10 @@ async def test_flight_cancelled_error(c, s, a, b):
         fut1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
         fut2 = c.submit(inc, fut1, workers=[b.address])
 
-        await wait_for_state(fut1.key, WTSName.flight, b)
+        await wait_for_state(fut1.key, WTSS.flight, b)
         fut2.release()
         fut1.release()
-        await wait_for_state(fut1.key, WTSName.cancelled, b)
+        await wait_for_state(fut1.key, WTSS.cancelled, b)
 
     lock.release()
     # At this point we do not fetch the result of the future since the future
@@ -262,7 +262,7 @@ async def test_value_raises_during_spilling(c, s):
 
         fut = c.submit(produce_evil_data)
 
-        await wait_for_state(fut.key, WTSName.error, w)
+        await wait_for_state(fut.key, WTSS.error, w)
 
         with pytest.raises(
             TypeError,

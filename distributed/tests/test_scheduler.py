@@ -42,7 +42,7 @@ from distributed.utils_test import (
     tls_only_security,
     varying,
 )
-from distributed.worker import WTSName, dumps_function, dumps_task, get_worker
+from distributed.worker import WTSS, dumps_function, dumps_task, get_worker
 
 if sys.version_info < (3, 8):
     try:
@@ -2271,7 +2271,7 @@ async def test_gather_allow_worker_reconnect(
     await lock.release()
 
     while not all(
-        all(ts.state == WTSName.memory for ts in w.tasks.values()) for w in [a, b]
+        all(ts.state == WTSS.memory for ts in w.tasks.values()) for w in [a, b]
     ):
         await asyncio.sleep(0.01)
 
@@ -2280,7 +2280,7 @@ async def test_gather_allow_worker_reconnect(
     assert b.executed_count == 1
     for w in [a, b]:
         assert x.key in w.tasks
-        assert w.tasks[x.key].state == WTSName.memory
+        assert w.tasks[x.key].state == WTSS.memory
     while not len(s.tasks[x.key].who_has) == 2:
         await asyncio.sleep(0.01)
     assert len(s.tasks[z.key].who_has) == 1

@@ -100,7 +100,7 @@ from distributed.utils_test import (
     varying,
     wait_for,
 )
-from distributed.worker import WTSName
+from distributed.worker import WTSS
 
 pytestmark = pytest.mark.ci1
 
@@ -5379,7 +5379,7 @@ async def test_call_stack_future(c, s, a):
     result = results[0]
     ts = a.tasks.get(future.key)
     assert ts is not None
-    assert ts.state == WTSName.executing
+    assert ts.state == WTSS.executing
 
     assert list(result) == [a.address]
     assert list(result[a.address]) == [future.key]

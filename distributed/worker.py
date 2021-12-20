@@ -102,7 +102,9 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 no_value = "--no-value-sentinel--"
 
 
-class WorkerTaskStateName(Enum):
+class WTSS(Enum):
+    """Worker TaskState state values"""
+
     released = "released"
     memory = "memory"
     waiting = "waiting"
@@ -123,25 +125,22 @@ class WorkerTaskStateName(Enum):
         return self.name
 
 
-WTSName = WorkerTaskStateName
-
-
 # TaskState.state subsets
 
-READY = {WTSName.ready, WTSName.constrained}
+READY = {WTSS.ready, WTSS.constrained}
 PROCESSING = READY | {
-    WTSName.waiting,
-    WTSName.executing,
-    WTSName.long_running,
-    WTSName.cancelled,
-    WTSName.resumed,
+    WTSS.waiting,
+    WTSS.executing,
+    WTSS.long_running,
+    WTSS.cancelled,
+    WTSS.resumed,
 }
 FETCH_INTENDED = {
-    WTSName.missing,
-    WTSName.fetch,
-    WTSName.flight,
-    WTSName.cancelled,
-    WTSName.resumed,
+    WTSS.missing,
+    WTSS.fetch,
+    WTSS.flight,
+    WTSS.cancelled,
+    WTSS.resumed,
 }
 
 # Worker.status subsets
@@ -178,7 +177,7 @@ class TaskState:
         Expected duration the a task
     * **priority**: ``tuple``
         The priority this task given by the scheduler.  Determines run order.
-    * **state**: ``WTSName``
+    * **state**: ``WTSS``
         The current state of the task. One of ["waiting", "ready", "executing",
         "fetch", "memory", "flight", "long-running", "rescheduled", "error"]
     * **who_has**: ``set(worker)``
@@ -231,7 +230,7 @@ class TaskState:
         self.dependents = set()
         self.duration = None
         self.priority = None
-        self.state = WTSName.released
+        self.state = WTSS.released
         self.who_has = set()
         self.coming_from = None
         self.waiting_for_data = set()
@@ -513,7 +512,7 @@ class Worker(ServerNode):
     outgoing_transfer_log: deque[dict[str, Any]]
     target_message_size: int
     validate: bool
-    _transitions_table: dict[tuple[WTSName, WTSName], Callable]
+    _transitions_table: dict[tuple[WTSS, WTSS], Callable]
     _transition_counter: int
     incoming_count: int
     outgoing_count: int
@@ -680,53 +679,53 @@ class Worker(ServerNode):
         self._transitions_table = {
             # Keep this list sorted. Formatter off due to line length
             # fmt: off
-            (WTSName.cancelled, WTSName.error): self.transition_cancelled_error,
-            (WTSName.cancelled, WTSName.fetch): self.transition_cancelled_fetch,
-            (WTSName.cancelled, WTSName.forgotten): self.transition_cancelled_forgotten,
-            (WTSName.cancelled, WTSName.memory): self.transition_cancelled_memory,
-            (WTSName.cancelled, WTSName.released): self.transition_cancelled_released,
-            (WTSName.cancelled, WTSName.resumed): self.transition_cancelled_resumed,
-            (WTSName.cancelled, WTSName.waiting): self.transition_cancelled_waiting,
-            (WTSName.constrained, WTSName.executing): self.transition_constrained_executing,
-            (WTSName.constrained, WTSName.released): self.transition_generic_released,
-            (WTSName.error, WTSName.released): self.transition_generic_released,
-            (WTSName.executing, WTSName.error): self.transition_executing_error,
-            (WTSName.executing, WTSName.long_running): self.transition_executing_long_running,
-            (WTSName.executing, WTSName.memory): self.transition_executing_memory,
-            (WTSName.executing, WTSName.released): self.transition_executing_released,
-            (WTSName.executing, WTSName.rescheduled): self.transition_executing_rescheduled,
-            (WTSName.fetch, WTSName.flight): self.transition_fetch_flight,
-            (WTSName.fetch, WTSName.missing): self.transition_fetch_missing,
-            (WTSName.fetch, WTSName.released): self.transition_generic_released,
-            (WTSName.flight, WTSName.error): self.transition_flight_error,
-            (WTSName.flight, WTSName.fetch): self.transition_flight_fetch,
-            (WTSName.flight, WTSName.memory): self.transition_flight_memory,
-            (WTSName.flight, WTSName.released): self.transition_flight_released,
-            (WTSName.long_running, WTSName.error): self.transition_generic_error,
-            (WTSName.long_running, WTSName.memory): self.transition_long_running_memory,
-            (WTSName.long_running, WTSName.released): self.transition_executing_released,
-            (WTSName.long_running, WTSName.rescheduled): self.transition_executing_rescheduled,
-            (WTSName.memory, WTSName.released): self.transition_memory_released,
-            (WTSName.missing, WTSName.error): self.transition_generic_error,
-            (WTSName.missing, WTSName.fetch): self.transition_missing_fetch,
-            (WTSName.missing, WTSName.released): self.transition_missing_released,
-            (WTSName.ready, WTSName.error): self.transition_generic_error,
-            (WTSName.ready, WTSName.executing): self.transition_ready_executing,
-            (WTSName.ready, WTSName.released): self.transition_generic_released,
-            (WTSName.released, WTSName.error): self.transition_generic_error,
-            (WTSName.released, WTSName.fetch): self.transition_released_fetch,
-            (WTSName.released, WTSName.forgotten): self.transition_released_forgotten,
-            (WTSName.released, WTSName.memory): self.transition_released_memory,
-            (WTSName.released, WTSName.waiting): self.transition_released_waiting,
-            (WTSName.resumed, WTSName.error): self.transition_generic_error,
-            (WTSName.resumed, WTSName.fetch): self.transition_resumed_fetch,
-            (WTSName.resumed, WTSName.memory): self.transition_generic_memory,
-            (WTSName.resumed, WTSName.released): self.transition_generic_released,
-            (WTSName.resumed, WTSName.waiting): self.transition_resumed_waiting,
-            (WTSName.waiting, WTSName.constrained): self.transition_waiting_constrained,
-            (WTSName.waiting, WTSName.ready): self.transition_waiting_ready,
-            (WTSName.waiting, WTSName.released): self.transition_generic_released,
-            (WTSName.cancelled, WTSName.resumed): self.transition_cancelled_resumed,
+            (WTSS.cancelled, WTSS.error): self.transition_cancelled_error,
+            (WTSS.cancelled, WTSS.fetch): self.transition_cancelled_fetch,
+            (WTSS.cancelled, WTSS.forgotten): self.transition_cancelled_forgotten,
+            (WTSS.cancelled, WTSS.memory): self.transition_cancelled_memory,
+            (WTSS.cancelled, WTSS.released): self.transition_cancelled_released,
+            (WTSS.cancelled, WTSS.resumed): self.transition_cancelled_resumed,
+            (WTSS.cancelled, WTSS.waiting): self.transition_cancelled_waiting,
+            (WTSS.constrained, WTSS.executing): self.transition_constrained_executing,
+            (WTSS.constrained, WTSS.released): self.transition_generic_released,
+            (WTSS.error, WTSS.released): self.transition_generic_released,
+            (WTSS.executing, WTSS.error): self.transition_executing_error,
+            (WTSS.executing, WTSS.long_running): self.transition_executing_long_running,
+            (WTSS.executing, WTSS.memory): self.transition_executing_memory,
+            (WTSS.executing, WTSS.released): self.transition_executing_released,
+            (WTSS.executing, WTSS.rescheduled): self.transition_executing_rescheduled,
+            (WTSS.fetch, WTSS.flight): self.transition_fetch_flight,
+            (WTSS.fetch, WTSS.missing): self.transition_fetch_missing,
+            (WTSS.fetch, WTSS.released): self.transition_generic_released,
+            (WTSS.flight, WTSS.error): self.transition_flight_error,
+            (WTSS.flight, WTSS.fetch): self.transition_flight_fetch,
+            (WTSS.flight, WTSS.memory): self.transition_flight_memory,
+            (WTSS.flight, WTSS.released): self.transition_flight_released,
+            (WTSS.long_running, WTSS.error): self.transition_generic_error,
+            (WTSS.long_running, WTSS.memory): self.transition_long_running_memory,
+            (WTSS.long_running, WTSS.released): self.transition_executing_released,
+            (WTSS.long_running, WTSS.rescheduled): self.transition_executing_rescheduled,
+            (WTSS.memory, WTSS.released): self.transition_memory_released,
+            (WTSS.missing, WTSS.error): self.transition_generic_error,
+            (WTSS.missing, WTSS.fetch): self.transition_missing_fetch,
+            (WTSS.missing, WTSS.released): self.transition_missing_released,
+            (WTSS.ready, WTSS.error): self.transition_generic_error,
+            (WTSS.ready, WTSS.executing): self.transition_ready_executing,
+            (WTSS.ready, WTSS.released): self.transition_generic_released,
+            (WTSS.released, WTSS.error): self.transition_generic_error,
+            (WTSS.released, WTSS.fetch): self.transition_released_fetch,
+            (WTSS.released, WTSS.forgotten): self.transition_released_forgotten,
+            (WTSS.released, WTSS.memory): self.transition_released_memory,
+            (WTSS.released, WTSS.waiting): self.transition_released_waiting,
+            (WTSS.resumed, WTSS.error): self.transition_generic_error,
+            (WTSS.resumed, WTSS.fetch): self.transition_resumed_fetch,
+            (WTSS.resumed, WTSS.memory): self.transition_generic_memory,
+            (WTSS.resumed, WTSS.released): self.transition_generic_released,
+            (WTSS.resumed, WTSS.waiting): self.transition_resumed_waiting,
+            (WTSS.waiting, WTSS.constrained): self.transition_waiting_constrained,
+            (WTSS.waiting, WTSS.ready): self.transition_waiting_ready,
+            (WTSS.waiting, WTSS.released): self.transition_generic_released,
+            (WTSS.cancelled, WTSS.resumed): self.transition_cancelled_resumed,
             # fmt: on
         }
 
@@ -1236,7 +1235,7 @@ class Worker(ServerNode):
                             # Only if the task is in memory this is a sensible
                             # result since otherwise it simply submits the
                             # default value
-                            if ts.state == WTSName.memory
+                            if ts.state == WTSS.memory
                         },
                         types={k: typename(v) for k, v in self.data.items()},
                         now=time(),
@@ -1813,7 +1812,7 @@ class Worker(ServerNode):
         for key, value in data.items():
             try:
                 ts = self.tasks[key]
-                recommendations[ts] = (WTSName.memory, value)
+                recommendations[ts] = (WTSS.memory, value)
             except KeyError:
                 self.tasks[key] = ts = TaskState(key)
 
@@ -1821,7 +1820,7 @@ class Worker(ServerNode):
                     recs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
                 except Exception as e:
                     msg = error_message(e)
-                    rec = (WTSName.error, *tuple(msg.values())[1:])
+                    rec = (WTSS.error, *tuple(msg.values())[1:])
                     recommendations = {ts: rec}
                 else:
                     recommendations.update(recs)
@@ -1854,7 +1853,7 @@ class Worker(ServerNode):
         for key in keys:
             ts = self.tasks.get(key)
             if ts:
-                recommendations[ts] = WTSName.released
+                recommendations[ts] = WTSS.released
 
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
@@ -1883,13 +1882,13 @@ class Worker(ServerNode):
         rejected = []
         for key in keys:
             ts = self.tasks.get(key)
-            if ts is None or ts.state != WTSName.memory:
+            if ts is None or ts.state != WTSS.memory:
                 continue
             if not ts.is_protected():
                 self.log.append(
                     (ts.key, "remove-replica-confirmed", stimulus_id, time())
                 )
-                recommendations[ts] = WTSName.released
+                recommendations[ts] = WTSS.released
             else:
                 rejected.append(key)
 
@@ -1928,14 +1927,14 @@ class Worker(ServerNode):
         Nothing will happen otherwise.
         """
         ts = self.tasks.get(key)
-        if ts and ts.state in READY | {WTSName.waiting}:
+        if ts and ts.state in READY | {WTSS.waiting}:
             self.log.append((key, "cancel-compute", reason, time()))
             ts.scheduler_holds_ref = False
             # All possible dependents of TS should not be in state Processing on
             # scheduler side and therefore should not be assigned to a worker,
             # yet.
             assert not ts.dependents
-            self.transition(ts, WTSName.released, stimulus_id=reason)
+            self.transition(ts, WTSS.released, stimulus_id=reason)
 
     def handle_acquire_replicas(
         self, comm=None, keys=None, priorities=None, who_has=None, stimulus_id=None
@@ -1947,8 +1946,8 @@ class Worker(ServerNode):
                 stimulus_id=stimulus_id,
                 priority=priorities[k],
             )
-            if ts.state != WTSName.memory:
-                recommendations[ts] = WTSName.fetch
+            if ts.state != WTSS.memory:
+                recommendations[ts] = WTSS.fetch
 
         self.update_who_has(who_has, stimulus_id=stimulus_id)
         self.transitions(recommendations, stimulus_id=stimulus_id)
@@ -2030,23 +2029,23 @@ class Worker(ServerNode):
             dep_ts.dependents.add(ts)
 
         if ts.state in READY | {
-            WTSName.executing,
-            WTSName.waiting,
-            WTSName.resumed,
+            WTSS.executing,
+            WTSS.waiting,
+            WTSS.resumed,
         }:
             pass
-        elif ts.state == WTSName.memory:
-            recommendations[ts] = WTSName.memory
+        elif ts.state == WTSS.memory:
+            recommendations[ts] = WTSS.memory
             scheduler_msgs.append(self._get_task_finished_msg(ts))
         elif ts.state in {
-            WTSName.released,
-            WTSName.fetch,
-            WTSName.flight,
-            WTSName.missing,
-            WTSName.cancelled,
-            WTSName.error,
+            WTSS.released,
+            WTSS.fetch,
+            WTSS.flight,
+            WTSS.missing,
+            WTSS.cancelled,
+            WTSS.error,
         }:
-            recommendations[ts] = WTSName.waiting
+            recommendations[ts] = WTSS.waiting
         else:
             raise RuntimeError(f"Unexpected task state encountered {ts} {stimulus_id}")
 
@@ -2063,7 +2062,7 @@ class Worker(ServerNode):
 
     def transition_missing_fetch(self, ts, *, stimulus_id):
         self._missing_dep_flight.discard(ts)
-        ts.state = WTSName.fetch
+        ts.state = WTSS.fetch
         ts.done = False
         heapq.heappush(self.data_needed, (ts.priority, ts.key))
         return {}, []
@@ -2078,14 +2077,14 @@ class Worker(ServerNode):
 
     def transition_fetch_missing(self, ts, *, stimulus_id):
         # handle_missing will append to self.data_needed if new workers are found
-        ts.state = WTSName.missing
+        ts.state = WTSS.missing
         self._missing_dep_flight.add(ts)
         return {}, []
 
     def transition_released_fetch(self, ts, *, stimulus_id):
         for w in ts.who_has:
             self.pending_data_per_worker[w].append(ts.key)
-        ts.state = WTSName.fetch
+        ts.state = WTSS.fetch
         ts.done = False
         heapq.heappush(self.data_needed, (ts.priority, ts.key))
         return {}, []
@@ -2096,47 +2095,47 @@ class Worker(ServerNode):
         for dependency in ts.dependencies:
             if (
                 not dependency.waiters
-                and dependency.state not in READY | PROCESSING | {WTSName.memory}
+                and dependency.state not in READY | PROCESSING | {WTSS.memory}
             ):
-                recs[dependency] = WTSName.released
+                recs[dependency] = WTSS.released
 
         if not ts.dependents:
-            recs[ts] = WTSName.forgotten
+            recs[ts] = WTSS.forgotten
 
         return recs, []
 
     def transition_released_waiting(self, ts, *, stimulus_id):
         if self.validate:
-            assert ts.state == WTSName.released
+            assert ts.state == WTSS.released
             assert all(d.key in self.tasks for d in ts.dependencies)
 
         recommendations = {}
         ts.waiting_for_data.clear()
         for dep_ts in ts.dependencies:
-            if not dep_ts.state == WTSName.memory:
+            if not dep_ts.state == WTSS.memory:
                 ts.waiting_for_data.add(dep_ts)
                 dep_ts.waiters.add(ts)
-                if dep_ts.state not in {WTSName.fetch, WTSName.flight}:
-                    recommendations[dep_ts] = WTSName.fetch
+                if dep_ts.state not in {WTSS.fetch, WTSS.flight}:
+                    recommendations[dep_ts] = WTSS.fetch
 
         if ts.waiting_for_data:
             self.waiting_for_data_count += 1
         elif ts.resource_restrictions:
-            recommendations[ts] = WTSName.constrained
+            recommendations[ts] = WTSS.constrained
         else:
-            recommendations[ts] = WTSName.ready
+            recommendations[ts] = WTSS.ready
 
-        ts.state = WTSName.waiting
+        ts.state = WTSS.waiting
         return recommendations, []
 
     def transition_fetch_flight(self, ts, worker, *, stimulus_id):
         if self.validate:
-            assert ts.state == WTSName.fetch
+            assert ts.state == WTSS.fetch
             assert ts.who_has
             assert ts.key not in self.data_needed
 
         ts.done = False
-        ts.state = WTSName.flight
+        ts.state = WTSS.flight
         ts.coming_from = worker
         self._in_flight_tasks.add(ts)
         return {}, []
@@ -2148,20 +2147,20 @@ class Worker(ServerNode):
 
     def transition_waiting_constrained(self, ts, *, stimulus_id):
         if self.validate:
-            assert ts.state == WTSName.waiting
+            assert ts.state == WTSS.waiting
             assert not ts.waiting_for_data
             assert all(
                 dep.key in self.data or dep.key in self.actors
                 for dep in ts.dependencies
             )
-            assert all(dep.state == WTSName.memory for dep in ts.dependencies)
+            assert all(dep.state == WTSS.memory for dep in ts.dependencies)
             assert ts.key not in self.ready
-        ts.state = WTSName.constrained
+        ts.state = WTSS.constrained
         self.constrained.append(ts.key)
         return {}, []
 
     def transition_long_running_rescheduled(self, ts, *, stimulus_id):
-        recs = {ts: WTSName.released}
+        recs = {ts: WTSS.released}
         smsgs = [{"op": "reschedule", "key": ts.key, "worker": self.address}]
         return recs, smsgs
 
@@ -2170,20 +2169,20 @@ class Worker(ServerNode):
             self.available_resources[resource] += quantity
         self._executing.discard(ts)
 
-        recs = {ts: WTSName.released}
+        recs = {ts: WTSS.released}
         smsgs = [{"op": "reschedule", "key": ts.key, "worker": self.address}]
         return recs, smsgs
 
     def transition_waiting_ready(self, ts, *, stimulus_id):
         if self.validate:
-            assert ts.state == WTSName.waiting
+            assert ts.state == WTSS.waiting
             assert ts.key not in self.ready
             assert not ts.waiting_for_data
             for dep in ts.dependencies:
                 assert dep.key in self.data or dep.key in self.actors
-                assert dep.state == WTSName.memory
+                assert dep.state == WTSS.memory
 
-        ts.state = WTSName.ready
+        ts.state = WTSS.ready
         heapq.heappush(self.ready, (ts.priority, ts.key))
 
         return {}, []
@@ -2192,7 +2191,7 @@ class Worker(ServerNode):
         self, ts, exception, traceback, exception_text, traceback_text, *, stimulus_id
     ):
         recs, msgs = {}, []
-        if ts._previous == WTSName.executing:
+        if ts._previous == WTSS.executing:
             recs, msgs = self.transition_executing_error(
                 ts,
                 exception,
@@ -2201,7 +2200,7 @@ class Worker(ServerNode):
                 traceback_text,
                 stimulus_id=stimulus_id,
             )
-        elif ts._previous == WTSName.flight:
+        elif ts._previous == WTSS.flight:
             recs, msgs = self.transition_flight_error(
                 ts,
                 exception,
@@ -2221,7 +2220,7 @@ class Worker(ServerNode):
         ts.traceback = traceback
         ts.exception_text = exception_text
         ts.traceback_text = traceback_text
-        ts.state = WTSName.error
+        ts.state = WTSS.error
         smsg = {
             "op": "task-erred",
             "status": "error",
@@ -2275,9 +2274,9 @@ class Worker(ServerNode):
         """
         # if the next state is already intended to be fetch or if the
         # coro/thread is still running (ts.done==False), this is a noop
-        if ts._next == WTSName.fetch:
+        if ts._next == WTSS.fetch:
             return {}, []
-        ts._next = WTSName.fetch
+        ts._next = WTSS.fetch
 
         if ts.done:
             next_state = ts._next
@@ -2303,38 +2302,38 @@ class Worker(ServerNode):
 
     def transition_cancelled_fetch(self, ts, *, stimulus_id):
         if ts.done:
-            return {ts: WTSName.released}, []
-        elif ts._previous == WTSName.flight:
+            return {ts: WTSS.released}, []
+        elif ts._previous == WTSS.flight:
             ts.state = ts._previous
             return {}, []
         else:
-            assert ts._previous == WTSName.executing
-            return {ts: (WTSName.resumed, WTSName.fetch)}, []
+            assert ts._previous == WTSS.executing
+            return {ts: (WTSS.resumed, WTSS.fetch)}, []
 
     def transition_cancelled_resumed(self, ts, next, *, stimulus_id):
         ts._next = next
-        ts.state = WTSName.resumed
+        ts.state = WTSS.resumed
         return {}, []
 
     def transition_cancelled_waiting(self, ts, *, stimulus_id):
         if ts.done:
-            return {ts: WTSName.released}, []
-        elif ts._previous == WTSName.executing:
+            return {ts: WTSS.released}, []
+        elif ts._previous == WTSS.executing:
             ts.state = ts._previous
             return {}, []
         else:
-            assert ts._previous == WTSName.flight
-            return {ts: (WTSName.resumed, WTSName.waiting)}, []
+            assert ts._previous == WTSS.flight
+            return {ts: (WTSS.resumed, WTSS.waiting)}, []
 
     def transition_cancelled_forgotten(self, ts, *, stimulus_id):
-        ts._next = WTSName.forgotten
+        ts._next = WTSS.forgotten
         if not ts.done:
             return {}, []
-        return {ts: WTSName.released}, []
+        return {ts: WTSS.released}, []
 
     def transition_cancelled_released(self, ts, *, stimulus_id):
         if not ts.done:
-            ts._next = WTSName.released
+            ts._next = WTSS.released
             return {}, []
         next_state = ts._next
         self._executing.discard(ts)
@@ -2345,15 +2344,15 @@ class Worker(ServerNode):
         recommendations, smsgs = self.transition_generic_released(
             ts, stimulus_id=stimulus_id
         )
-        if next_state != WTSName.released:
+        if next_state != WTSS.released:
             recommendations[ts] = next_state
         return recommendations, smsgs
 
     def transition_executing_released(self, ts, *, stimulus_id):
         ts._previous = ts.state
-        ts._next = WTSName.released
+        ts._next = WTSS.released
         # See https://github.com/dask/distributed/pull/5046#discussion_r685093940
-        ts.state = WTSName.cancelled
+        ts.state = WTSS.cancelled
         ts.done = False
         return {}, []
 
@@ -2378,7 +2377,7 @@ class Worker(ServerNode):
             recs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
         except Exception as e:
             msg = error_message(e)
-            rec = (WTSName.error, *tuple(msg.values())[1:])
+            rec = (WTSS.error, *tuple(msg.values())[1:])
             recs = {ts: rec}
             return recs, []
         assert ts.key in self.data or ts.key in self.actors
@@ -2387,7 +2386,7 @@ class Worker(ServerNode):
 
     def transition_executing_memory(self, ts, value=no_value, *, stimulus_id):
         if self.validate:
-            assert ts.state == WTSName.executing or ts.key in self.long_running
+            assert ts.state == WTSS.executing or ts.key in self.long_running
             assert not ts.waiting_for_data
             assert ts.key not in self.ready
 
@@ -2406,7 +2405,7 @@ class Worker(ServerNode):
 
         for resource, quantity in ts.resource_restrictions.items():
             self.available_resources[resource] -= quantity
-        ts.state = WTSName.executing
+        ts.state = WTSS.executing
         self._executing.add(ts)
         self.loop.add_callback(self.execute, ts.key, stimulus_id=stimulus_id)
         return {}, []
@@ -2422,7 +2421,7 @@ class Worker(ServerNode):
                 for dep in ts.dependencies
             )
 
-        ts.state = WTSName.executing
+        ts.state = WTSS.executing
         self._executing.add(ts)
         self.loop.add_callback(self.execute, ts.key, stimulus_id=stimulus_id)
         return {}, []
@@ -2435,7 +2434,7 @@ class Worker(ServerNode):
             recommendations, smsgs = self.transition_generic_released(
                 ts, stimulus_id=stimulus_id
             )
-            recommendations[ts] = WTSName.fetch
+            recommendations[ts] = WTSS.fetch
             return recommendations, smsgs
         else:
             return {}, []
@@ -2460,17 +2459,17 @@ class Worker(ServerNode):
             # sensible?
             return self.transition_generic_released(ts, stimulus_id=stimulus_id)
         else:
-            ts._previous = WTSName.flight
-            ts._next = WTSName.released
+            ts._previous = WTSS.flight
+            ts._next = WTSS.released
             # See https://github.com/dask/distributed/pull/5046#discussion_r685093940
-            ts.state = WTSName.cancelled
+            ts.state = WTSS.cancelled
             return {}, []
 
     def transition_cancelled_memory(self, ts, value, *, stimulus_id):
         return {ts: ts._next}, []
 
     def transition_executing_long_running(self, ts, compute_duration, *, stimulus_id):
-        ts.state = WTSName.long_running
+        ts.state = WTSS.long_running
         self._executing.discard(ts)
         self.long_running.add(ts.key)
         smsgs = [
@@ -2492,7 +2491,7 @@ class Worker(ServerNode):
             )
         except Exception as e:
             msg = error_message(e)
-            rec = (WTSName.error, *tuple(msg.values())[1:])
+            rec = (WTSS.error, *tuple(msg.values())[1:])
             recs = {ts: rec}
             return recs, []
         smsgs = [{"op": "add-keys", "keys": [ts.key], "stimulus_id": stimulus_id}]
@@ -2508,7 +2507,7 @@ class Worker(ServerNode):
             )
         except Exception as e:
             msg = error_message(e)
-            rec = (WTSName.error, *tuple(msg.values())[1:])
+            rec = (WTSS.error, *tuple(msg.values())[1:])
             recs = {ts: rec}
             return recs, []
         smsgs = [{"op": "add-keys", "keys": [ts.key], "stimulus_id": stimulus_id}]
@@ -2518,32 +2517,32 @@ class Worker(ServerNode):
         recommendations = {}
         # Dependents _should_ be released by the scheduler before this
         if self.validate:
-            assert all(d.state == WTSName.forgotten for d in ts.dependents)
+            assert all(d.state == WTSS.forgotten for d in ts.dependents)
         for dep in ts.dependencies:
             dep.dependents.discard(ts)
-            if dep.state == WTSName.released and not dep.dependents:
-                recommendations[dep] = WTSName.forgotten
+            if dep.state == WTSS.released and not dep.dependents:
+                recommendations[dep] = WTSS.forgotten
 
         # Mark state as forgotten in case it is still referenced
-        ts.state = WTSName.forgotten
+        ts.state = WTSS.forgotten
         self.tasks.pop(ts.key, None)
         return recommendations, []
 
     def _transition(
         self,
         ts: TaskState,
-        finish: WTSName | tuple,
+        finish: WTSS | tuple,
         *args: Any,
         stimulus_id: str,
         **kwargs: Any,
-    ) -> tuple[dict[TaskState, WTSName | tuple], list[str]]:
+    ) -> tuple[dict[TaskState, WTSS | tuple], list[str]]:
 
         if isinstance(finish, tuple):
             # the concatenated transition path might need to access the tuple
             assert not args
             args = finish[1:]
             finish = finish[0]
-        assert isinstance(finish, WTSName), finish
+        assert isinstance(finish, WTSS), finish
         if ts is None or ts.state == finish:
             return {}, []
 
@@ -2555,11 +2554,11 @@ class Worker(ServerNode):
             recs, smsgs = func(ts, *args, stimulus_id=stimulus_id, **kwargs)
             self._notify_plugins("transition", ts.key, start, finish, **kwargs)
 
-        elif WTSName.released not in (start, finish):
+        elif WTSS.released not in (start, finish):
             # start -> "released" -> finish
             try:
                 recs, smsgs = self._transition(
-                    ts, WTSName.released, stimulus_id=stimulus_id
+                    ts, WTSS.released, stimulus_id=stimulus_id
                 )
                 v = recs.get(ts, (finish, *args))
                 if isinstance(v, tuple):
@@ -2601,7 +2600,7 @@ class Worker(ServerNode):
         return recs, smsgs
 
     def transition(
-        self, ts: TaskState, finish: WTSName | tuple, *, stimulus_id: str, **kwargs
+        self, ts: TaskState, finish: WTSS | tuple, *, stimulus_id: str, **kwargs
     ) -> None:
         """Transition a key from its current state to the finish state
 
@@ -2656,19 +2655,19 @@ class Worker(ServerNode):
             )
 
     def maybe_transition_long_running(self, ts, *, stimulus_id, compute_duration=None):
-        if ts.state == WTSName.executing:
+        if ts.state == WTSS.executing:
             self.transition(
                 ts,
-                WTSName.long_running,
+                WTSS.long_running,
                 compute_duration=compute_duration,
                 stimulus_id=stimulus_id,
             )
-            assert ts.state == WTSName.long_running
+            assert ts.state == WTSS.long_running
 
     def stateof(self, key):
         ts = self.tasks[key]
         return {
-            "executing": ts.state == WTSName.executing,
+            "executing": ts.state == WTSS.executing,
             "waiting_for_data": bool(ts.waiting_for_data),
             "heap": key in pluck(1, self.ready),
             "data": key in self.data,
@@ -2710,11 +2709,11 @@ class Worker(ServerNode):
             except KeyError:
                 continue
 
-            if ts.state != WTSName.fetch:
+            if ts.state != WTSS.fetch:
                 continue
 
             if not ts.who_has:
-                self.transition(ts, WTSName.missing, stimulus_id=stimulus_id)
+                self.transition(ts, WTSS.missing, stimulus_id=stimulus_id)
                 continue
 
             workers = [w for w in ts.who_has if w not in self.in_flight_workers]
@@ -2738,9 +2737,7 @@ class Worker(ServerNode):
 
             self.comm_nbytes += total_nbytes
             self.in_flight_workers[worker] = to_gather
-            recommendations = {
-                self.tasks[d]: (WTSName.flight, worker) for d in to_gather
-            }
+            recommendations = {self.tasks[d]: (WTSS.flight, worker) for d in to_gather}
             self.transitions(recommendations, stimulus_id=stimulus_id)
 
             self.loop.add_callback(
@@ -2808,7 +2805,7 @@ class Worker(ServerNode):
             actor.
         """
         if ts.key in self.data:
-            ts.state = WTSName.memory
+            ts.state = WTSS.memory
             return {}
 
         recommendations = {}
@@ -2823,7 +2820,7 @@ class Worker(ServerNode):
                     {"action": "disk-write", "start": start, "stop": stop}
                 )
 
-        ts.state = WTSName.memory
+        ts.state = WTSS.memory
         if ts.nbytes is None:
             ts.nbytes = sizeof(value)
 
@@ -2831,9 +2828,9 @@ class Worker(ServerNode):
 
         for dep in ts.dependents:
             dep.waiting_for_data.discard(ts)
-            if not dep.waiting_for_data and dep.state == WTSName.waiting:
+            if not dep.waiting_for_data and dep.state == WTSS.waiting:
                 self.waiting_for_data_count -= 1
-                recommendations[dep] = WTSName.ready
+                recommendations[dep] = WTSS.ready
 
         self.log.append((ts.key, "put-in-memory", stimulus_id, time()))
         return recommendations
@@ -2848,7 +2845,7 @@ class Worker(ServerNode):
         while L:
             d = L.popleft()
             ts = self.tasks.get(d)
-            if ts is None or ts.state != WTSName.fetch:
+            if ts is None or ts.state != WTSS.fetch:
                 continue
             if total_bytes + ts.get_nbytes() > self.target_message_size:
                 break
@@ -2893,11 +2890,11 @@ class Worker(ServerNode):
             # resumed and cancelled will block any further transition until this
             # coro has been finished
 
-            if ts.state in (WTSName.flight, WTSName.resumed):
+            if ts.state in (WTSS.flight, WTSS.resumed):
                 in_flight_tasks.add(ts)
             # If the key is already in memory, the fetch should not happen which
             # is signalled by the cancelled_keys
-            elif ts.state in {WTSName.cancelled, WTSName.memory}:
+            elif ts.state in {WTSS.cancelled, WTSS.memory}:
                 cancelled_keys.add(key)
             else:
                 raise RuntimeError(
@@ -2988,7 +2985,7 @@ class Worker(ServerNode):
         if self.status not in RUNNING:
             return
 
-        recommendations: dict[TaskState, WTSName | tuple] = {}
+        recommendations: dict[TaskState, WTSS | tuple] = {}
         with log_errors():
             response = {}
             to_gather_keys: set[str] = set()
@@ -3056,7 +3053,7 @@ class Worker(ServerNode):
 
                     pdb.set_trace()
                 msg = error_message(e)
-                rec = (WTSName.error, *tuple(msg.values())[1:])
+                rec = (WTSS.error, *tuple(msg.values())[1:])
                 for k in self.in_flight_workers[worker]:
                     ts = self.tasks[k]
                     recommendations[ts] = rec
@@ -3075,14 +3072,14 @@ class Worker(ServerNode):
                     ts = self.tasks[d]
                     ts.done = True
                     if d in cancelled_keys:
-                        if ts.state == WTSName.cancelled:
-                            recommendations[ts] = WTSName.released
+                        if ts.state == WTSS.cancelled:
+                            recommendations[ts] = WTSS.released
                         else:
-                            recommendations[ts] = WTSName.fetch
+                            recommendations[ts] = WTSS.fetch
                     elif d in data:
-                        recommendations[ts] = (WTSName.memory, data[d])
+                        recommendations[ts] = (WTSS.memory, data[d])
                     elif busy:
-                        recommendations[ts] = WTSName.fetch
+                        recommendations[ts] = WTSS.fetch
                     elif ts not in recommendations:
                         ts.who_has.discard(worker)
                         self.has_what[worker].discard(ts.key)
@@ -3090,7 +3087,7 @@ class Worker(ServerNode):
                         self.batched_stream.send(
                             {"op": "missing-data", "errant_worker": worker, "key": d}
                         )
-                        recommendations[ts] = WTSName.fetch
+                        recommendations[ts] = WTSS.fetch
                 del data, response
                 self.transitions(recommendations, stimulus_id=stimulus_id)
                 self.ensure_computing()
@@ -3145,10 +3142,7 @@ class Worker(ServerNode):
                     continue
 
                 if dep in self.tasks:
-                    if (
-                        self.address in workers
-                        and self.tasks[dep].state != WTSName.memory
-                    ):
+                    if self.address in workers and self.tasks[dep].state != WTSS.memory:
                         logger.debug(
                             "Scheduler claims worker %s holds data for task %s which is not true.",
                             self.name,
@@ -3160,8 +3154,8 @@ class Worker(ServerNode):
                     if dep_ts.state in FETCH_INTENDED:
                         dep_ts.who_has.update(workers)
 
-                        if dep_ts.state == WTSName.missing:
-                            recommendations[dep_ts] = WTSName.fetch
+                        if dep_ts.state == WTSS.missing:
+                            recommendations[dep_ts] = WTSS.fetch
 
                         for worker in workers:
                             self.has_what[worker].add(dep)
@@ -3181,7 +3175,7 @@ class Worker(ServerNode):
         # In this case the self.tasks is already cleared. The `None` will be
         # registered as `already-computing` on the other end
         ts = self.tasks.get(key)
-        state = ts.state if ts is not None else WTSName.forgotten
+        state = ts.state if ts is not None else WTSS.forgotten
 
         response = {
             "op": "steal-response",
@@ -3191,11 +3185,11 @@ class Worker(ServerNode):
         }
         self.batched_stream.send(response)
 
-        if state in READY | {WTSName.waiting}:
+        if state in READY | {WTSS.waiting}:
             # If task is marked as "constrained" we haven't yet assigned it an
             # `available_resources` to run on, that happens in
             # `transition_constrained_executing`
-            self.transition(ts, WTSName.released, stimulus_id=stimulus_id)
+            self.transition(ts, WTSS.released, stimulus_id=stimulus_id)
 
     def release_key(
         self,
@@ -3210,7 +3204,7 @@ class Worker(ServerNode):
             ts = self.tasks[key]
             # needed for legacy notification support
             state_before = ts.state
-            ts.state = WTSName.released
+            ts.state = WTSS.released
 
             logger.debug(
                 "Release key %s", {"key": key, "cause": cause, "reason": reason}
@@ -3235,7 +3229,7 @@ class Worker(ServerNode):
                 del self.threads[key]
 
             if ts.resource_restrictions is not None:
-                if ts.state == WTSName.executing:
+                if ts.state == WTSS.executing:
                     for resource, quantity in ts.resource_restrictions.items():
                         self.available_resources[resource] += quantity
 
@@ -3395,7 +3389,7 @@ class Worker(ServerNode):
             emsg.pop("status")
             self.transition(
                 ts,
-                WTSName.error,
+                WTSS.error,
                 **emsg,
                 stimulus_id=stimulus_id,
             )
@@ -3409,12 +3403,12 @@ class Worker(ServerNode):
             while self.constrained and self.executing_count < self.nthreads:
                 key = self.constrained[0]
                 ts = self.tasks.get(key, None)
-                if ts is None or ts.state != WTSName.constrained:
+                if ts is None or ts.state != WTSS.constrained:
                     self.constrained.popleft()
                     continue
                 if self.meets_resource_constraints(key):
                     self.constrained.popleft()
-                    self.transition(ts, WTSName.executing, stimulus_id=stimulus_id)
+                    self.transition(ts, WTSS.executing, stimulus_id=stimulus_id)
                 else:
                     break
             while self.ready and self.executing_count < self.nthreads:
@@ -3427,9 +3421,9 @@ class Worker(ServerNode):
                     # continue through the heap
                     continue
                 elif ts.key in self.data:
-                    self.transition(ts, WTSName.memory, stimulus_id=stimulus_id)
+                    self.transition(ts, WTSS.memory, stimulus_id=stimulus_id)
                 elif ts.state in READY:
-                    self.transition(ts, WTSName.executing, stimulus_id=stimulus_id)
+                    self.transition(ts, WTSS.executing, stimulus_id=stimulus_id)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -3446,19 +3440,19 @@ class Worker(ServerNode):
         ts = self.tasks[key]
 
         try:
-            if ts.state == WTSName.cancelled:
+            if ts.state == WTSS.cancelled:
                 # This might happen if keys are canceled
                 logger.debug(
                     "Trying to execute task %s which is not in executing state anymore",
                     ts,
                 )
                 ts.done = True
-                self.transition(ts, WTSName.released, stimulus_id=stimulus_id)
+                self.transition(ts, WTSS.released, stimulus_id=stimulus_id)
                 return
 
             if self.validate:
                 assert not ts.waiting_for_data
-                assert ts.state == WTSName.executing
+                assert ts.state == WTSS.executing
                 assert ts.runspec is not None
 
             function, args, kwargs = await self._maybe_deserialize_task(
@@ -3527,11 +3521,11 @@ class Worker(ServerNode):
             if result["op"] == "task-finished":
                 ts.nbytes = result["nbytes"]
                 ts.type = result["type"]
-                recommendations[ts] = (WTSName.memory, value)
+                recommendations[ts] = (WTSS.memory, value)
                 if self.digests is not None:
                     self.digests["task-duration"].add(result["stop"] - result["start"])
             elif isinstance(result.pop("actual-exception"), Reschedule):
-                recommendations[ts] = WTSName.rescheduled
+                recommendations[ts] = WTSS.rescheduled
             else:
                 logger.warning(
                     "Compute Failed\n"
@@ -3545,7 +3539,7 @@ class Worker(ServerNode):
                     result["exception_text"],
                 )
                 recommendations[ts] = (
-                    WTSName.error,
+                    WTSS.error,
                     result["exception"],
                     result["traceback"],
                     result["exception_text"],
@@ -3557,7 +3551,7 @@ class Worker(ServerNode):
             logger.debug("Send compute response to scheduler: %s, %s", ts.key, result)
 
             if self.validate:
-                assert ts.state != WTSName.executing
+                assert ts.state != WTSS.executing
                 assert not ts.waiting_for_data
 
         except Exception as exc:
@@ -3569,7 +3563,7 @@ class Worker(ServerNode):
             emsg.pop("status")
             self.transition(
                 ts,
-                WTSName.error,
+                WTSS.error,
                 **emsg,
                 stimulus_id=stimulus_id,
             )
@@ -3827,17 +3821,17 @@ class Worker(ServerNode):
                         "The `WorkerPlugin.transition` hook will change soon "
                         "and will no longer receive string values for start and "
                         "finish but instead an instance of "
-                        f"`dask.distributed.worker.{WTSName.__name__}`. "
+                        f"`dask.distributed.worker.{WTSS.__name__}`. "
                         "To subscribe to the new behaviour already, set "
                         "`WorkerPlugin.enum_task_state_names = True` "
                         "for your plugin",
                         DeprecationWarning,
                     )
                     args = tuple(
-                        arg.value if isinstance(arg, WTSName) else arg for arg in args
+                        arg.value if isinstance(arg, WTSS) else arg for arg in args
                     )
                     kwargs = {
-                        k: v.value if isinstance(v, WTSName) else v
+                        k: v.value if isinstance(v, WTSS) else v
                         for k, v in kwargs.items()
                     }
 
@@ -3845,7 +3839,7 @@ class Worker(ServerNode):
                     warnings.warn(
                         "The `WorkerPlugin.release_key` hook is depreacted and will be "
                         "removed in a future version. A similar event can now be "
-                        "caught by filtering for a `finish==WTSName.released` event in the "
+                        "caught by filtering for a `finish==WTSS.released` event in the "
                         "`WorkerPlugin.transition` hook.",
                         DeprecationWarning,
                     )
@@ -3866,21 +3860,21 @@ class Worker(ServerNode):
         assert isinstance(ts.nbytes, int)
         assert not ts.waiting_for_data
         assert ts.key not in self.ready
-        assert ts.state == WTSName.memory
+        assert ts.state == WTSS.memory
 
     def validate_task_executing(self, ts):
-        assert ts.state == WTSName.executing
+        assert ts.state == WTSS.executing
         assert ts.runspec is not None
         assert ts.key not in self.data
         assert not ts.waiting_for_data
         for dep in ts.dependencies:
-            assert dep.state == WTSName.memory, self.story(dep)
+            assert dep.state == WTSS.memory, self.story(dep)
             assert dep.key in self.data or dep.key in self.actors
 
     def validate_task_ready(self, ts):
         assert ts.key in pluck(1, self.ready)
         assert ts.key not in self.data
-        assert ts.state != WTSName.executing
+        assert ts.state != WTSS.executing
         assert not ts.done
         assert not ts.waiting_for_data
         assert all(
@@ -3889,7 +3883,7 @@ class Worker(ServerNode):
 
     def validate_task_waiting(self, ts):
         assert ts.key not in self.data
-        assert ts.state == WTSName.waiting
+        assert ts.state == WTSS.waiting
         assert not ts.done
         if ts.dependencies and ts.runspec:
             assert not all(dep.key in self.data for dep in ts.dependencies)
@@ -3946,25 +3940,25 @@ class Worker(ServerNode):
         try:
             if ts.key in self.tasks:
                 assert self.tasks[ts.key] == ts
-            if ts.state == WTSName.memory:
+            if ts.state == WTSS.memory:
                 self.validate_task_memory(ts)
-            elif ts.state == WTSName.waiting:
+            elif ts.state == WTSS.waiting:
                 self.validate_task_waiting(ts)
-            elif ts.state == WTSName.missing:
+            elif ts.state == WTSS.missing:
                 self.validate_task_missing(ts)
-            elif ts.state == WTSName.cancelled:
+            elif ts.state == WTSS.cancelled:
                 self.validate_task_cancelled(ts)
-            elif ts.state == WTSName.resumed:
+            elif ts.state == WTSS.resumed:
                 self.validate_task_resumed(ts)
-            elif ts.state == WTSName.ready:
+            elif ts.state == WTSS.ready:
                 self.validate_task_ready(ts)
-            elif ts.state == WTSName.executing:
+            elif ts.state == WTSS.executing:
                 self.validate_task_executing(ts)
-            elif ts.state == WTSName.flight:
+            elif ts.state == WTSS.flight:
                 self.validate_task_flight(ts)
-            elif ts.state == WTSName.fetch:
+            elif ts.state == WTSS.fetch:
                 self.validate_task_fetch(ts)
-            elif ts.state == WTSName.released:
+            elif ts.state == WTSS.released:
                 self.validate_task_released(ts)
         except Exception as e:
             logger.exception(e)
@@ -4006,15 +4000,15 @@ class Worker(ServerNode):
                         ts_wait.state
                         in READY
                         | {
-                            WTSName.executing,
-                            WTSName.flight,
-                            WTSName.fetch,
-                            WTSName.missing,
+                            WTSS.executing,
+                            WTSS.flight,
+                            WTSS.fetch,
+                            WTSS.missing,
                         }
                         or ts_wait.key in self._missing_dep_flight
                         or ts_wait.who_has.issubset(self.in_flight_workers)
                     ), (ts, ts_wait, self.story(ts), self.story(ts_wait))
-                if ts.state == WTSName.memory:
+                if ts.state == WTSS.memory:
                     assert isinstance(ts.nbytes, int)
                     assert not ts.waiting_for_data
                     assert ts.key in self.data or ts.key in self.actors

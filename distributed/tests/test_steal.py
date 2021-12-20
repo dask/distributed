@@ -29,7 +29,7 @@ from distributed.utils_test import (
     slowidentity,
     slowinc,
 )
-from distributed.worker import WTSName
+from distributed.worker import WTSS
 
 pytestmark = pytest.mark.ci1
 
@@ -561,7 +561,7 @@ async def test_dont_steal_executing_tasks_2(c, s, a, b):
         s.tasks[future.key], s.workers[a.address], s.workers[b.address]
     )
     await asyncio.sleep(0.1)
-    assert a.tasks[future.key].state == WTSName.executing
+    assert a.tasks[future.key].state == WTSS.executing
     assert not b.executing_count
 
 
@@ -848,7 +848,7 @@ async def test_dont_steal_already_released(c, s, a, b):
 
     del future
 
-    while key in a.tasks and a.tasks[key].state != WTSName.released:
+    while key in a.tasks and a.tasks[key].state != WTSS.released:
         await asyncio.sleep(0.05)
 
     a.handle_steal_request(key=key, stimulus_id="test")
@@ -856,7 +856,7 @@ async def test_dont_steal_already_released(c, s, a, b):
     msg = a.batched_stream.buffer[0]
     assert msg["op"] == "steal-response"
     assert msg["key"] == key
-    assert msg["state"] in [WTSName.forgotten, WTSName.released]
+    assert msg["state"] in [WTSS.forgotten, WTSS.released]
 
     with captured_logger(
         logging.getLogger("distributed.stealing"), level=logging.DEBUG

@@ -1703,14 +1703,14 @@ class TaskStateMetadataPlugin(WorkerPlugin):
         self.worker = worker
 
     def transition(self, key, start, finish, **kwargs):
-        from distributed.worker import WTSName
+        from distributed.worker import WTSS
 
         # FIXME: Make plugins backwards compatible??
         ts = self.worker.tasks[key]
 
-        if start == WTSName.ready and finish == WTSName.executing:
+        if start == WTSS.ready and finish == WTSS.executing:
             ts.metadata["start_time"] = time()
-        elif start == WTSName.executing and finish == WTSName.memory:
+        elif start == WTSS.executing and finish == WTSS.memory:
             ts.metadata["stop_time"] = time()
 
 
