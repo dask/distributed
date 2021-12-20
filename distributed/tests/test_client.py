@@ -1274,6 +1274,35 @@ async def test_exception_on_exception(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_get_task_prefixes(c, s, a, b):
+    x = await c.submit(inc, 1)
+    res = s.get_task_prefixes()
+
+    data = {
+        "erred": {"inc": 0},
+        "memory": {"inc": 1},
+        "processing": {"inc": 0},
+        "released": {"inc": 0},
+        "waiting": {"inc": 0},
+    }
+    x = await c.submit(inc, 1)
+    assert res == data
+    del x
+
+    while s.get_task_prefixes() == data:
+        await asyncio.sleep(0.01)
+
+    res = s.get_task_prefixes()
+    assert res == {
+        "erred": {},
+        "memory": {},
+        "processing": {},
+        "released": {},
+        "waiting": {},
+    }
+
+
+@gen_cluster(client=True)
 async def test_get_nbytes(c, s, a, b):
     [x] = await c.scatter([1])
     assert s.get_nbytes(summary=False) == {x.key: sizeof(1)}
