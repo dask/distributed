@@ -1808,6 +1808,13 @@ def assert_worker_story(
     expect: list[tuple]
         Expected events. Each expected event must contain exactly 2 less fields than the
         story (the last two fields are always the stimulus_id and the timestamp).
+
+        Elements of the events can be
+
+        - callables, which accept a single event as argument and return True for match
+          and False for no match;
+        - arbitrary objects, which are compared with a == b
+
     strict: bool, optional
         If True, the story must contain exactly as many events as expect.
         If False (the default), the story may contain more events than expect; extra
@@ -1839,7 +1846,11 @@ def assert_worker_story(
             while True:
                 event = next(story_it)
                 # Ignore (stimulus_id, timestamp)
-                if event[:-2] == ev_expect:
+                event = event[:-2]
+                if len(event) == len(ev_expect) and all(
+                    ex(ev) if callable(ex) else ev == ex
+                    for ev, ex in zip(event, ev_expect)
+                ):
                     break
     except StopIteration:
         raise AssertionError(
