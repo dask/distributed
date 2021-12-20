@@ -4,19 +4,25 @@ from unittest import mock
 import pytest
 
 import distributed
-from distributed import Worker
 from distributed.core import CommClosedError
-from distributed.utils_test import _LockedCommPool, gen_cluster, inc, slowinc
+from distributed.utils_test import (
+    _LockedCommPool,
+    assert_worker_story,
+    gen_cluster,
+    inc,
+    slowinc,
+)
+from distributed.worker import Worker, WTSName
 
 
-async def wait_for_state(key, state, dask_worker):
+async def wait_for_state(key: str, state: WTSName, dask_worker: Worker) -> None:
     while key not in dask_worker.tasks or dask_worker.tasks[key].state != state:
         await asyncio.sleep(0.005)
 
 
-async def wait_for_cancelled(key, dask_worker):
+async def wait_for_cancelled(key: str, dask_worker: Worker) -> None:
     while key in dask_worker.tasks:
-        if dask_worker.tasks[key].state == "cancelled":
+        if dask_worker.tasks[key].state == WTSName.cancelled:
             return
         await asyncio.sleep(0.005)
     assert False
@@ -25,7 +31,7 @@ async def wait_for_cancelled(key, dask_worker):
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_release(c, s, a):
     fut = c.submit(slowinc, 1, delay=1)
-    await wait_for_state(fut.key, "executing", a)
+    await wait_for_state(fut.key, WTSName.executing, a)
     fut.release()
     await wait_for_cancelled(fut.key, a)
 
@@ -33,7 +39,7 @@ async def test_abort_execution_release(c, s, a):
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_reschedule(c, s, a):
     fut = c.submit(slowinc, 1, delay=1)
-    await wait_for_state(fut.key, "executing", a)
+    await wait_for_state(fut.key, WTSName.executing, a)
     fut.release()
     await wait_for_cancelled(fut.key, a)
     fut = c.submit(slowinc, 1, delay=0.1)
@@ -43,7 +49,7 @@ async def test_abort_execution_reschedule(c, s, a):
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_add_as_dependency(c, s, a):
     fut = c.submit(slowinc, 1, delay=1)
-    await wait_for_state(fut.key, "executing", a)
+    await wait_for_state(fut.key, WTSName.executing, a)
     fut.release()
     await wait_for_cancelled(fut.key, a)
 
@@ -55,7 +61,7 @@ async def test_abort_execution_add_as_dependency(c, s, a):
 @gen_cluster(client=True)
 async def test_abort_execution_to_fetch(c, s, a, b):
     fut = c.submit(slowinc, 1, delay=2, key="f1", workers=[a.worker_address])
-    await wait_for_state(fut.key, "executing", a)
+    await wait_for_state(fut.key, WTSName.executing, a)
     fut.release()
     await wait_for_cancelled(fut.key, a)
 
@@ -120,11 +126,11 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, a, b):
         fut1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
         fut2 = c.submit(inc, fut1, workers=[b.address])
 
-        await wait_for_state(fut1.key, "flight", b)
+        await wait_for_state(fut1.key, WTSName.flight, b)
 
         # Close in scheduler to ensure we transition and reschedule task properly
         await s.close_worker(worker=a.address)
-        await wait_for_state(fut1.key, "resumed", b)
+        await wait_for_state(fut1.key, WTSName.resumed, b)
 
     lock.release()
     assert await fut2 == 3
@@ -149,10 +155,10 @@ async def test_executing_cancelled_error(c, s, w):
             raise RuntimeError()
 
     fut = c.submit(wait_and_raise)
-    await wait_for_state(fut.key, "executing", w)
+    await wait_for_state(fut.key, WTSName.executing, w)
 
     fut.release()
-    await wait_for_state(fut.key, "cancelled", w)
+    await wait_for_state(fut.key, WTSName.cancelled, w)
     await lock.release()
 
     # At this point we do not fetch the result of the future since the future
@@ -169,10 +175,13 @@ async def test_executing_cancelled_error(c, s, w):
     # refactoring. Below verifies some implementation specific test assumptions
 
     story = w.story(fut.key)
-    start_finish = [(msg[1], msg[2], msg[3]) for msg in story if len(msg) == 7]
-    assert ("executing", "released", "cancelled") in start_finish
-    assert ("cancelled", "error", "error") in start_finish
-    assert ("error", "released", "released") in start_finish
+    expected = [
+        (fut.key, "executing", "released", "cancelled", {}),
+        (fut.key, "cancelled", "error", "error", {fut.key: "released"}),
+        (fut.key, "release-key"),
+        (fut.key, "error", "released", "released", {fut.key: "forgotten"}),
+    ]
+    assert_worker_story(story, expected)
 
 
 @gen_cluster(client=True)
@@ -194,10 +203,10 @@ async def test_flight_cancelled_error(c, s, a, b):
         fut1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
         fut2 = c.submit(inc, fut1, workers=[b.address])
 
-        await wait_for_state(fut1.key, "flight", b)
+        await wait_for_state(fut1.key, WTSName.flight, b)
         fut2.release()
         fut1.release()
-        await wait_for_state(fut1.key, "cancelled", b)
+        await wait_for_state(fut1.key, WTSName.cancelled, b)
 
     lock.release()
     # At this point we do not fetch the result of the future since the future
@@ -253,7 +262,7 @@ async def test_value_raises_during_spilling(c, s):
 
         fut = c.submit(produce_evil_data)
 
-        await wait_for_state(fut.key, "error", w)
+        await wait_for_state(fut.key, WTSName.error, w)
 
         with pytest.raises(
             TypeError,

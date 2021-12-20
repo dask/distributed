@@ -29,6 +29,7 @@ from distributed.utils_test import (
     slowidentity,
     slowinc,
 )
+from distributed.worker import WTSName
 
 pytestmark = pytest.mark.ci1
 
@@ -560,7 +561,7 @@ async def test_dont_steal_executing_tasks_2(c, s, a, b):
         s.tasks[future.key], s.workers[a.address], s.workers[b.address]
     )
     await asyncio.sleep(0.1)
-    assert a.tasks[future.key].state == "executing"
+    assert a.tasks[future.key].state == WTSName.executing
     assert not b.executing_count
 
 
@@ -847,7 +848,7 @@ async def test_dont_steal_already_released(c, s, a, b):
 
     del future
 
-    while key in a.tasks and a.tasks[key].state != "released":
+    while key in a.tasks and a.tasks[key].state != WTSName.released:
         await asyncio.sleep(0.05)
 
     a.handle_steal_request(key=key, stimulus_id="test")
@@ -855,7 +856,7 @@ async def test_dont_steal_already_released(c, s, a, b):
     msg = a.batched_stream.buffer[0]
     assert msg["op"] == "steal-response"
     assert msg["key"] == key
-    assert msg["state"] in [None, "released"]
+    assert msg["state"] in [WTSName.forgotten, WTSName.released]
 
     with captured_logger(
         logging.getLogger("distributed.stealing"), level=logging.DEBUG
@@ -1186,7 +1187,7 @@ async def test_correct_bad_time_estimate(c, s, *workers):
     future = c.submit(slowinc, 1, delay=0)
     await wait(future)
     futures = [c.submit(slowinc, future, delay=0.1, pure=False) for i in range(20)]
-    while not any(f.key in s.tasks for f in futures):
+    while not all(f.key in s.tasks for f in futures):
         await asyncio.sleep(0.001)
     assert not any(s.tasks[f.key] in steal.key_stealable for f in futures)
     await asyncio.sleep(0.5)

@@ -1697,15 +1697,20 @@ def cleanup():
 class TaskStateMetadataPlugin(WorkerPlugin):
     """WorkPlugin to populate TaskState.metadata"""
 
+    enum_task_state_names = True
+
     def setup(self, worker):
         self.worker = worker
 
     def transition(self, key, start, finish, **kwargs):
+        from distributed.worker import WTSName
+
+        # FIXME: Make plugins backwards compatible??
         ts = self.worker.tasks[key]
 
-        if start == "ready" and finish == "executing":
+        if start == WTSName.ready and finish == WTSName.executing:
             ts.metadata["start_time"] = time()
-        elif start == "executing" and finish == "memory":
+        elif start == WTSName.executing and finish == WTSName.memory:
             ts.metadata["stop_time"] = time()
 
 

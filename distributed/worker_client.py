@@ -6,7 +6,7 @@ import dask
 from distributed.metrics import time
 
 from .threadpoolexecutor import rejoin, secede
-from .worker import get_client, get_worker, thread_state
+from .worker import WTSName, get_client, get_worker, thread_state
 
 
 @contextmanager
@@ -57,7 +57,7 @@ def worker_client(timeout=None, separate_thread=True):
         worker.loop.add_callback(
             worker.transition,
             worker.tasks[thread_state.key],
-            "long-running",
+            WTSName.long_running,
             stimulus_id=f"worker-client-secede-{time()}",
             compute_duration=duration,
         )

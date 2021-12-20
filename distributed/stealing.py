@@ -13,6 +13,8 @@ from tornado.ioloop import PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
+from distributed.worker import WorkerTaskStateName as WTSName
+
 from .comm.addressing import get_address_host
 from .core import CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
@@ -30,21 +32,21 @@ logger = logging.getLogger(__name__)
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 _WORKER_STATE_CONFIRM = {
-    "ready",
-    "constrained",
-    "waiting",
+    WTSName.ready,
+    WTSName.constrained,
+    WTSName.waiting,
 }
 
 _WORKER_STATE_REJECT = {
-    "memory",
-    "executing",
-    "long-running",
-    "cancelled",
-    "resumed",
+    WTSName.memory,
+    WTSName.executing,
+    WTSName.long_running,
+    WTSName.cancelled,
+    WTSName.resumed,
 }
 _WORKER_STATE_UNDEFINED = {
-    "released",
-    None,
+    WTSName.released,
+    WTSName.forgotten,
 }
 
 

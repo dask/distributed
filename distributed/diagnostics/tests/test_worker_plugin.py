@@ -1,12 +1,15 @@
 import asyncio
+import contextlib
 
 import pytest
 
 from distributed import Worker, WorkerPlugin
 from distributed.utils_test import async_wait_for, gen_cluster, inc
+from distributed.worker import WTSName
 
 
 class MyPlugin(WorkerPlugin):
+    enum_task_state_names = True
     name = "MyPlugin"
 
     def __init__(self, data, expected_notifications=None):
@@ -106,12 +109,12 @@ async def test_create_on_construction(c, s, a, b):
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
 async def test_normal_task_transitions_called(c, s, w):
     expected_notifications = [
-        {"key": "task", "start": "released", "finish": "waiting"},
-        {"key": "task", "start": "waiting", "finish": "ready"},
-        {"key": "task", "start": "ready", "finish": "executing"},
-        {"key": "task", "start": "executing", "finish": "memory"},
-        {"key": "task", "start": "memory", "finish": "released"},
-        {"key": "task", "start": "released", "finish": "forgotten"},
+        {"key": "task", "start": WTSName.released, "finish": WTSName.waiting},
+        {"key": "task", "start": WTSName.waiting, "finish": WTSName.ready},
+        {"key": "task", "start": WTSName.ready, "finish": WTSName.executing},
+        {"key": "task", "start": WTSName.executing, "finish": WTSName.memory},
+        {"key": "task", "start": WTSName.memory, "finish": WTSName.released},
+        {"key": "task", "start": WTSName.released, "finish": WTSName.forgotten},
     ]
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
@@ -127,12 +130,12 @@ async def test_failing_task_transitions_called(c, s, w):
         raise Exception()
 
     expected_notifications = [
-        {"key": "task", "start": "released", "finish": "waiting"},
-        {"key": "task", "start": "waiting", "finish": "ready"},
-        {"key": "task", "start": "ready", "finish": "executing"},
-        {"key": "task", "start": "executing", "finish": "error"},
-        {"key": "task", "start": "error", "finish": "released"},
-        {"key": "task", "start": "released", "finish": "forgotten"},
+        {"key": "task", "start": WTSName.released, "finish": WTSName.waiting},
+        {"key": "task", "start": WTSName.waiting, "finish": WTSName.ready},
+        {"key": "task", "start": WTSName.ready, "finish": WTSName.executing},
+        {"key": "task", "start": WTSName.executing, "finish": WTSName.error},
+        {"key": "task", "start": WTSName.error, "finish": WTSName.released},
+        {"key": "task", "start": WTSName.released, "finish": WTSName.forgotten},
     ]
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
@@ -148,12 +151,12 @@ async def test_failing_task_transitions_called(c, s, w):
 )
 async def test_superseding_task_transitions_called(c, s, w):
     expected_notifications = [
-        {"key": "task", "start": "released", "finish": "waiting"},
-        {"key": "task", "start": "waiting", "finish": "constrained"},
-        {"key": "task", "start": "constrained", "finish": "executing"},
-        {"key": "task", "start": "executing", "finish": "memory"},
-        {"key": "task", "start": "memory", "finish": "released"},
-        {"key": "task", "start": "released", "finish": "forgotten"},
+        {"key": "task", "start": WTSName.released, "finish": WTSName.waiting},
+        {"key": "task", "start": WTSName.waiting, "finish": WTSName.constrained},
+        {"key": "task", "start": WTSName.constrained, "finish": WTSName.executing},
+        {"key": "task", "start": WTSName.executing, "finish": WTSName.memory},
+        {"key": "task", "start": WTSName.memory, "finish": WTSName.released},
+        {"key": "task", "start": WTSName.released, "finish": WTSName.forgotten},
     ]
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
@@ -168,18 +171,18 @@ async def test_dependent_tasks(c, s, w):
     dsk = {"dep": 1, "task": (inc, "dep")}
 
     expected_notifications = [
-        {"key": "dep", "start": "released", "finish": "waiting"},
-        {"key": "dep", "start": "waiting", "finish": "ready"},
-        {"key": "dep", "start": "ready", "finish": "executing"},
-        {"key": "dep", "start": "executing", "finish": "memory"},
-        {"key": "task", "start": "released", "finish": "waiting"},
-        {"key": "task", "start": "waiting", "finish": "ready"},
-        {"key": "task", "start": "ready", "finish": "executing"},
-        {"key": "task", "start": "executing", "finish": "memory"},
-        {"key": "dep", "start": "memory", "finish": "released"},
-        {"key": "task", "start": "memory", "finish": "released"},
-        {"key": "task", "start": "released", "finish": "forgotten"},
-        {"key": "dep", "start": "released", "finish": "forgotten"},
+        {"key": "dep", "start": WTSName.released, "finish": WTSName.waiting},
+        {"key": "dep", "start": WTSName.waiting, "finish": WTSName.ready},
+        {"key": "dep", "start": WTSName.ready, "finish": WTSName.executing},
+        {"key": "dep", "start": WTSName.executing, "finish": WTSName.memory},
+        {"key": "task", "start": WTSName.released, "finish": WTSName.waiting},
+        {"key": "task", "start": WTSName.waiting, "finish": WTSName.ready},
+        {"key": "task", "start": WTSName.ready, "finish": WTSName.executing},
+        {"key": "task", "start": WTSName.executing, "finish": WTSName.memory},
+        {"key": "dep", "start": WTSName.memory, "finish": WTSName.released},
+        {"key": "task", "start": WTSName.memory, "finish": WTSName.released},
+        {"key": "task", "start": WTSName.released, "finish": WTSName.forgotten},
+        {"key": "dep", "start": WTSName.released, "finish": WTSName.forgotten},
     ]
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
@@ -215,7 +218,7 @@ def test_release_key_deprecated():
         def release_key(self, key, state, cause, reason, report):
             # Ensure that the handler still works
             self._called = True
-            assert state == "memory"
+            assert state == WTSName.memory
             assert key == "task"
 
         def teardown(self, worker):
@@ -232,6 +235,43 @@ def test_release_key_deprecated():
     with pytest.deprecated_call(
         match="The `WorkerPlugin.release_key` hook is depreacted"
     ):
+        test()
+
+
+@pytest.mark.parametrize("enum", [True, False])
+def test_transition_enum_deprecation(enum):
+    class TransitionEnumStates(WorkerPlugin):
+        enum_task_state_names = enum
+
+        def __init__(self):
+            self._called = False
+
+        def transition(self, key, start, finish, **kwargs):
+            self._called = True
+            if enum:
+                assert isinstance(start, WTSName)
+                assert isinstance(finish, WTSName)
+            else:
+                assert isinstance(start, str)
+                assert isinstance(finish, str)
+            return super().transition(key, start, finish, **kwargs)
+
+        def teardown(self, worker):
+            assert self._called
+            return super().teardown(worker)
+
+    @gen_cluster(client=True, nthreads=[("", 1)])
+    async def test(c, s, a):
+        await c.register_worker_plugin(TransitionEnumStates())
+        fut = await c.submit(inc, 1, key="task")
+        assert fut == 2
+
+    if enum:
+        ctx = contextlib.nullcontext()
+    else:
+        ctx = pytest.deprecated_call(match="no longer receive string values for start")
+
+    with ctx:
         test()
 
 

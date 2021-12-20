@@ -131,6 +131,8 @@ class WorkerPlugin:
     >>> client.register_worker_plugin(plugin)  # doctest: +SKIP
     """
 
+    enum_task_state_names = False
+
     def setup(self, worker):
         """
         Run when the plugin is attached to a worker. This happens when the plugin is registered

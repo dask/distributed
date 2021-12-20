@@ -57,7 +57,13 @@ from distributed.utils_test import (
     slowinc,
     slowsum,
 )
-from distributed.worker import Worker, error_message, logger, parse_memory_limit
+from distributed.worker import (
+    Worker,
+    WTSName,
+    error_message,
+    logger,
+    parse_memory_limit,
+)
 
 pytestmark = pytest.mark.ci1
 
@@ -650,7 +656,7 @@ async def test_restrictions(c, s, a, b):
     assert ts.resource_restrictions == {"A": 1}
     await c._cancel(x)
 
-    while ts.state != "memory":
+    while ts.state != WTSName.memory:
         # Resource should be unavailable while task isn't finished
         assert a.available_resources == {"A": 0}
         await asyncio.sleep(0.01)
@@ -1573,7 +1579,7 @@ async def test_close_gracefully(c, s, a, b):
     while not b.data:
         await asyncio.sleep(0.01)
     mem = set(b.data)
-    proc = {ts for ts in b.tasks.values() if ts.state == "executing"}
+    proc = [ts for ts in b.tasks.values() if ts.state == WTSName.executing]
     assert proc
 
     await b.close_gracefully()
@@ -1582,7 +1588,7 @@ async def test_close_gracefully(c, s, a, b):
     assert b.address not in s.workers
     assert mem.issubset(a.data.keys())
     for ts in proc:
-        assert ts.state in ("executing", "memory")
+        assert ts.state in (WTSName.executing, WTSName.memory)
 
 
 @pytest.mark.slow
@@ -1779,7 +1785,7 @@ async def test_story(c, s, w):
     future = c.submit(inc, 1)
     await future
     ts = w.tasks[future.key]
-    assert ts.state in str(w.story(ts))
+    assert ts.state.name in str(w.story(ts))
     assert w.story(ts) == w.story(ts.key)
 
 
@@ -1865,9 +1871,9 @@ async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     ts_g = b.tasks[g.key]
 
     with pytest.raises(asyncio.TimeoutError):
-        assert ts_h.state == "waiting"
-        assert ts_f.state in ["flight", "fetch"]
-        assert ts_g.state in ["flight", "fetch"]
+        assert ts_h.state == WTSName.waiting
+        assert ts_f.state in [WTSName.flight, WTSName.fetch]
+        assert ts_g.state in [WTSName.flight, WTSName.fetch]
         await fut
 
     # Ensure B wasn't lazy but tried at least once
@@ -2126,15 +2132,15 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
     # A raised the exception therefore we should hold on to the erroneous task
     assert res.key in a.tasks
     ts = a.tasks[res.key]
-    assert ts.state == "error"
+    assert ts.state == WTSName.error
 
     expected_states = {
         # A was instructed to compute this result and we're still holding a ref via `f`
-        f.key: "memory",
+        f.key: WTSName.memory,
         # This was fetched from another worker. While we hold a ref via `g`, the
         # scheduler only instructed to compute this on B
-        g.key: "memory",
-        res.key: "error",
+        g.key: WTSName.memory,
+        res.key: WTSName.error,
     }
     assert_task_states_on_worker(expected_states, a)
     # Expected states after we release references to the futures
@@ -2147,9 +2153,9 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
         await asyncio.sleep(0.01)
 
     expected_states = {
-        f.key: "released",
-        g.key: "released",
-        res.key: "error",
+        f.key: WTSName.released,
+        g.key: WTSName.released,
+        res.key: WTSName.error,
     }
 
     assert_task_states_on_worker(expected_states, a)
@@ -2194,16 +2200,16 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
     # A raised the exception therefore we should hold on to the erroneous task
     assert res.key in a.tasks
     ts = a.tasks[res.key]
-    assert ts.state == "error"
+    assert ts.state == WTSName.error
 
     expected_states = {
         # A was instructed to compute this result and we're still holding a ref
         # via `f`
-        f.key: "memory",
+        f.key: WTSName.memory,
         # This was fetched from another worker. While we hold a ref via `g`, the
         # scheduler only instructed to compute this on B
-        g.key: "memory",
-        res.key: "error",
+        g.key: WTSName.memory,
+        res.key: WTSName.error,
     }
     assert_task_states_on_worker(expected_states, a)
     # Expected states after we release references to the futures
@@ -2215,8 +2221,8 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
         await asyncio.sleep(0.01)
 
     expected_states = {
-        f.key: "memory",
-        g.key: "memory",
+        f.key: WTSName.memory,
+        g.key: WTSName.memory,
     }
 
     assert_task_states_on_worker(expected_states, a)
@@ -2260,15 +2266,15 @@ async def test_worker_state_error_release_error_int(c, s, a, b):
     # A raised the exception therefore we should hold on to the erroneous task
     assert res.key in a.tasks
     ts = a.tasks[res.key]
-    assert ts.state == "error"
+    assert ts.state == WTSName.error
 
     expected_states = {
         # A was instructed to compute this result and we're still holding a ref via `f`
-        f.key: "memory",
+        f.key: WTSName.memory,
         # This was fetched from another worker. While we hold a ref via `g`, the
         # scheduler only instructed to compute this on B
-        g.key: "memory",
-        res.key: "error",
+        g.key: WTSName.memory,
+        res.key: WTSName.error,
     }
     assert_task_states_on_worker(expected_states, a)
     # Expected states after we release references to the futures
@@ -2281,7 +2287,7 @@ async def test_worker_state_error_release_error_int(c, s, a, b):
         await asyncio.sleep(0.01)
 
     expected_states = {
-        g.key: "memory",
+        g.key: WTSName.memory,
     }
 
     assert_task_states_on_worker(expected_states, a)
@@ -2315,18 +2321,18 @@ async def test_worker_state_error_long_chain(c, s, a, b):
         await res
 
     expected_states_A = {
-        f.key: "memory",
-        g.key: "memory",
-        h.key: "memory",
+        f.key: WTSName.memory,
+        g.key: WTSName.memory,
+        h.key: WTSName.memory,
     }
     await asyncio.sleep(0.05)
     assert_task_states_on_worker(expected_states_A, a)
 
     expected_states_B = {
-        f.key: "memory",
-        g.key: "memory",
-        h.key: "memory",
-        res.key: "error",
+        f.key: WTSName.memory,
+        g.key: WTSName.memory,
+        h.key: WTSName.memory,
+        res.key: WTSName.error,
     }
     await asyncio.sleep(0.05)
     assert_task_states_on_worker(expected_states_B, b)
@@ -2334,17 +2340,17 @@ async def test_worker_state_error_long_chain(c, s, a, b):
     f.release()
 
     expected_states_A = {
-        g.key: "memory",
-        h.key: "memory",
+        g.key: WTSName.memory,
+        h.key: WTSName.memory,
     }
     await asyncio.sleep(0.05)
     assert_task_states_on_worker(expected_states_A, a)
 
     expected_states_B = {
-        f.key: "released",
-        g.key: "memory",
-        h.key: "memory",
-        res.key: "error",
+        f.key: WTSName.released,
+        g.key: WTSName.memory,
+        h.key: WTSName.memory,
+        res.key: WTSName.error,
     }
     await asyncio.sleep(0.05)
     assert_task_states_on_worker(expected_states_B, b)
@@ -2352,17 +2358,17 @@ async def test_worker_state_error_long_chain(c, s, a, b):
     g.release()
 
     expected_states_A = {
-        g.key: "released",
-        h.key: "memory",
+        g.key: WTSName.released,
+        h.key: WTSName.memory,
     }
     await asyncio.sleep(0.05)
     assert_task_states_on_worker(expected_states_A, a)
 
     # B must not forget a task since all have a still valid dependent
     expected_states_B = {
-        f.key: "released",
-        h.key: "memory",
-        res.key: "error",
+        f.key: WTSName.released,
+        h.key: WTSName.memory,
+        res.key: WTSName.error,
     }
     assert_task_states_on_worker(expected_states_B, b)
     h.release()
@@ -2371,9 +2377,9 @@ async def test_worker_state_error_long_chain(c, s, a, b):
     expected_states_A = {}
     assert_task_states_on_worker(expected_states_A, a)
     expected_states_B = {
-        f.key: "released",
-        h.key: "released",
-        res.key: "error",
+        f.key: WTSName.released,
+        h.key: WTSName.released,
+        res.key: WTSName.error,
     }
 
     assert_task_states_on_worker(expected_states_B, b)
@@ -2402,7 +2408,7 @@ async def test_hold_on_to_replicas(c, s, *workers):
     while sum_2.key not in workers[3].tasks:
         await asyncio.sleep(0.01)
 
-    while not workers[3].tasks[sum_2.key].state == "memory":
+    while not workers[3].tasks[sum_2.key].state == WTSName.memory:
         assert len(s.tasks[f1.key].who_has) >= 2
         assert s.tasks[f2.key].state == "released"
         await asyncio.sleep(0.01)
@@ -2468,7 +2474,7 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
     # Ensure that all in-memory tasks on A have been restored on the
     # scheduler after reconnect
     for ts in a.tasks.values():
-        if ts.state == "memory":
+        if ts.state == WTSName.memory:
             assert a.address in {ws.address for ws in s.tasks[ts.key].who_has}
 
     # Ensure that all keys have been properly registered and will also be
@@ -2538,7 +2544,7 @@ async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, 
     # Ensure that all in-memory tasks on A have been restored on the
     # scheduler after reconnect
     for ts in a.tasks.values():
-        if ts.state == "memory":
+        if ts.state == WTSName.memory:
             assert a.address in {ws.address for ws in s.tasks[ts.key].who_has}
 
     del f1, f2, f3
@@ -2662,7 +2668,7 @@ async def test_gather_dep_exception_one_task(c, s, a, b):
     # fetch to memory
 
     b.validate = False
-    b.tasks[fut3.key].state = "fetch"
+    b.tasks[fut3.key].state = WTSName.fetch
     event.set()
 
     assert await res1 == 5
@@ -2690,7 +2696,7 @@ async def test_gather_dep_exception_one_task_2(c, s, a, b):
     fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
     fut2 = c.submit(inc, fut1, workers=[b.address], key="f2")
 
-    while fut1.key not in b.tasks or b.tasks[fut1.key].state == "flight":
+    while fut1.key not in b.tasks or b.tasks[fut1.key].state == WTSName.flight:
         await asyncio.sleep(0)
 
     s.handle_missing_data(key="f1", errant_worker=a.address)
@@ -2747,7 +2753,7 @@ async def test_acquire_replicas(c, s, a, b):
 
     for w in (a, b):
         assert w.data[fut.key] == 2
-        assert w.tasks[fut.key].state == "memory"
+        assert w.tasks[fut.key].state == WTSName.memory
 
     fut.release()
 
@@ -2765,7 +2771,7 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
     _acquire_replicas(s, b, futA)
 
     await futC
-    while futA.key not in b.tasks or not b.tasks[futA.key].state == "memory":
+    while futA.key not in b.tasks or not b.tasks[futA.key].state == WTSName.memory:
         await asyncio.sleep(0.005)
 
     while len(s.who_has[futA.key]) != 2:
@@ -2797,12 +2803,12 @@ async def test_acquire_replicas_many(c, s, *workers):
 
     # Worker 2 should normally not even be involved if there was no replication
     while not all(
-        f.key in workers[2].tasks and workers[2].tasks[f.key].state == "memory"
+        f.key in workers[2].tasks and workers[2].tasks[f.key].state == WTSName.memory
         for f in futs
     ):
         await asyncio.sleep(0.01)
 
-    assert all(ts.state == "memory" for ts in workers[2].tasks.values())
+    assert all(ts.state == WTSName.memory for ts in workers[2].tasks.values())
 
     assert await final == sum(map(inc, range(10))) + 1
     # All workers have a replica
@@ -2936,7 +2942,9 @@ async def test_remove_replica_while_computing(c, s, *workers):
     # They might be already gone due to the above remove replica calls
     _remove_replicas(s, w, *futs)
 
-    while any(w.tasks[f.key].state != "released" for f in futs if f.key in w.tasks):
+    while any(
+        w.tasks[f.key].state != WTSName.released for f in futs if f.key in w.tasks
+    ):
         await asyncio.sleep(0.001)
 
     # The scheduler actually gets notified about the removed replica
@@ -2970,7 +2978,7 @@ async def test_who_has_consistent_remove_replica(c, s, *workers):
     # suspicious counters are raised since this is expected behaviour when
     # removing replicas
 
-    while f1.key not in a.tasks or a.tasks[f1.key].state != "flight":
+    while f1.key not in a.tasks or a.tasks[f1.key].state != WTSName.flight:
         await asyncio.sleep(0)
 
     coming_from = None
@@ -2999,7 +3007,7 @@ async def test_missing_released_zombie_tasks(c, s, a, b):
     f2 = c.submit(inc, f1, key="f2", workers=[b.address])
     key = f1.key
 
-    while key not in b.tasks or b.tasks[key].state != "fetch":
+    while key not in b.tasks or b.tasks[key].state != WTSName.fetch:
         await asyncio.sleep(0.01)
 
     await a.close(report=False)
@@ -3020,7 +3028,7 @@ async def test_missing_released_zombie_tasks_2(c, s, a, b):
         await asyncio.sleep(0)
 
     ts = b.tasks[f1.key]
-    assert ts.state == "fetch"
+    assert ts.state == WTSName.fetch
 
     # A few things can happen to clear who_has. The dominant process is upon
     # connection failure to a worker. Regardless of how the set was cleared, the
@@ -3099,7 +3107,7 @@ async def test_worker_status_sync(c, s, a):
     ]
 
 
-async def _wait_for_state(key: str, worker: Worker, state: str):
+async def _wait_for_state(key: str, worker: Worker, state: WTSName) -> None:
     # Keep the sleep interval at 0 since the tests using this are very sensitive
     # about timing. they intend to capture loop cycles after this specific
     # condition was set
@@ -3137,7 +3145,7 @@ async def test_gather_dep_cancelled_rescheduled(c, s, a, b):
 
         fut2_key = fut2.key
 
-        await _wait_for_state(fut2_key, b, "flight")
+        await _wait_for_state(fut2_key, b, WTSName.flight)
         while not mocked_gather.call_args:
             await asyncio.sleep(0)
 
@@ -3145,7 +3153,7 @@ async def test_gather_dep_cancelled_rescheduled(c, s, a, b):
         while fut4.key in b.tasks:
             await asyncio.sleep(0)
 
-    assert b.tasks[fut2.key].state == "cancelled"
+    assert b.tasks[fut2.key].state == WTSName.cancelled
     args, kwargs = mocked_gather.call_args
     assert fut2.key in kwargs["to_gather"]
 
@@ -3174,7 +3182,7 @@ async def test_gather_dep_cancelled_rescheduled(c, s, a, b):
             await event.wait()
 
             fut4 = c.submit(sum, [fut1, fut2], workers=[b.address], key="f4")
-            while b.tasks[fut2.key].state != "flight":
+            while b.tasks[fut2.key].state != WTSName.flight:
                 await asyncio.sleep(0.1)
     await gather_dep_fut
     f2_story = b.story(fut2.key)
@@ -3202,7 +3210,7 @@ async def test_gather_dep_do_not_handle_response_of_not_requested_tasks(c, s, a,
 
         fut2_key = fut2.key
 
-        await _wait_for_state(fut2_key, b, "flight")
+        await _wait_for_state(fut2_key, b, WTSName.flight)
         while not mocked_gather.call_args:
             await asyncio.sleep(0)
 
@@ -3210,7 +3218,7 @@ async def test_gather_dep_do_not_handle_response_of_not_requested_tasks(c, s, a,
         while fut4.key in b.tasks:
             await asyncio.sleep(0)
 
-    assert b.tasks[fut2.key].state == "cancelled"
+    assert b.tasks[fut2.key].state == WTSName.cancelled
     args, kwargs = mocked_gather.call_args
     assert fut2.key in kwargs["to_gather"]
 
@@ -3237,7 +3245,7 @@ async def test_gather_dep_no_longer_in_flight_tasks(c, s, a, b):
 
         fut1_key = fut1.key
 
-        await _wait_for_state(fut1_key, b, "flight")
+        await _wait_for_state(fut1_key, b, WTSName.flight)
         while not mocked_gather.call_args:
             await asyncio.sleep(0)
 
@@ -3245,7 +3253,7 @@ async def test_gather_dep_no_longer_in_flight_tasks(c, s, a, b):
         while fut2.key in b.tasks:
             await asyncio.sleep(0)
 
-    assert b.tasks[fut1.key].state == "cancelled"
+    assert b.tasks[fut1.key].state == WTSName.cancelled
 
     args, kwargs = mocked_gather.call_args
     await Worker.gather_dep(b, *args, **kwargs)
@@ -3258,7 +3266,7 @@ async def test_gather_dep_no_longer_in_flight_tasks(c, s, a, b):
     assert not any("missing-dep" in msg for msg in f2_story)
 
 
-@pytest.mark.parametrize("intermediate_state", ["resumed", "cancelled"])
+@pytest.mark.parametrize("intermediate_state", [WTSName.resumed, WTSName.cancelled])
 @pytest.mark.parametrize("close_worker", [False, True])
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
 async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
@@ -3278,7 +3286,7 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
 
         fut2_key = fut2.key
 
-        await _wait_for_state(fut2_key, b, "flight")
+        await _wait_for_state(fut2_key, b, WTSName.flight)
 
         s.set_restrictions(worker={fut1B.key: a.address, fut2.key: b.address})
         while not mocked_gather.call_args:
@@ -3286,7 +3294,7 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
 
         await s.remove_worker(address=x.address, safe=True, close=close_worker)
 
-        await _wait_for_state(fut2_key, b, intermediate_state)
+        await _wait_for_state(fut2_key, b, intermediate_state), intermediate_state
 
     args, kwargs = mocked_gather.call_args
     await Worker.gather_dep(b, *args, **kwargs)
