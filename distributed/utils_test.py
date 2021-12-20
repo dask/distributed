@@ -1809,11 +1809,19 @@ def assert_worker_story(
         Expected events. Each expected event must contain exactly 2 less fields than the
         story (the last two fields are always the stimulus_id and the timestamp).
 
-        Elements of the events can be
+        Elements of the expect tuples can be
 
-        - callables, which accept a single event as argument and return True for match
-          and False for no match;
+        - callables, which accept a single element of the event tuple as argument and
+          return True for match and False for no match;
         - arbitrary objects, which are compared with a == b
+
+        e.g.
+        .. code-block:: python
+
+            expect=[
+                ("x", "missing", "fetch", "fetch", {}),
+                ("gather-dependencies", worker_addr, lambda set_: "x" in set_),
+            ]
 
     strict: bool, optional
         If True, the story must contain exactly as many events as expect.
