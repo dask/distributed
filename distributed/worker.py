@@ -3821,12 +3821,11 @@ class Worker(ServerNode):
             if hasattr(plugin, method_name):
                 if (
                     not getattr(plugin, "enum_task_state_names", False)
-                    and hasattr(self, "release_key")
                     and method_name == "transition"
                 ):
                     warnings.warn(
                         "The `WorkerPlugin.transition` hook will change soon "
-                        "and will no longer receive string values for start "
+                        "and will no longer receive string values for start and "
                         "finish but instead an instance of "
                         f"`dask.distributed.worker.{WTSName.__name__}`. "
                         "To subscribe to the new behaviour already, set "
@@ -3835,11 +3834,10 @@ class Worker(ServerNode):
                         DeprecationWarning,
                     )
                     args = tuple(
-                        arg.name if isinstance(arg, WorkerTaskStateName) else arg
-                        for arg in args
+                        arg.value if isinstance(arg, WTSName) else arg for arg in args
                     )
                     kwargs = {
-                        k: v.name if isinstance(v, WorkerTaskStateName) else v
+                        k: v.value if isinstance(v, WTSName) else v
                         for k, v in kwargs.items()
                     }
 
@@ -3847,7 +3845,7 @@ class Worker(ServerNode):
                     warnings.warn(
                         "The `WorkerPlugin.release_key` hook is depreacted and will be "
                         "removed in a future version. A similar event can now be "
-                        "caught by filtering for a `finish=='released'` event in the "
+                        "caught by filtering for a `finish==WTSName.released` event in the "
                         "`WorkerPlugin.transition` hook.",
                         DeprecationWarning,
                     )
