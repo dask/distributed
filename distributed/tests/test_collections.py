@@ -1,6 +1,5 @@
-from packaging.version import parse as parse_version
-
 import pytest
+from packaging.version import parse as parse_version
 
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
