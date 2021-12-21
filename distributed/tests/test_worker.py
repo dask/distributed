@@ -2506,6 +2506,7 @@ async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, 
         # different states
         f1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
         f2 = c.submit(inc, f1, workers=[a.address], allow_other_workers=True)
+        await f1
         a_address = a.address
 
         a.periodic_callbacks["heartbeat"].stop()
