@@ -1947,19 +1947,19 @@ class Worker(ServerNode):
     def handle_compute_task(
         self,
         *,
-        key,
+        key: str,
+        who_has: dict[str, Collection[str]],
+        priority: tuple[int, ...],
+        duration: float,
         function=None,
         args=None,
         kwargs=None,
         task=no_value,
-        who_has=None,
-        nbytes=None,
-        priority: tuple[int, ...],
-        duration=None,
+        nbytes: dict[str, int] | None = None,
         resource_restrictions=None,
-        actor=False,
+        actor: bool = False,
         annotations=None,
-        stimulus_id,
+        stimulus_id: str,
     ):
         self.log.append((key, "compute-task", stimulus_id, time()))
         try:
@@ -2032,6 +2032,10 @@ class Worker(ServerNode):
                 self.tasks[key].nbytes = value
 
     def transition_missing_fetch(self, ts, *, stimulus_id):
+        if self.validate:
+            assert ts.state == "missing"
+            assert ts.priority is not None
+
         self._missing_dep_flight.discard(ts)
         ts.state = "fetch"
         ts.done = False
@@ -2047,9 +2051,6 @@ class Worker(ServerNode):
         return recommendations, smsgs
 
     def transition_fetch_missing(self, ts, *, stimulus_id):
-        if self.validate:
-            assert ts.state == "fetch"
-            assert ts.priority is not None
         # handle_missing will append to self.data_needed if new workers are found
         ts.state = "missing"
         self._missing_dep_flight.add(ts)
@@ -2691,6 +2692,7 @@ class Worker(ServerNode):
 
             workers = [w for w in ts.who_has if w not in self.in_flight_workers]
             if not workers:
+                assert ts.priority is not None
                 skipped_worker_in_flight.append((ts.priority, ts.key))
                 continue
 
