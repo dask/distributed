@@ -7920,6 +7920,62 @@ class Scheduler(SchedulerState, ServerNode):
             to_close = self.workers_to_close()
             return len(parent._workers_dv) - len(to_close)
 
+    def acquire_replicas(self, addr: str, keys: list, *, stimulus_id: str):
+        """Asynchronously request a worker to acquire a replica of the listed keys from
+        other workers. This is a fire-and-forget operation which offers no feedback for
+        success or failure, and is intended for housekeeping and not for computation.
+        """
+        parent: SchedulerState = cast(SchedulerState, self)
+        ws: WorkerState
+        ts: TaskState
+
+        who_has = {}
+        for key in keys:
+            ts = parent._tasks[key]
+            who_has[key] = {ws._address for ws in ts._who_has}
+
+        self.stream_comms[addr].send(
+            {
+                "op": "acquire-replicas",
+                "keys": keys,
+                "who_has": who_has,
+                "stimulus_id": stimulus_id,
+            },
+        )
+
+    def remove_replicas(self, addr: str, keys: list, *, stimulus_id: str):
+        """Asynchronously request a worker to discard its replica of the listed keys.
+        This must never be used to destroy the last replica of a key. This is a
+        fire-and-forget operation, intended for housekeeping and not for computation.
+
+        The replica disappears immediately from TaskState.who_has on the Scheduler side;
+        if the worker refuses to delete, e.g. because the task is a dependency of
+        another task running on it, it will (also asynchronously) inform the scheduler
+        to re-add itself to who_has. If the worker agrees to discard the task, there is
+        no feedback.
+        """
+        parent: SchedulerState = cast(SchedulerState, self)
+        ws: WorkerState = parent._workers_dv[addr]
+        validate = self.validate
+
+        # The scheduler immediately forgets about the replica and suggests the worker to
+        # drop it. The worker may refuse, at which point it will send back an add-keys
+        # message to reinstate it.
+        for key in keys:
+            ts: TaskState = parent._tasks[key]
+            if validate:
+                # Do not destroy the last copy
+                assert len(ts._who_has) > 1
+            self.remove_replica(ts, ws)
+
+        self.stream_comms[addr].send(
+            {
+                "op": "remove-replicas",
+                "keys": keys,
+                "stimulus_id": stimulus_id,
+            }
+        )
+
 
 @cfunc
 @exceptval(check=False)

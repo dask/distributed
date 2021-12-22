@@ -13,7 +13,7 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict, deque, namedtuple
-from collections.abc import Callable, Iterable, Mapping, MutableMapping
+from collections.abc import Callable, Collection, Iterable, Mapping, MutableMapping
 from concurrent.futures import Executor
 from contextlib import suppress
 from datetime import timedelta
@@ -372,7 +372,11 @@ class Worker(ServerNode):
         The keys currently running on active threads
     * **waiting_for_data_count**: ``int``
         A count of how many tasks are currently waiting for data
-
+    * **generation**: ``int``
+        Counter that decreases every time the compute-task handler is invoked by the
+        Scheduler. It is appended to TaskState.priority and acts as a tie-breaker
+        between tasks that have the same priority on the Scheduler, determining a
+        last-in-first-out order between them.
 
     Parameters
     ----------
@@ -1901,14 +1905,23 @@ class Worker(ServerNode):
             self.transition(ts, "released", stimulus_id=reason)
 
     def handle_acquire_replicas(
-        self, comm=None, keys=None, priorities=None, who_has=None, stimulus_id=None
+        self,
+        comm=None,
+        *,
+        keys: Collection[str],
+        who_has: dict[str, Collection[str]],
+        stimulus_id: str,
     ):
         recommendations = {}
-        for k in keys:
+        for key in keys:
             ts = self.ensure_task_exists(
-                k,
+                key=key,
+                # Transfer this data after all dependency tasks of computations with
+                # default or explicitly high (>0) user priority and before all
+                # computations with low priority (<0). Note that the priority= parameter
+                # of compute() is multiplied by -1 before it reaches TaskState.priority.
+                priority=(1,),
                 stimulus_id=stimulus_id,
-                priority=priorities[k],
             )
             if ts.state != "memory":
                 recommendations[ts] = "fetch"
@@ -1917,18 +1930,18 @@ class Worker(ServerNode):
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
     def ensure_task_exists(
-        self, key: str, priority: tuple, stimulus_id: str
+        self, key: str, *, priority: tuple[int, ...], stimulus_id: str
     ) -> TaskState:
         try:
             ts = self.tasks[key]
-            logger.debug(
-                "Data task already known %s", {"task": ts, "stimulus_id": stimulus_id}
-            )
+            logger.debug("Data task %s already known (stimulus_id=%s)", ts, stimulus_id)
         except KeyError:
             self.tasks[key] = ts = TaskState(key)
+        if not ts.priority:
+            assert priority
+            ts.priority = priority
 
         self.log.append((key, "ensure-task-exists", ts.state, stimulus_id, time()))
-        ts.priority = ts.priority or priority
         return ts
 
     def handle_compute_task(
@@ -1941,12 +1954,12 @@ class Worker(ServerNode):
         task=no_value,
         who_has=None,
         nbytes=None,
-        priority=None,
+        priority: tuple[int, ...],
         duration=None,
         resource_restrictions=None,
         actor=False,
         annotations=None,
-        stimulus_id=None,
+        stimulus_id,
     ):
         self.log.append((key, "compute-task", stimulus_id, time()))
         try:
@@ -1960,9 +1973,9 @@ class Worker(ServerNode):
 
         ts.runspec = SerializedTask(function, args, kwargs, task)
 
-        if priority is not None:
-            priority = tuple(priority) + (self.generation,)
-            self.generation -= 1
+        assert isinstance(priority, tuple)
+        priority = priority + (self.generation,)
+        self.generation -= 1
 
         if actor:
             self.actors[ts.key] = None
@@ -1982,8 +1995,8 @@ class Worker(ServerNode):
         for dependency in who_has:
             dep_ts = self.ensure_task_exists(
                 key=dependency,
-                stimulus_id=stimulus_id,
                 priority=priority,
+                stimulus_id=stimulus_id,
             )
 
             # link up to child / parents
@@ -2034,12 +2047,18 @@ class Worker(ServerNode):
         return recommendations, smsgs
 
     def transition_fetch_missing(self, ts, *, stimulus_id):
+        if self.validate:
+            assert ts.state == "fetch"
+            assert ts.priority is not None
         # handle_missing will append to self.data_needed if new workers are found
         ts.state = "missing"
         self._missing_dep_flight.add(ts)
         return {}, []
 
     def transition_released_fetch(self, ts, *, stimulus_id):
+        if self.validate:
+            assert ts.state == "released"
+            assert ts.priority is not None
         for w in ts.who_has:
             self.pending_data_per_worker[w].append(ts.key)
         ts.state = "fetch"
@@ -2136,6 +2155,7 @@ class Worker(ServerNode):
             assert ts.state == "waiting"
             assert ts.key not in self.ready
             assert not ts.waiting_for_data
+            assert ts.priority is not None
             for dep in ts.dependencies:
                 assert dep.key in self.data or dep.key in self.actors
                 assert dep.state == "memory"
@@ -3080,13 +3100,17 @@ class Worker(ServerNode):
                 self.ensure_communicating()
                 self.ensure_computing()
 
-    async def query_who_has(self, *deps, stimulus_id):
+    async def query_who_has(
+        self, *deps: str, stimulus_id: str
+    ) -> dict[str, Collection[str]]:
         with log_errors():
             who_has = await retry_operation(self.scheduler.who_has, keys=deps)
             self.update_who_has(who_has, stimulus_id=stimulus_id)
             return who_has
 
-    def update_who_has(self, who_has, *, stimulus_id):
+    def update_who_has(
+        self, who_has: dict[str, Collection[str]], *, stimulus_id: str
+    ) -> None:
         try:
             recommendations = {}
             for dep, workers in who_has.items():

@@ -26,7 +26,6 @@ from dask.utils import tmpfile
 import distributed
 from distributed import (
     Client,
-    Future,
     Nanny,
     Reschedule,
     default_client,
@@ -2698,49 +2697,12 @@ async def test_gather_dep_exception_one_task_2(c, s, a, b):
     await fut2
 
 
-def _acquire_replicas(
-    scheduler: Scheduler, worker: Worker | str, *futures: Future
-) -> None:
-    keys = [f.key for f in futures]
-    address = worker if isinstance(worker, str) else worker.address
-    scheduler.stream_comms[address].send(
-        {
-            "op": "acquire-replicas",
-            "keys": keys,
-            "stimulus_id": f"acquire-replicas-{time()}",
-            "priorities": {key: scheduler.tasks[key].priority for key in keys},
-            "who_has": {
-                key: {w.address for w in scheduler.tasks[key].who_has} for key in keys
-            },
-        },
-    )
-
-
-def _remove_replicas(
-    scheduler: Scheduler, worker: Worker | str, *futures: Future
-) -> None:
-    keys = [f.key for f in futures]
-    address = worker if isinstance(worker, str) else worker.address
-    ws = scheduler.workers[address]
-    for k in keys:
-        ts = scheduler.tasks[k]
-        if ws in ts.who_has:
-            scheduler.remove_replica(ts, ws)
-    scheduler.stream_comms[address].send(
-        {
-            "op": "remove-replicas",
-            "keys": keys,
-            "stimulus_id": f"remove-replicas-{time()}",
-        }
-    )
-
-
 @gen_cluster(client=True)
 async def test_acquire_replicas(c, s, a, b):
     fut = c.submit(inc, 1, workers=[a.address])
     await fut
 
-    _acquire_replicas(s, b, fut)
+    s.acquire_replicas(b.address, [fut.key], stimulus_id=f"test-{time()}")
 
     while len(s.who_has[fut.key]) != 2:
         await asyncio.sleep(0.005)
@@ -2762,7 +2724,7 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
     futC = c.submit(inc, futB, workers=[b.address], key="f-C")
     await futA
 
-    _acquire_replicas(s, b, futA)
+    s.acquire_replicas(b.address, [futA.key], stimulus_id=f"test-{time()}")
 
     await futC
     while futA.key not in b.tasks or not b.tasks[futA.key].state == "memory":
@@ -2793,7 +2755,9 @@ async def test_acquire_replicas_many(c, s, *workers):
 
     await wait(futs)
 
-    _acquire_replicas(s, workers[2], *futs)
+    s.acquire_replicas(
+        workers[2].address, [fut.key for fut in futs], stimulus_id=f"test-{time()}"
+    )
 
     # Worker 2 should normally not even be involved if there was no replication
     while not all(
@@ -2828,7 +2792,7 @@ async def test_acquire_replicas_already_in_flight(c, s, *nannies):
     await wait(x)
     y = c.submit(lambda x: 123, x, workers=[b], key="y")
     await asyncio.sleep(0.3)
-    _acquire_replicas(s, b, x)
+    s.acquire_replicas(b, [x.key], stimulus_id=f"test-{time()}")
     assert await y == 123
 
     story = await c.run(lambda dask_worker: dask_worker.story("x"))
@@ -2851,15 +2815,19 @@ async def test_acquire_replicas_already_in_flight(c, s, *nannies):
 
 
 @gen_cluster(client=True)
-async def test_remove_replica_simple(c, s, a, b):
+async def test_remove_replicas_simple(c, s, a, b):
     futs = c.map(inc, range(10), workers=[a.address])
     await wait(futs)
-    _acquire_replicas(s, b, *futs)
+    s.acquire_replicas(
+        b.address, [fut.key for fut in futs], stimulus_id=f"test-{time()}"
+    )
 
     while not all(len(s.tasks[f.key].who_has) == 2 for f in futs):
         await asyncio.sleep(0.01)
 
-    _remove_replicas(s, b, *futs)
+    s.remove_replicas(
+        b.address, [fut.key for fut in futs], stimulus_id=f"test-{time()}"
+    )
 
     assert all(len(s.tasks[f.key].who_has) == 1 for f in futs)
 
@@ -2875,7 +2843,7 @@ async def test_remove_replica_simple(c, s, a, b):
     client=True,
     config={"distributed.comm.recent-messages-log-length": 1_000},
 )
-async def test_remove_replica_while_computing(c, s, *workers):
+async def test_remove_replicas_while_computing(c, s, *workers):
     futs = c.map(inc, range(10), workers=[workers[0].address])
 
     # All interesting things will happen on that worker
@@ -2897,19 +2865,16 @@ async def test_remove_replica_while_computing(c, s, *workers):
     # Make sure the worker responds to the rejection and the scheduler corrects
     # the state
     ws = s.workers[w.address]
-    while not any(s.tasks[fut.key] in ws.has_what for fut in futs):
+    while not all(s.tasks[fut.key] in ws.has_what for fut in futs):
         await asyncio.sleep(0.001)
 
-    _remove_replicas(s, w, *futs)
+    s.remove_replicas(
+        w.address, [fut.key for fut in futs], stimulus_id=f"test-{time()}"
+    )
     # Scheduler removed keys immediately...
     assert not any(s.tasks[fut.key] in ws.has_what for fut in futs)
     # ... but the state is properly restored
     while not any(s.tasks[fut.key] in ws.has_what for fut in futs):
-        await asyncio.sleep(0.01)
-
-    # The worker should reject all of these since they are required
-    while not all(fut.done() for fut in intermediate):
-        _remove_replicas(s, w, *futs)
         await asyncio.sleep(0.01)
 
     await wait(intermediate)
@@ -2934,7 +2899,9 @@ async def test_remove_replica_while_computing(c, s, *workers):
 
     # Since intermediate is done, futs replicas may be removed.
     # They might be already gone due to the above remove replica calls
-    _remove_replicas(s, w, *futs)
+    s.remove_replicas(
+        w.address, [fut.key for fut in futs], stimulus_id=f"test-{time()}"
+    )
 
     while any(w.tasks[f.key].state != "released" for f in futs if f.key in w.tasks):
         await asyncio.sleep(0.001)
@@ -2951,13 +2918,13 @@ async def test_remove_replica_while_computing(c, s, *workers):
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
-async def test_who_has_consistent_remove_replica(c, s, *workers):
+async def test_who_has_consistent_remove_replicas(c, s, *workers):
     a = workers[0]
     other_workers = {w for w in workers if w != a}
     f1 = c.submit(inc, 1, key="f1", workers=[w.address for w in other_workers])
     await wait(f1)
     for w in other_workers:
-        _acquire_replicas(s, w, f1)
+        s.acquire_replicas(w.address, [f1.key], stimulus_id=f"test-{time()}")
 
     while not len(s.tasks[f1.key].who_has) == len(other_workers):
         await asyncio.sleep(0)
@@ -2986,6 +2953,29 @@ async def test_who_has_consistent_remove_replica(c, s, *workers):
     assert_worker_story(a.story(f1.key), [(f1.key, "missing-dep")])
     assert a.tasks[f1.key].suspicious_count == 0
     assert s.tasks[f1.key].suspicious == 0
+
+
+@gen_cluster(client=True)
+async def test_acquire_replicas_with_no_priority(c, s, a, b):
+    """Scattered tasks have no priority. When they transit to another worker through
+    acquire-replicas, they end up in the Worker.data_needed heap together with tasks
+    with a priority; they must gain a priority to become sortable.
+    """
+    x = (await c.scatter({"x": 1}, workers=[a.address]))["x"]
+    y = c.submit(lambda: 2, key="y", workers=[a.address])
+    await y
+    assert s.tasks["x"].priority is None
+    assert a.tasks["x"].priority is None
+    assert s.tasks["y"].priority is not None
+    assert a.tasks["y"].priority is not None
+
+    s.acquire_replicas(b.address, [x.key, y.key], stimulus_id=f"test-{time()}")
+    while b.data != {"x": 1, "y": 2}:
+        await asyncio.sleep(0.01)
+
+    assert s.tasks["x"].priority is None
+    assert a.tasks["x"].priority is None
+    assert b.tasks["x"].priority is not None
 
 
 @gen_cluster(client=True)
