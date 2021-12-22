@@ -18,7 +18,10 @@ if TYPE_CHECKING:  # pragma: nocover
     from .client import Client
     from .scheduler import Scheduler, TaskState, WorkerState
 
+# Main logger. This is reasonably terse also at DEBUG level.
 logger = logging.getLogger(__name__)
+# Per-task logging. Exceptionally verbose at DEBUG level.
+task_logger = logging.getLogger(__name__ + ".tasks")
 
 
 class ActiveMemoryManagerExtension:
@@ -44,7 +47,7 @@ class ActiveMemoryManagerExtension:
     # Current memory (in bytes) allocated on each worker, plus/minus pending actions
     workers_memory: dict[WorkerState, int]
     # Pending replications and deletions for each task
-    pending: defaultdict[TaskState, tuple[set[WorkerState], set[WorkerState]]]
+    pending: dict[TaskState, tuple[set[WorkerState], set[WorkerState]]]
 
     def __init__(
         self,
@@ -125,10 +128,11 @@ class ActiveMemoryManagerExtension:
         recommendations to replicate/drop tasks
         """
         with log_errors():
+            ts_start = time()
             # This should never fail since this is a synchronous method
             assert not hasattr(self, "pending")
 
-            self.pending = defaultdict(lambda: (set(), set()))
+            self.pending = {}
             self.workers_memory = {
                 w: w.memory.optimistic for w in self.scheduler.workers.values()
             }
@@ -137,11 +141,14 @@ class ActiveMemoryManagerExtension:
                 self._run_policies()
 
                 if self.pending:
-                    logger.debug("Enacting suggestions for %d tasks", len(self.pending))
                     self._enact_suggestions()
             finally:
                 del self.workers_memory
                 del self.pending
+            ts_stop = time()
+            logger.debug(
+                "Active Memory Manager run in %.0fms", (ts_stop - ts_start) * 1000
+            )
 
     def _run_policies(self) -> None:
         """Sequentially run ActiveMemoryManagerPolicy.run() for all registered policies,
@@ -154,6 +161,7 @@ class ActiveMemoryManagerExtension:
         nreplicas: int
 
         for policy in list(self.policies):  # a policy may remove itself
+            logger.debug("Running policy: %s", policy)
             policy_gen = policy.run()
             ws = None
             while True:
@@ -162,7 +170,12 @@ class ActiveMemoryManagerExtension:
                 except StopIteration:
                     break  # next policy
 
-                pending_repl, pending_drop = self.pending[ts]
+                try:
+                    pending_repl, pending_drop = self.pending[ts]
+                except KeyError:
+                    pending_repl = set()
+                    pending_drop = set()
+                    self.pending[ts] = pending_repl, pending_drop
 
                 if cmd == "replicate":
                     ws = self._find_recipient(ts, candidates, pending_repl)
@@ -197,26 +210,42 @@ class ActiveMemoryManagerExtension:
         The worker with the lowest memory usage (downstream of pending replications and
         drops), or None if no eligible candidates are available.
         """
-        if ts.state != "memory":
-            logger.debug(
-                "(replicate, %s, %s) rejected: ts.state = %s", ts, candidates, ts.state
+        orig_candidates = candidates
+
+        def log_reject(msg: str) -> None:
+            task_logger.debug(
+                "(replicate, %s, %s) rejected: %s", ts, orig_candidates, msg
             )
+
+        if ts.state != "memory":
+            log_reject(f"ts.state = {ts.state}")
             return None
+
         if candidates is None:
             candidates = self.scheduler.running.copy()
         else:
-            candidates &= self.scheduler.running
+            # Don't modify orig_candidates
+            candidates = candidates & self.scheduler.running
+        if not candidates:
+            log_reject("no running candidates")
+            return None
 
         candidates -= ts.who_has
+        if not candidates:
+            log_reject("all candidates already own a replica")
+            return None
+
         candidates -= pending_repl
         if not candidates:
-            logger.debug(
-                "(replicate, %s, %s) rejected: no valid candidates", ts, candidates
-            )
+            log_reject("already pending replication on all candidates")
             return None
 
         # Select candidate with the lowest memory usage
-        return min(candidates, key=self.workers_memory.__getitem__)
+        choice = min(candidates, key=self.workers_memory.__getitem__)
+        task_logger.debug(
+            "(replicate, %s, %s): replicating to %s", ts, orig_candidates, choice
+        )
+        return choice
 
     def _find_dropper(
         self,
@@ -235,32 +264,77 @@ class ActiveMemoryManagerExtension:
         The worker with the highest memory usage (downstream of pending replications and
         drops), or None if no eligible candidates are available.
         """
+        orig_candidates = candidates
+
+        def log_reject(msg: str) -> None:
+            task_logger.debug("(drop, %s, %s) rejected: %s", ts, orig_candidates, msg)
+
         if len(ts.who_has) - len(pending_drop) < 2:
-            logger.debug(
-                "(drop, %s, %s) rejected: less than 2 replicas exist", ts, candidates
-            )
+            log_reject("less than 2 replicas exist")
             return None
+
         if candidates is None:
             candidates = ts.who_has.copy()
         else:
-            candidates &= ts.who_has
+            # Don't modify orig_candidates
+            candidates = candidates & ts.who_has
+            if not candidates:
+                log_reject("no candidates suggested by the policy own a replica")
+                return None
+
         candidates -= pending_drop
-        candidates -= {waiter_ts.processing_on for waiter_ts in ts.waiters}
         if not candidates:
-            logger.debug("(drop, %s, %s) rejected: no valid candidates", ts, candidates)
+            log_reject("already pending drop on all candidates")
+            return None
+
+        # This `candidates &` could seems superfluous here on first look, but beware of
+        # the second use of this set below!
+        processing_on = candidates & {
+            waiter_ts.processing_on for waiter_ts in ts.waiters
+        }
+
+        candidates -= processing_on
+        if not candidates:
+            log_reject("all candidates have dependent tasks queued or running on them")
             return None
 
         # Select candidate with the highest memory usage.
         # Drop from workers with status paused or closing_gracefully first.
-        return max(
+        choice = max(
             candidates,
             key=lambda ws: (ws.status != Status.running, self.workers_memory[ws]),
         )
+
+        # If there is only one candidate that could drop the key
+        # AND the candidate has status=running
+        # AND there are candidates with status=paused or closing_gracefully but we just
+        # discarded them because they have dependent tasks running on them, temporarily
+        # keep the extra replica on the candidate with status=running.
+        # Otherwise, we would need to wait until the end for the paused/closing worker
+        # to have no running tasks at all before we can retire it (and for what we know
+        # the tasks currently running might be stuck forever).
+        if (
+            len(candidates) == 1
+            and choice.status == Status.running
+            and processing_on
+            and all(ws.status != Status.running for ws in processing_on)
+        ):
+            log_reject(
+                "there is only one replica on workers that aren't paused or retiring"
+            )
+            return None
+
+        task_logger.debug(
+            "(drop, %s, %s): dropping from %s", ts, orig_candidates, choice
+        )
+        return choice
 
     def _enact_suggestions(self) -> None:
         """Iterate through self.pending, which was filled by self._run_policies(), and
         push the suggestions to the workers through bulk comms. Return immediately.
         """
+        logger.debug("Enacting suggestions for %d tasks:", len(self.pending))
+
         drop_by_worker: (defaultdict[WorkerState, set[TaskState]]) = defaultdict(set)
         repl_by_worker: (
             defaultdict[WorkerState, dict[TaskState, set[str]]]
@@ -281,6 +355,7 @@ class ActiveMemoryManagerExtension:
         # Fire-and-forget enact recommendations from policies
         stimulus_id = str(time())
         for ws_rec, ts_to_who_has in repl_by_worker.items():
+            logger.debug("- %s to acquire %d replicas", ws_rec, len(ts_to_who_has))
             self.scheduler.stream_comms[ws_rec.address].send(
                 {
                     "op": "acquire-replicas",
@@ -292,6 +367,7 @@ class ActiveMemoryManagerExtension:
             )
 
         for ws, tss in drop_by_worker.items():
+            logger.debug("- %s to drop %d replicas", ws, len(tss))
             # The scheduler immediately forgets about the replica and suggests the
             # worker to drop it. The worker may refuse, at which point it will send back
             # an add-keys message to reinstate it.
