@@ -339,7 +339,7 @@ class WSListener(Listener):
                 self.server = HTTPServer(web.Application(routes), **self.server_args)
                 self.server.listen(self.port)
 
-    async def stop(self):
+    def stop(self):
         self.server.stop()
 
     def get_host_port(self):

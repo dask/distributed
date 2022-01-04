@@ -1,6 +1,51 @@
 Changelog
 =========
 
+2021.12.0
+---------
+
+Released on December 10, 2021
+
+Enhancements
+^^^^^^^^^^^^
+- Support pytest fixures and parametrize with ``gen_test`` (:pr:`5532`) `Fábio Rosado`_
+- Allow idempotent scheduler plugins to be registered via the RPC (:pr:`5545`) `Jacob Tomlinson`_
+- AMM logging (:pr:`5530`) `crusaderky`_
+- Raise error if ``asyncssh`` isn't installed when using ``SSHCluster`` (:pr:`5535`) `Fábio Rosado`_
+- Allow ``None`` in UCX configuration schema (:pr:`5534`) `Fábio Rosado`_
+- Add ``distributed.comm.ucx.create-cuda-context`` config (:pr:`5526`) `Peter Andreas Entschev`_
+
+Bug fixes
+^^^^^^^^^
+- Allow unknown tasks to be stolen (:pr:`5572`) `Florian Jetter`_
+- Further ``RecursionError`` fixes in ``recursive_to_repr`` (:pr:`5579`) `crusaderky`_
+- Revisit ``recursive_to_dict`` (:pr:`5557`) `crusaderky`_
+- Handle ``UCXUnreachable`` exception (:pr:`5556`) `Peter Andreas Entschev`_
+
+Documentation
+^^^^^^^^^^^^^
+- Separate ``Coordination`` section in API docs (:pr:`5412`) `Gabe Joseph`_
+- Improved documentation for processing state and paused workers (:pr:`4985`) `Maximilian Roos`_
+- Fix typo in ``TaskGroupGraph.update_layout`` comment (:pr:`5536`) `Hristo Georgiev`_
+- Update documentation for ``register_worker_plugin`` (:pr:`5533`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Mark ``test_gpu_monitoring_recent`` as flaky (:pr:`5540`) `Peter Andreas Entschev`_
+- Await worker arrival in SSH ``test_nprocs`` (:pr:`5575`) `James Bourbeau`_
+- AMM: Test that acquire-replicas of a task already in flight is a no-op (:pr:`5566`) `crusaderky`_
+- Make sure artifacts are tagged with CI partition so they don't race and overwrite each other (:pr:`5571`) `Ian Rose`_
+- Minor refactoring and commentary in worker state machine (:pr:`5563`) `Florian Jetter`_
+- Fix ``test_ucx_unreachable`` on UCX < 1.12 (:pr:`5562`) `Peter Andreas Entschev`_
+- Bump Bokeh min version to 2.1.1 (:pr:`5548`) `Bryan Van de Ven`_
+- Update ``gen_test`` tests to be more robust (:pr:`5551`) `James Bourbeau`_
+- Skip ``test_ucx_unreachable`` if ``UCXUnreachable`` is unavailable (:pr:`5560`) `Peter Andreas Entschev`_
+- Update gpuCI ``RAPIDS_VER`` to ``22.02`` (:pr:`5544`)
+- Add workflow to automate gpuCI updates (:pr:`5541`) `Charles Blackmon-Luca`_
+- Actually support ``uvloop`` in distributed (:pr:`5531`) `Jim Crist-Harif`_
+- Standardize UCX config separator to ``-`` (:pr:`5539`) `Peter Andreas Entschev`_
+
+
 2021.11.2
 ---------
 
@@ -2790,3 +2835,5 @@ significantly without many new features.
 .. _`Michael Adkins`: https://github.com/madkinsz
 .. _`Genevieve Buckley`: https://github.com/GenevieveBuckley
 .. _`Erik Welch`: https://github.com/eriknw
+.. _`Fábio Rosado`: https://github.com/FabioRosado
+.. _`Maximilian Roos`: https://github.com/max-sixty

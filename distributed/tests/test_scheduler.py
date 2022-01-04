@@ -24,7 +24,7 @@ from distributed.comm import Comm
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
-from distributed.protocol.pickle import dumps
+from distributed.protocol.pickle import dumps, loads
 from distributed.scheduler import MemoryState, Scheduler
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
@@ -671,6 +671,34 @@ async def test_broadcast_nanny(s, a, b):
     assert result1 == result3
 
 
+@gen_cluster(config={"distributed.comm.timeouts.connect": "200ms"})
+async def test_broadcast_on_error(s, a, b):
+    a.stop()
+
+    with pytest.raises(OSError):
+        await s.broadcast(msg={"op": "ping"}, on_error="raise")
+    with pytest.raises(ValueError, match="on_error must be"):
+        await s.broadcast(msg={"op": "ping"}, on_error="invalid")
+
+    out = await s.broadcast(msg={"op": "ping"}, on_error="return")
+    assert isinstance(out[a.address], OSError)
+    assert out[b.address] == b"pong"
+
+    out = await s.broadcast(msg={"op": "ping"}, on_error="return_pickle")
+    assert isinstance(loads(out[a.address]), OSError)
+    assert out[b.address] == b"pong"
+
+    out = await s.broadcast(msg={"op": "ping"}, on_error="ignore")
+    assert out == {b.address: b"pong"}
+
+
+@gen_cluster()
+async def test_broadcast_deprecation(s, a, b):
+    with pytest.warns(FutureWarning):
+        out = await s.broadcast(msg={"op": "ping"}, workers=True)
+    assert out == {a.address: b"pong", b.address: b"pong"}
+
+
 @gen_cluster(nthreads=[])
 async def test_worker_name(s):
     w = await Worker(s.address, name="alice")
@@ -1020,7 +1048,7 @@ async def test_balance_many_workers(c, s, *workers):
 @nodebug
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 30)
 async def test_balance_many_workers_2(c, s, *workers):
-    s.extensions["stealing"]._pc.callback_time = 100000000
+    await s.extensions["stealing"].stop()
     futures = c.map(slowinc, range(90), delay=0.2)
     await wait(futures)
     assert {len(w.has_what) for w in s.workers.values()} == {3}
@@ -3251,11 +3279,11 @@ async def test_unpause_schedules_unrannable_tasks(c, s, a):
 
 
 @gen_cluster(client=True)
-async def test__to_dict(c, s, a, b):
+async def test_Scheduler__to_dict(c, s, a, b):
     futs = c.map(inc, range(100))
 
     await c.gather(futs)
-    d = Scheduler._to_dict(s)
+    d = s._to_dict()
     assert d.keys() == {
         "type",
         "id",
@@ -3272,6 +3300,26 @@ async def test__to_dict(c, s, a, b):
         "events",
     }
     assert d["tasks"][futs[0].key]
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_TaskState__to_dict(c, s):
+    """tasks that are listed as dependencies of other tasks are dumped as a short repr
+    and always appear in full under Scheduler.tasks
+    """
+    x = c.submit(inc, 1, key="x")
+    y = c.submit(inc, x, key="y")
+    z = c.submit(inc, 2, key="z")
+    while len(s.tasks) < 3:
+        await asyncio.sleep(0.01)
+
+    tasks = s._to_dict()["tasks"]
+
+    assert isinstance(tasks["x"], dict)
+    assert isinstance(tasks["y"], dict)
+    assert isinstance(tasks["z"], dict)
+    assert tasks["x"]["dependents"] == ["<TaskState 'y' waiting>"]
+    assert tasks["y"]["dependencies"] == ["<TaskState 'x' no-worker>"]
 
 
 @gen_cluster(nthreads=[])

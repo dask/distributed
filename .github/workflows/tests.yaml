@@ -148,3 +148,4 @@ jobs:
         with:
           name: ${{ env.TEST_ID }}-timeouts
           path: test_timeout_dump
+          if-no-files-found: ignore

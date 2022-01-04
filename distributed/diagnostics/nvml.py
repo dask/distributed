@@ -1,4 +1,5 @@
 import os
+from platform import uname
 
 import dask
 
@@ -12,10 +13,17 @@ nvmlLibraryNotFound = False
 nvmlOwnerPID = None
 
 
+def _in_wsl():
+    """Check if we are in Windows Subsystem for Linux; some PyNVML queries are not supported there.
+    Taken from https://www.scivision.dev/python-detect-wsl/
+    """
+    return "microsoft-standard" in uname().release
+
+
 def init_once():
     global nvmlInitialized, nvmlLibraryNotFound, nvmlOwnerPID
 
-    if dask.config.get("distributed.diagnostics.nvml") is False:
+    if dask.config.get("distributed.diagnostics.nvml") is False or _in_wsl():
         nvmlInitialized = False
         return
 
@@ -72,8 +80,13 @@ def has_cuda_context():
     index of the device for which there's a CUDA context.
     """
     init_once()
+    if nvmlLibraryNotFound or not nvmlInitialized:
+        return False
     for index in range(device_get_count()):
         handle = pynvml.nvmlDeviceGetHandleByIndex(index)
+        # TODO: WSL doesn't support this NVML query yet; when NVML monitoring is enabled
+        # there we may need to wrap this in a try/except block.
+        # See https://github.com/dask/distributed/pull/5568
         if hasattr(pynvml, "nvmlDeviceGetComputeRunningProcesses_v2"):
             running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses_v2(handle)
         else:

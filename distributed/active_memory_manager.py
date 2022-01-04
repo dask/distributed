@@ -122,7 +122,7 @@ class ActiveMemoryManagerExtension:
 
     def run_once(self) -> None:
         """Run all policies once and asynchronously (fire and forget) enact their
-        recommendations to replicate/drop keys
+        recommendations to replicate/drop tasks
         """
         with log_errors():
             # This should never fail since this is a synchronous method
@@ -198,6 +198,9 @@ class ActiveMemoryManagerExtension:
         drops), or None if no eligible candidates are available.
         """
         if ts.state != "memory":
+            logger.debug(
+                "(replicate, %s, %s) rejected: ts.state = %s", ts, candidates, ts.state
+            )
             return None
         if candidates is None:
             candidates = self.scheduler.running.copy()
@@ -207,6 +210,9 @@ class ActiveMemoryManagerExtension:
         candidates -= ts.who_has
         candidates -= pending_repl
         if not candidates:
+            logger.debug(
+                "(replicate, %s, %s) rejected: no valid candidates", ts, candidates
+            )
             return None
 
         # Select candidate with the lowest memory usage
@@ -230,6 +236,9 @@ class ActiveMemoryManagerExtension:
         drops), or None if no eligible candidates are available.
         """
         if len(ts.who_has) - len(pending_drop) < 2:
+            logger.debug(
+                "(drop, %s, %s) rejected: less than 2 replicas exist", ts, candidates
+            )
             return None
         if candidates is None:
             candidates = ts.who_has.copy()
@@ -238,6 +247,7 @@ class ActiveMemoryManagerExtension:
         candidates -= pending_drop
         candidates -= {waiter_ts.processing_on for waiter_ts in ts.waiters}
         if not candidates:
+            logger.debug("(drop, %s, %s) rejected: no valid candidates", ts, candidates)
             return None
 
         # Select candidate with the highest memory usage.

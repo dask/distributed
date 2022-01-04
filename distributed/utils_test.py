@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from typing_extensions import Literal
 
+from distributed.compatibility import MACOS
 from distributed.scheduler import Scheduler
 
 try:
@@ -40,6 +41,7 @@ except ImportError:
     ssl = None  # type: ignore
 
 import pytest
+import yaml
 from tlz import assoc, memoize, merge
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -49,6 +51,7 @@ import dask
 from distributed.comm.tcp import TCP
 
 from . import system
+from . import versions as version_module
 from .client import Client, _global_clients, default_client
 from .comm import Comm
 from .compatibility import WINDOWS
@@ -990,29 +993,13 @@ def gen_cluster(
                             # This stack indicates where the coro/test is suspended
                             task.print_stack(file=buffer)
 
-                            if client:
-                                assert c
-                                try:
-                                    if cluster_dump_directory:
-                                        if not os.path.exists(cluster_dump_directory):
-                                            os.makedirs(cluster_dump_directory)
-                                        filename = os.path.join(
-                                            cluster_dump_directory, func.__name__
-                                        )
-                                        fut = c.dump_cluster_state(
-                                            filename,
-                                            # Test dumps should be small enough that
-                                            # there is no need for a compressed
-                                            # binary representation and readability
-                                            # is more important
-                                            format="yaml",
-                                        )
-                                        assert fut is not None
-                                        await fut
-                                except Exception:
-                                    print(
-                                        f"Exception {sys.exc_info()} while trying to dump cluster state."
-                                    )
+                            if cluster_dump_directory:
+                                await dump_cluster_state(
+                                    s,
+                                    ws,
+                                    output_dir=cluster_dump_directory,
+                                    func_name=func.__name__,
+                                )
 
                             task.cancel()
                             while not task.cancelled():
@@ -1092,6 +1079,41 @@ def gen_cluster(
         return test_func
 
     return _
+
+
+async def dump_cluster_state(
+    s: Scheduler, ws: list[ServerNode], output_dir: str, func_name: str
+) -> None:
+    """A variant of Client.dump_cluster_state, which does not rely on any of the below
+    to work:
+
+    - Having a client at all
+    - Client->Scheduler comms
+    - Scheduler->Worker comms (unless using Nannies)
+    """
+    scheduler_info = s._to_dict()
+    workers_info: dict[str, Any]
+    versions_info = version_module.get_versions()
+
+    if not ws or isinstance(ws[0], Worker):
+        workers_info = {w.address: w._to_dict() for w in ws}
+    else:
+        workers_info = await s.broadcast(msg={"op": "dump_state"}, on_error="return")
+        workers_info = {
+            k: repr(v) if isinstance(v, Exception) else v
+            for k, v in workers_info.items()
+        }
+
+    state = {
+        "scheduler": scheduler_info,
+        "workers": workers_info,
+        "versions": versions_info,
+    }
+    os.makedirs(output_dir, exist_ok=True)
+    fname = os.path.join(output_dir, func_name) + ".yaml"
+    with open(fname, "w") as fh:
+        yaml.safe_dump(state, fh)  # Automatically convert tuples to lists
+    print(f"Dumped cluster state to {fname}")
 
 
 def raises(func, exc=Exception):
@@ -1550,6 +1572,9 @@ def check_thread_leak():
             # TODO: Make sure profile thread is cleaned up
             # and remove the line below
             and "Profile" not in thread.name
+            # asyncio default executor thread pool is not shut down until loop
+            # is shut down
+            and "asyncio_" not in thread.name
         ]
         if not bad_threads:
             break
@@ -1756,3 +1781,94 @@ class _LockedCommPool(ConnectionPool):
         return LockedComm(
             comm, self.read_event, self.read_queue, self.write_event, self.write_queue
         )
+
+
+def xfail_ssl_issue5601():
+    """Work around https://github.com/dask/distributed/issues/5601 where any test that
+    inits Security.temporary() crashes on MacOS GitHub Actions CI
+    """
+    pytest.importorskip("cryptography")
+    try:
+        Security.temporary()
+    except ImportError:
+        if MACOS:
+            pytest.xfail(reason="distributed#5601")
+        raise
+
+
+def assert_worker_story(
+    story: list[tuple], expect: list[tuple], *, strict: bool = False
+) -> None:
+    """Test the output of ``Worker.story``
+
+    Parameters
+    ==========
+    story: list[tuple]
+        Output of Worker.story
+    expect: list[tuple]
+        Expected events. Each expected event must contain exactly 2 less fields than the
+        story (the last two fields are always the stimulus_id and the timestamp).
+
+        Elements of the expect tuples can be
+
+        - callables, which accept a single element of the event tuple as argument and
+          return True for match and False for no match;
+        - arbitrary objects, which are compared with a == b
+
+        e.g.
+        .. code-block:: python
+
+            expect=[
+                ("x", "missing", "fetch", "fetch", {}),
+                ("gather-dependencies", worker_addr, lambda set_: "x" in set_),
+            ]
+
+    strict: bool, optional
+        If True, the story must contain exactly as many events as expect.
+        If False (the default), the story may contain more events than expect; extra
+        events are ignored.
+    """
+    now = time()
+    prev_ts = 0.0
+    for ev in story:
+        try:
+            assert len(ev) > 2
+            assert isinstance(ev, tuple)
+            assert isinstance(ev[-2], str) and ev[-2]  # stimulus_id
+            assert isinstance(ev[-1], float)  # timestamp
+            assert prev_ts <= ev[-1]  # Timestamps are monotonic ascending
+            # Timestamps are within the last hour. It's been observed that a timestamp
+            # generated in a Nanny process can be a few milliseconds in the future.
+            assert now - 3600 < ev[-1] <= now + 1
+            prev_ts = ev[-1]
+        except AssertionError:
+            raise AssertionError(
+                f"Malformed story event: {ev}\nin story:\n{_format_story(story)}"
+            )
+
+    try:
+        if strict and len(story) != len(expect):
+            raise StopIteration()
+        story_it = iter(story)
+        for ev_expect in expect:
+            while True:
+                event = next(story_it)
+                # Ignore (stimulus_id, timestamp)
+                event = event[:-2]
+                if len(event) == len(ev_expect) and all(
+                    ex(ev) if callable(ex) else ev == ex
+                    for ev, ex in zip(event, ev_expect)
+                ):
+                    break
+    except StopIteration:
+        raise AssertionError(
+            f"assert_worker_story(strict={strict}) failed\n"
+            f"story:\n{_format_story(story)}\n"
+            f"expect:\n{_format_story(expect)}"
+        ) from None
+
+
+def _format_story(story: list[tuple]) -> str:
+    if not story:
+        return "(empty story)"
+    return "- " + "\n- ".join(str(ev) for ev in story)

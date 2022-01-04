@@ -127,6 +127,8 @@ DEFAULT_DATA_SIZE = parse_bytes(
 
 SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "task"])
 
+_taskstate_to_dict_guard = False
+
 
 class InvalidTransition(Exception):
     pass
@@ -220,16 +222,16 @@ class TaskState:
         self._next = None
 
     def __repr__(self):
-        return f"<Task {self.key!r} {self.state}>"
+        return f"<TaskState {self.key!r} {self.state}>"
 
     def get_nbytes(self) -> int:
         nbytes = self.nbytes
         return nbytes if nbytes is not None else DEFAULT_DATA_SIZE
 
-    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict | str:
         """
         A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
+        Not type stable and not intended for roundtrips.
 
         Parameters
         ----------
@@ -241,10 +243,21 @@ class TaskState:
         --------
         Client.dump_cluster_state
         """
-        return recursive_to_dict(
-            {k: v for k, v in self.__dict__.items() if k not in exclude},
-            exclude=exclude,
-        )
+        # When a task references another task, just print the task repr. All tasks
+        # should neatly appear under Worker.tasks. This also prevents a RecursionError
+        # during particularly heavy loads, which have been observed to happen whenever
+        # there's an acyclic dependency chain of ~200+ tasks.
+        global _taskstate_to_dict_guard
+        if _taskstate_to_dict_guard:
+            return repr(self)
+        _taskstate_to_dict_guard = True
+        try:
+            return recursive_to_dict(
+                {k: v for k, v in self.__dict__.items() if k not in exclude},
+                exclude=exclude,
+            )
+        finally:
+            _taskstate_to_dict_guard = False
 
     def is_protected(self) -> bool:
         return self.state in PROCESSING or any(
@@ -1776,7 +1789,7 @@ class Worker(ServerNode):
                 else:
                     recommendations.update(recs)
 
-            self.log.append((key, "receive-from-scatter"))
+            self.log.append((key, "receive-from-scatter", stimulus_id, time()))
 
         if report:
             scheduler_messages.append(
@@ -1799,7 +1812,7 @@ class Worker(ServerNode):
         still decide to hold on to the data and task since it is required by an
         upstream dependency.
         """
-        self.log.append(("free-keys", keys, stimulus_id))
+        self.log.append(("free-keys", keys, stimulus_id, time()))
         recommendations = {}
         for key in keys:
             ts = self.tasks.get(key)
@@ -1827,7 +1840,7 @@ class Worker(ServerNode):
 
         For stronger guarantees, see handler free_keys
         """
-        self.log.append(("remove-replicas", keys, stimulus_id))
+        self.log.append(("remove-replicas", keys, stimulus_id, time()))
         recommendations = {}
 
         rejected = []
@@ -1836,18 +1849,20 @@ class Worker(ServerNode):
             if ts is None or ts.state != "memory":
                 continue
             if not ts.is_protected():
-                self.log.append((ts.key, "remove-replica-confirmed", stimulus_id))
+                self.log.append(
+                    (ts.key, "remove-replica-confirmed", stimulus_id, time())
+                )
                 recommendations[ts] = "released"
             else:
                 rejected.append(key)
 
         if rejected:
-            self.log.append(("remove-replica-rejected", rejected, stimulus_id))
+            self.log.append(("remove-replica-rejected", rejected, stimulus_id, time()))
             self.batched_stream.send(
                 {"op": "add-keys", "keys": rejected, "stimulus_id": stimulus_id}
             )
 
-        self.transitions(recommendations=recommendations, stimulus_id=stimulus_id)
+        self.transitions(recommendations, stimulus_id=stimulus_id)
 
         return "OK"
 
@@ -1877,7 +1892,7 @@ class Worker(ServerNode):
         """
         ts = self.tasks.get(key)
         if ts and ts.state in READY | {"waiting"}:
-            self.log.append((key, "cancel-compute", reason))
+            self.log.append((key, "cancel-compute", reason, time()))
             ts.scheduler_holds_ref = False
             # All possible dependents of TS should not be in state Processing on
             # scheduler side and therefore should not be assigned to a worker,
@@ -1889,7 +1904,6 @@ class Worker(ServerNode):
         self, comm=None, keys=None, priorities=None, who_has=None, stimulus_id=None
     ):
         recommendations = {}
-        scheduler_msgs = []
         for k in keys:
             ts = self.ensure_task_exists(
                 k,
@@ -1900,9 +1914,6 @@ class Worker(ServerNode):
                 recommendations[ts] = "fetch"
 
         self.update_who_has(who_has, stimulus_id=stimulus_id)
-
-        for msg in scheduler_msgs:
-            self.batched_stream.send(msg)
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
     def ensure_task_exists(
@@ -2680,7 +2691,7 @@ class Worker(ServerNode):
             self.comm_nbytes += total_nbytes
             self.in_flight_workers[worker] = to_gather
             recommendations = {self.tasks[d]: ("flight", worker) for d in to_gather}
-            self.transitions(recommendations=recommendations, stimulus_id=stimulus_id)
+            self.transitions(recommendations, stimulus_id=stimulus_id)
 
             self.loop.add_callback(
                 self.gather_dep,
@@ -2939,7 +2950,7 @@ class Worker(ServerNode):
 
                 if not to_gather_keys:
                     self.log.append(
-                        ("nothing-to-gather", worker, to_gather, stimulus_id)
+                        ("nothing-to-gather", worker, to_gather, stimulus_id, time())
                     )
                     return
 
@@ -3024,15 +3035,13 @@ class Worker(ServerNode):
                     elif ts not in recommendations:
                         ts.who_has.discard(worker)
                         self.has_what[worker].discard(ts.key)
-                        self.log.append((d, "missing-dep"))
+                        self.log.append((d, "missing-dep", stimulus_id, time()))
                         self.batched_stream.send(
                             {"op": "missing-data", "errant_worker": worker, "key": d}
                         )
                         recommendations[ts] = "fetch"
                 del data, response
-                self.transitions(
-                    recommendations=recommendations, stimulus_id=stimulus_id
-                )
+                self.transitions(recommendations, stimulus_id=stimulus_id)
                 self.ensure_computing()
 
                 if not busy:
@@ -3104,7 +3113,7 @@ class Worker(ServerNode):
                             self.has_what[worker].add(dep)
                             self.pending_data_per_worker[worker].append(dep_ts.key)
 
-            self.transitions(recommendations=recommendations, stimulus_id=stimulus_id)
+            self.transitions(recommendations, stimulus_id=stimulus_id)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -3153,9 +3162,9 @@ class Worker(ServerNode):
                 "Release key %s", {"key": key, "cause": cause, "reason": reason}
             )
             if cause:
-                self.log.append((key, "release-key", {"cause": cause}, reason))
+                self.log.append((key, "release-key", {"cause": cause}, reason, time()))
             else:
-                self.log.append((key, "release-key", reason))
+                self.log.append((key, "release-key", reason, time()))
             if key in self.data:
                 try:
                     del self.data[key]
@@ -3327,7 +3336,7 @@ class Worker(ServerNode):
             return function, args, kwargs
         except Exception as e:
             logger.error("Could not deserialize task", exc_info=True)
-            self.log.append((ts.key, "deserialize-error"))
+            self.log.append((ts.key, "deserialize-error", stimulus_id, time()))
             emsg = error_message(e)
             emsg.pop("status")
             self.transition(
