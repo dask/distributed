@@ -26,8 +26,11 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import ClassVar, Container
+from typing import TYPE_CHECKING, ClassVar, Container
 from typing import cast as pep484_cast
+
+if TYPE_CHECKING:
+    from typing_extensions import Literal
 
 import psutil
 from sortedcontainers import SortedDict, SortedSet
@@ -73,7 +76,7 @@ from .metrics import time
 from .multi_lock import MultiLockExtension
 from .node import ServerNode
 from .proctitle import setproctitle
-from .protocol.pickle import loads
+from .protocol.pickle import dumps, loads
 from .publish import PublishExtension
 from .pubsub import PubSubSchedulerExtension
 from .queues import QueueExtension
@@ -508,6 +511,7 @@ class WorkerState:
     _occupancy: double
     _pid: Py_ssize_t
     _processing: dict
+    _long_running: set
     _resources: dict
     _services: dict
     _status: Status
@@ -536,6 +540,7 @@ class WorkerState:
         "_occupancy",
         "_pid",
         "_processing",
+        "_long_running",
         "_resources",
         "_services",
         "_status",
@@ -585,6 +590,7 @@ class WorkerState:
         self._actors = set()
         self._has_what = {}
         self._processing = {}
+        self._long_running = set()
         self._executing = {}
         self._resources = {}
         self._used_resources = {}
@@ -2667,8 +2673,10 @@ class SchedulerState:
             total_duration = duration + comm
         old = ws._processing.get(ts, 0)
         ws._processing[ts] = total_duration
-        self._total_occupancy += total_duration - old
-        ws._occupancy += total_duration - old
+
+        if ts not in ws._long_running:
+            self._total_occupancy += total_duration - old
+            ws._occupancy += total_duration - old
 
         return total_duration
 
@@ -3539,6 +3547,23 @@ class SchedulerState:
         if len(ts._who_has) > 1:
             self._replicated_tasks.remove(ts)
         ts._who_has.clear()
+
+    @ccall
+    @exceptval(check=False)
+    def _reevaluate_occupancy_worker(self, ws: WorkerState):
+        """See reevaluate_occupancy"""
+        ts: TaskState
+        old = ws._occupancy
+        for ts in ws._processing:
+            self.set_duration_estimate(ts, ws)
+
+        self.check_idle_saturated(ws)
+        steal = self.extensions.get("stealing")
+        if steal is None:
+            return
+        if ws._occupancy > old * 1.3 or old > ws._occupancy * 1.3:
+            for ts in ws._processing:
+                steal.recalculate_cost(ts)
 
 
 class Scheduler(SchedulerState, ServerNode):
@@ -5463,8 +5488,7 @@ class Scheduler(SchedulerState, ServerNode):
     def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("handle missing data key=%s worker=%s", key, errant_worker)
-        self.log.append(("missing", key, errant_worker))
-
+        self.log_event(errant_worker, {"action": "missing-data", "key": key})
         ts: TaskState = parent._tasks.get(key)
         if ts is None:
             return
@@ -5525,7 +5549,12 @@ class Scheduler(SchedulerState, ServerNode):
         occ: double = ws._processing[ts]
         ws._occupancy -= occ
         parent._total_occupancy -= occ
+        # Cannot remove from processing since we're using this for things like
+        # idleness detection. Idle workers are typically targeted for
+        # downscaling but we should not downscale workers with long running
+        # tasks
         ws._processing[ts] = 0
+        ws._long_running.add(ts)
         self.check_idle_saturated(ws)
 
     def handle_worker_status_change(self, status: str, worker: str) -> None:
@@ -5983,22 +6012,30 @@ class Scheduler(SchedulerState, ServerNode):
     async def broadcast(
         self,
         comm=None,
-        msg=None,
-        workers=None,
-        hosts=None,
-        nanny=False,
+        *,
+        msg: dict,
+        workers: "list[str] | None" = None,
+        hosts: "list[str] | None" = None,
+        nanny: bool = False,
         serializers=None,
-    ):
+        on_error: "Literal['raise', 'return', 'return_pickle', 'ignore']" = "raise",
+    ) -> dict:  # dict[str, Any]
         """Broadcast message to workers, return all results"""
         parent: SchedulerState = cast(SchedulerState, self)
-        if workers is None or workers is True:
+        if workers is True:
+            warnings.warn(
+                "workers=True is deprecated; pass workers=None or omit instead",
+                category=FutureWarning,
+            )
+            workers = None
+        if workers is None:
             if hosts is None:
                 workers = list(parent._workers_dv)
             else:
                 workers = []
         if hosts is not None:
             for host in hosts:
-                dh: dict = parent._host_info.get(host)
+                dh: dict = parent._host_info.get(host)  # type: ignore
                 if dh is not None:
                     workers.extend(dh["addresses"])
         # TODO replace with worker_list
@@ -6008,20 +6045,40 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             addresses = workers
 
+        ERROR = object()
+
         async def send_message(addr):
-            comm = await self.rpc.connect(addr)
-            comm.name = "Scheduler Broadcast"
             try:
-                resp = await send_recv(comm, close=True, serializers=serializers, **msg)
-            finally:
-                self.rpc.reuse(addr, comm)
-            return resp
+                comm = await self.rpc.connect(addr)
+                comm.name = "Scheduler Broadcast"
+                try:
+                    resp = await send_recv(
+                        comm, close=True, serializers=serializers, **msg
+                    )
+                finally:
+                    self.rpc.reuse(addr, comm)
+                return resp
+            except Exception as e:
+                logger.error(f"broadcast to {addr} failed: {e.__class__.__name__}: {e}")
+                if on_error == "raise":
+                    raise
+                elif on_error == "return":
+                    return e
+                elif on_error == "return_pickle":
+                    return dumps(e, protocol=4)
+                elif on_error == "ignore":
+                    return ERROR
+                else:
+                    raise ValueError(
+                        "on_error must be 'raise', 'return', 'return_pickle', "
+                        f"or 'ignore'; got {on_error!r}"
+                    )
 
         results = await All(
             [send_message(address) for address in addresses if address is not None]
         )
 
-        return dict(zip(workers, results))
+        return {k: v for k, v in zip(workers, results) if v is not ERROR}
 
     async def proxy(self, comm=None, msg=None, worker=None, serializers=None):
         """Proxy a communication through the scheduler to some other worker"""
@@ -7758,7 +7815,7 @@ class Scheduler(SchedulerState, ServerNode):
                     try:
                         if ws is None or not ws._processing:
                             continue
-                        _reevaluate_occupancy_worker(parent, ws)
+                        parent._reevaluate_occupancy_worker(ws)
                     finally:
                         del ws  # lose ref
 
@@ -8097,24 +8154,6 @@ def _task_to_client_msgs(state: SchedulerState, ts: TaskState) -> dict:
             cs: ClientState
             return {cs._client_key: [report_msg] for cs in ts._who_wants}
     return {}
-
-
-@cfunc
-@exceptval(check=False)
-def _reevaluate_occupancy_worker(state: SchedulerState, ws: WorkerState):
-    """See reevaluate_occupancy"""
-    ts: TaskState
-    old = ws._occupancy
-    for ts in ws._processing:
-        state.set_duration_estimate(ts, ws)
-
-    state.check_idle_saturated(ws)
-    steal = state.extensions.get("stealing")
-    if not steal:
-        return
-    if ws._occupancy > old * 1.3 or old > ws._occupancy * 1.3:
-        for ts in ws._processing:
-            steal.recalculate_cost(ts)
 
 
 @cfunc
