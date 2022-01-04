@@ -33,7 +33,7 @@ notes_mismatch_package = {
     "msgpack": "Variation is ok, as long as everything is above 0.6",
     "python": "Variation in python versions can cause hard to debug serialization errors, we highly recommend using the same version of python everywhere",
     "dask": "Variation in dask versions can cause unexpected behaviour, we highly recommend using the same version of dask everywhere",
-    "distributed": "Variation in python versions can cause hard to debug connection errors, we highly recommend using the same version of distributed everywhere",
+    "distributed": "Variation in distributed versions can cause hard to debug connection errors, we highly recommend using the same version of distributed everywhere",
 }
 
 
