@@ -26,6 +26,8 @@ from distributed.utils_test import (
     slowinc,
 )
 
+pytestmark = pytest.mark.ci1
+
 
 def test_submit_after_failed_worker_sync(loop):
     with cluster() as (s, [a, b]):
@@ -65,6 +67,7 @@ async def test_submit_after_failed_worker(c, s, a, b):
     assert result == sum(map(inc, range(10)))
 
 
+@pytest.mark.slow
 def test_gather_after_failed_worker(loop):
     with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -75,12 +78,8 @@ def test_gather_after_failed_worker(loop):
             assert result == list(map(inc, range(10)))
 
 
-@gen_cluster(
-    client=True,
-    Worker=Nanny,
-    nthreads=[("127.0.0.1", 1)] * 4,
-    config={"distributed.comm.timeouts.connect": "1s"},
-)
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny, nthreads=[("127.0.0.1", 1)] * 4, timeout=60)
 async def test_gather_then_submit_after_failed_workers(c, s, w, x, y, z):
     L = c.map(inc, range(20))
     await wait(L)
@@ -88,7 +87,7 @@ async def test_gather_then_submit_after_failed_workers(c, s, w, x, y, z):
     w.process.process._process.terminate()
     total = c.submit(sum, L)
 
-    for i in range(3):
+    for _ in range(3):
         await wait(total)
         addr = first(s.tasks[total.key].who_has).address
         for worker in [x, y, z]:
@@ -101,7 +100,7 @@ async def test_gather_then_submit_after_failed_workers(c, s, w, x, y, z):
 
 
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
-@gen_cluster(Worker=Nanny, timeout=60, client=True)
+@gen_cluster(Worker=Nanny, client=True, timeout=60)
 async def test_failed_worker_without_warning(c, s, a, b):
     L = c.map(inc, range(10))
     await wait(L)
@@ -298,18 +297,20 @@ async def test_multiple_clients_restart(s, a, b):
     await c2.close()
 
 
-@pytest.mark.flaky(reruns=10, reruns_timeout=5, condition=MACOS)
 @gen_cluster(Worker=Nanny, timeout=60)
 async def test_restart_scheduler(s, a, b):
-    import gc
-
-    gc.collect()
-    addrs = (a.worker_address, b.worker_address)
-    await s.restart()
     assert len(s.nthreads) == 2
-    addrs2 = (a.worker_address, b.worker_address)
+    pids = (a.pid, b.pid)
+    assert pids[0]
+    assert pids[1]
 
-    assert addrs != addrs2
+    await s.restart()
+
+    assert len(s.nthreads) == 2
+    pids2 = (a.pid, b.pid)
+    assert pids2[0]
+    assert pids2[1]
+    assert pids != pids2
 
 
 @gen_cluster(Worker=Nanny, client=True, timeout=60)
@@ -325,6 +326,8 @@ async def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
     await y
 
 
+@pytest.mark.slow
+@pytest.mark.flaky(condition=MACOS, reruns=10, reruns_delay=5)
 @gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
 async def test_broken_worker_during_computation(c, s, a, b):
     s.allowed_failures = 100
@@ -406,12 +409,12 @@ class SlowTransmitData:
 
 @gen_cluster(client=True)
 async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
+    """This test is very sensitive to cluster state consistency. Timeouts often
+    indicate subtle deadlocks. Be mindful when marking flaky/repeat/etc."""
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
 
-    start = time()
     while len(s.nthreads) < 3:
         await asyncio.sleep(0.01)
-        assert time() < start + 5
 
     def slow_ser(x, delay):
         return SlowTransmitData(x, delay=delay)
@@ -485,7 +488,7 @@ async def test_worker_same_host_replicas_missing(c, s, a, b, x):
         # artificially, without notifying the scheduler.
         # This can only succeed if B handles the missing data properly by
         # removing A from the known sources of keys
-        a.handle_free_keys(keys=["f1"], reason="Am I evil?")  # Yes, I am!
+        a.handle_free_keys(keys=["f1"], stimulus_id="Am I evil?")  # Yes, I am!
         result_fut = c.submit(sink, futures, workers=x.address)
 
         await result_fut
@@ -497,7 +500,7 @@ async def test_restart_timeout_on_long_running_task(c, s, a):
     with captured_logger("distributed.scheduler") as sio:
         future = c.submit(sleep, 3600)
         await asyncio.sleep(0.1)
-        await c.restart(timeout=20)
+        await c.restart()
 
     text = sio.getvalue()
     assert "timeout" not in text.lower()
@@ -524,82 +527,6 @@ async def test_worker_time_to_live(c, s, a, b):
     set(s.workers) == {b.address}
 
 
-class SlowDeserialize:
-    def __init__(self, data, delay=0.1):
-        self.delay = delay
-        self.data = data
-
-    def __getstate__(self):
-        return self.delay
-
-    def __setstate__(self, state):
-        delay = state
-        import time
-
-        time.sleep(delay)
-        return SlowDeserialize(delay)
-
-    def __sizeof__(self) -> int:
-        # Ensure this is offloaded to avoid blocking loop
-        import dask
-        from dask.utils import parse_bytes
-
-        return parse_bytes(dask.config.get("distributed.comm.offload")) + 1
-
-
-@gen_cluster(client=True, timeout=None)
-async def test_handle_superfluous_data(c, s, a, b):
-    """
-    See https://github.com/dask/distributed/pull/4784#discussion_r649210094
-    """
-
-    def slow_deser(x, delay):
-        return SlowDeserialize(x, delay=delay)
-
-    futA = c.submit(
-        slow_deser, 1, delay=1, workers=[a.address], key="A", allow_other_workers=True
-    )
-    futB = c.submit(inc, 1, workers=[b.address], key="B")
-    await wait([futA, futB])
-
-    def reducer(*args):
-        return
-
-    assert len(a.tasks) == 1
-    assert futA.key in a.tasks
-
-    assert len(b.tasks) == 1
-    assert futB.key in b.tasks
-
-    red = c.submit(reducer, [futA, futB], workers=[b.address], key="reducer")
-
-    dep_key = futA.key
-
-    # Wait for the connection to be established
-    while dep_key not in b.tasks or not b.tasks[dep_key].state == "flight":
-        await asyncio.sleep(0.001)
-
-    # Wait for the connection to be returned to the pool. this signals that
-    # worker B is done with the communication and is about to deserialize the
-    # result
-    while a.address not in b.rpc.available and not b.rpc.available[a.address]:
-        await asyncio.sleep(0.001)
-
-    assert b.tasks[dep_key].state == "flight"
-    # After the comm is finished and the deserialization starts, Worker B
-    # wouldn't notice that A dies.
-    await a.close()
-    # However, while B is busy deserializing a third worker might notice that A
-    # is dead and issues a handle-missing signal to the scheduler. Since at this
-    # point in time, A was the only worker with a verified replica, the
-    # scheduler reschedules the computation by transitioning it to released. The
-    # released transition has the side effect that it purges all data which is
-    # in memory which exposes us to a race condition on B if B also receives the
-    # signal to compute that task in the meantime.
-    s.handle_missing_data(key=dep_key, errant_worker=a.address)
-    await red
-
-
 @gen_cluster()
 async def test_forget_data_not_supposed_to_have(s, a, b):
     """
@@ -616,7 +543,9 @@ async def test_forget_data_not_supposed_to_have(s, a, b):
     ts = TaskState("key")
     ts.state = "flight"
     a.tasks["key"] = ts
-    a.transition_flight_memory(ts, value=123)
+    recommendations = {ts: ("memory", 123)}
+    a.transitions(recommendations, stimulus_id="test")
+
     assert a.data
     while a.data:
         await asyncio.sleep(0.001)

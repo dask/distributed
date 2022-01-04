@@ -40,7 +40,7 @@ def assert_equal(a, b):
         assert a == b
 
 
-@gen_cluster(timeout=240, client=True)
+@gen_cluster(client=True)
 async def test_dataframes(c, s, a, b):
     df = pd.DataFrame(
         {"x": np.random.random(1000), "y": np.random.random(1000)},
@@ -48,8 +48,7 @@ async def test_dataframes(c, s, a, b):
     )
     ldf = dd.from_pandas(df, npartitions=10)
 
-    rdf = c.persist(ldf)
-
+    rdf = await c.persist(ldf)
     assert rdf.divisions == ldf.divisions
 
     remote = c.compute(rdf)

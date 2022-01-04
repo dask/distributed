@@ -3,7 +3,7 @@ from contextlib import contextmanager
 try:
     import ssl
 except ImportError:
-    ssl = None
+    ssl = None  # type: ignore
 
 import pytest
 
@@ -11,7 +11,7 @@ import dask
 
 from distributed.comm import connect, listen
 from distributed.security import Security
-from distributed.utils_test import get_cert
+from distributed.utils_test import gen_test, get_cert, xfail_ssl_issue5601
 
 ca_file = get_cert("tls-ca-cert.pem")
 
@@ -110,12 +110,19 @@ def test_kwargs():
     assert sec.extra_conn_args == {"headers": {"Auth": "Token abc"}}
 
 
-def test_repr():
+def test_repr_temp_keys():
+    xfail_ssl_issue5601()
+    pytest.importorskip("cryptography")
+    sec = Security.temporary()
+    representation = repr(sec)
+    assert "Temporary (In-memory)" in representation
+
+
+def test_repr_local_keys():
     sec = Security(tls_ca_file="ca.pem", tls_scheduler_cert="scert.pem")
-    assert (
-        repr(sec)
-        == "Security(require_encryption=True, tls_ca_file='ca.pem', tls_scheduler_cert='scert.pem')"
-    )
+    representation = repr(sec)
+    assert "ca.pem" in representation
+    assert "scert.pem" in representation
 
 
 def test_tls_config_for_role():
@@ -277,7 +284,7 @@ def test_listen_args():
     assert len(tls_13_ciphers) in (0, 3)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tls_listen_connect():
     """
     Functional test for TLS connection args.
@@ -325,7 +332,7 @@ async def test_tls_listen_connect():
         comm.abort()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_require_encryption():
     """
     Functional test for "require_encryption" setting.
@@ -389,6 +396,7 @@ async def test_require_encryption():
 
 
 def test_temporary_credentials():
+    xfail_ssl_issue5601()
     pytest.importorskip("cryptography")
 
     sec = Security.temporary()
@@ -406,14 +414,16 @@ def test_temporary_credentials():
 
 
 def test_extra_conn_args_in_temporary_credentials():
+    xfail_ssl_issue5601()
     pytest.importorskip("cryptography")
 
     sec = Security.temporary(extra_conn_args={"headers": {"X-Request-ID": "abcd"}})
     assert sec.extra_conn_args == {"headers": {"X-Request-ID": "abcd"}}
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tls_temporary_credentials_functional():
+    xfail_ssl_issue5601()
     pytest.importorskip("cryptography")
 
     async def handle_comm(comm):

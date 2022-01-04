@@ -81,6 +81,7 @@ def enable_gc_diagnosis_and_log(diag, level="INFO"):
             gc.enable()
 
 
+@pytest.mark.slow
 def test_gc_diagnosis_cpu_time():
     diag = GCDiagnosis(warn_over_frac=0.75)
     diag.N_SAMPLES = 3  # shorten tests

@@ -73,7 +73,7 @@ body {
   height: 22px;
 }
 
-@media screen and (max-width: 650px) {
+@media screen and (max-width: 800px) {
   .navbar li:not(#dask-logo):not(#navbar-toggle-icon) a {
     display: none;
   }
@@ -82,7 +82,7 @@ body {
   }
 }
 
-@media screen and (max-width: 650px) {
+@media screen and (max-width: 800px) {
   .navbar.responsive li:not(#navbar-toggle-icon) {
     float: none;
   }
@@ -100,6 +100,10 @@ body {
 .bk-root .bk-toolbar-box .bk-toolbar-right {
   top: 4px;
   right: 4px;
+}
+
+.bk-root .bk-data-table {
+  z-index: 0;
 }
 
 .content {
@@ -120,6 +124,8 @@ body {
   min-width: 160px;
   box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
   z-index: 2;
+  max-height: 90%;
+  overflow-y: scroll;
 }
 
 .dropdown-content ul li {

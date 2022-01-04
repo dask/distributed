@@ -168,3 +168,20 @@ fixture tests test basic interface and resilience.
 
 You should avoid ``popen`` style tests unless absolutely necessary, such as if
 you need to test the command line interface.
+
+Code Formatting
+---------------
+
+Dask.distributed uses several code linters (flake8, black, isort, pyupgrade, mypy),
+which are enforced by CI. Developers should run them locally before they submit a PR,
+through the single command ``pre-commit run --all-files``. This makes sure that linter
+versions and options are aligned for all developers.
+
+Optionally, you may wish to setup the `pre-commit hooks <https://pre-commit.com/>`_ to
+run automatically when you make a git commit. This can be done by running::
+
+   pre-commit install
+
+from the root of the distributed repository. Now the code linters will be run each time
+you commit changes. You can skip these checks with ``git commit --no-verify`` or with
+the short version ``git commit -n``.

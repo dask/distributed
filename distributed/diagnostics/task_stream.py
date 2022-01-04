@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 class TaskStreamPlugin(SchedulerPlugin):
+    name = "task-stream"
+
     def __init__(self, scheduler, maxlen=None):
         if maxlen is None:
             maxlen = max(
@@ -25,7 +27,6 @@ class TaskStreamPlugin(SchedulerPlugin):
             )
         self.buffer = deque(maxlen=maxlen)
         self.scheduler = scheduler
-        scheduler.add_plugin(self)
         self.index = 0
 
     def transition(self, key, start, finish, *args, **kwargs):

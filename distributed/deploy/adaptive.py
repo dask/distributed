@@ -1,11 +1,17 @@
 import logging
 from inspect import isawaitable
+from typing import TYPE_CHECKING
+
+from tornado.ioloop import IOLoop
 
 import dask.config
 
 from ..protocol import pickle
 from ..utils import log_errors, parse_timedelta
 from .adaptive_core import AdaptiveCore
+
+if TYPE_CHECKING:
+    from ..scheduler import WorkerState
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +173,7 @@ class OccupancyAdaptive(AdaptiveCore):
 
         Returns
         -------
-        List of worker addresses to close, if any
+        List of worker names to close, if any
 
         See Also
         --------
@@ -203,8 +209,12 @@ class OccupancyAdaptive(AdaptiveCore):
             await f
 
     @property
-    def loop(self):
-        return self.cluster.loop
+    def loop(self) -> IOLoop:
+        """Override Adaptive.loop"""
+        if self.cluster:
+            return self.cluster.loop
+        else:
+            return IOLoop.current()
 
 
 class TaskAdaptive(AdaptiveCore):
@@ -298,9 +308,8 @@ class TaskAdaptive(AdaptiveCore):
             self.close_counts.clear()
             return {"status": "up", "n": target}
 
-        elif target < len(plan):
-            to_close = set()
-
+        else:
+            to_close: set[WorkerState] = set()
             if target < len(plan) - len(to_close):
                 L = await self.workers_to_close(target=target)
                 to_close.update(L)

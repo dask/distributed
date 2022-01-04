@@ -4,12 +4,7 @@ import socket
 import sys
 import time
 import traceback
-
-try:
-    from queue import Queue
-except ImportError:  # Python 2.7 fix
-    from Queue import Queue
-
+from queue import Queue
 from threading import Thread
 
 from tlz import merge
@@ -51,8 +46,8 @@ def async_ssh(cmd_dict):
                 port=cmd_dict["ssh_port"],
                 key_filename=cmd_dict["ssh_private_key"],
                 compress=True,
-                timeout=20,
-                banner_timeout=20,
+                timeout=30,
+                banner_timeout=30,
             )  # Helps prevent timeouts when many concurrent ssh connections are opened.
             # Connection successful, break out of while loop
             break

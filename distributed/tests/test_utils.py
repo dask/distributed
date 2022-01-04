@@ -1,11 +1,13 @@
 import array
 import asyncio
+import contextvars
+import functools
 import io
 import os
 import queue
 import socket
-import sys
 import traceback
+from collections import deque
 from time import sleep
 
 import pytest
@@ -13,6 +15,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 
+from distributed.compatibility import MACOS, WINDOWS
 from distributed.metrics import time
 from distributed.utils import (
     LRU,
@@ -29,11 +32,13 @@ from distributed.utils import (
     get_traceback,
     is_kernel,
     is_valid_xml,
+    iscoroutinefunction,
     nbytes,
     offload,
     open_port,
     parse_ports,
     read_block,
+    recursive_to_dict,
     seek_delimiter,
     set_thread_state,
     sync,
@@ -41,7 +46,15 @@ from distributed.utils import (
     truncate_exception,
     warn_on_duration,
 )
-from distributed.utils_test import captured_logger, div, gen_test, has_ipv6, inc, throws
+from distributed.utils_test import (
+    _UnhashableCallable,
+    captured_logger,
+    div,
+    gen_test,
+    has_ipv6,
+    inc,
+    throws,
+)
 
 
 def test_All(loop):
@@ -140,23 +153,12 @@ def test_ensure_ip():
         assert ensure_ip("::1") == "::1"
 
 
+@pytest.mark.skipif(WINDOWS, reason="TODO")
 def test_get_ip_interface():
-    if sys.platform == "darwin":
-        assert get_ip_interface("lo0") == "127.0.0.1"
-    elif sys.platform.startswith("linux"):
-        assert get_ip_interface("lo") == "127.0.0.1"
-    else:
-        pytest.skip(f"test needs to be enhanced for platform {sys.platform!r}")
-
-    non_existent_interface = "__non-existent-interface"
-    expected_error_message = f"{non_existent_interface!r}.+network interface.+"
-
-    if sys.platform == "darwin":
-        expected_error_message += "'lo0'"
-    elif sys.platform.startswith("linux"):
-        expected_error_message += "'lo'"
-    with pytest.raises(ValueError, match=expected_error_message):
-        get_ip_interface(non_existent_interface)
+    iface = "lo0" if MACOS else "lo"
+    assert get_ip_interface(iface) == "127.0.0.1"
+    with pytest.raises(ValueError, match=f"'__notexist'.+network interface.+'{iface}'"):
+        get_ip_interface("__notexist")
 
 
 def test_truncate_exception():
@@ -555,6 +557,18 @@ async def test_offload():
     assert (await offload(lambda x, y: x + y, 1, y=2)) == 3
 
 
+@pytest.mark.asyncio
+async def test_offload_preserves_contextvars():
+    var = contextvars.ContextVar("var")
+
+    async def set_var(v: str):
+        var.set(v)
+        r = await offload(var.get)
+        assert r == v
+
+    await asyncio.gather(set_var("foo"), set_var("bar"))
+
+
 def test_serialize_for_cli_deprecated():
     with pytest.warns(FutureWarning, match="serialize_for_cli is deprecated"):
         from distributed.utils import serialize_for_cli
@@ -595,3 +609,94 @@ def test_parse_timedelta_deprecated():
     with pytest.warns(FutureWarning, match="parse_timedelta is deprecated"):
         from distributed.utils import parse_timedelta
     assert parse_timedelta is dask.utils.parse_timedelta
+
+
+def test_typename_deprecated():
+    with pytest.warns(FutureWarning, match="typename is deprecated"):
+        from distributed.utils import typename
+    assert typename is dask.utils.typename
+
+
+def test_tmpfile_deprecated():
+    with pytest.warns(FutureWarning, match="tmpfile is deprecated"):
+        from distributed.utils import tmpfile
+    assert tmpfile is dask.utils.tmpfile
+
+
+def test_iscoroutinefunction_unhashable_input():
+    # Ensure iscoroutinefunction can handle unhashable callables
+    assert not iscoroutinefunction(_UnhashableCallable())
+
+
+def test_iscoroutinefunction_nested_partial():
+    async def my_async_callable(x, y, z):
+        pass
+
+    assert iscoroutinefunction(
+        functools.partial(functools.partial(my_async_callable, 1), 2)
+    )
+
+
+def test_recursive_to_dict():
+    class C:
+        def __init__(self, x):
+            self.x = x
+
+        def __repr__(self):
+            return "<C>"
+
+        def _to_dict(self, *, exclude):
+            assert exclude == ["foo"]
+            return ["C:", recursive_to_dict(self.x, exclude=exclude)]
+
+    class D:
+        def __repr__(self):
+            return "<D>"
+
+    inp = [
+        1,
+        1.1,
+        True,
+        False,
+        None,
+        "foo",
+        b"bar",
+        C,
+        C(1),
+        D(),
+        (1, 2),
+        [3, 4],
+        {5, 6},
+        frozenset([7, 8]),
+        deque([9, 10]),
+    ]
+    expect = [
+        1,
+        1.1,
+        True,
+        False,
+        None,
+        "foo",
+        "b'bar'",
+        "<class 'test_utils.test_recursive_to_dict.<locals>.C'>",
+        ["C:", 1],
+        "<D>",
+        [1, 2],
+        [3, 4],
+        list({5, 6}),
+        list(frozenset([7, 8])),
+        [9, 10],
+    ]
+    assert recursive_to_dict(inp, exclude=["foo"]) == expect
+
+    # Test recursion
+    a = []
+    c = C(a)
+    a += [c, c]
+    # The blocklist of already-seen objects is reentrant: a is converted to string when
+    # found inside itself; c must *not* be converted to string the second time it's
+    # found, because it's outside of itself.
+    assert recursive_to_dict(a, exclude=["foo"]) == [
+        ["C:", "[<C>, <C>]"],
+        ["C:", "[<C>, <C>]"],
+    ]

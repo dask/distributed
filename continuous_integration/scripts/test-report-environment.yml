@@ -1,0 +1,10 @@
+channels:
+  - conda-forge
+dependencies:
+  - altair
+  - altair_saver
+  - pandas
+  - pip
+  - requests
+  - pip:
+    - junitparser

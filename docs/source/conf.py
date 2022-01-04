@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 #
 # Dask.distributed documentation build configuration file, created by
 # sphinx-quickstart on Tue Oct  6 14:42:44 2015.
@@ -84,7 +86,7 @@ language = None
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
-exclude_patterns = []
+exclude_patterns: list[str] = []
 
 # The reST default role (used for this markup: `text`) to use for all
 # documents.
@@ -116,10 +118,7 @@ todo_include_todos = True
 
 # -- Options for HTML output ----------------------------------------------
 
-import dask_sphinx_theme
-
 html_theme = "dask_sphinx_theme"
-html_theme_path = [dask_sphinx_theme.get_html_theme_path()]
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -148,7 +147,7 @@ html_theme_path = [dask_sphinx_theme.get_html_theme_path()]
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ["_static"]
+html_static_path: list[str] = []
 
 # Add any extra paths that contain custom files (such as robots.txt or
 # .htaccess) here, relative to this directory. These files are copied
@@ -215,15 +214,15 @@ htmlhelp_basename = "distributeddoc"
 
 # -- Options for LaTeX output ---------------------------------------------
 
-latex_elements = {
+latex_elements: dict[str, str] = {
     # The paper size ('letterpaper' or 'a4paper').
-    #'papersize': 'letterpaper',
+    # 'papersize': 'letterpaper',
     # The font size ('10pt', '11pt' or '12pt').
-    #'pointsize': '10pt',
+    # 'pointsize': '10pt',
     # Additional stuff for the LaTeX preamble.
-    #'preamble': '',
+    # 'preamble': '',
     # Latex figure (float) alignment
-    #'figure_align': 'htbp',
+    # 'figure_align': 'htbp',
 }
 
 # Grouping the document tree into LaTeX files. List of tuples
@@ -383,7 +382,9 @@ extlinks = {
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "numpy": ("https://docs.scipy.org/doc/numpy", None),
+    "pandas": ("https://pandas.pydata.org/docs", None),
     "dask": ("https://docs.dask.org/en/latest", None),
+    "bokeh": ("https://docs.bokeh.org/en/latest", None),
 }
 
 # Redirects
@@ -425,7 +426,7 @@ def copy_legacy_redirects(app, docname):
                 f.write(page)
 
 
-from docutils.parsers.rst import directives
+from docutils.parsers.rst import directives  # type: ignore
 
 # -- Configuration to keep autosummary in sync with autoclass::members ----------------------------------------------
 # Fixes issues/3693

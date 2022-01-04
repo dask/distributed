@@ -1,4 +1,5 @@
 import logging
+from functools import partial
 
 from tlz import merge, valmap
 
@@ -21,10 +22,10 @@ def counts(scheduler, allprogress):
     )
 
 
-def remove_plugin(*args, **kwargs):
+def remove_plugin(**kwargs):
     # Wrapper function around `Scheduler.remove_plugin` to avoid raising a
     # `PicklingError` when using a cythonized scheduler
-    return Scheduler.remove_plugin(*args, **kwargs)
+    return Scheduler.remove_plugin(**kwargs)
 
 
 async def progress_stream(address, interval):
@@ -53,7 +54,7 @@ async def progress_stream(address, interval):
             "setup": dumps_function(AllProgress),
             "function": dumps_function(counts),
             "interval": interval,
-            "teardown": dumps_function(remove_plugin),
+            "teardown": dumps_function(partial(remove_plugin, name=AllProgress.name)),
         }
     )
     return comm

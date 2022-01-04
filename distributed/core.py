@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import inspect
 import logging
@@ -5,12 +7,12 @@ import sys
 import threading
 import traceback
 import uuid
-import warnings
 import weakref
 from collections import defaultdict
 from contextlib import suppress
 from enum import Enum
 from functools import partial
+from typing import ClassVar, Container
 
 import tblib
 from tlz import merge
@@ -20,8 +22,11 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
+from distributed.utils import recursive_to_dict
+
 from . import profile, protocol
 from .comm import (
+    Comm,
     CommClosedError,
     connect,
     get_address_host_port,
@@ -49,18 +54,22 @@ class Status(Enum):
     other.
     """
 
-    closed = "closed"
-    closing = "closing"
-    closing_gracefully = "closing-gracefully"
-    failed = "failed"
-    init = "init"
+    undefined = "undefined"
     created = "created"
-    running = "running"
+    init = "init"
     starting = "starting"
-    stopped = "stopped"
+    running = "running"
+    paused = "paused"
     stopping = "stopping"
-    undefined = None
-    dont_reply = "dont-reply"
+    stopped = "stopped"
+    closing = "closing"
+    closing_gracefully = "closing_gracefully"
+    closed = "closed"
+    failed = "failed"
+    dont_reply = "dont_reply"
+
+
+Status.lookup = {s.name: s for s in Status}  # type: ignore
 
 
 class RPCClosed(IOError):
@@ -141,6 +150,7 @@ class Server:
             "identity": self.identity,
             "echo": self.echo,
             "connection_stream": self.handle_stream,
+            "dump_state": self._to_dict,
         }
         self.handlers.update(handlers)
         if blocked_handlers is None:
@@ -170,17 +180,9 @@ class Server:
         if not hasattr(self.io_loop, "profile"):
             ref = weakref.ref(self.io_loop)
 
-            if hasattr(self.io_loop, "asyncio_loop"):
-
-                def stop():
-                    loop = ref()
-                    return loop is None or loop.asyncio_loop.is_closed()
-
-            else:
-
-                def stop():
-                    loop = ref()
-                    return loop is None or loop._closing
+            def stop():
+                loop = ref()
+                return loop is None or loop.asyncio_loop.is_closed()
 
             self.io_loop.profile = profile.watch(
                 omit=("profile.py", "selectors.py"),
@@ -244,19 +246,9 @@ class Server:
 
     @status.setter
     def status(self, new_status):
-        if isinstance(new_status, Status):
-            self._status = new_status
-        elif isinstance(new_status, str) or new_status is None:
-            warnings.warn(
-                f"Since distributed 2.23 `.status` is now an Enum, please assign `Status.{new_status}`",
-                PendingDeprecationWarning,
-                stacklevel=1,
-            )
-            corresponding_enum_variants = [s for s in Status if s.value == new_status]
-            assert len(corresponding_enum_variants) == 1
-            self._status = corresponding_enum_variants[0]
-        else:
-            raise TypeError(f"expected Status or str, got {new_status}")
+        if not isinstance(new_status, Status):
+            raise TypeError(f"Expected Status; got {new_status!r}")
+        self._status = new_status
 
     async def finished(self):
         """Wait until the server has finished"""
@@ -266,7 +258,7 @@ class Server:
         async def _():
             timeout = getattr(self, "death_timeout", 0)
             async with self._startup_lock:
-                if self.status == Status.running:
+                if self.status in (Status.running, Status.paused):
                     return self
                 if timeout:
                     try:
@@ -382,8 +374,35 @@ class Server:
             _, self._port = get_address_host_port(self.address)
         return self._port
 
-    def identity(self, comm=None):
+    def identity(self, comm=None) -> dict[str, str]:
         return {"type": type(self).__name__, "id": self.id}
+
+    def _to_dict(
+        self, comm: Comm | None = None, *, exclude: Container[str] = ()
+    ) -> dict:
+        """
+        A very verbose dictionary representation for debugging purposes.
+        Not type stable and not inteded for roundtrips.
+
+        Parameters
+        ----------
+        comm:
+        exclude:
+            A list of attributes which must not be present in the output.
+
+        See also
+        --------
+        Server.identity
+        Client.dump_cluster_state
+        """
+        info = self.identity()
+        extra = {
+            "address": self.address,
+            "status": self.status.name,
+            "thread_id": self.thread_id,
+        }
+        info.update(extra)
+        return recursive_to_dict(info, exclude=exclude)
 
     def echo(self, comm=None, data=None):
         return data
@@ -500,9 +519,9 @@ class Server:
                             result = asyncio.ensure_future(result)
                             self._ongoing_coroutines.add(result)
                             result = await result
-                    except (CommClosedError, CancelledError) as e:
-                        if self.status == Status.running:
-                            logger.info("Lost connection to %r: %s", address, e)
+                    except (CommClosedError, CancelledError):
+                        if self.status in (Status.running, Status.paused):
+                            logger.info("Lost connection to %r", address, exc_info=True)
                         break
                     except Exception as e:
                         logger.exception("Exception while handling op %s", op)
@@ -511,14 +530,7 @@ class Server:
                         else:
                             result = error_message(e, status="uncaught-error")
 
-                # result is not type stable:
-                # when LHS is not Status then RHS must not be Status or it raises.
-                # when LHS is Status then RHS must be status or it raises in tests
-                is_dont_reply = False
-                if isinstance(result, Status) and (result == Status.dont_reply):
-                    is_dont_reply = True
-
-                if reply and not is_dont_reply:
+                if reply and result != Status.dont_reply:
                     try:
                         await comm.write(result, serializers=serializers)
                     except (OSError, TypeError) as e:
@@ -666,7 +678,7 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
             typ, exc, tb = clean_exception(**response)
             raise exc.with_traceback(tb)
         else:
-            raise Exception(response["text"])
+            raise Exception(response["exception_text"])
     return response
 
 
@@ -695,7 +707,7 @@ class rpc:
     >>> remote.close_comms()  # doctest: +SKIP
     """
 
-    active = weakref.WeakSet()
+    active: ClassVar[weakref.WeakSet[rpc]] = weakref.WeakSet()
     comms = ()
     address = None
 
@@ -791,12 +803,20 @@ class rpc:
                 kwargs["serializers"] = self.serializers
             if self.deserializers is not None and kwargs.get("deserializers") is None:
                 kwargs["deserializers"] = self.deserializers
+            comm = None
             try:
                 comm = await self.live_comm()
                 comm.name = "rpc." + key
                 result = await send_recv(comm=comm, op=key, **kwargs)
             except (RPCClosed, CommClosedError) as e:
-                raise e.__class__(f"{e}: while trying to call remote method {key!r}")
+                if comm:
+                    raise type(e)(
+                        f"Exception while trying to call remote method {key!r} before comm was established."
+                    ) from e
+                else:
+                    raise type(e)(
+                        f"Exception while trying to call remote method {key!r} using comm {comm!r}."
+                    ) from e
 
             self.comms[comm] = True  # mark as open
             return result
@@ -920,7 +940,7 @@ class ConnectionPool:
         Whether or not to deserialize data by default or pass it through
     """
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[ConnectionPool]] = weakref.WeakSet()
 
     def __init__(
         self,
@@ -1020,7 +1040,7 @@ class ConnectionPool:
         try:
             if self.status != Status.running:
                 raise CommClosedError(
-                    f"ConnectionPool not running.  Status: {self.status}"
+                    f"ConnectionPool not running. Status: {self.status}"
                 )
 
             fut = asyncio.ensure_future(
@@ -1044,7 +1064,7 @@ class ConnectionPool:
         except asyncio.CancelledError as exc:
             self.semaphore.release()
             raise CommClosedError(
-                f"ConnectionPool not running.  Status: {self.status}"
+                f"ConnectionPool not running. Status: {self.status}"
             ) from exc
         except Exception as exc:
             self.semaphore.release()
@@ -1113,7 +1133,7 @@ class ConnectionPool:
                 comms.update(d.popitem()[1])
 
             await asyncio.gather(
-                *[comm.close() for comm in comms], return_exceptions=True
+                *(comm.close() for comm in comms), return_exceptions=True
             )
 
             for _ in comms:
@@ -1161,28 +1181,36 @@ def error_message(e, status="error"):
     MAX_ERROR_LEN = dask.config.get("distributed.admin.max-error-length")
     tblib.pickling_support.install(e, *collect_causes(e))
     tb = get_traceback()
-    e2 = truncate_exception(e, MAX_ERROR_LEN)
+    tb_text = "".join(traceback.format_tb(tb))
+    e = truncate_exception(e, MAX_ERROR_LEN)
     try:
-        e3 = protocol.pickle.dumps(e2, protocol=4)
-        protocol.pickle.loads(e3)
+        e_serialized = protocol.pickle.dumps(e)
+        protocol.pickle.loads(e_serialized)
     except Exception:
-        e2 = Exception(str(e2))
-    e4 = protocol.to_serialize(e2)
-    try:
-        tb2 = protocol.pickle.dumps(tb, protocol=4)
-        protocol.pickle.loads(tb2)
-    except Exception:
-        tb = tb2 = "".join(traceback.format_tb(tb))
+        e_serialized = protocol.pickle.dumps(Exception(repr(e)))
+    e_serialized = protocol.to_serialize(e_serialized)
 
-    if len(tb2) > MAX_ERROR_LEN:
+    try:
+        tb_serialized = protocol.pickle.dumps(tb)
+        protocol.pickle.loads(tb_serialized)
+    except Exception:
+        tb_serialized = protocol.pickle.dumps(tb_text)
+
+    if len(tb_serialized) > MAX_ERROR_LEN:
         tb_result = None
     else:
-        tb_result = protocol.to_serialize(tb)
+        tb_result = protocol.to_serialize(tb_serialized)
 
-    return {"status": status, "exception": e4, "traceback": tb_result, "text": str(e2)}
+    return {
+        "status": status,
+        "exception": e_serialized,
+        "traceback": tb_result,
+        "exception_text": repr(e),
+        "traceback_text": tb_text,
+    }
 
 
-def clean_exception(exception, traceback, **kwargs):
+def clean_exception(exception, traceback=None, **kwargs):
     """Reraise exception and traceback. Deserialize if necessary
 
     See Also
