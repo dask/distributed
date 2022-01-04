@@ -3345,6 +3345,12 @@ async def test_ensure_default_client(c, s, a, b):
         assert c2 is default_client()
 
 
+def test_ensure_default_get_deprecated():
+    with pytest.warns(FutureWarning, match="`ensure_default_get` is deprecated"):
+        from distributed.client import ensure_default_get
+    assert ensure_default_get is ensure_default_client
+
+
 @gen_cluster()
 async def test_set_as_default(s, a, b):
     with pytest.raises(ValueError):
