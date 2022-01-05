@@ -178,22 +178,22 @@ class Security:
             valid = {None, ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3}
             if val not in valid:
                 raise ValueError(
-                    f"{field}={val!r} is not supported, expected one of {valid}"
+                    f"{field}={val!r} is not supported, expected one of {list(valid)}"
                 )
             if val is None:
                 val = default
         else:
-            val = dask.config.get(config_name)
             valid = {
+                None: default,
                 1.2: ssl.TLSVersion.TLSv1_2,
                 1.3: ssl.TLSVersion.TLSv1_3,
-                None: default,
             }
+            val = dask.config.get(config_name)
             if val in valid:
                 val = valid[val]
             else:
                 raise ValueError(
-                    f"{config_name}={val!r} is not supported, expected one of [null, 1.2, 1.3]"
+                    f"{config_name}={val!r} is not supported, expected one of {list(valid)}"
                 )
 
         setattr(self, field, val)
