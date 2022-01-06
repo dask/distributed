@@ -89,7 +89,7 @@ class Worker(Process):
         self.kwargs = copy.copy(kwargs)
         self.name = name
         self.remote_python = remote_python
-        self.nprocs = self.kwargs.pop("nprocs", 1)
+        self.num_workers = self.kwargs.pop("num_workers", 1)
 
     async def start(self):
         try:
@@ -138,7 +138,7 @@ class Worker(Process):
                                 **self.kwargs,
                             },
                         }
-                        for i in range(self.nprocs)
+                        for i in range(self.num_workers)
                     }
                 ),
             ]
@@ -148,7 +148,7 @@ class Worker(Process):
 
         # We watch stderr in order to get the address, then we return
         started_workers = 0
-        while started_workers < self.nprocs:
+        while started_workers < self.num_workers:
             line = await self.proc.stderr.readline()
             if not line.strip():
                 raise Exception("Worker failed to start")
@@ -336,7 +336,7 @@ def SSHCluster(
     >>> cluster = SSHCluster(
     ...     ["localhost", "localhost", "localhost", "localhost"],
     ...     connect_options={"known_hosts": None},
-    ...     worker_options={"nthreads": 2, "nprocs": 2},
+    ...     worker_options={"nthreads": 2, "num_workers": 2},
     ...     scheduler_options={"port": 0, "dashboard_address": ":8797"}
     ... )
     >>> client = Client(cluster)
