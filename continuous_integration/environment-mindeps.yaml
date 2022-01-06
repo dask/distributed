@@ -25,6 +25,7 @@ dependencies:
   # test dependencies
   - pytest
   - pytest-asyncio<0.14.0
+  - pytest-cov
   - pytest-faulthandler
   - pytest-repeat
   - pytest-rerunfailures
