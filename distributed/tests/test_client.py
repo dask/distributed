@@ -1274,9 +1274,9 @@ async def test_exception_on_exception(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_get_task_prefixes(c, s, a, b):
+async def test_get_task_prefix_states(c, s, a, b):
     x = await c.submit(inc, 1)
-    res = s.get_task_prefixes()
+    res = s.get_task_prefix_states()
 
     data = {
         "erred": {"inc": 0},
@@ -1289,10 +1289,10 @@ async def test_get_task_prefixes(c, s, a, b):
     assert res == data
     del x
 
-    while s.get_task_prefixes() == data:
+    while s.get_task_prefix_states() == data:
         await asyncio.sleep(0.01)
 
-    res = s.get_task_prefixes()
+    res = s.get_task_prefix_states()
     assert res == {
         "erred": {},
         "memory": {},

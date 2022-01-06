@@ -3922,7 +3922,7 @@ class Scheduler(SchedulerState, ServerNode):
             "heartbeat_worker": self.heartbeat_worker,
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
-            "task_prefix": self.get_task_prefixes,
+            "get_task_prefix_states": self.get_task_prefix_states,
             "register_scheduler_plugin": self.register_scheduler_plugin,
             "register_worker_plugin": self.register_worker_plugin,
             "unregister_worker_plugin": self.unregister_worker_plugin,
@@ -7244,7 +7244,7 @@ class Scheduler(SchedulerState, ServerNode):
                 restrictions = {restrictions}
             ts._worker_restrictions = set(restrictions)
 
-    def get_task_prefixes(self, comm=None):
+    def get_task_prefix_states(self, comm=None):
         with log_errors():
             state = {
                 "memory": {},
