@@ -4800,7 +4800,8 @@ def default_client(c=None):
         )
 
 
-def ensure_default_get(client):
+def ensure_default_client(client):
+    """Ensures the client passed as argument is set as the default"""
     dask.config.set(scheduler="dask.distributed")
     _set_global_client(client)
 
@@ -5119,3 +5120,16 @@ def _close_global_client():
 
 
 atexit.register(_close_global_client)
+
+
+def __getattr__(name):
+    if name == "ensure_default_get":
+        warnings.warn(
+            "`ensure_default_get` is deprecated and will be removed in a future release. "
+            "Please use `distributed.client.ensure_default_client` instead.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
+        return ensure_default_client
+    else:
+        raise AttributeError(f"module {__name__} has no attribute {name}")
