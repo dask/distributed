@@ -3922,6 +3922,7 @@ class Scheduler(SchedulerState, ServerNode):
             "heartbeat_worker": self.heartbeat_worker,
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
+            "get_task_prefix_states": self.get_task_prefix_states,
             "register_scheduler_plugin": self.register_scheduler_plugin,
             "register_worker_plugin": self.register_worker_plugin,
             "unregister_worker_plugin": self.unregister_worker_plugin,
@@ -7242,6 +7243,26 @@ class Scheduler(SchedulerState, ServerNode):
             if isinstance(restrictions, str):
                 restrictions = {restrictions}
             ts._worker_restrictions = set(restrictions)
+
+    def get_task_prefix_states(self, comm=None):
+        with log_errors():
+            state = {}
+
+            for tp in self.task_prefixes.values():
+                active_states = tp.active_states
+                if any(
+                    active_states.get(s)
+                    for s in {"memory", "erred", "released", "processing", "waiting"}
+                ):
+                    state[tp.name] = {
+                        "memory": active_states["memory"],
+                        "erred": active_states["erred"],
+                        "released": active_states["released"],
+                        "processing": active_states["processing"],
+                        "waiting": active_states["waiting"],
+                    }
+
+        return state
 
     def get_task_status(self, comm=None, keys=None):
         parent: SchedulerState = cast(SchedulerState, self)
