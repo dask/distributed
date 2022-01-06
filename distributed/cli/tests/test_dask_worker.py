@@ -283,7 +283,6 @@ def test_num_workers_expands_name(loop):
 
 
 def test_nprocs_deprecation():
-
     runner = CliRunner()
     with pytest.warns(UserWarning, match="nprocs"):
         try:

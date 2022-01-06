@@ -85,7 +85,7 @@ worker processes on each node, each using one thread.  When configuring your
 cluster you may want to use the options to the ``dask-worker`` executable as
 follows::
 
-   $ dask-worker ip:port --nprocs 8 --nthreads 1
+   $ dask-worker ip:port --num-workers 8 --nthreads 1
 
 Note that if you're primarily using NumPy, Pandas, SciPy, Scikit Learn, Numba,
 or other C/Fortran/LLVM/Cython-accelerated libraries then this is not an issue

@@ -1241,7 +1241,7 @@ def cli_keywords(d: dict, cls=None, cmd=None):
         A string with the name of a module, or the module containing a
         click-generated command with a "main" function, or the function itself.
         It may be used to parse a module's custom arguments (i.e., arguments that
-        are not part of Worker class), such as nprocs from dask-worker CLI or
+        are not part of Worker class), such as num-workers from dask-worker CLI or
         enable_nvlink from dask-cuda-worker CLI.
 
     Examples
