@@ -1,5 +1,4 @@
 from contextlib import suppress
-from distutils.version import LooseVersion
 from functools import partial
 
 from .compression import compressions, default_compression
