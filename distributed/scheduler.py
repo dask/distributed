@@ -7246,22 +7246,21 @@ class Scheduler(SchedulerState, ServerNode):
 
     def get_task_prefix_states(self, comm=None):
         with log_errors():
-            state = {
-                "memory": {},
-                "erred": {},
-                "released": {},
-                "processing": {},
-                "waiting": {},
-            }
+            state = {}
 
             for tp in self.task_prefixes.values():
                 active_states = tp.active_states
-                if any(active_states.get(s) for s in state.keys()):
-                    state["memory"][tp.name] = active_states["memory"]
-                    state["erred"][tp.name] = active_states["erred"]
-                    state["released"][tp.name] = active_states["released"]
-                    state["processing"][tp.name] = active_states["processing"]
-                    state["waiting"][tp.name] = active_states["waiting"]
+                if any(
+                    active_states.get(s)
+                    for s in {"memory", "erred", "released", "processing", "waiting"}
+                ):
+                    state[tp.name] = {
+                        "memory": active_states["memory"],
+                        "erred": active_states["erred"],
+                        "released": active_states["released"],
+                        "processing": active_states["processing"],
+                        "waiting": active_states["waiting"],
+                    }
 
         return state
 

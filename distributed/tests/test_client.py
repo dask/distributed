@@ -1279,11 +1279,13 @@ async def test_get_task_prefix_states(c, s, a, b):
     res = s.get_task_prefix_states()
 
     data = {
-        "erred": {"inc": 0},
-        "memory": {"inc": 1},
-        "processing": {"inc": 0},
-        "released": {"inc": 0},
-        "waiting": {"inc": 0},
+        "inc": {
+            "erred": 0,
+            "memory": 1,
+            "processing": 0,
+            "released": 0,
+            "waiting": 0,
+        }
     }
     x = await c.submit(inc, 1)
     assert res == data
@@ -1293,13 +1295,7 @@ async def test_get_task_prefix_states(c, s, a, b):
         await asyncio.sleep(0.01)
 
     res = s.get_task_prefix_states()
-    assert res == {
-        "erred": {},
-        "memory": {},
-        "processing": {},
-        "released": {},
-        "waiting": {},
-    }
+    assert res == {}
 
 
 @gen_cluster(client=True)
