@@ -8,12 +8,7 @@ dependencies:
   - cloudpickle=1.5.0
   - jinja2
   - msgpack-python=0.6.0
-  # There are known issues when running Python and openssl 3 (see
-  # https://bugs.python.org/issue38820).
-  # Openssl 1.1.1 contains a backport to fix unexpected SSL errors being raised
-  # https://github.com/openssl/openssl/pull/11400.
-  # Make sure openssl < 3 is installed as a temporary workaround.
-  - openssl<3
+  - packaging=20.0
   - psutil=5.4.7
   - sortedcontainers=2.0.4
   - tblib=1.6.0
