@@ -4,13 +4,13 @@ import subprocess
 import sys
 import unittest
 import weakref
-from distutils.version import LooseVersion
 from threading import Lock
 from time import sleep
 from urllib.parse import urlparse
 
 import pytest
 import tornado
+from packaging.version import parse as parse_version
 from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
@@ -456,7 +456,8 @@ async def test_scale_up_and_down():
 
 
 @pytest.mark.xfail(
-    sys.version_info >= (3, 8) and LooseVersion(tornado.version) < "6.0.3",
+    sys.version_info >= (3, 8)
+    and parse_version(tornado.version) < parse_version("6.0.3"),
     reason="Known issue with Python 3.8 and Tornado < 6.0.3. "
     "See https://github.com/tornadoweb/tornado/pull/2683.",
     strict=True,
