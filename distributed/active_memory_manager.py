@@ -283,9 +283,13 @@ class ActiveMemoryManagerExtension:
 
         stimulus_id = f"active_memory_manager-{time()}"
         for ws, keys in repl_by_worker.items():
-            self.scheduler.acquire_replicas(ws.address, keys, stimulus_id=stimulus_id)
+            self.scheduler.request_acquire_replicas(
+                ws.address, keys, stimulus_id=stimulus_id
+            )
         for ws, keys in drop_by_worker.items():
-            self.scheduler.remove_replicas(ws.address, keys, stimulus_id=stimulus_id)
+            self.scheduler.request_remove_replicas(
+                ws.address, keys, stimulus_id=stimulus_id
+            )
 
 
 class ActiveMemoryManagerPolicy:

@@ -7920,8 +7920,8 @@ class Scheduler(SchedulerState, ServerNode):
             to_close = self.workers_to_close()
             return len(parent._workers_dv) - len(to_close)
 
-    def acquire_replicas(self, addr: str, keys: list, *, stimulus_id: str):
-        """Asynchronously request a worker to acquire a replica of the listed keys from
+    def request_acquire_replicas(self, addr: str, keys: list, *, stimulus_id: str):
+        """Asynchronously ask a worker to acquire a replica of the listed keys from
         other workers. This is a fire-and-forget operation which offers no feedback for
         success or failure, and is intended for housekeeping and not for computation.
         """
@@ -7943,8 +7943,8 @@ class Scheduler(SchedulerState, ServerNode):
             },
         )
 
-    def remove_replicas(self, addr: str, keys: list, *, stimulus_id: str):
-        """Asynchronously request a worker to discard its replica of the listed keys.
+    def request_remove_replicas(self, addr: str, keys: list, *, stimulus_id: str):
+        """Asynchronously ask a worker to discard its replica of the listed keys.
         This must never be used to destroy the last replica of a key. This is a
         fire-and-forget operation, intended for housekeeping and not for computation.
 
