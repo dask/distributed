@@ -5,9 +5,10 @@ import tempfile
 try:
     import ssl
 except ImportError:
-    ssl = None
+    ssl = None  # type: ignore
 
 import dask
+from dask.widgets import get_template
 
 __all__ = ("Security",)
 
@@ -27,6 +28,11 @@ class Security:
     tls_ciphers : str, optional
         An OpenSSL cipher string of allowed ciphers. If not provided, the
         system defaults will be used.
+    tls_min_version : ssl.TLSVersion, optional
+        The minimum TLS version to support. Defaults to TLS 1.2.
+    tls_max_version : ssl.TLSVersion, optional
+        The maximum TLS version to support. Defaults to the maximum version
+        supported.
     tls_client_cert : str, optional
         Path to a certificate file for the client, encoded in PEM format.
     tls_client_key : str, optional
@@ -53,6 +59,8 @@ class Security:
         "require_encryption",
         "tls_ca_file",
         "tls_ciphers",
+        "tls_min_version",
+        "tls_max_version",
         "tls_client_key",
         "tls_client_cert",
         "tls_scheduler_key",
@@ -70,9 +78,20 @@ class Security:
         if require_encryption is None:
             require_encryption = dask.config.get("distributed.comm.require-encryption")
         if require_encryption is None:
-            require_encryption = not not kwargs
+            require_encryption = bool(kwargs)
         self.require_encryption = require_encryption
         self._set_field(kwargs, "tls_ciphers", "distributed.comm.tls.ciphers")
+        self._set_tls_version_field(
+            kwargs,
+            "tls_min_version",
+            "distributed.comm.tls.min-version",
+            ssl.TLSVersion.TLSv1_2,
+        )
+        self._set_tls_version_field(
+            kwargs,
+            "tls_max_version",
+            "distributed.comm.tls.max-version",
+        )
         self._set_field(kwargs, "tls_ca_file", "distributed.comm.tls.ca-file")
         self._set_field(kwargs, "tls_client_key", "distributed.comm.tls.client.key")
         self._set_field(kwargs, "tls_client_cert", "distributed.comm.tls.client.cert")
@@ -148,30 +167,72 @@ class Security:
 
     def _set_field(self, kwargs, field, config_name):
         if field in kwargs:
-            out = kwargs[field]
+            val = kwargs[field]
         else:
-            out = dask.config.get(config_name)
-        setattr(self, field, out)
+            val = dask.config.get(config_name)
+        setattr(self, field, val)
 
-    def __repr__(self):
+    def _set_tls_version_field(self, kwargs, field, config_name, default=None):
+        if field in kwargs:
+            val = kwargs[field]
+            valid = {None, ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3}
+            if val not in valid:
+                raise ValueError(
+                    f"{field}={val!r} is not supported, expected one of {list(valid)}"
+                )
+            if val is None:
+                val = default
+        else:
+            valid = {
+                None: default,
+                1.2: ssl.TLSVersion.TLSv1_2,
+                1.3: ssl.TLSVersion.TLSv1_3,
+            }
+            val = dask.config.get(config_name)
+            if val in valid:
+                val = valid[val]
+            else:
+                raise ValueError(
+                    f"{config_name}={val!r} is not supported, expected one of {list(valid)}"
+                )
+
+        setattr(self, field, val)
+
+    def _attr_to_dict(self):
         keys = sorted(self.__slots__)
         keys.remove("extra_conn_args")
-        items = []
+
+        attr = {}
+
         for k in keys:
             val = getattr(self, k)
             if val is not None:
                 if isinstance(val, str) and "\n" in val:
-                    items.append((k, "..."))
+                    attr[k] = "Temporary (In-memory)"
+                elif isinstance(val, str):
+                    attr[k] = f"Local ({os.path.abspath(val)})"
                 else:
-                    items.append((k, repr(val)))
-        return "Security(" + ", ".join("%s=%s" % (k, v) for k, v in items) + ")"
+                    attr[k] = val
+
+        return attr
+
+    def __repr__(self):
+        attr = self._attr_to_dict()
+        return (
+            "Security("
+            + ", ".join(f"{key}={value}" for key, value in attr.items())
+            + ")"
+        )
+
+    def _repr_html_(self):
+        return get_template("security.html.j2").render(security=self._attr_to_dict())
 
     def get_tls_config_for_role(self, role):
         """
         Return the TLS configuration for the given role, as a flat dict.
         """
         if role not in {"client", "scheduler", "worker"}:
-            raise ValueError("unknown role %r" % (role,))
+            raise ValueError(f"unknown role {role!r}")
         return {
             "ca_file": self.tls_ca_file,
             "ciphers": self.tls_ciphers,
@@ -189,6 +250,11 @@ class Security:
                 ctx = ssl.create_default_context(purpose=purpose, cadata=ca)
             else:
                 ctx = ssl.create_default_context(purpose=purpose, cafile=ca)
+
+            if self.tls_min_version is not None:
+                ctx.minimum_version = self.tls_min_version
+            if self.tls_max_version is not None:
+                ctx.maximum_version = self.tls_max_version
 
             cert_in_memory = "\n" in cert
             key_in_memory = key is not None and "\n" in key

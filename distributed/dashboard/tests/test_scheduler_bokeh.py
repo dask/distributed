@@ -17,35 +17,39 @@ from dask.core import flatten
 from dask.utils import stringify
 
 from distributed.client import wait
-from distributed.compatibility import MACOS
 from distributed.dashboard import scheduler
 from distributed.dashboard.components.scheduler import (
     AggregateAction,
+    ClusterMemory,
     ComputePerKey,
     CurrentLoad,
     Events,
     MemoryByKey,
-    NBytes,
-    NBytesCluster,
-    NBytesHistogram,
     Occupancy,
     ProcessingHistogram,
     ProfileServer,
     StealingEvents,
     StealingTimeSeries,
     SystemMonitor,
+    SystemTimeseries,
     TaskGraph,
+    TaskGroupGraph,
     TaskProgress,
     TaskStream,
+    WorkerNetworkBandwidth,
+    WorkersMemory,
+    WorkersMemoryHistogram,
     WorkerTable,
 )
 from distributed.dashboard.components.worker import Counters
 from distributed.dashboard.scheduler import applications
+from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.metrics import time
 from distributed.utils import format_dashboard_link
 from distributed.utils_test import dec, div, gen_cluster, get_cert, inc, slowinc
 
-scheduler.PROFILING = False
+# Imported from distributed.dashboard.utils
+scheduler.PROFILING = False  # type: ignore
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
@@ -57,7 +61,7 @@ async def test_simple(c, s, a, b):
 
     http_client = AsyncHTTPClient()
     for suffix in applications:
-        response = await http_client.fetch("http://localhost:%d%s" % (port, suffix))
+        response = await http_client.fetch(f"http://localhost:{port}{suffix}")
         body = response.body.decode()
         assert "bokeh" in body.lower()
         assert not re.search("href=./", body)  # no absolute links
@@ -92,10 +96,8 @@ async def test_counters(c, s, a, b):
     await asyncio.sleep(0.1)
     ss.update()
 
-    start = time()
     while not len(ss.digest_sources["tick-duration"][0].data["x"]):
-        await asyncio.sleep(1)
-        assert time() < start + 5
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)
@@ -103,15 +105,14 @@ async def test_stealing_events(c, s, a, b):
     se = StealingEvents(s)
 
     futures = c.map(
-        slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
+        slowinc, range(10), delay=0.1, workers=a.address, allow_other_workers=True
     )
 
-    while not b.tasks:  # will steal soon
-        await asyncio.sleep(0.01)
-
+    await wait(futures)
     se.update()
-
     assert len(first(se.source.data.values()))
+    assert b.tasks
+    assert sum(se.source.data["count"]) >= len(b.tasks)
 
 
 @gen_cluster(client=True)
@@ -184,7 +185,7 @@ async def test_task_stream_clear_interval(c, s, a, b):
 
     await wait(c.map(inc, range(10)))
     ts.update()
-    await asyncio.sleep(0.010)
+    await asyncio.sleep(0.01)
     await wait(c.map(dec, range(10)))
     ts.update()
 
@@ -192,7 +193,7 @@ async def test_task_stream_clear_interval(c, s, a, b):
     assert ts.source.data["name"].count("inc") == 10
     assert ts.source.data["name"].count("dec") == 10
 
-    await asyncio.sleep(0.300)
+    await asyncio.sleep(0.3)
     await wait(c.map(inc, range(10, 20)))
     ts.update()
 
@@ -276,8 +277,8 @@ async def test_ProcessingHistogram(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_NBytes(c, s, a, b):
-    cl = NBytes(s)
+async def test_WorkersMemory(c, s, a, b):
+    cl = WorkersMemory(s)
 
     futures = c.map(slowinc, range(10), delay=0.001)
     await wait(futures)
@@ -293,8 +294,8 @@ async def test_NBytes(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_NBytesCluster(c, s, a, b):
-    cl = NBytesCluster(s)
+async def test_ClusterMemory(c, s, a, b):
+    cl = ClusterMemory(s)
 
     futures = c.map(slowinc, range(10), delay=0.001)
     await wait(futures)
@@ -302,7 +303,7 @@ async def test_NBytesCluster(c, s, a, b):
     cl.update()
     d = dict(cl.source.data)
     llens = {len(l) for l in d.values()}
-    # Unlike NBytes, empty rects here aren't pruned away.
+    # Unlike WorkersMemory, empty rects here aren't pruned away.
     assert llens == {4}
     # There is definitely going to be managed_in_memory and
     # unmanaged_old; there may be unmanaged_new. There won't be managed_spilled.
@@ -311,8 +312,8 @@ async def test_NBytesCluster(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_NBytesHistogram(c, s, a, b):
-    nh = NBytesHistogram(s)
+async def test_WorkersMemoryHistogram(c, s, a, b):
+    nh = WorkersMemoryHistogram(s)
     nh.update()
     assert any(nh.source.data["top"] != 0)
 
@@ -480,6 +481,109 @@ async def test_WorkerTable_with_memory_limit_as_0(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_WorkerNetworkBandwidth(c, s, a, b):
+    nb = WorkerNetworkBandwidth(s)
+    nb.update()
+
+    assert all(len(v) == 2 for v in nb.source.data.values())
+
+    assert nb.source.data["y_read"] == [0.75, 1.85]
+    assert nb.source.data["y_write"] == [0.25, 1.35]
+
+
+@gen_cluster(client=True)
+async def test_WorkerNetworkBandwidth_metrics(c, s, a, b):
+    # Disable system monitor periodic callback to allow us to manually control
+    # when it is called below
+    a.periodic_callbacks["monitor"].stop()
+    b.periodic_callbacks["monitor"].stop()
+
+    # Update worker system monitors and send updated metrics to the scheduler
+    a.monitor.update()
+    b.monitor.update()
+    await asyncio.gather(a.heartbeat(), b.heartbeat())
+
+    nb = WorkerNetworkBandwidth(s)
+    nb.update()
+
+    for idx, ws in enumerate(s.workers.values()):
+        assert ws.metrics["read_bytes"] == nb.source.data["x_read"][idx]
+        assert ws.metrics["write_bytes"] == nb.source.data["x_write"][idx]
+        assert ws.metrics["read_bytes_disk"] == nb.source.data["x_read_disk"][idx]
+        assert ws.metrics["write_bytes_disk"] == nb.source.data["x_write_disk"][idx]
+
+
+@gen_cluster(client=True)
+async def test_SystemTimeseries(c, s, a, b):
+    # Disable system monitor periodic callback to allow us to manually control
+    # when it is called below
+    a.periodic_callbacks["monitor"].stop()
+    b.periodic_callbacks["monitor"].stop()
+
+    # Update worker system monitors and send updated metrics to the scheduler
+    a.monitor.update()
+    b.monitor.update()
+    await asyncio.gather(a.heartbeat(), b.heartbeat())
+
+    systs = SystemTimeseries(s)
+    workers = s.workers.values()
+
+    assert all(len(v) == 1 for v in systs.source.data.values())
+    assert systs.source.data["read_bytes"][0] == sum(
+        ws.metrics["read_bytes"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["write_bytes"][0] == sum(
+        ws.metrics["write_bytes"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["cpu"][0] == sum(
+        ws.metrics["cpu"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["memory"][0] == sum(
+        ws.metrics["memory"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["read_bytes_disk"][0] == sum(
+        ws.metrics["read_bytes_disk"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["write_bytes_disk"][0] == sum(
+        ws.metrics["write_bytes_disk"] for ws in workers
+    ) / len(workers)
+    assert (
+        systs.source.data["time"][0]
+        == sum(ws.metrics["time"] for ws in workers) / len(workers) * 1000
+    )
+
+    # Update worker system monitors and send updated metrics to the scheduler
+    a.monitor.update()
+    b.monitor.update()
+    await asyncio.gather(a.heartbeat(), b.heartbeat())
+    systs.update()
+
+    assert all(len(v) == 2 for v in systs.source.data.values())
+    assert systs.source.data["read_bytes"][1] == sum(
+        ws.metrics["read_bytes"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["write_bytes"][1] == sum(
+        ws.metrics["write_bytes"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["cpu"][1] == sum(
+        ws.metrics["cpu"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["memory"][1] == sum(
+        ws.metrics["memory"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["read_bytes_disk"][1] == sum(
+        ws.metrics["read_bytes_disk"] for ws in workers
+    ) / len(workers)
+    assert systs.source.data["write_bytes_disk"][1] == sum(
+        ws.metrics["write_bytes_disk"] for ws in workers
+    ) / len(workers)
+    assert (
+        systs.source.data["time"][1]
+        == sum(ws.metrics["time"] for ws in workers) / len(workers) * 1000
+    )
+
+
+@gen_cluster(client=True)
 async def test_TaskGraph(c, s, a, b):
     gp = TaskGraph(s)
     futures = c.map(inc, range(5))
@@ -610,6 +714,68 @@ async def test_TaskGraph_order(c, s, a, b):
     assert gp.node_source.data["state"][gp.layout.index[y.key]] == "erred"
 
 
+@gen_cluster(client=True)
+async def test_TaskGroupGraph(c, s, a, b):
+    tgg = TaskGroupGraph(s)
+    futures = c.map(inc, range(10))
+    await wait(futures)
+
+    tgg.update()
+    assert all(len(L) == 1 for L in tgg.nodes_source.data.values())
+    assert tgg.nodes_source.data["name"] == ["inc"]
+    assert tgg.nodes_source.data["tot_tasks"] == [10]
+
+    assert all(len(L) == 0 for L in tgg.arrows_source.data.values())
+
+    futures2 = c.map(dec, range(5))
+    await wait(futures2)
+
+    tgg.update()
+    assert all(len(L) == 2 for L in tgg.nodes_source.data.values())
+    assert tgg.nodes_source.data["name"] == ["inc", "dec"]
+    assert tgg.nodes_source.data["tot_tasks"] == [10, 5]
+
+    del futures, futures2
+    while s.task_groups:
+        await asyncio.sleep(0.01)
+
+    tgg.update()
+    assert not any(tgg.nodes_source.data.values())
+
+
+@gen_cluster(client=True)
+async def test_TaskGroupGraph_arrows(c, s, a, b):
+    tgg = TaskGroupGraph(s)
+
+    futures = c.map(inc, range(10))
+    await wait(futures)
+
+    tgg.update()
+    assert all(len(L) == 1 for L in tgg.nodes_source.data.values())
+    assert tgg.nodes_source.data["name"] == ["inc"]
+    assert tgg.nodes_source.data["tot_tasks"] == [10]
+
+    assert all(len(L) == 0 for L in tgg.arrows_source.data.values())
+
+    futures2 = c.map(dec, futures)
+    await wait(futures2)
+
+    tgg.update()
+    assert all(len(L) == 2 for L in tgg.nodes_source.data.values())
+    assert tgg.nodes_source.data["name"] == ["inc", "dec"]
+    assert tgg.nodes_source.data["tot_tasks"] == [10, 10]
+
+    assert all(len(L) == 1 for L in tgg.arrows_source.data.values())
+
+    del futures, futures2
+    while s.task_groups:
+        await asyncio.sleep(0.01)
+
+    tgg.update()  # for some reason after deleting the futures the tgg.node_source.data.values are not clear.
+    assert not any(tgg.nodes_source.data.values())
+    assert not any(tgg.arrows_source.data.values())
+
+
 @gen_cluster(
     client=True,
     config={
@@ -693,7 +859,7 @@ async def test_lots_of_tasks(c, s, a, b):
     futures = c.map(toolz.identity, range(100))
     await wait(futures)
 
-    tsp = [p for p in s.plugins if "taskstream" in type(p).__name__.lower()][0]
+    tsp = s.plugins[TaskStreamPlugin.name]
     assert len(tsp.buffer) == 10
     ts.update()
     assert len(ts.source.data["start"]) == 10
@@ -786,7 +952,6 @@ async def test_aggregate_action(c, s, a, b):
     assert ("compute") in mbk.action_source.data["names"]
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 async def test_compute_per_key(c, s, a, b):
     mbk = ComputePerKey(s)

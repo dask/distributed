@@ -175,10 +175,10 @@ def main(
             version=distributed.__version__
         )
     )
-    print("Worker nodes: {n}".format(n=len(hostnames)))
+    print(f"Worker nodes: {len(hostnames)}")
     for i, host in enumerate(hostnames):
-        print("  {num}: {host}".format(num=i, host=host))
-    print("\nscheduler node: {addr}:{port}".format(addr=scheduler, port=scheduler_port))
+        print(f"  {i}: {host}")
+    print(f"\nscheduler node: {scheduler}:{scheduler_port}")
     print("---------------------------------------------------------------\n\n")
 
     # Monitor the output of remote processes.  This blocks until the user issues a KeyboardInterrupt.

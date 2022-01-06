@@ -5,14 +5,15 @@ import warnings
 from asyncio import TimeoutError
 from collections import defaultdict, deque
 
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import PeriodicCallback
 
 import dask
+from dask.utils import parse_timedelta
 
 from distributed.utils_comm import retry_operation
 
 from .metrics import time
-from .utils import log_errors, parse_timedelta, sync, thread_state
+from .utils import SyncMethodMixin, log_errors
 from .worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)
@@ -268,7 +269,7 @@ class SemaphoreExtension:
                     del metric_dict[name]
 
 
-class Semaphore:
+class Semaphore(SyncMethodMixin):
     """Semaphore
 
     This `semaphore <https://en.wikipedia.org/wiki/Semaphore_(programming)>`_
@@ -409,10 +410,6 @@ class Semaphore:
         # PC uses the correct event loop.
         self.loop.add_callback(pc.start)
 
-    @property
-    def asynchronous(self):
-        return self.loop is IOLoop.current()
-
     async def _register(self):
         await retry_operation(
             self.scheduler.semaphore_register,
@@ -431,22 +428,6 @@ class Semaphore:
             return self
 
         return create_semaphore().__await__()
-
-    def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
-        callback_timeout = parse_timedelta(callback_timeout)
-        if (
-            asynchronous
-            or self.asynchronous
-            or getattr(thread_state, "asynchronous", False)
-        ):
-            future = func(*args, **kwargs)
-            if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
-            return future
-        else:
-            return sync(
-                self.loop, func, *args, callback_timeout=callback_timeout, **kwargs
-            )
 
     async def _refresh_leases(self):
         if self.refresh_leases and self._leases:

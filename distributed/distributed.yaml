@@ -28,7 +28,7 @@ distributed:
     unknown-task-duration: 500ms  # Default duration for all tasks with unknown durations ("15m", "2h")
     default-task-durations:  # How long we expect function names to run ("1h", "1s") (helps for long tasks)
       rechunk-split: 1us
-      shuffle-split: 1us
+      split-shuffle: 1us
     validate: False         # Check scheduler state at every step for debugging
     dashboard:
       status:
@@ -60,6 +60,18 @@ distributed:
       - dask
       - distributed
 
+    active-memory-manager:
+      # Set to true to auto-start the Active Memory Manager on Scheduler start; if false
+      # you'll have to either manually start it with client.amm.start() or run it once
+      # with client.amm.run_once().
+      start: false
+      # Once started, run the AMM cycle every <interval>
+      interval: 2s
+      policies:
+        # Policies that should be executed at every cycle. Any additional keys in each
+        # object are passed as keyword arguments to the policy constructor.
+        - class: distributed.active_memory_manager.ReduceReplicas
+
   worker:
     blocked-handlers: []
     multiprocessing-method: spawn
@@ -88,7 +100,43 @@ distributed:
       # system) that is not accounted for by the dask keys stored on the worker, ignore
       # it for this long before considering it in non-critical memory measures.
       # This should be set to be longer than the duration of most dask tasks.
-      recent_to_old_time: 30s
+      recent-to-old-time: 30s
+
+      rebalance:
+        # Memory measure to rebalance upon. Possible choices are:
+        # process
+        #     Total process memory, as measured by the OS.
+        # optimistic
+        #     Managed by dask (instantaneous) + unmanaged (without any increases
+        #     happened in the last <distributed.worker.memory.recent-to-old-time>).
+        #     Recommended for use on CPython with large (2MiB+) numpy-based data chunks.
+        # managed_in_memory
+        #     Only consider the data allocated by dask in RAM. Recommended if RAM is not
+        #     released in a timely fashion back to the OS after the Python objects are
+        #     dereferenced, but remains available for reuse by PyMalloc.
+        #
+        #     If this is your problem on Linux, you should alternatively consider
+        #     setting the MALLOC_TRIM_THRESHOLD_ environment variable (note the final
+        #     underscore) to a low value; refer to the mallopt man page and to the
+        #     comments about M_TRIM_THRESHOLD on
+        #     https://sourceware.org/git/?p=glibc.git;a=blob;f=malloc/malloc.c
+        # managed
+        #     Only consider data allocated by dask, including that spilled to disk.
+        #     Recommended if disk occupation of the spill file is an issue.
+        measure: optimistic
+        # Fraction of worker process memory at which we start potentially sending
+        # data to other workers. Ignored when max_memory is not set.
+        sender-min: 0.30
+        # Fraction of worker process memory at which we stop potentially accepting
+        # data from other workers. Ignored when max_memory is not set.
+        recipient-max: 0.60
+        # Fraction of worker process memory, around the cluster mean, where a worker is
+        # neither a sender nor a recipient of data during a rebalance operation. E.g. if
+        # the mean cluster occupation is 50%, sender-recipient-gap=0.10 means that only
+        # nodes above 55% will donate data and only nodes below 45% will receive them.
+        # This helps avoid data from bouncing around the cluster repeatedly.
+        # Ignored when max_memory is not set.
+        sender-recipient-gap: 0.10
 
       # Fractions of worker process memory at which we take action to avoid memory
       # blowup. Set any of the values to False to turn off the behavior entirely.
@@ -106,6 +154,10 @@ distributed:
   nanny:
     preload: []             # Run custom modules with Nanny
     preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.html
+    environ:
+      MALLOC_TRIM_THRESHOLD_: 65536
+      OMP_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
 
   client:
     heartbeat: 5s  # Interval between client heartbeats
@@ -129,29 +181,41 @@ distributed:
          min: 1s  # the first non-zero delay between re-tries
          max: 20s  # the maximum delay between re-tries
     compression: auto
+    shard: 64MiB
     offload: 10MiB # Size after which we choose to offload serialization to another thread
     default-scheme: tcp
     socket-backlog: 2048
     recent-messages-log-length: 0  # number of messages to keep for debugging
+    ucx:
+      cuda-copy: null  # enable cuda-copy
+      tcp: null  # enable tcp
+      nvlink: null  # enable cuda_ipc
+      infiniband: null  # enable Infiniband
+      rdmacm: null  # enable RDMACM
+      net-devices: null  # define what interface to use for UCX comm
+      reuse-endpoints: null  # enable endpoint reuse
+      create-cuda-context: null  # create CUDA context before UCX initialization
 
     zstd:
       level: 3      # Compression level, between 1 and 22.
       threads: 0    # Threads to use. 0 for single-threaded, -1 to infer from cpu count.
 
     timeouts:
-      connect: 10s          # time before connecting fails
+      connect: 30s          # time before connecting fails
       tcp: 30s              # time before calling an unresponsive connection dead
 
     require-encryption: null # Whether to require encryption on non-local comms
 
     tls:
-      ciphers: null   # Allowed ciphers, specified as an OpenSSL cipher string.
-      ca-file: null   # Path to a CA file, in pem format, optional
+      ciphers: null     # Allowed ciphers, specified as an OpenSSL cipher string.
+      min-version: 1.2  # The minimum TLS version supported.
+      max-version: null # The maximum TLS version supported.
+      ca-file: null     # Path to a CA file, in pem format, optional
       scheduler:
-        cert: null    # Path to certificate file for scheduler.
-        key: null     # Path to key file for scheduler. Alternatively, the key
-                      # can be appended to the cert file above, and this field
-                      # left blank.
+        cert: null      # Path to certificate file for scheduler.
+        key: null       # Path to key file for scheduler. Alternatively, the key
+                        # can be appended to the cert file above, and this field
+                        # left blank.
       worker:
         key: null
         cert: null
@@ -159,6 +223,24 @@ distributed:
         key: null
         cert: null
 
+    tcp:
+      backend: tornado  # The backend to use for TCP, one of {tornado, asyncio}
+
+    websockets:
+      shard: 8MiB
+
+  diagnostics:
+    nvml: True
+    computations:
+      max-history: 100
+      ignore-modules:
+        - distributed
+        - dask
+        - xarray
+        - cudf
+        - cuml
+        - prefect
+        - xgboost
 
   ###################
   # Bokeh dashboard #
@@ -187,13 +269,5 @@ distributed:
     system-monitor:
       interval: 500ms
     event-loop: tornado
-rmm:
-  pool-size: null
-ucx:
-  cuda_copy: False  # enable cuda-copy
-  tcp: False  # enable tcp
-  nvlink: False  # enable cuda_ipc
-  infiniband: False # enable Infiniband
-  rdmacm: False # enable RDMACM
-  net-devices: null  # define what interface to use for UCX comm
-  reuse-endpoints: null  # enable endpoint reuse
+  rmm:
+    pool-size: null

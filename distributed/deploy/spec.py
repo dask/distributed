@@ -1,27 +1,25 @@
+from __future__ import annotations
+
 import asyncio
 import atexit
 import copy
 import logging
 import math
-import warnings
 import weakref
 from contextlib import suppress
+from inspect import isawaitable
+from typing import ClassVar
 
 from tornado import gen
 
 import dask
+from dask.utils import parse_bytes, parse_timedelta
+from dask.widgets import get_template
 
 from ..core import CommClosedError, Status, rpc
 from ..scheduler import Scheduler
 from ..security import Security
-from ..utils import (
-    LoopRunner,
-    TimeoutError,
-    import_term,
-    parse_bytes,
-    parse_timedelta,
-    silence_logging,
-)
+from ..utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
 from .adaptive import Adaptive
 from .cluster import Cluster
 
@@ -43,19 +41,9 @@ class ProcessInterface:
 
     @status.setter
     def status(self, new_status):
-        if isinstance(new_status, Status):
-            self._status = new_status
-        elif isinstance(new_status, str) or new_status is None:
-            warnings.warn(
-                f"Since distributed 2.19 `.status` is now an Enum, please assign `Status.{new_status}`",
-                PendingDeprecationWarning,
-                stacklevel=1,
-            )
-            corresponding_enum_variants = [s for s in Status if s.value == new_status]
-            assert len(corresponding_enum_variants) == 1
-            self._status = corresponding_enum_variants[0]
-        else:
-            raise TypeError(f"expected Status or str, got {new_status}")
+        if not isinstance(new_status, Status):
+            raise TypeError(f"Expected Status; got {new_status!r}")
+        self._status = new_status
 
     def __init__(self, scheduler=None, name=None):
         self.address = getattr(self, "address", None)
@@ -102,7 +90,10 @@ class ProcessInterface:
         await self._event_finished.wait()
 
     def __repr__(self):
-        return "<%s: status=%s>" % (type(self).__name__, self.status)
+        return f"<{dask.utils.typename(type(self))}: status={self.status.name}>"
+
+    def _repr_html_(self):
+        return get_template("process_interface.html.j2").render(process_interface=self)
 
     async def __aenter__(self):
         await self
@@ -110,19 +101,6 @@ class ProcessInterface:
 
     async def __aexit__(self, *args, **kwargs):
         await self.close()
-
-
-class NoOpAwaitable:
-    """An awaitable object that always returns None.
-
-    Useful to return from a method that can be called in both asynchronous and
-    synchronous contexts"""
-
-    def __await__(self):
-        async def f():
-            return None
-
-        return f().__await__()
 
 
 class SpecCluster(Cluster):
@@ -233,7 +211,7 @@ class SpecCluster(Cluster):
     ["0-0", "0-1", "0-2", "1-0", "1-1"]
     """
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[SpecCluster]] = weakref.WeakSet()
 
     def __init__(
         self,
@@ -246,6 +224,7 @@ class SpecCluster(Cluster):
         silence_logs=False,
         name=None,
         shutdown_on_close=True,
+        scheduler_sync_interval=1,
     ):
         self._created = weakref.WeakSet()
 
@@ -264,9 +243,6 @@ class SpecCluster(Cluster):
                 level=silence_logs, root="bokeh"
             )
 
-        self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
-        self.loop = self._loop_runner.loop
-
         self._instances.add(self)
         self._correct_state_waiting = None
         self._name = name or type(self).__name__
@@ -274,7 +250,9 @@ class SpecCluster(Cluster):
 
         super().__init__(
             asynchronous=asynchronous,
+            loop=loop,
             name=name,
+            scheduler_sync_interval=scheduler_sync_interval,
         )
 
         if not self.asynchronous:
@@ -333,7 +311,6 @@ class SpecCluster(Cluster):
         async with self._lock:
             self._correct_state_waiting = None
 
-            pre = list(set(self.workers))
             to_close = set(self.workers) - set(self.worker_spec)
             if to_close:
                 if self.scheduler.status == Status.running:
@@ -413,7 +390,15 @@ class SpecCluster(Cluster):
             return
         if self.status == Status.running or self.status == Status.failed:
             self.status = Status.closing
-            self.scale(0)
+
+            # Need to call stop here before we close all servers to avoid having
+            # dangling tasks in the ioloop
+            with suppress(AttributeError):
+                self._adaptive.stop()
+
+            f = self.scale(0)
+            if isawaitable(f):
+                await f
             await self._correct_state()
             for future in self._futures:
                 await future
@@ -453,15 +438,14 @@ class SpecCluster(Cluster):
         for name in ["nthreads", "ncores", "threads", "cores"]:
             with suppress(KeyError):
                 return self.new_spec["options"][name]
-
-        if not self.new_spec:
-            raise ValueError("To scale by cores= you must specify cores per worker")
+        assert False, "unreachable"
 
     def _memory_per_worker(self) -> int:
         """Return the memory limit per worker for new workers"""
         if not self.new_spec:
             raise ValueError(
-                "to scale by memory= your worker definition must include a memory_limit definition"
+                "to scale by memory= your worker definition must include a "
+                "memory_limit definition"
             )
 
         for name in ["memory_limit", "memory"]:
@@ -469,7 +453,8 @@ class SpecCluster(Cluster):
                 return parse_bytes(self.new_spec["options"][name])
 
         raise ValueError(
-            "to use scale(memory=...) your worker definition must include a memory_limit definition"
+            "to use scale(memory=...) your worker definition must include a "
+            "memory_limit definition"
         )
 
     def scale(self, n=0, memory=None, cores=None):
@@ -526,7 +511,7 @@ class SpecCluster(Cluster):
 
     @property
     def _supports_scaling(self):
-        return not not self.new_spec
+        return bool(self.new_spec)
 
     async def scale_down(self, workers):
         # We may have groups, if so, map worker addresses to job names

@@ -4,12 +4,7 @@ import socket
 import sys
 import time
 import traceback
-
-try:
-    from queue import Queue
-except ImportError:  # Python 2.7 fix
-    from Queue import Queue
-
+from queue import Queue
 from threading import Thread
 
 from tlz import merge
@@ -51,8 +46,8 @@ def async_ssh(cmd_dict):
                 port=cmd_dict["ssh_port"],
                 key_filename=cmd_dict["ssh_private_key"],
                 compress=True,
-                timeout=20,
-                banner_timeout=20,
+                timeout=30,
+                banner_timeout=30,
             )  # Helps prevent timeouts when many concurrent ssh connections are opened.
             # Connection successful, break out of while loop
             break
@@ -100,7 +95,7 @@ def async_ssh(cmd_dict):
             print(
                 "               "
                 + bcolors.FAIL
-                + "Retrying... (attempt {n}/{total})".format(n=retries, total=3)
+                + f"Retrying... (attempt {retries}/3)"
                 + bcolors.ENDC
             )
 
@@ -152,7 +147,7 @@ def async_ssh(cmd_dict):
                 cmd_dict["output_queue"].put(
                     "[ {label} ] : ".format(label=cmd_dict["label"])
                     + bcolors.FAIL
-                    + "{output}".format(output=line)
+                    + line
                     + bcolors.ENDC
                 )
                 line = stderr.readline()
@@ -215,18 +210,14 @@ def start_scheduler(
 
     # Optionally re-direct stdout and stderr to a logfile
     if logdir is not None:
-        cmd = "mkdir -p {logdir} && ".format(logdir=logdir) + cmd
+        cmd = f"mkdir -p {logdir} && {cmd}"
         cmd += "&> {logdir}/dask_scheduler_{addr}:{port}.log".format(
             addr=addr, port=port, logdir=logdir
         )
 
     # Format output labels we can prepend to each line of output, and create
     # a 'status' key to keep track of jobs that terminate prematurely.
-    label = (
-        bcolors.BOLD
-        + "scheduler {addr}:{port}".format(addr=addr, port=port)
-        + bcolors.ENDC
-    )
+    label = f"{bcolors.BOLD}scheduler {addr}:{port}{bcolors.ENDC}"
 
     # Create a command dictionary, which contains everything we need to run and
     # interact with this command.
@@ -309,12 +300,12 @@ def start_worker(
 
     # Optionally redirect stdout and stderr to a logfile
     if logdir is not None:
-        cmd = "mkdir -p {logdir} && ".format(logdir=logdir) + cmd
+        cmd = f"mkdir -p {logdir} && {cmd}"
         cmd += "&> {logdir}/dask_scheduler_{addr}.log".format(
             addr=worker_addr, logdir=logdir
         )
 
-    label = "worker {addr}".format(addr=worker_addr)
+    label = f"worker {worker_addr}"
 
     # Create a command dictionary, which contains everything we need to run and
     # interact with this command.

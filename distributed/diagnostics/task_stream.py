@@ -2,9 +2,10 @@ import logging
 from collections import deque
 
 import dask
+from dask.utils import format_time, parse_timedelta
 
 from ..metrics import time
-from ..utils import format_time, key_split, parse_timedelta
+from ..utils import key_split
 from .plugin import SchedulerPlugin
 from .progress_stream import color_of
 
@@ -12,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 class TaskStreamPlugin(SchedulerPlugin):
+    name = "task-stream"
+
     def __init__(self, scheduler, maxlen=None):
         if maxlen is None:
             maxlen = max(
@@ -24,12 +27,14 @@ class TaskStreamPlugin(SchedulerPlugin):
             )
         self.buffer = deque(maxlen=maxlen)
         self.scheduler = scheduler
-        scheduler.add_plugin(self)
         self.index = 0
 
     def transition(self, key, start, finish, *args, **kwargs):
         if start == "processing":
             if key not in self.scheduler.tasks:
+                return
+            if not kwargs.get("startstops"):
+                # Other methods require `kwargs` to have a non-empty list of `startstops`
                 return
             kwargs["key"] = key
             if finish == "memory" or finish == "erred":

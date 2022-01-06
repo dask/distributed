@@ -2,7 +2,6 @@ from time import sleep
 
 from distributed import Client
 from distributed.metrics import time
-from distributed.utils_test import loop  # noqa: F401
 from distributed.utils_test import (
     get_cert,
     new_config_file,

@@ -4,8 +4,10 @@ import weakref
 from tlz import merge
 from tornado import gen
 
+from dask.utils import parse_timedelta
+
 from .metrics import time
-from .utils import TimeoutError, parse_timedelta, sync
+from .utils import TimeoutError, sync
 
 
 @gen.coroutine
@@ -126,6 +128,10 @@ class ClientExecutor(cf.Executor):
 
         fs = self._client.map(fn, *iterables, **self._kwargs)
 
+        # Below iterator relies on fs being an iterator itself, and not just an iterable
+        # (such as a list), in order to cancel remaining futures
+        fs = iter(fs)
+
         # Yield must be hidden in closure so that the tasks are submitted
         # before the first iterator value is required.
         def result_iterator():
@@ -141,8 +147,7 @@ class ClientExecutor(cf.Executor):
                         yield future.result()
             finally:
                 remaining = list(fs)
-                for future in remaining:
-                    self._futures.add(future)
+                self._futures.update(remaining)
                 self._client.cancel(remaining)
 
         return result_iterator()

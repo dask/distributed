@@ -7,7 +7,6 @@ pytest.importorskip("paramiko")
 from distributed import Client
 from distributed.deploy.old_ssh import SSHCluster
 from distributed.metrics import time
-from distributed.utils_test import loop  # noqa: F401
 
 
 @pytest.mark.avoid_ci

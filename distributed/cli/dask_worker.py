@@ -97,7 +97,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--listen-address",
     type=str,
     default=None,
-    help="The address to which the worker binds. Example: tcp://0.0.0.0:9000",
+    help="The address to which the worker binds. Example: tcp://0.0.0.0:9000 or tcp://:9000 for IPv4+IPv6",
 )
 @click.option(
     "--contact-address",
@@ -265,7 +265,7 @@ def main(
     dashboard_address,
     worker_class,
     preload_nanny,
-    **kwargs
+    **kwargs,
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
     gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)
@@ -339,6 +339,9 @@ def main(
     try:
         if listen_address:
             (host, worker_port) = get_address_host_port(listen_address, strict=True)
+            if ":" in host:
+                # IPv6 -- bracket to pass as user args
+                host = f"[{host}]"
 
         if contact_address:
             # we only need this to verify it is getting parsed
@@ -419,7 +422,7 @@ def main(
             name=name
             if nprocs == 1 or name is None or name == ""
             else str(name) + "-" + str(i),
-            **kwargs
+            **kwargs,
         )
         for i in range(nprocs)
     ]
@@ -427,7 +430,7 @@ def main(
     async def close_all():
         # Unregister all workers from scheduler
         if nanny:
-            await asyncio.gather(*[n.close(timeout=2) for n in nannies])
+            await asyncio.gather(*(n.close(timeout=2) for n in nannies))
 
     signal_fired = False
 
@@ -440,7 +443,7 @@ def main(
 
     async def run():
         await asyncio.gather(*nannies)
-        await asyncio.gather(*[n.finished() for n in nannies])
+        await asyncio.gather(*(n.finished() for n in nannies))
 
     install_signal_handlers(loop, cleanup=on_signal)
 

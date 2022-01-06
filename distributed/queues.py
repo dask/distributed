@@ -3,10 +3,9 @@ import logging
 import uuid
 from collections import defaultdict
 
-from dask.utils import stringify
+from dask.utils import parse_timedelta, stringify
 
 from .client import Client, Future
-from .utils import parse_timedelta, sync, thread_state
 from .worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)
@@ -46,7 +45,7 @@ class QueueExtension:
         self.scheduler.extensions["queues"] = self
 
     def create(self, comm=None, name=None, client=None, maxsize=0):
-        logger.debug("Queue name: {}".format(name))
+        logger.debug(f"Queue name: {name}")
         if name not in self.queues:
             self.queues[name] = asyncio.Queue(maxsize=maxsize)
             self.client_refcount[name] = 1
@@ -141,7 +140,7 @@ class Queue:
 
     .. warning::
 
-       This object is experimental and has known issues in Python 2
+       This object is experimental
 
     Parameters
     ----------
@@ -175,33 +174,26 @@ class Queue:
             # Initialise new client
             self.client = get_worker().client
         self.name = name or "queue-" + uuid.uuid4().hex
-        self._event_started = asyncio.Event()
-        if self.client.asynchronous or getattr(
-            thread_state, "on_event_loop_thread", False
-        ):
+        self.maxsize = maxsize
 
-            async def _create_queue():
-                await self.client.scheduler.queue_create(
-                    name=self.name, maxsize=maxsize
-                )
-                self._event_started.set()
-
-            self.client.loop.add_callback(_create_queue)
+        if self.client.asynchronous:
+            self._started = asyncio.ensure_future(self._start())
         else:
-            sync(
-                self.client.loop,
-                self.client.scheduler.queue_create,
-                name=self.name,
-                maxsize=maxsize,
-            )
-            self._event_started.set()
+            self.client.sync(self._start)
+
+    async def _start(self):
+        await self.client.scheduler.queue_create(name=self.name, maxsize=self.maxsize)
+        return self
 
     def __await__(self):
-        async def _():
-            await self._event_started.wait()
-            return self
+        if hasattr(self, "_started"):
+            return self._started.__await__()
+        else:
 
-        return _().__await__()
+            async def _():
+                return self
+
+            return _().__await__()
 
     async def _put(self, value, timeout=None):
         if isinstance(value, Future):

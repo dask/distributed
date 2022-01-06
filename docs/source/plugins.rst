@@ -75,7 +75,7 @@ the scheduler as so:
        scheduler.add_plugin(plugin)
 
 Worker Plugins
-=================
+==============
 
 :class:`distributed.diagnostics.plugin.WorkerPlugin` provides a base class
 for creating your own worker plugins. In addition, Dask provides some
@@ -91,3 +91,17 @@ Built-In Worker Plugins
 
 .. autoclass:: distributed.diagnostics.plugin.PipInstall
 .. autoclass:: distributed.diagnostics.plugin.UploadFile
+
+
+Nanny Plugins
+=============
+
+.. autoclass:: distributed.diagnostics.plugin.NannyPlugin
+   :members:
+
+
+Built-In Nanny Plugins
+----------------------
+
+.. autoclass:: distributed.diagnostics.plugin.Environ
+.. autoclass:: distributed.diagnostics.plugin.UploadDirectory

@@ -4,6 +4,8 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
+from dask.utils import tmpfile
+
 from distributed.protocol import (
     decompress,
     deserialize,
@@ -18,7 +20,7 @@ from distributed.protocol.numpy import itemsize
 from distributed.protocol.pickle import HIGHEST_PROTOCOL
 from distributed.protocol.utils import BIG_BYTES_SHARD_SIZE
 from distributed.system import MEMORY_LIMIT
-from distributed.utils import ensure_bytes, nbytes, tmpfile
+from distributed.utils import ensure_bytes, nbytes
 from distributed.utils_test import gen_cluster
 
 
@@ -185,11 +187,13 @@ def test_dumps_serialize_numpy_large():
     frames = dumps([to_serialize(x)])
     dtype, shape = x.dtype, x.shape
     checksum = crc32(x)
-    del x
     [y] = loads(frames)
 
     assert (y.dtype, y.shape) == (dtype, shape)
     assert crc32(y) == checksum, "Arrays are unequal"
+
+    x[:] = 2  # shared buffer; serialization is zero-copy
+    assert (x == y).all(), "Data was copied"
 
 
 @pytest.mark.parametrize(
