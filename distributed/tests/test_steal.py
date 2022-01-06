@@ -13,7 +13,7 @@ from tlz import concat, sliding_window
 
 import dask
 
-from distributed import Nanny, Worker, wait, worker_client
+from distributed import Lock, Nanny, Worker, wait, worker_client
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.config import config
 from distributed.metrics import time
@@ -1199,10 +1199,7 @@ async def test_correct_bad_time_estimate(c, s, *workers):
 async def test_steal_stimulus_id_unique(c, s, *workers):
     steal = s.extensions["stealing"]
     num_futs = 1_000
-    from distributed import Lock
-
-    lock = Lock()
-    async with lock:
+    async with Lock() as lock:
 
         def blocked(x, lock):
             lock.acquire()
@@ -1223,10 +1220,8 @@ async def test_steal_stimulus_id_unique(c, s, *workers):
         # chance of duplicates if the uniqueness is not guaranteed.
         for ts in tasks:
             steal.move_task_request(ts, w0, w1)
-        stimulus_ids = set()
         # Values stored in in_flight are used for response verification.
         # Therefore all stimulus IDs are stored here and must be unique
-        for dct in steal.in_flight.values():
-            stimulus_ids.add(dct["stimulus_id"])
+        stimulus_ids = {dct["stimulus_id"] for dct in steal.in_flight.values()}
         assert len(stimulus_ids) == num_futs
         await c.cancel(futures)
