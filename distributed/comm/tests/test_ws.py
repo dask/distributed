@@ -1,5 +1,4 @@
 import os
-import tempfile
 import warnings
 
 import pytest
@@ -17,6 +16,7 @@ from distributed.utils_test import (
     get_client_ssl_context,
     get_server_ssl_context,
     inc,
+    xfail_ssl_issue5601,
 )
 
 from .test_comms import check_tls_extra
@@ -74,24 +74,24 @@ async def test_expect_ssl_context():
 
 
 @gen_test()
-async def test_expect_scheduler_ssl_when_sharing_server():
+async def test_expect_scheduler_ssl_when_sharing_server(tmpdir):
+    xfail_ssl_issue5601()
     pytest.importorskip("cryptography")
     security = Security.temporary()
-    with tempfile.TemporaryDirectory() as tempdir:
-        key_path = os.path.join(tempdir, "dask.pem")
-        cert_path = os.path.join(tempdir, "dask.crt")
-        with open(key_path, "w") as f:
-            f.write(security.tls_scheduler_key)
-        with open(cert_path, "w") as f:
-            f.write(security.tls_scheduler_cert)
-        c = {
-            "distributed.scheduler.dashboard.tls.key": key_path,
-            "distributed.scheduler.dashboard.tls.cert": cert_path,
-        }
-        with dask.config.set(c):
-            with pytest.raises(RuntimeError):
-                async with Scheduler(protocol="ws://", dashboard=True, port=8787):
-                    pass
+    key_path = os.path.join(str(tmpdir), "dask.pem")
+    cert_path = os.path.join(str(tmpdir), "dask.crt")
+    with open(key_path, "w") as f:
+        f.write(security.tls_scheduler_key)
+    with open(cert_path, "w") as f:
+        f.write(security.tls_scheduler_cert)
+    c = {
+        "distributed.scheduler.dashboard.tls.key": key_path,
+        "distributed.scheduler.dashboard.tls.cert": cert_path,
+    }
+    with dask.config.set(c):
+        with pytest.raises(RuntimeError):
+            async with Scheduler(protocol="ws://", dashboard=True, port=8787):
+                pass
 
 
 @gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
@@ -116,8 +116,8 @@ async def test_large_transfer(c, s, a, b):
     await c.scatter(np.random.random(1_000_000))
 
 
-@pytest.mark.asyncio
-async def test_large_transfer_with_no_compression(cleanup):
+@gen_test()
+async def test_large_transfer_with_no_compression():
     np = pytest.importorskip("numpy")
     with dask.config.set({"distributed.comm.compression": None}):
         async with Scheduler(protocol="ws://") as s:
@@ -142,6 +142,7 @@ async def test_large_transfer_with_no_compression(cleanup):
 )
 async def test_http_and_comm_server(cleanup, dashboard, protocol, security, port):
     if security:
+        xfail_ssl_issue5601()
         pytest.importorskip("cryptography")
         security = Security.temporary()
     async with Scheduler(
@@ -165,6 +166,7 @@ async def test_connection_made_with_extra_conn_args(cleanup, protocol):
             extra_conn_args={"headers": {"Authorization": "Token abcd"}}
         )
     else:
+        xfail_ssl_issue5601()
         pytest.importorskip("cryptography")
         security = Security.temporary(
             extra_conn_args={"headers": {"Authorization": "Token abcd"}}
@@ -201,10 +203,11 @@ async def test_ws_roundtrip(c, s, a, b):
     assert (x == y).all()
 
 
-@pytest.mark.asyncio
-async def test_wss_roundtrip(cleanup):
-    pytest.importorskip("cryptography")
+@gen_test()
+async def test_wss_roundtrip():
     np = pytest.importorskip("numpy")
+    xfail_ssl_issue5601()
+    pytest.importorskip("cryptography")
     security = Security.temporary()
     async with Scheduler(
         protocol="wss://", security=security, dashboard_address=":0"

@@ -1,11 +1,16 @@
 """ utilities for package version introspection """
 
+from __future__ import annotations
 
 import importlib
 import os
 import platform
 import struct
 import sys
+from collections.abc import Callable, Iterable
+from itertools import chain
+from types import ModuleType
+from typing import Any
 
 required_packages = [
     ("dask", lambda p: p.__version__),
@@ -34,75 +39,71 @@ notes_mismatch_package = {
 }
 
 
-def get_versions(packages=None):
+def get_versions(
+    packages: Iterable[str | tuple[str, Callable[[ModuleType], str | None]]]
+    | None = None
+) -> dict[str, dict[str, Any]]:
+    """Return basic information on our software installation, and our installed versions
+    of packages
     """
-    Return basic information on our software installation, and our installed versions of packages.
-    """
-    if packages is None:
-        packages = []
-
-    d = {
+    return {
         "host": get_system_info(),
         "packages": get_package_info(
-            required_packages + optional_packages + list(packages)
+            chain(required_packages, optional_packages, packages or [])
         ),
     }
 
-    return d
 
-
-def get_system_info():
-    (sysname, nodename, release, version, machine, processor) = platform.uname()
-    host = {
-        "python": "%d.%d.%d.%s.%s" % sys.version_info[:],
+def get_system_info() -> dict[str, Any]:
+    uname = platform.uname()
+    return {
+        "python": "%d.%d.%d.%s.%s" % sys.version_info,
         "python-bits": struct.calcsize("P") * 8,
-        "OS": "%s" % sysname,
-        "OS-release": "%s" % release,
-        "machine": "%s" % machine,
-        "processor": "%s" % processor,
-        "byteorder": "%s" % sys.byteorder,
-        "LC_ALL": "%s" % os.environ.get("LC_ALL", "None"),
-        "LANG": "%s" % os.environ.get("LANG", "None"),
+        "OS": uname.system,
+        "OS-release": uname.release,
+        "machine": uname.machine,
+        "processor": uname.processor,
+        "byteorder": sys.byteorder,
+        "LC_ALL": os.environ.get("LC_ALL", "None"),
+        "LANG": os.environ.get("LANG", "None"),
     }
 
-    return host
 
-
-def version_of_package(pkg):
+def version_of_package(pkg: ModuleType) -> str | None:
     """Try a variety of common ways to get the version of a package"""
     from contextlib import suppress
 
     with suppress(AttributeError):
-        return pkg.__version__
+        return pkg.__version__  # type: ignore
     with suppress(AttributeError):
-        return str(pkg.version)
+        return str(pkg.version)  # type: ignore
     with suppress(AttributeError):
-        return ".".join(map(str, pkg.version_info))
+        return ".".join(map(str, pkg.version_info))  # type: ignore
     return None
 
 
-def get_package_info(pkgs):
+def get_package_info(
+    pkgs: Iterable[str | tuple[str, Callable[[ModuleType], str | None]]]
+) -> dict[str, str | None]:
     """get package versions for the passed required & optional packages"""
 
-    pversions = [("python", ".".join(map(str, sys.version_info)))]
+    pversions: dict[str, str | None] = {"python": ".".join(map(str, sys.version_info))}
     for pkg in pkgs:
         if isinstance(pkg, (tuple, list)):
             modname, ver_f = pkg
+            if ver_f is None:
+                ver_f = version_of_package
         else:
             modname = pkg
             ver_f = version_of_package
 
-        if ver_f is None:
-            ver_f = version_of_package
-
         try:
             mod = importlib.import_module(modname)
-            ver = ver_f(mod)
-            pversions.append((modname, ver))
+            pversions[modname] = ver_f(mod)
         except Exception:
-            pversions.append((modname, None))
+            pversions[modname] = None
 
-    return dict(pversions)
+    return pversions
 
 
 def error_message(scheduler, workers, client, client_name="client"):
@@ -160,10 +161,6 @@ def error_message(scheduler, workers, client, client_name="client"):
         if notes:
             err_msg += "\nNotes: \n{}".format("\n".join(notes))
         out["warning"] += err_msg
-
-        for name, c, s, ws in errs:
-            if not isinstance(ws, set):
-                ws = {ws}
 
     return out
 
