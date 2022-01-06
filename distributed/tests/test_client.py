@@ -1287,7 +1287,6 @@ async def test_get_task_prefix_states(c, s, a, b):
             "waiting": 0,
         }
     }
-    x = await c.submit(inc, 1)
     assert res == data
     del x
 
