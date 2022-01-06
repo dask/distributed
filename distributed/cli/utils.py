@@ -1,9 +1,8 @@
-from distutils.version import LooseVersion
-
 import click
+from packaging.version import parse as parse_version
 from tornado.ioloop import IOLoop
 
-CLICK_VERSION = LooseVersion(click.__version__)
+CLICK_VERSION = parse_version(click.__version__)
 
 py3_err_msg = """
 Warning: Your terminal does not set locales.
@@ -30,7 +29,7 @@ def check_python_3():
     import click.core
 
     # TODO: Remove use of internal click functions
-    if CLICK_VERSION < "8.0.0":
+    if CLICK_VERSION < parse_version("8.0.0"):
         click.core._verify_python3_env = lambda: None
     else:
         click.core._verify_python_env = lambda: None
@@ -38,7 +37,7 @@ def check_python_3():
     try:
         from click import _unicodefun
 
-        if CLICK_VERSION < "8.0.0":
+        if CLICK_VERSION < parse_version("8.0.0"):
             _unicodefun._verify_python3_env()
         else:
             _unicodefun._verify_python_env()
