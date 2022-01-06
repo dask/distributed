@@ -1,3 +1,6 @@
+import warnings
+from textwrap import dedent
+
 import click
 
 from distributed.cli.utils import check_python_3
@@ -5,11 +8,13 @@ from distributed.deploy.old_ssh import SSHCluster
 
 
 @click.command(
-    help="""Launch a distributed cluster over SSH. A 'dask-scheduler' process will run on the
-                         first host specified in [HOSTNAMES] or in the hostfile (unless --scheduler is specified
-                         explicitly). One or more 'dask-worker' processes will be run each host in [HOSTNAMES] or
-                         in the hostfile. Use command line flags to adjust how many dask-worker process are run on
-                         each host (--nprocs) and how many cpus are used by each dask-worker process (--nthreads)."""
+    help=dedent(
+        """Launch a distributed cluster over SSH. A 'dask-scheduler' process will run on the
+        first host specified in [HOSTNAMES] or in the hostfile, unless --scheduler is specified
+        explicitly. One or more 'dask-worker' processes will be run on each host. Use the flag
+        --num-workers to adjust how many dask-worker process are run on each host and the flag
+        --nthreads to adjust how many cpus are used by each dask-worker process."""
+    )
 )
 @click.option(
     "--scheduler",
@@ -36,6 +41,13 @@ from distributed.deploy.old_ssh import SSHCluster
 )
 @click.option(
     "--nprocs",
+    default=None,
+    show_default=True,
+    type=int,
+    help="Deprecated. Use --num-workers instead. Number of worker processes per host.",
+)
+@click.option(
+    "--num-workers",
     default=1,
     show_default=True,
     type=int,
@@ -122,6 +134,7 @@ def main(
     hostfile,
     nthreads,
     nprocs,
+    num_workers,
     ssh_username,
     ssh_port,
     ssh_private_key,
@@ -148,12 +161,16 @@ def main(
         print(ctx.get_help())
         exit(1)
 
+    if nprocs is not None:
+        warnings.warn("The --nprocs flag has been renamed to --num-workers. ")
+        num_workers = nprocs
+
     c = SSHCluster(
         scheduler,
         scheduler_port,
         hostnames,
         nthreads,
-        nprocs,
+        num_workers,
         ssh_username,
         ssh_port,
         ssh_private_key,

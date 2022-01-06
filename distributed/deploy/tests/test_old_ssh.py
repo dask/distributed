@@ -28,3 +28,14 @@ def test_cluster(loop):
             while len(e.ncores()) != 3:
                 sleep(0.01)
                 assert time() < start + 5
+
+
+@pytest.mark.filterwarnings("error::UserWarning")
+def test_nprocs_deprecated():
+    with pytest.raises(UserWarning, match="nprocs"):
+        SSHCluster(
+            scheduler_addr="127.0.0.1",
+            scheduler_port=8687,
+            worker_addrs=(),
+            nprocs=2,
+        )

@@ -4,6 +4,7 @@ import socket
 import sys
 import time
 import traceback
+import warnings
 from queue import Queue
 from threading import Thread
 
@@ -249,7 +250,7 @@ def start_worker(
     scheduler_port,
     worker_addr,
     nthreads,
-    nprocs,
+    num_workers,
     ssh_username,
     ssh_port,
     ssh_private_key,
@@ -265,7 +266,8 @@ def start_worker(
     cmd = (
         "{python} -m {remote_dask_worker} "
         "{scheduler_addr}:{scheduler_port} "
-        "--nthreads {nthreads}" + (" --nprocs {nprocs}" if nprocs != 1 else "")
+        "--nthreads {nthreads}"
+        + (" --num-workers {num_workers}" if num_workers != 1 else "")
     )
 
     if not nohost:
@@ -287,7 +289,7 @@ def start_worker(
         scheduler_port=scheduler_port,
         worker_addr=worker_addr,
         nthreads=nthreads,
-        nprocs=nprocs,
+        num_workers=num_workers,
         memory_limit=memory_limit,
         worker_port=worker_port,
         nanny_port=nanny_port,
@@ -337,7 +339,7 @@ class SSHCluster:
         scheduler_port,
         worker_addrs,
         nthreads=0,
-        nprocs=1,
+        num_workers=1,
         ssh_username=None,
         ssh_port=22,
         ssh_private_key=None,
@@ -349,12 +351,17 @@ class SSHCluster:
         nanny_port=None,
         remote_dask_worker="distributed.cli.dask_worker",
         local_directory=None,
+        **kwargs,
     ):
 
         self.scheduler_addr = scheduler_addr
         self.scheduler_port = scheduler_port
         self.nthreads = nthreads
-        self.nprocs = nprocs
+        if kwargs.get("nprocs") is not None:
+            warnings.warn("The nprocs argument has been renamed to num_workers.")
+            num_workers = kwargs["nprocs"]
+
+        self.num_workers = num_workers
 
         self.ssh_username = ssh_username
         self.ssh_port = ssh_port
@@ -442,7 +449,7 @@ class SSHCluster:
                 self.scheduler_port,
                 address,
                 self.nthreads,
-                self.nprocs,
+                self.num_workers,
                 self.ssh_username,
                 self.ssh_port,
                 self.ssh_private_key,
