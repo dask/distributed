@@ -5,23 +5,28 @@ on: [push, pull_request]
 jobs:
   mindeps:
     runs-on: "ubuntu-latest"
+    timeout-minutes: 180
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
 
       - name: Setup Conda Environment
         uses: conda-incubator/setup-miniconda@v2
         with:
           miniforge-variant: Mambaforge
           miniforge-version: latest
+          condarc-file: continuous_integration/condarc
           use-mamba: true
-          channels: conda-forge,defaults
-          channel-priority: true
           python-version: 3.7
           environment-file: continuous_integration/environment-mindeps.yaml
           activate-environment: dask-distributed
-          auto-activate-base: false
+
+      - name: Show conda options
+        shell: bash -l {0}
+        run: conda config --show
 
       - name: Install
         shell: bash -l {0}
@@ -37,6 +42,14 @@ jobs:
           echo -e "--\n--Conda Environment (re-create this with \`mamba env create --name <name> -f <output_file>\`)\n--"
           mamba env export | grep -E -v '^prefix:.*$'
 
+      - name: Setup SSH
+        shell: bash -l {0}
+        run: bash continuous_integration/scripts/setup_ssh.sh
+
+      - name: Reconfigure pytest-timeout
+        shell: bash -l {0}
+        run: sed -i.bak 's/timeout_method = thread/timeout_method = signal/' setup.cfg
+
       - name: Test
         shell: bash -l {0}
         env:
@@ -46,4 +59,28 @@ jobs:
           DISABLE_IPV6: 1
         run: |
           source continuous_integration/scripts/set_ulimit.sh
-          pytest distributed -m "not avoid_ci" --runslow
+          pytest distributed -m "not avoid_ci" --runslow  \
+            --junitxml reports/pytest.xml -o junit_suite_name=mindeps --cov=distributed --cov-report=xml
+
+      - name: Coverage
+        uses: codecov/codecov-action@v1
+
+      - name: Upload test artifacts
+        # ensure this runs even if pytest fails
+        if: >
+          always() &&
+          (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ env.mindeps }}
+          path: reports
+
+      - name: Upload timeout reports
+        # ensure this runs even if pytest fails
+        if: >
+          always() &&
+          (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ env.mindeps }}-timeouts
+          path: test_timeout_dump
