@@ -1,5 +1,7 @@
+from distutils.version import LooseVersion
 from numbers import Number
 
+import bokeh
 from bokeh.core.properties import without_property_validation
 from bokeh.io import curdoc
 from tlz.curried import first
@@ -9,6 +11,7 @@ try:
 except ImportError:
     np = None  # type: ignore
 
+BOKEH_VERSION = LooseVersion(bokeh.__version__)
 
 PROFILING = False
 
