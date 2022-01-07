@@ -289,11 +289,11 @@ class ActiveMemoryManagerExtension:
 
         # The `candidates &` bit could seem redundant with `candidates -=` immediately
         # below on first look, but beware of the second use of processing_on later on!
-        processing_on = candidates & {
+        candidates_with_dependents_processing = candidates & {
             waiter_ts.processing_on for waiter_ts in ts.waiters
         }
 
-        candidates -= processing_on
+        candidates -= candidates_with_dependents_processing
         if not candidates:
             log_reject("all candidates have dependent tasks queued or running on them")
             return None
@@ -323,8 +323,11 @@ class ActiveMemoryManagerExtension:
         if (
             len(candidates) == 1
             and choice.status == Status.running
-            and processing_on
-            and all(ws.status != Status.running for ws in processing_on)
+            and candidates_with_dependents_processing
+            and all(
+                ws.status != Status.running
+                for ws in candidates_with_dependents_processing
+            )
         ):
             log_reject(
                 "there is only one replica on workers that aren't paused or retiring"
