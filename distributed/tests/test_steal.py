@@ -13,7 +13,7 @@ from tlz import concat, sliding_window
 
 import dask
 
-from distributed import Nanny, Worker, wait, worker_client
+from distributed import Lock, Nanny, Worker, wait, worker_client
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.config import config
 from distributed.metrics import time
@@ -1193,3 +1193,35 @@ async def test_correct_bad_time_estimate(c, s, *workers):
     assert any(s.tasks[f.key] in steal.key_stealable for f in futures)
     await wait(futures)
     assert all(w.data for w in workers), [sorted(w.data) for w in workers]
+
+
+@gen_cluster(client=True)
+async def test_steal_stimulus_id_unique(c, s, *workers):
+    steal = s.extensions["stealing"]
+    num_futs = 1_000
+    async with Lock() as lock:
+
+        def blocked(x, lock):
+            lock.acquire()
+
+        # Setup all tasks on worker 0 such that victim/thief relation is the
+        # same for all tasks.
+        futures = c.map(
+            blocked, range(num_futs), lock=lock, workers=[workers[0].address]
+        )
+        # Ensure all tasks are assigned to the worker since otherwise the
+        # move_task_request fails.
+        while len(workers[0].tasks) != num_futs:
+            await asyncio.sleep(0.1)
+        tasks = [s.tasks[f.key] for f in futures]
+        w0 = s.workers[workers[0].address]
+        w1 = s.workers[workers[1].address]
+        # Generating the move task requests as fast as possible increases the
+        # chance of duplicates if the uniqueness is not guaranteed.
+        for ts in tasks:
+            steal.move_task_request(ts, w0, w1)
+        # Values stored in in_flight are used for response verification.
+        # Therefore all stimulus IDs are stored here and must be unique
+        stimulus_ids = {dct["stimulus_id"] for dct in steal.in_flight.values()}
+        assert len(stimulus_ids) == num_futs
+        await c.cancel(futures)

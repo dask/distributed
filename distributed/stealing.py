@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from collections import defaultdict, deque
 from math import log2
 from time import time
@@ -233,7 +234,9 @@ class WorkStealing(SchedulerPlugin):
         try:
             if ts in self.in_flight:
                 return "in-flight"
-            stimulus_id = f"steal-{time()}"
+            # Stimulus IDs are used to verify the response, see
+            # `move_task_confirm`. Therefore, this must be truly unique.
+            stimulus_id = f"steal-{uuid.uuid4().hex}"
 
             key = ts.key
             self.remove_key_from_stealable(ts)
@@ -291,7 +294,7 @@ class WorkStealing(SchedulerPlugin):
                 self.in_flight[ts] = d
                 return
         except KeyError:
-            self.log(("already-aborted", key, state, stimulus_id))
+            self.log(("already-aborted", key, state, worker, stimulus_id))
             return
 
         thief = d["thief"]
