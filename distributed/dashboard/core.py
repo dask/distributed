@@ -10,12 +10,12 @@ from packaging.version import parse as parse_version
 
 import dask
 
-if parse_version(bokeh.__version__) < parse_version("2.1.1"):
+if parse_version(bokeh.__version__) < parse_version("2.4"):
     warnings.warn(
-        "\nDask needs bokeh >= 2.1.1 for the dashboard."
+        "\nDask needs bokeh >= 2.4 for the dashboard."
         "\nContinuing without the dashboard."
     )
-    raise ImportError("Dask needs bokeh >= 2.1.1")
+    raise ImportError("Dask needs bokeh >= 2.4")
 
 
 def BokehApplication(applications, server, prefix="/", template_variables={}):
