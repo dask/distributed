@@ -287,8 +287,8 @@ class ActiveMemoryManagerExtension:
             log_reject("already pending drop on all candidates")
             return None
 
-        # This `candidates &` could seems superfluous here on first look, but beware of
-        # the second use of this set below!
+        # The `candidates &` bit could seem redundant with `candidates -=` immediately
+        # below on first look, but beware of the second use of processing_on later on!
         processing_on = candidates & {
             waiter_ts.processing_on for waiter_ts in ts.waiters
         }
@@ -305,14 +305,21 @@ class ActiveMemoryManagerExtension:
             key=lambda ws: (ws.status != Status.running, self.workers_memory[ws]),
         )
 
-        # If there is only one candidate that could drop the key
+        # IF there is only one candidate that could drop the key
         # AND the candidate has status=running
-        # AND there are candidates with status=paused or closing_gracefully but we just
-        # discarded them because they have dependent tasks running on them, temporarily
-        # keep the extra replica on the candidate with status=running.
-        # Otherwise, we would need to wait until the end for the paused/closing worker
-        # to have no running tasks at all before we can retire it (and for what we know
-        # the tasks currently running might be stuck forever).
+        # AND there were candidates with status=paused or closing_gracefully, but we
+        # discarded them above because they have dependent tasks running on them,
+        # THEN temporarily keep the extra replica on the candidate with status=running.
+        #
+        # This prevents a ping-pong effect between ReduceReplicas (or any other policy
+        # that yields drop commands with multiple candidates) and RetireWorker
+        # (to be later introduced by https://github.com/dask/distributed/pull/5381):
+        # 1. RetireWorker replicates in-memory tasks from worker A (very busy and being
+        #    retired) to worker B (idle)
+        # 2. on the next AMM iteration 2 seconds later, ReduceReplicas drops the same
+        #    tasks from B (because the replicas on A have dependants on the same worker)
+        # 3. on the third AMM iteration 2 seconds later, goto 1 in an infinite loop
+        #    which will last for as long as any tasks with dependencies are running on A
         if (
             len(candidates) == 1
             and choice.status == Status.running
