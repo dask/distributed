@@ -2896,6 +2896,17 @@ class WorkerTable(DashboardComponent):
             name: TableColumn(
                 field=name,
                 title=column_title_renames.get(name, name),
+                visible=True
+                if name
+                in [
+                    "name",
+                    "address",
+                    "max_cpu",
+                    "mean_cpu",
+                    "max_memory",
+                    "mean_memory",
+                ]
+                else False,
             )
             for name in stat_names
         }
@@ -2906,17 +2917,7 @@ class WorkerTable(DashboardComponent):
 
         stat_table = DataTable(
             source=self.source,
-            columns=[
-                stat_columns[n]
-                for n in [
-                    "name",
-                    "address",
-                    "max_cpu",
-                    "mean_cpu",
-                    "max_memory",
-                    "mean_memory",
-                ]
-            ],
+            columns=[stat_columns[n] for n in stat_names],
             reorderable=True,
             sortable=True,
             width=width,
@@ -2940,12 +2941,13 @@ class WorkerTable(DashboardComponent):
                     table=stat_table, columns=stat_columns, names=self.stat_names
                 ),
                 code="""
-                    var visible_columns = [columns["name"], columns["address"]]
-                    for (var i = 0; i < this.active.length; i++) {
-                        visible_columns.push(columns[names[this.active[i] * 2]])
-                        visible_columns.push(columns[names[(this.active[i] * 2) + 1]])
+                    for (var i = 0; i < table.columns.length; i++) {
+                        table.columns[i].visible = false;
                     }
-                    table.columns = visible_columns;
+                    for (var i = 0; i < this.active.length; i++) {
+                        table.columns[this.active[i] * 2 + 2].visible = true;
+                        table.columns[this.active[i] * 2 + 3].visible = true;
+                    }
                 """,
             )
         )
