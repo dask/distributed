@@ -1951,7 +1951,7 @@ class TaskGraph(DashboardComponent):
         )
 
         # Bokeh >= 3.0 automatically infers the source to use
-        if BOKEH_VERSION < "3.0":
+        if BOKEH_VERSION.major < 3:
             node_view.source = self.node_source
             edge_view.source = self.edge_source
 
