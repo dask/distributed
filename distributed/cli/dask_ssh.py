@@ -162,7 +162,11 @@ def main(
         exit(1)
 
     if nprocs is not None:
-        warnings.warn("The --nprocs flag has been renamed to --num-workers. ")
+        warnings.warn(
+            "The --nprocs flag will be removed in a future release. It has been "
+            "renamed to --num-workers.",
+            FutureWarning,
+        )
         num_workers = nprocs
 
     c = SSHCluster(

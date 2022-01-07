@@ -12,8 +12,8 @@ def test_version_option():
 
 # Turn warnings into errors for this test so that the cluster
 # isn't started.
-@pytest.mark.filterwarnings("error::UserWarning")
+@pytest.mark.filterwarnings("error::FutureWarning")
 def test_nprocs_deprecation():
     runner = CliRunner()
-    with pytest.raises(UserWarning, match="nprocs"):
+    with pytest.raises(FutureWarning, match="renamed to --num-workers"):
         runner.invoke(main, ["localhost", "--nprocs=2"], catch_exceptions=False)

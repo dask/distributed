@@ -136,7 +136,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option(
     "--num-workers",
     type=str,
-    default=1,
+    default=None,
     show_default=True,
     help="Number of worker processes to launch. "
     "If negative, then (CPU_COUNT + 1 + num-workers) is used. "
@@ -305,12 +305,23 @@ def main(
         if v is not None
     }
 
-    if nprocs is not None:
-        warnings.warn("The --nprocs flag has been renamed to --num-workers. ")
+    if nprocs is not None and num_workers is not None:
+        logger.error(
+            "Both --nprocs and --num-workers were specified. Use --num-workers only."
+        )
+        sys.exit(1)
+    elif nprocs is not None:
+        warnings.warn(
+            "The --nprocs flag will be removed in a future release. It has been "
+            "renamed to --num-workers.",
+            FutureWarning,
+        )
         num_workers = nprocs
 
     if num_workers == "auto":
         num_workers, nthreads = nprocesses_nthreads()
+    elif num_workers is None:
+        num_workers = 1
     else:
         num_workers = int(num_workers)
 

@@ -358,7 +358,11 @@ class SSHCluster:
         self.scheduler_port = scheduler_port
         self.nthreads = nthreads
         if kwargs.get("nprocs") is not None:
-            warnings.warn("The nprocs argument has been renamed to num_workers.")
+            warnings.warn(
+                "The --nprocs flag will be removed in a future release. It has been "
+                "renamed to --num-workers.",
+                FutureWarning,
+            )
             num_workers = kwargs["nprocs"]
 
         self.num_workers = num_workers
