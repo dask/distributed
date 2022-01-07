@@ -261,48 +261,34 @@ class ActiveMemoryManagerExtension:
         """Iterate through self.pending, which was filled by self._run_policies(), and
         push the suggestions to the workers through bulk comms. Return immediately.
         """
-        drop_by_worker: (defaultdict[WorkerState, set[TaskState]]) = defaultdict(set)
-        repl_by_worker: (
-            defaultdict[WorkerState, dict[TaskState, set[str]]]
-        ) = defaultdict(dict)
+        validate = self.scheduler.validate
+        drop_by_worker: (defaultdict[WorkerState, list[str]]) = defaultdict(list)
+        repl_by_worker: (defaultdict[WorkerState, list[str]]) = defaultdict(list)
 
         for ts, (pending_repl, pending_drop) in self.pending.items():
             if not ts.who_has:
                 continue
-            who_has = {ws_snd.address for ws_snd in ts.who_has - pending_drop}
-            assert who_has  # Never drop the last replica
-            for ws_rec in pending_repl:
-                assert ws_rec not in ts.who_has
-                repl_by_worker[ws_rec][ts] = who_has
+            if validate:
+                # Never drop the last replica
+                assert ts.who_has - pending_drop
+
+            for ws in pending_repl:
+                if validate:
+                    assert ws not in ts.who_has
+                repl_by_worker[ws].append(ts.key)
             for ws in pending_drop:
-                assert ws in ts.who_has
-                drop_by_worker[ws].add(ts)
+                if validate:
+                    assert ws in ts.who_has
+                drop_by_worker[ws].append(ts.key)
 
-        # Fire-and-forget enact recommendations from policies
-        stimulus_id = str(time())
-        for ws_rec, ts_to_who_has in repl_by_worker.items():
-            self.scheduler.stream_comms[ws_rec.address].send(
-                {
-                    "op": "acquire-replicas",
-                    "keys": [ts.key for ts in ts_to_who_has],
-                    "stimulus_id": "acquire-replicas-" + stimulus_id,
-                    "priorities": {ts.key: ts.priority for ts in ts_to_who_has},
-                    "who_has": {ts.key: v for ts, v in ts_to_who_has.items()},
-                },
+        stimulus_id = f"active_memory_manager-{time()}"
+        for ws, keys in repl_by_worker.items():
+            self.scheduler.request_acquire_replicas(
+                ws.address, keys, stimulus_id=stimulus_id
             )
-
-        for ws, tss in drop_by_worker.items():
-            # The scheduler immediately forgets about the replica and suggests the
-            # worker to drop it. The worker may refuse, at which point it will send back
-            # an add-keys message to reinstate it.
-            for ts in tss:
-                self.scheduler.remove_replica(ts, ws)
-            self.scheduler.stream_comms[ws.address].send(
-                {
-                    "op": "remove-replicas",
-                    "keys": [ts.key for ts in tss],
-                    "stimulus_id": "remove-replicas-" + stimulus_id,
-                }
+        for ws, keys in drop_by_worker.items():
+            self.scheduler.request_remove_replicas(
+                ws.address, keys, stimulus_id=stimulus_id
             )
 
 
