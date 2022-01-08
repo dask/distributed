@@ -288,7 +288,7 @@ class ActiveMemoryManagerExtension:
             return None
 
         # The `candidates &` bit could seem redundant with `candidates -=` immediately
-        # below on first look, but beware of the second use of processing_on later on!
+        # below on first look, but beware of the second use of this variable later on!
         candidates_with_dependents_processing = candidates & {
             waiter_ts.processing_on for waiter_ts in ts.waiters
         }
