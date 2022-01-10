@@ -17,7 +17,7 @@ import distributed.cli.dask_scheduler
 from distributed import Client, Scheduler
 from distributed.compatibility import LINUX
 from distributed.metrics import time
-from distributed.utils import get_ip, get_ip_interface
+from distributed.utils import get_ip, get_ip_interface, tmpfile
 from distributed.utils_test import (
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_locally_4,
@@ -192,11 +192,11 @@ def test_pid_file(loop):
         else:
             assert proc.pid == pid
 
-    with tempfile.TemporaryFile() as s:
+    with tmpfile() as s:
         with popen(["dask-scheduler", "--pid-file", s, "--no-dashboard"]) as sched:
             check_pidfile(sched, s)
 
-        with tempfile.TemporaryFile() as w:
+        with tmpfile() as w:
             with popen(
                 ["dask-worker", "127.0.0.1:8786", "--pid-file", w, "--no-dashboard"]
             ) as worker:
@@ -204,7 +204,7 @@ def test_pid_file(loop):
 
 
 def test_scheduler_port_zero(loop):
-    with tempfile.TemporaryFile() as fn:
+    with tmpfile() as fn:
         with popen(
             ["dask-scheduler", "--no-dashboard", "--scheduler-file", fn, "--port", "0"]
         ) as sched:
@@ -215,7 +215,7 @@ def test_scheduler_port_zero(loop):
 
 def test_dashboard_port_zero(loop):
     pytest.importorskip("bokeh")
-    with tempfile.TemporaryFile() as fn:
+    with tmpfile() as fn:
         with popen(["dask-scheduler", "--dashboard-address", ":0"]) as proc:
             count = 0
             while count < 1:
@@ -249,7 +249,7 @@ def test_preload_file(loop):
         path = os.path.join(tmpdir, "scheduler_info.py")
         with open(path, "w") as f:
             f.write(PRELOAD_TEXT)
-        with tempfile.TemporaryFile() as fn:
+        with tmpfile() as fn:
             with popen(["dask-scheduler", "--scheduler-file", fn, "--preload", path]):
                 with Client(scheduler_file=fn, loop=loop) as c:
                     assert c.run_on_scheduler(check_scheduler) == c.scheduler.address
@@ -273,7 +273,7 @@ def test_preload_module(loop):
             env["PYTHONPATH"] = tmpdir + ":" + env["PYTHONPATH"]
         else:
             env["PYTHONPATH"] = tmpdir
-        with tempfile.TemporaryFile() as fn:
+        with tmpfile() as fn:
             with popen(
                 [
                     "dask-scheduler",
@@ -341,7 +341,7 @@ def test_preload_command(loop):
         with open(path, "w") as f:
             f.write(PRELOAD_COMMAND_TEXT)
 
-        with tempfile.TemporaryFile() as fn:
+        with tmpfile() as fn:
             print(fn)
             with popen(
                 [
@@ -372,7 +372,7 @@ def test_preload_command_default(loop):
         with open(path, "w") as f:
             f.write(PRELOAD_COMMAND_TEXT)
 
-        with tempfile.TemporaryFile() as fn2:
+        with tmpfile() as fn2:
             print(fn2)
             with popen(
                 ["dask-scheduler", "--scheduler-file", fn2, "--preload", path],
