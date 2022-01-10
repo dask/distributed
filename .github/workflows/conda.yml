@@ -42,7 +42,11 @@ jobs:
           # suffix for nightly package versions
           export VERSION_SUFFIX=a`date +%y%m%d`
 
+          # latest dask-core nightly build
+          export DASK_BUILD=`conda search --override-channels -c dask/label/dev dask-core | tail -n 1 | awk '{print $3}'`
+
           conda mambabuild continuous_integration/recipe \
+                           --channel dask/label/dev \
                            --no-anaconda-upload \
                            --output-folder build
       - name: Upload conda package
