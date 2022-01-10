@@ -12,6 +12,8 @@ from typing import List
 
 import click
 
+from dask.utils import tmpfile
+
 from .utils import import_file
 
 logger = logging.getLogger(__name__)
@@ -109,7 +111,7 @@ def _import_module(name, file_dir=None) -> ModuleType:
 
     else:
         # not a name, actually the text of the script
-        with tempfile.TemporaryFile(suffix=".py") as fn:
+        with tmpfile(extension=".py") as fn:
             with open(fn, mode="w") as f:
                 f.write(name)
             return _import_module(fn, file_dir=file_dir)
