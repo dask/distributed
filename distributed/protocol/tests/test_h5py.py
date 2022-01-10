@@ -1,5 +1,4 @@
 import functools
-import tempfile
 import traceback
 
 import pytest
@@ -7,6 +6,7 @@ import pytest
 h5py = pytest.importorskip("h5py")
 
 from distributed.protocol import deserialize, serialize
+from distributed.utils import tmpfile
 
 
 def silence_h5py_issue775(func):
@@ -28,7 +28,7 @@ def silence_h5py_issue775(func):
 
 @silence_h5py_issue775
 def test_serialize_deserialize_file():
-    with tempfile.TemporaryFile() as fn:
+    with tmpfile() as fn:
         with h5py.File(fn, mode="a") as f:
             f.create_dataset("/x", shape=(2, 2), dtype="i4")
         with h5py.File(fn, mode="r") as f:
@@ -42,7 +42,7 @@ def test_serialize_deserialize_file():
 
 @silence_h5py_issue775
 def test_serialize_deserialize_group():
-    with tempfile.TemporaryFile() as fn:
+    with tmpfile() as fn:
         with h5py.File(fn, mode="a") as f:
             f.create_dataset("/group1/group2/x", shape=(2, 2), dtype="i4")
         with h5py.File(fn, mode="r") as f:
@@ -57,7 +57,7 @@ def test_serialize_deserialize_group():
 
 @silence_h5py_issue775
 def test_serialize_deserialize_dataset():
-    with tempfile.TemporaryFile() as fn:
+    with tmpfile() as fn:
         with h5py.File(fn, mode="a") as f:
             x = f.create_dataset("/group1/group2/x", shape=(2, 2), dtype="i4")
         with h5py.File(fn, mode="r") as f:
@@ -71,7 +71,7 @@ def test_serialize_deserialize_dataset():
 
 @silence_h5py_issue775
 def test_raise_error_on_serialize_write_permissions():
-    with tempfile.TemporaryFile() as fn:
+    with tmpfile() as fn:
         with h5py.File(fn, mode="a") as f:
             x = f.create_dataset("/x", shape=(2, 2), dtype="i4")
             f.flush()
@@ -92,7 +92,7 @@ async def test_h5py_serialize(c, s, a, b):
     from dask.utils import SerializableLock
 
     lock = SerializableLock("hdf5")
-    with tempfile.TemporaryFile() as fn:
+    with tmpfile() as fn:
         with h5py.File(fn, mode="a") as f:
             x = f.create_dataset("/group/x", shape=(4,), dtype="i4", chunks=(2,))
             x[:] = [1, 2, 3, 4]
@@ -106,7 +106,7 @@ async def test_h5py_serialize(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_h5py_serialize_2(c, s, a, b):
-    with tempfile.TemporaryFile() as fn:
+    with tmpfile() as fn:
         with h5py.File(fn, mode="a") as f:
             x = f.create_dataset("/group/x", shape=(12,), dtype="i4", chunks=(4,))
             x[:] = [1, 2, 3, 4] * 3
