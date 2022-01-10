@@ -5000,18 +5000,12 @@ class Scheduler(SchedulerState, ServerNode):
 
             self.remove_resources(address)
 
-            dh: dict = parent._host_info.get(host)
-            if dh is None:
-                parent._host_info[host] = dh = {}
-
+            dh: dict = parent._host_info[host]
             dh_addresses: set = dh["addresses"]
             dh_addresses.remove(address)
             dh["nthreads"] -= ws._nthreads
             parent._total_nthreads -= ws._nthreads
-
             if not dh_addresses:
-                dh = None
-                dh_addresses = None
                 del parent._host_info[host]
 
             self.rpc.remove(address)
