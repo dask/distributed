@@ -863,7 +863,7 @@ class WorkerProcess:
                 """
                 while True:
                     try:
-                        msg = child_stop_q.get(timeout=1000)
+                        msg = child_stop_q.get(timeout=1)
                     except Empty:
                         pass
                     else:
