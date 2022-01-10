@@ -1,7 +1,6 @@
 from zlib import crc32
 
 import pytest
-import tempfile
 
 np = pytest.importorskip("numpy")
 
