@@ -1,10 +1,10 @@
 import pytest
-import tempfile
 
 netCDF4 = pytest.importorskip("netCDF4")
 np = pytest.importorskip("numpy")
 
 from distributed.protocol import deserialize, serialize
+from distributed.utils import tmpfile
 
 
 def create_test_dataset(fn):
@@ -24,7 +24,7 @@ def create_test_dataset(fn):
 
 
 def test_serialize_deserialize_dataset():
-    with tempfile.TemporaryFile() as fn:
+    with tmpfile() as fn:
         create_test_dataset(fn)
         with netCDF4.Dataset(fn, mode="r") as f:
             g = deserialize(*serialize(f))
@@ -37,7 +37,7 @@ def test_serialize_deserialize_dataset():
 
 
 def test_serialize_deserialize_variable():
-    with tempfile.TemporaryFile() as fn:
+    with tmpfile() as fn:
         create_test_dataset(fn)
         with netCDF4.Dataset(fn, mode="r") as f:
             x = f.variables["x"]
@@ -49,7 +49,7 @@ def test_serialize_deserialize_variable():
 
 
 def test_serialize_deserialize_group():
-    with tempfile.TemporaryFile() as fn:
+    with tmpfile() as fn:
         create_test_dataset(fn)
         with netCDF4.Dataset(fn, mode="r") as f:
             for path in ["group", "group/group1"]:
@@ -81,7 +81,7 @@ from distributed.utils_test import gen_cluster
 
 @gen_cluster(client=True)
 async def test_netcdf4_serialize(c, s, a, b):
-    with tempfile.TemporaryFile() as fn:
+    with tmpfile() as fn:
         create_test_dataset(fn)
         with netCDF4.Dataset(fn, mode="r") as f:
             dset = f.variables["x"]
