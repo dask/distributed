@@ -1,7 +1,6 @@
 import asyncio
 
 import pytest
-import tempfile
 from click.testing import CliRunner
 
 pytest.importorskip("requests")
