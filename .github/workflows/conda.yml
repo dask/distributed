@@ -57,7 +57,7 @@ jobs:
                            --channel dask/label/dev \
                            --no-anaconda-upload \
                            --output-folder build
-      - name: Upload conda package
+      - name: Upload conda packages
         if: |
           github.event_name == 'push'
           && github.ref == 'refs/heads/main'
@@ -65,10 +65,9 @@ jobs:
         env:
           ANACONDA_API_TOKEN: ${{ secrets.DASK_CONDA_TOKEN }}
         run: |
-          # convert package to other architectures
+          # convert distributed to other architectures
           cd build && conda convert linux-64/*.tar.bz2 -p osx-64 \
                                                        -p osx-arm64 \
-                                                       -p linux-64 \
                                                        -p linux-ppc64le \
                                                        -p linux-aarch64 \
                                                        -p win-64
