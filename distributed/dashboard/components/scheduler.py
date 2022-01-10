@@ -56,7 +56,7 @@ from distributed.dashboard.components.shared import (
     ProfileTimePlot,
     SystemMonitor,
 )
-from distributed.dashboard.utils import PROFILING, transpose, update
+from distributed.dashboard.utils import BOKEH_VERSION, PROFILING, transpose, update
 from distributed.diagnostics.graph_layout import GraphLayout
 from distributed.diagnostics.progress_stream import color_of, progress_quads
 from distributed.diagnostics.task_stream import TaskStreamPlugin
@@ -1944,13 +1944,16 @@ class TaskGraph(DashboardComponent):
         self.edge_source = ColumnDataSource({"x": [], "y": [], "visible": []})
 
         node_view = CDSView(
-            source=self.node_source,
             filters=[GroupFilter(column_name="visible", group="True")],
         )
         edge_view = CDSView(
-            source=self.edge_source,
             filters=[GroupFilter(column_name="visible", group="True")],
         )
+
+        # Bokeh >= 3.0 automatically infers the source to use
+        if BOKEH_VERSION.major < 3:
+            node_view.source = self.node_source
+            edge_view.source = self.edge_source
 
         node_colors = factor_cmap(
             "state",
