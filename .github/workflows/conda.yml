@@ -37,15 +37,22 @@ jobs:
           which python
           pip list
           mamba list
-      - name: Build conda package
+      - name: Build conda packages
         run: |
-          # suffix for nightly package versions
+          # suffix for pre-release package versions
           export VERSION_SUFFIX=a`date +%y%m%d`
 
-          # latest dask-core nightly build
+          # latest dask-core pre-release build
           export DASK_BUILD=`conda search --override-channels -c dask/label/dev dask-core | tail -n 1 | awk '{print $3}'`
 
-          conda mambabuild continuous_integration/recipe \
+          # distributed pre-release build
+          conda mambabuild continuous_integration/recipes/distributed \
+                           --channel dask/label/dev \
+                           --no-anaconda-upload \
+                           --output-folder build
+
+          # dask pre-release build
+          conda mambabuild continuous_integration/recipes/dask \
                            --channel dask/label/dev \
                            --no-anaconda-upload \
                            --output-folder build
