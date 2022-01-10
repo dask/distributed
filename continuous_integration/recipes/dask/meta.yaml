@@ -1,4 +1,5 @@
 {% set version = environ.get('GIT_DESCRIBE_TAG', '0.0.0.dev') + environ.get('VERSION_SUFFIX', '') %}
+{% set dask_version = environ.get('DASK_VERSION', '0.0.0.dev') %}
 {% set dask_build = environ.get('DASK_BUILD', '') %}
 {% set py_version=environ.get('CONDA_PY', 36) %}
 
@@ -20,7 +21,7 @@ requirements:
     - python >=3.7
   run:
     - python >=3.7
-    - dask-core *={{ dask_build }}
+    - dask-core {{ dask_version }}={{ dask_build }}
     - distributed {{ version }}=py{{ py_version }}_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
     - cytoolz >=0.8.2
     - numpy >=1.18

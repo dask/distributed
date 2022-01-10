@@ -43,6 +43,7 @@ jobs:
           export VERSION_SUFFIX=a`date +%y%m%d`
 
           # latest dask-core pre-release build
+          export DASK_VERSION=`conda search --override-channels -c dask/label/dev dask-core | tail -n 1 | awk '{print $2}'`
           export DASK_BUILD=`conda search --override-channels -c dask/label/dev dask-core | tail -n 1 | awk '{print $3}'`
 
           # distributed pre-release build
