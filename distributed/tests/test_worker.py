@@ -2550,9 +2550,7 @@ async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, 
                 await asyncio.sleep(0.1)
 
             next = story[len(story_before)]
-            assert next[0] == f1.key
-            assert next[1] == "memory"
-            assert next[2] == "released"
+            assert next[:3] == (f1.key, "memory", "released")
 
             a.heartbeat_active = False
             await a.heartbeat()
