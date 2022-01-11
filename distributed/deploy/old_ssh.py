@@ -58,7 +58,7 @@ def async_ssh(cmd_dict):
             print(
                 "[ dask-ssh ] : "
                 + bcolors.FAIL
-                + "SSH connection error when connecting to {addr}:{port}"
+                + "SSH connection error when connecting to {addr}:{port} "
                 "to run '{cmd}'".format(
                     addr=cmd_dict["address"],
                     port=cmd_dict["ssh_port"],
@@ -339,7 +339,7 @@ class SSHCluster:
         scheduler_port,
         worker_addrs,
         nthreads=0,
-        num_workers=1,
+        num_workers=None,
         ssh_username=None,
         ssh_port=22,
         ssh_private_key=None,
@@ -357,13 +357,20 @@ class SSHCluster:
         self.scheduler_addr = scheduler_addr
         self.scheduler_port = scheduler_port
         self.nthreads = nthreads
-        if kwargs.get("nprocs") is not None:
+        if kwargs.get("nprocs") is not None and num_workers is not None:
+            logger.error(
+                "Both nprocs and num_workers were specified. Use num_workers only."
+            )
+            sys.exit(1)
+        elif kwargs.get("nprocs") is not None:
             warnings.warn(
-                "The --nprocs flag will be removed in a future release. It has been "
-                "renamed to --num-workers.",
+                "The nprocs argument will be removed in a future release. It has been "
+                "renamed to num_workers.",
                 FutureWarning,
             )
             num_workers = kwargs["nprocs"]
+        elif num_workers is None:
+            num_workers = 1
 
         self.num_workers = num_workers
 

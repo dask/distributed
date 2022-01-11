@@ -30,12 +30,24 @@ def test_cluster(loop):
                 assert time() < start + 5
 
 
-@pytest.mark.filterwarnings("error::FutureWarning")
-def test_nprocs_deprecated():
-    with pytest.raises(FutureWarning, match="renamed to --num-workers"):
-        SSHCluster(
-            scheduler_addr="127.0.0.1",
-            scheduler_port=8687,
-            worker_addrs=(),
-            nprocs=2,
+def test_nprocs_renamed_to_num_workers():
+    with SSHCluster(
+        scheduler_addr="127.0.0.1",
+        scheduler_port=8687,
+        worker_addrs=(),
+        nprocs=2,
+    ) as c:
+        assert any("renamed to num_workers" in c.stderr.readline() for i in range(15))
+        assert c.num_workers == 2
+
+
+def test_num_workers_with_nprocs_is_an_error():
+    with SSHCluster(
+        scheduler_addr="127.0.0.1",
+        scheduler_port=8687,
+        worker_addrs=(),
+        nprocs=2,
+    ) as c:
+        assert any(
+            "Both nprocs and num_workers" in c.stderr.readline() for i in range(15)
         )

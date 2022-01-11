@@ -1,3 +1,5 @@
+import logging
+import sys
 import warnings
 from textwrap import dedent
 
@@ -5,6 +7,8 @@ import click
 
 from distributed.cli.utils import check_python_3
 from distributed.deploy.old_ssh import SSHCluster
+
+logger = logging.getLogger("distributed.dask_ssh")
 
 
 @click.command(
@@ -48,7 +52,7 @@ from distributed.deploy.old_ssh import SSHCluster
 )
 @click.option(
     "--num-workers",
-    default=1,
+    default=None,
     show_default=True,
     type=int,
     help="Number of worker processes per host.",
@@ -161,13 +165,20 @@ def main(
         print(ctx.get_help())
         exit(1)
 
-    if nprocs is not None:
+    if nprocs is not None and num_workers is not None:
+        logger.error(
+            "Both --nprocs and --num-workers were specified. Use --num-workers only."
+        )
+        sys.exit(1)
+    elif nprocs is not None:
         warnings.warn(
             "The --nprocs flag will be removed in a future release. It has been "
             "renamed to --num-workers.",
             FutureWarning,
         )
         num_workers = nprocs
+    elif num_workers is None:
+        num_workers = 1
 
     c = SSHCluster(
         scheduler,

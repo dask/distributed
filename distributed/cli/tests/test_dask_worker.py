@@ -285,19 +285,15 @@ def test_num_workers_expands_name(loop):
 def test_nprocs_renamed_to_num_workers(loop):
     num_workers = 2
     with popen(["dask-scheduler", "--no-dashboard"]):
-        with popen(["dask-worker", "127.0.0.1:8786", f"--nprocs={num_workers}"]):
+        with popen(
+            ["dask-worker", "127.0.0.1:8786", f"--nprocs={num_workers}"]
+        ) as worker:
+            assert any(
+                b"renamed to --num-workers" in worker.stderr.readline()
+                for i in range(15)
+            )
             with Client("tcp://127.0.0.1:8786", loop=loop) as c:
                 c.wait_for_workers(num_workers, timeout="30 seconds")
-
-
-# Turn warnings into errors so that the process is ended
-@pytest.mark.filterwarnings("error::FutureWarning")
-def test_nprocs_deprecated():
-    runner = CliRunner()
-    with pytest.raises(FutureWarning, match="renamed to --num-workers"):
-        runner.invoke(
-            distributed.cli.dask_worker.main, ["--nprocs=2"], catch_exceptions=False
-        )
 
 
 def test_num_workers_with_nprocs_is_an_error(loop):

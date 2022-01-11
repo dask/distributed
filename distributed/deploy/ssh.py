@@ -248,6 +248,7 @@ old_cluster_kwargs = {
     "worker_addrs",
     "nthreads",
     "nprocs",
+    "num_workers",
     "ssh_username",
     "ssh_port",
     "ssh_private_key",
