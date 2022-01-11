@@ -52,8 +52,8 @@ class SpillBuffer(zict.Buffer):
             pass
         except OSError:
             logger.warning(
-                "Spill file on disk failed",
-                exec_info=True,
+                "Spill file to disk failed",
+                exc_info=True,
             )
             pass
         except PickleError as e:
