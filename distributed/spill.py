@@ -55,7 +55,21 @@ class SpillBuffer(zict.Buffer):
                 "Spill file on disk failed",
                 exec_info=True,
             )
-            pass  # can't remember if we want to raise here
+            pass
+        except PickleError as e:
+            logger.warning(
+                "Failed to pickle",
+                exc_info=True,
+            )
+            k, orig_e = e.args
+            if k == key:
+                del self[
+                    key
+                ]  # if the key that is bad is the one being added we delete it
+                raise orig_e
+            else:
+                # if you get here, key is fine something else is wrong then we pass
+                pass
 
     @property
     def memory(self) -> Mapping[Hashable, Any]:
@@ -84,6 +98,10 @@ class MaxSpillExceeded(Exception):
     pass
 
 
+class PickleError(Exception):
+    pass
+
+
 class Slow(zict.Func):
     max_weight: int | Literal[False]
     weight_by_key: dict[Hashable, int]
@@ -103,15 +121,10 @@ class Slow(zict.Func):
         try:
             pickled = self.dump(value)
             pickled_size = sum(len(frame) for frame in pickled)
-        except TypeError:  # This is the error raised when fail to serialize
-            logger.warning(
-                "Failed to pickle",
-                exc_info=True,
-            )
-            return  # This result on a separate problem
-            # distributed/distributed/worker.py", line 2302, in transition_generic_memory
-            # assert ts.key in self.data or ts.key in self.actors
-            # AssertionError
+        except Exception as e:  # This is the error raised when fail to serialize
+            raise PickleError(
+                key, e
+            )  # It's ok to loose the bad key, cluster remains usable
 
         if (
             self.max_weight is not False
