@@ -195,6 +195,7 @@ async def test_AllProgress_lost_key(c, s, a, b):
 @gen_cluster(client=True, Worker=Nanny)
 async def test_group_timing(c, s, a, b):
     p = GroupTiming(s)
+    s.add_plugin(p)
 
     assert len(p.time) == 2
     assert len(p.nthreads) == 2
