@@ -4,13 +4,13 @@ import subprocess
 import sys
 import unittest
 import weakref
-from distutils.version import LooseVersion
 from threading import Lock
 from time import sleep
 from urllib.parse import urlparse
 
 import pytest
 import tornado
+from packaging.version import parse as parse_version
 from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
@@ -36,6 +36,7 @@ from distributed.utils_test import (
     inc,
     slowinc,
     tls_only_security,
+    xfail_ssl_issue5601,
 )
 
 
@@ -264,6 +265,7 @@ def test_Client_twice(loop):
 
 @gen_test()
 async def test_client_constructor_with_temporary_security():
+    xfail_ssl_issue5601()
     pytest.importorskip("cryptography")
     async with Client(
         security=True, silence_logs=False, dashboard_address=":0", asynchronous=True
@@ -454,7 +456,8 @@ async def test_scale_up_and_down():
 
 
 @pytest.mark.xfail(
-    sys.version_info >= (3, 8) and LooseVersion(tornado.version) < "6.0.3",
+    sys.version_info >= (3, 8)
+    and parse_version(tornado.version) < parse_version("6.0.3"),
     reason="Known issue with Python 3.8 and Tornado < 6.0.3. "
     "See https://github.com/tornadoweb/tornado/pull/2683.",
     strict=True,
@@ -707,6 +710,7 @@ def test_adapt_then_manual(loop):
 @pytest.mark.parametrize("temporary", [True, False])
 def test_local_tls(loop, temporary):
     if temporary:
+        xfail_ssl_issue5601()
         pytest.importorskip("cryptography")
         security = True
     else:
@@ -989,6 +993,7 @@ async def test_threads_per_worker_set_to_0():
 @pytest.mark.parametrize("temporary", [True, False])
 async def test_capture_security(cleanup, temporary):
     if temporary:
+        xfail_ssl_issue5601()
         pytest.importorskip("cryptography")
         security = True
     else:

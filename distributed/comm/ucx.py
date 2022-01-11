@@ -307,9 +307,6 @@ class UCX(Comm):
 
     async def read(self, deserializers=("cuda", "dask", "pickle", "error")):
         with log_errors():
-            if self.closed():
-                raise CommClosedError("Endpoint is closed -- unable to read message")
-
             if deserializers is None:
                 deserializers = ("cuda", "dask", "pickle", "error")
 

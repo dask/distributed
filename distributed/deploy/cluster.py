@@ -281,6 +281,8 @@ class Cluster(SyncMethodMixin):
             logs["Scheduler"] = Log("\n".join(line for level, line in L))
 
         if workers:
+            if workers is True:
+                workers = None
             d = await self.scheduler_comm.worker_logs(workers=workers)
             for k, v in d.items():
                 logs[k] = Log("\n".join(line for level, line in v))

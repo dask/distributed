@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from collections import defaultdict, deque
 from math import log2
 from time import time
@@ -233,7 +234,9 @@ class WorkStealing(SchedulerPlugin):
         try:
             if ts in self.in_flight:
                 return "in-flight"
-            stimulus_id = f"steal-{time()}"
+            # Stimulus IDs are used to verify the response, see
+            # `move_task_confirm`. Therefore, this must be truly unique.
+            stimulus_id = f"steal-{uuid.uuid4().hex}"
 
             key = ts.key
             self.remove_key_from_stealable(ts)
@@ -291,7 +294,7 @@ class WorkStealing(SchedulerPlugin):
                 self.in_flight[ts] = d
                 return
         except KeyError:
-            self.log(("already-aborted", key, state, stimulus_id))
+            self.log(("already-aborted", key, state, worker, stimulus_id))
             return
 
         thief = d["thief"]
@@ -313,16 +316,8 @@ class WorkStealing(SchedulerPlugin):
             _log_msg = [key, state, victim.address, thief.address, stimulus_id]
 
             if ts.state != "processing":
-                self.log(("not-processing", *_log_msg))
-                old_thief = thief.occupancy
-                new_thief = sum(thief.processing.values())
-                old_victim = victim.occupancy
-                new_victim = sum(victim.processing.values())
-                thief.occupancy = new_thief
-                victim.occupancy = new_victim
-                self.scheduler.total_occupancy += (
-                    new_thief - old_thief + new_victim - old_victim
-                )
+                self.scheduler._reevaluate_occupancy_worker(thief)
+                self.scheduler._reevaluate_occupancy_worker(victim)
             elif (
                 state in _WORKER_STATE_UNDEFINED
                 or state in _WORKER_STATE_CONFIRM
@@ -534,10 +529,10 @@ def _can_steal(thief, ts, victim):
     elif ts.worker_restrictions and thief.address not in ts.worker_restrictions:
         return False
 
-    if victim.resources is None:
+    if not ts.resource_restrictions:
         return True
 
-    for resource, value in victim.resources.items():
+    for resource, value in ts.resource_restrictions.items():
         try:
             supplied = thief.resources[resource]
         except KeyError:
