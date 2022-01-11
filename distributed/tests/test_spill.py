@@ -1,4 +1,5 @@
 import logging
+import subprocess
 from distutils.version import LooseVersion
 
 import pytest
@@ -226,3 +227,50 @@ def test_spillbuffer_bad_key(tmpdir):
             buf["a"] = a
 
     assert "Failed to pickle" in logs_bad_key.getvalue()
+
+    b = Bad(size=100)  # this is small enough to fit in memory/fast
+
+    buf["b"] = b
+    assert set(buf.fast) == {"b"}
+
+    c = 100 * "c"
+    with captured_logger(logging.getLogger("distributed.spill")) as logs_bad_key_mem:
+        # This will go to fast and try to kick b out,
+        # but keep b in fast since it's not pickable
+        buf["c"] = c
+
+    assert "Failed to pickle" in logs_bad_key_mem.getvalue()
+    assert set(buf.fast) == {"b", "c"}
+
+
+def test_spillbuffer_oserror(tmpdir):
+    buf = SpillBuffer(str(tmpdir), target=200, max_spill=800)
+
+    a, b, c = "a" * 200, "b" * 100, "c" * 200
+
+    # let's have something in fast and something in slow
+    buf["a"] = a
+    buf["b"] = b
+    assert set(buf.fast) == {"b"}
+    assert set(buf.slow) == {"a"}
+
+    # modify permissions of disk to be read only
+    subprocess.call(["chmod", "-R", "-w", str(tmpdir)])
+
+    with captured_logger(logging.getLogger("distributed.spill")) as logs_oserror:
+        buf["c"] = c
+
+    # PROBLEM: this is not triggering the OSError and even though c ends up in fast because
+    # "Spill disk reached capacity but it didn't", when
+    # I check buf.slow.total_weight the value corresponds as if c was there,
+    # buf.slow.weight_by_key = {'a': 329, 'c': 329} but set(buf.slow) = {"a"} and set(buf.fast) = {"b", "c"}
+
+    assert "Spill file to disk failed" in logs_oserror.getvalue()
+    assert set(buf.fast) == {"b", "c"}
+    assert set(buf.slow) == {"a"}
+
+    del buf["b"]
+    del buf["c"]
+
+    # upto this point buf.slow.total_weight is 329 if I try to add c, it should hit OSError, but I get
+    # Spill file on disk reached capacity which makes no sense as capacity is 800
