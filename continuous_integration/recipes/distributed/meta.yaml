@@ -1,7 +1,6 @@
 {% set version = environ.get('GIT_DESCRIBE_TAG', '0.0.0.dev') + environ.get('VERSION_SUFFIX', '') %}
 {% set dask_version = environ.get('DASK_VERSION', '0.0.0.dev') %}
 {% set dask_build = environ.get('DASK_BUILD', '') %}
-{% set py_version=environ.get('CONDA_PY', 36) %}
 
 
 package:
@@ -13,7 +12,7 @@ source:
 
 build:
   number: {{ GIT_DESCRIBE_NUMBER }}
-  string: py{{ py_version }}_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
+  string: py{{ python | replace(".", "") }}_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
   script: {{ PYTHON }} -m pip install . -vv
   entry_points:
     - dask-scheduler = distributed.cli.dask_scheduler:go
