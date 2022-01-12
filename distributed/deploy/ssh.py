@@ -89,7 +89,19 @@ class Worker(Process):
         self.kwargs = copy.copy(kwargs)
         self.name = name
         self.remote_python = remote_python
-        self.num_workers = self.kwargs.pop("num_workers", 1)
+        if kwargs.get("nprocs") is not None and kwargs.get("num_workers") is not None:
+            raise ValueError(
+                "Both nprocs and num_workers were specified. Use num_workers only."
+            )
+        elif kwargs.get("nprocs") is not None:
+            warnings.warn(
+                "The nprocs argument will be removed in a future release. It has been "
+                "renamed to num_workers.",
+                FutureWarning,
+            )
+            self.num_workers = self.kwargs.pop("nprocs")
+        else:
+            self.num_workers = self.kwargs.pop("num_workers", 1)
 
     async def start(self):
         try:

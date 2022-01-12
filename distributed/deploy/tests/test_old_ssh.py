@@ -31,23 +31,22 @@ def test_cluster(loop):
 
 
 def test_nprocs_renamed_to_num_workers():
-    with SSHCluster(
-        scheduler_addr="127.0.0.1",
-        scheduler_port=8687,
-        worker_addrs=(),
-        nprocs=2,
-    ) as c:
-        assert any("renamed to num_workers" in c.stderr.readline() for i in range(15))
-        assert c.num_workers == 2
+    with pytest.warns(FutureWarning, match="renamed to num_workers"):
+        with SSHCluster(
+            scheduler_addr="127.0.0.1",
+            scheduler_port=8687,
+            worker_addrs=["127.0.0.1", "127.0.0.1"],
+            nprocs=2,
+        ) as c:
+            assert c.num_workers == 2
 
 
 def test_num_workers_with_nprocs_is_an_error():
-    with SSHCluster(
-        scheduler_addr="127.0.0.1",
-        scheduler_port=8687,
-        worker_addrs=(),
-        nprocs=2,
-    ) as c:
-        assert any(
-            "Both nprocs and num_workers" in c.stderr.readline() for i in range(15)
+    with pytest.raises(ValueError, match="Both nprocs and num_workers"):
+        SSHCluster(
+            scheduler_addr="127.0.0.1",
+            scheduler_port=8687,
+            worker_addrs=(),
+            nprocs=2,
+            num_workers=2,
         )

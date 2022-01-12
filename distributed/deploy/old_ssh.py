@@ -358,10 +358,9 @@ class SSHCluster:
         self.scheduler_port = scheduler_port
         self.nthreads = nthreads
         if kwargs.get("nprocs") is not None and num_workers is not None:
-            logger.error(
+            raise ValueError(
                 "Both nprocs and num_workers were specified. Use num_workers only."
             )
-            sys.exit(1)
         elif kwargs.get("nprocs") is not None:
             warnings.warn(
                 "The nprocs argument will be removed in a future release. It has been "
