@@ -11,9 +11,16 @@ omit =
     distributed/utils_test.py
     distributed/deploy/ssh.py
     distributed/_ipython_utils.py
+    distributed/dashboard/components/nvml.py
 
 [report]
 show_missing = True
+exclude_lines =
+    # re-enable the standard pragma
+    pragma: no cover
+    # exclude nvml calls
+    \snvml\.
+    \spynvml\.
 
 [html]
 directory = coverage_html_report
