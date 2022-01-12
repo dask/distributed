@@ -37,7 +37,7 @@ def test_shuffle_helper(client: Client):
     df = dd.demo.make_timeseries(freq="15D", partition_freq="30D")
     shuffle_helper = shuffle(df, "id", rearrange=rearrange_by_column_tasks)
     dask_shuffle = df.shuffle("id", shuffle="tasks")
-    dd.utils.assert_eq(shuffle_helper, dask_shuffle)
+    dd.utils.assert_eq(shuffle_helper, dask_shuffle, scheduler=client)
 
 
 def test_basic(client: Client):
@@ -49,7 +49,7 @@ def test_basic(client: Client):
     # setup -> blockwise -> barrier -> unpack -> drop_by_shallow_copy
     assert len(opt.dask.layers) == 5
 
-    dd.utils.assert_eq(shuffled, df.shuffle("id", shuffle="tasks"))
+    dd.utils.assert_eq(shuffled, df.shuffle("id", shuffle="tasks"), scheduler=client)
     # ^ NOTE: this works because `assert_eq` sorts the rows before comparing
 
 
@@ -82,5 +82,7 @@ def test_multiple_linear(client: Client):
     # TODO eventually test for fusion between s1's unpacks, the `+1`, and s2's `transfer`s
 
     dd.utils.assert_eq(
-        s2, df.assign(x=lambda df: df.x + 1).shuffle("x", shuffle="tasks")
+        s2,
+        df.assign(x=lambda df: df.x + 1).shuffle("x", shuffle="tasks"),
+        scheduler=client,
     )
