@@ -14,6 +14,7 @@ omit =
     distributed/dashboard/components/nvml.py
     distributed/_version.py
     distributed/pytest_resourceleaks.py
+    distributed/comm/ucx.py
 
 [report]
 show_missing = True
