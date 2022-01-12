@@ -12,6 +12,8 @@ omit =
     distributed/deploy/ssh.py
     distributed/_ipython_utils.py
     distributed/dashboard/components/nvml.py
+    distributed/_version.py
+    distributed/pytest_resourceleaks.py
 
 [report]
 show_missing = True
@@ -21,6 +23,8 @@ exclude_lines =
     # exclude nvml calls
     \snvml\.
     \spynvml\.
+    # exclude LOG_PDB
+    LOG_PDB
 
 [html]
 directory = coverage_html_report
