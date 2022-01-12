@@ -7,6 +7,7 @@ import zict
 
 from dask.sizeof import sizeof
 
+from distributed.compatibility import WINDOWS
 from distributed.protocol import serialize_bytelist
 from distributed.spill import SpillBuffer
 from distributed.utils_test import captured_logger
@@ -243,10 +244,15 @@ def test_spillbuffer_bad_key(tmpdir):
     assert set(buf.fast) == {"b", "c"}
 
 
+@pytest.mark.skipif(WINDOWS, reason="Needs chmod")
 def test_spillbuffer_oserror(tmpdir):
     buf = SpillBuffer(str(tmpdir), target=200, max_spill=800)
 
-    a, b, c = "a" * 200, "b" * 100, "c" * 200
+    a, b, c = (
+        "a" * 200,
+        "b" * 100,
+        "c" * 200,
+    )
 
     # let's have something in fast and something in slow
     buf["a"] = a
@@ -257,7 +263,9 @@ def test_spillbuffer_oserror(tmpdir):
     # modify permissions of disk to be read only
     subprocess.call(["chmod", "-R", "-w", str(tmpdir)])
 
-    with captured_logger(logging.getLogger("distributed.spill")) as logs_oserror:
+    # upto this point buf.slow.total_weight is 329 if I try to add c, it should hit OSError, but I get
+    # Spill file on disk reached capacity which makes no sense as capacity is 800
+    with captured_logger(logging.getLogger("distributed.spill")) as logs_oserror_evict:
         buf["c"] = c
 
     # PROBLEM: this is not triggering the OSError and even though c ends up in fast because
@@ -265,12 +273,10 @@ def test_spillbuffer_oserror(tmpdir):
     # I check buf.slow.total_weight the value corresponds as if c was there,
     # buf.slow.weight_by_key = {'a': 329, 'c': 329} but set(buf.slow) = {"a"} and set(buf.fast) = {"b", "c"}
 
-    assert "Spill file to disk failed" in logs_oserror.getvalue()
+    assert "Spill file to disk failed" in logs_oserror_evict.getvalue()
+    breakpoint()
     assert set(buf.fast) == {"b", "c"}
     assert set(buf.slow) == {"a"}
 
-    del buf["b"]
-    del buf["c"]
-
-    # upto this point buf.slow.total_weight is 329 if I try to add c, it should hit OSError, but I get
-    # Spill file on disk reached capacity which makes no sense as capacity is 800
+    assert buf.slow.weight_by_key == {"a": 329}  # this is having c too for some reason
+    assert buf.fast.weights == {"b": 149, "c": 149}
