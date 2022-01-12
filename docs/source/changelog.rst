@@ -1,6 +1,97 @@
 Changelog
 =========
 
+2021.12.0
+---------
+
+Released on December 10, 2021
+
+Enhancements
+^^^^^^^^^^^^
+- Support pytest fixures and parametrize with ``gen_test`` (:pr:`5532`) `Fábio Rosado`_
+- Allow idempotent scheduler plugins to be registered via the RPC (:pr:`5545`) `Jacob Tomlinson`_
+- AMM logging (:pr:`5530`) `crusaderky`_
+- Raise error if ``asyncssh`` isn't installed when using ``SSHCluster`` (:pr:`5535`) `Fábio Rosado`_
+- Allow ``None`` in UCX configuration schema (:pr:`5534`) `Fábio Rosado`_
+- Add ``distributed.comm.ucx.create-cuda-context`` config (:pr:`5526`) `Peter Andreas Entschev`_
+
+Bug fixes
+^^^^^^^^^
+- Allow unknown tasks to be stolen (:pr:`5572`) `Florian Jetter`_
+- Further ``RecursionError`` fixes in ``recursive_to_repr`` (:pr:`5579`) `crusaderky`_
+- Revisit ``recursive_to_dict`` (:pr:`5557`) `crusaderky`_
+- Handle ``UCXUnreachable`` exception (:pr:`5556`) `Peter Andreas Entschev`_
+
+Documentation
+^^^^^^^^^^^^^
+- Separate ``Coordination`` section in API docs (:pr:`5412`) `Gabe Joseph`_
+- Improved documentation for processing state and paused workers (:pr:`4985`) `Maximilian Roos`_
+- Fix typo in ``TaskGroupGraph.update_layout`` comment (:pr:`5536`) `Hristo Georgiev`_
+- Update documentation for ``register_worker_plugin`` (:pr:`5533`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Mark ``test_gpu_monitoring_recent`` as flaky (:pr:`5540`) `Peter Andreas Entschev`_
+- Await worker arrival in SSH ``test_nprocs`` (:pr:`5575`) `James Bourbeau`_
+- AMM: Test that acquire-replicas of a task already in flight is a no-op (:pr:`5566`) `crusaderky`_
+- Make sure artifacts are tagged with CI partition so they don't race and overwrite each other (:pr:`5571`) `Ian Rose`_
+- Minor refactoring and commentary in worker state machine (:pr:`5563`) `Florian Jetter`_
+- Fix ``test_ucx_unreachable`` on UCX < 1.12 (:pr:`5562`) `Peter Andreas Entschev`_
+- Bump Bokeh min version to 2.1.1 (:pr:`5548`) `Bryan Van de Ven`_
+- Update ``gen_test`` tests to be more robust (:pr:`5551`) `James Bourbeau`_
+- Skip ``test_ucx_unreachable`` if ``UCXUnreachable`` is unavailable (:pr:`5560`) `Peter Andreas Entschev`_
+- Update gpuCI ``RAPIDS_VER`` to ``22.02`` (:pr:`5544`)
+- Add workflow to automate gpuCI updates (:pr:`5541`) `Charles Blackmon-Luca`_
+- Actually support ``uvloop`` in distributed (:pr:`5531`) `Jim Crist-Harif`_
+- Standardize UCX config separator to ``-`` (:pr:`5539`) `Peter Andreas Entschev`_
+
+
+2021.11.2
+---------
+
+Released on November 19, 2021
+
+- Ensure cancelled error transition can properly release a key (:pr:`5528`) `Florian Jetter`_
+- Refactor release key (:pr:`5507`) `Florian Jetter`_
+- Fix deadlock caused by an erred task (executing->cancelled->error) (:pr:`5503`) `Florian Jetter`_
+- Resolve ``KeyError``-related deadlock (:pr:`5525`) `Florian Jetter`_
+- Remove extra quotation in worker failure docs (:pr:`5518`) `James Bourbeau`_
+- Ensure ``safe_sizeof`` warning is accurate (:pr:`5519`) `James Bourbeau`_
+- Visualize cluster-wide memory usage over time (:pr:`5477`) `crusaderky`_
+- AMM: redesign start/stop methods (:pr:`5476`) `crusaderky`_
+- Preserve ``contextvars`` during comm offload (:pr:`5486`) `Gabe Joseph`_
+- Deserialization: zero-copy merge subframes when possible (:pr:`5208`) `Gabe Joseph`_
+- Add support for multiple workers per SSH connection (:pr:`5506`) `Jacob Tomlinson`_
+- Client method to dump cluster state (:pr:`5470`) `Florian Jetter`_
+
+
+2021.11.1
+---------
+
+Released on November 8, 2021
+
+- Revert "Avoid multiple blocking calls by gathering UCX frames" (:pr:`5505`) `Peter Andreas Entschev`_
+
+
+2021.11.0
+---------
+
+Released on November 5, 2021
+
+- Fix ``cluster_info`` sync handling (:pr:`5488`) `Jim Crist-Harif`_
+- Serialization family to preserve headers of the underlying dumps functions (:pr:`5380`) `Mads R. B. Kristensen`_
+- Point users to Discourse (:pr:`5489`) `James Bourbeau`_
+- Avoid multiple blocking calls by gathering UCX frames (:pr:`5487`) `Peter Andreas Entschev`_
+- Update all UCX tests to use ``asyncio`` marker (:pr:`5484`) `Peter Andreas Entschev`_
+- Register UCX close callback (:pr:`5474`) `Peter Andreas Entschev`_
+- Use older version of ``pynvml.nvmlDeviceGetComputeRunningProcesses`` (:pr:`5469`) `Jacob Tomlinson`_
+- Check for Futures from the wrong ``Client`` in ``gather`` (:pr:`5468`) `Gabe Joseph`_
+- Fix ``performance_report`` when used with ``%%time`` or ``%%timeit`` magic (:pr:`5463`) `Erik Welch`_
+- Scatter and replicate to avoid paused workers (:pr:`5441`) `crusaderky`_
+- AMM to avoid paused workers (:pr:`5440`) `crusaderky`_
+- Update changelog with ``LocalCluster`` host security note (:pr:`5462`) `Jim Crist-Harif`_
+
+
 2021.10.0
 ---------
 
@@ -2743,3 +2834,6 @@ significantly without many new features.
 .. _`Tom Forbes`: https://github.com/orf
 .. _`Michael Adkins`: https://github.com/madkinsz
 .. _`Genevieve Buckley`: https://github.com/GenevieveBuckley
+.. _`Erik Welch`: https://github.com/eriknw
+.. _`Fábio Rosado`: https://github.com/FabioRosado
+.. _`Maximilian Roos`: https://github.com/max-sixty

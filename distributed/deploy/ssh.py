@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 import sys
 import warnings
@@ -9,7 +10,6 @@ from json import dumps
 import dask
 import dask.config
 
-from ..core import Status
 from .spec import ProcessInterface, SpecCluster
 
 logger = logging.getLogger(__name__)
@@ -86,12 +86,19 @@ class Worker(Process):
         self.scheduler = scheduler
         self.worker_class = worker_class
         self.connect_options = connect_options
-        self.kwargs = kwargs
+        self.kwargs = copy.copy(kwargs)
         self.name = name
         self.remote_python = remote_python
+        self.nprocs = self.kwargs.pop("nprocs", 1)
 
     async def start(self):
-        import asyncssh  # import now to avoid adding to module startup time
+        try:
+            import asyncssh  # import now to avoid adding to module startup time
+        except ImportError:
+            raise ImportError(
+                "Dask's SSHCluster requires the `asyncssh` package to be installed. "
+                "Please install it using pip or conda."
+            )
 
         self.connection = await asyncssh.connect(self.address, **self.connect_options)
 
@@ -125,11 +132,13 @@ class Worker(Process):
                 "'%s'"
                 % dumps(
                     {
-                        "cls": self.worker_class,
-                        "opts": {
-                            **self.kwargs,
-                            "name": self.name,
-                        },
+                        i: {
+                            "cls": self.worker_class,
+                            "opts": {
+                                **self.kwargs,
+                            },
+                        }
+                        for i in range(self.nprocs)
                     }
                 ),
             ]
@@ -138,15 +147,14 @@ class Worker(Process):
         self.proc = await self.connection.create_process(cmd)
 
         # We watch stderr in order to get the address, then we return
-        while True:
+        started_workers = 0
+        while started_workers < self.nprocs:
             line = await self.proc.stderr.readline()
             if not line.strip():
                 raise Exception("Worker failed to start")
             logger.info(line.strip())
             if "worker at" in line:
-                self.address = line.split("worker at:")[1].strip()
-                self.status = Status.running
-                break
+                started_workers += 1
         logger.debug("%s", line)
         await super().start()
 
@@ -178,7 +186,13 @@ class Scheduler(Process):
         self.remote_python = remote_python
 
     async def start(self):
-        import asyncssh  # import now to avoid adding to module startup time
+        try:
+            import asyncssh  # import now to avoid adding to module startup time
+        except ImportError:
+            raise ImportError(
+                "Dask's SSHCluster requires the `asyncssh` package to be installed. "
+                "Please install it using pip or conda."
+            )
 
         logger.debug("Created Scheduler Connection")
 
@@ -312,6 +326,17 @@ def SSHCluster(
     ...     ["localhost", "localhost", "localhost", "localhost"],
     ...     connect_options={"known_hosts": None},
     ...     worker_options={"nthreads": 2},
+    ...     scheduler_options={"port": 0, "dashboard_address": ":8797"}
+    ... )
+    >>> client = Client(cluster)
+
+    Create a cluster with two workers on each host:
+
+    >>> from dask.distributed import Client, SSHCluster
+    >>> cluster = SSHCluster(
+    ...     ["localhost", "localhost", "localhost", "localhost"],
+    ...     connect_options={"known_hosts": None},
+    ...     worker_options={"nthreads": 2, "nprocs": 2},
     ...     scheduler_options={"port": 0, "dashboard_address": ":8797"}
     ... )
     >>> client = Client(cluster)

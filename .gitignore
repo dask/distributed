@@ -30,3 +30,6 @@ dask-worker-space/
 tags
 .ipynb_checkpoints
 .venv/
+
+# Test timeouts will dump the cluster state in here
+test_timeout_dump/

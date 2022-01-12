@@ -1,3 +1,4 @@
+import os
 from time import sleep
 
 import pytest
@@ -30,7 +31,7 @@ async def test_ucx_config(cleanup):
         "rdmacm": False,
         "net-devices": "",
         "tcp": True,
-        "cuda_copy": True,
+        "cuda-copy": True,
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
@@ -49,7 +50,7 @@ async def test_ucx_config(cleanup):
         "rdmacm": False,
         "net-devices": "mlx5_0:1",
         "tcp": True,
-        "cuda_copy": False,
+        "cuda-copy": False,
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
@@ -68,7 +69,7 @@ async def test_ucx_config(cleanup):
         "rdmacm": True,
         "net-devices": "all",
         "tcp": True,
-        "cuda_copy": True,
+        "cuda-copy": True,
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
@@ -79,21 +80,33 @@ async def test_ucx_config(cleanup):
             assert ucx_config.get("TLS") == "rc,tcp,rdmacm,cuda_copy"
         assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "rdmacm"
 
+    ucx = {
+        "nvlink": None,
+        "infiniband": None,
+        "rdmacm": None,
+        "net-devices": None,
+        "tcp": None,
+        "cuda-copy": None,
+    }
+
+    with dask.config.set({"distributed.comm.ucx": ucx}):
+        ucx_config = _scrub_ucx_config()
+        assert ucx_config == {}
+
 
 @pytest.mark.flaky(
     reruns=10, reruns_delay=5, condition=ucp.get_ucx_version() < (1, 11, 0)
 )
-def test_ucx_config_w_env_var(cleanup, loop, monkeypatch):
-    size = "1000.00 MB"
-    monkeypatch.setenv("DASK_RMM__POOL_SIZE", size)
-
-    dask.config.refresh()
+def test_ucx_config_w_env_var(cleanup, loop):
+    env = os.environ.copy()
+    env["DASK_RMM__POOL_SIZE"] = "1000.00 MB"
 
     port = "13339"
     sched_addr = f"ucx://{HOST}:{port}"
 
     with popen(
-        ["dask-scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port]
+        ["dask-scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port],
+        env=env,
     ) as sched:
         with popen(
             [
@@ -103,7 +116,8 @@ def test_ucx_config_w_env_var(cleanup, loop, monkeypatch):
                 "--protocol",
                 "ucx",
                 "--no-nanny",
-            ]
+            ],
+            env=env,
         ):
             with Client(sched_addr, loop=loop, timeout=10) as c:
                 while not c.scheduler_info()["workers"]:

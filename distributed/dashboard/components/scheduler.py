@@ -1698,7 +1698,7 @@ class Events(DashboardComponent):
             color="color",
             size=50,
             alpha=0.5,
-            **{"legend_field" if BOKEH_VERSION >= "1.4" else "legend": "action"},
+            legend_field="action",
         )
         self.root.yaxis.axis_label = "Action"
         self.root.legend.location = "top_left"
@@ -1944,13 +1944,16 @@ class TaskGraph(DashboardComponent):
         self.edge_source = ColumnDataSource({"x": [], "y": [], "visible": []})
 
         node_view = CDSView(
-            source=self.node_source,
             filters=[GroupFilter(column_name="visible", group="True")],
         )
         edge_view = CDSView(
-            source=self.edge_source,
             filters=[GroupFilter(column_name="visible", group="True")],
         )
+
+        # Bokeh >= 3.0 automatically infers the source to use
+        if BOKEH_VERSION.major < 3:
+            node_view.source = self.node_source
+            edge_view.source = self.edge_source
 
         node_colors = factor_cmap(
             "state",
@@ -1978,7 +1981,7 @@ class TaskGraph(DashboardComponent):
             color=node_colors,
             source=self.node_source,
             view=node_view,
-            **{"legend_field" if BOKEH_VERSION >= "1.4" else "legend": "state"},
+            legend_field="state",
         )
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
@@ -2282,8 +2285,8 @@ class TaskGroupGraph(DashboardComponent):
     def update_layout(self):
 
         with log_errors():
-            # get dependecies per task group
-            # in some cases there are tg that have themeselves as dependencies, we remove those.
+            # Get dependecies per task group.
+            # In some cases there are tg that have themselves as dependencies - we remove those.
             dependencies = {
                 k: {ds.name for ds in ts.dependencies if ds.name != k}
                 for k, ts in self.scheduler.task_groups.items()

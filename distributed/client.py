@@ -16,7 +16,7 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager, suppress
@@ -24,9 +24,12 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
+
+if TYPE_CHECKING:
+    from typing_extensions import Literal
 
 import dask
 from dask.base import collections_to_dsk, normalize_token, tokenize
@@ -50,7 +53,7 @@ try:
 except ImportError:
     single_key = first
 from tornado import gen
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import PeriodicCallback
 
 from . import versions as version_module  # type: ignore
 from .batched import BatchedSend
@@ -78,6 +81,8 @@ from .utils import (
     Any,
     CancelledError,
     LoopRunner,
+    NoOpAwaitable,
+    SyncMethodMixin,
     TimeoutError,
     format_dashboard_link,
     has_keyword,
@@ -514,7 +519,7 @@ def _handle_warn(event):
         warnings.warn(msg)
 
 
-class Client:
+class Client(SyncMethodMixin):
     """Connect to and submit computation to a Dask cluster
 
     The Client connects users to a Dask cluster.  It provides an asynchronous
@@ -698,10 +703,10 @@ class Client:
         else:
             self.connection_args = self.security.get_connection_args("client")
 
-        self._connecting_to_scheduler = False
         self._asynchronous = asynchronous
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.io_loop = self.loop = self._loop_runner.loop
+        self._connecting_to_scheduler = False
 
         self._gather_keys = None
         self._gather_future = None
@@ -795,26 +800,6 @@ class Client:
         raise ValueError("Not running inside the `as_current` context manager")
 
     @property
-    def asynchronous(self):
-        """Are we running in the event loop?
-
-        This is true if the user signaled that we might be when creating the
-        client as in the following::
-
-            client = Client(asynchronous=True)
-
-        However, we override this expectation if we can definitively tell that
-        we are running from a thread that is not the event loop.  This is
-        common when calling get_client() from within a worker task.  Even
-        though the client was originally created in asynchronous mode we may
-        find ourselves in contexts when it is better to operate synchronously.
-        """
-        try:
-            return self._asynchronous and self.loop is IOLoop.current()
-        except RuntimeError:
-            return False
-
-    @property
     def dashboard_link(self):
         """Link to the scheduler's dashboard.
 
@@ -850,22 +835,6 @@ class Client:
 
             return format_dashboard_link(host, port)
 
-    def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
-        callback_timeout = parse_timedelta(callback_timeout)
-        if (
-            asynchronous
-            or self.asynchronous
-            or getattr(thread_state, "asynchronous", False)
-        ):
-            future = func(*args, **kwargs)
-            if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
-            return future
-        else:
-            return sync(
-                self.loop, func, *args, callback_timeout=callback_timeout, **kwargs
-            )
-
     def _get_scheduler_info(self):
         from .scheduler import Scheduler
 
@@ -877,9 +846,7 @@ class Client:
             info = self.cluster.scheduler.identity()
             scheduler = self.cluster.scheduler
         elif (
-            self._loop_runner.is_started()
-            and self.scheduler
-            and not (self.asynchronous and self.loop is IOLoop.current())
+            self._loop_runner.is_started() and self.scheduler and not self.asynchronous
         ):
             info = sync(self.loop, self.scheduler.identity)
             scheduler = self.scheduler
@@ -937,7 +904,6 @@ class Client:
         self._loop_runner.start()
         if self._set_as_default:
             _set_global_client(self)
-        self.status = "connecting"
 
         if self.asynchronous:
             self._started = asyncio.ensure_future(self._start(**kwargs))
@@ -974,6 +940,8 @@ class Client:
             )
 
     async def _start(self, timeout=no_default, **kwargs):
+        self.status = "connecting"
+
         await self.rpc.start()
 
         if timeout == no_default:
@@ -1187,7 +1155,10 @@ class Client:
         self.close()
 
     def __del__(self):
-        self.close()
+        # If the loop never got assigned, we failed early in the constructor,
+        # nothing to do
+        if hasattr(self, "loop"):
+            self.close()
 
     def _inc_ref(self, key):
         with self._refcount_lock:
@@ -1399,9 +1370,7 @@ class Client:
         # XXX handling of self.status here is not thread-safe
         if self.status in ["closed", "newly-created"]:
             if self.asynchronous:
-                future = asyncio.Future()
-                future.set_result(None)
-                return future
+                return NoOpAwaitable()
             return
         self.status = "closing"
 
@@ -2321,7 +2290,7 @@ class Client:
         --------
         >>> c.list_datasets()  # doctest: +SKIP
         ['my_dataset']
-        >>> c.unpublish_datasets('my_dataset')  # doctest: +SKIP
+        >>> c.unpublish_dataset('my_dataset')  # doctest: +SKIP
         >>> c.list_datasets()  # doctest: +SKIP
         []
 
@@ -2418,7 +2387,14 @@ class Client:
         return self.sync(self._run_on_scheduler, function, *args, **kwargs)
 
     async def _run(
-        self, function, *args, nanny=False, workers=None, wait=True, **kwargs
+        self,
+        function,
+        *args,
+        nanny: bool = False,
+        workers: list[str] | None = None,
+        wait: bool = True,
+        on_error: Literal["raise", "return", "ignore"] = "raise",
+        **kwargs,
     ):
         responses = await self.scheduler.broadcast(
             msg=dict(
@@ -2430,18 +2406,46 @@ class Client:
             ),
             workers=workers,
             nanny=nanny,
+            on_error="return_pickle",
         )
         results = {}
         for key, resp in responses.items():
-            if resp["status"] == "OK":
-                results[key] = resp["result"]
+            if isinstance(resp, bytes):
+                # Pickled RPC exception
+                exc = loads(resp)
+                assert isinstance(exc, Exception)
             elif resp["status"] == "error":
-                typ, exc, tb = clean_exception(**resp)
-                raise exc.with_traceback(tb)
+                # Exception raised by the remote function
+                _, exc, tb = clean_exception(**resp)
+                exc = exc.with_traceback(tb)
+            else:
+                assert resp["status"] == "OK"
+                results[key] = resp["result"]
+                continue
+
+            if on_error == "raise":
+                raise exc
+            elif on_error == "return":
+                results[key] = exc
+            elif on_error != "ignore":
+                raise ValueError(
+                    "on_error must be 'raise', 'return', or 'ignore'; "
+                    f"got {on_error!r}"
+                )
+
         if wait:
             return results
 
-    def run(self, function, *args, **kwargs):
+    def run(
+        self,
+        function,
+        *args,
+        workers: list[str] | None = None,
+        wait: bool = True,
+        nanny: bool = False,
+        on_error: Literal["raise", "return", "ignore"] = "raise",
+        **kwargs,
+    ):
         """
         Run a function on all workers outside of task scheduling system
 
@@ -2468,6 +2472,17 @@ class Client:
             Whether to run ``function`` on the nanny. By default, the function
             is run on the worker process.  If specified, the addresses in
             ``workers`` should still be the worker addresses, not the nanny addresses.
+        on_error: "raise" | "return" | "ignore"
+            If the function raises an error on a worker:
+
+            raise
+                (default) Re-raise the exception on the client.
+                The output from other workers will be lost.
+            return
+                Return the Exception object instead of the function output for
+                the worker
+            ignore
+                Ignore the exception and remove the worker from the result dict
 
         Examples
         --------
@@ -2500,7 +2515,16 @@ class Client:
 
         >>> c.run(print_state, wait=False)  # doctest: +SKIP
         """
-        return self.sync(self._run, function, *args, **kwargs)
+        return self.sync(
+            self._run,
+            function,
+            *args,
+            workers=workers,
+            wait=wait,
+            nanny=nanny,
+            on_error=on_error,
+            **kwargs,
+        )
 
     @_deprecated(use_instead="Client.run which detects async functions automatically")
     def run_coroutine(self, function, *args, **kwargs):
@@ -2530,9 +2554,9 @@ class Client:
     def _get_computation_code(stacklevel=None) -> str:
         """Walk up the stack to the user code and extract the code surrounding
         the compute/submit/persist call. All modules encountered which are
-        blacklisted by the option
+        ignored through the option
         `distributed.diagnostics.computations.ignore-modules` will be ignored.
-        This can be used to blacklist commonly used libraries which wrap
+        This can be used to exclude commonly used libraries which wrap
         dask/distributed compute calls.
 
         ``stacklevel`` may be used to explicitly indicate from which frame on
@@ -3509,6 +3533,129 @@ class Client:
             self.sync(self._update_scheduler_info)
         return self._scheduler_identity
 
+    async def _dump_cluster_state(
+        self,
+        filename: str,
+        exclude: Collection[str],
+        format: Literal["msgpack", "yaml"],
+    ) -> None:
+
+        scheduler_info = self.scheduler.dump_state()
+
+        workers_info = self.scheduler.broadcast(
+            msg={"op": "dump_state", "exclude": exclude},
+            on_error="return_pickle",
+        )
+        versions_info = self._get_versions()
+        scheduler_info, workers_info, versions_info = await asyncio.gather(
+            scheduler_info, workers_info, versions_info
+        )
+        # Unpickle RPC errors and convert them to string
+        workers_info = {
+            k: repr(loads(v)) if isinstance(v, bytes) else v
+            for k, v in workers_info.items()
+        }
+
+        state = {
+            "scheduler": scheduler_info,
+            "workers": workers_info,
+            "versions": versions_info,
+        }
+
+        def tuple_to_list(node):
+            if isinstance(node, (list, tuple)):
+                return [tuple_to_list(el) for el in node]
+            elif isinstance(node, dict):
+                return {k: tuple_to_list(v) for k, v in node.items()}
+            else:
+                return node
+
+        # lists are converted to tuples by the RPC
+        state = tuple_to_list(state)
+
+        filename = str(filename)
+        if format == "msgpack":
+            import gzip
+
+            import msgpack
+
+            suffix = ".msgpack.gz"
+            if not filename.endswith(suffix):
+                filename += suffix
+
+            with gzip.open(filename, "wb") as fdg:
+                msgpack.pack(state, fdg)
+        elif format == "yaml":
+            import yaml
+
+            suffix = ".yaml"
+            if not filename.endswith(suffix):
+                filename += suffix
+
+            with open(filename, "w") as fd:
+                yaml.dump(state, fd)
+        else:
+            raise ValueError(
+                f"Unsupported format {format}. Possible values are `msgpack` or `yaml`"
+            )
+
+    def dump_cluster_state(
+        self,
+        filename: str = "dask-cluster-dump",
+        exclude: Collection[str] = (),
+        format: Literal["msgpack", "yaml"] = "msgpack",
+    ):
+        """Extract a dump of the entire cluster state and persist to disk.
+        This is intended for debugging purposes only.
+
+        Warning: Memory usage on client side can be large.
+
+        Results will be stored in a dict::
+
+            {
+                "scheduler_info": {...},
+                "worker_info": {
+                    worker_addr: {...},  # worker attributes
+                    ...
+                }
+            }
+
+        Parameters
+        ----------
+        filename:
+            The output filename. The appropriate file suffix (`.msgpack.gz` or
+            `.yaml`) will be appended automatically.
+        exclude:
+            A collection of attribute names which are supposed to be excluded
+            from the dump, e.g. to exclude code, tracebacks, logs, etc.
+        format:
+            Either msgpack or yaml. If msgpack is used (default), the output
+            will be stored in a gzipped file as msgpack.
+
+            To read::
+
+                import gzip, msgpack
+                with gzip.open("filename") as fd:
+                    state = msgpack.unpack(fd)
+
+            or::
+
+                import yaml
+                try:
+                    from yaml import CLoader as Loader
+                except ImportError:
+                    from yaml import Loader
+                with open("filename") as fd:
+                    state = yaml.load(fd, Loader=Loader)
+
+        """
+        return self.sync(
+            self._dump_cluster_state,
+            filename=filename,
+            format=format,
+            exclude=exclude,
+        )
+
     def write_scheduler_file(self, scheduler_file):
         """Write the scheduler information to a json file.
 
@@ -3775,15 +3922,10 @@ class Client:
 
     async def _get_versions(self, check=False, packages=[]):
         client = version_module.get_versions(packages=packages)
-        try:
-            scheduler = await self.scheduler.versions(packages=packages)
-        except KeyError:
-            scheduler = None
-        except TypeError:  # packages keyword not supported
-            scheduler = await self.scheduler.versions()  # this raises
-
+        scheduler = await self.scheduler.versions(packages=packages)
         workers = await self.scheduler.broadcast(
-            msg={"op": "versions", "packages": packages}
+            msg={"op": "versions", "packages": packages},
+            on_error="ignore",
         )
         result = {"scheduler": scheduler, "workers": workers, "client": client}
 
@@ -4163,7 +4305,7 @@ class Client:
 
         If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
         used then that will control idempotency.  If a plugin with that name has
-        already been registered then any future plugins will not run.
+        already been registered, then it will be removed and replaced by the new one.
 
         For alternatives to plugins, you may also wish to look into preload
         scripts.
@@ -4274,6 +4416,13 @@ class Client:
         register_worker_plugin
         """
         return self.sync(self._unregister_worker_plugin, name=name, nanny=nanny)
+
+    @property
+    def amm(self):
+        """Convenience accessors for the :doc:`active_memory_manager`"""
+        from .active_memory_manager import AMMClientProxy
+
+        return AMMClientProxy(self)
 
 
 class _WorkerSetupPlugin(WorkerPlugin):
@@ -4651,7 +4800,8 @@ def default_client(c=None):
         )
 
 
-def ensure_default_get(client):
+def ensure_default_client(client):
+    """Ensures the client passed as argument is set as the default"""
     dask.config.set(scheduler="dask.distributed")
     _set_global_client(client)
 
@@ -4970,3 +5120,16 @@ def _close_global_client():
 
 
 atexit.register(_close_global_client)
+
+
+def __getattr__(name):
+    if name == "ensure_default_get":
+        warnings.warn(
+            "`ensure_default_get` is deprecated and will be removed in a future release. "
+            "Please use `distributed.client.ensure_default_client` instead.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
+        return ensure_default_client
+    else:
+        raise AttributeError(f"module {__name__} has no attribute {name}")

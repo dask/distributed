@@ -119,7 +119,7 @@ def test_dashboard_non_standard_ports(loop):
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
-def test_dashboard_whitelist(loop):
+def test_dashboard_allowlist(loop):
     pytest.importorskip("bokeh")
     with pytest.raises(Exception):
         requests.get("http://localhost:8787/status/").ok

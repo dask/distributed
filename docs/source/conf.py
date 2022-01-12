@@ -382,6 +382,7 @@ extlinks = {
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "numpy": ("https://docs.scipy.org/doc/numpy", None),
+    "pandas": ("https://pandas.pydata.org/docs", None),
     "dask": ("https://docs.dask.org/en/latest", None),
     "bokeh": ("https://docs.bokeh.org/en/latest", None),
 }

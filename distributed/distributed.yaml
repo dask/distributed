@@ -62,8 +62,8 @@ distributed:
 
     active-memory-manager:
       # Set to true to auto-start the Active Memory Manager on Scheduler start; if false
-      # you'll have to either manually start it with client.scheduler.amm_start() or run
-      # it once with client.scheduler.amm_run().
+      # you'll have to either manually start it with client.amm.start() or run it once
+      # with client.amm.run_once().
       start: false
       # Once started, run the AMM cycle every <interval>
       interval: 2s
@@ -187,13 +187,14 @@ distributed:
     socket-backlog: 2048
     recent-messages-log-length: 0  # number of messages to keep for debugging
     ucx:
-      cuda_copy: False  # enable cuda-copy
-      tcp: False  # enable tcp
-      nvlink: False  # enable cuda_ipc
-      infiniband: False # enable Infiniband
-      rdmacm: False # enable RDMACM
+      cuda-copy: null  # enable cuda-copy
+      tcp: null  # enable tcp
+      nvlink: null  # enable cuda_ipc
+      infiniband: null  # enable Infiniband
+      rdmacm: null  # enable RDMACM
       net-devices: null  # define what interface to use for UCX comm
       reuse-endpoints: null  # enable endpoint reuse
+      create-cuda-context: null  # create CUDA context before UCX initialization
 
     zstd:
       level: 3      # Compression level, between 1 and 22.
@@ -206,19 +207,24 @@ distributed:
     require-encryption: null # Whether to require encryption on non-local comms
 
     tls:
-      ciphers: null   # Allowed ciphers, specified as an OpenSSL cipher string.
-      ca-file: null   # Path to a CA file, in pem format, optional
+      ciphers: null     # Allowed ciphers, specified as an OpenSSL cipher string.
+      min-version: 1.2  # The minimum TLS version supported.
+      max-version: null # The maximum TLS version supported.
+      ca-file: null     # Path to a CA file, in pem format, optional
       scheduler:
-        cert: null    # Path to certificate file for scheduler.
-        key: null     # Path to key file for scheduler. Alternatively, the key
-                      # can be appended to the cert file above, and this field
-                      # left blank.
+        cert: null      # Path to certificate file for scheduler.
+        key: null       # Path to key file for scheduler. Alternatively, the key
+                        # can be appended to the cert file above, and this field
+                        # left blank.
       worker:
         key: null
         cert: null
       client:
         key: null
         cert: null
+
+    tcp:
+      backend: tornado  # The backend to use for TCP, one of {tornado, asyncio}
 
     websockets:
       shard: 8MiB

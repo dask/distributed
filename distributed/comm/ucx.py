@@ -5,7 +5,6 @@ See :ref:`communications` for more.
 
 .. _UCX: https://github.com/openucx/ucx
 """
-import asyncio
 import functools
 import logging
 import os
@@ -71,7 +70,9 @@ def init_once():
     # We ensure the CUDA context is created before initializing UCX. This can't
     # be safely handled externally because communications in Dask start before
     # preload scripts run.
-    if "TLS" in ucx_config and "cuda_copy" in ucx_config["TLS"]:
+    if dask.config.get("distributed.comm.ucx.create-cuda-context") is True or (
+        "TLS" in ucx_config and "cuda_copy" in ucx_config["TLS"]
+    ):
         try:
             import numba.cuda
         except ImportError:
@@ -279,6 +280,16 @@ class UCX(Comm):
 
                 # Send meta data
 
+                # Send close flag and number of frames (_Bool, int64)
+                await self.ep.send(struct.pack("?Q", False, nframes))
+                # Send which frames are CUDA (bool) and
+                # how large each frame is (uint64)
+                await self.ep.send(
+                    struct.pack(nframes * "?" + nframes * "Q", *cuda_frames, *sizes)
+                )
+
+                # Send frames
+
                 # It is necessary to first synchronize the default stream before start
                 # sending We synchronize the default stream because UCX is not
                 # stream-ordered and syncing the default stream will wait for other
@@ -287,22 +298,8 @@ class UCX(Comm):
                 if any(cuda_send_frames):
                     synchronize_stream(0)
 
-                tasks = []
-
-                # Send close flag and number of frames (_Bool, int64)
-                tasks.append(self.ep.send(struct.pack("?Q", False, nframes)))
-                # Send which frames are CUDA (bool) and
-                # how large each frame is (uint64)
-                tasks.append(
-                    self.ep.send(
-                        struct.pack(nframes * "?" + nframes * "Q", *cuda_frames, *sizes)
-                    )
-                )
-
-                # Send frames
                 for each_frame in send_frames:
-                    tasks.append(self.ep.send(each_frame))
-                await asyncio.gather(*tasks)
+                    await self.ep.send(each_frame)
                 return sum(sizes)
             except (ucp.exceptions.UCXBaseException):
                 self.abort()
@@ -310,9 +307,6 @@ class UCX(Comm):
 
     async def read(self, deserializers=("cuda", "dask", "pickle", "error")):
         with log_errors():
-            if self.closed():
-                raise CommClosedError("Endpoint is closed -- unable to read message")
-
             if deserializers is None:
                 deserializers = ("cuda", "dask", "pickle", "error")
 
@@ -359,10 +353,8 @@ class UCX(Comm):
                 if any(cuda_recv_frames):
                     synchronize_stream(0)
 
-                tasks = []
                 for each_frame in recv_frames:
-                    tasks.append(self.ep.recv(each_frame))
-                await asyncio.gather(*tasks)
+                    await self.ep.recv(each_frame)
                 msg = await from_frames(
                     frames,
                     deserialize=self.deserialize,
@@ -425,6 +417,7 @@ class UCXConnector(Connector):
         except (ucp.exceptions.UCXCloseError, ucp.exceptions.UCXCanceled,) + (
             getattr(ucp.exceptions, "UCXConnectionReset", ()),
             getattr(ucp.exceptions, "UCXNotConnected", ()),
+            getattr(ucp.exceptions, "UCXUnreachable", ()),
         ):
             raise CommClosedError("Connection closed before handshake completed")
         return self.comm_class(
@@ -582,7 +575,7 @@ def _scrub_ucx_config():
         if any(
             [
                 dask.config.get("distributed.comm.ucx.nvlink"),
-                dask.config.get("distributed.comm.ucx.cuda_copy"),
+                dask.config.get("distributed.comm.ucx.cuda-copy"),
             ]
         ):
             tls = tls + ",cuda_copy"
