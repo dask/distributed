@@ -147,9 +147,7 @@ def test_spillbuffer_maxlim(tmpdir):
     with captured_logger(logging.getLogger("distributed.spill")) as logs_d:
         buf["d"] = d
 
-    # assert (
-    #     logs_d.getvalue().count("disk reached capacity") == 2
-    # )  # we have two spill exceptions raised, now is only reporting 1, after moving the log to spill buffer set_item
+    assert "disk reached capacity" in logs_d.getvalue()
 
     assert set(buf.fast) == {"c", "d"}
     assert buf.fast.weights == {"c": sc, "d": sd}
@@ -160,7 +158,7 @@ def test_spillbuffer_maxlim(tmpdir):
     # We overwrite `a` with something bigger than max_spill, it will try to write in slow
     # it will trigger exception and locate it in fast, where it will trigger total_weight being
     # bigger than the target and the LRU dict has more than one element, causing this to evict
-    # `c` (lower priority) with no compalins since we have room on slow. But this condition
+    # `c` (lower priority) with no complains since we have room on slow. But this condition
     # self.total_weight > self.n and len(self.d) > 1 is still true on the LRU (we have `a` and `d`
     # here) so it'll try to evict `d` but it doesn't fit in slow, which will trigger another exception
     # kepping it finally on fast
@@ -172,9 +170,7 @@ def test_spillbuffer_maxlim(tmpdir):
     with captured_logger(logging.getLogger("distributed.spill")) as logs_alarge:
         buf["a"] = a_large
 
-    # assert (
-    #     logs_alarge.getvalue().count("disk reached capacity") == 2
-    # )  # we have two spill exceptions raised
+    assert "disk reached capacity" in logs_alarge.getvalue()
 
     assert set(buf.fast) == {"a", "d"}
     assert set(buf.slow) == {"b", "c"}
@@ -192,9 +188,7 @@ def test_spillbuffer_maxlim(tmpdir):
     with captured_logger(logging.getLogger("distributed.spill")) as logs_dlarge:
         buf["d"] = d_large
 
-    # assert (
-    #     logs_dlarge.getvalue().count("disk reached capacity") == 2
-    # )  # we have two spill exceptions raised
+    assert "disk reached capacity" in logs_dlarge.getvalue()
 
     assert set(buf.fast) == {"a", "d"}
     assert set(buf.slow) == {"b", "c"}
@@ -248,10 +242,11 @@ def test_spillbuffer_bad_key(tmpdir):
 def test_spillbuffer_oserror(tmpdir):
     buf = SpillBuffer(str(tmpdir), target=200, max_spill=800)
 
-    a, b, c = (
+    a, b, c, d = (
         "a" * 200,
         "b" * 100,
         "c" * 200,
+        "d" * 100,
     )
 
     # let's have something in fast and something in slow
@@ -263,20 +258,28 @@ def test_spillbuffer_oserror(tmpdir):
     # modify permissions of disk to be read only
     subprocess.call(["chmod", "-R", "-w", str(tmpdir)])
 
-    # upto this point buf.slow.total_weight is 329 if I try to add c, it should hit OSError, but I get
-    # Spill file on disk reached capacity which makes no sense as capacity is 800
-    with captured_logger(logging.getLogger("distributed.spill")) as logs_oserror_evict:
+    # Add key > than target
+    with captured_logger(logging.getLogger("distributed.spill")) as logs_oserror_slow:
         buf["c"] = c
 
-    # PROBLEM: this is not triggering the OSError and even though c ends up in fast because
-    # "Spill disk reached capacity but it didn't", when
-    # I check buf.slow.total_weight the value corresponds as if c was there,
-    # buf.slow.weight_by_key = {'a': 329, 'c': 329} but set(buf.slow) = {"a"} and set(buf.fast) = {"b", "c"}
-
-    assert "Spill file to disk failed" in logs_oserror_evict.getvalue()
-    breakpoint()
+    assert "Spill file to disk failed" in logs_oserror_slow.getvalue()
     assert set(buf.fast) == {"b", "c"}
     assert set(buf.slow) == {"a"}
 
-    assert buf.slow.weight_by_key == {"a": 329}  # this is having c too for some reason
-    assert buf.fast.weights == {"b": 149, "c": 149}
+    assert buf.slow.weight_by_key == {"a": 329}
+    assert buf.fast.weights == {"b": 149, "c": 249}
+
+    del buf["c"]
+    assert set(buf.fast) == {"b"}
+    assert set(buf.slow) == {"a"}
+
+    # add key to fast which is small than target but when add it triggers spill, which triggers OSError
+    with captured_logger(logging.getLogger("distributed.spill")) as logs_oserror_evict:
+        buf["d"] = d
+
+    assert "Spill file to disk failed" in logs_oserror_evict.getvalue()
+    assert set(buf.fast) == {"b", "d"}
+    assert set(buf.slow) == {"a"}
+
+    assert buf.slow.weight_by_key == {"a": 329}
+    assert buf.fast.weights == {"b": 149, "d": 149}

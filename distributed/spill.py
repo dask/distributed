@@ -26,10 +26,7 @@ class SpillBuffer(zict.Buffer):
     def __init__(
         self, spill_directory: str, target: int, max_spill: int | Literal[False] = False
     ):
-        if (
-            max_spill is not False and LooseVersion(zict.__version__) <= "2.0.0"
-        ):  # FIX ME WHEN zict is released us LooseVersion(zict.__version__) <= "2.0.0"
-            # is not False allows spill limit 0, decide if this case is ok
+        if max_spill is not False and LooseVersion(zict.__version__) <= "2.0.0":
             raise ValueError("zict > 2.0.0 required to set max_weight")
 
         super().__init__(
@@ -131,17 +128,23 @@ class Slow(zict.Func):
             and self.total_weight + pickled_size > self.max_weight
         ):
             # Stop callbacks and ensure that the key ends up in SpillBuffer.fast
-            self.total_weight -= self.weight_by_key.pop(
-                key, 0
-            )  # isn't this taken care when we pop an item? triggering del
+            self.total_weight -= self.weight_by_key.pop(key, 0)
             self.d.pop(key, None)
             # To be caught by SpillBuffer.__setitem__
             raise MaxSpillExceeded()
 
         assert key not in self.weight_by_key  # Thanks to Buffer.__setitem__
+
+        try:
+            self.d[key] = pickled  # pickle and store to disk through File
+        except OSError:  # need to catch OSErrors when writing directly to disk
+            raise
+
         self.weight_by_key[key] = pickled_size
         self.total_weight += pickled_size
-        self.d[key] = pickled  # pickle and store to disk through File
+
+        print("Im here", f"{set(self.d)=}")
+        print("\n\n")
 
     def __delitem__(self, key):
         super().__delitem__(key)
