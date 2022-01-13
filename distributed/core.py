@@ -1094,6 +1094,8 @@ class ConnectionPool:
         else:
             self.occupied[addr].remove(comm)
             if comm.closed():
+                # Either the user passed the close=True parameter to send_recv, or
+                # the RPC call raised OSError or CancelledError
                 self.semaphore.release()
             else:
                 self.available[addr].add(comm)
