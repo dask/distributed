@@ -667,7 +667,7 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
     # subclass of OSError
     except (TimeoutError, OSError):
         # On communication errors, we should simply close the communication
-        # This includes CommClosedError and socket timeouts
+        # Note that OSError includes CommClosedError and socket timeouts
         force_close = True
         raise
     except (CancelledError, asyncio.CancelledError):
