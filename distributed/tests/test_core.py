@@ -535,6 +535,7 @@ async def test_send_recv_args():
 @gen_test(timeout=5)
 async def test_send_recv_cancelled():
     """Test that the comm channel is closed on CancelledError"""
+
     async def get_stuck(comm):
         await asyncio.Future()
 

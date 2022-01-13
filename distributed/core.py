@@ -37,7 +37,6 @@ from .comm import (
 from .metrics import time
 from .system_monitor import SystemMonitor
 from .utils import (
-    CancelledError,
     TimeoutError,
     get_traceback,
     has_keyword,
