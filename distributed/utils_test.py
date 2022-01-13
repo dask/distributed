@@ -1872,3 +1872,23 @@ def _format_story(story: list[tuple]) -> str:
     if not story:
         return "(empty story)"
     return "- " + "\n- ".join(str(ev) for ev in story)
+
+
+class BrokenComm(Comm):
+    peer_address = ""
+    local_address = ""
+
+    def close(self):
+        pass
+
+    def closed(self):
+        return True
+
+    def abort(self):
+        pass
+
+    def read(self, deserializers=None):
+        raise OSError()
+
+    def write(self, msg, serializers=None, on_error=None):
+        raise OSError()

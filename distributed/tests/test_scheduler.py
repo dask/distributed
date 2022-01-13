@@ -20,7 +20,6 @@ from dask import delayed
 from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
-from distributed.comm import Comm
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
@@ -28,6 +27,7 @@ from distributed.protocol.pickle import dumps, loads
 from distributed.scheduler import MemoryState, Scheduler
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
+    BrokenComm,
     captured_logger,
     cluster,
     dec,
@@ -2112,26 +2112,6 @@ async def test_task_group_on_fire_and_forget(c, s, a, b):
         await asyncio.sleep(1)
 
     assert "Error transitioning" not in logs.getvalue()
-
-
-class BrokenComm(Comm):
-    peer_address = ""
-    local_address = ""
-
-    def close(self):
-        pass
-
-    def closed(self):
-        pass
-
-    def abort(self):
-        pass
-
-    def read(self, deserializers=None):
-        raise OSError()
-
-    def write(self, msg, serializers=None, on_error=None):
-        raise OSError()
 
 
 class FlakyConnectionPool(ConnectionPool):
