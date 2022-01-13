@@ -723,7 +723,17 @@ properties:
                 type:
                 - string
                 - "null"
-                descsription: Allowed ciphers, specified as an OpenSSL cipher string.
+                description: Allowed ciphers, specified as an OpenSSL cipher string.
+
+              min-version:
+                enum: [null, 1.2, 1.3]
+                description: The minimum TLS version to support. Defaults to TLS 1.2.
+
+              max-version:
+                enum: [null, 1.2, 1.3]
+                description: |
+                  The maximum TLS version to support. Defaults to the maximum
+                  version supported by the platform.
 
               ca-file:
                 type:
@@ -843,6 +853,14 @@ properties:
                   additional variables for each transport, while ensuring optimal connectivity. When
                   ``True``, a CUDA context will be created on the first device listed in
                   ``CUDA_VISIBLE_DEVICES``.
+
+          tcp:
+            type: object
+            properties:
+              backend:
+                type: string
+                description: |
+                  The TCP backend implementation to use. Must be either `tornado` or `asyncio`.
 
           websockets:
             type: object

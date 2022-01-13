@@ -16,7 +16,7 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager, suppress
@@ -24,7 +24,7 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import TYPE_CHECKING, Awaitable, ClassVar, Sequence
+from typing import TYPE_CHECKING, ClassVar
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
@@ -2290,7 +2290,7 @@ class Client(SyncMethodMixin):
         --------
         >>> c.list_datasets()  # doctest: +SKIP
         ['my_dataset']
-        >>> c.unpublish_datasets('my_dataset')  # doctest: +SKIP
+        >>> c.unpublish_dataset('my_dataset')  # doctest: +SKIP
         >>> c.list_datasets()  # doctest: +SKIP
         []
 
@@ -2387,7 +2387,14 @@ class Client(SyncMethodMixin):
         return self.sync(self._run_on_scheduler, function, *args, **kwargs)
 
     async def _run(
-        self, function, *args, nanny=False, workers=None, wait=True, **kwargs
+        self,
+        function,
+        *args,
+        nanny: bool = False,
+        workers: list[str] | None = None,
+        wait: bool = True,
+        on_error: Literal["raise", "return", "ignore"] = "raise",
+        **kwargs,
     ):
         responses = await self.scheduler.broadcast(
             msg=dict(
@@ -2399,18 +2406,46 @@ class Client(SyncMethodMixin):
             ),
             workers=workers,
             nanny=nanny,
+            on_error="return_pickle",
         )
         results = {}
         for key, resp in responses.items():
-            if resp["status"] == "OK":
-                results[key] = resp["result"]
+            if isinstance(resp, bytes):
+                # Pickled RPC exception
+                exc = loads(resp)
+                assert isinstance(exc, Exception)
             elif resp["status"] == "error":
-                typ, exc, tb = clean_exception(**resp)
-                raise exc.with_traceback(tb)
+                # Exception raised by the remote function
+                _, exc, tb = clean_exception(**resp)
+                exc = exc.with_traceback(tb)
+            else:
+                assert resp["status"] == "OK"
+                results[key] = resp["result"]
+                continue
+
+            if on_error == "raise":
+                raise exc
+            elif on_error == "return":
+                results[key] = exc
+            elif on_error != "ignore":
+                raise ValueError(
+                    "on_error must be 'raise', 'return', or 'ignore'; "
+                    f"got {on_error!r}"
+                )
+
         if wait:
             return results
 
-    def run(self, function, *args, **kwargs):
+    def run(
+        self,
+        function,
+        *args,
+        workers: list[str] | None = None,
+        wait: bool = True,
+        nanny: bool = False,
+        on_error: Literal["raise", "return", "ignore"] = "raise",
+        **kwargs,
+    ):
         """
         Run a function on all workers outside of task scheduling system
 
@@ -2437,6 +2472,17 @@ class Client(SyncMethodMixin):
             Whether to run ``function`` on the nanny. By default, the function
             is run on the worker process.  If specified, the addresses in
             ``workers`` should still be the worker addresses, not the nanny addresses.
+        on_error: "raise" | "return" | "ignore"
+            If the function raises an error on a worker:
+
+            raise
+                (default) Re-raise the exception on the client.
+                The output from other workers will be lost.
+            return
+                Return the Exception object instead of the function output for
+                the worker
+            ignore
+                Ignore the exception and remove the worker from the result dict
 
         Examples
         --------
@@ -2469,7 +2515,16 @@ class Client(SyncMethodMixin):
 
         >>> c.run(print_state, wait=False)  # doctest: +SKIP
         """
-        return self.sync(self._run, function, *args, **kwargs)
+        return self.sync(
+            self._run,
+            function,
+            *args,
+            workers=workers,
+            wait=wait,
+            nanny=nanny,
+            on_error=on_error,
+            **kwargs,
+        )
 
     @_deprecated(use_instead="Client.run which detects async functions automatically")
     def run_coroutine(self, function, *args, **kwargs):
@@ -2499,9 +2554,9 @@ class Client(SyncMethodMixin):
     def _get_computation_code(stacklevel=None) -> str:
         """Walk up the stack to the user code and extract the code surrounding
         the compute/submit/persist call. All modules encountered which are
-        blacklisted by the option
+        ignored through the option
         `distributed.diagnostics.computations.ignore-modules` will be ignored.
-        This can be used to blacklist commonly used libraries which wrap
+        This can be used to exclude commonly used libraries which wrap
         dask/distributed compute calls.
 
         ``stacklevel`` may be used to explicitly indicate from which frame on
@@ -3481,45 +3536,61 @@ class Client(SyncMethodMixin):
     async def _dump_cluster_state(
         self,
         filename: str,
-        exclude: Sequence[str] = None,
-        format: Literal["msgpack"] | Literal["yaml"] = "msgpack",
+        exclude: Collection[str],
+        format: Literal["msgpack", "yaml"],
     ) -> None:
 
         scheduler_info = self.scheduler.dump_state()
 
-        worker_info = self.scheduler.broadcast(
-            msg=dict(
-                op="dump_state",
-                exclude=exclude,
-            ),
+        workers_info = self.scheduler.broadcast(
+            msg={"op": "dump_state", "exclude": exclude},
+            on_error="return_pickle",
         )
-        versions = self._get_versions()
-        scheduler_info, worker_info, versions_info = await asyncio.gather(
-            scheduler_info, worker_info, versions
+        versions_info = self._get_versions()
+        scheduler_info, workers_info, versions_info = await asyncio.gather(
+            scheduler_info, workers_info, versions_info
         )
+        # Unpickle RPC errors and convert them to string
+        workers_info = {
+            k: repr(loads(v)) if isinstance(v, bytes) else v
+            for k, v in workers_info.items()
+        }
 
         state = {
             "scheduler": scheduler_info,
-            "workers": worker_info,
+            "workers": workers_info,
             "versions": versions_info,
         }
+
+        def tuple_to_list(node):
+            if isinstance(node, (list, tuple)):
+                return [tuple_to_list(el) for el in node]
+            elif isinstance(node, dict):
+                return {k: tuple_to_list(v) for k, v in node.items()}
+            else:
+                return node
+
+        # lists are converted to tuples by the RPC
+        state = tuple_to_list(state)
+
         filename = str(filename)
         if format == "msgpack":
-            suffix = ".msgpack.gz"
-            if not filename.endswith(suffix):
-                filename += suffix
             import gzip
 
             import msgpack
-            import yaml
+
+            suffix = ".msgpack.gz"
+            if not filename.endswith(suffix):
+                filename += suffix
 
             with gzip.open(filename, "wb") as fdg:
                 msgpack.pack(state, fdg)
         elif format == "yaml":
+            import yaml
+
             suffix = ".yaml"
             if not filename.endswith(suffix):
                 filename += suffix
-            import yaml
 
             with open(filename, "w") as fd:
                 yaml.dump(state, fd)
@@ -3531,9 +3602,9 @@ class Client(SyncMethodMixin):
     def dump_cluster_state(
         self,
         filename: str = "dask-cluster-dump",
-        exclude: Sequence[str] = None,
-        format: Literal["msgpack"] | Literal["yaml"] = "msgpack",
-    ) -> Awaitable | None:
+        exclude: Collection[str] = (),
+        format: Literal["msgpack", "yaml"] = "msgpack",
+    ):
         """Extract a dump of the entire cluster state and persist to disk.
         This is intended for debugging purposes only.
 
@@ -3549,13 +3620,13 @@ class Client(SyncMethodMixin):
                 }
             }
 
-        Paramters
-        ---------
+        Parameters
+        ----------
         filename:
             The output filename. The appropriate file suffix (`.msgpack.gz` or
             `.yaml`) will be appended automatically.
         exclude:
-            A sequence of attribute names which are supposed to be blacklisted
+            A collection of attribute names which are supposed to be excluded
             from the dump, e.g. to exclude code, tracebacks, logs, etc.
         format:
             Either msgpack or yaml. If msgpack is used (default), the output
@@ -3851,15 +3922,10 @@ class Client(SyncMethodMixin):
 
     async def _get_versions(self, check=False, packages=[]):
         client = version_module.get_versions(packages=packages)
-        try:
-            scheduler = await self.scheduler.versions(packages=packages)
-        except KeyError:
-            scheduler = None
-        except TypeError:  # packages keyword not supported
-            scheduler = await self.scheduler.versions()  # this raises
-
+        scheduler = await self.scheduler.versions(packages=packages)
         workers = await self.scheduler.broadcast(
-            msg={"op": "versions", "packages": packages}
+            msg={"op": "versions", "packages": packages},
+            on_error="ignore",
         )
         result = {"scheduler": scheduler, "workers": workers, "client": client}
 
@@ -4734,7 +4800,8 @@ def default_client(c=None):
         )
 
 
-def ensure_default_get(client):
+def ensure_default_client(client):
+    """Ensures the client passed as argument is set as the default"""
     dask.config.set(scheduler="dask.distributed")
     _set_global_client(client)
 
@@ -5053,3 +5120,16 @@ def _close_global_client():
 
 
 atexit.register(_close_global_client)
+
+
+def __getattr__(name):
+    if name == "ensure_default_get":
+        warnings.warn(
+            "`ensure_default_get` is deprecated and will be removed in a future release. "
+            "Please use `distributed.client.ensure_default_client` instead.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
+        return ensure_default_client
+    else:
+        raise AttributeError(f"module {__name__} has no attribute {name}")

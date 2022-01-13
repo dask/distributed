@@ -35,6 +35,7 @@ from distributed.utils_test import (
     async_wait_for,
     captured_logger,
     gen_cluster,
+    gen_test,
     has_ipv6,
     inc,
     throws,
@@ -529,6 +530,28 @@ async def test_send_recv_args():
     assert comm.closed()
 
     server.stop()
+
+
+@gen_test(timeout=5)
+async def test_send_recv_cancelled():
+    """Test that the comm channel is closed on CancelledError"""
+
+    async def get_stuck(comm):
+        await asyncio.Future()
+
+    server = Server({"get_stuck": get_stuck})
+    await server.listen(0)
+
+    client_comm = await connect(server.address, deserialize=False)
+    while not server._comms:
+        await asyncio.sleep(0.01)
+    server_comm = next(iter(server._comms))
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(send_recv(client_comm, op="get_stuck"), timeout=0.1)
+    assert client_comm.closed()
+    while not server_comm.closed():
+        await asyncio.sleep(0.01)
 
 
 def test_coerce_to_address():

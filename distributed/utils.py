@@ -22,18 +22,15 @@ from asyncio import TimeoutError
 from collections import OrderedDict, UserDict, deque
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
-from typing import TYPE_CHECKING
 from typing import Any as AnyType
-from typing import ClassVar, Container, Sequence, overload
+from typing import ClassVar, Container
 
 import click
 import tblib.pickling_support
-
-if TYPE_CHECKING:
-    from typing_extensions import Protocol
 
 try:
     import resource
@@ -1439,95 +1436,56 @@ def __getattr__(name):
         raise AttributeError(f"module {__name__} has no attribute {name}")
 
 
-if TYPE_CHECKING:
-
-    class SupportsToDict(Protocol):
-        def _to_dict(
-            self, *, exclude: Container[str] | None = None, **kwargs
-        ) -> dict[str, AnyType]:
-            ...
+# Used internally by recursive_to_dict to stop infinite recursion. If an object has
+# already been encountered, a string representation will be returned instead. This is
+# necessary since we have multiple cyclic referencing data structures.
+_recursive_to_dict_seen: ContextVar[set[int]] = ContextVar("_recursive_to_dict_seen")
 
 
-@overload
-def recursive_to_dict(
-    obj: SupportsToDict, exclude: Container[str] = None, seen: set[AnyType] = None
-) -> dict[str, AnyType]:
-    ...
-
-
-@overload
-def recursive_to_dict(
-    obj: Sequence, exclude: Container[str] = None, seen: set[AnyType] = None
-) -> Sequence:
-    ...
-
-
-@overload
-def recursive_to_dict(
-    obj: dict, exclude: Container[str] = None, seen: set[AnyType] = None
-) -> dict:
-    ...
-
-
-@overload
-def recursive_to_dict(
-    obj: None, exclude: Container[str] = None, seen: set[AnyType] = None
-) -> None:
-    ...
-
-
-def recursive_to_dict(obj, exclude=None, seen=None):
-    """
-    This is for debugging purposes only and calls ``_to_dict`` methods on ``obj`` or
-    it's elements recursively, if available. The output of this function is
-    intended to be json serializable.
+def recursive_to_dict(obj: AnyType, *, exclude: Container[str] = ()) -> AnyType:
+    """Recursively convert arbitrary Python objects to a JSON-serializable
+    representation. This is intended for debugging purposes only and calls ``_to_dict``
+    methods on encountered objects, if available.
 
     Parameters
     ----------
     exclude:
         A list of attribute names to be excluded from the dump.
         This will be forwarded to the objects ``_to_dict`` methods and these methods
-        are required to ensure this.
-    seen:
-        Used internally to avoid infinite recursion. If an object has already
-        been encountered, it's representation will be generated instead of its
-        ``_to_dict``. This is necessary since we have multiple cyclic referencing
-        data structures.
+        are required to accept this parameter.
     """
-    if obj is None:
-        return None
-    if isinstance(obj, str):
+    if isinstance(obj, (int, float, bool, str)) or obj is None:
         return obj
-    if seen is None:
+    if isinstance(obj, (type, bytes)):
+        return repr(obj)
+
+    # Prevent infinite recursion
+    try:
+        seen = _recursive_to_dict_seen.get()
+    except LookupError:
         seen = set()
-    if id(obj) in seen:
+    seen = seen.copy()
+    tok = _recursive_to_dict_seen.set(seen)
+    try:
+        if id(obj) in seen:
+            return repr(obj)
+        seen.add(id(obj))
+
+        if hasattr(obj, "_to_dict"):
+            return obj._to_dict(exclude=exclude)
+        if isinstance(obj, (list, tuple, set, frozenset, deque)):
+            return [recursive_to_dict(el, exclude=exclude) for el in obj]
+        if isinstance(obj, dict):
+            res = {}
+            for k, v in obj.items():
+                k = recursive_to_dict(k, exclude=exclude)
+                v = recursive_to_dict(v, exclude=exclude)
+                try:
+                    res[k] = v
+                except TypeError:
+                    res[str(k)] = v
+            return res
+
         return repr(obj)
-    seen.add(id(obj))
-    if isinstance(obj, type):
-        return repr(obj)
-    if hasattr(obj, "_to_dict"):
-        return obj._to_dict(exclude=exclude)
-    if isinstance(obj, (deque, set)):
-        obj = tuple(obj)
-    if isinstance(obj, (list, tuple)):
-        return tuple(
-            recursive_to_dict(
-                el,
-                exclude=exclude,
-                seen=seen,
-            )
-            for el in obj
-        )
-    elif isinstance(obj, dict):
-        res = {}
-        for k, v in obj.items():
-            k = recursive_to_dict(k, exclude=exclude, seen=seen)
-            try:
-                hash(k)
-            except TypeError:
-                k = str(k)
-            v = recursive_to_dict(v, exclude=exclude, seen=seen)
-            res[k] = v
-        return res
-    else:
-        return repr(obj)
+    finally:
+        tok.var.reset(tok)

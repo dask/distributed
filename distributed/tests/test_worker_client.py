@@ -2,6 +2,7 @@ import asyncio
 import random
 import threading
 import warnings
+from collections import defaultdict
 from time import sleep
 
 import pytest
@@ -18,7 +19,7 @@ from distributed import (
     worker_client,
 )
 from distributed.metrics import time
-from distributed.utils_test import double, gen_cluster, inc
+from distributed.utils_test import double, gen_cluster, inc, slowinc
 
 
 @gen_cluster(client=True)
@@ -315,3 +316,27 @@ async def test_submit_different_names(s, a, b):
         assert fut > 0
     finally:
         await c.close()
+
+
+@gen_cluster(client=True)
+async def test_secede_does_not_claim_worker(c, s, a, b):
+    """A seceded task must not block the task running it. Tasks scheduled from
+    within should be evenly distributed"""
+    # https://github.com/dask/distributed/issues/5332
+    def get_addr(x):
+        w = get_worker()
+        slowinc(x)
+        return w.address
+
+    def long_running():
+        with worker_client() as client:
+            futs = client.map(get_addr, range(100))
+            workers = defaultdict(int)
+            for f in futs:
+                workers[f.result()] += 1
+            return dict(workers)
+
+    res = await c.submit(long_running)
+    assert len(res) == 2
+    assert res[a.address] > 25
+    assert res[b.address] > 25

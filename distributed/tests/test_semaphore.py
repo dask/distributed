@@ -10,10 +10,15 @@ import dask
 from dask.distributed import Client
 
 from distributed import Semaphore, fire_and_forget
-from distributed.comm import Comm
 from distributed.core import ConnectionPool
 from distributed.metrics import time
-from distributed.utils_test import captured_logger, cluster, gen_cluster, slowidentity
+from distributed.utils_test import (
+    BrokenComm,
+    captured_logger,
+    cluster,
+    gen_cluster,
+    slowidentity,
+)
 
 
 @gen_cluster(client=True)
@@ -261,26 +266,6 @@ async def test_release_once_too_many_resilience(c, s, a, b):
     assert not s.extensions["semaphores"].leases["x"]
     await sem.acquire()
     assert len(s.extensions["semaphores"].leases["x"]) == 1
-
-
-class BrokenComm(Comm):
-    peer_address = ""
-    local_address = ""
-
-    def close(self):
-        pass
-
-    def closed(self):
-        return True
-
-    def abort(self):
-        pass
-
-    def read(self, deserializers=None):
-        raise OSError()
-
-    def write(self, msg, serializers=None, on_error=None):
-        raise OSError()
 
 
 class FlakyConnectionPool(ConnectionPool):

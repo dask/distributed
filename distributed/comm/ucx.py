@@ -307,9 +307,6 @@ class UCX(Comm):
 
     async def read(self, deserializers=("cuda", "dask", "pickle", "error")):
         with log_errors():
-            if self.closed():
-                raise CommClosedError("Endpoint is closed -- unable to read message")
-
             if deserializers is None:
                 deserializers = ("cuda", "dask", "pickle", "error")
 
@@ -420,6 +417,7 @@ class UCXConnector(Connector):
         except (ucp.exceptions.UCXCloseError, ucp.exceptions.UCXCanceled,) + (
             getattr(ucp.exceptions, "UCXConnectionReset", ()),
             getattr(ucp.exceptions, "UCXNotConnected", ()),
+            getattr(ucp.exceptions, "UCXUnreachable", ()),
         ):
             raise CommClosedError("Connection closed before handshake completed")
         return self.comm_class(

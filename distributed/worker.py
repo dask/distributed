@@ -13,7 +13,7 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict, deque, namedtuple
-from collections.abc import Callable, Iterable, Mapping, MutableMapping
+from collections.abc import Callable, Collection, Iterable, Mapping, MutableMapping
 from concurrent.futures import Executor
 from contextlib import suppress
 from datetime import timedelta
@@ -110,6 +110,7 @@ PROCESSING = {
     "resumed",
 }
 READY = {"ready", "constrained"}
+FETCH_INTENDED = {"missing", "fetch", "flight", "cancelled", "resumed"}
 
 # Worker.status subsets
 RUNNING = {Status.running, Status.paused, Status.closing_gracefully}
@@ -125,6 +126,8 @@ DEFAULT_DATA_SIZE = parse_bytes(
 )
 
 SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "task"])
+
+_taskstate_to_dict_guard = False
 
 
 class InvalidTransition(Exception):
@@ -219,16 +222,16 @@ class TaskState:
         self._next = None
 
     def __repr__(self):
-        return f"<Task {self.key!r} {self.state}>"
+        return f"<TaskState {self.key!r} {self.state}>"
 
     def get_nbytes(self) -> int:
         nbytes = self.nbytes
         return nbytes if nbytes is not None else DEFAULT_DATA_SIZE
 
-    def _to_dict(self, *, exclude: Container[str] = None) -> dict[str, Any]:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict | str:
         """
         A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
+        Not type stable and not intended for roundtrips.
 
         Parameters
         ----------
@@ -240,18 +243,21 @@ class TaskState:
         --------
         Client.dump_cluster_state
         """
-
-        if exclude is None:
-            exclude = set()
-
-        return recursive_to_dict(
-            {
-                attr: getattr(self, attr)
-                for attr in self.__dict__.keys()
-                if attr not in exclude
-            },
-            exclude=exclude,
-        )
+        # When a task references another task, just print the task repr. All tasks
+        # should neatly appear under Worker.tasks. This also prevents a RecursionError
+        # during particularly heavy loads, which have been observed to happen whenever
+        # there's an acyclic dependency chain of ~200+ tasks.
+        global _taskstate_to_dict_guard
+        if _taskstate_to_dict_guard:
+            return repr(self)
+        _taskstate_to_dict_guard = True
+        try:
+            return recursive_to_dict(
+                {k: v for k, v in self.__dict__.items() if k not in exclude},
+                exclude=exclude,
+            )
+        finally:
+            _taskstate_to_dict_guard = False
 
     def is_protected(self) -> bool:
         return self.state in PROCESSING or any(
@@ -366,7 +372,11 @@ class Worker(ServerNode):
         The keys currently running on active threads
     * **waiting_for_data_count**: ``int``
         A count of how many tasks are currently waiting for data
-
+    * **generation**: ``int``
+        Counter that decreases every time the compute-task handler is invoked by the
+        Scheduler. It is appended to TaskState.priority and acts as a tie-breaker
+        between tasks that have the same priority on the Scheduler, determining a
+        last-in-first-out order between them.
 
     Parameters
     ----------
@@ -650,8 +660,8 @@ class Worker(ServerNode):
             ("resumed", "memory"): self.transition_generic_memory,
             ("resumed", "error"): self.transition_generic_error,
             ("resumed", "released"): self.transition_generic_released,
-            ("resumed", "waiting"): self.transition_rescheduled_next,
-            ("resumed", "fetch"): self.transition_rescheduled_next,
+            ("resumed", "waiting"): self.transition_resumed_waiting,
+            ("resumed", "fetch"): self.transition_resumed_fetch,
             ("constrained", "executing"): self.transition_constrained_executing,
             ("constrained", "released"): self.transition_generic_released,
             ("error", "released"): self.transition_generic_released,
@@ -1122,8 +1132,8 @@ class Worker(ServerNode):
         }
 
     def _to_dict(
-        self, comm: Comm = None, *, exclude: Container[str] = None
-    ) -> dict[str, Any]:
+        self, comm: Comm | None = None, *, exclude: Container[str] = ()
+    ) -> dict:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not inteded for roundtrips.
@@ -1155,9 +1165,9 @@ class Worker(ServerNode):
             "memory_spill_fraction": self.memory_spill_fraction,
             "memory_pause_fraction": self.memory_pause_fraction,
             "logs": self.get_logs(),
-            "config": dict(dask.config.config),
-            "incoming_transfer_log": list(self.incoming_transfer_log),
-            "outgoing_transfer_log": list(self.outgoing_transfer_log),
+            "config": dask.config.config,
+            "incoming_transfer_log": self.incoming_transfer_log,
+            "outgoing_transfer_log": self.outgoing_transfer_log,
         }
         info.update(extra)
         return recursive_to_dict(info, exclude=exclude)
@@ -1797,7 +1807,7 @@ class Worker(ServerNode):
                 else:
                     recommendations.update(recs)
 
-            self.log.append((key, "receive-from-scatter"))
+            self.log.append((key, "receive-from-scatter", stimulus_id, time()))
 
         if report:
             scheduler_messages.append(
@@ -1820,7 +1830,7 @@ class Worker(ServerNode):
         still decide to hold on to the data and task since it is required by an
         upstream dependency.
         """
-        self.log.append(("free-keys", keys, stimulus_id))
+        self.log.append(("free-keys", keys, stimulus_id, time()))
         recommendations = {}
         for key in keys:
             ts = self.tasks.get(key)
@@ -1848,7 +1858,7 @@ class Worker(ServerNode):
 
         For stronger guarantees, see handler free_keys
         """
-        self.log.append(("remove-replicas", keys, stimulus_id))
+        self.log.append(("remove-replicas", keys, stimulus_id, time()))
         recommendations = {}
 
         rejected = []
@@ -1857,18 +1867,20 @@ class Worker(ServerNode):
             if ts is None or ts.state != "memory":
                 continue
             if not ts.is_protected():
-                self.log.append((ts.key, "remove-replica-confirmed", stimulus_id))
+                self.log.append(
+                    (ts.key, "remove-replica-confirmed", stimulus_id, time())
+                )
                 recommendations[ts] = "released"
             else:
                 rejected.append(key)
 
         if rejected:
-            self.log.append(("remove-replica-rejected", rejected, stimulus_id))
+            self.log.append(("remove-replica-rejected", rejected, stimulus_id, time()))
             self.batched_stream.send(
                 {"op": "add-keys", "keys": rejected, "stimulus_id": stimulus_id}
             )
 
-        self.transitions(recommendations=recommendations, stimulus_id=stimulus_id)
+        self.transitions(recommendations, stimulus_id=stimulus_id)
 
         return "OK"
 
@@ -1898,7 +1910,7 @@ class Worker(ServerNode):
         """
         ts = self.tasks.get(key)
         if ts and ts.state in READY | {"waiting"}:
-            self.log.append((key, "cancel-compute", reason))
+            self.log.append((key, "cancel-compute", reason, time()))
             ts.scheduler_holds_ref = False
             # All possible dependents of TS should not be in state Processing on
             # scheduler side and therefore should not be assigned to a worker,
@@ -1907,56 +1919,61 @@ class Worker(ServerNode):
             self.transition(ts, "released", stimulus_id=reason)
 
     def handle_acquire_replicas(
-        self, comm=None, keys=None, priorities=None, who_has=None, stimulus_id=None
+        self,
+        comm=None,
+        *,
+        keys: Collection[str],
+        who_has: dict[str, Collection[str]],
+        stimulus_id: str,
     ):
         recommendations = {}
-        scheduler_msgs = []
-        for k in keys:
+        for key in keys:
             ts = self.ensure_task_exists(
-                k,
+                key=key,
+                # Transfer this data after all dependency tasks of computations with
+                # default or explicitly high (>0) user priority and before all
+                # computations with low priority (<0). Note that the priority= parameter
+                # of compute() is multiplied by -1 before it reaches TaskState.priority.
+                priority=(1,),
                 stimulus_id=stimulus_id,
-                priority=priorities[k],
             )
             if ts.state != "memory":
                 recommendations[ts] = "fetch"
 
         self.update_who_has(who_has, stimulus_id=stimulus_id)
-
-        for msg in scheduler_msgs:
-            self.batched_stream.send(msg)
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
     def ensure_task_exists(
-        self, key: str, priority: tuple, stimulus_id: str
+        self, key: str, *, priority: tuple[int, ...], stimulus_id: str
     ) -> TaskState:
         try:
             ts = self.tasks[key]
-            logger.debug(
-                "Data task already known %s", {"task": ts, "stimulus_id": stimulus_id}
-            )
+            logger.debug("Data task %s already known (stimulus_id=%s)", ts, stimulus_id)
         except KeyError:
             self.tasks[key] = ts = TaskState(key)
+        if not ts.priority:
+            assert priority
+            ts.priority = priority
 
         self.log.append((key, "ensure-task-exists", ts.state, stimulus_id, time()))
-        ts.priority = ts.priority or priority
         return ts
 
     def handle_compute_task(
         self,
         *,
-        key,
+        key: str,
+        who_has: dict[str, Collection[str]],
+        priority: tuple[int, ...],
+        duration: float,
         function=None,
         args=None,
         kwargs=None,
         task=no_value,
-        who_has=None,
-        nbytes=None,
-        priority=None,
-        duration=None,
+        nbytes: dict[str, int] | None = None,
         resource_restrictions=None,
-        actor=False,
+        actor: bool = False,
         annotations=None,
-        stimulus_id=None,
+        stimulus_id: str,
     ):
         self.log.append((key, "compute-task", stimulus_id, time()))
         try:
@@ -1970,9 +1987,9 @@ class Worker(ServerNode):
 
         ts.runspec = SerializedTask(function, args, kwargs, task)
 
-        if priority is not None:
-            priority = tuple(priority) + (self.generation,)
-            self.generation -= 1
+        assert isinstance(priority, tuple)
+        priority = priority + (self.generation,)
+        self.generation -= 1
 
         if actor:
             self.actors[ts.key] = None
@@ -1992,8 +2009,8 @@ class Worker(ServerNode):
         for dependency in who_has:
             dep_ts = self.ensure_task_exists(
                 key=dependency,
-                stimulus_id=stimulus_id,
                 priority=priority,
+                stimulus_id=stimulus_id,
             )
 
             # link up to child / parents
@@ -2029,6 +2046,10 @@ class Worker(ServerNode):
                 self.tasks[key].nbytes = value
 
     def transition_missing_fetch(self, ts, *, stimulus_id):
+        if self.validate:
+            assert ts.state == "missing"
+            assert ts.priority is not None
+
         self._missing_dep_flight.discard(ts)
         ts.state = "fetch"
         ts.done = False
@@ -2050,6 +2071,9 @@ class Worker(ServerNode):
         return {}, []
 
     def transition_released_fetch(self, ts, *, stimulus_id):
+        if self.validate:
+            assert ts.state == "released"
+            assert ts.priority is not None
         for w in ts.who_has:
             self.pending_data_per_worker[w].append(ts.key)
         ts.state = "fetch"
@@ -2146,6 +2170,7 @@ class Worker(ServerNode):
             assert ts.state == "waiting"
             assert ts.key not in self.ready
             assert not ts.waiting_for_data
+            assert ts.priority is not None
             for dep in ts.dependencies:
                 assert dep.key in self.data or dep.key in self.actors
                 assert dep.state == "memory"
@@ -2220,11 +2245,53 @@ class Worker(ServerNode):
             stimulus_id=stimulus_id,
         )
 
-    def transition_rescheduled_next(self, ts, *, stimulus_id):
-        next_state = ts._next
-        recs, smsgs = self.transition_generic_released(ts, stimulus_id=stimulus_id)
-        recs[ts] = next_state
-        return recs, smsgs
+    def transition_resumed_fetch(self, ts, *, stimulus_id):
+        """`resumed` is an intermediate degenerate state which splits further up
+        into two states depending on what the last signal / next state is
+        intended to be. There are only two viable choices depending on whether
+        the task is required to be fetched from another worker `resumed(fetch)`
+        or the task shall be computed on this worker `resumed(waiting)`.
+
+        The only viable state transitions ending up here are
+
+        flight -> cancelled -> resumed(waiting)
+
+        or
+
+        executing -> cancelled -> resumed(fetch)
+
+        depending on the origin. Equally, only `fetch`, `waiting` or `released`
+        are allowed output states.
+
+        See also `transition_resumed_waiting`
+        """
+        # if the next state is already intended to be fetch or if the
+        # coro/thread is still running (ts.done==False), this is a noop
+        if ts._next == "fetch":
+            return {}, []
+        ts._next = "fetch"
+
+        if ts.done:
+            next_state = ts._next
+            recs, smsgs = self.transition_generic_released(ts, stimulus_id=stimulus_id)
+            recs[ts] = next_state
+            return recs, smsgs
+        return {}, []
+
+    def transition_resumed_waiting(self, ts, *, stimulus_id):
+        """
+        See transition_resumed_fetch
+        """
+        if ts._next == "waiting":
+            return {}, []
+        ts._next = "waiting"
+
+        if ts.done:
+            next_state = ts._next
+            recs, smsgs = self.transition_generic_released(ts, stimulus_id=stimulus_id)
+            recs[ts] = next_state
+            return recs, smsgs
+        return {}, []
 
     def transition_cancelled_fetch(self, ts, *, stimulus_id):
         if ts.done:
@@ -2352,16 +2419,17 @@ class Worker(ServerNode):
         return {}, []
 
     def transition_flight_fetch(self, ts, *, stimulus_id):
-        self._in_flight_tasks.discard(ts)
-        ts.coming_from = None
-
-        for w in ts.who_has:
-            self.pending_data_per_worker[w].append(ts.key)
-        ts.state = "fetch"
-        ts.done = False
-        heapq.heappush(self.data_needed, (ts.priority, ts.key))
-
-        return {}, []
+        # If this transition is called after the flight coroutine has finished,
+        # we can reset the task and transition to fetch again. If it is not yet
+        # finished, this should be a no-op
+        if ts.done:
+            recommendations, smsgs = self.transition_generic_released(
+                ts, stimulus_id=stimulus_id
+            )
+            recommendations[ts] = "fetch"
+            return recommendations, smsgs
+        else:
+            return {}, []
 
     def transition_flight_error(
         self, ts, exception, traceback, exception_text, traceback_text, *, stimulus_id
@@ -2638,6 +2706,7 @@ class Worker(ServerNode):
 
             workers = [w for w in ts.who_has if w not in self.in_flight_workers]
             if not workers:
+                assert ts.priority is not None
                 skipped_worker_in_flight.append((ts.priority, ts.key))
                 continue
 
@@ -2658,7 +2727,7 @@ class Worker(ServerNode):
             self.comm_nbytes += total_nbytes
             self.in_flight_workers[worker] = to_gather
             recommendations = {self.tasks[d]: ("flight", worker) for d in to_gather}
-            self.transitions(recommendations=recommendations, stimulus_id=stimulus_id)
+            self.transitions(recommendations, stimulus_id=stimulus_id)
 
             self.loop.add_callback(
                 self.gather_dep,
@@ -2791,9 +2860,9 @@ class Worker(ServerNode):
         Returns
         -------
         in_flight_keys:
-            The subset of keys in to_gather_keys in state `flight`
+            The subset of keys in to_gather_keys in state `flight` or `resumed`
         cancelled_keys:
-            The subset of tasks in to_gather_keys in state `cancelled`
+            The subset of tasks in to_gather_keys in state `cancelled` or `memory`
         cause:
             The task to attach startstops of this transfer to
         """
@@ -2803,9 +2872,18 @@ class Worker(ServerNode):
             ts = self.tasks.get(key)
             if ts is None:
                 continue
+
+            # At this point, a task has been transitioned fetch->flight
+            # flight is only allowed to be transitioned into
+            # {memory, resumed, cancelled}
+            # resumed and cancelled will block any further transition until this
+            # coro has been finished
+
             if ts.state in ("flight", "resumed"):
                 in_flight_tasks.add(ts)
-            elif ts.state == "cancelled":
+            # If the key is already in memory, the fetch should not happen which
+            # is signalled by the cancelled_keys
+            elif ts.state in {"cancelled", "memory"}:
                 cancelled_keys.add(key)
             else:
                 raise RuntimeError(
@@ -2908,7 +2986,7 @@ class Worker(ServerNode):
 
                 if not to_gather_keys:
                     self.log.append(
-                        ("nothing-to-gather", worker, to_gather, stimulus_id)
+                        ("nothing-to-gather", worker, to_gather, stimulus_id, time())
                     )
                     return
 
@@ -2993,15 +3071,13 @@ class Worker(ServerNode):
                     elif ts not in recommendations:
                         ts.who_has.discard(worker)
                         self.has_what[worker].discard(ts.key)
-                        self.log.append((d, "missing-dep"))
+                        self.log.append((d, "missing-dep", stimulus_id, time()))
                         self.batched_stream.send(
                             {"op": "missing-data", "errant_worker": worker, "key": d}
                         )
                         recommendations[ts] = "fetch"
                 del data, response
-                self.transitions(
-                    recommendations=recommendations, stimulus_id=stimulus_id
-                )
+                self.transitions(recommendations, stimulus_id=stimulus_id)
                 self.ensure_computing()
 
                 if not busy:
@@ -3040,13 +3116,17 @@ class Worker(ServerNode):
                 self.ensure_communicating()
                 self.ensure_computing()
 
-    async def query_who_has(self, *deps, stimulus_id):
+    async def query_who_has(
+        self, *deps: str, stimulus_id: str
+    ) -> dict[str, Collection[str]]:
         with log_errors():
             who_has = await retry_operation(self.scheduler.who_has, keys=deps)
             self.update_who_has(who_has, stimulus_id=stimulus_id)
             return who_has
 
-    def update_who_has(self, who_has, *, stimulus_id):
+    def update_who_has(
+        self, who_has: dict[str, Collection[str]], *, stimulus_id: str
+    ) -> None:
         try:
             recommendations = {}
             for dep, workers in who_has.items():
@@ -3063,17 +3143,17 @@ class Worker(ServerNode):
                         # Do not mutate the input dict. That's rude
                         workers = set(workers) - {self.address}
                     dep_ts = self.tasks[dep]
-                    dep_ts.who_has.update(workers)
+                    if dep_ts.state in FETCH_INTENDED:
+                        dep_ts.who_has.update(workers)
 
-                    if dep_ts.state == "missing":
-                        recommendations[dep_ts] = "fetch"
+                        if dep_ts.state == "missing":
+                            recommendations[dep_ts] = "fetch"
 
-                    for worker in workers:
-                        self.has_what[worker].add(dep)
-                        if dep_ts.state in ("fetch", "flight", "missing"):
+                        for worker in workers:
+                            self.has_what[worker].add(dep)
                             self.pending_data_per_worker[worker].append(dep_ts.key)
 
-            self.transitions(recommendations=recommendations, stimulus_id=stimulus_id)
+            self.transitions(recommendations, stimulus_id=stimulus_id)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -3122,9 +3202,9 @@ class Worker(ServerNode):
                 "Release key %s", {"key": key, "cause": cause, "reason": reason}
             )
             if cause:
-                self.log.append((key, "release-key", {"cause": cause}, reason))
+                self.log.append((key, "release-key", {"cause": cause}, reason, time()))
             else:
-                self.log.append((key, "release-key", reason))
+                self.log.append((key, "release-key", reason, time()))
             if key in self.data:
                 try:
                     del self.data[key]
@@ -3296,7 +3376,7 @@ class Worker(ServerNode):
             return function, args, kwargs
         except Exception as e:
             logger.error("Could not deserialize task", exc_info=True)
-            self.log.append((ts.key, "deserialize-error"))
+            self.log.append((ts.key, "deserialize-error", stimulus_id, time()))
             emsg = error_message(e)
             emsg.pop("status")
             self.transition(

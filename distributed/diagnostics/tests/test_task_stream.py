@@ -84,6 +84,29 @@ async def test_collect(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_no_startstops(c, s, a, b):
+    tasks = TaskStreamPlugin(s)
+    s.add_plugin(tasks)
+    # just to create the key on the scheduler
+    future = c.submit(inc, 1)
+    await wait(future)
+    assert len(tasks.buffer) == 1
+
+    tasks.transition(future.key, "processing", "erred")
+    # Transition was not recorded because it didn't contain `startstops`
+    assert len(tasks.buffer) == 1
+
+    tasks.transition(future.key, "processing", "erred", startstops=[])
+    # Transition was not recorded because `startstops` was empty
+    assert len(tasks.buffer) == 1
+
+    tasks.transition(
+        future.key, "processing", "erred", startstops=[dict(start=time(), stop=time())]
+    )
+    assert len(tasks.buffer) == 2
+
+
+@gen_cluster(client=True)
 async def test_client(c, s, a, b):
     L = await c.get_task_stream()
     assert L == ()
