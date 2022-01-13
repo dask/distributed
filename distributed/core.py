@@ -37,7 +37,6 @@ from .comm import (
 from .metrics import time
 from .system_monitor import SystemMonitor
 from .utils import (
-    CancelledError,
     TimeoutError,
     get_traceback,
     has_keyword,
@@ -519,7 +518,7 @@ class Server:
                             result = asyncio.ensure_future(result)
                             self._ongoing_coroutines.add(result)
                             result = await result
-                    except (CommClosedError, CancelledError):
+                    except (CommClosedError, asyncio.CancelledError):
                         if self.status in (Status.running, Status.paused):
                             logger.info("Lost connection to %r", address, exc_info=True)
                         break
@@ -663,15 +662,23 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
             response = await comm.read(deserializers=deserializers)
         else:
             response = None
-    except OSError:
+    except (asyncio.TimeoutError, OSError):
         # On communication errors, we should simply close the communication
+        # Note that OSError includes CommClosedError and socket timeouts
         force_close = True
         raise
+    except asyncio.CancelledError:
+        # Do not reuse the comm to prevent the next call of send_recv from receiving
+        # data from this call and/or accidentally putting multiple waiters on read().
+        # Note that this relies on all Comm implementations to allow a write() in the
+        # middle of a read().
+        please_close = True
+        raise
     finally:
-        if please_close:
-            await comm.close()
-        elif force_close:
+        if force_close:
             comm.abort()
+        elif please_close:
+            await comm.close()
 
     if isinstance(response, dict) and response.get("status") == "uncaught-error":
         if comm.deserialize:
@@ -1084,6 +1091,8 @@ class ConnectionPool:
         else:
             self.occupied[addr].remove(comm)
             if comm.closed():
+                # Either the user passed the close=True parameter to send_recv, or
+                # the RPC call raised OSError or CancelledError
                 self.semaphore.release()
             else:
                 self.available[addr].add(comm)
