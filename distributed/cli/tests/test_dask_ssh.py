@@ -11,10 +11,11 @@ def test_version_option():
 
 
 def test_nprocs_renamed_to_num_workers():
-    with popen(["dask-ssh", "--nprocs=2", "127.0.0.1"]) as cluster:
+    with popen(["dask-ssh", "--nprocs=2", "--nohost", "localhost"]) as cluster:
         assert any(
             b"renamed to --num-workers" in cluster.stderr.readline() for i in range(15)
         )
+        cluster.send_signal(KeyboardInterrupt)
 
 
 def test_num_workers_with_nprocs_is_an_error():

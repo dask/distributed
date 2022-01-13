@@ -92,7 +92,8 @@ async def test_nprocs_renamed_to_num_workers():
                 await client.wait_for_workers(4)
 
 
-def test_num_workers_with_nprocs_is_an_error():
+@pytest.mark.asyncio
+async def test_num_workers_with_nprocs_is_an_error():
     with pytest.raises(ValueError, match="Both nprocs and num_workers"):
         SSHCluster(
             ["127.0.0.1"] * 3,
