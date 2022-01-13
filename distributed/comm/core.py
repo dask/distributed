@@ -294,10 +294,8 @@ async def connect(
             break
         except FatalCommClosedError:
             raise
-        # CommClosed inherits from OSError
-        # Note: this is asyncio.TimeoutError, not the builtin TimeoutError which is a
-        # subclass of OSError
-        except (TimeoutError, OSError) as exc:
+        # Note: CommClosed inherits from OSError
+        except (asyncio.TimeoutError, OSError) as exc:
             active_exception = exc
 
             # The intermediate capping is mostly relevant for the initial
