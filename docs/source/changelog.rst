@@ -2495,17 +2495,17 @@ This is a small bugfix release due to a config change upstream.
 -  Add Client.current() (:pr:`1450`)
 -  Clean handling of restart timeouts (:pr:`1442`)
 
-.. _v1.19.1 - September 25th, 2017:
+.. _v1.19.1 - 2017-09-25:
 
-1.19.1 - September 25th, 2017
+1.19.1 - 2017-09-25
 -----------------------------
 
 -  Fix tool issues with TaskStream plot (:pr:`1425`)
 -  Move profile module to top level (:pr:`1423`)
 
-.. _v1.19.0 - September 24th, 2017:
+.. _v1.19.0 - 2017-09-24:
 
-1.19.0 - September 24th, 2017
+1.19.0 - 2017-09-24
 -----------------------------
 
 -  Avoid storing messages in message log (:pr:`1361`)
@@ -2521,18 +2521,18 @@ This is a small bugfix release due to a config change upstream.
 -  Change memory-limit keyword to refer to maximum number of bytes (:pr:`1405`)
 -  Add ``cancel(force=)`` keyword (:pr:`1408`)
 
-.. _v1.18.2 - September 2nd, 2017:
+.. _v1.18.2 - 2017-09-02:
 
-1.18.2 - September 2nd, 2017
+1.18.2 - 2017-09-02
 ----------------------------
 -  Silently pass on cancelled futures in as_completed (:pr:`1366`)
 -  Fix unicode keys error in Python 2 (:pr:`1370`)
 -  Support numeric worker names
 -  Add dask-mpi executable (:pr:`1367`)
 
-.. _v1.18.1 - August 25th, 2017:
+.. _v1.18.1 - 2017-08-25:
 
-1.18.1 - August 25th, 2017
+1.18.1 - 2017-08-25
 --------------------------
 -  Clean up forgotten keys in fire-and-forget workloads (:pr:`1250`)
 -  Handle missing extensions (:pr:`1263`)
@@ -2560,9 +2560,9 @@ This is a small bugfix release due to a config change upstream.
 -  Exit workers if nanny process fails (:pr:`1345`)
 -  Auto pep8 and flake (:pr:`1353`)
 
-.. _v1.18.0 - July 8th, 2017:
+.. _v1.18.0 - 2017-07-08:
 
-1.18.0 - July 8th, 2017
+1.18.0 - 2017-07-08
 -----------------------
 -  Multi-threading safety (:pr:`1191`), (:pr:`1228`), (:pr:`1229`)
 -  Improve handling of byte counting (:pr:`1198`) (:pr:`1224`)
@@ -2574,9 +2574,9 @@ This is a small bugfix release due to a config change upstream.
 -  Resolve testing corner-cases (:pr:`1236`), (:pr:`1237`), (:pr:`1240`), (:pr:`1241`), (:pr:`1242`), (:pr:`1244`)
 -  Automatic use of scatter/gather(direct=True) in more cases (:pr:`1239`)
 
-.. _v1.17.1 - June 14th, 2017:
+.. _v1.17.1 - 2017-06-14:
 
-1.17.1 - June 14th, 2017
+1.17.1 - 2017-06-14
 ------------------------
 
 -  Remove Python 3.4 testing from travis-ci (:pr:`1157`)
@@ -2586,9 +2586,9 @@ This is a small bugfix release due to a config change upstream.
 -  Improve scheduler.restart (:pr:`1175`)
 
 
-.. _v1.17.0 - June 9th, 2017:
+.. _v1.17.0 - 2017-06-09:
 
-1.17.0 - June 9th, 2017
+1.17.0 - 2017-06-09
 -----------------------
 
 -  Reevaluate worker occupancy periodically during scheduler downtime
@@ -2618,18 +2618,18 @@ This is a small bugfix release due to a config change upstream.
 -  Remove old distributed.collections submodule (:pr:`1153`)
 
 
-.. _v1.16.3 - May 5th, 2017:
+.. _v1.16.3 - 2017-05-05:
 
-1.16.3 - May 5th, 2017
+1.16.3 - 2017-05-05
 ----------------------
 
 -  Add bokeh template files to MANIFEST (:pr:`1063`)
 -  Don't set worker_client.get as default get (:pr:`1061`)
 -  Clean up logging on Client().shutdown() (:pr:`1055`)
 
-.. _v1.16.2 - May 3rd, 2017:
+.. _v1.16.2 - 2017-05-03:
 
-1.16.2 - May 3rd, 2017
+1.16.2 - 2017-05-03
 ----------------------
 
 -  Support ``async with Client`` syntax (:pr:`1053`)
@@ -2650,9 +2650,9 @@ This is a small bugfix release due to a config change upstream.
 -  Run supports non-msgpack-serializable results (:pr:`965`)
 
 
-.. _v1.16.1 - March 22nd, 2017:
+.. _v1.16.1 - 2017-03-22:
 
-1.16.1 - March 22nd, 2017
+1.16.1 - 2017-03-22
 -------------------------
 
 -  Use inproc transport in LocalCluster (:pr:`919`)
@@ -2667,9 +2667,9 @@ This is a small bugfix release due to a config change upstream.
 -  Upload sourcecode as zip module (:pr:`886`)
 -  Replay remote exceptions in local process (:pr:`894`)
 
-.. _v1.16.0 - February 24th, 2017:
+.. _v1.16.0 - 2017-02-24:
 
-1.16.0 - February 24th, 2017
+1.16.0 - 2017-02-24
 ----------------------------
 
 - First come first served priorities on client submissions (:pr:`840`)
@@ -2685,9 +2685,9 @@ This is a small bugfix release due to a config change upstream.
 - Support uploading modules from zip files (:pr:`886`)
 - Improve titles of Bokeh dashboards (:pr:`895`)
 
-.. _v1.15.2 - January 27th, 2017:
+.. _v1.15.2 - 2017-01-27:
 
-1.15.2 - January 27th, 2017
+1.15.2 - 2017-01-27
 ---------------------------
 
 *  Fix a bug where arrays with large dtypes or shapes were being improperly compressed (:pr:`830` :pr:`832` :pr:`833`)
@@ -2696,9 +2696,9 @@ This is a small bugfix release due to a config change upstream.
 *  Support scheduler shutdown of remote workers, useful for adaptive clusters (:pr: `811` :pr:`816` :pr:`821`)
 *  Add ``Client.run_on_scheduler`` method for running debug functions on the scheduler (:pr:`808`)
 
-.. _v1.15.1 - January 11th, 2017:
+.. _v1.15.1 - 2017-01-11:
 
-1.15.1 - January 11th, 2017
+1.15.1 - 2017-01-11
 ---------------------------
 
 *  Make compatibile with Bokeh 0.12.4 (:pr:`803`)
@@ -2711,9 +2711,9 @@ This is a small bugfix release due to a config change upstream.
 *  Resolve scheduling issues in worker (:pr:`804`)
 
 
-.. _v1.15.0 - January 2nd, 2017:
+.. _v1.15.0 - 2017-01-02:
 
-1.15.0 - January 2nd, 2017
+1.15.0 - 2017-01-02
 --------------------------
 
 *  Major Worker refactor (:pr:`704`)
@@ -2738,18 +2738,18 @@ This is a small bugfix release due to a config change upstream.
 *  Avoid slow sizeof call on Pandas dataframes (:pr:`758`)
 
 
-.. _v1.14.3 - November 13th, 2016:
+.. _v1.14.3 - 2016-11-13:
 
-1.14.3 - November 13th, 2016
+1.14.3 - 2016-11-13
 ----------------------------
 
 *  Remove custom Bokeh export tool that implicitly relied on nodejs (:pr:`655`)
 *  Clean up scheduler logging (:pr:`657`)
 
 
-.. _v1.14.2 - November 11th, 2016:
+.. _v1.14.2 - 2016-11-11:
 
-1.14.2 - November 11th, 2016
+1.14.2 - 2016-11-11
 ----------------------------
 
 *  Support more numpy dtypes in custom serialization, (:pr:`627`), (:pr:`630`), (:pr:`636`)
@@ -2760,9 +2760,9 @@ This is a small bugfix release due to a config change upstream.
 *  Add timeout when waiting on write (:pr:`653`)
 
 
-.. _v1.14.0 - November 3rd, 2016:
+.. _v1.14.0 - 2016-11-03:
 
-1.14.0 - November 3rd, 2016
+1.14.0 - 2016-11-03
 ---------------------------
 
 *   Add ``Client.get_versions()`` function to return software and package
@@ -2777,9 +2777,9 @@ This is a small bugfix release due to a config change upstream.
 *   Pass Worker kwargs through LocalCluster
 
 
-.. _v1.13.3 - October 15th, 2016:
+.. _v1.13.3 - 2016-10-15:
 
-1.13.3 - October 15th, 2016
+1.13.3 - 2016-10-15
 ---------------------------
 
 *   Schedulers can retire workers cleanly
