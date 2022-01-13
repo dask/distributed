@@ -143,9 +143,6 @@ class Slow(zict.Func):
         self.weight_by_key[key] = pickled_size
         self.total_weight += pickled_size
 
-        print("Im here", f"{set(self.d)=}")
-        print("\n\n")
-
     def __delitem__(self, key):
         super().__delitem__(key)
         self.total_weight -= self.weight_by_key.pop(key)
