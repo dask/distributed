@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import glob
 import logging
 import os
@@ -5,6 +7,7 @@ import shutil
 import stat
 import tempfile
 import weakref
+from typing import ClassVar
 
 import dask
 
@@ -33,6 +36,10 @@ class WorkDir:
     """
     A temporary work directory inside a WorkSpace.
     """
+
+    dir_path: str
+    _lock_path: str
+    _finalizer: weakref.finalize
 
     def __init__(self, workspace, name=None, prefix=None):
         assert name is None or prefix is None
@@ -110,7 +117,7 @@ class WorkSpace:
 
     # Keep track of all locks known to this process, to avoid several
     # WorkSpaces to step on each other's toes
-    _known_locks = set()
+    _known_locks: ClassVar[set[str]] = set()
 
     def __init__(self, base_dir):
         self.base_dir = os.path.abspath(base_dir)

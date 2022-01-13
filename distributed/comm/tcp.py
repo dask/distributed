@@ -13,7 +13,7 @@ from tornado import gen
 try:
     import ssl
 except ImportError:
-    ssl = None
+    ssl = None  # type: ignore
 
 from tlz import sliding_window
 from tornado import netutil
@@ -30,7 +30,7 @@ from ..threadpoolexecutor import ThreadPoolExecutor
 from ..utils import ensure_ip, get_ip, get_ipv6, nbytes
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, FatalCommClosedError, Listener
-from .registry import Backend, backends
+from .registry import Backend
 from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to_frames
 
 logger = logging.getLogger(__name__)
@@ -147,7 +147,13 @@ class TCP(Comm):
 
     max_shard_size = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
 
-    def __init__(self, stream, local_addr, peer_addr, deserialize=True):
+    def __init__(
+        self,
+        stream,
+        local_addr: str,
+        peer_addr: str,
+        deserialize: bool = True,
+    ):
         self._closed = False
         super().__init__()
         self._local_addr = local_addr
@@ -156,7 +162,7 @@ class TCP(Comm):
         self.deserialize = deserialize
         self._finalizer = weakref.finalize(self, self._get_finalizer())
         self._finalizer.atexit = False
-        self._extra = {}
+        self._extra: dict = {}
 
         ref = weakref.ref(self)
 
@@ -171,7 +177,8 @@ class TCP(Comm):
 
     def _get_finalizer(self):
         def finalize(stream=self.stream, r=repr(self)):
-            # stream is None if a StreamClosedError is raised during interpreter shutdown
+            # stream is None if a StreamClosedError is raised during interpreter
+            # shutdown
             if stream is not None and not stream.closed():
                 logger.warning(f"Closing dangling stream in {r}")
                 stream.close()
@@ -179,11 +186,11 @@ class TCP(Comm):
         return finalize
 
     @property
-    def local_address(self):
+    def local_address(self) -> str:
         return self._local_addr
 
     @property
-    def peer_address(self):
+    def peer_address(self) -> str:
         return self._peer_addr
 
     async def read(self, deserializers=None):
@@ -379,8 +386,20 @@ class RequireEncryptionMixin:
 
 class BaseTCPConnector(Connector, RequireEncryptionMixin):
     _executor = ThreadPoolExecutor(2, thread_name_prefix="TCP-Executor")
-    _resolver = netutil.ExecutorResolver(close_executor=False, executor=_executor)
-    client = TCPClient(resolver=_resolver)
+
+    @property
+    def client(self):
+        # The `TCPClient` is cached on the class itself to avoid creating
+        # excess `ThreadPoolExecutor`s. We delay creation until inside an async
+        # function to avoid accessing an IOLoop from a context where a backing
+        # event loop doesn't exist.
+        cls = type(self)
+        if not hasattr(type(self), "_client"):
+            resolver = netutil.ExecutorResolver(
+                close_executor=False, executor=cls._executor
+            )
+            cls._client = TCPClient(resolver=resolver)
+        return cls._client
 
     async def connect(self, address, deserialize=True, **connection_args):
         self._check_encryption(address, connection_args)
@@ -391,8 +410,8 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
             stream = await self.client.connect(
                 ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
             )
-            # Under certain circumstances tornado will have a closed connnection with an error and not raise
-            # a StreamClosedError.
+            # Under certain circumstances tornado will have a closed connnection with an
+            # error and not raise a StreamClosedError.
             #
             # This occurs with tornado 5.x and openssl 1.1+
             if stream.closed() and stream.error:
@@ -615,7 +634,3 @@ class TCPBackend(BaseTCPBackend):
 class TLSBackend(BaseTCPBackend):
     _connector_class = TLSConnector
     _listener_class = TLSListener
-
-
-backends["tcp"] = TCPBackend()
-backends["tls"] = TLSBackend()

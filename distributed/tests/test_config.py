@@ -203,11 +203,11 @@ def test_logging_extended():
             "loggers": {
                 "distributed.foo": {
                     "level": "INFO",
-                    #'handlers': ['console'],
+                    # 'handlers': ['console'],
                 },
                 "distributed.foo.bar": {
                     "level": "ERROR",
-                    #'handlers': ['console'],
+                    # 'handlers': ['console'],
                 },
             },
             "root": {"level": "WARNING", "handlers": ["console"]},
@@ -352,3 +352,16 @@ def test_schema_is_complete():
                 test_matches(c[k], s["properties"][k])
 
     test_matches(config, schema)
+
+
+def test_uvloop_event_loop():
+    """Check that configuring distributed to use uvloop actually sets the event loop policy"""
+    pytest.importorskip("uvloop")
+    script = (
+        "import distributed, asyncio, uvloop\n"
+        "assert isinstance(asyncio.get_event_loop_policy(), uvloop.EventLoopPolicy)"
+    )
+    subprocess.check_call(
+        [sys.executable, "-c", script],
+        env={"DASK_DISTRIBUTED__ADMIN__EVENT_LOOP": "uvloop"},
+    )

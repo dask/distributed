@@ -4,12 +4,13 @@ import subprocess
 import sys
 import unittest
 import weakref
-from distutils.version import LooseVersion
 from threading import Lock
 from time import sleep
+from urllib.parse import urlparse
 
 import pytest
 import tornado
+from packaging.version import parse as parse_version
 from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
@@ -35,6 +36,7 @@ from distributed.utils_test import (
     inc,
     slowinc,
     tls_only_security,
+    xfail_ssl_issue5601,
 )
 
 
@@ -174,7 +176,7 @@ def test_transports_tcp_port():
 
 
 class LocalTest(ClusterTest, unittest.TestCase):
-    Cluster = LocalCluster
+    Cluster = LocalCluster  # type: ignore
     kwargs = {"silence_logs": False, "dashboard_address": ":0", "processes": False}
 
 
@@ -263,6 +265,7 @@ def test_Client_twice(loop):
 
 @gen_test()
 async def test_client_constructor_with_temporary_security():
+    xfail_ssl_issue5601()
     pytest.importorskip("cryptography")
     async with Client(
         security=True, silence_logs=False, dashboard_address=":0", asynchronous=True
@@ -453,7 +456,8 @@ async def test_scale_up_and_down():
 
 
 @pytest.mark.xfail(
-    sys.version_info >= (3, 8) and LooseVersion(tornado.version) < "6.0.3",
+    sys.version_info >= (3, 8)
+    and parse_version(tornado.version) < parse_version("6.0.3"),
     reason="Known issue with Python 3.8 and Tornado < 6.0.3. "
     "See https://github.com/tornadoweb/tornado/pull/2683.",
     strict=True,
@@ -706,6 +710,7 @@ def test_adapt_then_manual(loop):
 @pytest.mark.parametrize("temporary", [True, False])
 def test_local_tls(loop, temporary):
     if temporary:
+        xfail_ssl_issue5601()
         pytest.importorskip("cryptography")
         security = True
     else:
@@ -988,6 +993,7 @@ async def test_threads_per_worker_set_to_0():
 @pytest.mark.parametrize("temporary", [True, False])
 async def test_capture_security(cleanup, temporary):
     if temporary:
+        xfail_ssl_issue5601()
         pytest.importorskip("cryptography")
         security = True
     else:
@@ -1100,3 +1106,56 @@ async def test_cluster_info_sync():
 
         info = cluster.scheduler.get_metadata(keys=["cluster-manager-info"])
         assert info["foo"] == "bar"
+
+
+@pytest.mark.asyncio
+async def test_cluster_info_sync_is_robust_to_network_blips(monkeypatch):
+    async with LocalCluster(
+        processes=False, asynchronous=True, scheduler_sync_interval="1ms"
+    ) as cluster:
+        assert cluster._cluster_info["name"] == cluster.name
+
+        error_called = False
+
+        async def error(*args, **kwargs):
+            nonlocal error_called
+            await asyncio.sleep(0.001)
+            error_called = True
+            raise OSError
+
+        # Temporarily patch the `set_metadata` RPC to error
+        with monkeypatch.context() as patch:
+            patch.setattr(cluster.scheduler_comm, "set_metadata", error)
+
+            # Set a new cluster_info value
+            cluster._cluster_info["foo"] = "bar"
+
+            # Wait for the bad method to be called at least once
+            while not error_called:
+                await asyncio.sleep(0.01)
+
+        # Check that cluster_info is resynced after the error condition is fixed
+        while "foo" not in cluster.scheduler.get_metadata(
+            keys=["cluster-manager-info"]
+        ):
+            await asyncio.sleep(0.01)
+
+        info = cluster.scheduler.get_metadata(keys=["cluster-manager-info"])
+        assert info["foo"] == "bar"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("host", [None, "127.0.0.1"])
+@pytest.mark.parametrize("use_nanny", [True, False])
+async def test_cluster_host_used_throughout_cluster(host, use_nanny):
+    """Ensure that the `host` kwarg is propagated through scheduler, nanny, and workers"""
+    async with LocalCluster(host=host, asynchronous=True) as cluster:
+        url = urlparse(cluster.scheduler_address)
+        assert url.hostname == "127.0.0.1"
+        for worker in cluster.workers.values():
+            url = urlparse(worker.address)
+            assert url.hostname == "127.0.0.1"
+
+            if use_nanny:
+                url = urlparse(worker.process.worker_address)
+                assert url.hostname == "127.0.0.1"

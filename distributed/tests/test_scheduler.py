@@ -5,7 +5,6 @@ import logging
 import operator
 import re
 import sys
-from collections import defaultdict
 from itertools import product
 from textwrap import dedent
 from time import sleep
@@ -18,17 +17,17 @@ from tlz import concat, first, frequencies, merge, valmap
 
 import dask
 from dask import delayed
-from dask.utils import apply, parse_timedelta, stringify, typename
+from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
-from distributed.comm import Comm
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import ConnectionPool, Status, connect, rpc
+from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
-from distributed.protocol.pickle import dumps
+from distributed.protocol.pickle import dumps, loads
 from distributed.scheduler import MemoryState, Scheduler
-from distributed.utils import TimeoutError, tmpfile
+from distributed.utils import TimeoutError
 from distributed.utils_test import (
+    BrokenComm,
     captured_logger,
     cluster,
     dec,
@@ -58,8 +57,6 @@ pytestmark = pytest.mark.ci1
 
 alice = "alice:1234"
 bob = "bob:1234"
-
-occupancy = defaultdict(lambda: 0)
 
 
 @gen_cluster()
@@ -196,7 +193,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         secondary_worker_key_fractions = []
         for i, keys in enumerate(x.__dask_keys__()):
             # Iterate along rows of the array.
-            keys = set(stringify(k) for k in keys)
+            keys = {stringify(k) for k in keys}
 
             # No more than 2 workers should have any keys
             assert sum(any(k in w.data for k in keys) for w in workers) <= 2
@@ -413,11 +410,9 @@ async def test_blocked_handlers_are_respected(s, a, b):
 
     response = await comm.read()
 
-    assert "exception" in response
-    assert isinstance(response["exception"], ValueError)
-    assert "'feed' handler has been explicitly disallowed" in repr(
-        response["exception"]
-    )
+    _, exc, _ = clean_exception(response["exception"], response["traceback"])
+    assert isinstance(exc, ValueError)
+    assert "'feed' handler has been explicitly disallowed" in repr(exc)
 
     await comm.close()
 
@@ -425,7 +420,7 @@ async def test_blocked_handlers_are_respected(s, a, b):
 @gen_cluster(
     nthreads=[], config={"distributed.scheduler.blocked-handlers": ["test-handler"]}
 )
-def test_scheduler_init_pulls_blocked_handlers_from_config(s):
+async def test_scheduler_init_pulls_blocked_handlers_from_config(s):
     assert s.blocked_handlers == ["test-handler"]
 
 
@@ -676,6 +671,34 @@ async def test_broadcast_nanny(s, a, b):
     assert result1 == result3
 
 
+@gen_cluster(config={"distributed.comm.timeouts.connect": "200ms"})
+async def test_broadcast_on_error(s, a, b):
+    a.stop()
+
+    with pytest.raises(OSError):
+        await s.broadcast(msg={"op": "ping"}, on_error="raise")
+    with pytest.raises(ValueError, match="on_error must be"):
+        await s.broadcast(msg={"op": "ping"}, on_error="invalid")
+
+    out = await s.broadcast(msg={"op": "ping"}, on_error="return")
+    assert isinstance(out[a.address], OSError)
+    assert out[b.address] == b"pong"
+
+    out = await s.broadcast(msg={"op": "ping"}, on_error="return_pickle")
+    assert isinstance(loads(out[a.address]), OSError)
+    assert out[b.address] == b"pong"
+
+    out = await s.broadcast(msg={"op": "ping"}, on_error="ignore")
+    assert out == {b.address: b"pong"}
+
+
+@gen_cluster()
+async def test_broadcast_deprecation(s, a, b):
+    with pytest.warns(FutureWarning):
+        out = await s.broadcast(msg={"op": "ping"}, workers=True)
+    assert out == {a.address: b"pong", b.address: b"pong"}
+
+
 @gen_cluster(nthreads=[])
 async def test_worker_name(s):
     w = await Worker(s.address, name="alice")
@@ -789,20 +812,27 @@ async def test_story(c, s, a, b):
     assert s.story(x.key) == s.story(s.tasks[x.key])
 
 
-@gen_cluster(nthreads=[], client=True)
-async def test_scatter_no_workers(c, s):
+@pytest.mark.parametrize("direct", [False, True])
+@gen_cluster(client=True, nthreads=[])
+async def test_scatter_no_workers(c, s, direct):
     with pytest.raises(TimeoutError):
         await s.scatter(data={"x": 1}, client="alice", timeout=0.1)
 
     start = time()
     with pytest.raises(TimeoutError):
-        await c.scatter(123, timeout=0.1)
+        await c.scatter(123, timeout=0.1, direct=direct)
     assert time() < start + 1.5
 
-    w = Worker(s.address, nthreads=3)
-    await asyncio.gather(c.scatter(data={"y": 2}, timeout=5), w)
+    fut = c.scatter({"y": 2}, timeout=5, direct=direct)
+    await asyncio.sleep(0.1)
+    async with Worker(s.address) as w:
+        await fut
+        assert w.data["y"] == 2
 
-    assert w.data["y"] == 2
+    # Test race condition between worker init and scatter
+    w = Worker(s.address)
+    await asyncio.gather(c.scatter({"z": 3}, timeout=5, direct=direct), w)
+    assert w.data["z"] == 3
     await w.close()
 
 
@@ -925,7 +955,7 @@ async def test_file_descriptors(c, s):
     num_fds_1 = proc.num_fds()
 
     N = 20
-    nannies = await asyncio.gather(*[Nanny(s.address, loop=s.loop) for _ in range(N)])
+    nannies = await asyncio.gather(*(Nanny(s.address, loop=s.loop) for _ in range(N)))
 
     while len(s.nthreads) < N:
         await asyncio.sleep(0.1)
@@ -955,7 +985,7 @@ async def test_file_descriptors(c, s):
     num_fds_6 = proc.num_fds()
     assert num_fds_6 < num_fds_5 + N
 
-    await asyncio.gather(*[n.close() for n in nannies])
+    await asyncio.gather(*(n.close() for n in nannies))
     await c.close()
 
     assert not s.rpc.open
@@ -1018,7 +1048,7 @@ async def test_balance_many_workers(c, s, *workers):
 @nodebug
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 30)
 async def test_balance_many_workers_2(c, s, *workers):
-    s.extensions["stealing"]._pc.callback_time = 100000000
+    await s.extensions["stealing"].stop()
     futures = c.map(slowinc, range(90), delay=0.2)
     await wait(futures)
     assert {len(w.has_what) for w in s.workers.values()} == {3}
@@ -1106,24 +1136,23 @@ async def test_worker_breaks_and_returns(c, s, a):
 
 @gen_cluster(client=True, nthreads=[])
 async def test_no_workers_to_memory(c, s):
-    x = delayed(slowinc)(1, delay=0.4)
+    x = delayed(slowinc)(1, delay=10.0)
     y = delayed(slowinc)(x, delay=0.4)
     z = delayed(slowinc)(y, delay=0.4)
 
     yy, zz = c.persist([y, z])
 
-    while not s.tasks:
+    while len(s.tasks) < 3:
         await asyncio.sleep(0.01)
 
     w = Worker(s.address, nthreads=1)
     w.update_data(data={y.key: 3})
 
-    await w
-
     start = time()
-
-    while not s.workers:
+    await w
+    while not s.workers or s.workers[w.address].status != Status.running:
         await asyncio.sleep(0.01)
+    assert time() < start + 9  # Did not wait for x
 
     assert s.get_task_status(keys={x.key, y.key, z.key}) == {
         x.key: "released",
@@ -1294,22 +1323,16 @@ async def test_scheduler_file():
 async def test_non_existent_worker(c, s):
     with dask.config.set({"distributed.comm.timeouts.connect": "100ms"}):
         await s.add_worker(
-            address="127.0.0.1:5738", nthreads=2, nbytes={}, host_info={}
+            address="127.0.0.1:5738",
+            status="running",
+            nthreads=2,
+            nbytes={},
+            host_info={},
         )
         futures = c.map(inc, range(10))
         await asyncio.sleep(0.300)
         assert not s.workers
         assert all(ts.state == "no-worker" for ts in s.tasks.values())
-
-
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
-async def test_correct_bad_time_estimate(c, s, *workers):
-    future = c.submit(slowinc, 1, delay=0)
-    await wait(future)
-    futures = [c.submit(slowinc, future, delay=0.1, pure=False) for i in range(20)]
-    await asyncio.sleep(0.5)
-    await wait(futures)
-    assert all(w.data for w in workers), [sorted(w.data) for w in workers]
 
 
 @pytest.mark.parametrize(
@@ -1944,7 +1967,7 @@ async def test_default_task_duration_splits(c, s, a, b):
 
 
 @gen_test()
-async def test_no_danglng_asyncio_tasks():
+async def test_no_dangling_asyncio_tasks():
     start = asyncio.all_tasks()
     async with Scheduler(dashboard_address=":0") as s:
         async with Worker(s.address, name="0"):
@@ -1962,7 +1985,7 @@ class NoSchedulerDelayWorker(Worker):
     comparisons using times reported from workers.
     """
 
-    @property
+    @property  # type: ignore
     def scheduler_delay(self):
         return 0
 
@@ -1996,14 +2019,7 @@ async def test_task_groups(c, s, a, b):
     assert tg.nbytes_total == tp.nbytes_total
     # It should map down to individual tasks
     assert tg.nbytes_total == sum(
-        [ts.get_nbytes() for ts in s.tasks.values() if ts.group is tg]
-    )
-    in_memory_ts = sum(
-        [
-            ts.get_nbytes()
-            for ts in s.tasks.values()
-            if ts.group is tg and ts.state == "memory"
-        ]
+        ts.get_nbytes() for ts in s.tasks.values() if ts.group is tg
     )
     tg = s.task_groups[y.name]
     assert tg.states["memory"] == 5
@@ -2096,26 +2112,6 @@ async def test_task_group_on_fire_and_forget(c, s, a, b):
         await asyncio.sleep(1)
 
     assert "Error transitioning" not in logs.getvalue()
-
-
-class BrokenComm(Comm):
-    peer_address = None
-    local_address = None
-
-    def close(self):
-        pass
-
-    def closed(self):
-        pass
-
-    def abort(self):
-        pass
-
-    def read(self, deserializers=None):
-        raise OSError()
-
-    def write(self, msg, serializers=None, on_error=None):
-        raise OSError()
 
 
 class FlakyConnectionPool(ConnectionPool):
@@ -2495,8 +2491,6 @@ async def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout
     client=True, Worker=Nanny, worker_kwargs={"memory_limit": "500 MiB"}, timeout=120
 )
 async def test_memory(c, s, *_):
-    pytest.importorskip("zict")
-
     # WorkerState objects, as opposed to the Nanny objects passed by gen_cluster
     a, b = s.workers.values()
 
@@ -3181,12 +3175,35 @@ async def test_worker_heartbeat_after_cancel(c, s, *workers):
     await c.cancel(futs)
 
     while any(w.tasks for w in workers):
-        await asyncio.gather(*[w.heartbeat() for w in workers])
+        await asyncio.gather(*(w.heartbeat() for w in workers))
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_worker_reconnect_task_memory(c, s, a):
+    a.periodic_callbacks["heartbeat"].stop()
+
+    futs = c.map(inc, range(10))
+    res = c.submit(sum, futs)
+
+    while not a.executing_count and not a.data:
+        await asyncio.sleep(0.001)
+
+    await s.remove_worker(address=a.address, close=False)
+    while not res.done():
+        await a.heartbeat()
+
+    await res
+    assert ("no-worker", "memory") in {
+        (start, finish) for (_, start, finish, _, _) in s.transition_log
+    }
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_worker_reconnect_task_memory_with_resources(c, s, a):
     async with Worker(s.address, resources={"A": 1}) as b:
+        while s.workers[b.address].status != Status.running:
+            await asyncio.sleep(0.001)
+
         b.periodic_callbacks["heartbeat"].stop()
 
         futs = c.map(inc, range(10), resources={"A": 1})
@@ -3203,3 +3220,129 @@ async def test_worker_reconnect_task_memory_with_resources(c, s, a):
         assert ("no-worker", "memory") in {
             (start, finish) for (_, start, finish, _, _) in s.transition_log
         }
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
+async def test_set_restrictions(c, s, a, b):
+
+    f = c.submit(inc, 1, workers=[b.address])
+    await f
+    s.set_restrictions(worker={f.key: a.address})
+    assert s.tasks[f.key].worker_restrictions == {a.address}
+    s.reschedule(f)
+    await f
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+async def test_avoid_paused_workers(c, s, w1, w2, w3):
+    w2.memory_pause_fraction = 1e-15
+    while s.workers[w2.address].status != Status.paused:
+        await asyncio.sleep(0.01)
+    futures = c.map(slowinc, range(8), delay=0.1)
+    while (len(w1.tasks), len(w2.tasks), len(w3.tasks)) != (4, 0, 4):
+        await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_unpause_schedules_unrannable_tasks(c, s, a):
+    a.memory_pause_fraction = 1e-15
+    while s.workers[a.address].status != Status.paused:
+        await asyncio.sleep(0.01)
+
+    fut = c.submit(inc, 1, key="x")
+    while not s.unrunnable:
+        await asyncio.sleep(0.001)
+    assert next(iter(s.unrunnable)).key == "x"
+
+    a.memory_pause_fraction = 0.8
+    assert await fut == 2
+
+
+@gen_cluster(client=True)
+async def test_Scheduler__to_dict(c, s, a, b):
+    futs = c.map(inc, range(100))
+
+    await c.gather(futs)
+    d = s._to_dict()
+    assert d.keys() == {
+        "type",
+        "id",
+        "address",
+        "extensions",
+        "services",
+        "started",
+        "workers",
+        "status",
+        "thread_id",
+        "transition_log",
+        "log",
+        "tasks",
+        "events",
+    }
+    assert d["tasks"][futs[0].key]
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_TaskState__to_dict(c, s):
+    """tasks that are listed as dependencies of other tasks are dumped as a short repr
+    and always appear in full under Scheduler.tasks
+    """
+    x = c.submit(inc, 1, key="x")
+    y = c.submit(inc, x, key="y")
+    z = c.submit(inc, 2, key="z")
+    while len(s.tasks) < 3:
+        await asyncio.sleep(0.01)
+
+    tasks = s._to_dict()["tasks"]
+
+    assert isinstance(tasks["x"], dict)
+    assert isinstance(tasks["y"], dict)
+    assert isinstance(tasks["z"], dict)
+    assert tasks["x"]["dependents"] == ["<TaskState 'y' waiting>"]
+    assert tasks["y"]["dependencies"] == ["<TaskState 'x' no-worker>"]
+
+
+@gen_cluster(nthreads=[])
+async def test_idempotent_plugins(s):
+
+    from distributed.diagnostics.plugin import SchedulerPlugin
+
+    class IdempotentPlugin(SchedulerPlugin):
+        def __init__(self, instance=None):
+            self.name = "idempotentplugin"
+            self.instance = instance
+
+        def start(self, scheduler):
+            if self.instance != "first":
+                raise RuntimeError(
+                    "Only the first plugin should be started when idempotent is set"
+                )
+
+    first = IdempotentPlugin(instance="first")
+    await s.register_scheduler_plugin(plugin=dumps(first), idempotent=True)
+    assert "idempotentplugin" in s.plugins
+
+    second = IdempotentPlugin(instance="second")
+    await s.register_scheduler_plugin(plugin=dumps(second), idempotent=True)
+    assert "idempotentplugin" in s.plugins
+    assert s.plugins["idempotentplugin"].instance == "first"
+
+
+@gen_cluster(nthreads=[])
+async def test_non_idempotent_plugins(s):
+
+    from distributed.diagnostics.plugin import SchedulerPlugin
+
+    class NonIdempotentPlugin(SchedulerPlugin):
+        def __init__(self, instance=None):
+            self.name = "nonidempotentplugin"
+            self.instance = instance
+
+    first = NonIdempotentPlugin(instance="first")
+    await s.register_scheduler_plugin(plugin=dumps(first), idempotent=False)
+    assert "nonidempotentplugin" in s.plugins
+
+    second = NonIdempotentPlugin(instance="second")
+    await s.register_scheduler_plugin(plugin=dumps(second), idempotent=False)
+    assert "nonidempotentplugin" in s.plugins
+    assert s.plugins["nonidempotentplugin"].instance == "second"

@@ -2,6 +2,8 @@ import asyncio
 
 import pytest
 
+import dask
+
 pytestmark = pytest.mark.gpu
 
 ucp = pytest.importorskip("ucp")
@@ -10,13 +12,32 @@ from distributed import Client, Scheduler, wait
 from distributed.comm import connect, listen, parse_address, ucx
 from distributed.comm.registry import backends, get_backend
 from distributed.deploy.local import LocalCluster
+from distributed.diagnostics.nvml import has_cuda_context
 from distributed.protocol import to_serialize
-from distributed.utils_test import gen_cluster, gen_test, inc
+from distributed.utils_test import inc
 
 try:
     HOST = ucp.get_address()
 except Exception:
     HOST = "127.0.0.1"
+
+
+def handle_exception(loop, context):
+    msg = context.get("exception", context["message"])
+    print(msg)
+
+
+# Let's make sure that UCX gets time to cancel
+# progress tasks before closing the event loop.
+@pytest.fixture()
+def event_loop(scope="function"):
+    loop = asyncio.new_event_loop()
+    loop.set_exception_handler(handle_exception)
+    ucp.reset()
+    yield loop
+    ucp.reset()
+    loop.run_until_complete(asyncio.sleep(0))
+    loop.close()
 
 
 def test_registered():
@@ -71,7 +92,8 @@ async def test_comm_objs():
     assert comm.peer_address == serv_comm.local_address
 
 
-def test_ucx_specific():
+@pytest.mark.asyncio
+async def test_ucx_specific():
     """
     Test concrete UCX API.
     """
@@ -80,50 +102,48 @@ def test_ucx_specific():
     # 2. Use dict in read / write, put seralization there.
     # 3. Test peer_address
     # 4. Test cleanup
-    async def f():
-        address = f"ucx://{HOST}:{0}"
+    address = f"ucx://{HOST}:{0}"
 
-        async def handle_comm(comm):
-            msg = await comm.read()
-            msg["op"] = "pong"
-            await comm.write(msg)
-            await comm.read()
-            assert comm.closed() is False
-            await comm.close()
-            assert comm.closed
+    async def handle_comm(comm):
+        msg = await comm.read()
+        msg["op"] = "pong"
+        await comm.write(msg)
+        await comm.read()
+        await comm.close()
+        assert comm.closed() is True
 
-        listener = await ucx.UCXListener(address, handle_comm)
-        host, port = listener.get_host_port()
-        assert host.count(".") == 3
-        assert port > 0
+    listener = await ucx.UCXListener(address, handle_comm)
+    host, port = listener.get_host_port()
+    assert host.count(".") == 3
+    assert port > 0
 
-        l = []
+    l = []
 
-        async def client_communicate(key, delay=0):
-            addr = "%s:%d" % (host, port)
-            comm = await connect(listener.contact_address)
-            # TODO: peer_address
-            # assert comm.peer_address == 'ucx://' + addr
-            assert comm.extra_info == {}
-            msg = {"op": "ping", "data": key}
-            await comm.write(msg)
-            if delay:
-                await asyncio.sleep(delay)
-            msg = await comm.read()
-            assert msg == {"op": "pong", "data": key}
-            await comm.write({"op": "client closed"})
-            l.append(key)
-            return comm
+    async def client_communicate(key, delay=0):
+        addr = "%s:%d" % (host, port)
+        comm = await connect(listener.contact_address)
+        # TODO: peer_address
+        # assert comm.peer_address == 'ucx://' + addr
+        assert comm.extra_info == {}
+        msg = {"op": "ping", "data": key}
+        await comm.write(msg)
+        if delay:
+            await asyncio.sleep(delay)
+        msg = await comm.read()
+        assert msg == {"op": "pong", "data": key}
+        await comm.write({"op": "client closed"})
+        l.append(key)
+        return comm
 
-        comm = await client_communicate(key=1234, delay=0.5)
+    comm = await client_communicate(key=1234, delay=0.5)
 
-        # Many clients at once
-        N = 2
-        futures = [client_communicate(key=i, delay=0.05) for i in range(N)]
-        await asyncio.gather(*futures)
-        assert set(l) == {1234} | set(range(N))
+    # Many clients at once
+    N = 2
+    futures = [client_communicate(key=i, delay=0.05) for i in range(N)]
+    await asyncio.gather(*futures)
+    assert set(l) == {1234} | set(range(N))
 
-    asyncio.run(f())
+    listener.stop()
 
 
 @pytest.mark.asyncio
@@ -149,7 +169,7 @@ async def test_ping_pong_data():
     await serv_com.close()
 
 
-@gen_test()
+@pytest.mark.asyncio
 async def test_ucx_deserialize():
     # Note we see this error on some systems with this test:
     # `socket.gaierror: [Errno -5] No address associated with hostname`
@@ -236,7 +256,7 @@ async def test_large_cupy(n, cleanup):
     await serv_com.close()
 
 
-@gen_test()
+@pytest.mark.asyncio
 async def test_ping_pong_numba():
     np = pytest.importorskip("numpy")
     numba = pytest.importorskip("numba")
@@ -254,8 +274,8 @@ async def test_ping_pong_numba():
     assert result["op"] == "ping"
 
 
-@pytest.mark.parametrize("processes", [True, False])
 @pytest.mark.asyncio
+@pytest.mark.parametrize("processes", [True, False])
 async def test_ucx_localcluster(processes, cleanup):
     async with LocalCluster(
         protocol="ucx",
@@ -276,7 +296,7 @@ async def test_ucx_localcluster(processes, cleanup):
 
 
 @pytest.mark.slow
-@gen_test(timeout=240)
+@pytest.mark.asyncio
 async def test_stress():
     da = pytest.importorskip("dask.array")
 
@@ -286,7 +306,6 @@ async def test_stress():
         protocol="ucx",
         dashboard_address=":0",
         asynchronous=True,
-        processes=False,
         host=HOST,
     ) as cluster:
         async with Client(cluster, asynchronous=True):
@@ -302,21 +321,39 @@ async def test_stress():
                 await wait(x)
 
 
-@gen_cluster(client=True, scheduler_kwargs={"protocol": "ucx"})
-async def test_simple(c, s, a, b):
-    assert s.address.startswith("ucx://")
-    assert await c.submit(lambda x: x + 1, 10) == 11
+@pytest.mark.asyncio
+async def test_simple():
+    async with LocalCluster(protocol="ucx", asynchronous=True) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            assert cluster.scheduler_address.startswith("ucx://")
+            assert await client.submit(lambda x: x + 1, 10) == 11
 
 
-@gen_cluster(client=True, scheduler_kwargs={"protocol": "ucx"})
-async def test_transpose(c, s, a, b):
+@pytest.mark.asyncio
+async def test_cuda_context():
+    with dask.config.set({"distributed.comm.ucx.create-cuda-context": True}):
+        async with LocalCluster(
+            protocol="ucx", n_workers=1, asynchronous=True
+        ) as cluster:
+            async with Client(cluster, asynchronous=True) as client:
+                assert cluster.scheduler_address.startswith("ucx://")
+                assert has_cuda_context() == 0
+                worker_cuda_context = await client.run(has_cuda_context)
+                assert len(worker_cuda_context) == 1
+                assert list(worker_cuda_context.values())[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_transpose():
     da = pytest.importorskip("dask.array")
 
-    assert s.address.startswith("ucx://")
-    x = da.ones((10000, 10000), chunks=(1000, 1000)).persist()
-    await x
-    y = (x + x.T).sum()
-    await y
+    async with LocalCluster(protocol="ucx", asynchronous=True) as cluster:
+        async with Client(cluster, asynchronous=True):
+            assert cluster.scheduler_address.startswith("ucx://")
+            x = da.ones((10000, 10000), chunks=(1000, 1000)).persist()
+            await x
+            y = (x + x.T).sum()
+            await y
 
 
 @pytest.mark.asyncio
@@ -324,3 +361,16 @@ async def test_transpose(c, s, a, b):
 async def test_ucx_protocol(cleanup, port):
     async with Scheduler(protocol="ucx", port=port, dashboard_address=":0") as s:
         assert s.address.startswith("ucx://")
+
+
+@pytest.mark.skipif(
+    not hasattr(ucp.exceptions, "UCXUnreachable"),
+    reason="Requires UCX-Py support for UCXUnreachable exception",
+)
+def test_ucx_unreachable():
+    if ucp.get_ucx_version() > (1, 12, 0):
+        with pytest.raises(OSError, match="Timed out trying to connect to"):
+            Client("ucx://255.255.255.255:12345", timeout=1)
+    else:
+        with pytest.raises(ucp.exceptions.UCXError, match="Destination is unreachable"):
+            Client("ucx://255.255.255.255:12345", timeout=1)

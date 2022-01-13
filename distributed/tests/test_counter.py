@@ -5,7 +5,7 @@ from distributed.counter import Counter
 try:
     from distributed.counter import Digest
 except ImportError:
-    Digest = None
+    Digest = None  # type: ignore
 
 
 @pytest.mark.parametrize(

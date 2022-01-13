@@ -1,7 +1,12 @@
+from __future__ import annotations
+
+import asyncio
 import logging
+import uuid
 from collections import defaultdict, deque
 from math import log2
 from time import time
+from typing import Container
 
 from tlz import topk
 from tornado.ioloop import PeriodicCallback
@@ -12,14 +17,36 @@ from dask.utils import parse_timedelta
 from .comm.addressing import get_address_host
 from .core import CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
-from .utils import log_errors
+from .utils import log_errors, recursive_to_dict
 
-LATENCY = 10e-3
+# Stealing requires multiple network bounces and if successful also task
+# submission which may include code serialization. Therefore, be very
+# conservative in the latency estimation to suppress too aggressive stealing
+# of small tasks
+LATENCY = 0.1
 
 logger = logging.getLogger(__name__)
 
 
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
+
+_WORKER_STATE_CONFIRM = {
+    "ready",
+    "constrained",
+    "waiting",
+}
+
+_WORKER_STATE_REJECT = {
+    "memory",
+    "executing",
+    "long-running",
+    "cancelled",
+    "resumed",
+}
+_WORKER_STATE_UNDEFINED = {
+    "released",
+    None,
+}
 
 
 class WorkStealing(SchedulerPlugin):
@@ -38,14 +65,11 @@ class WorkStealing(SchedulerPlugin):
         for worker in scheduler.workers:
             self.add_worker(worker=worker)
 
-        callback_time = parse_timedelta(
+        self._callback_time = parse_timedelta(
             dask.config.get("distributed.scheduler.work-stealing-interval"),
             default="ms",
         )
         # `callback_time` is in milliseconds
-        pc = PeriodicCallback(callback=self.balance, callback_time=callback_time * 1000)
-        self._pc = pc
-        self.scheduler.periodic_callbacks["stealing"] = pc
         self.scheduler.add_plugin(self)
         self.scheduler.extensions["stealing"] = self
         self.scheduler.events["stealing"] = deque(maxlen=100000)
@@ -54,8 +78,61 @@ class WorkStealing(SchedulerPlugin):
         self.in_flight = dict()
         # { worker state: occupancy }
         self.in_flight_occupancy = defaultdict(lambda: 0)
+        self._in_flight_event = asyncio.Event()
 
         self.scheduler.stream_handlers["steal-response"] = self.move_task_confirm
+
+    async def start(self, scheduler=None):
+        """Start the background coroutine to balance the tasks on the cluster.
+        Idempotent.
+        The scheduler argument is ignored. It is merely required to satisify the
+        plugin interface. Since this class is simultaneouly an extension, the
+        scheudler instance is already registered during initialization
+        """
+        if "stealing" in self.scheduler.periodic_callbacks:
+            return
+        pc = PeriodicCallback(
+            callback=self.balance, callback_time=self._callback_time * 1000
+        )
+        pc.start()
+        self.scheduler.periodic_callbacks["stealing"] = pc
+        self._in_flight_event.set()
+
+    async def stop(self):
+        """Stop the background task balancing tasks on the cluster.
+        This will block until all currently running stealing requests are
+        finished. Idempotent
+        """
+        pc = self.scheduler.periodic_callbacks.pop("stealing", None)
+        if pc:
+            pc.stop()
+        await self._in_flight_event.wait()
+
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
+        """
+        A very verbose dictionary representation for debugging purposes.
+        Not type stable and not inteded for roundtrips.
+
+        Parameters
+        ----------
+        comm:
+        exclude:
+            A list of attributes which must not be present in the output.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        """
+        return recursive_to_dict(
+            {
+                "stealable_all": self.stealable_all,
+                "stealable": self.stealable,
+                "key_stealable": self.key_stealable,
+                "in_flight": self.in_flight,
+                "in_flight_occupancy": self.in_flight_occupancy,
+            },
+            exclude=exclude,
+        )
 
     def log(self, msg):
         return self.scheduler.log_event("stealing", msg)
@@ -67,7 +144,10 @@ class WorkStealing(SchedulerPlugin):
         del self.stealable[worker]
 
     def teardown(self):
-        self._pc.stop()
+        pcs = self.scheduler.periodic_callbacks
+        if "stealing" in pcs:
+            pcs["stealing"].stop()
+            del pcs["stealing"]
 
     def transition(
         self, key, start, finish, compute_start=None, compute_stop=None, *args, **kwargs
@@ -78,8 +158,20 @@ class WorkStealing(SchedulerPlugin):
         elif start == "processing":
             ts = self.scheduler.tasks[key]
             self.remove_key_from_stealable(ts)
-            if finish != "memory":
-                self.in_flight.pop(ts, None)
+            d = self.in_flight.pop(ts, None)
+            if d:
+                thief = d["thief"]
+                victim = d["victim"]
+                self.in_flight_occupancy[thief] -= d["thief_duration"]
+                self.in_flight_occupancy[victim] += d["victim_duration"]
+                if not self.in_flight:
+                    self.in_flight_occupancy.clear()
+                    self._in_flight_event.set()
+
+    def recalculate_cost(self, ts):
+        if ts not in self.in_flight:
+            self.remove_key_from_stealable(ts)
+            self.put_key_in_stealable(ts)
 
     def put_key_in_stealable(self, ts):
         cost_multiplier, level = self.steal_time_ratio(ts)
@@ -114,12 +206,12 @@ class WorkStealing(SchedulerPlugin):
         For example a result of zero implies a task without dependencies.
         level: The location within a stealable list to place this value
         """
-        if not ts.dependencies:  # no dependencies fast path
-            return 0, 0
-
         split = ts.prefix.name
         if split in fast_tasks:
             return None, None
+
+        if not ts.dependencies:  # no dependencies fast path
+            return 0, 0
 
         ws = ts.processing_on
         compute_time = ws.processing[ts]
@@ -138,13 +230,13 @@ class WorkStealing(SchedulerPlugin):
 
         return cost_multiplier, level
 
-    def move_task_request(self, ts, victim, thief):
+    def move_task_request(self, ts, victim, thief) -> str:
         try:
-            if self.scheduler.validate:
-                if victim is not ts.processing_on and LOG_PDB:
-                    import pdb
-
-                    pdb.set_trace()
+            if ts in self.in_flight:
+                return "in-flight"
+            # Stimulus IDs are used to verify the response, see
+            # `move_task_confirm`. Therefore, this must be truly unique.
+            stimulus_id = f"steal-{uuid.uuid4().hex}"
 
             key = ts.key
             self.remove_key_from_stealable(ts)
@@ -164,20 +256,23 @@ class WorkStealing(SchedulerPlugin):
             ) + self.scheduler.get_comm_cost(ts, thief)
 
             self.scheduler.stream_comms[victim.address].send(
-                {"op": "steal-request", "key": key}
+                {"op": "steal-request", "key": key, "stimulus_id": stimulus_id}
             )
-
             self.in_flight[ts] = {
-                "victim": victim,
+                "victim": victim,  # guaranteed to be processing_on
                 "thief": thief,
                 "victim_duration": victim_duration,
                 "thief_duration": thief_duration,
+                "stimulus_id": stimulus_id,
             }
+            self._in_flight_event.clear()
 
             self.in_flight_occupancy[victim] -= victim_duration
             self.in_flight_occupancy[thief] += thief_duration
+            return stimulus_id
         except CommClosedError:
             logger.info("Worker comm %r closed while stealing: %r", victim, ts)
+            return "comm-closed"
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -186,57 +281,61 @@ class WorkStealing(SchedulerPlugin):
                 pdb.set_trace()
             raise
 
-    async def move_task_confirm(self, key=None, worker=None, state=None):
+    async def move_task_confirm(self, *, key, state, stimulus_id, worker=None):
         try:
-            try:
-                ts = self.scheduler.tasks[key]
-            except KeyError:
-                logger.debug("Key released between request and confirm: %s", key)
+            ts = self.scheduler.tasks[key]
+        except KeyError:
+            logger.debug("Key released between request and confirm: %s", key)
+            return
+        try:
+            d = self.in_flight.pop(ts)
+            if d["stimulus_id"] != stimulus_id:
+                self.log(("stale-response", key, state, worker, stimulus_id))
+                self.in_flight[ts] = d
                 return
-            try:
-                d = self.in_flight.pop(ts)
-            except KeyError:
-                return
-            thief = d["thief"]
-            victim = d["victim"]
-            logger.debug(
-                "Confirm move %s, %s -> %s.  State: %s", key, victim, thief, state
-            )
+        except KeyError:
+            self.log(("already-aborted", key, state, worker, stimulus_id))
+            return
 
-            self.in_flight_occupancy[thief] -= d["thief_duration"]
-            self.in_flight_occupancy[victim] += d["victim_duration"]
+        thief = d["thief"]
+        victim = d["victim"]
 
-            if not self.in_flight:
-                self.in_flight_occupancy = defaultdict(lambda: 0)
+        logger.debug("Confirm move %s, %s -> %s.  State: %s", key, victim, thief, state)
 
-            if ts.state != "processing" or ts.processing_on is not victim:
-                old_thief = thief.occupancy
-                new_thief = sum(thief.processing.values())
-                old_victim = victim.occupancy
-                new_victim = sum(victim.processing.values())
-                thief.occupancy = new_thief
-                victim.occupancy = new_victim
-                self.scheduler.total_occupancy += (
-                    new_thief - old_thief + new_victim - old_victim
-                )
-                return
+        self.in_flight_occupancy[thief] -= d["thief_duration"]
+        self.in_flight_occupancy[victim] += d["victim_duration"]
 
-            # One of the pair has left, punt and reschedule
-            if (
-                thief.address not in self.scheduler.workers
-                or victim.address not in self.scheduler.workers
+        if not self.in_flight:
+            self.in_flight_occupancy.clear()
+            self._in_flight_event.set()
+
+        if self.scheduler.validate:
+            assert ts.processing_on == victim
+
+        try:
+            _log_msg = [key, state, victim.address, thief.address, stimulus_id]
+
+            if ts.state != "processing":
+                self.scheduler._reevaluate_occupancy_worker(thief)
+                self.scheduler._reevaluate_occupancy_worker(victim)
+            elif (
+                state in _WORKER_STATE_UNDEFINED
+                or state in _WORKER_STATE_CONFIRM
+                and thief.address not in self.scheduler.workers
             ):
+                self.log(
+                    (
+                        "reschedule",
+                        thief.address not in self.scheduler.workers,
+                        *_log_msg,
+                    )
+                )
                 self.scheduler.reschedule(key)
-                return
-
-            # Victim had already started execution, reverse stealing
-            if state in ("memory", "executing", "long-running", None):
-                self.log(("already-computing", key, victim.address, thief.address))
-                self.scheduler.check_idle_saturated(thief)
-                self.scheduler.check_idle_saturated(victim)
-
+            # Victim had already started execution
+            elif state in _WORKER_STATE_REJECT:
+                self.log(("already-computing", *_log_msg))
             # Victim was waiting, has given up task, enact steal
-            elif state in ("waiting", "ready", "constrained"):
+            elif state in _WORKER_STATE_CONFIRM:
                 self.remove_key_from_stealable(ts)
                 ts.processing_on = thief
                 duration = victim.processing.pop(ts)
@@ -250,11 +349,8 @@ class WorkStealing(SchedulerPlugin):
                 self.scheduler.total_occupancy += d["thief_duration"]
                 self.put_key_in_stealable(ts)
 
-                try:
-                    self.scheduler.send_task_to_worker(thief.address, ts)
-                except CommClosedError:
-                    await self.scheduler.remove_worker(thief.address)
-                self.log(("confirm", key, victim.address, thief.address))
+                self.scheduler.send_task_to_worker(thief.address, ts)
+                self.log(("confirm", *_log_msg))
             else:
                 raise ValueError(f"Unexpected task state: {state}")
         except Exception as e:
@@ -265,14 +361,8 @@ class WorkStealing(SchedulerPlugin):
                 pdb.set_trace()
             raise
         finally:
-            try:
-                self.scheduler.check_idle_saturated(thief)
-            except Exception:
-                pass
-            try:
-                self.scheduler.check_idle_saturated(victim)
-            except Exception:
-                pass
+            self.scheduler.check_idle_saturated(thief)
+            self.scheduler.check_idle_saturated(victim)
 
     def balance(self):
         s = self.scheduler
@@ -405,9 +495,9 @@ class WorkStealing(SchedulerPlugin):
         self.key_stealable.clear()
 
     def story(self, *keys):
-        keys = set(keys)
+        keys = {key.key if not isinstance(key, str) else key for key in keys}
         out = []
-        for _, L in self.scheduler.get_event("stealing"):
+        for _, L in self.scheduler.get_events(topic="stealing"):
             if not isinstance(L, list):
                 L = [L]
             for t in L:
@@ -439,10 +529,10 @@ def _can_steal(thief, ts, victim):
     elif ts.worker_restrictions and thief.address not in ts.worker_restrictions:
         return False
 
-    if victim.resources is None:
+    if not ts.resource_restrictions:
         return True
 
-    for resource, value in victim.resources.items():
+    for resource, value in ts.resource_restrictions.items():
         try:
             supplied = thief.resources[resource]
         except KeyError:

@@ -6,13 +6,7 @@ after which we can import them instead of having our own definitions.
 
 import atexit
 import os
-
-try:
-    import queue
-except ImportError:
-    # Python 2
-    import Queue as queue
-
+import queue
 import sys
 from subprocess import Popen
 from threading import Event, Thread
@@ -135,7 +129,7 @@ def remote_magic(line, cell=None):
 
 
 # cache clients for re-use in remote magic
-remote_magic._clients = {}
+remote_magic._clients = {}  # type: ignore
 
 
 def register_remote_magic(magic_name="remote"):
@@ -217,6 +211,8 @@ def start_ipython(ip=None, ns=None, log=None):
     evt = Event()
 
     def _start():
+        # Create a new event loop for the new thread
+        loop = IOLoop()
         app.initialize([])
         app.kernel.pre_handler_hook = noop
         app.kernel.post_handler_hook = noop
@@ -226,8 +222,8 @@ def start_ipython(ip=None, ns=None, log=None):
         if ns:
             app.kernel.shell.user_ns.update(ns)
         evt.set()
-        # start the app's IOLoop in its thread
-        IOLoop.current().start()
+        # Start the event loop
+        loop.start()
 
     zmq_loop_thread = Thread(target=_start)
     zmq_loop_thread.daemon = True

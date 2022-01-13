@@ -1,8 +1,6 @@
-import atexit
 import logging
 import math
 import warnings
-import weakref
 
 import toolz
 
@@ -58,8 +56,8 @@ class LocalCluster(SpecCluster):
         Set to True if using this cluster within async/await functions or within
         Tornado gen.coroutines.  This should remain False for normal use.
     blocked_handlers: List[str]
-        A list of strings specifying a blacklist of handlers to disallow on the Scheduler,
-        like ``['feed', 'run_function']``
+        A list of strings specifying a blocklist of handlers to disallow on the
+        Scheduler, like ``['feed', 'run_function']``
     service_kwargs: Dict[str, Dict]
         Extra keywords to hand to the running services
     security : Security or bool, optional
@@ -200,6 +198,7 @@ class LocalCluster(SpecCluster):
 
         worker_kwargs.update(
             {
+                "host": host,
                 "nthreads": threads_per_worker,
                 "services": worker_services,
                 "dashboard_address": worker_dashboard_address,
@@ -258,12 +257,3 @@ class LocalCluster(SpecCluster):
             cluster_status=cluster_status,
         )
         return super()._repr_html_(cluster_status=cluster_status)
-
-
-clusters_to_close = weakref.WeakSet()
-
-
-@atexit.register
-def close_clusters():
-    for cluster in list(clusters_to_close):
-        cluster.close(timeout=10)

@@ -9,7 +9,7 @@ from tlz import identity
 try:
     import numpy as np
 except ImportError:
-    np = None
+    np = None  # type: ignore
 
 import dask
 
@@ -430,18 +430,45 @@ async def test_profile_nested_sizeof():
     frames = await to_frames(msg)
 
 
-def test_compression_numpy_list():
-    class MyObj:
+def test_different_compression_families():
+    """Test serialization of a collection of items that use different compression
+
+    This scenario happens for instance when serializing collections of
+    cupy and numpy arrays.
+    """
+
+    class MyObjWithCompression:
         pass
 
-    @dask_serialize.register(MyObj)
-    def _(x):
-        header = {"compression": [False]}
-        frames = [b""]
-        return header, frames
+    class MyObjWithNoCompression:
+        pass
 
-    header, frames = serialize([MyObj(), MyObj()])
-    assert header["compression"] == [False, False]
+    def my_dumps_compression(obj, context=None):
+        if not isinstance(obj, MyObjWithCompression):
+            raise NotImplementedError()
+        header = {"compression": [True]}
+        return header, [bytes(2 ** 20)]
+
+    def my_dumps_no_compression(obj, context=None):
+        if not isinstance(obj, MyObjWithNoCompression):
+            raise NotImplementedError()
+
+        header = {"compression": [False]}
+        return header, [bytes(2 ** 20)]
+
+    def my_loads(header, frames):
+        return pickle.loads(frames[0])
+
+    register_serialization_family("with-compression", my_dumps_compression, my_loads)
+    register_serialization_family("no-compression", my_dumps_no_compression, my_loads)
+
+    header, _ = serialize(
+        [MyObjWithCompression(), MyObjWithNoCompression()],
+        serializers=("with-compression", "no-compression"),
+        on_error="raise",
+        iterate_collection=True,
+    )
+    assert header["compression"] == [True, False]
 
 
 @gen_test()
@@ -480,7 +507,9 @@ async def test_frame_split():
         (memoryview(b"hello"), True),
         pytest.param(
             memoryview(
-                np.random.random((3, 4)) if np is not None else b"skip np.random"
+                np.random.random((3, 4))  # type: ignore
+                if np is not None
+                else b"skip np.random"
             ),
             True,
             marks=pytest.mark.skipif(np is None, reason="Test needs numpy"),
@@ -512,7 +541,9 @@ def test_serialize_lists(serializers):
         memoryview(b"hello"),
         pytest.param(
             memoryview(
-                np.random.random((3, 4)) if np is not None else b"skip np.random"
+                np.random.random((3, 4))  # type: ignore
+                if np is not None
+                else b"skip np.random"
             ),
             marks=pytest.mark.skipif(np is None, reason="Test needs numpy"),
         ),

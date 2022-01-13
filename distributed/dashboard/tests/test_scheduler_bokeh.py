@@ -48,7 +48,8 @@ from distributed.metrics import time
 from distributed.utils import format_dashboard_link
 from distributed.utils_test import dec, div, gen_cluster, get_cert, inc, slowinc
 
-scheduler.PROFILING = False
+# Imported from distributed.dashboard.utils
+scheduler.PROFILING = False  # type: ignore
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
@@ -529,26 +530,26 @@ async def test_SystemTimeseries(c, s, a, b):
 
     assert all(len(v) == 1 for v in systs.source.data.values())
     assert systs.source.data["read_bytes"][0] == sum(
-        [ws.metrics["read_bytes"] for ws in workers]
+        ws.metrics["read_bytes"] for ws in workers
     ) / len(workers)
     assert systs.source.data["write_bytes"][0] == sum(
-        [ws.metrics["write_bytes"] for ws in workers]
+        ws.metrics["write_bytes"] for ws in workers
     ) / len(workers)
     assert systs.source.data["cpu"][0] == sum(
-        [ws.metrics["cpu"] for ws in workers]
+        ws.metrics["cpu"] for ws in workers
     ) / len(workers)
     assert systs.source.data["memory"][0] == sum(
-        [ws.metrics["memory"] for ws in workers]
+        ws.metrics["memory"] for ws in workers
     ) / len(workers)
     assert systs.source.data["read_bytes_disk"][0] == sum(
-        [ws.metrics["read_bytes_disk"] for ws in workers]
+        ws.metrics["read_bytes_disk"] for ws in workers
     ) / len(workers)
     assert systs.source.data["write_bytes_disk"][0] == sum(
-        [ws.metrics["write_bytes_disk"] for ws in workers]
+        ws.metrics["write_bytes_disk"] for ws in workers
     ) / len(workers)
     assert (
         systs.source.data["time"][0]
-        == sum([ws.metrics["time"] for ws in workers]) / len(workers) * 1000
+        == sum(ws.metrics["time"] for ws in workers) / len(workers) * 1000
     )
 
     # Update worker system monitors and send updated metrics to the scheduler
@@ -559,26 +560,26 @@ async def test_SystemTimeseries(c, s, a, b):
 
     assert all(len(v) == 2 for v in systs.source.data.values())
     assert systs.source.data["read_bytes"][1] == sum(
-        [ws.metrics["read_bytes"] for ws in workers]
+        ws.metrics["read_bytes"] for ws in workers
     ) / len(workers)
     assert systs.source.data["write_bytes"][1] == sum(
-        [ws.metrics["write_bytes"] for ws in workers]
+        ws.metrics["write_bytes"] for ws in workers
     ) / len(workers)
     assert systs.source.data["cpu"][1] == sum(
-        [ws.metrics["cpu"] for ws in workers]
+        ws.metrics["cpu"] for ws in workers
     ) / len(workers)
     assert systs.source.data["memory"][1] == sum(
-        [ws.metrics["memory"] for ws in workers]
+        ws.metrics["memory"] for ws in workers
     ) / len(workers)
     assert systs.source.data["read_bytes_disk"][1] == sum(
-        [ws.metrics["read_bytes_disk"] for ws in workers]
+        ws.metrics["read_bytes_disk"] for ws in workers
     ) / len(workers)
     assert systs.source.data["write_bytes_disk"][1] == sum(
-        [ws.metrics["write_bytes_disk"] for ws in workers]
+        ws.metrics["write_bytes_disk"] for ws in workers
     ) / len(workers)
     assert (
         systs.source.data["time"][1]
-        == sum([ws.metrics["time"] for ws in workers]) / len(workers) * 1000
+        == sum(ws.metrics["time"] for ws in workers) / len(workers) * 1000
     )
 
 
@@ -770,7 +771,7 @@ async def test_TaskGroupGraph_arrows(c, s, a, b):
     while s.task_groups:
         await asyncio.sleep(0.01)
 
-    tgg.update()  ###for some reason after deleting the futures the tgg.node_source.data.values are not clear.
+    tgg.update()  # for some reason after deleting the futures the tgg.node_source.data.values are not clear.
     assert not any(tgg.nodes_source.data.values())
     assert not any(tgg.arrows_source.data.values())
 

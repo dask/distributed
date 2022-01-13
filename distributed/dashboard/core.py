@@ -1,25 +1,21 @@
 import functools
 import warnings
-from distutils.version import LooseVersion
 
 import bokeh
 from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
 from bokeh.server.server import BokehTornado
-
-try:
-    from bokeh.server.util import create_hosts_allowlist
-except ImportError:
-    from bokeh.server.util import create_hosts_whitelist as create_hosts_allowlist
+from bokeh.server.util import create_hosts_allowlist
+from packaging.version import parse as parse_version
 
 import dask
 
-if LooseVersion(bokeh.__version__) < LooseVersion("1.0.0"):
+if parse_version(bokeh.__version__) < parse_version("2.1.1"):
     warnings.warn(
-        "\nDask needs bokeh >= 1.0 for the dashboard."
+        "\nDask needs bokeh >= 2.1.1 for the dashboard."
         "\nContinuing without the dashboard."
     )
-    raise ImportError("Dask needs bokeh >= 1.0")
+    raise ImportError("Dask needs bokeh >= 2.1.1")
 
 
 def BokehApplication(applications, server, prefix="/", template_variables={}):

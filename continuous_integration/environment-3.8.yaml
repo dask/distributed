@@ -4,11 +4,13 @@ channels:
   - defaults
 dependencies:
   - python=3.8
+  - packaging
   - pip
   - asyncssh
   - bokeh
   - click
   - cloudpickle
+  - coverage
   - dask  # overridden by git tip below
   - filesystem-spec
   - h5py
@@ -20,10 +22,12 @@ dependencies:
   - msgpack-python
   - netcdf4
   - paramiko
+  - pre-commit
   - prometheus_client
   - psutil
   - pytest
   - pytest-asyncio<0.14.0
+  - pytest-cov
   - pytest-faulthandler
   - pytest-repeat
   - pytest-rerunfailures

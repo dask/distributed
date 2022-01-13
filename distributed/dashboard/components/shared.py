@@ -30,7 +30,7 @@ from distributed.utils import log_errors
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
 else:
-    ExportTool = None
+    ExportTool = None  # type: ignore
 
 
 profile_interval = dask.config.get("distributed.worker.profile.interval")
@@ -449,7 +449,6 @@ class SystemMonitor(DashboardComponent):
                 y_units="screen",
                 text="cpu",
                 text_font_size="1em",
-                render_mode="css",
                 source=self.label_source,
             )
         )
@@ -472,7 +471,6 @@ class SystemMonitor(DashboardComponent):
                 y_units="screen",
                 text="memory",
                 text_font_size="1em",
-                render_mode="css",
                 source=self.label_source,
             )
         )
