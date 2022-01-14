@@ -807,22 +807,20 @@ def test_compression(compression, serialize, loop):
         loop.run_sync(f)
 
 
-def test_rpc_serialization(loop):
-    async def f():
-        server = Server({"echo": echo_serialize})
-        await server.listen("tcp://")
+@pytest.mark.asyncio
+async def test_rpc_serialization():
+    server = Server({"echo": echo_serialize})
+    await server.listen("tcp://")
 
-        async with rpc(server.address, serializers=["msgpack"]) as r:
-            with pytest.raises(TypeError):
-                await r.echo(x=to_serialize(inc))
+    async with rpc(server.address, serializers=["msgpack"]) as r:
+        with pytest.raises(TypeError):
+            await r.echo(x=to_serialize(inc))
 
-        async with rpc(server.address, serializers=["msgpack", "pickle"]) as r:
-            result = await r.echo(x=to_serialize(inc))
-            assert result == {"result": inc}
+    async with rpc(server.address, serializers=["msgpack", "pickle"]) as r:
+        result = await r.echo(x=to_serialize(inc))
+        assert result == {"result": inc}
 
-        server.stop()
-
-    loop.run_sync(f)
+    server.stop()
 
 
 @gen_cluster()

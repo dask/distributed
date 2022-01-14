@@ -24,7 +24,7 @@ class BatchedSend:
 
     Examples
     --------
-    >>> stream = yield connect(address)
+    >>> stream = await connect(address)
     >>> bstream = BatchedSend(interval='10 ms')
     >>> bstream.start(stream)
     >>> bstream.send('Hello,')
