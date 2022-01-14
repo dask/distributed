@@ -731,7 +731,17 @@ properties:
                 type:
                 - string
                 - "null"
-                descsription: Allowed ciphers, specified as an OpenSSL cipher string.
+                description: Allowed ciphers, specified as an OpenSSL cipher string.
+
+              min-version:
+                enum: [null, 1.2, 1.3]
+                description: The minimum TLS version to support. Defaults to TLS 1.2.
+
+              max-version:
+                enum: [null, 1.2, 1.3]
+                description: |
+                  The maximum TLS version to support. Defaults to the maximum
+                  version supported by the platform.
 
               ca-file:
                 type:
@@ -801,26 +811,26 @@ properties:
             description: |
               UCX provides access to other transport methods including NVLink and InfiniBand.
             properties:
-              cuda_copy:
-                type: boolean
+              cuda-copy:
+                type: [boolean, 'null']
                 description: |
                   Set environment variables to enable CUDA support over UCX. This may be used even if
                   InfiniBand and NVLink are not supported or disabled, then transferring data over TCP.
               tcp:
-                type: boolean
+                type: [boolean, 'null']
                 description: |
                   Set environment variables to enable TCP over UCX, even if InfiniBand and NVLink
                   are not supported or disabled.
               nvlink:
-                type: boolean
+                type: [boolean, 'null']
                 description: |
                   Set environment variables to enable UCX over NVLink, implies ``distributed.comm.ucx.tcp=True``.
               infiniband:
-                type: boolean
+                type: [boolean, 'null']
                 description: |
                   Set environment variables to enable UCX over InfiniBand, implies ``distributed.comm.ucx.tcp=True``.
               rdmacm:
-                type: boolean
+                type: [boolean, 'null']
                 description: |
                   Set environment variables to enable UCX RDMA connection manager support,
                   requires ``distributed.comm.ucx.infiniband=True``.
@@ -842,6 +852,23 @@ properties:
                   introduced to resolve an issue with CUDA IPC that has been fixed in UCX 1.10, but
                   can cause establishing endpoints to be very slow, this is particularly noticeable in
                   clusters of more than a few dozen workers.
+              create-cuda-context:
+                type: [boolean, 'null']
+                description: |
+                  Creates a CUDA context before UCX is initialized. This is necessary to enable UCX to
+                  properly identify connectivity of GPUs with specialized networking hardware, such as
+                  InfiniBand. This permits UCX to choose transports automatically, without specifying
+                  additional variables for each transport, while ensuring optimal connectivity. When
+                  ``True``, a CUDA context will be created on the first device listed in
+                  ``CUDA_VISIBLE_DEVICES``.
+
+          tcp:
+            type: object
+            properties:
+              backend:
+                type: string
+                description: |
+                  The TCP backend implementation to use. Must be either `tornado` or `asyncio`.
 
           websockets:
             type: object

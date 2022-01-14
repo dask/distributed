@@ -85,11 +85,10 @@ class WSHandler(WebSocketHandler):
 
 
 class WSHandlerComm(Comm):
-    def __init__(self, handler, deserialize=True, allow_offload=True):
+    def __init__(self, handler, deserialize: bool = True, allow_offload: bool = True):
         self.handler = handler
-        self.deserialize = deserialize
         self.allow_offload = allow_offload
-        super().__init__()
+        super().__init__(deserialize=deserialize)
 
     async def read(self, deserializers=None):
         try:
@@ -158,16 +157,15 @@ class WSHandlerComm(Comm):
 class WS(Comm):
     prefix = "ws://"
 
-    def __init__(self, sock, deserialize=True, allow_offload=True):
+    def __init__(self, sock, deserialize: bool = True, allow_offload: bool = True):
         self._closed = False
-        super().__init__()
+        super().__init__(deserialize=deserialize)
         self.sock = sock
         self._local_addr = f"{self.prefix}{self.sock.parsed.netloc}"
         self._peer_addr = f"{self.prefix}{self.sock.parsed.netloc}"
-        self.deserialize = deserialize
         self.allow_offload = allow_offload
         self._finalizer = weakref.finalize(self, self._get_finalizer())
-        self._extra = {}
+        self._extra: dict = {}
         self._read_extra()
 
     def _get_finalizer(self):
@@ -339,7 +337,7 @@ class WSListener(Listener):
                 self.server = HTTPServer(web.Application(routes), **self.server_args)
                 self.server.listen(self.port)
 
-    async def stop(self):
+    def stop(self):
         self.server.stop()
 
     def get_host_port(self):

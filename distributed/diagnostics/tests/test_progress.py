@@ -7,12 +7,13 @@ from distributed.client import wait
 from distributed.compatibility import LINUX
 from distributed.diagnostics.progress import (
     AllProgress,
+    GroupTiming,
     MultiProgress,
     Progress,
     SchedulerPlugin,
 )
 from distributed.scheduler import COMPILED
-from distributed.utils_test import dec, div, gen_cluster, inc, nodebug
+from distributed.utils_test import dec, div, gen_cluster, inc, nodebug, slowdec, slowinc
 
 
 def f(*args):
@@ -189,3 +190,35 @@ async def test_AllProgress_lost_key(c, s, a, b):
 
     while len(p.state["memory"]["inc"]) > 0:
         await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_group_timing(c, s, a, b):
+    p = GroupTiming(s)
+    s.add_plugin(p)
+
+    assert len(p.time) == 2
+    assert len(p.nthreads) == 2
+
+    futures1 = c.map(slowinc, range(10), delay=0.3)
+    futures2 = c.map(slowdec, range(10), delay=0.3)
+    await wait(futures1 + futures2)
+
+    assert len(p.time) > 2
+    assert len(p.nthreads) == len(p.time)
+    assert all([nt == s.total_nthreads for nt in p.nthreads])
+    assert "slowinc" in p.compute
+    assert "slowdec" in p.compute
+    assert all([len(v) == len(p.time) for v in p.compute.values()])
+    assert s.task_groups.keys() == p.compute.keys()
+    assert all(
+        [
+            abs(s.task_groups[k].all_durations["compute"] - sum(v)) < 1.0e-12
+            for k, v in p.compute.items()
+        ]
+    )
+
+    await s.restart()
+    assert len(p.time) == 2
+    assert len(p.nthreads) == 2
+    assert len(p.compute) == 0

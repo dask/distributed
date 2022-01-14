@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 import sys
 import warnings
@@ -85,13 +86,19 @@ class Worker(Process):
         self.scheduler = scheduler
         self.worker_class = worker_class
         self.connect_options = connect_options
-        self.kwargs = kwargs
+        self.kwargs = copy.copy(kwargs)
         self.name = name
         self.remote_python = remote_python
         self.nprocs = self.kwargs.pop("nprocs", 1)
 
     async def start(self):
-        import asyncssh  # import now to avoid adding to module startup time
+        try:
+            import asyncssh  # import now to avoid adding to module startup time
+        except ImportError:
+            raise ImportError(
+                "Dask's SSHCluster requires the `asyncssh` package to be installed. "
+                "Please install it using pip or conda."
+            )
 
         self.connection = await asyncssh.connect(self.address, **self.connect_options)
 
@@ -129,7 +136,6 @@ class Worker(Process):
                             "cls": self.worker_class,
                             "opts": {
                                 **self.kwargs,
-                                "name": self.name,
                             },
                         }
                         for i in range(self.nprocs)
@@ -180,7 +186,13 @@ class Scheduler(Process):
         self.remote_python = remote_python
 
     async def start(self):
-        import asyncssh  # import now to avoid adding to module startup time
+        try:
+            import asyncssh  # import now to avoid adding to module startup time
+        except ImportError:
+            raise ImportError(
+                "Dask's SSHCluster requires the `asyncssh` package to be installed. "
+                "Please install it using pip or conda."
+            )
 
         logger.debug("Created Scheduler Connection")
 

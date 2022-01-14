@@ -5,6 +5,7 @@ channels:
   - pytorch
 dependencies:
   - python=3.9
+  - packaging
   - pip
   - asyncssh
   - bokeh

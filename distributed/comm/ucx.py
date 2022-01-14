@@ -70,7 +70,9 @@ def init_once():
     # We ensure the CUDA context is created before initializing UCX. This can't
     # be safely handled externally because communications in Dask start before
     # preload scripts run.
-    if "TLS" in ucx_config and "cuda_copy" in ucx_config["TLS"]:
+    if dask.config.get("distributed.comm.ucx.create-cuda-context") is True or (
+        "TLS" in ucx_config and "cuda_copy" in ucx_config["TLS"]
+    ):
         try:
             import numba.cuda
         except ImportError:
@@ -213,15 +215,14 @@ class UCX(Comm):
     4. Read all the data frames.
     """
 
-    def __init__(self, ep, local_addr: str, peer_addr: str, deserialize=True):
-        super().__init__()
+    def __init__(self, ep, local_addr: str, peer_addr: str, deserialize: bool = True):
+        super().__init__(deserialize=deserialize)
         self._ep = ep
         if local_addr:
             assert local_addr.startswith("ucx")
         assert peer_addr.startswith("ucx")
         self._local_addr = local_addr
         self._peer_addr = peer_addr
-        self.deserialize = deserialize
         self.comm_flag = None
 
         # When the UCX endpoint closes or errors the registered callback
@@ -305,9 +306,6 @@ class UCX(Comm):
 
     async def read(self, deserializers=("cuda", "dask", "pickle", "error")):
         with log_errors():
-            if self.closed():
-                raise CommClosedError("Endpoint is closed -- unable to read message")
-
             if deserializers is None:
                 deserializers = ("cuda", "dask", "pickle", "error")
 
@@ -418,6 +416,7 @@ class UCXConnector(Connector):
         except (ucp.exceptions.UCXCloseError, ucp.exceptions.UCXCanceled,) + (
             getattr(ucp.exceptions, "UCXConnectionReset", ()),
             getattr(ucp.exceptions, "UCXNotConnected", ()),
+            getattr(ucp.exceptions, "UCXUnreachable", ()),
         ):
             raise CommClosedError("Connection closed before handshake completed")
         return self.comm_class(
@@ -575,7 +574,7 @@ def _scrub_ucx_config():
         if any(
             [
                 dask.config.get("distributed.comm.ucx.nvlink"),
-                dask.config.get("distributed.comm.ucx.cuda_copy"),
+                dask.config.get("distributed.comm.ucx.cuda-copy"),
             ]
         ):
             tls = tls + ",cuda_copy"

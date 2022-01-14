@@ -26,8 +26,11 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import Any, ClassVar, Container
+from typing import TYPE_CHECKING, ClassVar, Container
 from typing import cast as pep484_cast
+
+if TYPE_CHECKING:
+    from typing_extensions import Literal
 
 import psutil
 from sortedcontainers import SortedDict, SortedSet
@@ -73,7 +76,7 @@ from .metrics import time
 from .multi_lock import MultiLockExtension
 from .node import ServerNode
 from .proctitle import setproctitle
-from .protocol.pickle import loads
+from .protocol.pickle import dumps, loads
 from .publish import PublishExtension
 from .pubsub import PubSubSchedulerExtension
 from .queues import QueueExtension
@@ -195,6 +198,8 @@ ALL_TASK_STATES = declare(
 globals()["ALL_TASK_STATES"] = ALL_TASK_STATES
 COMPILED = declare(bint, compiled)
 globals()["COMPILED"] = COMPILED
+
+_taskstate_to_dict_guard: bool = False
 
 
 @final
@@ -506,6 +511,7 @@ class WorkerState:
     _occupancy: double
     _pid: Py_ssize_t
     _processing: dict
+    _long_running: set
     _resources: dict
     _services: dict
     _status: Status
@@ -534,6 +540,7 @@ class WorkerState:
         "_occupancy",
         "_pid",
         "_processing",
+        "_long_running",
         "_resources",
         "_services",
         "_status",
@@ -583,6 +590,7 @@ class WorkerState:
         self._actors = set()
         self._has_what = {}
         self._processing = {}
+        self._long_running = set()
         self._executing = {}
         self._resources = {}
         self._used_resources = {}
@@ -1732,10 +1740,10 @@ class TaskState:
         return nbytes
 
     @ccall
-    def _to_dict(self, *, exclude: Container[str] = None):
+    def _to_dict(self, *, exclude: "Container[str]" = ()):  # -> dict | str
         """
         A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
+        Not type stable and not intended for roundtrips.
 
         Parameters
         ----------
@@ -1746,14 +1754,26 @@ class TaskState:
         --------
         Client.dump_cluster_state
         """
-
-        if not exclude:
-            exclude = set()
-        members = inspect.getmembers(self)
-        return recursive_to_dict(
-            {k: v for k, v in members if k not in exclude and not callable(v)},
-            exclude=exclude,
-        )
+        # When a task references another task, just print the task repr. All tasks
+        # should neatly appear under Scheduler.tasks. This also prevents a
+        # RecursionError during particularly heavy loads, which have been observed to
+        # happen whenever there's an acyclic dependency chain of ~200+ tasks.
+        global _taskstate_to_dict_guard
+        if _taskstate_to_dict_guard:
+            return repr(self)
+        _taskstate_to_dict_guard = True
+        try:
+            members = inspect.getmembers(self)
+            return recursive_to_dict(
+                {
+                    k: v
+                    for k, v in members
+                    if not k.startswith("_") and k not in exclude and not callable(v)
+                },
+                exclude=exclude,
+            )
+        finally:
+            _taskstate_to_dict_guard = False
 
 
 class _StateLegacyMapping(Mapping):
@@ -2653,8 +2673,10 @@ class SchedulerState:
             total_duration = duration + comm
         old = ws._processing.get(ts, 0)
         ws._processing[ts] = total_duration
-        self._total_occupancy += total_duration - old
-        ws._occupancy += total_duration - old
+
+        if ts not in ws._long_running:
+            self._total_occupancy += total_duration - old
+            ws._occupancy += total_duration - old
 
         return total_duration
 
@@ -2812,7 +2834,7 @@ class SchedulerState:
                 if tts._processing_on:
                     self.set_duration_estimate(tts, tts._processing_on)
                     if steal:
-                        steal.put_key_in_stealable(tts)
+                        steal.recalculate_cost(tts)
 
             ############################
             # Update State Information #
@@ -3526,6 +3548,23 @@ class SchedulerState:
             self._replicated_tasks.remove(ts)
         ts._who_has.clear()
 
+    @ccall
+    @exceptval(check=False)
+    def _reevaluate_occupancy_worker(self, ws: WorkerState):
+        """See reevaluate_occupancy"""
+        ts: TaskState
+        old = ws._occupancy
+        for ts in ws._processing:
+            self.set_duration_estimate(ts, ws)
+
+        self.check_idle_saturated(ws)
+        steal = self.extensions.get("stealing")
+        if steal is None:
+            return
+        if ws._occupancy > old * 1.3 or old > ws._occupancy * 1.3:
+            for ts in ws._processing:
+                steal.recalculate_cost(ts)
+
 
 class Scheduler(SchedulerState, ServerNode):
     """Dynamic distributed task scheduler
@@ -3883,6 +3922,7 @@ class Scheduler(SchedulerState, ServerNode):
             "heartbeat_worker": self.heartbeat_worker,
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
+            "get_task_prefix_states": self.get_task_prefix_states,
             "register_scheduler_plugin": self.register_scheduler_plugin,
             "register_worker_plugin": self.register_worker_plugin,
             "unregister_worker_plugin": self.unregister_worker_plugin,
@@ -3977,8 +4017,8 @@ class Scheduler(SchedulerState, ServerNode):
         return d
 
     def _to_dict(
-        self, comm: Comm = None, *, exclude: Container[str] = None
-    ) -> "dict[str, Any]":
+        self, comm: "Comm | None" = None, *, exclude: "Container[str]" = ()
+    ) -> dict:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not inteded for roundtrips.
@@ -3994,20 +4034,16 @@ class Scheduler(SchedulerState, ServerNode):
         Server.identity
         Client.dump_cluster_state
         """
-
         info = super()._to_dict(exclude=exclude)
         extra = {
             "transition_log": self.transition_log,
             "log": self.log,
             "tasks": self.tasks,
             "events": self.events,
+            "extensions": self.extensions,
         }
-        info.update(extra)
-        extensions = {}
-        for name, ex in self.extensions.items():
-            if hasattr(ex, "_to_dict"):
-                extensions[name] = ex._to_dict()
-        return recursive_to_dict(info, exclude=exclude)
+        info.update(recursive_to_dict(extra, exclude=exclude))
+        return info
 
     def get_worker_service_addr(self, worker, service_name, protocol=False):
         """
@@ -4964,18 +5000,12 @@ class Scheduler(SchedulerState, ServerNode):
 
             self.remove_resources(address)
 
-            dh: dict = parent._host_info.get(host)
-            if dh is None:
-                parent._host_info[host] = dh = {}
-
+            dh: dict = parent._host_info[host]
             dh_addresses: set = dh["addresses"]
             dh_addresses.remove(address)
             dh["nthreads"] -= ws._nthreads
             parent._total_nthreads -= ws._nthreads
-
             if not dh_addresses:
-                dh = None
-                dh_addresses = None
                 del parent._host_info[host]
 
             self.rpc.remove(address)
@@ -5453,8 +5483,7 @@ class Scheduler(SchedulerState, ServerNode):
     def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("handle missing data key=%s worker=%s", key, errant_worker)
-        self.log.append(("missing", key, errant_worker))
-
+        self.log_event(errant_worker, {"action": "missing-data", "key": key})
         ts: TaskState = parent._tasks.get(key)
         if ts is None:
             return
@@ -5515,7 +5544,12 @@ class Scheduler(SchedulerState, ServerNode):
         occ: double = ws._processing[ts]
         ws._occupancy -= occ
         parent._total_occupancy -= occ
+        # Cannot remove from processing since we're using this for things like
+        # idleness detection. Idle workers are typically targeted for
+        # downscaling but we should not downscale workers with long running
+        # tasks
         ws._processing[ts] = 0
+        ws._long_running.add(ts)
         self.check_idle_saturated(ws)
 
     def handle_worker_status_change(self, status: str, worker: str) -> None:
@@ -5678,7 +5712,9 @@ class Scheduler(SchedulerState, ServerNode):
                 f"Could not find plugin {name!r} among the current scheduler plugins"
             )
 
-    async def register_scheduler_plugin(self, comm=None, plugin=None, name=None):
+    async def register_scheduler_plugin(
+        self, comm=None, plugin=None, name=None, idempotent=None
+    ):
         """Register a plugin on the scheduler."""
         if not dask.config.get("distributed.scheduler.pickle"):
             raise ValueError(
@@ -5689,12 +5725,18 @@ class Scheduler(SchedulerState, ServerNode):
             )
         plugin = loads(plugin)
 
+        if name is None:
+            name = _get_plugin_name(plugin)
+
+        if name in self.plugins and idempotent:
+            return
+
         if hasattr(plugin, "start"):
             result = plugin.start(self)
             if inspect.isawaitable(result):
                 await result
 
-        self.add_plugin(plugin, name=name)
+        self.add_plugin(plugin, name=name, idempotent=idempotent)
 
     def worker_send(self, worker, msg):
         """Send message to worker
@@ -5965,22 +6007,30 @@ class Scheduler(SchedulerState, ServerNode):
     async def broadcast(
         self,
         comm=None,
-        msg=None,
-        workers=None,
-        hosts=None,
-        nanny=False,
+        *,
+        msg: dict,
+        workers: "list[str] | None" = None,
+        hosts: "list[str] | None" = None,
+        nanny: bool = False,
         serializers=None,
-    ):
+        on_error: "Literal['raise', 'return', 'return_pickle', 'ignore']" = "raise",
+    ) -> dict:  # dict[str, Any]
         """Broadcast message to workers, return all results"""
         parent: SchedulerState = cast(SchedulerState, self)
-        if workers is None or workers is True:
+        if workers is True:
+            warnings.warn(
+                "workers=True is deprecated; pass workers=None or omit instead",
+                category=FutureWarning,
+            )
+            workers = None
+        if workers is None:
             if hosts is None:
                 workers = list(parent._workers_dv)
             else:
                 workers = []
         if hosts is not None:
             for host in hosts:
-                dh: dict = parent._host_info.get(host)
+                dh: dict = parent._host_info.get(host)  # type: ignore
                 if dh is not None:
                     workers.extend(dh["addresses"])
         # TODO replace with worker_list
@@ -5990,20 +6040,40 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             addresses = workers
 
+        ERROR = object()
+
         async def send_message(addr):
-            comm = await self.rpc.connect(addr)
-            comm.name = "Scheduler Broadcast"
             try:
-                resp = await send_recv(comm, close=True, serializers=serializers, **msg)
-            finally:
-                self.rpc.reuse(addr, comm)
-            return resp
+                comm = await self.rpc.connect(addr)
+                comm.name = "Scheduler Broadcast"
+                try:
+                    resp = await send_recv(
+                        comm, close=True, serializers=serializers, **msg
+                    )
+                finally:
+                    self.rpc.reuse(addr, comm)
+                return resp
+            except Exception as e:
+                logger.error(f"broadcast to {addr} failed: {e.__class__.__name__}: {e}")
+                if on_error == "raise":
+                    raise
+                elif on_error == "return":
+                    return e
+                elif on_error == "return_pickle":
+                    return dumps(e, protocol=4)
+                elif on_error == "ignore":
+                    return ERROR
+                else:
+                    raise ValueError(
+                        "on_error must be 'raise', 'return', 'return_pickle', "
+                        f"or 'ignore'; got {on_error!r}"
+                    )
 
         results = await All(
             [send_message(address) for address in addresses if address is not None]
         )
 
-        return dict(zip(workers, results))
+        return {k: v for k, v in zip(workers, results) if v is not ERROR}
 
     async def proxy(self, comm=None, msg=None, worker=None, serializers=None):
         """Proxy a communication through the scheduler to some other worker"""
@@ -6176,14 +6246,14 @@ class Scheduler(SchedulerState, ServerNode):
         Parameters
         ----------
         keys: optional
-            whitelist of dask keys that should be considered for moving. All other keys
+            allowlist of dask keys that should be considered for moving. All other keys
             will be ignored. Note that this offers no guarantee that a key will actually
             be moved (e.g. because it is unnecessary or because there are no viable
             recipient workers for it).
         workers: optional
-            whitelist of workers addresses to be considered as senders or recipients.
+            allowlist of workers addresses to be considered as senders or recipients.
             All other workers will be ignored. The mean cluster occupancy will be
-            calculated only using the whitelisted workers.
+            calculated only using the allowed workers.
         """
         parent: SchedulerState = cast(SchedulerState, self)
 
@@ -6234,15 +6304,15 @@ class Scheduler(SchedulerState, ServerNode):
 
         The big-O complexity is O(wt + ke*log(we)), where
 
-        - wt is the total number of workers on the cluster (or the number of whitelisted
+        - wt is the total number of workers on the cluster (or the number of allowed
           workers, if explicitly stated by the user)
         - we is the number of workers that are eligible to be senders or recipients
-        - kt is the total number of keys on the cluster (or on the whitelisted workers)
+        - kt is the total number of keys on the cluster (or on the allowed workers)
         - ke is the number of keys that need to be moved in order to achieve a balanced
           cluster
 
         There is a degenerate edge case O(wt + kt*log(we)) when kt is much greater than
-        the number of whitelisted keys, or when most keys are replicated or cannot be
+        the number of allowed keys, or when most keys are replicated or cannot be
         moved for some other reason.
 
         Returns list of tuples to feed into _rebalance_move_data:
@@ -7168,6 +7238,26 @@ class Scheduler(SchedulerState, ServerNode):
                 restrictions = {restrictions}
             ts._worker_restrictions = set(restrictions)
 
+    def get_task_prefix_states(self, comm=None):
+        with log_errors():
+            state = {}
+
+            for tp in self.task_prefixes.values():
+                active_states = tp.active_states
+                if any(
+                    active_states.get(s)
+                    for s in {"memory", "erred", "released", "processing", "waiting"}
+                ):
+                    state[tp.name] = {
+                        "memory": active_states["memory"],
+                        "erred": active_states["erred"],
+                        "released": active_states["released"],
+                        "processing": active_states["processing"],
+                        "waiting": active_states["waiting"],
+                    }
+
+        return state
+
     def get_task_status(self, comm=None, keys=None):
         parent: SchedulerState = cast(SchedulerState, self)
         return {
@@ -7206,7 +7296,7 @@ class Scheduler(SchedulerState, ServerNode):
         return {"metadata": plugin.metadata, "state": plugin.state}
 
     async def register_worker_plugin(self, comm, plugin, name=None):
-        """Registers a setup function, and call it on every worker"""
+        """Registers a worker plugin on all running and future workers"""
         self.worker_plugins[name] = plugin
 
         responses = await self.broadcast(
@@ -7740,7 +7830,7 @@ class Scheduler(SchedulerState, ServerNode):
                     try:
                         if ws is None or not ws._processing:
                             continue
-                        _reevaluate_occupancy_worker(parent, ws)
+                        parent._reevaluate_occupancy_worker(ws)
                     finally:
                         del ws  # lose ref
 
@@ -7844,6 +7934,62 @@ class Scheduler(SchedulerState, ServerNode):
         else:  # Scale down?
             to_close = self.workers_to_close()
             return len(parent._workers_dv) - len(to_close)
+
+    def request_acquire_replicas(self, addr: str, keys: list, *, stimulus_id: str):
+        """Asynchronously ask a worker to acquire a replica of the listed keys from
+        other workers. This is a fire-and-forget operation which offers no feedback for
+        success or failure, and is intended for housekeeping and not for computation.
+        """
+        parent: SchedulerState = cast(SchedulerState, self)
+        ws: WorkerState
+        ts: TaskState
+
+        who_has = {}
+        for key in keys:
+            ts = parent._tasks[key]
+            who_has[key] = {ws._address for ws in ts._who_has}
+
+        self.stream_comms[addr].send(
+            {
+                "op": "acquire-replicas",
+                "keys": keys,
+                "who_has": who_has,
+                "stimulus_id": stimulus_id,
+            },
+        )
+
+    def request_remove_replicas(self, addr: str, keys: list, *, stimulus_id: str):
+        """Asynchronously ask a worker to discard its replica of the listed keys.
+        This must never be used to destroy the last replica of a key. This is a
+        fire-and-forget operation, intended for housekeeping and not for computation.
+
+        The replica disappears immediately from TaskState.who_has on the Scheduler side;
+        if the worker refuses to delete, e.g. because the task is a dependency of
+        another task running on it, it will (also asynchronously) inform the scheduler
+        to re-add itself to who_has. If the worker agrees to discard the task, there is
+        no feedback.
+        """
+        parent: SchedulerState = cast(SchedulerState, self)
+        ws: WorkerState = parent._workers_dv[addr]
+        validate = self.validate
+
+        # The scheduler immediately forgets about the replica and suggests the worker to
+        # drop it. The worker may refuse, at which point it will send back an add-keys
+        # message to reinstate it.
+        for key in keys:
+            ts: TaskState = parent._tasks[key]
+            if validate:
+                # Do not destroy the last copy
+                assert len(ts._who_has) > 1
+            self.remove_replica(ts, ws)
+
+        self.stream_comms[addr].send(
+            {
+                "op": "remove-replicas",
+                "keys": keys,
+                "stimulus_id": stimulus_id,
+            }
+        )
 
 
 @cfunc
@@ -8079,24 +8225,6 @@ def _task_to_client_msgs(state: SchedulerState, ts: TaskState) -> dict:
             cs: ClientState
             return {cs._client_key: [report_msg] for cs in ts._who_wants}
     return {}
-
-
-@cfunc
-@exceptval(check=False)
-def _reevaluate_occupancy_worker(state: SchedulerState, ws: WorkerState):
-    """See reevaluate_occupancy"""
-    ts: TaskState
-    old = ws._occupancy
-    for ts in ws._processing:
-        state.set_duration_estimate(ts, ws)
-
-    state.check_idle_saturated(ws)
-    steal = state.extensions.get("stealing")
-    if not steal:
-        return
-    if ws._occupancy > old * 1.3 or old > ws._occupancy * 1.3:
-        for ts in ws._processing:
-            steal.recalculate_cost(ts)
 
 
 @cfunc

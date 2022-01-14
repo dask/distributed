@@ -30,7 +30,7 @@ from ..threadpoolexecutor import ThreadPoolExecutor
 from ..utils import ensure_ip, get_ip, get_ipv6, nbytes
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, FatalCommClosedError, Listener
-from .registry import Backend, backends
+from .registry import Backend
 from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to_frames
 
 logger = logging.getLogger(__name__)
@@ -155,11 +155,10 @@ class TCP(Comm):
         deserialize: bool = True,
     ):
         self._closed = False
-        super().__init__()
+        super().__init__(deserialize=deserialize)
         self._local_addr = local_addr
         self._peer_addr = peer_addr
         self.stream = stream
-        self.deserialize = deserialize
         self._finalizer = weakref.finalize(self, self._get_finalizer())
         self._finalizer.atexit = False
         self._extra: dict = {}
@@ -386,8 +385,20 @@ class RequireEncryptionMixin:
 
 class BaseTCPConnector(Connector, RequireEncryptionMixin):
     _executor = ThreadPoolExecutor(2, thread_name_prefix="TCP-Executor")
-    _resolver = netutil.ExecutorResolver(close_executor=False, executor=_executor)
-    client = TCPClient(resolver=_resolver)
+
+    @property
+    def client(self):
+        # The `TCPClient` is cached on the class itself to avoid creating
+        # excess `ThreadPoolExecutor`s. We delay creation until inside an async
+        # function to avoid accessing an IOLoop from a context where a backing
+        # event loop doesn't exist.
+        cls = type(self)
+        if not hasattr(type(self), "_client"):
+            resolver = netutil.ExecutorResolver(
+                close_executor=False, executor=cls._executor
+            )
+            cls._client = TCPClient(resolver=resolver)
+        return cls._client
 
     async def connect(self, address, deserialize=True, **connection_args):
         self._check_encryption(address, connection_args)
@@ -622,7 +633,3 @@ class TCPBackend(BaseTCPBackend):
 class TLSBackend(BaseTCPBackend):
     _connector_class = TLSConnector
     _listener_class = TLSListener
-
-
-backends["tcp"] = TCPBackend()
-backends["tls"] = TLSBackend()

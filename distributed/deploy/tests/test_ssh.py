@@ -27,6 +27,20 @@ def test_ssh_hosts_empty_list():
 
 
 @pytest.mark.asyncio
+async def test_ssh_cluster_raises_if_asyncssh_not_installed(monkeypatch, cleanup):
+    monkeypatch.setitem(sys.modules, "asyncssh", None)
+    with pytest.raises(ImportError, match="SSHCluster requires the `asyncssh` package"):
+        async with SSHCluster(
+            ["127.0.0.1"] * 3,
+            connect_options=[dict(known_hosts=None)] * 3,
+            asynchronous=True,
+            scheduler_options={"idle_timeout": "5s"},
+            worker_options={"death_timeout": "5s"},
+        ) as cluster:
+            assert not cluster
+
+
+@pytest.mark.asyncio
 async def test_basic():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
@@ -55,7 +69,7 @@ async def test_nprocs():
     ) as cluster:
         assert len(cluster.workers) == 2
         async with Client(cluster, asynchronous=True) as client:
-            client.wait_for_workers(4)
+            await client.wait_for_workers(4)
             result = await client.submit(lambda x: x + 1, 10)
             assert result == 11
         assert not cluster._supports_scaling

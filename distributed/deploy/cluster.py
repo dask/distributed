@@ -1,7 +1,6 @@
 import asyncio
 import datetime
 import logging
-import threading
 import uuid
 from contextlib import suppress
 from inspect import isawaitable
@@ -14,13 +13,21 @@ from dask.widgets import get_template
 
 from ..core import Status
 from ..objects import SchedulerInfo
-from ..utils import Log, Logs, format_dashboard_link, log_errors, sync, thread_state
+from ..utils import (
+    Log,
+    Logs,
+    LoopRunner,
+    NoOpAwaitable,
+    SyncMethodMixin,
+    format_dashboard_link,
+    log_errors,
+)
 from .adaptive import Adaptive
 
 logger = logging.getLogger(__name__)
 
 
-class Cluster:
+class Cluster(SyncMethodMixin):
     """Superclass for cluster objects
 
     This class contains common functionality for Dask Cluster manager classes.
@@ -46,10 +53,19 @@ class Cluster:
     _supports_scaling = True
     _cluster_info: dict = {}
 
-    def __init__(self, asynchronous, quiet=False, name=None, scheduler_sync_interval=1):
+    def __init__(
+        self,
+        asynchronous=False,
+        loop=None,
+        quiet=False,
+        name=None,
+        scheduler_sync_interval=1,
+    ):
+        self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
+        self.loop = self._loop_runner.loop
+
         self.scheduler_info = {"workers": {}}
         self.periodic_callbacks = {}
-        self._asynchronous = asynchronous
         self._watch_worker_status_comm = None
         self._watch_worker_status_task = None
         self._cluster_manager_logs = []
@@ -169,9 +185,7 @@ class Cluster:
         # If the cluster is already closed, we're already done
         if self.status == Status.closed:
             if self.asynchronous:
-                future = asyncio.Future()
-                future.set_result(None)
-                return future
+                return NoOpAwaitable()
             else:
                 return
 
@@ -238,25 +252,6 @@ class Cluster:
         """
         raise NotImplementedError()
 
-    @property
-    def asynchronous(self):
-        return (
-            self._asynchronous
-            or getattr(thread_state, "asynchronous", False)
-            or hasattr(self.loop, "_thread_identity")
-            and self.loop._thread_identity == threading.get_ident()
-        )
-
-    def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
-        asynchronous = asynchronous or self.asynchronous
-        if asynchronous:
-            future = func(*args, **kwargs)
-            if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
-            return future
-        else:
-            return sync(self.loop, func, *args, **kwargs)
-
     def _log(self, log):
         """Log a message.
 
@@ -286,6 +281,8 @@ class Cluster:
             logs["Scheduler"] = Log("\n".join(line for level, line in L))
 
         if workers:
+            if workers is True:
+                workers = None
             d = await self.scheduler_comm.worker_logs(workers=workers)
             for k, v in d.items():
                 logs[k] = Log("\n".join(line for level, line in v))
