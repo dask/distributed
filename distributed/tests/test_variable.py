@@ -134,7 +134,10 @@ def test_timeout_sync(client):
         v.get(timeout=0.2)
     stop = time()
 
-    assert 0.2 <= stop - start < 2.0
+    if WINDOWS:
+        assert 0.1 < stop - start < 2.0
+    else:
+        assert 0.2 < stop - start < 2.0
 
     with pytest.raises(TimeoutError):
         v.get(timeout=0.01)
