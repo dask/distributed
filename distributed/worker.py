@@ -1511,10 +1511,7 @@ class Worker(ServerNode):
             ),
             return_exceptions=True,
         )
-        plugins_exceptions = []
-        for msg in plugins_msgs:
-            if isinstance(msg, Exception):
-                plugins_exceptions.append(msg)
+        plugins_exceptions = [msg for msg in plugins_msgs if isinstance(msg, Exception)]
         if len(plugins_exceptions) >= 1:
             if len(plugins_exceptions) > 1:
                 logger.error(
