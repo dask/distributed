@@ -1023,9 +1023,9 @@ class Client(SyncMethodMixin):
             self.status = "connecting"
             self.scheduler_comm = None
 
-            for st in self.futures.values():
-                st.cancel()
-            self.futures.clear()
+            # for st in self.futures.values():
+            #     st.cancel()
+            # self.futures.clear()
 
             timeout = self._timeout
             deadline = self.loop.time() + timeout
