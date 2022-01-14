@@ -12,26 +12,18 @@ guidelines`_ in the main documentation.
 Install
 -------
 
-Clone this repository with git::
+1. Clone this repository with git::
 
-   git clone git@github.com:dask/distributed.git
-   cd distributed
+     git clone git@github.com:dask/distributed.git
+     cd distributed
 
-Install all dependencies:
+2. Install anaconda or miniconda (OS-dependent)
+3. ::
 
-On Linux / MacOSX::
+     conda env create --file continuous_integration/environment-3.8.yaml
+     conda activate dask-distributed
+     python -m pip install -e .
 
-    source continuous_integration/travis/install.sh
-
-On Windows:
-
-1. Install anaconda or miniconda
-2. ::
-
-    conda create -n dask-distributed -c conda-forge -c defaults python=3.8 tornado=6
-    conda activate dask-distributed
-    conda env update --file continuous_integration/environment-windows.yml
-    python -m pip install .
 
 To keep a fork in sync with the upstream source::
 
@@ -39,9 +31,9 @@ To keep a fork in sync with the upstream source::
    git remote add upstream git@github.com:dask/distributed.git
    git remote -v
    git fetch -a upstream
-   git checkout master
-   git pull upstream master
-   git push origin master
+   git checkout main
+   git pull upstream main
+   git push origin main
 
 Test
 ----
@@ -92,7 +84,7 @@ The test suite contains three kinds of tests
     same event loop in the main thread.  These are good for testing complex
     logic and inspecting the state of the system directly.  They are also
     easier to debug and cause the fewest problems with shutdowns.
-2.  ``def test_foo(client)``: Tests with multiple processes forked from the master
+2.  ``def test_foo(client)``: Tests with multiple processes forked from the main
     process.  These are good for testing the synchronous (normal user) API and
     when triggering hard failures for resilience tests.
 3.  ``popen``: Tests that call out to the command line to start the system.
@@ -114,15 +106,15 @@ using the ``@gen_cluster`` style of test, e.g.
         assert isinstance(s, Scheduler)
         assert isinstance(a, Worker)
         assert isinstance(b, Worker)
-    
+
         future = c.submit(inc, 1)
         assert isinstance(future, Future)
         assert future.key in c.futures
-    
+
         # result = future.result()  # This synchronous API call would block
         result = await future
         assert result == 2
-    
+
         assert future.key in s.tasks
         assert future.key in a.data or future.key in b.data
 
@@ -176,3 +168,20 @@ fixture tests test basic interface and resilience.
 
 You should avoid ``popen`` style tests unless absolutely necessary, such as if
 you need to test the command line interface.
+
+Code Formatting
+---------------
+
+Dask.distributed uses several code linters (flake8, black, isort, pyupgrade, mypy),
+which are enforced by CI. Developers should run them locally before they submit a PR,
+through the single command ``pre-commit run --all-files``. This makes sure that linter
+versions and options are aligned for all developers.
+
+Optionally, you may wish to setup the `pre-commit hooks <https://pre-commit.com/>`_ to
+run automatically when you make a git commit. This can be done by running::
+
+   pre-commit install
+
+from the root of the distributed repository. Now the code linters will be run each time
+you commit changes. You can skip these checks with ``git commit --no-verify`` or with
+the short version ``git commit -n``.

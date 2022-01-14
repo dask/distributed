@@ -47,6 +47,58 @@ When we submit tasks to the cluster we specify constraints per task
    processed = [client.submit(process, d, resources={'GPU': 1}) for d in data]
    final = client.submit(aggregate, processed, resources={'MEMORY': 70e9})
 
+Equivalently, we can specify resource constraints using the dask annotations machinery:
+
+.. code-block:: python
+
+   with dask.annotate(resources={'GPU': 1}):
+       processed = [client.submit(process, d) for d in data]
+   with dask.annotate(resources={'MEMORY': 70e9}):
+       final = client.submit(aggregate, processed)
+
+Specifying Resources
+--------------------
+
+Resources can be specifed in several ways. The easiest option will depend on exactly
+how your cluster is being created.
+
+**From the command line**
+
+Resources can be provided when starting the worker process, as shown above:
+
+.. code-block:: console
+
+   dask-worker scheduler:8786 --resources "GPU=2"
+
+The keys are used as the resource name and the values are parsed into a numeric value.
+
+**From Dask's configuration system**
+
+Alternatively, resources can be specified using Dask's
+`configuration system <https://docs.dask.org/en/latest/configuration.html>`_.
+
+.. code-block:: python
+
+   from distributed import LocalCluster
+
+   with dask.config.set({"distributed.worker.resources.GPU": 2}):
+       cluster = LocalCluster()
+
+The configuration will need to be set in the process that's spawning the actual worker.
+This might be easiest to achieve by specifying resources as an environment variable
+(shown in the next section).
+
+**From environment variables**
+
+Like any other Dask config value, resources can be specified as environment variables
+before starting the process. Using Bash syntax
+
+.. code-block:: console
+
+   $ DASK_DISTRIBUTED__WORKER__RESOURCES__GPU=2 dask-worker
+   ...
+
+This might be the easiest solution if you aren't able to pass options to the :class:`distributed.Worker` class.
 
 Resources are applied separately to each worker process
 -------------------------------------------------------
@@ -92,24 +144,18 @@ Resources with collections
 --------------------------
 
 You can also use resources with Dask collections, like arrays, dataframes, and
-delayed objects.  You can pass a dictionary mapping keys of the collection to
-resource requirements during compute or persist calls.
+delayed objects. You can annotate operations on collections with specific resources
+that should be required perform the computation using the dask annotations machinery.
 
 .. code-block:: python
 
-    from dask import core
-    
     x = dd.read_csv(...)
-    y = x.map_partitions(func1)
+    with dask.annotate(resources={'GPU': 1}):
+        y = x.map_partitions(func1)
     z = y.map_partitions(func2)
 
-    z.compute(resources={tuple(core.flatten(y.__dask_keys__())): {'GPU': 1}})
+    z.compute(optimize_graph=False)
 
-In some cases (such as the case above) the keys for ``y`` may be optimized away
-before execution.  You can avoid that either by requiring them as an explicit
-output, or by passing the ``optimize_graph=False`` keyword.
-
-
-.. code-block:: python
-
-    z.compute(resources={tuple(core.flatten(y.__dask_keys__())): {'GPU': 1}}, optimize_graph=False)
+In most cases (such as the case above) the annotations for ``y`` may be lost during
+graph optimization before execution. You can avoid that by passing the
+``optimize_graph=False`` keyword.

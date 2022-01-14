@@ -12,27 +12,94 @@ more information on how this these policies are enacted efficiently see
 Choosing Workers
 ----------------
 
-When a task transitions from waiting to a processing state we decide a suitable
-worker for that task.  If the task has significant data dependencies or if the
-workers are under heavy load then this choice of worker can strongly impact
-global performance.  Currently workers for tasks are determined as follows:
+When a task transitions from waiting to a processing state, we decide a suitable
+worker for that task. If the task has significant data dependencies or if the
+workers are under heavy load, then this choice of worker can strongly impact
+global performance. Similarly, the placement of root tasks affects performance
+of downstream computations, since it can determine how much data will need to be
+transferred between workers in the future. Different heuristics are used for these
+different scenarios:
 
-1.  If the task has no major dependencies and no restrictions then we find the
-    least occupied worker.
+Initial Task Placement
+~~~~~~~~~~~~~~~~~~~~~~
+
+We want neighboring root tasks to run on the same worker, since there's a
+good chance those neighbors will be combined in a downstream operation::
+
+      i       j
+     / \     / \
+    e   f   g   h
+    |   |   |   |
+    a   b   c   d
+    \   \  /   /
+         X
+
+In the above case, we want ``a`` and ``b`` to run on the same worker,
+and ``c`` and ``d`` to run on the same worker, reducing future
+data transfer. We can also ignore the location of ``X``, because assuming
+we split the ``a b c d`` group across all workers to maximize parallelism,
+then ``X`` will eventually get transferred everywhere.
+(Note that wanting to co-locate ``a b`` and ``c d`` would still apply even if
+``X`` didn't exist.)
+
+Calculating these cousin tasks directly by traversing the graph would be expensive.
+Instead, we use the task's TaskGroup, which is the collection of all tasks with the
+same key prefix. (``(random-a1b2c3, 0)``, ``(random-a1b2c3, 1)``, ``(random-a1b2c3, 2)``
+would all belong to the TaskGroup ``random-a1b2c3``.)
+
+To identify the root(ish) tasks, we use this heuristic:
+
+1.  The TaskGroup has 2x more tasks than there are threads in the cluster
+2.  The TaskGroup has fewer than 5 dependencies across *all* tasks in the group.
+
+    We don't just say "The task has no dependencies", because real-world cases like
+    :obj:`dask.array.from_zarr` and :obj:`dask.array.from_array` produce graphs like the one
+    above, where the data-creation tasks (``a b c d``) all share one dependency
+    (``X``)---the Zarr dataset, for example. Though ``a b c d`` are not technically
+    root tasks, we want to treat them as such, hence allowing a small number of trivial
+    dependencies shard by all tasks.
+
+Then, we use the same priority described in :ref:`priority-break-ties` to
+determine which tasks are related. This depth-first-with-child-weights metric
+can usually be used to properly segment the leaves of a graph into decently
+well-separated sub-graphs with relatively low inter-sub-graph connectedness.
+
+Iterating through tasks in this priority order, we assign a batch of subsequent tasks
+to a worker, then select a new worker (the least-busy one) and repeat.
+
+Though this does not provide perfect initial task assignment (a handful of sibling
+tasks may be split across workers), it does well in most cases, while adding
+minimal scheduling overhead.
+
+Initial task placement is a forward-looking decision. By colocating related root tasks,
+we ensure that their downstream tasks are set up for success.
+
+Downstream Task Placement
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When initial tasks are well-placed, placing subsequent tasks is backwards-looking:
+where can the task run the soonest, considering both data transfer and worker busyness?
+
+Tasks that don't meet the root-ish criteria described above are selected as follows:
+
+1.  If the task has no dependencies and no restrictions, then we find the
+    least-occupied worker.
 2.  Otherwise, if a task has user-provided restrictions (for example it must
     run on a machine with a GPU) then we restrict the available pool of workers
-    to just that set, otherwise we consider all workers
-3.  From among this pool of workers we determine the workers to whom the least
+    to just that set, otherwise we consider all workers.
+3.  From among this pool of workers, we determine the workers to whom the least
     amount of data would need to be transferred.
 4.  We break ties by choosing the worker that currently has the fewest tasks,
     counting both those tasks in memory and those tasks processing currently.
 
 This process is easy to change (and indeed this document may be outdated).  We
-encourage readers to inspect the ``decide_worker`` function in scheduler.py
+encourage readers to inspect the ``decide_worker`` functions in ``scheduler.py``.
 
 .. currentmodule:: distributed.scheduler
 
 .. autosummary:: decide_worker
+
+.. autosummary:: Scheduler.decide_worker
 
 
 Choosing Tasks
@@ -64,6 +131,8 @@ before starting new work.  This often conflicts with the
 first-come-first-served objective but often results in shorter total runtimes
 and significantly reduced memory footprints.
 
+.. _priority-break-ties:
+
 Break ties with children and depth
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -78,19 +147,7 @@ can be used to break ties and helps us to prioritize nodes with longer critical
 paths and nodes with many children.  The actual algorithms used are somewhat
 more complex and are described in detail in `dask/order.py`_
 
-.. _`dask/order.py`: https://github.com/dask/dask/blob/master/dask/order.py
-
-Initial Task Placement
-~~~~~~~~~~~~~~~~~~~~~~
-
-When a new large batch of tasks come in and there are many idle workers then we
-want to give each worker a set of tasks that are close together/related and
-unrelated from the tasks given to other workers.  This usually avoids
-inter-worker communication down the line.  The same
-depth-first-with-child-weights priority given to workers described above can
-usually be used to properly segment the leaves of a graph into decently well
-separated sub-graphs with relatively low inter-sub-graph connectedness.
-
+.. _`dask/order.py`: https://github.com/dask/dask/blob/main/dask/order.py
 
 First-Come-First-Served, Coarsely
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -122,7 +179,7 @@ scheduler, and workers at various points in the computation.
     computing deeply before broadly, preferring critical paths, preferring
     nodes with many dependencies, etc..  This is the same logic used by the
     single-machine scheduler and lives in `dask/order.py
-    <https://github.com/dask/dask/blob/master/dask/order.py>`_.
+    <https://github.com/dask/dask/blob/main/dask/order.py>`_.
 2.  When the graph reaches the scheduler the scheduler changes each of these
     numeric priorities into a tuple of two numbers, the first of which is an
     increasing counter, the second of which is the client-generated priority

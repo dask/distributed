@@ -1,10 +1,10 @@
 import math
+
 import numpy as np
 
-from .serialize import dask_serialize, dask_deserialize
+from ..utils import log_errors
 from . import pickle
-
-from ..utils import log_errors, nbytes
+from .serialize import dask_deserialize, dask_serialize
 
 
 def itemsize(dt):
@@ -20,7 +20,7 @@ def itemsize(dt):
 
 @dask_serialize.register(np.ndarray)
 def serialize_numpy_ndarray(x, context=None):
-    if x.dtype.hasobject:
+    if x.dtype.hasobject or (x.dtype.flags & np.core.multiarray.LIST_PICKLE):
         header = {"pickle": True}
         frames = [None]
         buffer_callback = lambda f: frames.append(memoryview(f))
@@ -29,7 +29,6 @@ def serialize_numpy_ndarray(x, context=None):
             buffer_callback=buffer_callback,
             protocol=(context or {}).get("pickle-protocol", None),
         )
-        header["lengths"] = tuple(map(nbytes, frames))
         return header, frames
 
     # We cannot blindly pickle the dtype as some may fail pickling,
@@ -93,15 +92,17 @@ def serialize_numpy_ndarray(x, context=None):
         # "ValueError: cannot include dtype 'M' in a buffer"
         data = data.view("u%d" % math.gcd(x.dtype.itemsize, 8)).data
 
-    header = {"dtype": dt, "shape": x.shape, "strides": strides}
+    header = {
+        "dtype": dt,
+        "shape": x.shape,
+        "strides": strides,
+        "writeable": [x.flags.writeable],
+    }
 
     if broadcast_to is not None:
         header["broadcast_to"] = broadcast_to
 
     frames = [data]
-
-    header["lengths"] = [x.nbytes]
-
     return header, frames
 
 
@@ -112,6 +113,7 @@ def deserialize_numpy_ndarray(header, frames):
             return pickle.loads(frames[0], buffers=frames[1:])
 
         (frame,) = frames
+        (writeable,) = header["writeable"]
 
         is_custom, dt = header["dtype"]
         if is_custom:
@@ -125,6 +127,10 @@ def deserialize_numpy_ndarray(header, frames):
             shape = header["shape"]
 
         x = np.ndarray(shape, dtype=dt, buffer=frame, strides=header["strides"])
+        if not writeable:
+            x.flags.writeable = False
+        else:
+            x = np.require(x, requirements=["W"])
 
         return x
 

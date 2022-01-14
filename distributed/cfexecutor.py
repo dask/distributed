@@ -2,11 +2,12 @@ import concurrent.futures as cf
 import weakref
 
 from tlz import merge
-
 from tornado import gen
 
+from dask.utils import parse_timedelta
+
 from .metrics import time
-from .utils import sync, TimeoutError
+from .utils import TimeoutError, sync
 
 
 @gen.coroutine
@@ -98,12 +99,12 @@ class ClientExecutor(cf.Executor):
 
         Parameters
         ----------
-        fn: A callable that will take as many arguments as there are
+        fn : A callable that will take as many arguments as there are
             passed iterables.
-        iterables: One iterable for each parameter to *fn*.
-        timeout: The maximum number of seconds to wait. If None, then there
+        iterables : One iterable for each parameter to *fn*.
+        timeout : The maximum number of seconds to wait. If None, then there
             is no limit on the wait time.
-        chunksize: ignored.
+        chunksize : ignored.
 
         Returns
         -------
@@ -112,12 +113,15 @@ class ClientExecutor(cf.Executor):
 
         Raises
         ------
-        TimeoutError: If the entire result iterator could not be generated
-            before the given timeout.
-        Exception: If ``fn(*args)`` raises for any values.
+        concurrent.futures.TimeoutError:
+            If the entire result iterator could not be generated before the given
+            timeout.
+        Exception:
+            If ``fn(*args)`` raises for any values.
         """
         timeout = kwargs.pop("timeout", None)
         if timeout is not None:
+            timeout = parse_timedelta(timeout)
             end_time = timeout + time()
         if "chunksize" in kwargs:
             del kwargs["chunksize"]
@@ -125,6 +129,10 @@ class ClientExecutor(cf.Executor):
             raise TypeError("unexpected arguments to map(): %s" % sorted(kwargs))
 
         fs = self._client.map(fn, *iterables, **self._kwargs)
+
+        # Below iterator relies on fs being an iterator itself, and not just an iterable
+        # (such as a list), in order to cancel remaining futures
+        fs = iter(fs)
 
         # Yield must be hidden in closure so that the tasks are submitted
         # before the first iterator value is required.
@@ -141,8 +149,7 @@ class ClientExecutor(cf.Executor):
                         yield future.result()
             finally:
                 remaining = list(fs)
-                for future in remaining:
-                    self._futures.add(future)
+                self._futures.update(remaining)
                 self._client.cancel(remaining)
 
         return result_iterator()
@@ -155,7 +162,7 @@ class ClientExecutor(cf.Executor):
 
         Parameters
         ----------
-        wait: If True then shutdown will not return until all running
+        wait : If True then shutdown will not return until all running
             futures have finished executing.  If False then all running
             futures are cancelled immediately.
         """

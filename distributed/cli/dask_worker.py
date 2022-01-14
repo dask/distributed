@@ -1,28 +1,30 @@
 import asyncio
 import atexit
-from contextlib import suppress
-import logging
 import gc
+import logging
 import os
 import signal
 import sys
 import warnings
+from contextlib import suppress
 
 import click
+from tlz import valmap
+from tornado.ioloop import IOLoop, TimeoutError
+
 import dask
 from dask.system import CPU_COUNT
+
 from distributed import Nanny
 from distributed.cli.utils import check_python_3, install_signal_handlers
 from distributed.comm import get_address_host_port
+from distributed.deploy.utils import nprocesses_nthreads
 from distributed.preloading import validate_preload_argv
 from distributed.proctitle import (
     enable_proctitle_on_children,
     enable_proctitle_on_current,
 )
-from distributed.utils import deserialize_for_cli, import_term
-
-from tlz import valmap
-from tornado.ioloop import IOLoop, TimeoutError
+from distributed.utils import import_term
 
 logger = logging.getLogger("distributed.dask_worker")
 
@@ -95,7 +97,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--listen-address",
     type=str,
     default=None,
-    help="The address to which the worker binds. Example: tcp://0.0.0.0:9000",
+    help="The address to which the worker binds. Example: tcp://0.0.0.0:9000 or tcp://:9000 for IPv4+IPv6",
 )
 @click.option(
     "--contact-address",
@@ -124,11 +126,12 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option("--nthreads", type=int, default=0, help="Number of threads per process.")
 @click.option(
     "--nprocs",
-    type=int,
+    type=str,
     default=1,
     show_default=True,
     help="Number of worker processes to launch. "
-    "If negative, then (CPU_COUNT + 1 + nprocs) is used.",
+    "If negative, then (CPU_COUNT + 1 + nprocs) is used. "
+    "Set to 'auto' to set nprocs and nthreads dynamically based on CPU_COUNT",
 )
 @click.option(
     "--name",
@@ -262,7 +265,7 @@ def main(
     dashboard_address,
     worker_class,
     preload_nanny,
-    **kwargs
+    **kwargs,
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
     gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)
@@ -291,6 +294,11 @@ def main(
         ]
         if v is not None
     }
+
+    if nprocs == "auto":
+        nprocs, nthreads = nprocesses_nthreads()
+    else:
+        nprocs = int(nprocs)
 
     if nprocs < 0:
         nprocs = CPU_COUNT + 1 + nprocs
@@ -331,6 +339,9 @@ def main(
     try:
         if listen_address:
             (host, worker_port) = get_address_host_port(listen_address, strict=True)
+            if ":" in host:
+                # IPv6 -- bracket to pass as user args
+                host = f"[{host}]"
 
         if contact_address:
             # we only need this to verify it is getting parsed
@@ -395,11 +406,6 @@ def main(
     with suppress(TypeError, ValueError):
         name = int(name)
 
-    if "DASK_INTERNAL_INHERIT_CONFIG" in os.environ:
-        config = deserialize_for_cli(os.environ["DASK_INTERNAL_INHERIT_CONFIG"])
-        # Update the global config given priority to the existing global config
-        dask.config.update(dask.config.global_config, config, priority="old")
-
     nannies = [
         t(
             scheduler,
@@ -416,7 +422,7 @@ def main(
             name=name
             if nprocs == 1 or name is None or name == ""
             else str(name) + "-" + str(i),
-            **kwargs
+            **kwargs,
         )
         for i in range(nprocs)
     ]
@@ -424,7 +430,7 @@ def main(
     async def close_all():
         # Unregister all workers from scheduler
         if nanny:
-            await asyncio.gather(*[n.close(timeout=2) for n in nannies])
+            await asyncio.gather(*(n.close(timeout=2) for n in nannies))
 
     signal_fired = False
 
@@ -437,7 +443,7 @@ def main(
 
     async def run():
         await asyncio.gather(*nannies)
-        await asyncio.gather(*[n.finished() for n in nannies])
+        await asyncio.gather(*(n.finished() for n in nannies))
 
     install_signal_handlers(loop, cleanup=on_signal)
 

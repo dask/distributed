@@ -3,13 +3,18 @@ Record known compressors
 
 Includes utilities for determining whether or not to compress
 """
-from contextlib import suppress
-from functools import partial
+from __future__ import annotations
+
 import logging
 import random
+from collections.abc import Callable
+from contextlib import suppress
+from functools import partial
+from typing import TYPE_CHECKING
+
+from tlz import identity
 
 import dask
-from tlz import identity
 
 try:
     import blosc
@@ -22,8 +27,13 @@ except ImportError:
 
 from ..utils import ensure_bytes
 
+if TYPE_CHECKING:
+    from typing_extensions import Literal
 
-compressions = {None: {"compress": identity, "decompress": identity}}
+compressions: dict[
+    str | None | Literal[False],
+    dict[Literal["compress", "decompress"], Callable[[bytes], bytes]],
+] = {None: {"compress": identity, "decompress": identity}}
 
 compressions[False] = compressions[None]  # alias
 
@@ -147,10 +157,10 @@ def byte_sample(b, size, n):
 
     Parameters
     ----------
-    b: bytes or memoryview
-    size: int
+    b : bytes or memoryview
+    size : int
         size of each sample to collect
-    n: int
+    n : int
         number of samples to collect
     """
     starts = [random.randint(0, len(b) - size) for j in range(n)]
@@ -221,7 +231,7 @@ def maybe_compress(
 
 
 def decompress(header, frames):
-    """ Decompress frames according to information in the header """
+    """Decompress frames according to information in the header"""
     return [
         compressions[c]["decompress"](frame)
         for c, frame in zip(header["compression"], frames)

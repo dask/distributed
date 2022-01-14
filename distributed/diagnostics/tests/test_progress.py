@@ -4,15 +4,16 @@ import pytest
 
 from distributed import Nanny
 from distributed.client import wait
-from distributed.metrics import time
-from distributed.utils_test import gen_cluster, inc, dec, div, nodebug
+from distributed.compatibility import LINUX
 from distributed.diagnostics.progress import (
+    AllProgress,
+    GroupTiming,
+    MultiProgress,
     Progress,
     SchedulerPlugin,
-    AllProgress,
-    GroupProgress,
-    MultiProgress,
 )
+from distributed.scheduler import COMPILED
+from distributed.utils_test import dec, div, gen_cluster, inc, nodebug, slowdec, slowinc
 
 
 def f(*args):
@@ -28,6 +29,7 @@ def h(*args):
 
 
 @nodebug
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_many_Progress(c, s, a, b):
     x = c.submit(f, 1)
@@ -36,13 +38,10 @@ async def test_many_Progress(c, s, a, b):
 
     bars = [Progress(keys=[z], scheduler=s) for _ in range(10)]
     await asyncio.gather(*(bar.setup() for bar in bars))
-
     await z
 
-    start = time()
     while not all(b.status == "finished" for b in bars):
-        await asyncio.sleep(0.1)
-        assert time() < start + 5
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)
@@ -89,12 +88,14 @@ async def test_robust_to_bad_plugin(c, s, a, b):
 
 def check_bar_completed(capsys, width=40):
     out, err = capsys.readouterr()
-    bar, percent, time = [i.strip() for i in out.split("\r")[-1].split("|")]
+    bar, percent, time = (i.strip() for i in out.split("\r")[-1].split("|"))
     assert bar == "[" + "#" * width + "]"
     assert percent == "100% Completed"
 
 
-@gen_cluster(client=True, Worker=Nanny, timeout=None)
+@pytest.mark.flaky(condition=not COMPILED and LINUX, reruns=10, reruns_delay=5)
+@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
+@gen_cluster(client=True, Worker=Nanny)
 async def test_AllProgress(c, s, a, b):
     x, y, z = c.map(inc, [1, 2, 3])
     xx, yy, zz = c.map(dec, [x, y, z])
@@ -176,8 +177,9 @@ async def test_AllProgress(c, s, a, b):
     assert all(set(d) == {"div"} for d in p.state.values())
 
 
+@pytest.mark.flaky(condition=LINUX, reruns=10, reruns_delay=5)
 @gen_cluster(client=True, Worker=Nanny)
-async def test_AllProgress_lost_key(c, s, a, b, timeout=None):
+async def test_AllProgress_lost_key(c, s, a, b):
     p = AllProgress(s)
     futures = c.map(inc, range(5))
     await wait(futures)
@@ -186,32 +188,37 @@ async def test_AllProgress_lost_key(c, s, a, b, timeout=None):
     await a.close()
     await b.close()
 
-    start = time()
     while len(p.state["memory"]["inc"]) > 0:
-        await asyncio.sleep(0.1)
-        assert time() < start + 5
-
-
-@gen_cluster(client=True)
-async def test_GroupProgress(c, s, a, b):
-    da = pytest.importorskip("dask.array")
-    fp = GroupProgress(s)
-    x = da.ones(100, chunks=10)
-    y = x + 1
-    z = (x * y).sum().persist(optimize_graph=False)
-
-    await wait(z)
-    assert 3 < len(fp.groups) < 10
-    for k, g in fp.groups.items():
-        assert fp.keys[k]
-        assert len(fp.keys[k]) == sum(g.values())
-        assert all(v >= 0 for v in g.values())
-
-    assert fp.dependencies[y.name] == {x.name}
-    assert fp.dependents[x.name] == {y.name, (x * y).name}
-
-    del x, y, z
-    while s.tasks:
         await asyncio.sleep(0.01)
 
-    assert not fp.groups
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_group_timing(c, s, a, b):
+    p = GroupTiming(s)
+    s.add_plugin(p)
+
+    assert len(p.time) == 2
+    assert len(p.nthreads) == 2
+
+    futures1 = c.map(slowinc, range(10), delay=0.3)
+    futures2 = c.map(slowdec, range(10), delay=0.3)
+    await wait(futures1 + futures2)
+
+    assert len(p.time) > 2
+    assert len(p.nthreads) == len(p.time)
+    assert all([nt == s.total_nthreads for nt in p.nthreads])
+    assert "slowinc" in p.compute
+    assert "slowdec" in p.compute
+    assert all([len(v) == len(p.time) for v in p.compute.values()])
+    assert s.task_groups.keys() == p.compute.keys()
+    assert all(
+        [
+            abs(s.task_groups[k].all_durations["compute"] - sum(v)) < 1.0e-12
+            for k, v in p.compute.items()
+        ]
+    )
+
+    await s.restart()
+    assert len(p.time) == 2
+    assert len(p.nthreads) == 2
+    assert len(p.compute) == 0

@@ -9,42 +9,9 @@ API
 
 .. autosummary::
    Client
-   Client.call_stack
-   Client.cancel
-   Client.close
-   Client.compute
-   Client.gather
-   Client.get
-   Client.get_dataset
-   Client.get_executor
-   Client.get_metadata
-   Client.get_scheduler_logs
-   Client.get_worker_logs
-   Client.get_task_stream
-   Client.has_what
-   Client.list_datasets
-   Client.map
-   Client.nthreads
-   Client.persist
-   Client.publish_dataset
-   Client.profile
-   Client.rebalance
-   Client.replicate
-   Client.restart
-   Client.retry
-   Client.run
-   Client.run_on_scheduler
-   Client.scatter
-   Client.scheduler_info
-   Client.write_scheduler_file
-   Client.set_metadata
-   Client.start_ipython_workers
-   Client.start_ipython_scheduler
-   Client.submit
-   Client.unpublish_dataset
-   Client.upload_file
-   Client.wait_for_workers
-   Client.who_has
+
+.. autoautosummary:: distributed.Client
+   :methods:
 
 .. currentmodule:: distributed
 
@@ -56,11 +23,11 @@ API
    rejoin
    Reschedule
 
-.. currentmodule:: distributed.recreate_exceptions
+.. currentmodule:: distributed.recreate_tasks
 
 .. autosummary::
-   ReplayExceptionClient.get_futures_error
-   ReplayExceptionClient.recreate_error_locally
+   ReplayTaskClient.recreate_task_locally
+   ReplayTaskClient.recreate_error_locally
 
 .. currentmodule:: distributed
 
@@ -69,22 +36,19 @@ API
 
 .. autosummary::
    Future
-   Future.add_done_callback
-   Future.cancel
-   Future.cancelled
-   Future.done
-   Future.exception
-   Future.result
-   Future.retry
-   Future.traceback
 
-**Client Coordination**
+.. autoautosummary:: distributed.Future
+   :methods:
+
+**Synchronization**
 
 .. currentmodule:: distributed
 
 .. autosummary::
    Event
    Lock
+   MultiLock
+   Semaphore
    Queue
    Variable
 
@@ -93,11 +57,20 @@ API
 
 .. autosummary::
    as_completed
-   distributed.diagnostics.progress
+   distributed.diagnostics.progressbar.progress
    wait
    fire_and_forget
    futures_of
    get_task_stream
+   get_task_metadata
+   performance_report
+
+
+**Utilities**
+
+.. autosummary::
+   distributed.utils.Log
+   distributed.utils.Logs
 
 
 Asynchronous methods
@@ -140,7 +113,7 @@ Client
 .. autoclass:: Client
    :members:
 
-.. autoclass:: distributed.recreate_exceptions.ReplayExceptionClient
+.. autoclass:: distributed.recreate_tasks.ReplayTaskClient
    :members:
 
 
@@ -149,6 +122,24 @@ Future
 
 .. autoclass:: Future
    :members:
+
+
+Synchronization
+---------------
+
+.. autoclass:: Event
+   :members:
+.. autoclass:: Lock
+   :members:
+.. autoclass:: MultiLock
+   :members:
+.. autoclass:: Semaphore
+   :members:
+.. autoclass:: Queue
+   :members:
+.. autoclass:: Variable
+   :members:
+
 
 Cluster
 -------
@@ -179,7 +170,7 @@ Other
 .. autoclass:: as_completed
    :members:
 
-.. autofunction:: distributed.diagnostics.progress
+.. autofunction:: distributed.diagnostics.progressbar.progress
 .. autofunction:: wait
 .. autofunction:: fire_and_forget
 .. autofunction:: futures_of
@@ -193,17 +184,15 @@ Other
 .. autofunction:: distributed.rejoin
 .. autoclass:: distributed.Reschedule
 .. autoclass:: get_task_stream
+.. autoclass:: get_task_metadata
+.. autoclass:: performance_report
 
-.. autoclass:: Event
-   :members:
-.. autoclass:: Lock
-   :members:
-.. autoclass:: Semaphore
-   :members:
-.. autoclass:: Queue
-   :members:
-.. autoclass:: Variable
-   :members:
+
+Utilities
+---------
+
+.. autoclass:: distributed.utils.Log
+.. autoclass:: distributed.utils.Logs
 
 
 Adaptive

@@ -11,7 +11,7 @@ The life of a computation with Dask can be described in the following stages:
 1.  The user authors a graph using some library, perhaps dask.delayed or
     dask.dataframe or the ``submit/map`` functions on the client.  They submit
     these tasks to the scheduler.
-2.  The schedulers assimilates these tasks into its graph of all tasks to
+2.  The scheduler assimilates these tasks into its graph of all tasks to
     track, and as their dependencies become available it asks workers to run
     each of these tasks in turn.
 3.  The worker receives information about how to run the task, communicates
@@ -46,6 +46,8 @@ The scheduler keeps internal state about several kinds of entities:
    in user code (including on any APIs explained here).
 
 
+.. _scheduler-task-state:
+
 Task State
 ----------
 
@@ -64,7 +66,9 @@ Tasks flow along the following states with the following allowed transitions:
 *  *No-worker*: Ready to be computed, but no appropriate worker exists
    (for example because of resource restrictions, or because no worker is
    connected at all).
-*  *Processing*: Actively being computed by one or more workers
+*  *Processing*: All dependencies are available and the task is assigned to a
+   worker for compute (the scheduler doesn't know whether it's in a worker
+   queue or actively being computed).
 *  *Memory*: In memory on one or more workers
 *  *Erred*: Task computation, or one of its dependencies, has encountered an error
 *  *Forgotten* (not actually a state): Task is no longer needed by any client
@@ -308,5 +312,6 @@ API
 
 .. autoclass:: Scheduler
    :members:
+   :inherited-members:
 
 .. autofunction:: decide_worker

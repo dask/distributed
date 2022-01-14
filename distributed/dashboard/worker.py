@@ -1,14 +1,14 @@
-from .components.worker import (
-    status_doc,
-    crossfilter_doc,
-    systemmonitor_doc,
-    counters_doc,
-    profile_doc,
-    profile_server_doc,
-)
-from .core import BokehApplication
 from tornado.ioloop import IOLoop
 
+from .components.worker import (
+    counters_doc,
+    crossfilter_doc,
+    profile_doc,
+    profile_server_doc,
+    status_doc,
+    systemmonitor_doc,
+)
+from .core import BokehApplication
 
 template_variables = {
     "pages": ["status", "system", "profile", "crossfilter", "profile-server"]

@@ -1,11 +1,15 @@
-from ..client import Client
+from __future__ import annotations
+
+from typing import Any
 
 import pytest
+
+from ..client import Client
 
 
 class ClusterTest:
     Cluster = None
-    kwargs = {}
+    kwargs: dict[str, Any] = {}
 
     def setUp(self):
         self.cluster = self.Cluster(2, scheduler_port=0, **self.kwargs)
@@ -17,7 +21,7 @@ class ClusterTest:
 
     @pytest.mark.xfail()
     def test_cores(self):
-        info = self.client.scheduler_info()
+        self.client.scheduler_info()
         assert len(self.client.nthreads()) == 2
 
     def test_submit(self):

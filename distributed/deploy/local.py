@@ -1,18 +1,18 @@
-import atexit
 import logging
 import math
 import warnings
-import weakref
 
-from dask.utils import factors
-from dask.system import CPU_COUNT
 import toolz
 
-from .spec import SpecCluster
+from dask.system import CPU_COUNT
+from dask.widgets import get_template
+
 from ..nanny import Nanny
 from ..scheduler import Scheduler
 from ..security import Security
 from ..worker import Worker, parse_memory_limit
+from .spec import SpecCluster
+from .utils import nprocesses_nthreads
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,8 @@ class LocalCluster(SpecCluster):
     n_workers: int
         Number of workers to start
     processes: bool
-        Whether to use processes (True) or threads (False).  Defaults to True
+        Whether to use processes (True) or threads (False).  Defaults to True, unless
+        worker_class=Worker, in which case it defaults to False.
     threads_per_worker: int
         Number of threads per each worker
     scheduler_port: int
@@ -55,8 +56,8 @@ class LocalCluster(SpecCluster):
         Set to True if using this cluster within async/await functions or within
         Tornado gen.coroutines.  This should remain False for normal use.
     blocked_handlers: List[str]
-        A list of strings specifying a blacklist of handlers to disallow on the Scheduler,
-        like ``['feed', 'run_function']``
+        A list of strings specifying a blocklist of handlers to disallow on the
+        Scheduler, like ``['feed', 'run_function']``
     service_kwargs: Dict[str, Dict]
         Extra keywords to hand to the running services
     security : Security or bool, optional
@@ -70,14 +71,15 @@ class LocalCluster(SpecCluster):
     interface: str (optional)
         Network interface to use.  Defaults to lo/localhost
     worker_class: Worker
-        Worker class used to instantiate workers from.
+        Worker class used to instantiate workers from. Defaults to Worker if
+        processes=False and Nanny if processes=True or omitted.
     **worker_kwargs:
         Extra worker arguments. Any additional keyword arguments will be passed
         to the ``Worker`` class constructor.
 
     Examples
     --------
-    >>> cluster = LocalCluster()  # Create a local cluster with as many workers as cores  # doctest: +SKIP
+    >>> cluster = LocalCluster()  # Create a local cluster  # doctest: +SKIP
     >>> cluster  # doctest: +SKIP
     LocalCluster("127.0.0.1:8786", workers=8, threads=8)
 
@@ -94,9 +96,10 @@ class LocalCluster(SpecCluster):
 
     def __init__(
         self,
+        name=None,
         n_workers=None,
         threads_per_worker=None,
-        processes=True,
+        processes=None,
         loop=None,
         start=None,
         host=None,
@@ -116,7 +119,8 @@ class LocalCluster(SpecCluster):
         interface=None,
         worker_class=None,
         scheduler_kwargs=None,
-        **worker_kwargs
+        scheduler_sync_interval=1,
+        **worker_kwargs,
     ):
         if ip is not None:
             # In the future we should warn users about this move
@@ -132,8 +136,8 @@ class LocalCluster(SpecCluster):
 
         if threads_per_worker == 0:
             warnings.warn(
-                "Setting `threads_per_worker` to 0 is discouraged. "
-                "Please set to None or to a specific int to get best behavior."
+                "Setting `threads_per_worker` to 0 has been deprecated. "
+                "Please set to None or to a specific int."
             )
             threads_per_worker = None
 
@@ -143,6 +147,11 @@ class LocalCluster(SpecCluster):
                 "Please set `dashboard_address` to affect the scheduler (more common) "
                 "and `worker_dashboard_address` for the worker (less common)."
             )
+
+        if processes is None:
+            processes = worker_class is None or issubclass(worker_class, Nanny)
+        if worker_class is None:
+            worker_class = Nanny if processes else Worker
 
         self.status = None
         self.processes = processes
@@ -180,7 +189,7 @@ class LocalCluster(SpecCluster):
                 n_workers = 1
                 threads_per_worker = CPU_COUNT
         if n_workers is None and threads_per_worker is not None:
-            n_workers = max(1, CPU_COUNT // threads_per_worker)
+            n_workers = max(1, CPU_COUNT // threads_per_worker) if processes else 1
         if n_workers and threads_per_worker is None:
             # Overcommit threads per worker, rather than undercommit
             threads_per_worker = max(1, int(math.ceil(CPU_COUNT / n_workers)))
@@ -189,6 +198,7 @@ class LocalCluster(SpecCluster):
 
         worker_kwargs.update(
             {
+                "host": host,
                 "nthreads": threads_per_worker,
                 "services": worker_services,
                 "dashboard_address": worker_dashboard_address,
@@ -219,14 +229,11 @@ class LocalCluster(SpecCluster):
             ),
         }
 
-        worker = {
-            "cls": worker_class or (Worker if not processes else Nanny),
-            "options": worker_kwargs,
-        }
-
+        worker = {"cls": worker_class, "options": worker_kwargs}
         workers = {i: worker for i in range(n_workers)}
 
         super().__init__(
+            name=name,
             scheduler=scheduler,
             workers=workers,
             worker=worker,
@@ -234,6 +241,7 @@ class LocalCluster(SpecCluster):
             asynchronous=asynchronous,
             silence_logs=silence_logs,
             security=security,
+            scheduler_sync_interval=scheduler_sync_interval,
         )
 
     def start_worker(self, *args, **kwargs):
@@ -242,39 +250,10 @@ class LocalCluster(SpecCluster):
             "Please see the `cluster.scale` method instead."
         )
 
-
-def nprocesses_nthreads(n=CPU_COUNT):
-    """
-    The default breakdown of processes and threads for a given number of cores
-
-    Parameters
-    ----------
-    n: int
-        Number of available cores
-
-    Examples
-    --------
-    >>> nprocesses_nthreads(4)
-    (4, 1)
-    >>> nprocesses_nthreads(32)
-    (8, 4)
-
-    Returns
-    -------
-    nprocesses, nthreads
-    """
-    if n <= 4:
-        processes = n
-    else:
-        processes = min(f for f in factors(n) if f >= math.sqrt(n))
-    threads = n // processes
-    return (processes, threads)
-
-
-clusters_to_close = weakref.WeakSet()
-
-
-@atexit.register
-def close_clusters():
-    for cluster in list(clusters_to_close):
-        cluster.close(timeout=10)
+    def _repr_html_(self, cluster_status=None):
+        cluster_status = get_template("local_cluster.html.j2").render(
+            status=self.status.name,
+            processes=self.processes,
+            cluster_status=cluster_status,
+        )
+        return super()._repr_html_(cluster_status=cluster_status)

@@ -1,19 +1,21 @@
-from datetime import datetime
+from __future__ import annotations
+
 import json
 import logging
 import os
 import os.path
+from datetime import datetime
 
-from dask.utils import format_bytes
-
+from tlz import first, merge
 from tornado import escape
 from tornado.websocket import WebSocketHandler
-from tlz import first, merge
 
-from ..utils import RequestHandler, redirect
+from dask.utils import format_bytes, format_time
+
 from ...diagnostics.websocket import WebsocketPlugin
 from ...metrics import time
-from ...utils import log_errors, format_time
+from ...utils import log_errors
+from ..utils import RequestHandler, redirect
 
 ns = {
     func.__name__: func
@@ -33,7 +35,13 @@ class Workers(RequestHandler):
                 "workers.html",
                 title="Workers",
                 scheduler=self.server,
-                **merge(self.server.__dict__, ns, self.extra, rel_path_statics),
+                **merge(
+                    self.server.__dict__,
+                    self.server.__pdict__,
+                    ns,
+                    self.extra,
+                    rel_path_statics,
+                ),
             )
 
 
@@ -49,7 +57,13 @@ class Worker(RequestHandler):
                 title="Worker: " + worker,
                 scheduler=self.server,
                 Worker=worker,
-                **merge(self.server.__dict__, ns, self.extra, rel_path_statics),
+                **merge(
+                    self.server.__dict__,
+                    self.server.__pdict__,
+                    ns,
+                    self.extra,
+                    rel_path_statics,
+                ),
             )
 
 
@@ -65,7 +79,13 @@ class Task(RequestHandler):
                 title="Task: " + task,
                 Task=task,
                 scheduler=self.server,
-                **merge(self.server.__dict__, ns, self.extra, rel_path_statics),
+                **merge(
+                    self.server.__dict__,
+                    self.server.__pdict__,
+                    ns,
+                    self.extra,
+                    rel_path_statics,
+                ),
             )
 
 
@@ -186,10 +206,10 @@ class EventstreamHandler(WebSocketHandler):
             self.send("pong", {"timestamp": str(datetime.now())})
 
     def on_close(self):
-        self.server.remove_plugin(self.plugin)
+        self.server.remove_plugin(name=self.plugin.name)
 
 
-routes = [
+routes: list[tuple] = [
     (r"info", redirect("info/main/workers.html"), {}),
     (r"info/main/workers.html", Workers, {}),
     (r"info/worker/(.*).html", Worker, {}),

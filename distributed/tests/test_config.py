@@ -1,19 +1,19 @@
 import logging
+import os
 import subprocess
 import sys
 import tempfile
-import os
-import yaml
 
 import pytest
+import yaml
 
+from distributed.config import initialize_logging
 from distributed.utils_test import (
     captured_handler,
     captured_logger,
     new_config,
     new_config_file,
 )
-from distributed.config import initialize_logging
 
 
 def dump_logger_list():
@@ -203,11 +203,11 @@ def test_logging_extended():
             "loggers": {
                 "distributed.foo": {
                     "level": "INFO",
-                    #'handlers': ['console'],
+                    # 'handlers': ['console'],
                 },
                 "distributed.foo.bar": {
                     "level": "ERROR",
-                    #'handlers': ['console'],
+                    # 'handlers': ['console'],
                 },
             },
             "root": {"level": "WARNING", "handlers": ["console"]},
@@ -331,7 +331,7 @@ def test_schema_is_complete():
     with open(schema_fn) as f:
         schema = yaml.safe_load(f)
 
-    skip = {"default-task-durations", "bokeh-application"}
+    skip = {"default-task-durations", "bokeh-application", "environ"}
 
     def test_matches(c, s):
         if set(c) != set(s["properties"]):
@@ -352,3 +352,16 @@ def test_schema_is_complete():
                 test_matches(c[k], s["properties"][k])
 
     test_matches(config, schema)
+
+
+def test_uvloop_event_loop():
+    """Check that configuring distributed to use uvloop actually sets the event loop policy"""
+    pytest.importorskip("uvloop")
+    script = (
+        "import distributed, asyncio, uvloop\n"
+        "assert isinstance(asyncio.get_event_loop_policy(), uvloop.EventLoopPolicy)"
+    )
+    subprocess.check_call(
+        [sys.executable, "-c", script],
+        env={"DASK_DISTRIBUTED__ADMIN__EVENT_LOOP": "uvloop"},
+    )

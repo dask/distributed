@@ -6,25 +6,17 @@ after which we can import them instead of having our own definitions.
 
 import atexit
 import os
-
-try:
-    import queue
-except ImportError:
-    # Python 2
-    import Queue as queue
-from subprocess import Popen
+import queue
 import sys
-from threading import Thread
+from subprocess import Popen
+from threading import Event, Thread
 from uuid import uuid4
-
-from tornado.gen import TimeoutError
-from tornado.ioloop import IOLoop
-from threading import Event
 
 from IPython import get_ipython
 from jupyter_client import BlockingKernelClient, write_connection_file
 from jupyter_core.paths import jupyter_runtime_dir
-
+from tornado.gen import TimeoutError
+from tornado.ioloop import IOLoop
 
 OUTPUT_TIMEOUT = 10
 
@@ -78,10 +70,8 @@ def register_worker_magic(connection_info, magic_name="worker"):
     which run the given cell in a remote kernel.
     """
     ip = get_ipython()
-    info = dict(connection_info)  # copy
-    key = info.pop("key")
-    kc = BlockingKernelClient(**connection_info)
-    kc.session.key = key
+    kc = BlockingKernelClient()
+    kc.load_connection_info(connection_info)
     kc.start_channels()
 
     def remote(line, cell=None):
@@ -124,13 +114,12 @@ def remote_magic(line, cell=None):
 
     # turn info dict to hashable str for use as lookup key in _clients cache
     key = ",".join(map(str, sorted(connection_info.items())))
-    session_key = connection_info.pop("key")
 
     if key in remote_magic._clients:
         kc = remote_magic._clients[key]
     else:
-        kc = BlockingKernelClient(**connection_info)
-        kc.session.key = session_key
+        kc = BlockingKernelClient()
+        kc.load_connection_info(connection_info)
         kc.start_channels()
         kc.wait_for_ready(timeout=10)
         remote_magic._clients[key] = kc
@@ -140,7 +129,7 @@ def remote_magic(line, cell=None):
 
 
 # cache clients for re-use in remote magic
-remote_magic._clients = {}
+remote_magic._clients = {}  # type: ignore
 
 
 def register_remote_magic(magic_name="remote"):
@@ -187,12 +176,11 @@ def start_ipython(ip=None, ns=None, log=None):
 
     Parameters
     ----------
-
-    ip: str
+    ip : str
         The IP address to listen on (likely the parent object's ip).
-    ns: dict
+    ns : dict
         Any names that should be injected into the IPython namespace.
-    log: logger instance
+    log : logger instance
         Hook up IPython's logging to an existing logger instead of the default.
     """
     from IPython import get_ipython
@@ -200,15 +188,7 @@ def start_ipython(ip=None, ns=None, log=None):
     if get_ipython() is not None:
         raise RuntimeError("Cannot start IPython, it's already running.")
 
-    from zmq.eventloop.ioloop import ZMQIOLoop
     from ipykernel.kernelapp import IPKernelApp
-
-    # save the global IOLoop instance
-    # since IPython relies on it, but we are going to put it in a thread.
-    save_inst = IOLoop.instance()
-    IOLoop.clear_instance()
-    zmq_loop = ZMQIOLoop()
-    zmq_loop.install()
 
     # start IPython, disabling its signal handlers that won't work due to running in a thread:
     app = IPKernelApp.instance(log=log)
@@ -231,24 +211,23 @@ def start_ipython(ip=None, ns=None, log=None):
     evt = Event()
 
     def _start():
+        # Create a new event loop for the new thread
+        loop = IOLoop()
         app.initialize([])
         app.kernel.pre_handler_hook = noop
         app.kernel.post_handler_hook = noop
         app.kernel.start()
-        app.kernel.loop = IOLoop.instance()
         # save self in the IPython namespace as 'worker'
         # inject things into the IPython namespace
         if ns:
             app.kernel.shell.user_ns.update(ns)
         evt.set()
-        zmq_loop.start()
+        # Start the event loop
+        loop.start()
 
     zmq_loop_thread = Thread(target=_start)
     zmq_loop_thread.daemon = True
     zmq_loop_thread.start()
     assert evt.wait(timeout=5), "IPython didn't start in a reasonable amount of time."
 
-    # put the global IOLoop instance back:
-    IOLoop.clear_instance()
-    save_inst.install()
     return app

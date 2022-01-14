@@ -1,34 +1,30 @@
 import asyncio
-from contextlib import suppress
 import random
-import sys
+from contextlib import suppress
 from operator import add
 from time import sleep
 
-from dask import delayed
 import pytest
 from tlz import concat, sliding_window
 
-from distributed import Client, wait, Nanny
+from dask import delayed
+
+from distributed import Client, Nanny, wait
+from distributed.compatibility import WINDOWS
 from distributed.config import config
 from distributed.metrics import time
-from distributed.utils import All, CancelledError
+from distributed.utils import CancelledError
 from distributed.utils_test import (
-    gen_cluster,
-    cluster,
-    inc,
-    slowinc,
-    slowadd,
-    slowsum,
     bump_rlimit,
-)
-from distributed.utils_test import (  # noqa: F401
-    loop,
+    cluster,
+    gen_cluster,
+    inc,
     nodebug_setup_module,
     nodebug_teardown_module,
+    slowadd,
+    slowinc,
+    slowsum,
 )
-from distributed.client import wait
-
 
 # All tests here are slow in some way
 setup_module = nodebug_setup_module
@@ -47,6 +43,7 @@ async def test_stress_1(c, s, a, b):
     assert result == sum(map(inc, range(n)))
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(("func", "n"), [(slowinc, 100), (inc, 1000)])
 def test_stress_gc(loop, func, n):
     with cluster() as (s, [a, b]):
@@ -58,10 +55,8 @@ def test_stress_gc(loop, func, n):
             assert x.result() == n + 2
 
 
-@pytest.mark.skipif(
-    sys.platform.startswith("win"), reason="test can leave dangling RPC objects"
-)
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 8, timeout=None)
+@pytest.mark.skipif(WINDOWS, reason="test can leave dangling RPC objects")
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 8)
 async def test_cancel_stress(c, s, *workers):
     da = pytest.importorskip("dask.array")
     x = da.random.random((50, 50), chunks=(2, 2))
@@ -90,28 +85,36 @@ def test_cancel_stress_sync(loop):
                 c.cancel(f)
 
 
-@gen_cluster(nthreads=[], client=True, timeout=None)
+@pytest.mark.xfail(
+    reason="Flaky and re-fails on rerun. See https://github.com/dask/distributed/issues/5388"
+)
+@pytest.mark.slow
+@gen_cluster(
+    nthreads=[],
+    client=True,
+    timeout=180,
+    scheduler_kwargs={"allowed_failures": 100_000},
+)
 async def test_stress_creation_and_deletion(c, s):
     # Assertions are handled by the validate mechanism in the scheduler
-    s.allowed_failures = 100000
     da = pytest.importorskip("dask.array")
 
-    x = da.random.random(size=(2000, 2000), chunks=(100, 100))
-    y = (x + 1).T + (x * 2) - x.mean(axis=1)
-
+    rng = da.random.RandomState(0)
+    x = rng.random(size=(2000, 2000), chunks=(100, 100))
+    y = ((x + 1).T + (x * 2) - x.mean(axis=1)).sum().round(2)
     z = c.persist(y)
 
     async def create_and_destroy_worker(delay):
         start = time()
         while time() < start + 5:
-            n = await Nanny(s.address, nthreads=2, loop=s.loop)
-            await asyncio.sleep(delay)
-            await n.close()
+            async with Nanny(s.address, nthreads=2) as n:
+                await asyncio.sleep(delay)
             print("Killed nanny")
 
-    await asyncio.wait_for(
-        All([create_and_destroy_worker(0.1 * i) for i in range(20)]), 60
-    )
+    await asyncio.gather(*(create_and_destroy_worker(0.1 * i) for i in range(20)))
+
+    async with Nanny(s.address, nthreads=2):
+        assert await c.compute(z) == 8000884.93
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)] * 10, client=True, timeout=60)
@@ -171,11 +174,13 @@ def vsum(*args):
     return sum(args)
 
 
-@pytest.mark.avoid_travis
+@pytest.mark.avoid_ci
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 80, timeout=1000)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 80)
 async def test_stress_communication(c, s, *workers):
     s.validate = False  # very slow otherwise
+    for w in workers:
+        w.validate = False
     da = pytest.importorskip("dask.array")
     # Test consumes many file descriptors and can hang if the limit is too low
     resource = pytest.importorskip("resource")
@@ -184,7 +189,7 @@ async def test_stress_communication(c, s, *workers):
     n = 20
     xs = [da.random.random((100, 100), chunks=(5, 5)) for i in range(n)]
     ys = [x + x.T for x in xs]
-    z = da.atop(vsum, "ij", *concat(zip(ys, ["ij"] * n)), dtype="float64")
+    z = da.blockwise(vsum, "ij", *concat(zip(ys, ["ij"] * n)), dtype="float64")
 
     future = c.compute(z.sum())
 
@@ -219,7 +224,7 @@ async def test_stress_steal(c, s, *workers):
 
 
 @pytest.mark.slow
-@gen_cluster(nthreads=[("127.0.0.1", 1)] * 10, client=True, timeout=120)
+@gen_cluster(nthreads=[("127.0.0.1", 1)] * 10, client=True, timeout=180)
 async def test_close_connections(c, s, *workers):
     da = pytest.importorskip("dask.array")
     x = da.random.random(size=(1000, 1000), chunks=(1000, 1))
@@ -240,11 +245,13 @@ async def test_close_connections(c, s, *workers):
     await wait(future)
 
 
+@pytest.mark.slow
 @pytest.mark.xfail(
-    reason="IOStream._handle_write blocks on large write_buffer"
-    " https://github.com/tornadoweb/tornado/issues/2110"
+    reason="flaky and re-fails on rerun; "
+    "IOStream._handle_write blocks on large write_buffer"
+    " https://github.com/tornadoweb/tornado/issues/2110",
 )
-@gen_cluster(client=True, timeout=20, nthreads=[("127.0.0.1", 1)])
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_no_delay_during_large_transfer(c, s, w):
     pytest.importorskip("crick")
     np = pytest.importorskip("numpy")
@@ -252,10 +259,12 @@ async def test_no_delay_during_large_transfer(c, s, w):
     x_nbytes = x.nbytes
 
     # Reset digests
-    from distributed.counter import Digest
     from collections import defaultdict
     from functools import partial
+
     from dask.diagnostics import ResourceProfiler
+
+    from distributed.counter import Digest
 
     for server in [s, w]:
         server.digests = defaultdict(partial(Digest, loop=server.io_loop))

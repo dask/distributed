@@ -1,51 +1,51 @@
 import asyncio
-from functools import partial
 import gc
 import subprocess
 import sys
-from time import sleep
-from threading import Lock
 import unittest
 import weakref
-from distutils.version import LooseVersion
+from threading import Lock
+from time import sleep
+from urllib.parse import urlparse
 
-from tornado.ioloop import IOLoop
-import tornado
-from tornado.httpclient import AsyncHTTPClient
 import pytest
+import tornado
+from packaging.version import parse as parse_version
+from tornado.httpclient import AsyncHTTPClient
+from tornado.ioloop import IOLoop
 
 from dask.system import CPU_COUNT
-from distributed import Client, Worker, Nanny, get_client
+
+from distributed import Client, Nanny, Worker, get_client
+from distributed.compatibility import LINUX
 from distributed.core import Status
-from distributed.deploy.local import LocalCluster, nprocesses_nthreads
+from distributed.deploy.local import LocalCluster
+from distributed.deploy.utils_test import ClusterTest
 from distributed.metrics import time
+from distributed.scheduler import COMPILED
 from distributed.system import MEMORY_LIMIT
-from distributed.utils_test import (  # noqa: F401
-    clean,
-    cleanup,
-    inc,
-    gen_test,
-    slowinc,
-    assert_cannot_connect,
-    assert_can_connect_locally_4,
+from distributed.utils import TimeoutError, sync
+from distributed.utils_test import (
     assert_can_connect_from_everywhere_4,
     assert_can_connect_from_everywhere_4_6,
+    assert_can_connect_locally_4,
+    assert_cannot_connect,
     captured_logger,
+    clean,
+    gen_test,
+    inc,
+    slowinc,
     tls_only_security,
+    xfail_ssl_issue5601,
 )
-from distributed.utils_test import loop  # noqa: F401
-from distributed.utils import sync, TimeoutError
-
-from distributed.deploy.utils_test import ClusterTest
 
 
 def test_simple(loop):
     with LocalCluster(
-        4,
-        scheduler_port=0,
+        n_workers=4,
         processes=False,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         loop=loop,
     ) as c:
         with Client(c) as e:
@@ -58,7 +58,12 @@ def test_simple(loop):
 
 
 def test_local_cluster_supports_blocked_handlers(loop):
-    with LocalCluster(blocked_handlers=["run_function"], n_workers=0, loop=loop) as c:
+    with LocalCluster(
+        blocked_handlers=["run_function"],
+        n_workers=0,
+        loop=loop,
+        dashboard_address=":0",
+    ) as c:
         with Client(c) as client:
             with pytest.raises(ValueError) as exc:
                 client.run_on_scheduler(lambda x: x, 42)
@@ -69,7 +74,7 @@ def test_local_cluster_supports_blocked_handlers(loop):
 
 
 def test_close_twice():
-    with LocalCluster() as cluster:
+    with LocalCluster(dashboard_address=":0") as cluster:
         with Client(cluster.scheduler_address) as client:
             f = client.map(inc, range(100))
             client.gather(f)
@@ -83,11 +88,10 @@ def test_close_twice():
 
 def test_procs():
     with LocalCluster(
-        2,
-        scheduler_port=0,
+        n_workers=2,
         processes=False,
         threads_per_worker=3,
-        dashboard_address=None,
+        dashboard_address=":0",
         silence_logs=False,
     ) as c:
         assert len(c.workers) == 2
@@ -98,11 +102,10 @@ def test_procs():
         repr(c)
 
     with LocalCluster(
-        2,
-        scheduler_port=0,
+        n_workers=2,
         processes=True,
         threads_per_worker=3,
-        dashboard_address=None,
+        dashboard_address=":0",
         silence_logs=False,
     ) as c:
         assert len(c.workers) == 2
@@ -121,7 +124,7 @@ def test_move_unserializable_data():
     transports.
     """
     with LocalCluster(
-        processes=False, silence_logs=False, dashboard_address=None
+        processes=False, silence_logs=False, dashboard_address=":0"
     ) as cluster:
         assert cluster.scheduler_address.startswith("inproc://")
         assert cluster.workers[0].address.startswith("inproc://")
@@ -137,7 +140,7 @@ def test_transports_inproc():
     Test the transport chosen by LocalCluster depending on arguments.
     """
     with LocalCluster(
-        1, processes=False, silence_logs=False, dashboard_address=None
+        n_workers=1, processes=False, silence_logs=False, dashboard_address=":0"
     ) as c:
         assert c.scheduler_address.startswith("inproc://")
         assert c.workers[0].address.startswith("inproc://")
@@ -148,7 +151,7 @@ def test_transports_inproc():
 def test_transports_tcp():
     # Have nannies => need TCP
     with LocalCluster(
-        1, processes=True, silence_logs=False, dashboard_address=None
+        n_workers=1, processes=True, silence_logs=False, dashboard_address=":0"
     ) as c:
         assert c.scheduler_address.startswith("tcp://")
         assert c.workers[0].address.startswith("tcp://")
@@ -159,11 +162,11 @@ def test_transports_tcp():
 def test_transports_tcp_port():
     # Scheduler port specified => need TCP
     with LocalCluster(
-        1,
+        n_workers=1,
         processes=False,
         scheduler_port=8786,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
     ) as c:
 
         assert c.scheduler_address == "tcp://127.0.0.1:8786"
@@ -173,13 +176,13 @@ def test_transports_tcp_port():
 
 
 class LocalTest(ClusterTest, unittest.TestCase):
-    Cluster = partial(LocalCluster, silence_logs=False, dashboard_address=None)
-    kwargs = {"dashboard_address": None, "processes": False}
+    Cluster = LocalCluster  # type: ignore
+    kwargs = {"silence_logs": False, "dashboard_address": ":0", "processes": False}
 
 
 def test_Client_with_local(loop):
     with LocalCluster(
-        1, scheduler_port=0, silence_logs=False, dashboard_address=None, loop=loop
+        n_workers=1, silence_logs=False, dashboard_address=":0", loop=loop
     ) as c:
         with Client(c) as e:
             assert len(e.nthreads()) == len(c.workers)
@@ -187,7 +190,7 @@ def test_Client_with_local(loop):
 
 
 def test_Client_solo(loop):
-    with Client(loop=loop, silence_logs=False) as c:
+    with Client(loop=loop, silence_logs=False, dashboard_address=":0") as c:
         pass
     assert c.cluster.status == Status.closed
 
@@ -221,14 +224,20 @@ async def test_duplicate_clients():
 
 
 def test_Client_kwargs(loop):
-    with Client(loop=loop, processes=False, n_workers=2, silence_logs=False) as c:
+    with Client(
+        loop=loop,
+        processes=False,
+        n_workers=2,
+        silence_logs=False,
+        dashboard_address=":0",
+    ) as c:
         assert len(c.cluster.workers) == 2
         assert all(isinstance(w, Worker) for w in c.cluster.workers.values())
     assert c.cluster.status == Status.closed
 
 
 def test_Client_unused_kwargs_with_cluster(loop):
-    with LocalCluster() as cluster:
+    with LocalCluster(dashboard_address=":0") as cluster:
         with pytest.raises(Exception) as argexcept:
             c = Client(cluster, n_workers=2, dashboard_port=8000, silence_logs=None)
         assert (
@@ -249,37 +258,37 @@ def test_Client_unused_kwargs_with_address(loop):
 
 
 def test_Client_twice(loop):
-    with Client(loop=loop, silence_logs=False, dashboard_address=None) as c:
-        with Client(loop=loop, silence_logs=False, dashboard_address=None) as f:
+    with Client(loop=loop, silence_logs=False, dashboard_address=":0") as c:
+        with Client(loop=loop, silence_logs=False, dashboard_address=":0") as f:
             assert c.cluster.scheduler.port != f.cluster.scheduler.port
 
 
-@pytest.mark.asyncio
-async def test_client_constructor_with_temporary_security(cleanup):
+@gen_test()
+async def test_client_constructor_with_temporary_security():
+    xfail_ssl_issue5601()
     pytest.importorskip("cryptography")
     async with Client(
-        security=True, silence_logs=False, dashboard_address=None, asynchronous=True
+        security=True, silence_logs=False, dashboard_address=":0", asynchronous=True
     ) as c:
         assert c.cluster.scheduler_address.startswith("tls")
         assert c.security == c.cluster.security
 
 
-@pytest.mark.asyncio
-async def test_defaults(cleanup):
+@gen_test()
+async def test_defaults():
     async with LocalCluster(
-        scheduler_port=0, silence_logs=False, dashboard_address=None, asynchronous=True
+        silence_logs=False, dashboard_address=":0", asynchronous=True
     ) as c:
         assert sum(w.nthreads for w in c.workers.values()) == CPU_COUNT
         assert all(isinstance(w, Nanny) for w in c.workers.values())
 
 
-@pytest.mark.asyncio
-async def test_defaults_2(cleanup):
+@gen_test()
+async def test_defaults_2():
     async with LocalCluster(
         processes=False,
-        scheduler_port=0,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         asynchronous=True,
     ) as c:
         assert sum(w.nthreads for w in c.workers.values()) == CPU_COUNT
@@ -287,13 +296,12 @@ async def test_defaults_2(cleanup):
         assert len(c.workers) == 1
 
 
-@pytest.mark.asyncio
-async def test_defaults_3(cleanup):
+@gen_test()
+async def test_defaults_3():
     async with LocalCluster(
         n_workers=2,
-        scheduler_port=0,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         asynchronous=True,
     ) as c:
         if CPU_COUNT % 2 == 0:
@@ -304,66 +312,61 @@ async def test_defaults_3(cleanup):
         assert sum(w.nthreads for w in c.workers.values()) == expected_total_threads
 
 
-@pytest.mark.asyncio
-async def test_defaults_4(cleanup):
+@gen_test()
+async def test_defaults_4():
     async with LocalCluster(
         threads_per_worker=CPU_COUNT * 2,
-        scheduler_port=0,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         asynchronous=True,
     ) as c:
         assert len(c.workers) == 1
 
 
-@pytest.mark.asyncio
-async def test_defaults_5(cleanup):
+@gen_test()
+async def test_defaults_5():
     async with LocalCluster(
         n_workers=CPU_COUNT * 2,
-        scheduler_port=0,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         asynchronous=True,
     ) as c:
         assert all(w.nthreads == 1 for w in c.workers.values())
 
 
-@pytest.mark.asyncio
-async def test_defaults_6(cleanup):
+@gen_test()
+async def test_defaults_6():
     async with LocalCluster(
         threads_per_worker=2,
         n_workers=3,
-        scheduler_port=0,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         asynchronous=True,
     ) as c:
         assert len(c.workers) == 3
         assert all(w.nthreads == 2 for w in c.workers.values())
 
 
-@pytest.mark.asyncio
-async def test_worker_params(cleanup):
+@gen_test()
+async def test_worker_params():
     async with LocalCluster(
         processes=False,
         n_workers=2,
-        scheduler_port=0,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         memory_limit=500,
         asynchronous=True,
     ) as c:
         assert [w.memory_limit for w in c.workers.values()] == [500] * 2
 
 
-@pytest.mark.asyncio
-async def test_memory_limit_none(cleanup):
+@gen_test()
+async def test_memory_limit_none():
     async with LocalCluster(
         n_workers=2,
-        scheduler_port=0,
         silence_logs=False,
         processes=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         memory_limit=None,
         asynchronous=True,
     ) as c:
@@ -374,13 +377,11 @@ async def test_memory_limit_none(cleanup):
 
 def test_cleanup():
     with clean(threads=False):
-        c = LocalCluster(
-            2, scheduler_port=0, silence_logs=False, dashboard_address=None
-        )
+        c = LocalCluster(n_workers=2, silence_logs=False, dashboard_address=":0")
         port = c.scheduler.port
         c.close()
         c2 = LocalCluster(
-            2, scheduler_port=port, silence_logs=False, dashboard_address=None
+            n_workers=2, scheduler_port=port, silence_logs=False, dashboard_address=":0"
         )
         c2.close()
 
@@ -388,12 +389,12 @@ def test_cleanup():
 def test_repeated():
     with clean(threads=False):
         with LocalCluster(
-            0, scheduler_port=8448, silence_logs=False, dashboard_address=None
-        ) as c:
+            n_workers=0, scheduler_port=8448, silence_logs=False, dashboard_address=":0"
+        ):
             pass
         with LocalCluster(
-            0, scheduler_port=8448, silence_logs=False, dashboard_address=None
-        ) as c:
+            n_workers=0, scheduler_port=8448, silence_logs=False, dashboard_address=":0"
+        ):
             pass
 
 
@@ -403,11 +404,10 @@ def test_bokeh(loop, processes):
     requests = pytest.importorskip("requests")
     with LocalCluster(
         n_workers=0,
-        scheduler_port=0,
         silence_logs=False,
         loop=loop,
         processes=processes,
-        dashboard_address=0,
+        dashboard_address=":0",
     ) as c:
         bokeh_port = c.scheduler.http_server.port
         url = "http://127.0.0.1:%d/status/" % bokeh_port
@@ -427,18 +427,17 @@ def test_bokeh(loop, processes):
 
 
 def test_blocks_until_full(loop):
-    with Client(loop=loop) as c:
+    with Client(loop=loop, dashboard_address=":0") as c:
         assert len(c.nthreads()) > 0
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_scale_up_and_down():
     async with LocalCluster(
-        0,
-        scheduler_port=0,
+        n_workers=0,
         processes=False,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         asynchronous=True,
     ) as cluster:
         async with Client(cluster, asynchronous=True) as c:
@@ -457,7 +456,8 @@ async def test_scale_up_and_down():
 
 
 @pytest.mark.xfail(
-    sys.version_info >= (3, 8) and LooseVersion(tornado.version) < "6.0.3",
+    sys.version_info >= (3, 8)
+    and parse_version(tornado.version) < parse_version("6.0.3"),
     reason="Known issue with Python 3.8 and Tornado < 6.0.3. "
     "See https://github.com/tornadoweb/tornado/pull/2683.",
     strict=True,
@@ -468,7 +468,7 @@ def test_silent_startup():
         from distributed import LocalCluster
 
         if __name__ == "__main__":
-            with LocalCluster(1, dashboard_address=None, scheduler_port=0):
+            with LocalCluster(n_workers=1, dashboard_address=":0"):
                 sleep(.1)
         """
 
@@ -486,17 +486,16 @@ def test_silent_startup():
 
 def test_only_local_access(loop):
     with LocalCluster(
-        0, scheduler_port=0, silence_logs=False, dashboard_address=None, loop=loop
+        n_workers=0, silence_logs=False, dashboard_address=":0", loop=loop
     ) as c:
         sync(loop, assert_can_connect_locally_4, c.scheduler.port)
 
 
 def test_remote_access(loop):
     with LocalCluster(
-        0,
-        scheduler_port=0,
+        n_workers=0,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         host="",
         loop=loop,
     ) as c:
@@ -507,10 +506,9 @@ def test_remote_access(loop):
 def test_memory(loop, n_workers):
     with LocalCluster(
         n_workers=n_workers,
-        scheduler_port=0,
         processes=False,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         loop=loop,
     ) as cluster:
         assert sum(w.memory_limit for w in cluster.workers.values()) <= MEMORY_LIMIT
@@ -520,10 +518,9 @@ def test_memory(loop, n_workers):
 def test_memory_nanny(loop, n_workers):
     with LocalCluster(
         n_workers=n_workers,
-        scheduler_port=0,
         processes=True,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         loop=loop,
     ) as cluster:
         with Client(cluster.scheduler_address, loop=loop) as c:
@@ -536,38 +533,34 @@ def test_memory_nanny(loop, n_workers):
 def test_death_timeout_raises(loop):
     with pytest.raises(TimeoutError):
         with LocalCluster(
-            scheduler_port=0,
             silence_logs=False,
             death_timeout=1e-10,
-            dashboard_address=None,
+            dashboard_address=":0",
             loop=loop,
         ) as cluster:
             pass
     LocalCluster._instances.clear()  # ignore test hygiene checks
 
 
-@pytest.mark.asyncio
-async def test_bokeh_kwargs(cleanup):
+@gen_test()
+async def test_bokeh_kwargs():
     pytest.importorskip("bokeh")
     async with LocalCluster(
         n_workers=0,
-        scheduler_port=0,
         silence_logs=False,
-        dashboard_address=0,
+        dashboard_address=":0",
         asynchronous=True,
         scheduler_kwargs={"http_prefix": "/foo"},
     ) as c:
         client = AsyncHTTPClient()
         response = await client.fetch(
-            "http://localhost:{}/foo/status".format(c.scheduler.http_server.port)
+            f"http://localhost:{c.scheduler.http_server.port}/foo/status"
         )
         assert "bokeh" in response.body.decode()
 
 
 def test_io_loop_periodic_callbacks(loop):
-    with LocalCluster(
-        loop=loop, port=0, dashboard_address=None, silence_logs=False
-    ) as cluster:
+    with LocalCluster(loop=loop, dashboard_address=":0", silence_logs=False) as cluster:
         assert cluster.scheduler.loop is loop
         for pc in cluster.scheduler.periodic_callbacks.values():
             assert pc.io_loop is loop
@@ -580,7 +573,7 @@ def test_logging():
     """
     Workers and scheduler have logs even when silenced
     """
-    with LocalCluster(1, processes=False, dashboard_address=None) as c:
+    with LocalCluster(n_workers=1, processes=False, dashboard_address=":0") as c:
         assert c.scheduler._deque_handler.deque
         assert c.workers[0]._deque_handler.deque
 
@@ -589,10 +582,9 @@ def test_ipywidgets(loop):
     ipywidgets = pytest.importorskip("ipywidgets")
     with LocalCluster(
         n_workers=0,
-        scheduler_port=0,
         silence_logs=False,
         loop=loop,
-        dashboard_address=False,
+        dashboard_address=":0",
         processes=False,
     ) as cluster:
         cluster._ipython_display_()
@@ -610,10 +602,9 @@ def test_no_ipywidgets(loop, monkeypatch):
 
     with LocalCluster(
         n_workers=0,
-        scheduler_port=0,
         silence_logs=False,
         loop=loop,
-        dashboard_address=False,
+        dashboard_address=":0",
         processes=False,
     ) as cluster:
         cluster._ipython_display_()
@@ -626,12 +617,11 @@ def test_no_ipywidgets(loop, monkeypatch):
 
 
 def test_scale(loop):
-    """ Directly calling scale both up and down works as expected """
+    """Directly calling scale both up and down works as expected"""
     with LocalCluster(
-        scheduler_port=0,
         silence_logs=False,
         loop=loop,
-        dashboard_address=False,
+        dashboard_address=":0",
         processes=False,
         n_workers=0,
     ) as cluster:
@@ -655,10 +645,9 @@ def test_scale(loop):
 
 def test_adapt(loop):
     with LocalCluster(
-        scheduler_port=0,
         silence_logs=False,
         loop=loop,
-        dashboard_address=False,
+        dashboard_address=":0",
         processes=False,
         n_workers=0,
     ) as cluster:
@@ -685,22 +674,20 @@ def test_adapt(loop):
 
 
 def test_adapt_then_manual(loop):
-    """ We can revert from adaptive, back to manual """
+    """We can revert from adaptive, back to manual"""
     with LocalCluster(
-        scheduler_port=0,
         silence_logs=False,
         loop=loop,
-        dashboard_address=False,
+        dashboard_address=":0",
         processes=False,
         n_workers=8,
     ) as cluster:
-        sleep(0.1)
         cluster.adapt(minimum=0, maximum=4, interval="10ms")
 
         start = time()
         while cluster.scheduler.workers or cluster.workers:
-            sleep(0.1)
-            assert time() < start + 5
+            sleep(0.01)
+            assert time() < start + 30
 
         assert not cluster.workers
 
@@ -716,13 +703,14 @@ def test_adapt_then_manual(loop):
 
             start = time()
             while len(cluster.scheduler.workers) != 2:
-                sleep(0.1)
-                assert time() < start + 5
+                sleep(0.01)
+                assert time() < start + 30
 
 
 @pytest.mark.parametrize("temporary", [True, False])
 def test_local_tls(loop, temporary):
     if temporary:
+        xfail_ssl_issue5601()
         pytest.importorskip("cryptography")
         security = True
     else:
@@ -732,7 +720,7 @@ def test_local_tls(loop, temporary):
         scheduler_port=8786,
         silence_logs=False,
         security=security,
-        dashboard_address=False,
+        dashboard_address=":0",
         host="tls://0.0.0.0",
         loop=loop,
     ) as c:
@@ -763,11 +751,10 @@ async def test_scale_retires_workers():
 
     loop = IOLoop.current()
     cluster = await MyCluster(
-        0,
-        scheduler_port=0,
+        n_workers=0,
         processes=False,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         loop=loop,
         asynchronous=True,
     )
@@ -793,6 +780,7 @@ async def test_scale_retires_workers():
     await cluster.close()
 
 
+@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 def test_local_tls_restart(loop):
     from distributed.utils_test import tls_only_security
 
@@ -802,7 +790,7 @@ def test_local_tls_restart(loop):
         scheduler_port=8786,
         silence_logs=False,
         security=security,
-        dashboard_address=False,
+        dashboard_address=":0",
         host="tls://0.0.0.0",
         loop=loop,
     ) as c:
@@ -815,26 +803,12 @@ def test_local_tls_restart(loop):
             assert workers_before != workers_after
 
 
-def test_default_process_thread_breakdown():
-    assert nprocesses_nthreads(1) == (1, 1)
-    assert nprocesses_nthreads(4) == (4, 1)
-    assert nprocesses_nthreads(5) == (5, 1)
-    assert nprocesses_nthreads(8) == (4, 2)
-    assert nprocesses_nthreads(12) in ((6, 2), (4, 3))
-    assert nprocesses_nthreads(20) == (5, 4)
-    assert nprocesses_nthreads(24) in ((6, 4), (8, 3))
-    assert nprocesses_nthreads(32) == (8, 4)
-    assert nprocesses_nthreads(40) in ((8, 5), (10, 4))
-    assert nprocesses_nthreads(80) in ((10, 8), (16, 5))
-
-
 def test_asynchronous_property(loop):
     with LocalCluster(
-        4,
-        scheduler_port=0,
+        n_workers=4,
         processes=False,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         loop=loop,
     ) as cluster:
 
@@ -845,23 +819,27 @@ def test_asynchronous_property(loop):
 
 
 def test_protocol_inproc(loop):
-    with LocalCluster(protocol="inproc://", loop=loop, processes=False) as cluster:
+    with LocalCluster(
+        protocol="inproc://", loop=loop, processes=False, dashboard_address=":0"
+    ) as cluster:
         assert cluster.scheduler.address.startswith("inproc://")
 
 
 def test_protocol_tcp(loop):
     with LocalCluster(
-        protocol="tcp", loop=loop, n_workers=0, processes=False
+        protocol="tcp", loop=loop, n_workers=0, processes=False, dashboard_address=":0"
     ) as cluster:
         assert cluster.scheduler.address.startswith("tcp://")
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 def test_protocol_ip(loop):
     with LocalCluster(
-        host="tcp://127.0.0.2", loop=loop, n_workers=0, processes=False
+        host="tcp://127.0.0.2",
+        loop=loop,
+        n_workers=0,
+        processes=False,
+        dashboard_address=":0",
     ) as cluster:
         assert cluster.scheduler.address.startswith("tcp://127.0.0.2")
 
@@ -876,8 +854,7 @@ def test_worker_class_worker(loop):
         loop=loop,
         worker_class=MyWorker,
         processes=False,
-        scheduler_port=0,
-        dashboard_address=None,
+        dashboard_address=":0",
     ) as cluster:
         assert all(isinstance(w, MyWorker) for w in cluster.workers.values())
 
@@ -890,22 +867,20 @@ def test_worker_class_nanny(loop):
         n_workers=2,
         loop=loop,
         worker_class=MyNanny,
-        scheduler_port=0,
-        dashboard_address=None,
+        dashboard_address=":0",
     ) as cluster:
         assert all(isinstance(w, MyNanny) for w in cluster.workers.values())
 
 
-@pytest.mark.asyncio
-async def test_worker_class_nanny_async(cleanup):
+@gen_test()
+async def test_worker_class_nanny_async():
     class MyNanny(Nanny):
         pass
 
     async with LocalCluster(
         n_workers=2,
         worker_class=MyNanny,
-        scheduler_port=0,
-        dashboard_address=None,
+        dashboard_address=":0",
         asynchronous=True,
     ) as cluster:
         assert all(isinstance(w, MyNanny) for w in cluster.workers.values())
@@ -916,8 +891,7 @@ def test_starts_up_sync(loop):
         n_workers=2,
         loop=loop,
         processes=False,
-        scheduler_port=0,
-        dashboard_address=None,
+        dashboard_address=":0",
     )
     try:
         assert len(cluster.scheduler.workers) == 2
@@ -929,7 +903,7 @@ def test_dont_select_closed_worker():
     # Make sure distributed does not try to reuse a client from a
     # closed cluster (https://github.com/dask/distributed/issues/2840).
     with clean(threads=False):
-        cluster = LocalCluster(n_workers=0)
+        cluster = LocalCluster(n_workers=0, dashboard_address=":0")
         c = Client(cluster)
         cluster.scale(2)
         assert c == get_client()
@@ -937,7 +911,7 @@ def test_dont_select_closed_worker():
         c.close()
         cluster.close()
 
-        cluster2 = LocalCluster(n_workers=0)
+        cluster2 = LocalCluster(n_workers=0, dashboard_address=":0")
         c2 = Client(cluster2)
         cluster2.scale(2)
 
@@ -950,19 +924,20 @@ def test_dont_select_closed_worker():
 
 def test_client_cluster_synchronous(loop):
     with clean(threads=False):
-        with Client(loop=loop, processes=False) as c:
+        with Client(loop=loop, processes=False, dashboard_address=":0") as c:
             assert not c.asynchronous
             assert not c.cluster.asynchronous
 
 
-@pytest.mark.asyncio
-async def test_scale_memory_cores(cleanup):
+@gen_test()
+async def test_scale_memory_cores():
     async with LocalCluster(
         n_workers=0,
         processes=False,
         threads_per_worker=2,
         memory_limit="2GB",
         asynchronous=True,
+        dashboard_address=":0",
     ) as cluster:
         cluster.scale(cores=4)
         assert len(cluster.worker_spec) == 2
@@ -978,30 +953,34 @@ async def test_scale_memory_cores(cleanup):
 
 
 @pytest.mark.asyncio
-async def test_repr(cleanup):
+@pytest.mark.parametrize("memory_limit", ["2 GiB", None])
+async def test_repr(memory_limit, cleanup):
     async with LocalCluster(
         n_workers=2,
         processes=False,
         threads_per_worker=2,
-        memory_limit="2GB",
+        memory_limit=memory_limit,
         asynchronous=True,
+        dashboard_address=":0",
     ) as cluster:
+        # __repr__ uses cluster.scheduler_info, which slightly lags behind
+        # cluster.scheduler.workers and client.wait_for_workers.
+        while len(cluster.scheduler_info["workers"]) < 2:
+            await asyncio.sleep(0.01)
+
         text = repr(cluster)
-        assert "workers=2" in text
         assert cluster.scheduler_address in text
-        assert "cores=4" in text or "threads=4" in text
-        assert "GB" in text and "4" in text
-
-    async with LocalCluster(
-        n_workers=2, processes=False, memory_limit=None, asynchronous=True
-    ) as cluster:
-        assert "memory" not in repr(cluster)
+        assert "workers=2, threads=4" in text
+        if memory_limit:
+            assert "memory=4.00 GiB" in text
+        else:
+            assert "memory" not in text
 
 
-@pytest.mark.asyncio
-async def test_threads_per_worker_set_to_0(cleanup):
+@gen_test()
+async def test_threads_per_worker_set_to_0():
     with pytest.warns(
-        Warning, match="Setting `threads_per_worker` to 0 is discouraged."
+        Warning, match="Setting `threads_per_worker` to 0 has been deprecated."
     ):
         async with LocalCluster(
             n_workers=2, processes=False, threads_per_worker=0, asynchronous=True
@@ -1014,6 +993,7 @@ async def test_threads_per_worker_set_to_0(cleanup):
 @pytest.mark.parametrize("temporary", [True, False])
 async def test_capture_security(cleanup, temporary):
     if temporary:
+        xfail_ssl_issue5601()
         pytest.importorskip("cryptography")
         security = True
     else:
@@ -1023,38 +1003,159 @@ async def test_capture_security(cleanup, temporary):
         silence_logs=False,
         security=security,
         asynchronous=True,
-        dashboard_address=False,
+        dashboard_address=":0",
         host="tls://0.0.0.0",
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             assert client.security == cluster.security
 
 
-@pytest.mark.asyncio
-@pytest.mark.skipif(
-    sys.version_info < (3, 7), reason="asyncio.all_tasks not implemented"
-)
-async def test_no_danglng_asyncio_tasks(cleanup):
+@gen_test()
+async def test_no_dangling_asyncio_tasks():
     start = asyncio.all_tasks()
-    async with LocalCluster(asynchronous=True, processes=False):
+    async with LocalCluster(asynchronous=True, processes=False, dashboard_address=":0"):
         await asyncio.sleep(0.01)
 
     tasks = asyncio.all_tasks()
     assert tasks == start
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_async_with():
-    async with LocalCluster(processes=False, asynchronous=True) as cluster:
+    async with LocalCluster(
+        processes=False, asynchronous=True, dashboard_address=":0"
+    ) as cluster:
         w = cluster.workers
         assert w
 
     assert not w
 
 
-@pytest.mark.asyncio
-async def test_no_workers(cleanup):
+@gen_test()
+async def test_no_workers():
     async with Client(
-        n_workers=0, silence_logs=False, dashboard_address=None, asynchronous=True
+        n_workers=0, silence_logs=False, dashboard_address=":0", asynchronous=True
     ) as c:
         pass
+
+
+@gen_test()
+async def test_cluster_names():
+    async with LocalCluster(
+        processes=False, asynchronous=True, dashboard_address=":0"
+    ) as unnamed_cluster:
+        async with LocalCluster(
+            processes=False, asynchronous=True, name="mycluster", dashboard_address=":0"
+        ) as named_cluster:
+            assert isinstance(unnamed_cluster.name, str)
+            assert isinstance(named_cluster.name, str)
+            assert named_cluster.name == "mycluster"
+            assert unnamed_cluster == unnamed_cluster
+            assert named_cluster == named_cluster
+            assert unnamed_cluster != named_cluster
+
+        async with LocalCluster(
+            processes=False, asynchronous=True, dashboard_address=":0"
+        ) as unnamed_cluster2:
+            assert unnamed_cluster2 != unnamed_cluster
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("nanny", [True, False])
+async def test_local_cluster_redundant_kwarg(nanny):
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        # Extra arguments are forwarded to the worker class. Depending on
+        # whether we use the nanny or not, the error treatment is quite
+        # different and we should assert that an exception is raised
+        async with await LocalCluster(
+            typo_kwarg="foo",
+            processes=nanny,
+            n_workers=1,
+            dashboard_address=":0",
+        ) as cluster:
+
+            # This will never work but is a reliable way to block without hard
+            # coding any sleep values
+            async with Client(cluster) as c:
+                f = c.submit(sleep, 0)
+                await f
+
+
+@pytest.mark.asyncio
+async def test_cluster_info_sync():
+    async with LocalCluster(
+        processes=False, asynchronous=True, scheduler_sync_interval="1ms"
+    ) as cluster:
+        assert cluster._cluster_info["name"] == cluster.name
+
+        while "name" not in cluster.scheduler.get_metadata(
+            keys=["cluster-manager-info"]
+        ):
+            await asyncio.sleep(0.01)
+
+        info = await cluster.scheduler_comm.get_metadata(keys=["cluster-manager-info"])
+        assert info["name"] == cluster.name
+        info = cluster.scheduler.get_metadata(keys=["cluster-manager-info"])
+        assert info["name"] == cluster.name
+
+        cluster._cluster_info["foo"] = "bar"
+        while "foo" not in cluster.scheduler.get_metadata(
+            keys=["cluster-manager-info"]
+        ):
+            await asyncio.sleep(0.01)
+
+        info = cluster.scheduler.get_metadata(keys=["cluster-manager-info"])
+        assert info["foo"] == "bar"
+
+
+@pytest.mark.asyncio
+async def test_cluster_info_sync_is_robust_to_network_blips(monkeypatch):
+    async with LocalCluster(
+        processes=False, asynchronous=True, scheduler_sync_interval="1ms"
+    ) as cluster:
+        assert cluster._cluster_info["name"] == cluster.name
+
+        error_called = False
+
+        async def error(*args, **kwargs):
+            nonlocal error_called
+            await asyncio.sleep(0.001)
+            error_called = True
+            raise OSError
+
+        # Temporarily patch the `set_metadata` RPC to error
+        with monkeypatch.context() as patch:
+            patch.setattr(cluster.scheduler_comm, "set_metadata", error)
+
+            # Set a new cluster_info value
+            cluster._cluster_info["foo"] = "bar"
+
+            # Wait for the bad method to be called at least once
+            while not error_called:
+                await asyncio.sleep(0.01)
+
+        # Check that cluster_info is resynced after the error condition is fixed
+        while "foo" not in cluster.scheduler.get_metadata(
+            keys=["cluster-manager-info"]
+        ):
+            await asyncio.sleep(0.01)
+
+        info = cluster.scheduler.get_metadata(keys=["cluster-manager-info"])
+        assert info["foo"] == "bar"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("host", [None, "127.0.0.1"])
+@pytest.mark.parametrize("use_nanny", [True, False])
+async def test_cluster_host_used_throughout_cluster(host, use_nanny):
+    """Ensure that the `host` kwarg is propagated through scheduler, nanny, and workers"""
+    async with LocalCluster(host=host, asynchronous=True) as cluster:
+        url = urlparse(cluster.scheduler_address)
+        assert url.hostname == "127.0.0.1"
+        for worker in cluster.workers.values():
+            url = urlparse(worker.address)
+            assert url.hostname == "127.0.0.1"
+
+            if use_nanny:
+                url = urlparse(worker.process.worker_address)
+                assert url.hostname == "127.0.0.1"

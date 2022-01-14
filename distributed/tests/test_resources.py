@@ -1,15 +1,15 @@
 import asyncio
 from time import time
 
-from dask import delayed
 import pytest
+
+import dask
+from dask import delayed
+from dask.utils import stringify
 
 from distributed import Worker
 from distributed.client import wait
-from distributed.compatibility import WINDOWS
-from distributed.utils import tokey
-from distributed.utils_test import inc, gen_cluster, slowinc, slowadd
-from distributed.utils_test import client, cluster_fixture, loop, s, a, b  # noqa: F401
+from distributed.utils_test import gen_cluster, inc, slowadd, slowinc
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -78,6 +78,26 @@ async def test_submit_many_non_overlapping(c, s, a, b):
 @gen_cluster(
     client=True,
     nthreads=[
+        ("127.0.0.1", 4, {"resources": {"A": 2}}),
+        ("127.0.0.1", 4, {"resources": {"A": 1}}),
+    ],
+)
+async def test_submit_many_non_overlapping_2(c, s, a, b):
+    futures = c.map(slowinc, range(100), resources={"A": 1}, delay=0.02)
+
+    while len(a.data) + len(b.data) < 100:
+        await asyncio.sleep(0.01)
+        assert a.executing_count <= 2
+        assert b.executing_count <= 1
+
+    await wait(futures)
+    assert a.total_resources == a.available_resources
+    assert b.total_resources == b.available_resources
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[
         ("127.0.0.1", 1, {"resources": {"A": 1}}),
         ("127.0.0.1", 1, {"resources": {"B": 1}}),
     ],
@@ -131,10 +151,12 @@ async def test_map(c, s, a, b):
     ],
 )
 async def test_persist(c, s, a, b):
-    x = delayed(inc)(1)
-    y = delayed(inc)(x)
+    with dask.annotate(resources={"A": 1}):
+        x = delayed(inc)(1)
+    with dask.annotate(resources={"B": 1}):
+        y = delayed(inc)(x)
 
-    xx, yy = c.persist([x, y], resources={x: {"A": 1}, y: {"B": 1}})
+    xx, yy = c.persist([x, y], optimize_graph=False)
 
     await wait([xx, yy])
 
@@ -150,10 +172,12 @@ async def test_persist(c, s, a, b):
     ],
 )
 async def test_compute(c, s, a, b):
-    x = delayed(inc)(1)
-    y = delayed(inc)(x)
+    with dask.annotate(resources={"A": 1}):
+        x = delayed(inc)(1)
+    with dask.annotate(resources={"B": 1}):
+        y = delayed(inc)(x)
 
-    yy = c.compute(y, resources={x: {"A": 1}, y: {"B": 1}})
+    yy = c.compute(y, optimize_graph=False)
     await wait(yy)
 
     assert b.data
@@ -175,8 +199,10 @@ async def test_compute(c, s, a, b):
 async def test_get(c, s, a, b):
     dsk = {"x": (inc, 1), "y": (inc, "x")}
 
-    result = await c.get(dsk, "y", resources={"y": {"A": 1}}, sync=False)
+    result = await c.get(dsk, "y", resources={"A": 1}, sync=False)
     assert result == 3
+    assert "y" in a.data
+    assert not b.data
 
 
 @gen_cluster(
@@ -186,11 +212,12 @@ async def test_get(c, s, a, b):
         ("127.0.0.1", 1, {"resources": {"B": 1}}),
     ],
 )
-async def test_persist_tuple(c, s, a, b):
-    x = delayed(inc)(1)
-    y = delayed(inc)(x)
+async def test_persist_multiple_collections(c, s, a, b):
+    with dask.annotate(resources={"A": 1}):
+        x = delayed(inc)(1)
+        y = delayed(inc)(x)
 
-    xx, yy = c.persist([x, y], resources={(x, y): {"A": 1}})
+    xx, yy = c.persist([x, y], optimize_graph=False)
 
     await wait([xx, yy])
 
@@ -211,30 +238,10 @@ async def test_resources_str(c, s, a, b):
     yy = y.persist(resources={"MyRes": 1})
     await wait(yy)
 
-    ts_first = s.tasks[tokey(y.__dask_keys__()[0])]
+    ts_first = s.tasks[stringify(y.__dask_keys__()[0])]
     assert ts_first.resource_restrictions == {"MyRes": 1}
-    ts_last = s.tasks[tokey(y.__dask_keys__()[-1])]
+    ts_last = s.tasks[stringify(y.__dask_keys__()[-1])]
     assert ts_last.resource_restrictions == {"MyRes": 1}
-
-
-@gen_cluster(
-    client=True,
-    nthreads=[
-        ("127.0.0.1", 4, {"resources": {"A": 2}}),
-        ("127.0.0.1", 4, {"resources": {"A": 1}}),
-    ],
-)
-async def test_submit_many_non_overlapping(c, s, a, b):
-    futures = c.map(slowinc, range(100), resources={"A": 1}, delay=0.02)
-
-    while len(a.data) + len(b.data) < 100:
-        await asyncio.sleep(0.01)
-        assert a.executing_count <= 2
-        assert b.executing_count <= 1
-
-    await wait(futures)
-    assert a.total_resources == a.available_resources
-    assert b.total_resources == b.available_resources
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 4, {"resources": {"A": 2, "B": 1}})])
@@ -308,15 +315,16 @@ async def test_set_resources(c, s, a):
 async def test_persist_collections(c, s, a, b):
     da = pytest.importorskip("dask.array")
     x = da.arange(10, chunks=(5,))
-    y = x.map_blocks(lambda x: x + 1)
+    with dask.annotate(resources={"A": 1}):
+        y = x.map_blocks(lambda x: x + 1)
     z = y.map_blocks(lambda x: 2 * x)
     w = z.sum()
 
-    ww, yy = c.persist([w, y], resources={tuple(y.__dask_keys__()): {"A": 1}})
+    ww, yy = c.persist([w, y], optimize_graph=False)
 
     await wait([ww, yy])
 
-    assert all(tokey(key) in a.data for key in y.__dask_keys__())
+    assert all(stringify(key) in a.data for key in y.__dask_keys__())
 
 
 @pytest.mark.skip(reason="Should protect resource keys from optimization")
@@ -336,11 +344,11 @@ async def test_dont_optimize_out(c, s, a, b):
 
     await c.compute(w, resources={tuple(y.__dask_keys__()): {"A": 1}})
 
-    for key in map(tokey, y.__dask_keys__()):
+    for key in map(stringify, y.__dask_keys__()):
         assert "executing" in str(a.story(key))
 
 
-@pytest.mark.xfail(reason="atop fusion seemed to break this")
+@pytest.mark.skip(reason="atop fusion seemed to break this")
 @gen_cluster(
     client=True,
     nthreads=[
@@ -369,9 +377,7 @@ async def test_full_collections(c, s, a, b):
                 reason="don't track resources through optimization"
             ),
         ),
-        pytest.param(
-            False, marks=pytest.mark.skipif(WINDOWS, reason="intermittent failure")
-        ),
+        False,
     ],
 )
 def test_collections_get(client, optimize_graph, s, a, b):
@@ -382,9 +388,10 @@ def test_collections_get(client, optimize_graph, s, a, b):
 
     client.run(f, workers=[a["address"]])
 
-    x = da.random.random(100, chunks=(10,)) + 1
+    with dask.annotate(resources={"A": 1}):
+        x = da.random.random(100, chunks=(10,)) + 1
 
-    x.compute(resources={tuple(x.dask): {"A": 1}}, optimize_graph=optimize_graph)
+    x.compute(optimize_graph=optimize_graph)
 
     def g(dask_worker):
         return len(dask_worker.log)
@@ -392,3 +399,21 @@ def test_collections_get(client, optimize_graph, s, a, b):
     logs = client.run(g)
     assert logs[a["address"]]
     assert not logs[b["address"]]
+
+
+@gen_cluster(config={"distributed.worker.resources.my_resources": 1}, client=True)
+async def test_resources_from_config(c, s, a, b):
+    info = c.scheduler_info()
+    for worker in [a, b]:
+        assert info["workers"][worker.address]["resources"] == {"my_resources": 1}
+
+
+@gen_cluster(
+    worker_kwargs=dict(resources={"my_resources": 10}),
+    config={"distributed.worker.resources.my_resources": 1},
+    client=True,
+)
+async def test_resources_from_python_override_config(c, s, a, b):
+    info = c.scheduler_info()
+    for worker in [a, b]:
+        assert info["workers"][worker.address]["resources"] == {"my_resources": 10}

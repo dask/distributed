@@ -1,13 +1,14 @@
-import numpy as np
-from numpy.testing import assert_allclose
 import pytest
 
 keras = pytest.importorskip("keras")
+np = pytest.importorskip("numpy")
 
-from distributed.protocol import serialize, deserialize, dumps, loads, to_serialize
+from distributed.protocol import deserialize, dumps, loads, serialize, to_serialize
 
 
 def test_serialize_deserialize_model():
+    from numpy.testing import assert_allclose
+
     model = keras.models.Sequential()
     model.add(keras.layers.Dense(5, input_dim=3))
     model.add(keras.layers.Dense(2))

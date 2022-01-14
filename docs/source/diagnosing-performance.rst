@@ -19,9 +19,8 @@ identify performance issues.
 Fortunately, Dask collects a variety of diagnostic information during
 execution.  It does this both to provide performance feedback to users, but
 also for its own internal scheduling decisions.  The primary place to observe
-this feedback is the :doc:`diagnostic dashboard <web>`.  This document
-describes the various pieces of performance information available and how to
-access them.
+this feedback is the diagnostic dashboard.  This document describes the various
+pieces of performance information available and how to access them.
 
 
 Task start and stop times
@@ -39,7 +38,7 @@ The main way to observe these times is with the task stream plot on the
 scheduler's ``/status`` page where the colors of the bars correspond to the
 colors listed above.
 
-.. image:: https://raw.githubusercontent.com/dask/dask-org/master/images/bokeh-task-stream.gif
+.. image:: https://raw.githubusercontent.com/dask/dask-org/main/images/bokeh-task-stream.gif
    :alt: Dask task stream
    :width: 50%
 
@@ -73,7 +72,7 @@ any of the bars in the profile will zoom the user into just that section, as is
 typical with most profiling tools.  There is a timeline at the bottom of the
 page to allow users to select different periods in time.
 
-.. image:: https://raw.githubusercontent.com/dask/dask-org/master/images/daskboard-profile.gif
+.. image:: https://raw.githubusercontent.com/dask/dask-org/main/images/daskboard-profile.gif
    :alt: Dask profiler
    :width: 70%
 
@@ -121,7 +120,8 @@ Performance Reports
 Often when benchmarking and/or profiling, users may want to record a
 particular computation or even a full workflow.  Dask can save the bokeh
 dashboards as static HTML plots including the task stream, worker profiles,
-bandwidths, etc. This is done wrapping a computation with the ``performance_report`` context manager:
+bandwidths, etc. This is done wrapping a computation with the
+:class:`distributed.performance_report` context manager:
 
 .. code-block:: python
 
@@ -154,3 +154,35 @@ an estimate of differences.  All times recorded in workers take this estimated
 delay into account.  This helps, but still, imprecise measurements may exist.
 
 All times are intended to be from the scheduler's perspective.
+
+
+Analysing memory usage over time
+--------------------------------
+You may want to know how the cluster-wide memory usage evolves over time as a
+computation progresses, or how two different implementations of the same algorithm
+compare memory-wise.
+
+This is done wrapping a computation with the
+:class:`distributed.diagnostics.MemorySampler` context manager:
+
+.. code-block:: python
+
+    from distributed import Client
+    from distributed.diagnostics import MemorySampler
+
+    client = Client(...)
+    ms = MemorySampler()
+    with ms.sample("collection 1"):
+        collection1.compute()
+    with ms.sample("collection 2"):
+        collection2.compute()
+    ...
+    ms.plot(align=True)
+
+Sample output:
+
+.. image:: images/memory-sampler.svg
+    :alt: Sample output of the MemorySampler
+
+.. autoclass:: distributed.diagnostics.MemorySampler
+   :members:

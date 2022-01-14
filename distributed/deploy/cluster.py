@@ -1,32 +1,33 @@
 import asyncio
 import datetime
-from contextlib import suppress
 import logging
-import threading
-import warnings
+import uuid
+from contextlib import suppress
+from inspect import isawaitable
+
 from tornado.ioloop import PeriodicCallback
 
 import dask.config
-from dask.utils import format_bytes
-
-from .adaptive import Adaptive
+from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
+from dask.widgets import get_template
 
 from ..core import Status
+from ..objects import SchedulerInfo
 from ..utils import (
-    log_errors,
-    sync,
     Log,
     Logs,
-    thread_state,
+    LoopRunner,
+    NoOpAwaitable,
+    SyncMethodMixin,
     format_dashboard_link,
-    parse_timedelta,
+    log_errors,
 )
-
+from .adaptive import Adaptive
 
 logger = logging.getLogger(__name__)
 
 
-class Cluster:
+class Cluster(SyncMethodMixin):
     """Superclass for cluster objects
 
     This class contains common functionality for Dask Cluster manager classes.
@@ -50,43 +51,133 @@ class Cluster:
     """
 
     _supports_scaling = True
+    _cluster_info: dict = {}
 
-    def __init__(self, asynchronous, quiet=False):
+    def __init__(
+        self,
+        asynchronous=False,
+        loop=None,
+        quiet=False,
+        name=None,
+        scheduler_sync_interval=1,
+    ):
+        self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
+        self.loop = self._loop_runner.loop
+
         self.scheduler_info = {"workers": {}}
         self.periodic_callbacks = {}
-        self._asynchronous = asynchronous
         self._watch_worker_status_comm = None
         self._watch_worker_status_task = None
         self._cluster_manager_logs = []
         self.quiet = quiet
         self.scheduler_comm = None
+        self._adaptive = None
+        self._sync_interval = parse_timedelta(
+            scheduler_sync_interval, default="seconds"
+        )
+        self._sync_cluster_info_task = None
 
+        if name is None:
+            name = str(uuid.uuid4())[:8]
+
+        # Mask class attribute with instance attribute
+        self._cluster_info = {
+            "name": name,
+            "type": typename(type(self)),
+            **type(self)._cluster_info,
+        }
         self.status = Status.created
+
+    @property
+    def name(self):
+        return self._cluster_info["name"]
+
+    @name.setter
+    def name(self, name):
+        self._cluster_info["name"] = name
 
     async def _start(self):
         comm = await self.scheduler_comm.live_comm()
         await comm.write({"op": "subscribe_worker_status"})
-        self.scheduler_info = await comm.read()
+        self.scheduler_info = SchedulerInfo(await comm.read())
         self._watch_worker_status_comm = comm
         self._watch_worker_status_task = asyncio.ensure_future(
             self._watch_worker_status(comm)
         )
+
+        info = await self.scheduler_comm.get_metadata(
+            keys=["cluster-manager-info"], default={}
+        )
+        self._cluster_info.update(info)
+
+        # Start a background task for syncing cluster info with the scheduler
+        self._sync_cluster_info_task = asyncio.ensure_future(self._sync_cluster_info())
+
+        for pc in self.periodic_callbacks.values():
+            pc.start()
         self.status = Status.running
+
+    async def _sync_cluster_info(self):
+        err_count = 0
+        warn_at = 5
+        max_interval = 10 * self._sync_interval
+        # Loop until the cluster is shutting down. We shouldn't really need
+        # this check (the `CancelledError` should be enough), but something
+        # deep in the comms code is silencing `CancelledError`s _some_ of the
+        # time, resulting in a cancellation not always bubbling back up to
+        # here. Relying on the status is fine though, not worth changing.
+        while self.status == Status.running:
+            try:
+                await self.scheduler_comm.set_metadata(
+                    keys=["cluster-manager-info"],
+                    value=self._cluster_info.copy(),
+                )
+                err_count = 0
+            except asyncio.CancelledError:
+                # Task is being closed. When we drop Python < 3.8 we can drop
+                # this check (since CancelledError is not a subclass of
+                # Exception then).
+                break
+            except Exception:
+                err_count += 1
+                # Only warn if multiple subsequent attempts fail, and only once
+                # per set of subsequent failed attempts. This way we're not
+                # excessively noisy during a connection blip, but we also don't
+                # silently fail.
+                if err_count == warn_at:
+                    logger.warning(
+                        "Failed to sync cluster info multiple times - perhaps "
+                        "there's a connection issue? Error:",
+                        exc_info=True,
+                    )
+            # Sleep, with error backoff
+            interval = min(max_interval, self._sync_interval * 1.5 ** err_count)
+            await asyncio.sleep(interval)
 
     async def _close(self):
         if self.status == Status.closed:
             return
+
+        self.status = Status.closing
+
+        with suppress(AttributeError):
+            self._adaptive.stop()
 
         if self._watch_worker_status_comm:
             await self._watch_worker_status_comm.close()
         if self._watch_worker_status_task:
             await self._watch_worker_status_task
 
-        for pc in self.periodic_callbacks.values():
-            pc.stop()
+        if self._sync_cluster_info_task:
+            self._sync_cluster_info_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._sync_cluster_info_task
 
         if self.scheduler_comm:
             await self.scheduler_comm.close_rpc()
+
+        for pc in self.periodic_callbacks.values():
+            pc.stop()
 
         self.status = Status.closed
 
@@ -94,9 +185,7 @@ class Cluster:
         # If the cluster is already closed, we're already done
         if self.status == Status.closed:
             if self.asynchronous:
-                future = asyncio.Future()
-                future.set_result(None)
-                return future
+                return NoOpAwaitable()
             else:
                 return
 
@@ -109,7 +198,7 @@ class Cluster:
                 self.loop.add_callback(self.close)
 
     async def _watch_worker_status(self, comm):
-        """ Listen to scheduler for updates on adding and removing workers """
+        """Listen to scheduler for updates on adding and removing workers"""
         while True:
             try:
                 msgs = await comm.read()
@@ -154,7 +243,7 @@ class Cluster:
 
         Parameters
         ----------
-        n: int
+        n : int
             Target number of workers
 
         Examples
@@ -162,25 +251,6 @@ class Cluster:
         >>> cluster.scale(10)  # scale cluster to ten workers
         """
         raise NotImplementedError()
-
-    @property
-    def asynchronous(self):
-        return (
-            self._asynchronous
-            or getattr(thread_state, "asynchronous", False)
-            or hasattr(self.loop, "_thread_identity")
-            and self.loop._thread_identity == threading.get_ident()
-        )
-
-    def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
-        asynchronous = asynchronous or self.asynchronous
-        if asynchronous:
-            future = func(*args, **kwargs)
-            if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
-            return future
-        else:
-            return sync(self.loop, func, *args, **kwargs)
 
     def _log(self, log):
         """Log a message.
@@ -211,6 +281,8 @@ class Cluster:
             logs["Scheduler"] = Log("\n".join(line for level, line in L))
 
         if workers:
+            if workers is True:
+                workers = None
             d = await self.scheduler_comm.worker_logs(workers=workers)
             for k, v in d.items():
                 logs[k] = Log("\n".join(line for level, line in v))
@@ -240,8 +312,8 @@ class Cluster:
             self._get_logs, cluster=cluster, scheduler=scheduler, workers=workers
         )
 
+    @_deprecated(use_instead="get_logs")
     def logs(self, *args, **kwargs):
-        warnings.warn("logs is deprecated, use get_logs instead", DeprecationWarning)
         return self.get_logs(*args, **kwargs)
 
     @property
@@ -254,7 +326,11 @@ class Cluster:
             host = self.scheduler_address.split("://")[1].split("/")[0].split(":")[0]
             return format_dashboard_link(host, port)
 
-    def _widget_status(self):
+    def _scaling_status(self):
+        if self._adaptive and self._adaptive.periodic_callback:
+            mode = "Adaptive"
+        else:
+            mode = "Manual"
         workers = len(self.scheduler_info["workers"])
         if hasattr(self, "worker_spec"):
             requested = sum(
@@ -265,65 +341,40 @@ class Cluster:
             requested = len(self.workers)
         else:
             requested = workers
-        cores = sum(v["nthreads"] for v in self.scheduler_info["workers"].values())
-        memory = sum(v["memory_limit"] for v in self.scheduler_info["workers"].values())
-        memory = format_bytes(memory)
-        text = """
-<div>
-  <style scoped>
-    .dataframe tbody tr th:only-of-type {
-        vertical-align: middle;
-    }
 
-    .dataframe tbody tr th {
-        vertical-align: top;
-    }
-
-    .dataframe thead th {
-        text-align: right;
-    }
-  </style>
-  <table style="text-align: right;">
-    <tr> <th>Workers</th> <td>%s</td></tr>
-    <tr> <th>Cores</th> <td>%d</td></tr>
-    <tr> <th>Memory</th> <td>%s</td></tr>
-  </table>
-</div>
-""" % (
-            workers if workers == requested else "%d / %d" % (workers, requested),
-            cores,
-            memory,
-        )
-        return text
+        worker_count = workers if workers == requested else f"{workers} / {requested}"
+        return f"""
+        <table>
+            <tr><td style="text-align: left;">Scaling mode: {mode}</td></tr>
+            <tr><td style="text-align: left;">Workers: {worker_count}</td></tr>
+        </table>
+        """
 
     def _widget(self):
-        """ Create IPython widget for display within a notebook """
+        """Create IPython widget for display within a notebook"""
         try:
             return self._cached_widget
         except AttributeError:
             pass
 
         try:
-            from ipywidgets import Layout, VBox, HBox, IntText, Button, HTML, Accordion
+            from ipywidgets import (
+                HTML,
+                Accordion,
+                Button,
+                HBox,
+                IntText,
+                Layout,
+                Tab,
+                VBox,
+            )
         except ImportError:
             self._cached_widget = None
             return None
 
         layout = Layout(width="150px")
 
-        if self.dashboard_link:
-            link = '<p><b>Dashboard: </b><a href="%s" target="_blank">%s</a></p>\n' % (
-                self.dashboard_link,
-                self.dashboard_link,
-            )
-        else:
-            link = ""
-
-        title = "<h2>%s</h2>" % self._cluster_class_name
-        title = HTML(title)
-        dashboard = HTML(link)
-
-        status = HTML(self._widget_status(), layout=Layout(min_width="150px"))
+        status = HTML(self._repr_html_())
 
         if self._supports_scaling:
             request = IntText(0, description="Workers", layout=layout)
@@ -359,12 +410,18 @@ class Cluster:
         else:
             accordion = HTML("")
 
-        box = VBox([title, HBox([status, accordion]), dashboard])
+        scale_status = HTML(self._scaling_status())
 
-        self._cached_widget = box
+        tab = Tab()
+        tab.children = [status, VBox([scale_status, accordion])]
+        tab.set_title(0, "Status")
+        tab.set_title(1, "Scaling")
+
+        self._cached_widget = tab
 
         def update():
-            status.value = self._widget_status()
+            status.value = self._repr_html_()
+            scale_status.value = self._scaling_status()
 
         cluster_repr_interval = parse_timedelta(
             dask.config.get("distributed.deploy.cluster-repr-interval", default="ms")
@@ -373,24 +430,23 @@ class Cluster:
         self.periodic_callbacks["cluster-repr"] = pc
         pc.start()
 
-        return box
+        return tab
 
-    def _repr_html_(self):
-        if self.dashboard_link:
-            dashboard = "<a href='{0}' target='_blank'>{0}</a>".format(
-                self.dashboard_link
-            )
-        else:
-            dashboard = "Not Available"
-        return (
-            "<div style='background-color: #f2f2f2; display: inline-block; "
-            "padding: 10px; border: 1px solid #999999;'>\n"
-            "  <h3>{cls}</h3>\n"
-            "  <ul>\n"
-            "    <li><b>Dashboard: </b>{dashboard}\n"
-            "  </ul>\n"
-            "</div>\n"
-        ).format(cls=self._cluster_class_name, dashboard=dashboard)
+    def _repr_html_(self, cluster_status=None):
+
+        try:
+            scheduler_info_repr = self.scheduler_info._repr_html_()
+        except AttributeError:
+            scheduler_info_repr = "Scheduler not started yet."
+
+        return get_template("cluster.html.j2").render(
+            type=type(self).__name__,
+            name=self.name,
+            workers=self.scheduler_info["workers"],
+            dashboard_link=self.dashboard_link,
+            scheduler_info_repr=scheduler_info_repr,
+            cluster_status=cluster_status,
+        )
 
     def _ipython_display_(self, **kwargs):
         widget = self._widget()
@@ -413,10 +469,14 @@ class Cluster:
         return self
 
     async def __aexit__(self, typ, value, traceback):
-        await self.close()
+        f = self.close()
+        if isawaitable(f):
+            await f
 
     @property
-    def scheduler_address(self):
+    def scheduler_address(self) -> str:
+        if not self.scheduler_comm:
+            return "<Not Connected>"
         return self.scheduler_comm.address
 
     @property
@@ -424,8 +484,9 @@ class Cluster:
         return getattr(self, "_name", type(self).__name__)
 
     def __repr__(self):
-        text = "%s(%r, workers=%d, threads=%d" % (
+        text = "%s(%s, %r, workers=%d, threads=%d" % (
             self._cluster_class_name,
+            self.name,
             self.scheduler_address,
             len(self.scheduler_info["workers"]),
             sum(w["nthreads"] for w in self.scheduler_info["workers"].values()),
@@ -449,3 +510,9 @@ class Cluster:
     @property
     def observed(self):
         return {d["name"] for d in self.scheduler_info["workers"].values()}
+
+    def __eq__(self, other):
+        return type(other) == type(self) and self.name == other.name
+
+    def __hash__(self):
+        return id(self)

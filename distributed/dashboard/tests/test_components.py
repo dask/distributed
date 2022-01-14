@@ -6,12 +6,12 @@ pytest.importorskip("bokeh")
 
 from bokeh.models import ColumnDataSource, Model
 
-from distributed.utils_test import slowinc, gen_cluster
 from distributed.dashboard.components.shared import (
     Processing,
     ProfilePlot,
     ProfileTimePlot,
 )
+from distributed.utils_test import gen_cluster, slowinc
 
 
 @pytest.mark.parametrize("Component", [Processing])

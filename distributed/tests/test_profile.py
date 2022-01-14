@@ -1,21 +1,22 @@
-import pytest
 import sys
-import time
-from tlz import first
 import threading
+import time
 
-from distributed.compatibility import WINDOWS
+import pytest
+from tlz import first
+
 from distributed import metrics
+from distributed.compatibility import WINDOWS
 from distributed.profile import (
-    process,
-    merge,
-    create,
     call_stack,
+    create,
     identifier,
-    watch,
-    llprocess,
     ll_get_stack,
+    llprocess,
+    merge,
     plot_data,
+    process,
+    watch,
 )
 
 

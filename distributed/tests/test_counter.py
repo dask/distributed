@@ -1,12 +1,11 @@
 import pytest
 
 from distributed.counter import Counter
-from distributed.utils_test import loop  # noqa F401
 
 try:
     from distributed.counter import Digest
 except ImportError:
-    Digest = None
+    Digest = None  # type: ignore
 
 
 @pytest.mark.parametrize(

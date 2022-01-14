@@ -1,5 +1,8 @@
-from distributed.protocol import serialize, deserialize
 import pytest
+
+pytestmark = pytest.mark.gpu
+
+from distributed.protocol import deserialize, serialize
 
 numpy = pytest.importorskip("numpy")
 cuda = pytest.importorskip("numba.cuda")
@@ -21,10 +24,10 @@ def test_serialize_rmm_device_buffer(size, serializers):
     y_np = y.copy_to_host()
 
     if serializers[0] == "cuda":
-        assert header["strides"] == (1,)
+        assert header["sub-header"]["strides"] == (1,)
         assert all(hasattr(f, "__cuda_array_interface__") for f in frames)
     elif serializers[0] == "dask":
-        assert header["strides"] == (1,)
+        assert header["sub-header"]["strides"] == (1,)
         assert all(isinstance(f, memoryview) for f in frames)
 
     assert (x_np == y_np).all()

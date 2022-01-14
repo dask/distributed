@@ -1,7 +1,12 @@
 import logging
+import os
 import socket
 import subprocess
 import sys
+import uuid
+import zipfile
+
+from dask.utils import funcname, tmpfile
 
 logger = logging.getLogger(__name__)
 
@@ -56,37 +61,37 @@ class SchedulerPlugin:
         pass
 
     def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
-        """ Run when a new graph / tasks enter the scheduler """
+        """Run when a new graph / tasks enter the scheduler"""
 
     def restart(self, scheduler, **kwargs):
-        """ Run when the scheduler restarts itself """
+        """Run when the scheduler restarts itself"""
 
     def transition(self, key, start, finish, *args, **kwargs):
         """Run whenever a task changes state
 
         Parameters
         ----------
-        key: string
-        start: string
+        key : string
+        start : string
             Start state of the transition.
             One of released, waiting, processing, memory, error.
-        finish: string
+        finish : string
             Final state of the transition.
-        *args, **kwargs: More options passed when transitioning
+        *args, **kwargs : More options passed when transitioning
             This may include worker ID, compute time, etc.
         """
 
     def add_worker(self, scheduler=None, worker=None, **kwargs):
-        """ Run when a new worker enters the cluster """
+        """Run when a new worker enters the cluster"""
 
     def remove_worker(self, scheduler=None, worker=None, **kwargs):
-        """ Run when a worker leaves the cluster """
+        """Run when a worker leaves the cluster"""
 
     def add_client(self, scheduler=None, client=None, **kwargs):
-        """ Run when a new client connects """
+        """Run when a new client connects"""
 
     def remove_client(self, scheduler=None, client=None, **kwargs):
-        """ Run when a client disconnects """
+        """Run when a client disconnects"""
 
 
 class WorkerPlugin:
@@ -115,8 +120,12 @@ class WorkerPlugin:
     ...
     ...     def transition(self, key, start, finish, *args, **kwargs):
     ...         if finish == 'error':
-    ...             exc = self.worker.exceptions[key]
-    ...             self.logger.error("Task '%s' has failed with exception: %s" % (key, str(exc)))
+    ...             ts = self.worker.tasks[key]
+    ...             exc_info = (type(ts.exception), ts.exception, ts.traceback)
+    ...             self.logger.error(
+    ...                 "Error during computation of '%s'.", key,
+    ...                 exc_info=exc_info
+    ...             )
 
     >>> plugin = ErrorLogger()
     >>> client.register_worker_plugin(plugin)  # doctest: +SKIP
@@ -130,7 +139,7 @@ class WorkerPlugin:
         """
 
     def teardown(self, worker):
-        """ Run when the worker to which the plugin is attached to is closed """
+        """Run when the worker to which the plugin is attached to is closed"""
 
     def transition(self, key, start, finish, **kwargs):
         """
@@ -143,46 +152,61 @@ class WorkerPlugin:
 
         Parameters
         ----------
-        key: string
-        start: string
+        key : string
+        start : string
             Start state of the transition.
             One of waiting, ready, executing, long-running, memory, error.
-        finish: string
+        finish : string
             Final state of the transition.
-        kwargs: More options passed when transitioning
+        kwargs : More options passed when transitioning
         """
 
-    def release_key(self, key, state, cause, reason, report):
-        """
-        Called when the worker releases a task.
 
-        Parameters
-        ----------
-        key: string
-        state: string
-            State of the released task.
-            One of waiting, ready, executing, long-running, memory, error.
-        cause: string or None
-            Additional information on what triggered the release of the task.
-        reason: None
-            Not used.
-        report: bool
-            Whether the worker should report the released task to the scheduler.
+class NannyPlugin:
+    """Interface to extend the Nanny
+
+    A worker plugin enables custom code to run at different stages of the Workers'
+    lifecycle. A nanny plugin does the same thing, but benefits from being able
+    to run code before the worker is started, or to restart the worker if
+    necessary.
+
+    To implement a plugin implement some of the methods of this class and register
+    the plugin to your client in order to have it attached to every existing and
+    future nanny by passing ``nanny=True`` to
+    :meth:`Client.register_worker_plugin<distributed.Client.register_worker_plugin>`.
+
+    The ``restart`` attribute is used to control whether or not a running ``Worker``
+    needs to be restarted when registering the plugin.
+
+    See Also
+    --------
+    WorkerPlugin
+    SchedulerPlugin
+    """
+
+    restart = False
+
+    def setup(self, nanny):
+        """
+        Run when the plugin is attached to a nanny. This happens when the plugin is registered
+        and attached to existing nannies, or when a nanny is created after the plugin has been
+        registered.
         """
 
-    def release_dep(self, dep, state, report):
-        """
-        Called when the worker releases a dependency.
+    def teardown(self, nanny):
+        """Run when the nanny to which the plugin is attached to is closed"""
 
-        Parameters
-        ----------
-        dep: string
-        state: string
-            State of the released dependency.
-            One of waiting, flight, memory.
-        report: bool
-            Whether the worker should report the released dependency to the scheduler.
-        """
+
+def _get_plugin_name(plugin) -> str:
+    """Return plugin name.
+
+    If plugin has no name attribute a random name is used.
+
+    """
+    if hasattr(plugin, "name"):
+        return plugin.name
+    else:
+        return funcname(type(plugin)) + "-" + str(uuid.uuid4())
 
 
 class PipInstall(WorkerPlugin):
@@ -236,9 +260,8 @@ class PipInstall(WorkerPlugin):
         async with Lock(socket.gethostname()):  # don't clobber one installation
             logger.info("Pip installing the following packages: %s", self.packages)
             proc = subprocess.Popen(
-                [sys.executable, "-m", "pip"]
+                [sys.executable, "-m", "pip", "install"]
                 + self.pip_options
-                + ["install"]
                 + self.packages,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -258,3 +281,115 @@ class PipInstall(WorkerPlugin):
                     worker.loop.add_callback(
                         worker.close_gracefully, restart=True
                     )  # restart
+
+
+# Adapted from https://github.com/dask/distributed/issues/3560#issuecomment-596138522
+class UploadFile(WorkerPlugin):
+    """A WorkerPlugin to upload a local file to workers.
+
+    Parameters
+    ----------
+    filepath: str
+        A path to the file (.py, egg, or zip) to upload
+
+    Examples
+    --------
+    >>> from distributed.diagnostics.plugin import UploadFile
+
+    >>> client.register_worker_plugin(UploadFile("/path/to/file.py"))  # doctest: +SKIP
+    """
+
+    name = "upload_file"
+
+    def __init__(self, filepath):
+        """
+        Initialize the plugin by reading in the data from the given file.
+        """
+        self.filename = os.path.basename(filepath)
+        with open(filepath, "rb") as f:
+            self.data = f.read()
+
+    async def setup(self, worker):
+        response = await worker.upload_file(
+            comm=None, filename=self.filename, data=self.data, load=True
+        )
+        assert len(self.data) == response["nbytes"]
+
+
+class Environ(NannyPlugin):
+    restart = True
+
+    def __init__(self, environ={}):
+        self.environ = {k: str(v) for k, v in environ.items()}
+
+    async def setup(self, nanny):
+        nanny.env.update(self.environ)
+
+
+class UploadDirectory(NannyPlugin):
+    """A NannyPlugin to upload a local file to workers.
+
+    Parameters
+    ----------
+    path: str
+        A path to the directory to upload
+
+    Examples
+    --------
+    >>> from distributed.diagnostics.plugin import UploadDirectory
+    >>> client.register_worker_plugin(UploadDirectory("/path/to/directory"), nanny=True)  # doctest: +SKIP
+    """
+
+    def __init__(
+        self,
+        path,
+        restart=False,
+        update_path=False,
+        skip_words=(".git", ".github", ".pytest_cache", "tests", "docs"),
+        skip=(lambda fn: os.path.splitext(fn)[1] == ".pyc",),
+    ):
+        """
+        Initialize the plugin by reading in the data from the given file.
+        """
+        path = os.path.expanduser(path)
+        self.path = os.path.split(path)[-1]
+        self.restart = restart
+        self.update_path = update_path
+
+        self.name = "upload-directory-" + os.path.split(path)[-1]
+
+        with tmpfile(extension="zip") as fn:
+            with zipfile.ZipFile(fn, "w", zipfile.ZIP_DEFLATED) as z:
+                for root, dirs, files in os.walk(path):
+                    for file in files:
+                        filename = os.path.join(root, file)
+                        if any(predicate(filename) for predicate in skip):
+                            continue
+                        dirs = filename.split(os.sep)
+                        if any(word in dirs for word in skip_words):
+                            continue
+
+                        archive_name = os.path.relpath(
+                            os.path.join(root, file), os.path.join(path, "..")
+                        )
+                        z.write(filename, archive_name)
+
+            with open(fn, "rb") as f:
+                self.data = f.read()
+
+    async def setup(self, nanny):
+        fn = os.path.join(nanny.local_directory, f"tmp-{str(uuid.uuid4())}.zip")
+        with open(fn, "wb") as f:
+            f.write(self.data)
+
+        import zipfile
+
+        with zipfile.ZipFile(fn) as z:
+            z.extractall(path=nanny.local_directory)
+
+        if self.update_path:
+            path = os.path.join(nanny.local_directory, self.path)
+            if path not in sys.path:
+                sys.path.insert(0, path)
+
+        os.remove(fn)

@@ -1,33 +1,30 @@
 import math
 
-from distributed.dashboard.components import DashboardComponent, add_periodic_callback
-
-from bokeh.plotting import figure
+from bokeh.core.properties import without_property_validation
 from bokeh.models import (
-    ColumnDataSource,
     BasicTicker,
-    NumeralTickFormatter,
-    TapTool,
-    OpenURL,
+    ColumnDataSource,
     HoverTool,
+    NumeralTickFormatter,
+    OpenURL,
+    TapTool,
 )
+from bokeh.plotting import figure
 from tornado import escape
+
 from dask.utils import format_bytes
+
+from distributed.dashboard.components import DashboardComponent, add_periodic_callback
+from distributed.dashboard.components.scheduler import BOKEH_THEME, TICKS_1024, env
+from distributed.dashboard.utils import update
+from distributed.diagnostics import nvml
 from distributed.utils import log_errors
-from distributed.dashboard.components.scheduler import BOKEH_THEME, TICKS_1024
-from distributed.dashboard.utils import without_property_validation, update
 
-
-try:
-    import pynvml
-
-    pynvml.nvmlInit()
-except Exception:
-    pass
+NVML_ENABLED = nvml.device_get_count() > 0
 
 
 class GPUCurrentLoad(DashboardComponent):
-    """ How many tasks are on each worker """
+    """How many tasks are on each worker"""
 
     def __init__(self, scheduler, width=600, **kwargs):
         with log_errors():
@@ -53,7 +50,7 @@ class GPUCurrentLoad(DashboardComponent):
                 id="bk-gpu-memory-worker-plot",
                 width=int(width / 2),
                 name="gpu_memory_histogram",
-                **kwargs
+                **kwargs,
             )
             rect = memory.rect(
                 source=self.source,
@@ -71,7 +68,7 @@ class GPUCurrentLoad(DashboardComponent):
                 id="bk-gpu-utilization-worker-plot",
                 width=int(width / 2),
                 name="gpu_utilization_histogram",
-                **kwargs
+                **kwargs,
             )
             rect = utilization.rect(
                 source=self.source,
@@ -98,7 +95,6 @@ class GPUCurrentLoad(DashboardComponent):
                 )
                 fig.add_tools(tap)
 
-                fig.toolbar.logo = None
                 fig.toolbar_location = None
                 fig.yaxis.visible = False
 
@@ -163,7 +159,7 @@ class GPUCurrentLoad(DashboardComponent):
                 "escaped_worker": [escape.url_escape(w) for w in worker],
             }
 
-            self.memory_figure.title.text = "GPU Memory: %s / %s" % (
+            self.memory_figure.title.text = "GPU Memory: {} / {}".format(
                 format_bytes(sum(memory)),
                 format_bytes(memory_total),
             )
@@ -173,16 +169,32 @@ class GPUCurrentLoad(DashboardComponent):
 
 
 def gpu_memory_doc(scheduler, extra, doc):
-    gpu_load = GPUCurrentLoad(scheduler, sizing_mode="stretch_both")
-    gpu_load.update()
-    add_periodic_callback(doc, gpu_load, 100)
-    doc.add_root(gpu_load.memory_figure)
-    doc.theme = BOKEH_THEME
+    with log_errors():
+        gpu_load = GPUCurrentLoad(scheduler, sizing_mode="stretch_both")
+        gpu_load.update()
+        add_periodic_callback(doc, gpu_load, 100)
+        doc.add_root(gpu_load.memory_figure)
+        doc.theme = BOKEH_THEME
 
 
 def gpu_utilization_doc(scheduler, extra, doc):
-    gpu_load = GPUCurrentLoad(scheduler, sizing_mode="stretch_both")
-    gpu_load.update()
-    add_periodic_callback(doc, gpu_load, 100)
-    doc.add_root(gpu_load.utilization_figure)
-    doc.theme = BOKEH_THEME
+    with log_errors():
+        gpu_load = GPUCurrentLoad(scheduler, sizing_mode="stretch_both")
+        gpu_load.update()
+        add_periodic_callback(doc, gpu_load, 100)
+        doc.add_root(gpu_load.utilization_figure)
+        doc.theme = BOKEH_THEME
+
+
+def gpu_doc(scheduler, extra, doc):
+    with log_errors():
+        gpu_load = GPUCurrentLoad(scheduler, sizing_mode="stretch_both")
+        gpu_load.update()
+        add_periodic_callback(doc, gpu_load, 100)
+        doc.add_root(gpu_load.memory_figure)
+        doc.add_root(gpu_load.utilization_figure)
+
+        doc.title = "Dask: GPU"
+        doc.theme = BOKEH_THEME
+        doc.template = env.get_template("gpu.html")
+        doc.template_variables.update(extra)

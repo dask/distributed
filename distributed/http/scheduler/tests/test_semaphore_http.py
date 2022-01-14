@@ -1,9 +1,8 @@
 import pytest
-
 from tornado.httpclient import AsyncHTTPClient
 
-from distributed.utils_test import gen_cluster
 from distributed import Semaphore
+from distributed.utils_test import gen_cluster
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
@@ -20,19 +19,19 @@ async def test_prometheus_collect_task_states(c, s, a, b):
         families = {
             family.name: family
             for family in text_string_to_metric_families(txt)
-            if family.name.startswith("semaphore_")
+            if family.name.startswith("dask_semaphore_")
         }
         return families
 
     active_metrics = await fetch_metrics()
 
     expected_metrics = {
-        "semaphore_max_leases",
-        "semaphore_active_leases",
-        "semaphore_pending_leases",
-        "semaphore_acquire",
-        "semaphore_release",
-        "semaphore_average_pending_lease_time_s",
+        "dask_semaphore_max_leases",
+        "dask_semaphore_active_leases",
+        "dask_semaphore_pending_leases",
+        "dask_semaphore_acquire",
+        "dask_semaphore_release",
+        "dask_semaphore_average_pending_lease_time_s",
     }
 
     assert active_metrics.keys() == expected_metrics
@@ -49,28 +48,34 @@ async def test_prometheus_collect_task_states(c, s, a, b):
         assert len(samples) == 1
         sample = samples.pop()
         assert sample.labels["name"] == "test"
-        if name == "semaphore_max_leases":
+        if name == "dask_semaphore_max_leases":
             assert sample.value == 2
         else:
             assert sample.value == 0
 
     assert await sem.acquire()
     active_metrics = await fetch_metrics()
-    assert active_metrics["semaphore_max_leases"].samples[0].value == 2
-    assert active_metrics["semaphore_active_leases"].samples[0].value == 1
-    assert active_metrics["semaphore_average_pending_lease_time_s"].samples[0].value > 0
-    assert active_metrics["semaphore_acquire"].samples[0].value == 1
-    assert active_metrics["semaphore_release"].samples[0].value == 0
-    assert active_metrics["semaphore_pending_leases"].samples[0].value == 0
+    assert active_metrics["dask_semaphore_max_leases"].samples[0].value == 2
+    assert active_metrics["dask_semaphore_active_leases"].samples[0].value == 1
+    assert (
+        active_metrics["dask_semaphore_average_pending_lease_time_s"].samples[0].value
+        > 0
+    )
+    assert active_metrics["dask_semaphore_acquire"].samples[0].value == 1
+    assert active_metrics["dask_semaphore_release"].samples[0].value == 0
+    assert active_metrics["dask_semaphore_pending_leases"].samples[0].value == 0
 
     assert await sem.release() is True
     active_metrics = await fetch_metrics()
-    assert active_metrics["semaphore_max_leases"].samples[0].value == 2
-    assert active_metrics["semaphore_active_leases"].samples[0].value == 0
-    assert active_metrics["semaphore_average_pending_lease_time_s"].samples[0].value > 0
-    assert active_metrics["semaphore_acquire"].samples[0].value == 1
-    assert active_metrics["semaphore_release"].samples[0].value == 1
-    assert active_metrics["semaphore_pending_leases"].samples[0].value == 0
+    assert active_metrics["dask_semaphore_max_leases"].samples[0].value == 2
+    assert active_metrics["dask_semaphore_active_leases"].samples[0].value == 0
+    assert (
+        active_metrics["dask_semaphore_average_pending_lease_time_s"].samples[0].value
+        > 0
+    )
+    assert active_metrics["dask_semaphore_acquire"].samples[0].value == 1
+    assert active_metrics["dask_semaphore_release"].samples[0].value == 1
+    assert active_metrics["dask_semaphore_pending_leases"].samples[0].value == 0
 
     await sem.close()
     active_metrics = await fetch_metrics()

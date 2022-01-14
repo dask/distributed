@@ -91,6 +91,7 @@ Contents
    efficiency
    limitations
    locality
+   logging
    manage-computation
    memory
    priority
@@ -108,14 +109,13 @@ Contents
 
    actors
    asynchronous
-   configuration
    ipython
-   prometheus
    http_services
    publish
    resources
    task-launch
    tls
+   active_memory_manager
 
 .. toctree::
    :maxdepth: 1

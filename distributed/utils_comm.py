@@ -1,17 +1,18 @@
 import asyncio
+import logging
+import random
 from collections import defaultdict
 from functools import partial
 from itertools import cycle
-import logging
-import random
 
-from dask.optimization import SubgraphCallable
+from tlz import concat, drop, groupby, merge
+
 import dask.config
-from dask.utils import parse_timedelta
-from tlz import merge, concat, groupby, drop
+from dask.optimization import SubgraphCallable
+from dask.utils import parse_timedelta, stringify
 
 from .core import rpc
-from .utils import All, tokey
+from .utils import All
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=No
             for worker, c in coroutines.items():
                 try:
                     r = await c
-                except EnvironmentError:
+                except OSError:
                     missing_workers.add(worker)
                 except ValueError as e:
                     logger.info(
@@ -111,7 +112,7 @@ class WrappedKey:
         self.key = key
 
     def __repr__(self):
-        return "%s('%s')" % (type(self).__name__, self.key)
+        return f"{type(self).__name__}('{self.key}')"
 
 
 _round_robin_counter = [0]
@@ -210,7 +211,7 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
             if futures:
                 myset.update(futures)
                 futures = (
-                    tuple(tokey(f.key) for f in futures)
+                    tuple(stringify(f.key) for f in futures)
                     if byte_keys
                     else tuple(f.key for f in futures)
                 )
@@ -231,14 +232,13 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
         return typ(outs)
     elif typ is dict:
         if o:
-            values = [unpack_remotedata(v, byte_keys, myset) for v in o.values()]
-            return dict(zip(o.keys(), values))
+            return {k: unpack_remotedata(v, byte_keys, myset) for k, v in o.items()}
         else:
             return o
     elif issubclass(typ, WrappedKey):  # TODO use type is Future
         k = o.key
         if byte_keys:
-            k = tokey(k)
+            k = stringify(k)
         myset.add(o)
         return k
     else:
@@ -250,9 +250,9 @@ def pack_data(o, d, key_types=object):
 
     Parameters
     ----------
-    o:
+    o
         core data structures containing literals and keys
-    d: dict
+    d : dict
         mapping of keys to data
 
     Examples
@@ -285,9 +285,9 @@ def subs_multiple(o, d):
 
     Parameters
     ----------
-    o:
+    o
         Core data structures containing literals and keys
-    d: dict
+    d : dict
         Mapping of keys to values
 
     Examples

@@ -5,8 +5,8 @@ Code heavily borrowed from Lib/tests/make_ssl_certs.py in CPython.
 
 import os
 import shutil
-import tempfile
 import subprocess
+import tempfile
 
 req_template = """
     [req]
@@ -34,8 +34,8 @@ req_template = """
     database  = $dir/index.txt
     crlnumber = $dir/crl.txt
     default_md = sha256
-    default_days = 3600
-    default_crl_days = 3600
+    default_days = 360000
+    default_crl_days = 360000
     certificate = tls-ca-cert.pem
     private_key = tls-ca-key.pem
     serial    = $dir/serial
@@ -84,7 +84,7 @@ def make_cert_key(hostname, sign=False):
             "req",
             "-new",
             "-days",
-            "3650",
+            "365242",
             "-nodes",
             "-newkey",
             "rsa:2048",
@@ -120,9 +120,9 @@ def make_cert_key(hostname, sign=False):
             ]
             subprocess.check_call(["openssl"] + args)
 
-        with open(cert_file, "r") as f:
+        with open(cert_file) as f:
             cert = f.read()
-        with open(key_file, "r") as f:
+        with open(key_file) as f:
             key = f.read()
         return cert, key
     finally:
@@ -154,7 +154,7 @@ def make_ca():
                 "req",
                 "-new",
                 "-days",
-                "3650",
+                "365242",
                 "-extensions",
                 "v3_ca",
                 "-nodes",
@@ -181,7 +181,7 @@ def make_ca():
                 "-keyfile",
                 "tls-ca-key.pem",
                 "-days",
-                "3650",
+                "365242",
                 "-selfsign",
                 "-extensions",
                 "v3_ca",
@@ -203,7 +203,7 @@ if __name__ == "__main__":
 
     # For certificate matching tests
     make_ca()
-    with open("tls-ca-cert.pem", "r") as f:
+    with open("tls-ca-cert.pem") as f:
         ca_cert = f.read()
 
     cert, key = make_cert_key("localhost", sign=True)

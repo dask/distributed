@@ -1,21 +1,23 @@
-from abc import ABC, abstractmethod, abstractproperty
+from __future__ import annotations
+
 import asyncio
-from contextlib import suppress
 import inspect
 import logging
 import random
 import sys
 import weakref
+from abc import ABC, abstractmethod
+from contextlib import suppress
+from typing import ClassVar
 
 import dask
+from dask.utils import parse_timedelta
 
 from ..metrics import time
-from ..utils import parse_timedelta, TimeoutError
+from ..protocol import pickle
+from ..protocol.compression import get_default_compression
 from . import registry
 from .addressing import parse_address
-from ..protocol.compression import get_default_compression
-from ..protocol import pickle
-
 
 logger = logging.getLogger(__name__)
 
@@ -40,54 +42,60 @@ class Comm(ABC):
     depending on the underlying transport's characteristics.
     """
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[Comm]] = weakref.WeakSet()
+    name: str | None
+    local_info: dict
+    remote_info: dict
+    handshake_options: dict
+    deserialize: bool
 
-    def __init__(self):
+    def __init__(self, deserialize: bool = True):
         self._instances.add(self)
         self.allow_offload = True  # for deserialization in utils.from_frames
         self.name = None
         self.local_info = {}
         self.remote_info = {}
         self.handshake_options = {}
+        self.deserialize = deserialize
 
     # XXX add set_close_callback()?
 
     @abstractmethod
-    def read(self, deserializers=None):
+    async def read(self, deserializers=None):
         """
         Read and return a message (a Python object).
 
-        This method is a coroutine.
+        This method returns a coroutine.
 
         Parameters
         ----------
-        deserializers : Optional[Dict[str, Tuple[Callable, Callable, bool]]]
+        deserializers : dict[str, tuple[Callable, Callable, bool]] | None
             An optional dict appropriate for distributed.protocol.deserialize.
             See :ref:`serialization` for more.
         """
 
     @abstractmethod
-    def write(self, msg, serializers=None, on_error=None):
+    async def write(self, msg, serializers=None, on_error=None):
         """
         Write a message (a Python object).
 
-        This method is a coroutine.
+        This method returns a coroutine.
 
         Parameters
         ----------
-        msg :
-        on_error : Optional[str]
+        msg
+        on_error : str | None
             The behavior when serialization fails. See
             ``distributed.protocol.core.dumps`` for valid values.
         """
 
     @abstractmethod
-    def close(self):
+    async def close(self):
         """
         Close the communication cleanly.  This will attempt to flush
         outgoing buffers before actually closing the underlying transport.
 
-        This method is a coroutine.
+        This method returns a coroutine.
         """
 
     @abstractmethod
@@ -99,21 +107,17 @@ class Comm(ABC):
 
     @abstractmethod
     def closed(self):
-        """
-        Return whether the stream is closed.
-        """
+        """Return whether the stream is closed."""
 
-    @abstractproperty
-    def local_address(self):
-        """
-        The local address.  For logging and debugging purposes only.
-        """
+    @property
+    @abstractmethod
+    def local_address(self) -> str:
+        """The local address. For logging and debugging purposes only."""
 
-    @abstractproperty
-    def peer_address(self):
-        """
-        The peer's address.  For logging and debugging purposes only.
-        """
+    @property
+    @abstractmethod
+    def peer_address(self) -> str:
+        """The peer's address. For logging and debugging purposes only."""
 
     @property
     def extra_info(self):
@@ -155,16 +159,13 @@ class Comm(ABC):
         return out
 
     def __repr__(self):
-        clsname = self.__class__.__name__
-        if self.closed():
-            return "<closed %s>" % (clsname,)
-        else:
-            return "<%s %s local=%s remote=%s>" % (
-                clsname,
-                self.name or "",
-                self.local_address,
-                self.peer_address,
-            )
+        return "<{}{} {} local={} remote={}>".format(
+            self.__class__.__name__,
+            " (closed)" if self.closed() else "",
+            self.name or "",
+            self.local_address,
+            self.peer_address,
+        )
 
 
 class Listener(ABC):
@@ -181,13 +182,15 @@ class Listener(ABC):
         communications, but prevents accepting new ones.
         """
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def listen_address(self):
         """
         The listening address as a URI string.
         """
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def contact_address(self):
         """
         An address this listener can be contacted on.  This can be
@@ -213,20 +216,26 @@ class Listener(ABC):
 
     async def on_connection(self, comm: Comm, handshake_overrides=None):
         local_info = {**comm.handshake_info(), **(handshake_overrides or {})}
+
+        timeout = dask.config.get("distributed.comm.timeouts.connect")
+        timeout = parse_timedelta(timeout, default="seconds")
         try:
-            write = await asyncio.wait_for(comm.write(local_info), 1)
-            handshake = await asyncio.wait_for(comm.read(), 1)
+            # Timeout is to ensure that we'll terminate connections eventually.
+            # Connector side will employ smaller timeouts and we should only
+            # reach this if the comm is dead anyhow.
+            await asyncio.wait_for(comm.write(local_info), timeout=timeout)
+            handshake = await asyncio.wait_for(comm.read(), timeout=timeout)
             # This would be better, but connections leak if worker is closed quickly
             # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
         except Exception as e:
             with suppress(Exception):
                 await comm.close()
-            raise CommClosedError() from e
+            raise CommClosedError(f"Comm {comm!r} closed.") from e
 
         comm.remote_info = handshake
-        comm.remote_info["address"] = comm._peer_addr
+        comm.remote_info["address"] = comm.peer_address
         comm.local_info = local_info
-        comm.local_info["address"] = comm._local_addr
+        comm.local_info["address"] = comm.local_address
 
         comm.handshake_options = comm.handshake_configuration(
             comm.local_info, comm.remote_info
@@ -235,10 +244,10 @@ class Listener(ABC):
 
 class Connector(ABC):
     @abstractmethod
-    def connect(self, address, deserialize=True):
+    async def connect(self, address, deserialize=True):
         """
         Connect to the given address and return a Comm object.
-        This function is a coroutine.   It may raise EnvironmentError
+        This function returns a coroutine. It may raise EnvironmentError
         if the other endpoint is unreachable or unavailable.  It
         may raise ValueError if the address is malformed.
         """
@@ -262,79 +271,73 @@ async def connect(
     comm = None
 
     start = time()
-    deadline = start + timeout
-    error = None
 
-    def _raise(error):
-        error = error or "connect() didn't finish in time"
-        msg = "Timed out trying to connect to %r after %s s: %s" % (
-            addr,
-            timeout,
-            error,
-        )
-        raise IOError(msg)
+    def time_left():
+        deadline = start + timeout
+        return max(0, deadline - time())
 
-    backoff = 0.01
-    if timeout and timeout / 20 < backoff:
-        backoff = timeout / 20
+    backoff_base = 0.01
+    attempt = 0
 
-    retry_timeout_backoff = random.randrange(140, 160) / 100
-
-    # This starts a thread
-    while True:
+    # Prefer multiple small attempts than one long attempt. This should protect
+    # primarily from DNS race conditions
+    # gh3104, gh4176, gh4167
+    intermediate_cap = timeout / 5
+    active_exception = None
+    while time_left() > 0:
         try:
-            while deadline - time() > 0:
-
-                async def _():
-                    comm = await connector.connect(
-                        loc, deserialize=deserialize, **connection_args
-                    )
-                    local_info = {
-                        **comm.handshake_info(),
-                        **(handshake_overrides or {}),
-                    }
-                    try:
-                        handshake = await asyncio.wait_for(comm.read(), 1)
-                        write = await asyncio.wait_for(comm.write(local_info), 1)
-                        # This would be better, but connections leak if worker is closed quickly
-                        # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
-                    except Exception as e:
-                        with suppress(Exception):
-                            await comm.close()
-                        raise CommClosedError() from e
-
-                    comm.remote_info = handshake
-                    comm.remote_info["address"] = comm._peer_addr
-                    comm.local_info = local_info
-                    comm.local_info["address"] = comm._local_addr
-
-                    comm.handshake_options = comm.handshake_configuration(
-                        comm.local_info, comm.remote_info
-                    )
-                    return comm
-
-                with suppress(TimeoutError):
-                    comm = await asyncio.wait_for(
-                        _(), timeout=min(deadline - time(), retry_timeout_backoff)
-                    )
-                    break
-            if not comm:
-                _raise(error)
+            comm = await asyncio.wait_for(
+                connector.connect(loc, deserialize=deserialize, **connection_args),
+                timeout=min(intermediate_cap, time_left()),
+            )
+            break
         except FatalCommClosedError:
             raise
-        except EnvironmentError as e:
-            error = str(e)
-            if time() < deadline:
-                logger.debug("Could not connect, waiting before retrying")
-                await asyncio.sleep(backoff)
-                backoff *= random.randrange(140, 160) / 100
-                retry_timeout_backoff *= random.randrange(140, 160) / 100
-                backoff = min(backoff, 1)  # wait at most one second
-            else:
-                _raise(error)
-        else:
-            break
+        # Note: CommClosed inherits from OSError
+        except (asyncio.TimeoutError, OSError) as exc:
+            active_exception = exc
 
+            # The intermediate capping is mostly relevant for the initial
+            # connect. Afterwards we should be more forgiving
+            intermediate_cap = intermediate_cap * 1.5
+            # FullJitter see https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
+
+            upper_cap = min(time_left(), backoff_base * (2 ** attempt))
+            backoff = random.uniform(0, upper_cap)
+            attempt += 1
+            logger.debug(
+                "Could not connect to %s, waiting for %s before retrying", loc, backoff
+            )
+            await asyncio.sleep(backoff)
+    else:
+        raise OSError(
+            f"Timed out trying to connect to {addr} after {timeout} s"
+        ) from active_exception
+
+    local_info = {
+        **comm.handshake_info(),
+        **(handshake_overrides or {}),
+    }
+    try:
+        # This would be better, but connections leak if worker is closed quickly
+        # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
+        handshake = await asyncio.wait_for(comm.read(), time_left())
+        await asyncio.wait_for(comm.write(local_info), time_left())
+    except Exception as exc:
+        with suppress(Exception):
+            await comm.close()
+        raise OSError(
+            f"Timed out during handshake while connecting to {addr} after {timeout} s"
+        ) from exc
+
+    comm.remote_info = handshake
+    comm.remote_info["address"] = comm._peer_addr
+    comm.local_info = local_info
+    comm.local_info["address"] = comm._local_addr
+
+    comm.handshake_options = comm.handshake_configuration(
+        comm.local_info, comm.remote_info
+    )
     return comm
 
 
