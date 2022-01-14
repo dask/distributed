@@ -757,7 +757,7 @@ class WorkerProcess:
             if self.on_exit is not None:
                 self.on_exit(r)
 
-    async def kill(self, timeout=2, executor_wait=True):
+    async def kill(self, timeout: float = 2, executor_wait: bool = True):
         """
         Ensure the worker process is stopped, waiting at most
         *timeout* seconds before terminating it abruptly.
@@ -788,7 +788,7 @@ class WorkerProcess:
 
         if process.is_alive():
             logger.warning(
-                "Worker process still alive after %d seconds, killing", timeout
+                f"Worker process still alive after {timeout} seconds, killing"
             )
             try:
                 await process.terminate()
