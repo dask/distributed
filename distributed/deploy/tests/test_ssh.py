@@ -95,13 +95,14 @@ async def test_nprocs_renamed_to_num_workers():
 @pytest.mark.asyncio
 async def test_num_workers_with_nprocs_is_an_error():
     with pytest.raises(ValueError, match="Both nprocs and num_workers"):
-        SSHCluster(
+        async with SSHCluster(
             ["127.0.0.1"] * 3,
             connect_options=dict(known_hosts=None),
             asynchronous=True,
-            scheduler_options={"idle_timeout": "5s"},
-            worker_options={"death_timeout": "5s", "num_workers": 2, "nprocs": 2},
-        )
+            scheduler_options={},
+            worker_options={"num_workers": 2, "nprocs": 2},
+        ) as cluster:
+            assert not cluster
 
 
 @pytest.mark.asyncio
