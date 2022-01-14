@@ -1,3 +1,5 @@
+import time
+
 from click.testing import CliRunner
 
 from distributed.cli.dask_ssh import main
@@ -11,11 +13,24 @@ def test_version_option():
 
 
 def test_nprocs_renamed_to_num_workers():
-    with popen(["dask-ssh", "--nprocs=2", "--nohost", "localhost"]) as cluster:
+    num_workers = 2
+    with popen(
+        ["dask-ssh", f"--nprocs={num_workers}", "--nohost", "localhost"]
+    ) as cluster:
+        # Sleeping seems to be necessary to allow the SSHCluster to start up.
+        # 15 seconds is arbitrary but seems long enough. Startup to shutdown
+        # takes about 8 seconds in my testing.
+        time.sleep(15)
+        # Signal 2 is SIGINT, KeyboardInterrupt. Output is only put onto the
+        # stderr and stdout pipes when the cluster is interrupted.
+        cluster.send_signal(2)
+        # Retrieve the standard and error output from the cluster
+        stdout, stderr = cluster.communicate()
+        assert any(b"renamed to --num-workers" in line for line in stderr.splitlines())
         assert any(
-            b"renamed to --num-workers" in cluster.stderr.readline() for i in range(15)
+            f"--num-workers {num_workers}".encode() in line
+            for line in stdout.splitlines()
         )
-        cluster.send_signal(KeyboardInterrupt)
 
 
 def test_num_workers_with_nprocs_is_an_error():
