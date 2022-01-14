@@ -30,7 +30,7 @@ def test_cluster(loop):
                 assert time() < start + 5
 
 
-def test_nprocs_renamed_to_num_workers():
+def test_old_ssh_nprocs_renamed_to_num_workers():
     with pytest.warns(FutureWarning, match="renamed to num_workers"):
         with SSHCluster(
             scheduler_addr="127.0.0.1",
@@ -41,7 +41,7 @@ def test_nprocs_renamed_to_num_workers():
             assert c.num_workers == 2
 
 
-def test_num_workers_with_nprocs_is_an_error():
+def test_old_ssh_num_workers_with_nprocs_is_an_error():
     with pytest.raises(ValueError, match="Both nprocs and num_workers"):
         SSHCluster(
             scheduler_addr="127.0.0.1",

@@ -12,7 +12,7 @@ def test_version_option():
     assert result.exit_code == 0
 
 
-def test_nprocs_renamed_to_num_workers():
+def test_ssh_cli_nprocs_renamed_to_num_workers():
     num_workers = 2
     with popen(
         ["dask-ssh", f"--nprocs={num_workers}", "--nohost", "localhost"]
@@ -33,7 +33,7 @@ def test_nprocs_renamed_to_num_workers():
         )
 
 
-def test_num_workers_with_nprocs_is_an_error():
+def test_ssh_cli_num_workers_with_nprocs_is_an_error():
     with popen(["dask-ssh", "localhost", "--nprocs=2", "--num-workers=2"]) as c:
         assert any(
             b"Both --nprocs and --num-workers" in c.stderr.readline() for i in range(15)

@@ -78,7 +78,7 @@ async def test_num_workers():
 
 
 @pytest.mark.asyncio
-async def test_nprocs_renamed_to_num_workers():
+async def test_ssh_nprocs_renamed_to_num_workers():
     with pytest.warns(FutureWarning, match="renamed to num_workers"):
         async with SSHCluster(
             ["127.0.0.1"] * 3,
@@ -93,7 +93,7 @@ async def test_nprocs_renamed_to_num_workers():
 
 
 @pytest.mark.asyncio
-async def test_num_workers_with_nprocs_is_an_error():
+async def test_ssh_num_workers_with_nprocs_is_an_error():
     with pytest.raises(ValueError, match="Both nprocs and num_workers"):
         async with SSHCluster(
             ["127.0.0.1"] * 3,

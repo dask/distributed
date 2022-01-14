@@ -282,7 +282,7 @@ def test_num_workers_expands_name(loop):
                     assert len(set(names)) == 4
 
 
-def test_nprocs_renamed_to_num_workers(loop):
+def test_worker_cli_nprocs_renamed_to_num_workers(loop):
     num_workers = 2
     with popen(["dask-scheduler", "--no-dashboard"]):
         with popen(
@@ -296,7 +296,7 @@ def test_nprocs_renamed_to_num_workers(loop):
                 c.wait_for_workers(num_workers, timeout="30 seconds")
 
 
-def test_num_workers_with_nprocs_is_an_error(loop):
+def test_worker_cli_num_workers_with_nprocs_is_an_error():
     with popen(["dask-scheduler", "--no-dashboard"]):
         with popen(
             ["dask-worker", "127.0.0.1:8786", "--nprocs=2", "--num-workers=2"]
