@@ -1504,13 +1504,17 @@ class Worker(ServerNode):
 
         setproctitle("dask-worker [%s]" % self.address)
 
-        plugins_exceptions = await asyncio.gather(
+        plugins_msgs = await asyncio.gather(
             *(
                 self.plugin_add(plugin=plugin, catch_errors=False)
                 for plugin in self._pending_plugins
             ),
             return_exceptions=True,
         )
+        plugins_exceptions = []
+        for msg in plugins_msgs:
+            if isinstance(msg, Exception):
+                plugins_exceptions.append(msg)
         if len(plugins_exceptions) >= 1:
             if len(plugins_exceptions) > 1:
                 logger.error(
