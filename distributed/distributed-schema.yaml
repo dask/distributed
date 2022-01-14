@@ -506,8 +506,8 @@ properties:
                   - {type: string}
                   - {type: number, minimum: 0}
                   - {enum: [false]}
-                description: |
-                Limit of number of bytes to be spilled on disk. 
+                description: >-
+                  Limit of number of bytes to be spilled on disk. 
 
           http:
             type: object
