@@ -8,6 +8,7 @@ import dask
 from dask.utils import parse_timedelta
 
 from .core import CommClosedError
+from .metrics import time
 
 logger = logging.getLogger(__name__)
 
@@ -83,12 +84,12 @@ class BatchedSend:
                 # Nothing to send
                 self.next_deadline = None
                 continue
-            if self.next_deadline is not None and self.loop.time() < self.next_deadline:
+            if self.next_deadline is not None and time() < self.next_deadline:
                 # Send interval not expired yet
                 continue
             payload, self.buffer = self.buffer, []
             self.batch_count += 1
-            self.next_deadline = self.loop.time() + self.interval
+            self.next_deadline = time() + self.interval
             try:
                 nbytes = yield self.comm.write(
                     payload, serializers=self.serializers, on_error="raise"

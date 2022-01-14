@@ -28,6 +28,7 @@ from .comm import get_address_host, unparse_host_port
 from .comm.addressing import address_from_user_args
 from .core import CommClosedError, RPCClosed, Status, coerce_to_address, error_message
 from .diagnostics.plugin import _get_plugin_name
+from .metrics import time
 from .node import ServerNode
 from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
@@ -356,8 +357,8 @@ class Nanny(ServerNode):
         if self.process is None:
             return "OK"
 
-        deadline = self.loop.time() + timeout
-        await self.process.kill(timeout=0.8 * (deadline - self.loop.time()))
+        deadline = time() + timeout
+        await self.process.kill(timeout=0.8 * (deadline - time()))
 
     async def instantiate(self, comm=None) -> Status:
         """Start a local worker process
@@ -761,8 +762,7 @@ class WorkerProcess:
         Ensure the worker process is stopped, waiting at most
         *timeout* seconds before terminating it abruptly.
         """
-        loop = IOLoop.current()
-        deadline = loop.time() + timeout
+        deadline = time() + timeout
 
         if self.status == Status.stopped:
             return
@@ -776,14 +776,14 @@ class WorkerProcess:
         self.child_stop_q.put(
             {
                 "op": "stop",
-                "timeout": max(0, deadline - loop.time()) * 0.8,
+                "timeout": max(0, deadline - time()) * 0.8,
                 "executor_wait": executor_wait,
             }
         )
         await asyncio.sleep(0)  # otherwise we get broken pipe errors
         self.child_stop_q.close()
 
-        while process.is_alive() and loop.time() < deadline:
+        while process.is_alive() and time() < deadline:
             await asyncio.sleep(0.05)
 
         if process.is_alive():
