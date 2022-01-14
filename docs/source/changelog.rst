@@ -1,6 +1,68 @@
 Changelog
 =========
 
+.. _v2022.01.0:
+
+2022.01.0
+---------
+
+Released on January 14, 2022
+
+New Features
+^^^^^^^^^^^^
+- Task group stacked area chart (:pr:`5320`) `Ian Rose`_
+- Support configuring TLS min/max version (:pr:`5594`) `Jim Crist-Harif`_
+- Use asyncio for TCP/TLS comms (:pr:`5450`) `Jim Crist-Harif`_
+
+Enhancements
+^^^^^^^^^^^^
+- Close comm on ``CancelledError`` (:pr:`5656`) `crusaderky`_
+- Don't drop from the only running worker (:pr:`5626`) `crusaderky`_
+- Transfer priority (:pr:`5625`) `crusaderky`_
+- Add RPC call for getting task prefixes (:pr:`5617`) `Benjamin Zaitlen`_
+- Long running occupancy (:pr:`5395`) `Florian Jetter`_
+- Handle errors on individual workers in ``run``/``broadcast`` (:pr:`5590`) `crusaderky`_
+- Allow work stealing in case there are heterogeneous resources for thief and victim (:pr:`5573`) `Florian Jetter`_
+- Disable NVML monitoring on WSL (:pr:`5568`) `Charles Blackmon-Luca`_
+
+Bug Fixes
+^^^^^^^^^
+- Ensure uniqueness of steal stimulus ID (:pr:`5620`) `Florian Jetter`_
+- Fix ``KeyError: 'startstops'`` in performance report (:pr:`5608`) `Gabe Joseph`_
+- Story timestamps can be slightly in the future (:pr:`5612`) `crusaderky`_
+- Prevent ``RecursionError`` in ``Worker._to_dict`` (:pr:`5591`) `crusaderky`_
+- Ensure distributed can be imported in thread (:pr:`5593`) `Jim Crist-Harif`_
+
+Documentation
+^^^^^^^^^^^^^
+- Fix changelog section hyperlinks (:pr:`5638`) `Aneesh Nema`_
+- Fix typo in ``unpublish_dataset`` example invocation (:pr:`5615`) `Deepyaman Datta`_
+- Fix typo in test report badge in ``README`` (:pr:`5586`) `James Bourbeau`_
+
+Maintenance
+^^^^^^^^^^^
+- Cosmetic changes to ``distributed.comm`` (:pr:`5657`) `crusaderky`_
+- Consolidate broken comm testing utilities (:pr:`5654`) `James Bourbeau`_
+- Fix concurrency assumptions for ``test_worker_reconnects_mid_compute`` (:pr:`5623`) `Florian Jetter`_
+- Handle Bokeh 3.0 CDSView change (:pr:`5643`) `Bryan Van de Ven`_
+- Use ``packaging`` rather than ``distutils`` to get version (:pr:`5624`) `Julia Signell`_
+- XFAIL tls explicit comm close test on py3.7 (:pr:`5639`) `Jim Crist-Harif`_
+- Mark some additional ucx-py tests for GPU (:pr:`5603`) `Charles Blackmon-Luca`_
+- Rename ``ensure_default_get`` and add test (:pr:`5609`) `Naty Clementi`_
+- Remove ``render_mode`` ``kwarg`` from ``boekh`` ``LabelSets`` (:pr:`5616`) `Garry O'Donnell`_
+- Add lambda support to ``assert_worker_story`` (:pr:`5618`) `crusaderky`_
+- Ignore file not found warning for timeout artifact (:pr:`5619`) `Florian Jetter`_
+- Improved cluster state dump in ``@gen_cluster`` (:pr:`5592`) `crusaderky`_
+- Work around SSL failures on MacOS CI (:pr:`5606`) `crusaderky`_
+- Bump gpuCI ``CUDA_VER`` to 11.5 (:pr:`5604`) `Charles Blackmon-Luca`_
+- ``assert_worker_story`` (:pr:`5598`) `crusaderky`_
+- ``distributed.versions`` code refresh (:pr:`5600`) `crusaderky`_
+- Updates to gpuCI and ``test_ucx_config_w_env_var`` (:pr:`5595`) `James Bourbeau`_
+- Replace blacklist/whitelist with blocklist/allowlist (:pr:`5589`) `crusaderky`_
+- Distributed test report (:pr:`5583`) `Ian Rose`_
+- AMM: cosmetic tweaks (:pr:`5584`) `crusaderky`_
+
+
 .. _v2021.12.0:
 
 2021.12.0
@@ -3087,3 +3149,6 @@ significantly without many new features.
 .. _`Erik Welch`: https://github.com/eriknw
 .. _`Fábio Rosado`: https://github.com/FabioRosado
 .. _`Maximilian Roos`: https://github.com/max-sixty
+.. _`Aneesh Nema`: https://github.com/aneeshnema
+.. _`Deepyaman Datta`: https://github.com/deepyaman
+.. _`Garry O'Donnell`: https://github.com/garryod
