@@ -826,16 +826,12 @@ async def test_steal_twice(c, s, a, b):
 
     await wait(futures)
 
-    empty_workers = [w for w, keys in s.has_what.items() if not len(keys)]
+    # Note: this includes a and b
+    empty_workers = [w for w, keys in s.has_what.items() if not keys]
     assert (
         len(empty_workers) < 3
     ), f"Too many workers without keys ({len(empty_workers)} out of {len(s.workers)})"
-
     assert max(map(len, s.has_what.values())) < 30
-
-    assert a.data  # a kept some tasks
-    assert b.data  # b stole some tasks
-    assert len(b.data) < 30  # Some tasks were stolen from b to workers
 
     assert a.in_flight_tasks == 0
     assert b.in_flight_tasks == 0
