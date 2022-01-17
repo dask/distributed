@@ -831,6 +831,8 @@ async def test_steal_twice(c, s, a, b):
     assert (
         len(empty_workers) < 3
     ), f"Too many workers without keys ({len(empty_workers)} out of {len(s.workers)})"
+    # This also tests that some tasks were stolen from b
+    # (see `while len(b.tasks) < 30` above)
     assert max(map(len, s.has_what.values())) < 30
 
     assert a.in_flight_tasks == 0
