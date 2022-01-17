@@ -818,7 +818,7 @@ async def test_steal_twice(c, s, a, b):
     while len(s.tasks) < 100:  # tasks are all allocated
         await asyncio.sleep(0.01)
     # Wait for b to start stealing tasks
-    while not b.tasks:
+    while len(b.tasks) < 30:
         await asyncio.sleep(0.01)
 
     # Army of new workers arrives to help
@@ -835,6 +835,7 @@ async def test_steal_twice(c, s, a, b):
 
     assert a.data  # a kept some tasks
     assert b.data  # b stole some tasks
+    assert len(b.data) < 30  # Some tasks were stolen from b to workers
 
     assert a.in_flight_tasks == 0
     assert b.in_flight_tasks == 0
