@@ -15,7 +15,7 @@ import dask
 from dask.utils import parse_timedelta
 
 from .comm.addressing import get_address_host
-from .core import CommClosedError
+from .core import CommClosedError, Status
 from .diagnostics.plugin import SchedulerPlugin
 from .utils import log_errors, recursive_to_dict
 
@@ -393,7 +393,8 @@ class WorkStealing(SchedulerPlugin):
 
         with log_errors():
             i = 0
-            idle = s.idle.values()
+            # Paused and closing workers must never become thieves
+            idle = [ws for ws in s.idle.values() if ws.status == Status.running]
             if not idle or len(idle) == len(s.workers):
                 return
 

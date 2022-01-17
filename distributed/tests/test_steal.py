@@ -832,6 +832,9 @@ async def test_steal_twice(c, s, a, b):
 
     assert max(map(len, s.has_what.values())) < 30
 
+    assert a.data  # a kept some tasks
+    assert b.data  # b stole some tasks
+
     assert a.in_flight_tasks == 0
     assert b.in_flight_tasks == 0
 
