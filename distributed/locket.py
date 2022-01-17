@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import threading
-import time
 import weakref
+from time import sleep
+
+from .metrics import time
 
 __all__ = ["lock_file"]
 
@@ -97,15 +99,15 @@ def _acquire_non_blocking(acquire, timeout, retry_period, path):
     if retry_period is None:
         retry_period = 0.05
 
-    start_time = time.time()
+    start_time = time()
     while True:
         success = acquire()
         if success:
             return
-        elif timeout is not None and time.time() - start_time > timeout:
+        elif timeout is not None and time() - start_time > timeout:
             raise LockError(f"Couldn't lock {path}")
         else:
-            time.sleep(retry_period)
+            sleep(retry_period)
 
 
 class _LockSet:
