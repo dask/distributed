@@ -16,6 +16,7 @@ import dask
 from distributed import Lock, Nanny, Worker, wait, worker_client
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.config import config
+from distributed.core import Status
 from distributed.metrics import time
 from distributed.scheduler import key_split
 from distributed.system import MEMORY_LIMIT
@@ -839,6 +840,23 @@ async def test_steal_twice(c, s, a, b):
     assert b.in_flight_tasks == 0
 
     await asyncio.gather(*(w.close() for w in workers))
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+async def test_paused_workers_must_not_steal(c, s, w1, w2, w3):
+    w2.memory_pause_fraction = 1e-15
+    while s.workers[w2.address].status != Status.paused:
+        await asyncio.sleep(0.01)
+
+    x = c.submit(inc, 1, workers=w1.address)
+    await wait(x)
+
+    futures = [c.submit(slowadd, x, i, delay=0.1) for i in range(10)]
+    await wait(futures)
+
+    assert w1.data
+    assert not w2.data
+    assert w3.data
 
 
 @gen_cluster(client=True)
