@@ -394,21 +394,21 @@ class WorkStealing(SchedulerPlugin):
         with log_errors():
             i = 0
             idle = s.idle.values()
-            saturated = s.saturated
             if not idle or len(idle) == len(s.workers):
                 return
 
             log = []
             start = time()
 
-            if not s.saturated:
+            saturated = s.saturated
+            if not saturated:
                 saturated = topk(10, s.workers.values(), key=combined_occupancy)
                 saturated = [
                     ws
                     for ws in saturated
                     if combined_occupancy(ws) > 0.2 and len(ws.processing) > ws.nthreads
                 ]
-            elif len(s.saturated) < 20:
+            elif len(saturated) < 20:
                 saturated = sorted(saturated, key=combined_occupancy, reverse=True)
             if len(idle) < 20:
                 idle = sorted(idle, key=combined_occupancy)

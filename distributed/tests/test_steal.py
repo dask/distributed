@@ -816,25 +816,25 @@ async def test_steal_twice(c, s, a, b):
 
     while len(s.tasks) < 100:  # tasks are all allocated
         await asyncio.sleep(0.01)
+    # Wait for b to start stealing tasks
+    while not b.tasks:
+        await asyncio.sleep(0.01)
 
     # Army of new workers arrives to help
-    workers = await asyncio.gather(*(Worker(s.address, loop=s.loop) for _ in range(20)))
+    workers = await asyncio.gather(*(Worker(s.address) for _ in range(20)))
 
     await wait(futures)
 
-    has_what = dict(s.has_what)  # take snapshot
-    empty_workers = [w for w, keys in has_what.items() if not len(keys)]
-    if len(empty_workers) > 2:
-        pytest.fail(
-            "Too many workers without keys (%d out of %d)"
-            % (len(empty_workers), len(has_what))
-        )
-    assert max(map(len, has_what.values())) < 30
+    empty_workers = [w for w, keys in s.has_what.items() if not len(keys)]
+    assert (
+        len(empty_workers) < 3
+    ), f"Too many workers without keys ({len(empty_workers)} out of {len(s.workers)})"
+
+    assert max(map(len, s.has_what.values())) < 30
 
     assert a.in_flight_tasks == 0
     assert b.in_flight_tasks == 0
 
-    await c._close()
     await asyncio.gather(*(w.close() for w in workers))
 
 
