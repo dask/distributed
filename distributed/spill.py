@@ -21,6 +21,8 @@ class SpillBuffer(zict.Buffer):
     """MutableMapping that automatically spills out dask key/value pairs to disk when
     the total size of the stored data exceeds the target. If max_spill is provided the
     key/value pairs won't be spilled once this threshold has been reached.
+
+    parameter
     """
 
     def __init__(
@@ -35,17 +37,21 @@ class SpillBuffer(zict.Buffer):
             n=target,
             weight=_in_memory_weight,
         )
+        self.logged_keys: list = []
 
     def __setitem__(self, key, value):
         try:
             super().__setitem__(key, value)
-        except MaxSpillExceeded:
+        except MaxSpillExceeded as e:
+            key_e = e.args[0]  # otherwise it returns (key_e, )
             # key is in self.fast; no keys have been lost on eviction
             # Note: requires zict > 2.0
             # TODO don't spam the log file with hundreds of messages per second
-            logger.warning(
-                "Spill file on disk reached capacity; keeping data in memory"
-            )
+            if key_e not in self.logged_keys:
+                logger.warning(
+                    "Spill file on disk reached capacity; keeping data in memory"
+                )
+                self.logged_keys.append(key_e)
             pass
         except OSError:
             logger.error("Spill to disk failed; keeping data in memory", exc_info=True)
@@ -66,7 +72,9 @@ class SpillBuffer(zict.Buffer):
                 assert key_e in self.fast
                 assert key_e not in self.slow
                 # TODO don't flood the log every time ANY key is added to the LRU!
-                logger.error(f"Failed to pickle {key!r}", exc_info=True)
+                if key_e not in self.logged_keys:
+                    logger.error(f"Failed to pickle {key!r}", exc_info=True)
+                    self.logged_keys.append(key_e)
                 pass
 
     @property
@@ -134,7 +142,7 @@ class Slow(zict.Func):
             self.total_weight -= self.weight_by_key.pop(key, 0)
             self.d.pop(key, None)
             # To be caught by SpillBuffer.__setitem__
-            raise MaxSpillExceeded()
+            raise MaxSpillExceeded(key)
 
         # Thanks to Buffer.__setitem__, we never update existing keys in slow,
         # but always delete them and reinsert them.
