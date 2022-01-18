@@ -262,7 +262,7 @@ def test_spillbuffer_oserror(tmpdir):
     with captured_logger(logging.getLogger("distributed.spill")) as logs_oserror_slow:
         buf["c"] = c
 
-    assert "Spill file to disk failed" in logs_oserror_slow.getvalue()
+    assert "Spill to disk failed" in logs_oserror_slow.getvalue()
     assert set(buf.fast) == {"b", "c"}
     assert set(buf.slow) == {"a"}
 
@@ -277,7 +277,7 @@ def test_spillbuffer_oserror(tmpdir):
     with captured_logger(logging.getLogger("distributed.spill")) as logs_oserror_evict:
         buf["d"] = d
 
-    assert "Spill file to disk failed" in logs_oserror_evict.getvalue()
+    assert "Spill to disk failed" in logs_oserror_evict.getvalue()
     assert set(buf.fast) == {"b", "d"}
     assert set(buf.slow) == {"a"}
 
