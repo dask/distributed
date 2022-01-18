@@ -37,7 +37,7 @@ class SpillBuffer(zict.Buffer):
             n=target,
             weight=_in_memory_weight,
         )
-        self.logged_keys: list = []
+        self.logged_keys: list = []  # list to track logged keys to avoid spaming
 
     def __setitem__(self, key, value):
         try:
