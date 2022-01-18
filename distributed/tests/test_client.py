@@ -6566,6 +6566,16 @@ async def test_get_task_metadata_multiple(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_register_worker_plugin_exception(c, s, a, b):
+    class MyPlugin:
+        def setup(self, worker=None):
+            raise ValueError("Setup failed")
+
+    with pytest.raises(ValueError, match="Setup failed"):
+        await c.register_worker_plugin(MyPlugin())
+
+
+@gen_cluster(client=True)
 async def test_log_event(c, s, a, b):
 
     # Log an event from inside a task
