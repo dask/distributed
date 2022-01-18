@@ -192,8 +192,6 @@ distributed:
       nvlink: null  # enable cuda_ipc
       infiniband: null  # enable Infiniband
       rdmacm: null  # enable RDMACM
-      net-devices: null  # define what interface to use for UCX comm
-      reuse-endpoints: null  # enable endpoint reuse
       create-cuda-context: null  # create CUDA context before UCX initialization
 
     zstd:
