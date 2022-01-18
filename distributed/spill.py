@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Hashable, Mapping
-from distutils.version import LooseVersion
+from packaging.version import parse as parse_version
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -26,7 +26,7 @@ class SpillBuffer(zict.Buffer):
     def __init__(
         self, spill_directory: str, target: int, max_spill: int | Literal[False] = False
     ):
-        if max_spill is not False and LooseVersion(zict.__version__) <= "2.0.0":
+        if max_spill is not False and parse_version(zict.__version__) <= parse_version("2.0.0"):
             raise ValueError("zict > 2.0.0 required to set max_weight")
 
         super().__init__(
@@ -48,24 +48,25 @@ class SpillBuffer(zict.Buffer):
             )
             pass
         except OSError:
-            logger.warning(
-                "Spill file to disk failed",
-                exc_info=True,
-            )
+            logger.error("Spill to disk failed; keeping data in memory", exc_info=True)
             pass
         except PickleError as e:
-            logger.warning(
-                "Failed to pickle",
-                exc_info=True,
-            )
-            k, orig_e = e.args
-            if k == key:
-                del self[
-                    key
-                ]  # if the key that is bad is the one being added we delete it
+            key_e, orig_e = e.args
+            if key_e == key:
+                # The key we just inserted failed to serialize.
+                # This happens only when the key is individually larger than target.
+                # The exception will be caught by Worker and logged; the status of
+                # the task will be set to error.
+                del self[key]
                 raise orig_e
             else:
-                # if you get here, key is fine something else is wrong then we pass
+                # The key we just inserted is smaller than target, but it caused another,
+                # unrelated key to be spilled out of the LRU, and that key failed to serialize.
+                # There's nothing wrong with the new key. The older key is still in memory.
+                assert key_e in self.fast
+                assert key_e not in self.slow
+                # TODO don't flood the log every time ANY key is added to the LRU!
+                logger.error(f"Failed to pickle {key!r}", exc_info=True)
                 pass
 
     @property
@@ -117,11 +118,13 @@ class Slow(zict.Func):
     def __setitem__(self, key, value):
         try:
             pickled = self.dump(value)
-            pickled_size = sum(len(frame) for frame in pickled)
-        except Exception as e:  # This is the error raised when fail to serialize
-            raise PickleError(
-                key, e
-            )  # It's ok to loose the bad key, cluster remains usable
+        except Exception as e:
+            # zict.LRU ensures that the key remains in fast if we raise.
+            # Wrap the exception so that it's recognizable by SpillBuffer,
+            # which will then unwrap it.
+            raise PickleError(key, e)
+            
+        pickled_size = sum(len(frame) for frame in pickled)
 
         if (
             self.max_weight is not False
@@ -133,7 +136,9 @@ class Slow(zict.Func):
             # To be caught by SpillBuffer.__setitem__
             raise MaxSpillExceeded()
 
-        assert key not in self.weight_by_key  # Thanks to Buffer.__setitem__
+       # Thanks to Buffer.__setitem__, we never update existing keys in slow,
+       # but always delete them and reinsert them.
+        assert key not in self.weight_by_key
         # Store to disk through File.
         # This may raise OSError, which is caught by SpillBuffer above.
         self.d[key] = pickled

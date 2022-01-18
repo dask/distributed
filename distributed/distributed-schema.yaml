@@ -503,9 +503,9 @@ properties:
 
               max-spill:
                 oneOf:
-                  - {type: string}
+                  - type: string
                   - {type: number, minimum: 0}
-                  - {enum: [false]}
+                  - enum: [false]
                 description: >-
                   Limit of number of bytes to be spilled on disk. 
 
