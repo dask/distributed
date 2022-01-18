@@ -412,9 +412,8 @@ class TCP(Comm):
         self._protocol = protocol
         self._local_addr = local_addr
         self._peer_addr = peer_addr
-        self.deserialize = deserialize
         self._closed = False
-        super().__init__()
+        super().__init__(deserialize=deserialize)
 
         # setup a finalizer to close the protocol if the comm was never explicitly closed
         self._finalizer = weakref.finalize(

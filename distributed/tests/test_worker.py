@@ -39,6 +39,7 @@ from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
+from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
@@ -378,6 +379,64 @@ async def test_chained_error_message(c, s, a, b):
     except Exception as e:
         assert e.__cause__ is not None
         assert "Bar" in str(e.__cause__)
+
+
+@pytest.mark.asyncio
+async def test_plugin_exception(cleanup):
+    class MyPlugin:
+        def setup(self, worker=None):
+            raise ValueError("Setup failed")
+
+    async with Scheduler(port=0) as s:
+        with pytest.raises(ValueError, match="Setup failed"):
+            async with Worker(
+                s.address,
+                plugins={
+                    MyPlugin(),
+                },
+            ) as w:
+                pass
+
+
+@pytest.mark.asyncio
+async def test_plugin_multiple_exceptions(cleanup):
+    class MyPlugin1:
+        def setup(self, worker=None):
+            raise ValueError("MyPlugin1 Error")
+
+    class MyPlugin2:
+        def setup(self, worker=None):
+            raise RuntimeError("MyPlugin2 Error")
+
+    async with Scheduler(port=0) as s:
+        # There's no guarantee on the order of which exception is raised first
+        with pytest.raises((ValueError, RuntimeError), match="MyPlugin.* Error"):
+            with captured_logger("distributed.worker") as logger:
+                async with Worker(
+                    s.address,
+                    plugins={
+                        MyPlugin1(),
+                        MyPlugin2(),
+                    },
+                ) as w:
+                    pass
+
+            text = logger.getvalue()
+            assert "MyPlugin1 Error" in text
+            assert "MyPlugin2 Error" in text
+
+
+@pytest.mark.asyncio
+async def test_plugin_internal_exception(cleanup):
+    async with Scheduler(port=0) as s:
+        with pytest.raises(UnicodeDecodeError, match="codec can't decode"):
+            async with Worker(
+                s.address,
+                plugins={
+                    b"corrupting pickle" + pickle.dumps(lambda: None, protocol=4),
+                },
+            ) as w:
+                pass
 
 
 @gen_cluster(client=True)

@@ -6434,7 +6434,7 @@ async def test_performance_report(c, s, a, b):
     assert "Dask Performance Report" in data
     assert "x = da.random" in data
     assert "Threads: 4" in data
-    assert "distributed.scheduler - INFO - Clear task state" in data
+    assert "No logs to report" in data
     assert dask.__version__ in data
 
     # stacklevel=2 captures code two frames back -- which in this case
@@ -6563,6 +6563,16 @@ async def test_get_task_metadata_multiple(c, s, a, b):
     assert len(metadata2) == 1
     assert list(metadata2.keys()) == [f2.key]
     assert metadata2[f2.key] == s.tasks.get(f2.key).metadata
+
+
+@gen_cluster(client=True)
+async def test_register_worker_plugin_exception(c, s, a, b):
+    class MyPlugin:
+        def setup(self, worker=None):
+            raise ValueError("Setup failed")
+
+    with pytest.raises(ValueError, match="Setup failed"):
+        await c.register_worker_plugin(MyPlugin())
 
 
 @gen_cluster(client=True)

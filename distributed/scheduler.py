@@ -7635,7 +7635,7 @@ class Scheduler(SchedulerState, ServerNode):
         # Scheduler logs
         from distributed.dashboard.components.scheduler import SchedulerLogs
 
-        logs = SchedulerLogs(self)
+        logs = SchedulerLogs(self, start=start)
 
         from bokeh.models import Div, Panel, Tabs
 

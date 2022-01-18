@@ -1,12 +1,12 @@
 import sys
 import threading
-import time
+from time import sleep
 
 import pytest
 from tlz import first
 
-from distributed import metrics
 from distributed.compatibility import WINDOWS
+from distributed.metrics import time
 from distributed.profile import (
     call_stack,
     create,
@@ -22,10 +22,10 @@ from distributed.profile import (
 
 def test_basic():
     def test_g():
-        time.sleep(0.01)
+        sleep(0.01)
 
     def test_h():
-        time.sleep(0.02)
+        sleep(0.02)
 
     def test_f():
         for i in range(100):
@@ -39,7 +39,7 @@ def test_basic():
     state = create()
 
     for i in range(100):
-        time.sleep(0.02)
+        sleep(0.02)
         frame = sys._current_frames()[thread.ident]
         process(frame, None, state)
 
@@ -70,7 +70,7 @@ def test_basic_low_level():
     state = create()
 
     for i in range(100):
-        time.sleep(0.02)
+        sleep(0.02)
         frame = sys._current_frames()[threading.get_ident()]
         llframes = {threading.get_ident(): ll_get_stack(threading.get_ident())}
         for f in llframes.values():
@@ -179,24 +179,24 @@ def test_identifier():
 
 
 def test_watch():
-    start = metrics.time()
+    start = time()
 
     def stop():
-        return metrics.time() > start + 0.500
+        return time() > start + 0.500
 
     start_threads = threading.active_count()
 
     log = watch(interval="10ms", cycle="50ms", stop=stop)
 
-    start = metrics.time()  # wait until thread starts up
+    start = time()  # wait until thread starts up
     while threading.active_count() <= start_threads:
-        assert metrics.time() < start + 2
-        time.sleep(0.01)
+        assert time() < start + 2
+        sleep(0.01)
 
-    time.sleep(0.5)
+    sleep(0.5)
     assert 1 < len(log) < 10
 
-    start = metrics.time()
+    start = time()
     while threading.active_count() > start_threads:
-        assert metrics.time() < start + 2
-        time.sleep(0.01)
+        assert time() < start + 2
+        sleep(0.01)
