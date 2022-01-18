@@ -134,11 +134,9 @@ class Slow(zict.Func):
             raise MaxSpillExceeded()
 
         assert key not in self.weight_by_key  # Thanks to Buffer.__setitem__
-
-        try:
-            self.d[key] = pickled  # pickle and store to disk through File
-        except OSError:  # need to catch OSErrors when writing directly to disk
-            raise
+        # Store to disk through File.
+        # This may raise OSError, which is caught by SpillBuffer above.
+        self.d[key] = pickled
 
         self.weight_by_key[key] = pickled_size
         self.total_weight += pickled_size
