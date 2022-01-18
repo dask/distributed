@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Hashable, Mapping
-from packaging.version import parse as parse_version
+from distutils.version import LooseVersion
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -26,7 +26,7 @@ class SpillBuffer(zict.Buffer):
     def __init__(
         self, spill_directory: str, target: int, max_spill: int | Literal[False] = False
     ):
-        if max_spill is not False and parse_version(zict.__version__) <= parse_version("2.0.0"):
+        if max_spill is not False and LooseVersion(zict.__version__) <= "2.0.0":
             raise ValueError("zict > 2.0.0 required to set max_weight")
 
         super().__init__(
@@ -123,7 +123,7 @@ class Slow(zict.Func):
             # Wrap the exception so that it's recognizable by SpillBuffer,
             # which will then unwrap it.
             raise PickleError(key, e)
-            
+
         pickled_size = sum(len(frame) for frame in pickled)
 
         if (
@@ -136,8 +136,8 @@ class Slow(zict.Func):
             # To be caught by SpillBuffer.__setitem__
             raise MaxSpillExceeded()
 
-       # Thanks to Buffer.__setitem__, we never update existing keys in slow,
-       # but always delete them and reinsert them.
+        # Thanks to Buffer.__setitem__, we never update existing keys in slow,
+        # but always delete them and reinsert them.
         assert key not in self.weight_by_key
         # Store to disk through File.
         # This may raise OSError, which is caught by SpillBuffer above.
