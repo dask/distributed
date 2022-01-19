@@ -12,8 +12,6 @@ import pandas
 import requests
 
 TOKEN = os.environ.get("GITHUB_TOKEN")
-if not TOKEN:
-    raise RuntimeError("Failed to find a GitHub Token")
 
 # Mapping between a symbol (pass, fail, skip) and a color
 COLORS = {
@@ -162,6 +160,8 @@ def dataframe_from_jxml(run):
 
 
 if __name__ == "__main__":
+    if not TOKEN:
+        raise RuntimeError("Failed to find a GitHub Token")
     print("Getting all recent workflows...")
     workflows = get_workflow_listing()
 

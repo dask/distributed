@@ -3,6 +3,7 @@ import math
 import operator
 import os
 from collections import OrderedDict, defaultdict
+from datetime import datetime
 from numbers import Number
 
 import numpy as np
@@ -3284,13 +3285,24 @@ class WorkerTable(DashboardComponent):
 
 
 class SchedulerLogs:
-    def __init__(self, scheduler):
-        logs = Log(
-            "\n".join(line for level, line in scheduler.get_logs())
-        )._repr_html_()
+    def __init__(self, scheduler, start=None):
+        logs = scheduler.get_logs(start=start, timestamps=True)
+
+        if not logs:
+            logs_html = (
+                '<p style="font-family: monospace; margin: 0;">No logs to report</p>'
+            )
+        else:
+            logs_html = Log(
+                "\n".join(
+                    "%s - %s"
+                    % (datetime.fromtimestamp(time).strftime("%H:%M:%S.%f"), line)
+                    for time, level, line in logs
+                )
+            )._repr_html_()
 
         self.root = Div(
-            text=logs,
+            text=logs_html,
             style={
                 "width": "100%",
                 "height": "100%",

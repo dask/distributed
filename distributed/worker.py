@@ -1504,9 +1504,23 @@ class Worker(ServerNode):
 
         setproctitle("dask-worker [%s]" % self.address)
 
-        await asyncio.gather(
-            *(self.plugin_add(plugin=plugin) for plugin in self._pending_plugins)
+        plugins_msgs = await asyncio.gather(
+            *(
+                self.plugin_add(plugin=plugin, catch_errors=False)
+                for plugin in self._pending_plugins
+            ),
+            return_exceptions=True,
         )
+        plugins_exceptions = [msg for msg in plugins_msgs if isinstance(msg, Exception)]
+        if len(plugins_exceptions) >= 1:
+            if len(plugins_exceptions) > 1:
+                logger.error(
+                    "Multiple plugin exceptions raised. All exceptions will be logged, the first is raised."
+                )
+                for exc in plugins_exceptions:
+                    logger.error(repr(exc))
+            raise plugins_exceptions[0]
+
         self._pending_plugins = ()
 
         await self._register_with_scheduler()
@@ -3248,7 +3262,7 @@ class Worker(ServerNode):
     def run_coroutine(self, comm, function, args=(), kwargs=None, wait=True):
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
-    async def plugin_add(self, comm=None, plugin=None, name=None):
+    async def plugin_add(self, comm=None, plugin=None, name=None, catch_errors=True):
         with log_errors(pdb=False):
             if isinstance(plugin, bytes):
                 plugin = pickle.loads(plugin)
@@ -3270,6 +3284,8 @@ class Worker(ServerNode):
                     if isawaitable(result):
                         result = await result
                 except Exception as e:
+                    if not catch_errors:
+                        raise
                     msg = error_message(e)
                     return msg
 

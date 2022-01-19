@@ -16,7 +16,6 @@ from dask.utils import parse_timedelta
 from ..metrics import time
 from ..protocol import pickle
 from ..protocol.compression import get_default_compression
-from ..utils import TimeoutError
 from . import registry
 from .addressing import parse_address
 
@@ -44,14 +43,20 @@ class Comm(ABC):
     """
 
     _instances: ClassVar[weakref.WeakSet[Comm]] = weakref.WeakSet()
+    name: str | None
+    local_info: dict
+    remote_info: dict
+    handshake_options: dict
+    deserialize: bool
 
-    def __init__(self):
+    def __init__(self, deserialize: bool = True):
         self._instances.add(self)
         self.allow_offload = True  # for deserialization in utils.from_frames
         self.name = None
         self.local_info = {}
         self.remote_info = {}
         self.handshake_options = {}
+        self.deserialize = deserialize
 
     # XXX add set_close_callback()?
 
@@ -288,8 +293,8 @@ async def connect(
             break
         except FatalCommClosedError:
             raise
-        # CommClosed, EnvironmentError inherit from OSError
-        except (TimeoutError, OSError) as exc:
+        # Note: CommClosed inherits from OSError
+        except (asyncio.TimeoutError, OSError) as exc:
             active_exception = exc
 
             # The intermediate capping is mostly relevant for the initial

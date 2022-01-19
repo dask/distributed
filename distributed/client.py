@@ -1028,7 +1028,7 @@ class Client(SyncMethodMixin):
             self.futures.clear()
 
             timeout = self._timeout
-            deadline = self.loop.time() + timeout
+            deadline = time() + timeout
             while timeout > 0 and self.status == "connecting":
                 try:
                     await self._ensure_connected(timeout=timeout)
@@ -1036,7 +1036,7 @@ class Client(SyncMethodMixin):
                 except OSError:
                     # Wait a bit before retrying
                     await asyncio.sleep(0.1)
-                    timeout = deadline - self.loop.time()
+                    timeout = deadline - time()
                 except ImportError:
                     await self._close()
                     break
