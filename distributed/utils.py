@@ -1143,19 +1143,6 @@ def warn_on_duration(duration, msg):
 
 
 def format_dashboard_link(host, port):
-    """
-	Parameters
-    ----------
-    host : str
-        The host
-    port : str
-        The port
-
-    Returns
-    -------
-    dict
-        The megred dictionary
-    """
     template = dask.config.get("distributed.dashboard.link")
     if dask.config.get("distributed.scheduler.dashboard.tls.cert"):
         scheme = "https"
