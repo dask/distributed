@@ -22,8 +22,8 @@ exclude_lines =
     # re-enable the standard pragma
     pragma: no cover
     # exclude nvml calls
-    \snvml\.
-    \spynvml\.
+    [\s(.]nvml[\s(.]
+    [\s(.]pynvml[\s(.]
     # exclude LOG_PDB
     LOG_PDB
 
