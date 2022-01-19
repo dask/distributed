@@ -11,7 +11,6 @@ omit =
     distributed/utils_test.py
     distributed/deploy/ssh.py
     distributed/_ipython_utils.py
-    distributed/dashboard/components/nvml.py
     distributed/_version.py
     distributed/pytest_resourceleaks.py
     distributed/comm/ucx.py
