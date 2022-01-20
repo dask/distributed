@@ -1016,7 +1016,7 @@ def gen_cluster(
                             ) from None
 
                         except Exception:
-                            if cluster_dump_directory and not hasattr(
+                            if cluster_dump_directory and not has_pytestmark(
                                 test_func, "xfail"
                             ):
                                 await dump_cluster_state(
@@ -1912,3 +1912,14 @@ class BrokenComm(Comm):
 
     def write(self, msg, serializers=None, on_error=None):
         raise OSError()
+
+
+def has_pytestmark(test_func: Callable, name: str) -> bool:
+    """Return True if the test function is marked by the given @pytest.mark.<name>;
+    False otherwise.
+
+    FIXME doesn't work with individually marked parameters inside
+          @pytest.mark.parametrize
+    """
+    marks = getattr(test_func, "pytestmark", [])
+    return any(mark.name == name for mark in marks)
