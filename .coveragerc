@@ -19,6 +19,7 @@ omit =
 show_missing = True
 exclude_lines =
     # re-enable the standard pragma
+    pragma: nocover
     pragma: no cover
     # exclude nvml calls
     [\s(.]nvml[\s(.]
