@@ -467,7 +467,11 @@ async def test_drop_with_paused_workers_with_running_tasks_2(c, s, a, b):
 
 @pytest.mark.slow
 @pytest.mark.parametrize("pause", [True, False])
-@gen_cluster(client=True, config=demo_config("drop"))
+@gen_cluster(
+    client=True,
+    config=demo_config("drop"),
+    worker_kwargs={"memory_monitor_interval": "50ms"},
+)
 async def test_drop_with_paused_workers_with_running_tasks_3_4(c, s, a, b, pause):
     """If there is exactly 1 worker that holds a replica of a task that isn't paused or
     retiring, and there are 1+ paused/retiring workers with the same task, don't drop
@@ -482,7 +486,7 @@ async def test_drop_with_paused_workers_with_running_tasks_3_4(c, s, a, b, pause
     b is running and has no dependent tasks
     """
     x = (await c.scatter({"x": 1}, broadcast=True))["x"]
-    y = c.submit(slowinc, x, delay=2, key="y", workers=[a.address])
+    y = c.submit(slowinc, x, delay=2.5, key="y", workers=[a.address])
     while "y" not in a.tasks or a.tasks["y"].state != "executing":
         await asyncio.sleep(0.01)
 
