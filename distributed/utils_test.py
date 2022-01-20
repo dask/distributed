@@ -1016,7 +1016,7 @@ def gen_cluster(
                             ) from None
 
                         except Exception:
-                            if cluster_dump_directory:
+                            if cluster_dump_directory and not hasattr(test_func, "xfail"):
                                 await dump_cluster_state(
                                     s,
                                     ws,
