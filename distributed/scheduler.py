@@ -27,11 +27,8 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import TYPE_CHECKING, ClassVar, Container
+from typing import ClassVar, Container, Literal
 from typing import cast as pep484_cast
-
-if TYPE_CHECKING:
-    from typing_extensions import Literal
 
 import psutil
 from sortedcontainers import SortedDict, SortedSet

@@ -19,10 +19,9 @@ from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import TYPE_CHECKING, Any, ClassVar, Container
+from typing import TYPE_CHECKING, Any, ClassVar, Container, Literal
 
 if TYPE_CHECKING:
-    from typing_extensions import Literal
     from .diagnostics.plugin import WorkerPlugin
     from .actor import Actor
     from .client import Client
