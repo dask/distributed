@@ -139,13 +139,13 @@ jobs:
         with:
           name: ${{ env.TEST_ID }}
           path: reports
-      - name: Upload timeout reports
+      - name: Upload gen_cluster dumps for failed tests
         # ensure this runs even if pytest fails
         if: >
           always() &&
           (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
         uses: actions/upload-artifact@v2
         with:
-          name: ${{ env.TEST_ID }}-timeouts
-          path: test_timeout_dump
+          name: ${{ env.TEST_ID }}_cluster_dumps
+          path: test_cluster_dump
           if-no-files-found: ignore

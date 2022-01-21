@@ -140,14 +140,16 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         nthreads=nthreads,
         config={"distributed.scheduler.work-stealing": False},
     )
-    async def test(c, s, *workers):
+    async def test_decide_worker_coschedule_order_neighbors_(c, s, *workers):
         r"""
-        Ensure that sibling root tasks are scheduled to the same node, reducing future data transfer.
+        Ensure that sibling root tasks are scheduled to the same node, reducing future
+        data transfer.
 
-        We generate a wide layer of "root" tasks (random NumPy arrays). All of those tasks share 0-5
-        trivial dependencies. The ``ndeps=0`` and ``ndeps=1`` cases are most common in real-world use
-        (``ndeps=1`` is basically ``da.from_array(..., inline_array=False)`` or ``da.from_zarr``).
-        The graph is structured like this (though the number of tasks and workers is different):
+        We generate a wide layer of "root" tasks (random NumPy arrays). All of those
+        tasks share 0-5 trivial dependencies. The ``ndeps=0`` and ``ndeps=1`` cases are
+        most common in real-world use (``ndeps=1`` is basically ``da.from_array(...,
+        inline_array=False)`` or ``da.from_zarr``). The graph is structured like this
+        (though the number of tasks and workers is different):
 
             |-W1-|  |-W2-| |-W3-|  |-W4-|   < ---- ideal task scheduling
 
@@ -159,9 +161,9 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
             \   \   \   |   |   /   /   /
                    TRIVIAL * 0..5
 
-        Neighboring `random-` tasks should be scheduled on the same worker. We test that generally,
-        only one worker holds each row of the array, that the `random-` tasks are never transferred,
-        and that there are few transfers overall.
+        Neighboring `random-` tasks should be scheduled on the same worker. We test that
+        generally, only one worker holds each row of the array, that the `random-` tasks
+        are never transferred, and that there are few transfers overall.
         """
         da = pytest.importorskip("dask.array")
         np = pytest.importorskip("numpy")
@@ -222,16 +224,18 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
                 keys = log["keys"]
                 # The root-ish tasks should never be transferred
                 assert not any(k.startswith("random") for k in keys), keys
-                # `object-` keys (the trivial deps of the root random tasks) should be transferred
+                # `object-` keys (the trivial deps of the root random tasks) should be
+                # transferred
                 if any(not k.startswith("object") for k in keys):
                     # But not many other things should be
                     unexpected_transfers.append(list(keys))
 
-        # A transfer at the very end to move aggregated results is fine (necessary with unbalanced workers in fact),
-        # but generally there should be very very few transfers.
+        # A transfer at the very end to move aggregated results is fine (necessary with
+        # unbalanced workers in fact), but generally there should be very very few
+        # transfers.
         assert len(unexpected_transfers) <= 3, unexpected_transfers
 
-    test()
+    test_decide_worker_coschedule_order_neighbors_()
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)

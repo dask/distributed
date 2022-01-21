@@ -207,7 +207,8 @@ async def test_default_name(c, s, w):
     assert next(iter(w.plugins)).startswith("MyCustomPlugin-")
 
 
-def test_release_key_deprecated():
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_release_key_deprecated(c, s, a):
     class ReleaseKeyDeprecated(WorkerPlugin):
         def __init__(self):
             self._called = False
@@ -222,20 +223,18 @@ def test_release_key_deprecated():
             assert self._called
             return super().teardown(worker)
 
-    @gen_cluster(client=True, nthreads=[("", 1)])
-    async def test(c, s, a):
-
-        await c.register_worker_plugin(ReleaseKeyDeprecated())
-        fut = await c.submit(inc, 1, key="task")
-        assert fut == 2
+    await c.register_worker_plugin(ReleaseKeyDeprecated())
 
     with pytest.deprecated_call(
         match="The `WorkerPlugin.release_key` hook is depreacted"
     ):
-        test()
+        assert await c.submit(inc, 1, key="x") == 2
+        while "x" in a.tasks:
+            await asyncio.sleep(0.01)
 
 
-def test_assert_no_warning_no_overload():
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_assert_no_warning_no_overload(c, s, a):
     """Assert we do not receive a deprecation warning if we do not overload any
     methods
     """
@@ -243,15 +242,11 @@ def test_assert_no_warning_no_overload():
     class Dummy(WorkerPlugin):
         pass
 
-    @gen_cluster(client=True, nthreads=[("", 1)])
-    async def test(c, s, a):
-
-        await c.register_worker_plugin(Dummy())
-        fut = await c.submit(inc, 1, key="task")
-        assert fut == 2
-
     with pytest.warns(None):
-        test()
+        await c.register_worker_plugin(Dummy())
+        assert await c.submit(inc, 1, key="x") == 2
+        while "x" in a.tasks:
+            await asyncio.sleep(0.01)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)

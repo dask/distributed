@@ -5747,43 +5747,37 @@ async def test_client_active_bad_port():
 
 
 @pytest.mark.parametrize("direct", [True, False])
-def test_turn_off_pickle(direct):
-    @gen_cluster()
-    async def test(s, a, b):
-        np = pytest.importorskip("numpy")
+@gen_cluster(client=True, client_kwargs={"serializers": ["dask", "msgpack"]})
+async def test_turn_off_pickle(c, s, a, b, direct):
+    np = pytest.importorskip("numpy")
 
-        async with Client(
-            s.address, asynchronous=True, serializers=["dask", "msgpack"]
-        ) as c:
-            assert (await c.submit(inc, 1)) == 2
-            await c.submit(np.ones, 5)
-            await c.scatter(1)
+    assert (await c.submit(inc, 1)) == 2
+    await c.submit(np.ones, 5)
+    await c.scatter(1)
 
-            # Can't send complex data
-            with pytest.raises(TypeError):
-                future = await c.scatter(inc)
+    # Can't send complex data
+    with pytest.raises(TypeError):
+        await c.scatter(inc)
 
-            # can send complex tasks (this uses pickle regardless)
-            future = c.submit(lambda x: x, inc)
-            await wait(future)
+    # can send complex tasks (this uses pickle regardless)
+    future = c.submit(lambda x: x, inc)
+    await wait(future)
 
-            # but can't receive complex results
-            with pytest.raises(TypeError):
-                await c.gather(future, direct=direct)
+    # but can't receive complex results
+    with pytest.raises(TypeError):
+        await c.gather(future, direct=direct)
 
-            # Run works
-            result = await c.run(lambda: 1)
-            assert list(result.values()) == [1, 1]
-            result = await c.run_on_scheduler(lambda: 1)
-            assert result == 1
+    # Run works
+    result = await c.run(lambda: 1)
+    assert list(result.values()) == [1, 1]
+    result = await c.run_on_scheduler(lambda: 1)
+    assert result == 1
 
-            # But not with complex return values
-            with pytest.raises(TypeError):
-                await c.run(lambda: inc)
-            with pytest.raises(TypeError):
-                await c.run_on_scheduler(lambda: inc)
-
-    test()
+    # But not with complex return values
+    with pytest.raises(TypeError):
+        await c.run(lambda: inc)
+    with pytest.raises(TypeError):
+        await c.run_on_scheduler(lambda: inc)
 
 
 @gen_cluster()
@@ -6620,21 +6614,19 @@ async def test_annotations_task_state(c, s, a, b):
 
 
 @pytest.mark.parametrize("fn", ["compute", "persist"])
-def test_annotations_compute_time(fn):
+@gen_cluster(client=True)
+async def test_annotations_compute_time(c, s, a, b, fn):
     da = pytest.importorskip("dask.array")
+    x = da.ones(10, chunks=(5,))
 
-    @gen_cluster(client=True)
-    async def test(c, s, a, b):
-        x = da.ones(10, chunks=(5,))
+    with dask.annotate(foo="bar"):
+        # Turn off optimization to avoid rewriting layers and picking up annotations
+        # that way. Instead, we want `compute`/`persist` to be able to pick them up.
+        fut = getattr(c, fn)(x, optimize_graph=False)
 
-        with dask.annotate(foo="bar"):
-            # Turn off optimization to avoid rewriting layers and picking up annotations
-            # that way. Instead, we want `compute`/`persist` to be able to pick them up.
-            x = await getattr(c, fn)(x, optimize_graph=False)
-
-        assert all({"foo": "bar"} == ts.annotations for ts in s.tasks.values())
-
-    test()
+    await wait(fut)
+    assert s.tasks
+    assert all(ts.annotations == {"foo": "bar"} for ts in s.tasks.values())
 
 
 @pytest.mark.xfail(reason="https://github.com/dask/dask/issues/7036")
