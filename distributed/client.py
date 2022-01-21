@@ -5095,7 +5095,7 @@ def default_client(c=None):
 
 
 def ensure_default_client(client):
-    """ Ensures the client passed as argument is set as the default
+    """Ensures the client passed as argument is set as the default
 
     Parameters
     ----------
