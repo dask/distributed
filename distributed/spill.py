@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Hashable, Mapping
 from distutils.version import LooseVersion
 from functools import partial
@@ -22,12 +23,27 @@ class SpillBuffer(zict.Buffer):
     the total size of the stored data exceeds the target. If max_spill is provided the
     key/value pairs won't be spilled once this threshold has been reached.
 
-    parameter
+    Paramaters
+    ----------
+    spill_directory: str
+        Directory use as storage in slow. See zict.Func and zict.File
+    target: int
+        target memory when to start to spill. See also zict.Buffer and zict.LRU n and weight.
+    max_spill: int
+        Limit of number of bytes to be spilled on disk.
+        (default: read from config key distributed.worker.memory.spill-limit)
+    min_log_interval: float
+        Minimum logging time interval. Default 2 seconds.
     """
 
     def __init__(
-        self, spill_directory: str, target: int, max_spill: int | Literal[False] = False
+        self,
+        spill_directory: str,
+        target: int,
+        max_spill: int | Literal[False] = False,
+        min_log_interval: float = 2,
     ):
+
         if max_spill is not False and LooseVersion(zict.__version__) <= "2.0.0":
             raise ValueError("zict > 2.0.0 required to set max_weight")
 
@@ -37,7 +53,13 @@ class SpillBuffer(zict.Buffer):
             n=target,
             weight=_in_memory_weight,
         )
-        self.logged_keys: list[str] = []  # list to track logged keys to avoid spaming
+        self.time_log_maxspill: float = 0
+        self.time_log_oserror: float = 0
+        self.time_log_pickle: float = 0
+
+        self.min_log_interval = min_log_interval
+
+        self.logged_pickle_keys: set = set()  # keys logged with pickle error
 
     def __setitem__(self, key, value):
         try:
@@ -46,15 +68,20 @@ class SpillBuffer(zict.Buffer):
             key_e = e.args[0]  # otherwise it returns (key_e, )
             # key is in self.fast; no keys have been lost on eviction
             # Note: requires zict > 2.0
-            # TODO don't spam the log file with hundreds of messages per second
-            if key_e not in self.logged_keys:
+            now = time.time()
+            if now - self.time_log_maxspill >= self.min_log_interval:
                 logger.warning(
                     "Spill file on disk reached capacity; keeping data in memory"
                 )
-                self.logged_keys.append(key_e)
+                self.time_log_maxspill = now
             pass
         except OSError:
-            logger.error("Spill to disk failed; keeping data in memory", exc_info=True)
+            now = time.time()
+            if now - self.time_log_oserror >= self.min_log_interval:
+                logger.error(
+                    "Spill to disk failed; keeping data in memory", exc_info=True
+                )
+                self.time_log_oserror = now
             pass
         except PickleError as e:
             key_e, orig_e = e.args
@@ -71,10 +98,12 @@ class SpillBuffer(zict.Buffer):
                 # There's nothing wrong with the new key. The older key is still in memory.
                 assert key_e in self.fast
                 assert key_e not in self.slow
-                # TODO don't flood the log every time ANY key is added to the LRU!
-                if key_e not in self.logged_keys:
+                now = time.time()
+                if (key_e not in self.logged_pickle_keys) and (
+                    now - self.time_log_pickle >= self.min_log_interval
+                ):
                     logger.error(f"Failed to pickle {key!r}", exc_info=True)
-                    self.logged_keys.append(key_e)
+                    self.logged_pickle_keys.add(key_e)
                 pass
 
     @property

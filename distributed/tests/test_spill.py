@@ -103,7 +103,7 @@ def test_spillbuffer(tmpdir):
     reason="requires zict version > 2.0.0 or higher",
 )
 def test_spillbuffer_maxlim(tmpdir):
-    buf = SpillBuffer(str(tmpdir), target=200, max_spill=600)
+    buf = SpillBuffer(str(tmpdir), target=200, max_spill=600, min_log_interval=0)
 
     a, b, c, d = "a" * 200, "b" * 100, "c" * 100, "d" * 200
 
@@ -200,8 +200,12 @@ class MyError(Exception):
     pass
 
 
+@pytest.mark.skipif(
+    LooseVersion(zict.__version__) <= "2.0.0",
+    reason="requires zict version > 2.0.0 or higher",
+)
 def test_spillbuffer_bad_key(tmpdir):
-    buf = SpillBuffer(str(tmpdir), target=200, max_spill=600)
+    buf = SpillBuffer(str(tmpdir), target=200, max_spill=600, min_log_interval=0)
 
     class Bad:
         def __init__(self, size):
@@ -217,11 +221,14 @@ def test_spillbuffer_bad_key(tmpdir):
     a = Bad(size=200)
     assert sizeof(a) > 200
 
+    # Exception caught in the worker
     with pytest.raises(Exception):
-        with captured_logger(logging.getLogger("distributed.spill")) as logs_bad_key:
+        with captured_logger(
+            logging.getLogger("distributed.protocol.pickle")
+        ) as logs_bad_key:
             buf["a"] = a
 
-    assert "Failed to pickle" in logs_bad_key.getvalue()
+    assert "Failed to serialize" in logs_bad_key.getvalue()
 
     b = Bad(size=100)  # this is small enough to fit in memory/fast
 
@@ -238,9 +245,13 @@ def test_spillbuffer_bad_key(tmpdir):
     assert set(buf.fast) == {"b", "c"}
 
 
+@pytest.mark.skipif(
+    LooseVersion(zict.__version__) <= "2.0.0",
+    reason="requires zict version > 2.0.0 or higher",
+)
 @pytest.mark.skipif(WINDOWS, reason="Needs chmod")
 def test_spillbuffer_oserror(tmpdir):
-    buf = SpillBuffer(str(tmpdir), target=200, max_spill=800)
+    buf = SpillBuffer(str(tmpdir), target=200, max_spill=800, min_log_interval=0)
 
     a, b, c, d = (
         "a" * 200,
