@@ -1663,9 +1663,9 @@ async def test_close_gracefully(c, s, a, b):
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[])
 async def test_lifetime(c, s):
-    async with Worker(s.address) as a, Worker(s.address, lifetime="1 seconds") as b:
+    async with Worker(s.address) as a, Worker(s.address, lifetime="2 seconds") as b:
         futures = c.map(slowinc, range(200), delay=0.1, workers=[b.address])
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1)
         assert not a.data
         assert b.data
         b_keys = set(b.data)
