@@ -7,6 +7,7 @@ import logging
 import math
 import operator
 import os
+import pickle
 import random
 import sys
 import uuid
@@ -159,15 +160,6 @@ else:
 
     def nogil(func):
         return func
-
-
-if sys.version_info < (3, 8):
-    try:
-        import pickle5 as pickle
-    except ImportError:
-        import pickle
-else:
-    import pickle
 
 
 logger = logging.getLogger(__name__)

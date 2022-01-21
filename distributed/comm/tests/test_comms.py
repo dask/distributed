@@ -769,10 +769,6 @@ async def test_tcp_comm_closed_explicit(tcp):
     await check_comm_closed_explicit("tcp://127.0.0.1")
 
 
-@pytest.mark.xfail(
-    sys.version_info[:2] == (3, 7),
-    reason="This test fails on python 3.7 with certain versions of openssl",
-)
 @pytest.mark.asyncio
 async def test_tls_comm_closed_explicit(tcp):
     await check_comm_closed_explicit("tls://127.0.0.1", **tls_kwargs)
