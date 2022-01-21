@@ -1632,7 +1632,7 @@ async def test_close_gracefully(c, s, a, b):
     # Note: keys will appear in b.data several milliseconds before they switch to
     # status=memory in s.tasks. It's important to sample the in-memory keys from the
     # scheduler side, because those that the scheduler thinks are still processing won't
-    # be replicated by the Active Memory Manager.
+    # be replicated by retire_workers().
     while True:
         mem = {k for k, ts in s.tasks.items() if ts.state == "memory"}
         if len(mem) >= 8:
