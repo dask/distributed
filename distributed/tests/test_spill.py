@@ -1,9 +1,9 @@
 import logging
 import subprocess
-from distutils.version import LooseVersion
 
 import pytest
 import zict
+from packaging.version import parse as parse_version
 
 from dask.sizeof import sizeof
 
@@ -99,7 +99,7 @@ def test_spillbuffer(tmpdir):
 
 
 @pytest.mark.skipif(
-    LooseVersion(zict.__version__) <= "2.0.0",
+    parse_version(zict.__version__) <= parse_version("2.0.0"),
     reason="requires zict version > 2.0.0 or higher",
 )
 def test_spillbuffer_maxlim(tmpdir):
@@ -201,7 +201,7 @@ class MyError(Exception):
 
 
 @pytest.mark.skipif(
-    LooseVersion(zict.__version__) <= "2.0.0",
+    parse_version(zict.__version__) <= parse_version("2.0.0"),
     reason="requires zict version > 2.0.0 or higher",
 )
 def test_spillbuffer_bad_key(tmpdir):
@@ -246,7 +246,7 @@ def test_spillbuffer_bad_key(tmpdir):
 
 
 @pytest.mark.skipif(
-    LooseVersion(zict.__version__) <= "2.0.0",
+    parse_version(zict.__version__) <= parse_version("2.0.0"),
     reason="requires zict version > 2.0.0 or higher",
 )
 @pytest.mark.skipif(WINDOWS, reason="Needs chmod")

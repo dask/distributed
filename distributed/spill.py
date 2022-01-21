@@ -3,11 +3,11 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Hashable, Mapping
-from distutils.version import LooseVersion
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
 import zict
+from packaging.version import parse as parse_version
 
 if TYPE_CHECKING:
     from typing_extensions import Literal
@@ -44,7 +44,9 @@ class SpillBuffer(zict.Buffer):
         min_log_interval: float = 2,
     ):
 
-        if max_spill is not False and LooseVersion(zict.__version__) <= "2.0.0":
+        if max_spill is not False and parse_version(zict.__version__) <= parse_version(
+            "2.0.0"
+        ):
             raise ValueError("zict > 2.0.0 required to set max_weight")
 
         super().__init__(
