@@ -202,7 +202,7 @@ if __name__ == "__main__":
                 w["dfs"].append(df)
 
     # Compute the set of test suites which form the top-level grouping for the chart
-    # (e.g., ubuntu-latest-3.9, windows-latest-3.7)
+    # (e.g., ubuntu-latest-3.9, windows-latest-3.8)
     suites = set()
     for w in workflows:
         for a in w["artifacts"]:
