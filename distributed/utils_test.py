@@ -678,7 +678,7 @@ def cluster(
             for worker in workers:
                 worker["address"] = worker["queue"].get(timeout=5)
         except queue.Empty:
-            raise pytest.xfail.Exception("Worker failed to start in test")
+            pytest.xfail("Worker failed to start in test")
 
         saddr = scheduler_q.get()
 
@@ -1014,6 +1014,9 @@ def gen_cluster(
                                 "========== Test stack trace starts here ==========\n"
                                 f"{buffer.getvalue()}"
                             ) from None
+
+                        except pytest.xfail.Exception:
+                            raise
 
                         except Exception:
                             if cluster_dump_directory and not has_pytestmark(

@@ -699,6 +699,7 @@ async def assert_balanced(inp, expected, c, s, *workers):
     raise Exception(f"Expected: {expected2}; got: {result2}")
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "inp,expected",
     [
@@ -732,19 +733,15 @@ async def assert_balanced(inp, expected, c, s, *workers):
     ],
 )
 def test_balance(inp, expected):
-    async def test(*args, **kwargs):
+    async def test_balance_(*args, **kwargs):
         await assert_balanced(inp, expected, *args, **kwargs)
 
-    test = gen_cluster(
-        client=True,
-        nthreads=[("127.0.0.1", 1)] * len(inp),
-        config={
-            "distributed.scheduler.default-task-durations": {
-                str(i): 1 for i in range(10)
-            }
-        },
-    )(test)
-    test()
+    config = {
+        "distributed.scheduler.default-task-durations": {str(i): 1 for i in range(10)}
+    }
+    gen_cluster(client=True, nthreads=[("", 1)] * len(inp), config=config)(
+        test_balance_
+    )()
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2, Worker=Nanny, timeout=60)
