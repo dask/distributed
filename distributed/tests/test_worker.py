@@ -1661,18 +1661,34 @@ async def test_close_gracefully(c, s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[])
-async def test_lifetime(c, s):
-    async with Worker(s.address) as a, Worker(s.address, lifetime="2 seconds") as b:
+@gen_cluster(client=True, nthreads=[("", 1)], timeout=10)
+async def test_lifetime(c, s, a):
+    async with Worker(s.address, lifetime="2 seconds") as b:
         futures = c.map(slowinc, range(200), delay=0.1, workers=[b.address])
         await asyncio.sleep(1)
         assert not a.data
-        assert b.data
-        b_keys = set(b.data)
-        while b.status == Status.running:
+        # Note: keys will appear in b.data several milliseconds before they switch to
+        # status=memory in s.tasks. It's important to sample the in-memory keys from the
+        # scheduler side, because those that the scheduler thinks are still processing
+        # won't be replicated by retire_workers().
+        mem = {k for k, ts in s.tasks.items() if ts.state == "memory"}
+        assert mem
+
+        while b.status != Status.closed:
             await asyncio.sleep(0.01)
-        await b.finished()
-        assert b_keys.issubset(a.data)  # successfully moved data over from b to a
+
+    # All tasks that were in memory in b have been copied over to a;
+    # they have not been recomputed
+    for key in mem:
+        assert_worker_story(
+            a.story(key),
+            [
+                (key, "put-in-memory"),
+                (key, "receive-from-scatter"),
+            ],
+            strict=True,
+        )
+        assert key in a.data
 
 
 @gen_cluster(worker_kwargs={"lifetime": "10s", "lifetime_stagger": "2s"})
