@@ -261,8 +261,8 @@ class Future(WrappedKey):
 
         Returns
         -------
-        result : asyncio.Future
-            The Future that contains the result of the computation
+        result
+            The result of the computation. Or a coroutine if the client is asynchronous.
         """
         if self.client.asynchronous:
             return self.client.sync(self._result, callback_timeout=timeout)
@@ -420,8 +420,8 @@ class Future(WrappedKey):
 
         Returns
         -------
-        Future
-            The Future that contains the traceback
+        traceback
+            The traceback object. Or a coroutine if the client is asynchronous.
 
         See Also
         --------
@@ -434,14 +434,8 @@ class Future(WrappedKey):
         """Returns the type"""
         return self._state.type
 
-    def release(self, _in_destructor=False):
+    def release(self):
         """
-
-        Parameters
-        ----------
-        _in_destructor: bool
-            Not used
-
         Notes
         -----
         This method can be called from different threads
@@ -688,9 +682,11 @@ class Client(SyncMethodMixin):
     heartbeat_interval: int (optional)
         Time in milliseconds between heartbeats to scheduler
     serializers
-        The serializers to turn an object into a string
+        Iterable of approaches to use when serializing the object.
+        See :ref:`serialization` for more.
     deserializers
-        The deserializers to turn the string into the original object
+        Iterable of approaches to use when deserializing the object.
+        See :ref:`serialization` for more.
     extensions : list
         The extensions
     direct_to_workers: bool (optional)
@@ -3019,10 +3015,13 @@ class Client(SyncMethodMixin):
 
         Parameters
         ----------
-        collection
+        collection : dask object
+            Collection like dask.array or dataframe or dask.value objects
 
         Returns
         -------
+        collection : dask object
+            Collection with its tasks replaced with any existing futures.
 
         Examples
         --------
@@ -5075,7 +5074,7 @@ def default_client(c=None):
     Parameters
     ----------
     c : Client
-        The client
+        The client to return. If None, the default client is returned.
 
     Returns
     -------
