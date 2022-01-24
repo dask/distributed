@@ -286,7 +286,11 @@ properties:
               For a list of handlers see the `dask.distributed.Scheduler.handlers` attribute.
 
           multiprocessing-method:
-            type: string
+            type:
+              enum:
+                - spawn
+                - fork
+                - forkserver
             description: |
               How we create new workers, one of "spawn", "forkserver", or "fork"
 
