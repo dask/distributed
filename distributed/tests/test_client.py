@@ -2939,27 +2939,33 @@ async def test_rebalance(c, s, *_):
     """Test Client.rebalance(). These are just to test the Client wrapper around
     Scheduler.rebalance(); for more thorough tests on the latter see test_scheduler.py.
     """
+    np = pytest.importorskip("numpy")
     # We used nannies to have separate processes for each worker
     a, b = s.workers
 
-    # Generate 10 buffers worth 512 MiB total on worker a. This sends its memory
+    # Generate 100 buffers worth 512 MiB total on worker a. This sends its memory
     # utilisation slightly above 50% (after counting unmanaged) which is above the
     # distributed.worker.memory.rebalance.sender-min threshold.
-    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
+    # NOTE: we use NumPy arrays instead of strings to get zero-copy data transfer,
+    # which prevents worker memory spikes during the rebalance. We use many small
+    # pieces of data for the same reason.
+    futures = c.map(
+        lambda _: np.full(2 ** 29 // 100, 1, dtype="uint8"), range(100), workers=[a]
+    )
     await wait(futures)
     # Wait for heartbeats
     while s.memory.process < 2 ** 29:
         await asyncio.sleep(0.1)
 
-    assert await c.run(lambda dask_worker: len(dask_worker.data)) == {a: 10, b: 0}
+    assert await c.run(lambda dask_worker: len(dask_worker.data)) == {a: 100, b: 0}
 
     await c.rebalance()
 
     ndata = await c.run(lambda dask_worker: len(dask_worker.data))
     # Allow for some uncertainty as the unmanaged memory is not stable
-    assert sum(ndata.values()) == 10
-    assert 3 <= ndata[a] <= 7
-    assert 3 <= ndata[b] <= 7
+    assert sum(ndata.values()) == 100
+    assert 30 <= ndata[a] <= 70
+    assert 30 <= ndata[b] <= 70
 
 
 @gen_cluster(

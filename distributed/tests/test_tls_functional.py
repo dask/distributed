@@ -4,6 +4,8 @@ Most are taken from other test files and adapted.
 """
 import asyncio
 
+import pytest
+
 from distributed import Client, Nanny, Queue, Scheduler, Worker, wait, worker_client
 from distributed.core import Status
 from distributed.metrics import time
@@ -104,29 +106,35 @@ async def test_nanny(c, s, a, b):
     config={"distributed.worker.memory.rebalance.sender-min": 0.3},
 )
 async def test_rebalance(c, s, *_):
+    np = pytest.importorskip("numpy")
     # We used nannies to have separate processes for each worker
     a, b = s.workers
     assert a.startswith("tls://")
 
-    # Generate 10 buffers worth 512 MiB total on worker a. This sends its memory
+    # Generate 100 buffers worth 512 MiB total on worker a. This sends its memory
     # utilisation slightly above 50% (after counting unmanaged) which is above the
     # distributed.worker.memory.rebalance.sender-min threshold.
-    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
+    # NOTE: we use NumPy arrays instead of strings to get zero-copy data transfer,
+    # which prevents worker memory spikes during the rebalance. We use many small
+    # pieces of data for the same reason.
+    futures = c.map(
+        lambda _: np.full(2 ** 29 // 100, 1, dtype="uint8"), range(100), workers=[a]
+    )
     await wait(futures)
 
     # Wait for heartbeats
     while s.memory.process < 2 ** 29:
         await asyncio.sleep(0.1)
 
-    assert await c.run(lambda dask_worker: len(dask_worker.data)) == {a: 10, b: 0}
+    assert await c.run(lambda dask_worker: len(dask_worker.data)) == {a: 100, b: 0}
 
     await c.rebalance()
 
     ndata = await c.run(lambda dask_worker: len(dask_worker.data))
     # Allow for some uncertainty as the unmanaged memory is not stable
-    assert sum(ndata.values()) == 10
-    assert 3 <= ndata[a] <= 7
-    assert 3 <= ndata[b] <= 7
+    assert sum(ndata.values()) == 100
+    assert 30 <= ndata[a] <= 70
+    assert 30 <= ndata[b] <= 70
 
 
 @gen_tls_cluster(client=True, nthreads=[("tls://127.0.0.1", 2)] * 2)
