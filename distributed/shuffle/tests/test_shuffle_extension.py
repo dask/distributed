@@ -136,12 +136,13 @@ async def test_create(s: Scheduler, *workers: Worker):
     )
 
     metadata = await exts[0]._create_shuffle(new_metadata)
+    assert sorted(metadata.workers) == sorted(w.address for w in workers)
 
     # Check shuffle was created on all workers
     for ext in exts:
         assert len(ext.shuffles) == 1
         shuffle = ext.shuffles[new_metadata.id]
-        assert sorted(shuffle.metadata.workers) == sorted(w.address for w in workers)
+        assert shuffle.metadata.workers == metadata.workers
 
     # TODO (resilience stage) what happens if some workers already have
     # the ID registered, but others don't?
@@ -213,7 +214,7 @@ async def test_barrier(c: Client, s: Scheduler, *workers: Worker):
     await ext._barrier(metadata.id)
 
     # Check scheduler restrictions were set for unpack tasks
-    for key, i in zip(fs, range(metadata.npartitions)):
+    for i, key in enumerate(fs):
         assert s.tasks[key].worker_restrictions == {metadata.worker_for(i)}
 
     # Check all workers have been informed of the barrier
