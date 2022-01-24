@@ -3243,8 +3243,11 @@ async def test_avoid_paused_workers(c, s, w1, w2, w3):
     while s.workers[w2.address].status != Status.paused:
         await asyncio.sleep(0.01)
     futures = c.map(slowinc, range(8), delay=0.1)
-    while (len(w1.tasks), len(w2.tasks), len(w3.tasks)) != (4, 0, 4):
-        await asyncio.sleep(0.01)
+    await wait(futures)
+    assert w1.data
+    assert not w2.data
+    assert w3.data
+    assert len(w1.data) + len(w3.data) == 8
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
