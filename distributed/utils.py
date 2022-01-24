@@ -72,21 +72,26 @@ def _initialize_mp_context():
     else:
         method = dask.config.get("distributed.worker.multiprocessing-method")
         ctx = multiprocessing.get_context(method)
-        # Makes the test suite much faster
-        preload = ["distributed"]
-        if "pkg_resources" in sys.modules:
-            preload.append("pkg_resources")
 
-        from .versions import optional_packages, required_packages
+        # Determine which modules to try to load in forkserver process
+        if method == "forkserver":
+            # Makes the test suite much faster
+            preload = ["distributed"]
+            if "pkg_resources" in sys.modules:
+                preload.append("pkg_resources")
 
-        for pkg, _ in required_packages + optional_packages:
-            try:
-                importlib.import_module(pkg)
-            except ImportError:
-                pass
-            else:
-                preload.append(pkg)
-        ctx.set_forkserver_preload(preload)
+            from .versions import optional_packages, required_packages
+
+            for pkg, _ in required_packages + optional_packages:
+                try:
+                    # see https://docs.python.org/3/library/importlib.html#checking-if-a-module-can-be-imported
+                    if importlib.util.find_spec(pkg) is not None:
+                        preload.append(pkg)
+                except (ValueError, AttributeError, ModuleNotFoundError):
+                    pass
+
+            ctx.set_forkserver_preload(preload)
+
         return ctx
 
 
