@@ -181,12 +181,14 @@ async def test_no_reconnect(nanny):
                 "--no-dashboard",
             ]
         ) as worker:
-            await c.wait_for_workers(1)
+            # roundtrip works
+            assert await c.submit(lambda x: x + 1, 10) == 11
 
             (comm,) = s.stream_comms.values()
             comm.abort()
 
-            await to_thread(worker.communicate, timeout=30)
+            # worker terminates as soon as the connection is aborted
+            await to_thread(worker.communicate, timeout=5)
             assert worker.returncode == 0
 
 
@@ -206,15 +208,18 @@ async def test_reconnect(nanny):
                 "--no-dashboard",
             ]
         ) as worker:
-            await c.wait_for_workers(1)
+            # roundtrip works
+            await c.submit(lambda x: x + 1, 10) == 11
 
             (comm,) = s.stream_comms.values()
             comm.abort()
 
-            await c.wait_for_workers(1)
-            await s.close()
+            # roundtrip still works, which means the worker reconnected
+            assert await c.submit(lambda x: x + 1, 11) == 12
 
-            await to_thread(worker.communicate, timeout=30)
+            # closing the scheduler cleanly does terminate the worker
+            await s.close()
+            await to_thread(worker.communicate, timeout=5)
             assert worker.returncode == 0
 
 
