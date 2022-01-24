@@ -2667,7 +2667,7 @@ class Client(SyncMethodMixin):
         This calls a function on all currently known workers immediately,
         blocks until those results come back, and returns the results
         asynchronously as a dictionary keyed by worker address.  This method
-        if generally used for side effects, such and collecting diagnostic
+        is generally used for side effects such as collecting diagnostic
         information or installing libraries.
 
         If your function takes an input argument named ``dask_worker`` then
