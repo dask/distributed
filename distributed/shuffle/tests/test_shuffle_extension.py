@@ -136,12 +136,13 @@ async def test_create(s: Scheduler, *workers: Worker):
     )
 
     metadata = await exts[0]._create_shuffle(new_metadata)
+    assert sorted(metadata.workers) == sorted(w.address for w in workers)
 
     # Check shuffle was created on all workers
     for ext in exts:
         assert len(ext.shuffles) == 1
         shuffle = ext.shuffles[new_metadata.id]
-        assert sorted(shuffle.metadata.workers) == sorted(w.address for w in workers)
+        assert shuffle.metadata.workers == metadata.workers
 
     # TODO (resilience stage) what happens if some workers already have
     # the ID registered, but others don't?
@@ -213,7 +214,7 @@ async def test_barrier(c: Client, s: Scheduler, *workers: Worker):
     await ext._barrier(metadata.id)
 
     # Check scheduler restrictions were set for unpack tasks
-    for key, i in zip(fs, range(metadata.npartitions)):
+    for i, key in enumerate(fs):
         assert s.tasks[key].worker_restrictions == {metadata.worker_for(i)}
 
     # Check all workers have been informed of the barrier
@@ -260,8 +261,10 @@ async def test_get_partition(c: Client, s: Scheduler, *workers: Worker):
     )
     await ext._barrier(metadata.id)
 
-    with pytest.raises(AssertionError, match="belongs on"):
-        ext.get_output_partition(metadata.id, 7)
+    for addr, ext in exts.items():
+        if metadata.worker_for(0) != addr:
+            with pytest.raises(AssertionError, match="belongs on"):
+                ext.get_output_partition(metadata.id, 0)
 
     full = pd.concat([p1, p2])
     expected_groups = full.groupby("partition")
@@ -278,6 +281,5 @@ async def test_get_partition(c: Client, s: Scheduler, *workers: Worker):
     # Once all partitions are retrieved, shuffles are cleaned up
     for ext in exts.values():
         assert not ext.shuffles
-
-    with pytest.raises(ValueError, match="not registered"):
-        ext.get_output_partition(metadata.id, 0)
+        with pytest.raises(ValueError, match="not registered"):
+            ext.get_output_partition(metadata.id, 0)
