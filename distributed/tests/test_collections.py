@@ -1,6 +1,5 @@
-from distutils.version import LooseVersion
-
 import pytest
+from packaging.version import parse as parse_version
 
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
@@ -12,8 +11,8 @@ import dask.dataframe as dd
 from distributed.client import wait
 from distributed.utils_test import gen_cluster
 
-PANDAS_VERSION = LooseVersion(pd.__version__)
-PANDAS_GT_100 = PANDAS_VERSION >= LooseVersion("1.0.0")
+PANDAS_VERSION = parse_version(pd.__version__)
+PANDAS_GT_100 = PANDAS_VERSION >= parse_version("1.0.0")
 
 if PANDAS_GT_100:
     import pandas.testing as tm  # noqa: F401

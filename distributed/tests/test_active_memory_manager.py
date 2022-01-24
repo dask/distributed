@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import random
+from contextlib import contextmanager
 
 import pytest
 
@@ -15,8 +18,25 @@ from distributed.utils_test import captured_logger, gen_cluster, inc, slowinc
 NO_AMM_START = {"distributed.scheduler.active-memory-manager.start": False}
 
 
-def captured_amm_logger():
-    return captured_logger("distributed.active_memory_manager", level=logging.DEBUG)
+@contextmanager
+def assert_amm_log(expect: list[str]):
+    with captured_logger(
+        "distributed.active_memory_manager", level=logging.DEBUG
+    ) as logger:
+        yield
+    actual = logger.getvalue().splitlines()
+    if len(actual) != len(expect) or any(
+        not a.startswith(e) for a, e in zip(actual, expect)
+    ):
+        raise AssertionError(
+            "Log lines mismatch:\n"
+            + "\n".join(actual)
+            + "\n"
+            + "=" * 80
+            + "\n"
+            + "Does not match:\n"
+            + "\n".join(expect)
+        )
 
 
 class DemoPolicy(ActiveMemoryManagerPolicy):
@@ -70,19 +90,37 @@ async def test_no_policies(c, s, a, b):
     s.extensions["amm"].run_once()
 
 
-@gen_cluster(nthreads=[("", 1)] * 4, client=True, config=demo_config("drop"))
+@gen_cluster(nthreads=[("", 1)] * 4, client=True, config=demo_config("drop", n=5))
 async def test_drop(c, s, *workers):
-    with captured_amm_logger() as logs:
-        s.extensions["amm"].run_once()
     # Logging is quiet if there are no suggestions
-    assert logs.getvalue() == ""
+    with assert_amm_log(
+        [
+            "Running policy: DemoPolicy()",
+            "Active Memory Manager run in ",
+        ],
+    ):
+        s.extensions["amm"].run_once()
 
     futures = await c.scatter({"x": 123}, broadcast=True)
     assert len(s.tasks["x"].who_has) == 4
     # Also test the extension handler
-    with captured_amm_logger() as logs:
+    with assert_amm_log(
+        [
+            "Running policy: DemoPolicy()",
+            "(drop, <TaskState 'x' memory>, None): dropping from ",
+            "(drop, <TaskState 'x' memory>, None): dropping from ",
+            "(drop, <TaskState 'x' memory>, None): dropping from ",
+            "(drop, <TaskState 'x' memory>, None) rejected: less than 2 replicas exist",
+            "(drop, <TaskState 'x' memory>, None) rejected: less than 2 replicas exist",
+            "Enacting suggestions for 1 tasks:",
+            "- <WorkerState ",
+            "- <WorkerState ",
+            "- <WorkerState ",
+            "Active Memory Manager run in ",
+        ],
+    ):
         s.extensions["amm"].run_once()
-    assert logs.getvalue() == "Enacting suggestions for 1 tasks\n"
+
     while len(s.tasks["x"].who_has) > 1:
         await asyncio.sleep(0.01)
     # The last copy is never dropped even if the policy asks so
@@ -381,6 +419,127 @@ async def test_drop_prefers_paused_workers(c, s, *workers):
     assert ws not in ts.who_has
 
 
+@pytest.mark.slow
+@gen_cluster(client=True, config=demo_config("drop"))
+async def test_drop_with_paused_workers_with_running_tasks_1(c, s, a, b):
+    """If there is exactly 1 worker that holds a replica of a task that isn't paused or
+    retiring, and there are 1+ paused/retiring workers with the same task, don't drop
+    anything.
+
+    Use case 1 (don't drop):
+    a is paused and with dependent tasks executing on it
+    b is running and has no dependent tasks
+    """
+    x = (await c.scatter({"x": 1}, broadcast=True))["x"]
+    y = c.submit(slowinc, x, delay=2, key="y", workers=[a.address])
+    while "y" not in a.tasks or a.tasks["y"].state != "executing":
+        await asyncio.sleep(0.01)
+    a.memory_pause_fraction = 1e-15
+    while s.workers[a.address].status != Status.paused:
+        await asyncio.sleep(0.01)
+    assert s.tasks["y"].state == "processing"
+    assert a.tasks["y"].state == "executing"
+
+    s.extensions["amm"].run_once()
+    await y
+    assert len(s.tasks["x"].who_has) == 2
+
+
+@gen_cluster(client=True, config=demo_config("drop"))
+async def test_drop_with_paused_workers_with_running_tasks_2(c, s, a, b):
+    """If there is exactly 1 worker that holds a replica of a task that isn't paused or
+    retiring, and there are 1+ paused/retiring workers with the same task, don't drop
+    anything.
+
+    Use case 2 (drop from a):
+    a is paused and has no dependent tasks
+    b is running and has no dependent tasks
+    """
+    x = (await c.scatter({"x": 1}, broadcast=True))["x"]
+    a.memory_pause_fraction = 1e-15
+    while s.workers[a.address].status != Status.paused:
+        await asyncio.sleep(0.01)
+
+    s.extensions["amm"].run_once()
+    await asyncio.sleep(0.2)
+    assert {ws.address for ws in s.tasks["x"].who_has} == {b.address}
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("pause", [True, False])
+@gen_cluster(
+    client=True,
+    config=demo_config("drop"),
+    worker_kwargs={"memory_monitor_interval": "50ms"},
+)
+async def test_drop_with_paused_workers_with_running_tasks_3_4(c, s, a, b, pause):
+    """If there is exactly 1 worker that holds a replica of a task that isn't paused or
+    retiring, and there are 1+ paused/retiring workers with the same task, don't drop
+    anything.
+
+    Use case 3 (drop from b):
+    a is paused and with dependent tasks executing on it
+    b is paused and has no dependent tasks
+
+    Use case 4 (drop from b):
+    a is running and with dependent tasks executing on it
+    b is running and has no dependent tasks
+    """
+    x = (await c.scatter({"x": 1}, broadcast=True))["x"]
+    y = c.submit(slowinc, x, delay=2.5, key="y", workers=[a.address])
+    while "y" not in a.tasks or a.tasks["y"].state != "executing":
+        await asyncio.sleep(0.01)
+
+    if pause:
+        a.memory_pause_fraction = 1e-15
+        b.memory_pause_fraction = 1e-15
+        while any(ws.status != Status.paused for ws in s.workers.values()):
+            await asyncio.sleep(0.01)
+
+    assert s.tasks["y"].state == "processing"
+    assert a.tasks["y"].state == "executing"
+
+    s.extensions["amm"].run_once()
+    await y
+    assert {ws.address for ws in s.tasks["x"].who_has} == {a.address}
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("", 1)] * 3, config=demo_config("drop"))
+async def test_drop_with_paused_workers_with_running_tasks_5(c, s, w1, w2, w3):
+    """If there is exactly 1 worker that holds a replica of a task that isn't paused or
+    retiring, and there are 1+ paused/retiring workers with the same task, don't drop
+    anything.
+
+    Use case 5 (drop from w2):
+    w1 is paused and with dependent tasks executing on it
+    w2 is running and has no dependent tasks
+    w3 is running and with dependent tasks executing on it
+    """
+    x = (await c.scatter({"x": 1}, broadcast=True))["x"]
+    y1 = c.submit(slowinc, x, delay=2, key="y1", workers=[w1.address])
+    y2 = c.submit(slowinc, x, delay=2, key="y2", workers=[w3.address])
+    while (
+        "y1" not in w1.tasks
+        or w1.tasks["y1"].state != "executing"
+        or "y2" not in w3.tasks
+        or w3.tasks["y2"].state != "executing"
+    ):
+        await asyncio.sleep(0.01)
+    w1.memory_pause_fraction = 1e-15
+    while s.workers[w1.address].status != Status.paused:
+        await asyncio.sleep(0.01)
+    assert s.tasks["y1"].state == "processing"
+    assert s.tasks["y2"].state == "processing"
+    assert w1.tasks["y1"].state == "executing"
+    assert w3.tasks["y2"].state == "executing"
+
+    s.extensions["amm"].run_once()
+    await y1
+    await y2
+    assert {ws.address for ws in s.tasks["x"].who_has} == {w1.address, w3.address}
+
+
 @gen_cluster(nthreads=[("", 1)] * 4, client=True, config=demo_config("replicate", n=2))
 async def test_replicate(c, s, *workers):
     futures = await c.scatter({"x": 123})
@@ -529,20 +688,35 @@ async def test_replicate_avoids_paused_workers_2(c, s, a, b):
     },
 )
 async def test_ReduceReplicas(c, s, *workers):
-    with captured_amm_logger() as logs:
-        s.extensions["amm"].run_once()
     # Logging is quiet if there are no suggestions
-    assert logs.getvalue() == ""
+    with assert_amm_log(
+        [
+            "Running policy: ReduceReplicas()",
+            "Running policy: ReduceReplicas()",
+            "Active Memory Manager run in ",
+        ],
+    ):
+        s.extensions["amm"].run_once()
 
     futures = await c.scatter({"x": 123}, broadcast=True)
     assert len(s.tasks["x"].who_has) == 4
 
-    with captured_amm_logger() as logs:
+    with assert_amm_log(
+        [
+            "Running policy: ReduceReplicas()",
+            "(drop, <TaskState 'x' memory>, None): dropping from <WorkerState ",
+            "(drop, <TaskState 'x' memory>, None): dropping from <WorkerState ",
+            "(drop, <TaskState 'x' memory>, None): dropping from <WorkerState ",
+            "ReduceReplicas: Dropping 3 superfluous replicas of 1 tasks",
+            "Running policy: ReduceReplicas()",
+            "Enacting suggestions for 1 tasks:",
+            "- <WorkerState ",
+            "- <WorkerState ",
+            "- <WorkerState ",
+            "Active Memory Manager run in ",
+        ],
+    ):
         s.extensions["amm"].run_once()
-    assert logs.getvalue() == (
-        "ReduceReplicas: Dropping 3 superfluous replicas of 1 tasks\n"
-        "Enacting suggestions for 1 tasks\n"  # core AMM extension
-    )
 
     while len(s.tasks["x"].who_has) > 1:
         await asyncio.sleep(0.01)
@@ -570,7 +744,7 @@ class DropEverything(ActiveMemoryManagerPolicy):
             self.manager.policies.remove(self)
 
 
-async def _tensordot_stress(c):
+async def tensordot_stress(c):
     da = pytest.importorskip("dask.array")
 
     rng = da.random.RandomState(0)
@@ -580,7 +754,7 @@ async def _tensordot_stress(c):
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/5371")
+@pytest.mark.avoid_ci(reason="distributed#5371")
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 4,
@@ -592,7 +766,6 @@ async def _tensordot_stress(c):
             {"class": "distributed.tests.test_active_memory_manager.DropEverything"},
         ],
     },
-    timeout=120,
 )
 async def test_drop_stress(c, s, *nannies):
     """A policy which suggests dropping everything won't break a running computation,
@@ -600,11 +773,11 @@ async def test_drop_stress(c, s, *nannies):
 
     See also: test_ReduceReplicas_stress
     """
-    await _tensordot_stress(c)
+    await tensordot_stress(c)
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/5371")
+@pytest.mark.avoid_ci(reason="distributed#5371")
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 4,
@@ -616,11 +789,10 @@ async def test_drop_stress(c, s, *nannies):
             {"class": "distributed.active_memory_manager.ReduceReplicas"},
         ],
     },
-    timeout=120,
 )
 async def test_ReduceReplicas_stress(c, s, *nannies):
     """Running ReduceReplicas compulsively won't break a running computation. Unlike
     test_drop_stress above, this test does not stop running after a few seconds - the
     policy must not disrupt the computation too much.
     """
-    await _tensordot_stress(c)
+    await tensordot_stress(c)

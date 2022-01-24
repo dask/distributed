@@ -6,9 +6,11 @@ import gc
 import os
 import sys
 import threading
-import time
+from time import sleep
 
 import pytest
+
+from .metrics import time
 
 
 def pytest_addoption(parser):
@@ -313,7 +315,7 @@ class LeakChecker:
                     leaks.append((checker, before, after))
             return leaks
 
-        t1 = time.time()
+        t1 = time()
         deadline = t1 + self.grace_delay
         leaks = run_measurements()
         if leaks:
@@ -322,8 +324,8 @@ class LeakChecker:
                 c.on_retry()
             leaks = run_measurements()
 
-        while leaks and time.time() < deadline:
-            time.sleep(0.1)
+        while leaks and time() < deadline:
+            sleep(0.1)
             self.cleanup()
             for c, _, _ in leaks:
                 c.on_retry()

@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 import asyncio
-import contextlib
 import functools
 import gc
 import inspect
@@ -30,7 +31,7 @@ import dask
 import dask.bag as db
 from dask import delayed
 from dask.optimization import SubgraphCallable
-from dask.utils import stringify, tmpfile
+from dask.utils import parse_timedelta, stringify, tmpfile
 
 from distributed import (
     CancelledError,
@@ -52,6 +53,7 @@ from distributed.client import (
     _get_global_client,
     as_completed,
     default_client,
+    ensure_default_client,
     futures_of,
     get_task_metadata,
     temp_default_client,
@@ -1270,6 +1272,30 @@ async def test_exception_on_exception(c, s, a, b):
 
     with pytest.raises(ZeroDivisionError):
         await z
+
+
+@gen_cluster(client=True)
+async def test_get_task_prefix_states(c, s, a, b):
+    x = await c.submit(inc, 1)
+    res = s.get_task_prefix_states()
+
+    data = {
+        "inc": {
+            "erred": 0,
+            "memory": 1,
+            "processing": 0,
+            "released": 0,
+            "waiting": 0,
+        }
+    }
+    assert res == data
+    del x
+
+    while s.get_task_prefix_states() == data:
+        await asyncio.sleep(0.01)
+
+    res = s.get_task_prefix_states()
+    assert res == {}
 
 
 @gen_cluster(client=True)
@@ -2694,13 +2720,45 @@ async def test_run_coroutine_deprecated(c, s, a, b):
     assert results == {a.address: "bar", b.address: "bar"}
 
 
-def test_run_exception(c):
-    def raise_exception(exc_type, exc_msg):
-        raise exc_type(exc_msg)
+@gen_cluster(client=True)
+async def test_run_exception(c, s, a, b):
+    class MyError(Exception):
+        pass
 
-    for exc_type in [ValueError, RuntimeError]:
-        with pytest.raises(exc_type, match="informative message"):
-            c.run(raise_exception, exc_type, "informative message")
+    def raise_exception(dask_worker, addr):
+        if addr == dask_worker.address:
+            raise MyError("informative message")
+        return 123
+
+    with pytest.raises(MyError, match="informative message"):
+        await c.run(raise_exception, addr=a.address)
+    with pytest.raises(MyError, match="informative message"):
+        await c.run(raise_exception, addr=a.address, on_error="raise")
+    with pytest.raises(ValueError, match="on_error must be"):
+        await c.run(raise_exception, addr=a.address, on_error="invalid")
+
+    out = await c.run(raise_exception, addr=a.address, on_error="return")
+    assert isinstance(out[a.address], MyError)
+    assert out[b.address] == 123
+
+    out = await c.run(raise_exception, addr=a.address, on_error="ignore")
+    assert out == {b.address: 123}
+
+
+@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "200ms"})
+async def test_run_rpc_error(c, s, a, b):
+    a.stop()
+    with pytest.raises(OSError, match="Timed out trying to connect"):
+        await c.run(inc, 1)
+    with pytest.raises(OSError, match="Timed out trying to connect"):
+        await c.run(inc, 1, on_error="raise")
+
+    out = await c.run(inc, 1, on_error="return")
+    assert isinstance(out[a.address], OSError)
+    assert out[b.address] == 2
+
+    out = await c.run(inc, 1, on_error="ignore")
+    assert out == {b.address: 2}
 
 
 def test_diagnostic_ui(loop):
@@ -3332,6 +3390,24 @@ def test_default_get():
         assert dask.base.get_scheduler() == pre_get
 
 
+@gen_cluster(client=True)
+async def test_ensure_default_client(c, s, a, b):
+    assert c is default_client()
+
+    async with Client(s.address, set_as_default=False, asynchronous=True) as c2:
+        assert c is default_client()
+        assert c2 is not default_client()
+        ensure_default_client(c2)
+        assert c is not default_client()
+        assert c2 is default_client()
+
+
+def test_ensure_default_get_deprecated():
+    with pytest.warns(FutureWarning, match="`ensure_default_get` is deprecated"):
+        from distributed.client import ensure_default_get
+    assert ensure_default_get is ensure_default_client
+
+
 @gen_cluster()
 async def test_set_as_default(s, a, b):
     with pytest.raises(ValueError):
@@ -3854,7 +3930,7 @@ def test_write_scheduler_file(c):
             c.write_scheduler_file(scheduler_file)
 
 
-def test_get_versions(c):
+def test_get_versions_sync(c):
     requests = pytest.importorskip("requests")
 
     v = c.get_versions()
@@ -3873,8 +3949,17 @@ def test_get_versions(c):
 
 
 @gen_cluster(client=True)
-async def test_async_get_versions(c, s, a, b):
-    await c.get_versions(check=True)
+async def test_get_versions_async(c, s, a, b):
+    v = await c.get_versions(check=True)
+    assert v.keys() == {"scheduler", "client", "workers"}
+
+
+@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "200ms"})
+async def test_get_versions_rpc_error(c, s, a, b):
+    a.stop()
+    v = await c.get_versions()
+    assert v.keys() == {"scheduler", "client", "workers"}
+    assert v["workers"].keys() == {b.address}
 
 
 def test_threaded_get_within_distributed(c):
@@ -4306,7 +4391,7 @@ async def test_retire_many_workers(c, s, *workers):
     config={"distributed.scheduler.default-task-durations": {"f": "10ms"}},
 )
 async def test_weight_occupancy_against_data_movement(c, s, a, b):
-    s.extensions["stealing"]._pc.callback_time = 1000000
+    await s.extensions["stealing"].stop()
 
     def f(x, y=0, z=0):
         sleep(0.01)
@@ -4329,7 +4414,7 @@ async def test_weight_occupancy_against_data_movement(c, s, a, b):
     config={"distributed.scheduler.default-task-durations": {"f": "10ms"}},
 )
 async def test_distribute_tasks_by_nthreads(c, s, a, b):
-    s.extensions["stealing"]._pc.callback_time = 1000000
+    await s.extensions["stealing"].stop()
 
     def f(x, y=0):
         sleep(0.01)
@@ -5114,6 +5199,42 @@ async def test_secede_balances(c, s, a, b):
     assert results == [sum(map(inc, range(10)))] * 10
 
 
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_long_running_not_in_occupancy(c, s, a):
+    # https://github.com/dask/distributed/issues/5332
+    from distributed import Lock
+
+    l = Lock()
+    await l.acquire()
+
+    def long_running(lock):
+        sleep(0.1)
+        secede()
+        lock.acquire()
+
+    f = c.submit(long_running, l)
+    while f.key not in s.tasks:
+        await asyncio.sleep(0.01)
+    assert s.workers[a.address].occupancy == parse_timedelta(
+        dask.config.get("distributed.scheduler.unknown-task-duration")
+    )
+
+    while s.workers[a.address].occupancy:
+        await asyncio.sleep(0.01)
+    await a.heartbeat()
+
+    ts = s.tasks[f.key]
+    ws = s.workers[a.address]
+    s.set_duration_estimate(ts, ws)
+    assert s.workers[a.address].occupancy == 0
+
+    s.reevaluate_occupancy(0)
+    assert s.workers[a.address].occupancy == 0
+    await l.release()
+
+    await f
+
+
 @gen_cluster(client=True)
 async def test_sub_submit_priority(c, s, a, b):
     def func():
@@ -5626,43 +5747,37 @@ async def test_client_active_bad_port():
 
 
 @pytest.mark.parametrize("direct", [True, False])
-def test_turn_off_pickle(direct):
-    @gen_cluster()
-    async def test(s, a, b):
-        np = pytest.importorskip("numpy")
+@gen_cluster(client=True, client_kwargs={"serializers": ["dask", "msgpack"]})
+async def test_turn_off_pickle(c, s, a, b, direct):
+    np = pytest.importorskip("numpy")
 
-        async with Client(
-            s.address, asynchronous=True, serializers=["dask", "msgpack"]
-        ) as c:
-            assert (await c.submit(inc, 1)) == 2
-            await c.submit(np.ones, 5)
-            await c.scatter(1)
+    assert (await c.submit(inc, 1)) == 2
+    await c.submit(np.ones, 5)
+    await c.scatter(1)
 
-            # Can't send complex data
-            with pytest.raises(TypeError):
-                future = await c.scatter(inc)
+    # Can't send complex data
+    with pytest.raises(TypeError):
+        await c.scatter(inc)
 
-            # can send complex tasks (this uses pickle regardless)
-            future = c.submit(lambda x: x, inc)
-            await wait(future)
+    # can send complex tasks (this uses pickle regardless)
+    future = c.submit(lambda x: x, inc)
+    await wait(future)
 
-            # but can't receive complex results
-            with pytest.raises(TypeError):
-                await c.gather(future, direct=direct)
+    # but can't receive complex results
+    with pytest.raises(TypeError):
+        await c.gather(future, direct=direct)
 
-            # Run works
-            result = await c.run(lambda: 1)
-            assert list(result.values()) == [1, 1]
-            result = await c.run_on_scheduler(lambda: 1)
-            assert result == 1
+    # Run works
+    result = await c.run(lambda: 1)
+    assert list(result.values()) == [1, 1]
+    result = await c.run_on_scheduler(lambda: 1)
+    assert result == 1
 
-            # But not with complex return values
-            with pytest.raises(TypeError):
-                await c.run(lambda: inc)
-            with pytest.raises(TypeError):
-                await c.run_on_scheduler(lambda: inc)
-
-    test()
+    # But not with complex return values
+    with pytest.raises(TypeError):
+        await c.run(lambda: inc)
+    with pytest.raises(TypeError):
+        await c.run_on_scheduler(lambda: inc)
 
 
 @gen_cluster()
@@ -6237,7 +6352,7 @@ async def test_dont_hold_on_to_large_messages(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_run_scheduler_async_def(c, s, a, b):
+async def test_run_on_scheduler_async_def(c, s, a, b):
     async def f(dask_scheduler):
         await asyncio.sleep(0.01)
         dask_scheduler.foo = "bar"
@@ -6256,7 +6371,7 @@ async def test_run_scheduler_async_def(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_run_scheduler_async_def_wait(c, s, a, b):
+async def test_run_on_scheduler_async_def_wait(c, s, a, b):
     async def f(dask_scheduler):
         await asyncio.sleep(0.01)
         dask_scheduler.foo = "bar"
@@ -6313,7 +6428,7 @@ async def test_performance_report(c, s, a, b):
     assert "Dask Performance Report" in data
     assert "x = da.random" in data
     assert "Threads: 4" in data
-    assert "distributed.scheduler - INFO - Clear task state" in data
+    assert "No logs to report" in data
     assert dask.__version__ in data
 
     # stacklevel=2 captures code two frames back -- which in this case
@@ -6445,6 +6560,16 @@ async def test_get_task_metadata_multiple(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_register_worker_plugin_exception(c, s, a, b):
+    class MyPlugin:
+        def setup(self, worker=None):
+            raise ValueError("Setup failed")
+
+    with pytest.raises(ValueError, match="Setup failed"):
+        await c.register_worker_plugin(MyPlugin())
+
+
+@gen_cluster(client=True)
 async def test_log_event(c, s, a, b):
 
     # Log an event from inside a task
@@ -6489,21 +6614,19 @@ async def test_annotations_task_state(c, s, a, b):
 
 
 @pytest.mark.parametrize("fn", ["compute", "persist"])
-def test_annotations_compute_time(fn):
+@gen_cluster(client=True)
+async def test_annotations_compute_time(c, s, a, b, fn):
     da = pytest.importorskip("dask.array")
+    x = da.ones(10, chunks=(5,))
 
-    @gen_cluster(client=True)
-    async def test(c, s, a, b):
-        x = da.ones(10, chunks=(5,))
+    with dask.annotate(foo="bar"):
+        # Turn off optimization to avoid rewriting layers and picking up annotations
+        # that way. Instead, we want `compute`/`persist` to be able to pick them up.
+        fut = getattr(c, fn)(x, optimize_graph=False)
 
-        with dask.annotate(foo="bar"):
-            # Turn off optimization to avoid rewriting layers and picking up annotations
-            # that way. Instead, we want `compute`/`persist` to be able to pick them up.
-            x = await getattr(c, fn)(x, optimize_graph=False)
-
-        assert all({"foo": "bar"} == ts.annotations for ts in s.tasks.values())
-
-    test()
+    await wait(fut)
+    assert s.tasks
+    assert all(ts.annotations == {"foo": "bar"} for ts in s.tasks.values())
 
 
 @pytest.mark.xfail(reason="https://github.com/dask/dask/issues/7036")
@@ -7103,7 +7226,7 @@ def test_print_simple(capsys):
     assert "Hello!:123" in out
 
 
-def _verify_cluster_dump(path, _format):
+def _verify_cluster_dump(path, _format: str, addresses: set[str]) -> dict:
     path = str(path)
     if _format == "msgpack":
         import gzip
@@ -7112,56 +7235,42 @@ def _verify_cluster_dump(path, _format):
 
         path += ".msgpack.gz"
 
-        with gzip.open(path) as fd:
-            state = msgpack.unpack(fd)
+        with gzip.open(path) as fd_zip:
+            state = msgpack.unpack(fd_zip)
     else:
         import yaml
 
         path += ".yaml"
-        with open(path) as fd:
-            state = yaml.load(fd, Loader=yaml.Loader)
+        with open(path) as fd_plain:
+            state = yaml.safe_load(fd_plain)
 
     assert isinstance(state, dict)
     assert "scheduler" in state
     assert "workers" in state
     assert "versions" in state
+    assert state["workers"].keys() == addresses
+    return state
 
 
-@pytest.mark.parametrize("_format", ["msgpack", "json", "yaml"])
-def test_dump_cluster_state(c, s, a, b, tmp_path, _format):
-
-    if _format == "json":
-        ctx = pytest.raises(ValueError, match="Unsupported format")
-    else:
-        ctx = contextlib.nullcontext()
-
+@pytest.mark.parametrize("_format", ["msgpack", "yaml"])
+def test_dump_cluster_state_sync(c, s, a, b, tmp_path, _format):
     filename = tmp_path / "foo"
-    with ctx:
-        c.dump_cluster_state(
-            filename=filename,
-            format=_format,
-        )
-
-        _verify_cluster_dump(filename, _format)
+    c.dump_cluster_state(filename, format=_format)
+    _verify_cluster_dump(filename, _format, {a["address"], b["address"]})
 
 
-@pytest.mark.parametrize("_format", ["msgpack", "json", "yaml"])
+@pytest.mark.parametrize("_format", ["msgpack", "yaml"])
 @gen_cluster(client=True)
 async def test_dump_cluster_state_async(c, s, a, b, tmp_path, _format):
-
-    if _format == "json":
-        ctx = pytest.raises(ValueError, match="Unsupported format")
-    else:
-        ctx = contextlib.nullcontext()
-
     filename = tmp_path / "foo"
-    with ctx:
-        await c.dump_cluster_state(
-            filename=filename,
-            format=_format,
-        )
+    await c.dump_cluster_state(filename, format=_format)
+    _verify_cluster_dump(filename, _format, {a.address, b.address})
 
-        _verify_cluster_dump(filename, _format)
+
+@gen_cluster(client=True)
+async def test_dump_cluster_state_json(c, s, a, b, tmp_path):
+    with pytest.raises(ValueError, match="Unsupported format"):
+        await c.dump_cluster_state(tmp_path / "foo", format="json")
 
 
 @gen_cluster(client=True)
@@ -7189,3 +7298,16 @@ async def test_dump_cluster_state_exclude(c, s, a, b, tmp_path):
     for k, task_dump in tasks.items():
         assert not any(blocked in task_dump for blocked in exclude)
         assert k in s.tasks
+
+
+@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "200ms"})
+async def test_dump_cluster_state_error(c, s, a, b, tmp_path):
+    a.stop()
+    filename = tmp_path / "foo"
+    await c.dump_cluster_state(filename, format="yaml")
+    state = _verify_cluster_dump(filename, "yaml", {a.address, b.address})
+    assert state["workers"][a.address] == (
+        f"OSError('Timed out trying to connect to {a.address} after 0.2 s')"
+    )
+    assert isinstance(state["workers"][b.address], dict)
+    assert state["versions"]["workers"].keys() == {b.address}

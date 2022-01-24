@@ -7,7 +7,10 @@ from contextlib import contextmanager
 from time import sleep
 
 import pytest
+import yaml
 from tornado import gen
+
+import dask.config
 
 from distributed import Client, Nanny, Scheduler, Worker, config, default_client
 from distributed.core import Server, rpc
@@ -16,7 +19,9 @@ from distributed.utils import get_ip
 from distributed.utils_test import (
     _LockedCommPool,
     _UnhashableCallable,
+    assert_worker_story,
     cluster,
+    dump_cluster_state,
     gen_cluster,
     gen_test,
     inc,
@@ -97,11 +102,8 @@ async def test_gen_cluster_parametrized_variadic_workers(c, s, *workers, foo):
 )
 async def test_gen_cluster_set_config_nanny(c, s, a, b):
     def assert_config():
-        import dask
-
         assert dask.config.get("distributed.comm.timeouts.connect") == "1s"
         assert dask.config.get("new.config.value") == "foo"
-        return dask.config
 
     await c.run(assert_config)
     await c.run_on_scheduler(assert_config)
@@ -422,3 +424,132 @@ def test_dump_cluster_state_timeout(tmp_path):
 
     assert "scheduler" in state
     assert "workers" in state
+
+
+def test_assert_worker_story():
+    now = time()
+    story = [
+        ("foo", "id1", now - 600),
+        ("bar", "id2", now),
+        ("baz", {1: 2}, "id2", now),
+    ]
+    # strict=False
+    assert_worker_story(story, [("foo",), ("bar",), ("baz", {1: 2})])
+    assert_worker_story(story, [])
+    assert_worker_story(story, [("foo",)])
+    assert_worker_story(story, [("foo",), ("bar",)])
+    assert_worker_story(story, [("baz", lambda d: d[1] == 2)])
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [("foo", "nomatch")])
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [("baz",)])
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [("baz", {1: 3})])
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [("foo",), ("bar",), ("baz", "extra"), ("+1",)])
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [("baz", lambda d: d[1] == 3)])
+    with pytest.raises(KeyError):  # Faulty lambda
+        assert_worker_story(story, [("baz", lambda d: d[2] == 1)])
+    assert_worker_story([], [])
+    assert_worker_story([("foo", "id1", now)], [("foo",)])
+    with pytest.raises(AssertionError):
+        assert_worker_story([], [("foo",)])
+
+    # strict=True
+    assert_worker_story([], [], strict=True)
+    assert_worker_story([("foo", "id1", now)], [("foo",)])
+    assert_worker_story(story, [("foo",), ("bar",), ("baz", {1: 2})], strict=True)
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [("foo",), ("bar",)], strict=True)
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [("foo",), ("baz", {1: 2})], strict=True)
+    with pytest.raises(AssertionError):
+        assert_worker_story(story, [], strict=True)
+
+
+@pytest.mark.parametrize(
+    "story",
+    [
+        [()],  # Missing payload, stimulus_id, ts
+        [("foo",)],  # Missing (stimulus_id, ts)
+        [("foo", "bar")],  # Missing ts
+        [("foo", "bar", "baz")],  # ts is not a float
+        [("foo", "bar", time() + 3600)],  # ts is in the future
+        [("foo", "bar", time() - 7200)],  # ts is too old
+        [("foo", 123, time())],  # stimulus_id is not a string
+        [("foo", "", time())],  # stimulus_id is an empty string
+        [("", time())],  # no payload
+        [("foo", "id", time()), ("foo", "id", time() - 10)],  # timestamps out of order
+    ],
+)
+def test_assert_worker_story_malformed_story(story):
+    with pytest.raises(AssertionError, match="Malformed story event"):
+        assert_worker_story(story, [])
+
+
+@gen_cluster()
+async def test_dump_cluster_state(s, a, b, tmpdir):
+    await dump_cluster_state(s, [a, b], str(tmpdir), "dump")
+    with open(f"{tmpdir}/dump.yaml") as fh:
+        out = yaml.safe_load(fh)
+
+    assert out.keys() == {"scheduler", "workers", "versions"}
+    assert out["workers"].keys() == {a.address, b.address}
+
+
+@gen_cluster(nthreads=[])
+async def test_dump_cluster_state_no_workers(s, tmpdir):
+    await dump_cluster_state(s, [], str(tmpdir), "dump")
+    with open(f"{tmpdir}/dump.yaml") as fh:
+        out = yaml.safe_load(fh)
+
+    assert out.keys() == {"scheduler", "workers", "versions"}
+    assert out["workers"] == {}
+
+
+@gen_cluster(Worker=Nanny)
+async def test_dump_cluster_state_nannies(s, a, b, tmpdir):
+    await dump_cluster_state(s, [a, b], str(tmpdir), "dump")
+    with open(f"{tmpdir}/dump.yaml") as fh:
+        out = yaml.safe_load(fh)
+
+    assert out.keys() == {"scheduler", "workers", "versions"}
+    assert out["workers"].keys() == s.workers.keys()
+
+
+@gen_cluster()
+async def test_dump_cluster_state_unresponsive_local_worker(s, a, b, tmpdir):
+    a.stop()
+    await dump_cluster_state(s, [a, b], str(tmpdir), "dump")
+    with open(f"{tmpdir}/dump.yaml") as fh:
+        out = yaml.safe_load(fh)
+
+    assert out.keys() == {"scheduler", "workers", "versions"}
+    assert isinstance(out["workers"][a.address], dict)
+    assert isinstance(out["workers"][b.address], dict)
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    config={"distributed.comm.timeouts.connect": "600ms"},
+)
+async def test_dump_cluster_unresponsive_remote_worker(c, s, a, b, tmpdir):
+    clog_fut = asyncio.create_task(
+        c.run(lambda dask_scheduler: dask_scheduler.stop(), workers=[a.worker_address])
+    )
+    await asyncio.sleep(0.2)
+
+    await dump_cluster_state(s, [a, b], str(tmpdir), "dump")
+    with open(f"{tmpdir}/dump.yaml") as fh:
+        out = yaml.safe_load(fh)
+
+    assert out.keys() == {"scheduler", "workers", "versions"}
+    assert isinstance(out["workers"][b.worker_address], dict)
+    assert out["workers"][a.worker_address].startswith(
+        "OSError('Timed out trying to connect to"
+    )
+
+    clog_fut.cancel()

@@ -71,13 +71,11 @@ class ParameterServer:
 
 
 @pytest.mark.parametrize("direct_to_workers", [True, False])
-def test_client_actions(direct_to_workers):
-    @gen_cluster(client=True)
-    async def test(c, s, a, b):
-        c = await Client(
-            s.address, asynchronous=True, direct_to_workers=direct_to_workers
-        )
-
+@gen_cluster()
+async def test_client_actions(s, a, b, direct_to_workers):
+    async with Client(
+        s.address, asynchronous=True, direct_to_workers=direct_to_workers
+    ) as c:
         counter = c.submit(Counter, workers=[a.address], actor=True)
         assert isinstance(counter, Future)
         counter = await counter
@@ -86,8 +84,7 @@ def test_client_actions(direct_to_workers):
         assert hasattr(counter, "add")
         assert hasattr(counter, "n")
 
-        n = await counter.n
-        assert n == 0
+        assert await counter.n == 0
 
         assert counter._address == a.address
 
@@ -96,45 +93,36 @@ def test_client_actions(direct_to_workers):
 
         await asyncio.gather(counter.increment(), counter.increment())
 
-        n = await counter.n
-        assert n == 2
+        assert await counter.n == 2
 
         counter.add(10)
         while (await counter.n) != 10 + 2:
-            n = await counter.n
             await asyncio.sleep(0.01)
-
-        await c.close()
-
-    test()
 
 
 @pytest.mark.parametrize("separate_thread", [False, True])
-def test_worker_actions(separate_thread):
-    @gen_cluster(client=True)
-    async def test(c, s, a, b):
-        counter = c.submit(Counter, workers=[a.address], actor=True)
-        a_address = a.address
+@gen_cluster(client=True)
+async def test_worker_actions(c, s, a, b, separate_thread):
+    counter = c.submit(Counter, workers=[a.address], actor=True)
+    a_address = a.address
 
-        def f(counter):
-            start = counter.n
+    def f(counter):
+        start = counter.n
 
-            assert type(counter) is Actor
-            assert counter._address == a_address
+        assert type(counter) is Actor
+        assert counter._address == a_address
 
-            future = counter.increment(separate_thread=separate_thread)
-            assert isinstance(future, ActorFuture)
-            assert "Future" in type(future).__name__
-            end = future.result(timeout=1)
-            assert end > start
+        future = counter.increment(separate_thread=separate_thread)
+        assert isinstance(future, ActorFuture)
+        assert "Future" in type(future).__name__
+        end = future.result(timeout=1)
+        assert end > start
 
-        futures = [c.submit(f, counter, pure=False) for _ in range(10)]
-        await c.gather(futures)
+    futures = [c.submit(f, counter, pure=False) for _ in range(10)]
+    await c.gather(futures)
 
-        counter = await counter
-        assert await counter.n == 10
-
-    test()
+    counter = await counter
+    assert await counter.n == 10
 
 
 @gen_cluster(client=True)

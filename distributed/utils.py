@@ -1436,10 +1436,9 @@ def __getattr__(name):
         raise AttributeError(f"module {__name__} has no attribute {name}")
 
 
-# Used internally by recursive_to_dict to let the YAML exporter catch infinite
-# recursion. If an object has already been encountered, a string representan will be
-# returned instead. This is necessary since we have multiple cyclic referencing data
-# structures.
+# Used internally by recursive_to_dict to stop infinite recursion. If an object has
+# already been encountered, a string representation will be returned instead. This is
+# necessary since we have multiple cyclic referencing data structures.
 _recursive_to_dict_seen: ContextVar[set[int]] = ContextVar("_recursive_to_dict_seen")
 
 
@@ -1464,29 +1463,29 @@ def recursive_to_dict(obj: AnyType, *, exclude: Container[str] = ()) -> AnyType:
     try:
         seen = _recursive_to_dict_seen.get()
     except LookupError:
-        tok = _recursive_to_dict_seen.set(set())
-        try:
-            return recursive_to_dict(obj, exclude=exclude)
-        finally:
-            _recursive_to_dict_seen.reset(tok)
+        seen = set()
+    seen = seen.copy()
+    tok = _recursive_to_dict_seen.set(seen)
+    try:
+        if id(obj) in seen:
+            return repr(obj)
+        seen.add(id(obj))
 
-    if id(obj) in seen:
+        if hasattr(obj, "_to_dict"):
+            return obj._to_dict(exclude=exclude)
+        if isinstance(obj, (list, tuple, set, frozenset, deque)):
+            return [recursive_to_dict(el, exclude=exclude) for el in obj]
+        if isinstance(obj, dict):
+            res = {}
+            for k, v in obj.items():
+                k = recursive_to_dict(k, exclude=exclude)
+                v = recursive_to_dict(v, exclude=exclude)
+                try:
+                    res[k] = v
+                except TypeError:
+                    res[str(k)] = v
+            return res
+
         return repr(obj)
-    seen.add(id(obj))
-
-    if hasattr(obj, "_to_dict"):
-        return obj._to_dict(exclude=exclude)
-    if isinstance(obj, (list, tuple, set, frozenset, deque)):
-        return [recursive_to_dict(el, exclude=exclude) for el in obj]
-    if isinstance(obj, dict):
-        res = {}
-        for k, v in obj.items():
-            k = recursive_to_dict(k, exclude=exclude)
-            v = recursive_to_dict(v, exclude=exclude)
-            try:
-                res[k] = v
-            except TypeError:
-                res[str(k)] = v
-        return res
-
-    return repr(obj)
+    finally:
+        tok.var.reset(tok)

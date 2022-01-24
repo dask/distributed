@@ -16,7 +16,7 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Awaitable, Collection, Iterator
+from collections.abc import Collection, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager, suppress
@@ -156,6 +156,8 @@ class Future(WrappedKey):
         Client that should own this future.  Defaults to _get_global_client()
     inform: bool
         Do we inform the scheduler that we need an update on this future
+    state: FutureState
+        The state of the future
 
     Examples
     --------
@@ -212,21 +214,55 @@ class Future(WrappedKey):
 
     @property
     def executor(self):
+        """Returns the executor, which is the client.
+
+        Returns
+        -------
+        Client
+            The executor
+        """
         return self.client
 
     @property
     def status(self):
+        """Returns the status
+
+        Returns
+        -------
+        str
+            The status
+        """
         return self._state.status
 
     def done(self):
-        """Is the computation complete?"""
+        """Returns whether or not the computation completed.
+
+        Returns
+        -------
+        bool
+            True if the computation is complete, otherwise False
+        """
         return self._state.done()
 
     def result(self, timeout=None):
         """Wait until computation completes, gather result to local process.
 
-        If *timeout* seconds are elapsed before returning, a
-        ``dask.distributed.TimeoutError`` is raised.
+        Parameters
+        ----------
+        timeout : number, optional
+            Time in seconds after which to raise a
+            ``dask.distributed.TimeoutError``
+
+        Raises
+        ------
+        dask.distributed.TimeoutError
+            If *timeout* seconds are elapsed before returning, a
+            ``dask.distributed.TimeoutError`` is raised.
+
+        Returns
+        -------
+        result : asyncio.Future
+            The Future that contains the result of the computation
         """
         if self.client.asynchronous:
             return self.client.sync(self._result, callback_timeout=timeout)
@@ -270,8 +306,20 @@ class Future(WrappedKey):
     def exception(self, timeout=None, **kwargs):
         """Return the exception of a failed task
 
-        If *timeout* seconds are elapsed before returning, a
-        ``dask.distributed.TimeoutError`` is raised.
+        Parameters
+        ----------
+        timeout : number, optional
+            Time in seconds after which to raise a
+            ``dask.distributed.TimeoutError``
+        **kwargs : dict
+            Optional keyword arguments for the function
+
+        Returns
+        -------
+        Exception
+            The exception that was raised
+            If *timeout* seconds are elapsed before returning, a
+            ``dask.distributed.TimeoutError`` is raised.
 
         See Also
         --------
@@ -287,6 +335,11 @@ class Future(WrappedKey):
         errs, or is cancelled
 
         The callback is executed in a separate thread.
+
+        Parameters
+        ----------
+        fn : callable
+            The method or function to be called
         """
         cls = Future
         if cls._cb_executor is None or cls._cb_executor_pid != os.getpid():
@@ -309,7 +362,7 @@ class Future(WrappedKey):
         )
 
     def cancel(self, **kwargs):
-        """Cancel request to run this future
+        """Cancel the request to run this future
 
         See Also
         --------
@@ -327,7 +380,13 @@ class Future(WrappedKey):
         return self.client.retry([self], **kwargs)
 
     def cancelled(self):
-        """Returns True if the future has been cancelled"""
+        """Returns True if the future has been cancelled
+
+        Returns
+        -------
+        bool
+            True if the future was 'cancelled', otherwise False
+        """
         return self._state.status == "cancelled"
 
     async def _traceback(self):
@@ -344,8 +403,13 @@ class Future(WrappedKey):
         ``traceback`` module.  Alternatively if you call ``future.result()``
         this traceback will accompany the raised exception.
 
-        If *timeout* seconds are elapsed before returning, a
-        ``dask.distributed.TimeoutError`` is raised.
+        Parameters
+        ----------
+        timeout : number, optional
+            Time in seconds after which to raise a
+            ``dask.distributed.TimeoutError``
+            If *timeout* seconds are elapsed before returning, a
+            ``dask.distributed.TimeoutError`` is raised.
 
         Examples
         --------
@@ -353,6 +417,11 @@ class Future(WrappedKey):
         >>> tb = future.traceback()  # doctest: +SKIP
         >>> traceback.format_tb(tb)  # doctest: +SKIP
         [...]
+
+        Returns
+        -------
+        Future
+            The Future that contains the traceback
 
         See Also
         --------
@@ -362,11 +431,22 @@ class Future(WrappedKey):
 
     @property
     def type(self):
+        """Returns the type"""
         return self._state.type
 
     def release(self, _in_destructor=False):
-        # NOTE: this method can be called from different threads
-        # (see e.g. Client.get() or Future.__del__())
+        """
+
+        Parameters
+        ----------
+        _in_destructor: bool
+            Not used
+
+        Notes
+        -----
+        This method can be called from different threads
+        (see e.g. Client.get() or Future.__del__())
+        """
         if not self._cleared and self.client.generation == self._generation:
             self._cleared = True
             try:
@@ -446,25 +526,47 @@ class FutureState:
         return event
 
     def cancel(self):
+        """Cancels the operation"""
         self.status = "cancelled"
         self.exception = CancelledError()
         self._get_event().set()
 
     def finish(self, type=None):
+        """Sets the status to 'finished' and sets the event
+
+        Parameters
+        ----------
+        type : any
+            The type
+        """
         self.status = "finished"
         self._get_event().set()
         if type is not None:
             self.type = type
 
     def lose(self):
+        """Sets the status to 'lost' and clears the event"""
         self.status = "lost"
         self._get_event().clear()
 
     def retry(self):
+        """Sets the status to 'pending' and clears the event"""
         self.status = "pending"
         self._get_event().clear()
 
     def set_error(self, exception, traceback):
+        """Sets the error data
+
+        Sets the status to 'error'. Sets the exception, the traceback,
+        and the event
+
+        Parameters
+        ----------
+        exception: Exception
+            The exception
+        traceback: Exception
+            The traceback
+        """
         _, exception, traceback = clean_exception(exception, traceback)
 
         self.status = "error"
@@ -473,14 +575,24 @@ class FutureState:
         self._get_event().set()
 
     def done(self):
+        """Returns 'True' if the event is not None and the event is set"""
         return self._event is not None and self._event.is_set()
 
     def reset(self):
+        """Sets the status to 'pending' and clears the event"""
         self.status = "pending"
         if self._event is not None:
             self._event.clear()
 
     async def wait(self, timeout=None):
+        """Wait for the awaitable to complete with a timeout.
+
+        Parameters
+        ----------
+        timeout : number, optional
+            Time in seconds after which to raise a
+            ``dask.distributed.TimeoutError``
+        """
         await asyncio.wait_for(self._get_event().wait(), timeout)
 
     def __repr__(self):
@@ -488,7 +600,15 @@ class FutureState:
 
 
 async def done_callback(future, callback):
-    """Coroutine that waits on future, then calls callback"""
+    """Coroutine that waits on the future, then calls the callback
+
+    Parameters
+    ----------
+    future : asyncio.Future
+        The future
+    callback : callable
+        The callback
+    """
     while future.status == "pending":
         await future._state.wait()
     callback(future)
@@ -496,6 +616,13 @@ async def done_callback(future, callback):
 
 @partial(normalize_token.register, Future)
 def normalize_future(f):
+    """Returns the key and the type as a list
+
+    Parameters
+    ----------
+    list
+        The key and the type
+    """
     return [f.key, type(f)]
 
 
@@ -539,6 +666,8 @@ class Client(SyncMethodMixin):
     address: string, or Cluster
         This can be the address of a ``Scheduler`` server like a string
         ``'127.0.0.1:8786'`` or a cluster object like ``LocalCluster()``
+    loop
+        The event loop
     timeout: int
         Timeout duration for initial connection to the scheduler
     set_as_default: bool (True)
@@ -556,11 +685,20 @@ class Client(SyncMethodMixin):
     name: string (optional)
         Gives the client a name that will be included in logs generated on
         the scheduler for matters relating to this client
+    heartbeat_interval: int (optional)
+        Time in milliseconds between heartbeats to scheduler
+    serializers
+        The serializers to turn an object into a string
+    deserializers
+        The deserializers to turn the string into the original object
+    extensions : list
+        The extensions
     direct_to_workers: bool (optional)
         Whether or not to connect directly to the workers, or to ask
         the scheduler to serve as intermediary.
-    heartbeat_interval: int
-        Time in milliseconds between heartbeats to scheduler
+    connection_limit : int
+        The number of open comms to maintain at once in the connection pool
+
     **kwargs:
         If you do not pass a scheduler address, Client will create a
         ``LocalCluster`` object, passing any extra keyword arguments.
@@ -774,9 +912,9 @@ class Client(SyncMethodMixin):
 
     @contextmanager
     def as_current(self):
-        """Thread-local, Task-local context manager that causes the Client.current class
-        method to return self. Any Future objects deserialized inside this context
-        manager will be automatically attached to this Client.
+        """Thread-local, Task-local context manager that causes the Client.current
+        class method to return self. Any Future objects deserialized inside this
+        context manager will be automatically attached to this Client.
         """
         tok = _current_client.set(self)
         try:
@@ -789,8 +927,23 @@ class Client(SyncMethodMixin):
         """When running within the context of `as_client`, return the context-local
         current client. Otherwise, return the latest initialised Client.
         If no Client instances exist, raise ValueError.
-        If allow_global is set to False, raise ValueError if running outside of the
-        `as_client` context manager.
+        If allow_global is set to False, raise ValueError if running outside of
+        the `as_client` context manager.
+
+        Parameters
+        ----------
+        allow_global : bool
+            If True returns the default client
+
+        Returns
+        -------
+        Client
+            The current client
+
+        Raises
+        ------
+        ValueError
+            If there is no client set, a ValueError is raised
         """
         out = _current_client.get()
         if out:
@@ -1028,7 +1181,7 @@ class Client(SyncMethodMixin):
             self.futures.clear()
 
             timeout = self._timeout
-            deadline = self.loop.time() + timeout
+            deadline = time() + timeout
             while timeout > 0 and self.status == "connecting":
                 try:
                     await self._ensure_connected(timeout=timeout)
@@ -1036,7 +1189,7 @@ class Client(SyncMethodMixin):
                 except OSError:
                     # Wait a bit before retrying
                     await asyncio.sleep(0.1)
-                    timeout = deadline - self.loop.time()
+                    timeout = deadline - time()
                 except ImportError:
                     await self._close()
                     break
@@ -1132,7 +1285,16 @@ class Client(SyncMethodMixin):
             info = await self.scheduler.identity()
 
     def wait_for_workers(self, n_workers=0, timeout=None):
-        """Blocking call to wait for n workers before continuing"""
+        """Blocking call to wait for n workers before continuing
+
+        Parameters
+        ----------
+        n_workers : int
+            The number of workers
+        timeout : number, optional
+            Time in seconds after which to raise a
+            ``dask.distributed.TimeoutError``
+        """
         return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
 
     def _heartbeat(self):
@@ -1361,6 +1523,13 @@ class Client(SyncMethodMixin):
         If you started a client without arguments like ``Client()`` then this
         will also close the local cluster that was started at the same time.
 
+
+        Parameters
+        ----------
+        timeout : number
+            Time in seconds after which to raise a
+            ``dask.distributed.TimeoutError``
+
         See Also
         --------
         Client.restart
@@ -1424,7 +1593,8 @@ class Client(SyncMethodMixin):
 
     def get_executor(self, **kwargs):
         """
-        Return a concurrent.futures Executor for submitting tasks on this Client
+        Return a concurrent.futures Executor for submitting tasks on this
+        Client
 
         Parameters
         ----------
@@ -1434,8 +1604,9 @@ class Client(SyncMethodMixin):
 
         Returns
         -------
-        An Executor object that's fully compatible with the concurrent.futures
-        API.
+        ClientExecutor
+            An Executor object that's fully compatible with the
+            concurrent.futures API.
         """
         return ClientExecutor(self, **kwargs)
 
@@ -1465,20 +1636,18 @@ class Client(SyncMethodMixin):
             coroutine, it will be run on the main event loop of a worker. Otherwise
             ``func`` will be run in a worker's task executor pool (see
             ``Worker.executors`` for more information.)
-        *args
-        **kwargs
-        pure : bool (defaults to True)
-            Whether or not the function is pure.  Set ``pure=False`` for
-            impure functions like ``np.random.random``.
-            See :ref:`pure functions` for more details.
+        *args : tuple
+            Optional positional arguments
+        key : str
+            Unique identifier for the task.  Defaults to function-name and hash
         workers : string or iterable of strings
             A set of worker addresses or hostnames on which computations may be
             performed. Leave empty to default to all workers (common case)
-        key : str
-            Unique identifier for the task.  Defaults to function-name and hash
-        allow_other_workers : bool (defaults to False)
-            Used with ``workers``. Indicates whether or not the computations
-            may be performed on workers that are not in the `workers` set(s).
+        resources : dict (defaults to {})
+            Defines the ``resources`` each instance of this mapped task
+            requires on the worker; e.g. ``{'GPU': 2}``.
+            See :doc:`worker resources <resources>` for details on defining
+            resources.
         retries : int (default to 0)
             Number of allowed automatic retries if the task fails
         priority : Number
@@ -1486,16 +1655,19 @@ class Client(SyncMethodMixin):
             Higher priorities take precedence
         fifo_timeout : str timedelta (default '100ms')
             Allowed amount of time between calls to consider the same priority
-        resources : dict (defaults to {})
-            Defines the ``resources`` each instance of this mapped task requires
-            on the worker; e.g. ``{'GPU': 2}``.
-            See :doc:`worker resources <resources>` for details on defining
-            resources.
+        allow_other_workers : bool (defaults to False)
+            Used with ``workers``. Indicates whether or not the computations
+            may be performed on workers that are not in the `workers` set(s).
         actor : bool (default False)
             Whether this task should exist on the worker as a stateful actor.
             See :doc:`actors` for additional details.
         actors : bool (default False)
             Alias for `actor`
+        pure : bool (defaults to True)
+            Whether or not the function is pure.  Set ``pure=False`` for
+            impure functions like ``np.random.random``.
+            See :ref:`pure functions` for more details.
+        **kwargs
 
         Examples
         --------
@@ -1504,6 +1676,16 @@ class Client(SyncMethodMixin):
         Returns
         -------
         Future
+            If running in asynchronous mode, returns the future. Otherwise
+            returns the concrete value
+
+        Raises
+        ------
+        TypeError
+            If 'func' is not callable, a TypeError is raised
+        ValueError
+            If 'allow_other_workers'is True and 'workers' is None, a
+            ValueError is raised
 
         See Also
         --------
@@ -1591,40 +1773,41 @@ class Client(SyncMethodMixin):
             List-like objects to map over.  They should have the same length.
         key : str, list
             Prefix for task names if string.  Explicit names if list.
-        pure : bool (defaults to True)
-            Whether or not the function is pure.  Set ``pure=False`` for
-            impure functions like ``np.random.random``.
-            See :ref:`pure functions` for more details.
         workers : string or iterable of strings
             A set of worker hostnames on which computations may be performed.
             Leave empty to default to all workers (common case)
-        allow_other_workers : bool (defaults to False)
-            Used with `workers`. Indicates whether or not the computations
-            may be performed on workers that are not in the `workers` set(s).
         retries : int (default to 0)
             Number of allowed automatic retries if a task fails
-        priority : Number
-            Optional prioritization of task.  Zero is default.
-            Higher priorities take precedence
-        fifo_timeout : str timedelta (default '100ms')
-            Allowed amount of time between calls to consider the same priority
         resources : dict (defaults to {})
             Defines the `resources` each instance of this mapped task requires
             on the worker; e.g. ``{'GPU': 2}``.
             See :doc:`worker resources <resources>` for details on defining
             resources.
+        priority : Number
+            Optional prioritization of task.  Zero is default.
+            Higher priorities take precedence
+        allow_other_workers : bool (defaults to False)
+            Used with `workers`. Indicates whether or not the computations
+            may be performed on workers that are not in the `workers` set(s).
+        fifo_timeout : str timedelta (default '100ms')
+            Allowed amount of time between calls to consider the same priority
         actor : bool (default False)
             Whether these tasks should exist on the worker as stateful actors.
             See :doc:`actors` for additional details.
         actors : bool (default False)
             Alias for `actor`
+        pure : bool (defaults to True)
+            Whether or not the function is pure.  Set ``pure=False`` for
+            impure functions like ``np.random.random``.
+            See :ref:`pure functions` for more details.
         batch_size : int, optional
-            Submit tasks to the scheduler in batches of (at most) ``batch_size``.
+            Submit tasks to the scheduler in batches of (at most)
+            ``batch_size``.
             Larger batch sizes can be useful for very large ``iterables``,
             as the cluster can start processing tasks while later ones are
             submitted asynchronously.
         **kwargs : dict
-            Extra keywords to send to the function.
+            Extra keyword arguments to send to the function.
             Large values will be included explicitly in the task graph.
 
         Examples
@@ -1910,6 +2093,8 @@ class Client(SyncMethodMixin):
             Whether or not to connect directly to the workers, or to ask
             the scheduler to serve as intermediary.  This can also be set when
             creating the Client.
+        asynchronous: bool
+            If True the client is in asynchronous mode
 
         Returns
         -------
@@ -2085,7 +2270,8 @@ class Client(SyncMethodMixin):
             Data to scatter out to workers.  Output type matches input type.
         workers : list of tuples (optional)
             Optionally constrain locations of data.
-            Specify workers as hostname/port pairs, e.g. ``('127.0.0.1', 8787)``.
+            Specify workers as hostname/port pairs, e.g.
+            ``('127.0.0.1', 8787)``.
         broadcast : bool (defaults to False)
             Whether to send each data element to all workers.
             By default we round-robin based on number of cores.
@@ -2096,6 +2282,11 @@ class Client(SyncMethodMixin):
         hash : bool (optional)
             Whether or not to hash data to determine key.
             If False then this uses a random key
+        timeout : number, optional
+            Time in seconds after which to raise a
+            ``dask.distributed.TimeoutError``
+        asynchronous: bool
+            If True the client is in asynchronous mode
 
         Returns
         -------
@@ -2177,7 +2368,10 @@ class Client(SyncMethodMixin):
 
         Parameters
         ----------
-        futures : list of Futures
+        futures : List[Future]
+            The list of Futures
+        asynchronous: bool
+            If True the client is in asynchronous mode
         force : boolean (False)
             Cancel this future even if other clients desire it
         """
@@ -2197,6 +2391,9 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         futures : list of Futures
+            The list of Futures
+        asynchronous: bool
+            If True the client is in asynchronous mode
         """
         return self.sync(self._retry, futures, asynchronous=asynchronous)
 
@@ -2246,9 +2443,6 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         args : list of objects to publish as name
-        name : optional name of the dataset to publish
-        override : bool (optional, default False)
-            if true, override any already present dataset with the same name
         kwargs : dict
             named collections to publish on the scheduler
 
@@ -2286,11 +2480,16 @@ class Client(SyncMethodMixin):
         """
         Remove named datasets from scheduler
 
+        Parameters
+        ----------
+        name : str
+            The name of the dataset to unpublish
+
         Examples
         --------
         >>> c.list_datasets()  # doctest: +SKIP
         ['my_dataset']
-        >>> c.unpublish_datasets('my_dataset')  # doctest: +SKIP
+        >>> c.unpublish_dataset('my_dataset')  # doctest: +SKIP
         >>> c.list_datasets()  # doctest: +SKIP
         []
 
@@ -2329,11 +2528,18 @@ class Client(SyncMethodMixin):
 
         Parameters
         ----------
-        name : name of the dataset to retrieve
-        default : optional, not set by default
-            If set, do not raise a KeyError if the name is not present but return this default
+        name : str
+            name of the dataset to retrieve
+        default : str
+            optional, not set by default
+            If set, do not raise a KeyError if the name is not present but
+            return this default
         kwargs : dict
-            additional arguments to _get_dataset
+            additional keyword arguments to _get_dataset
+
+        Returns
+        -------
+        The dataset from the scheduler, if present
 
         See Also
         --------
@@ -2362,6 +2568,15 @@ class Client(SyncMethodMixin):
         keyword argument ``dask_scheduler=``, which will be given the scheduler
         object itself.
 
+        Parameters
+        ----------
+        function : callable
+            The function to run on the scheduler process
+        *args : tuple
+            Optional arguments for the function
+        **kwargs : dict
+            Optional keyword arguments for the function
+
         Examples
         --------
         >>> def get_number_of_tasks(dask_scheduler=None):
@@ -2387,7 +2602,14 @@ class Client(SyncMethodMixin):
         return self.sync(self._run_on_scheduler, function, *args, **kwargs)
 
     async def _run(
-        self, function, *args, nanny=False, workers=None, wait=True, **kwargs
+        self,
+        function,
+        *args,
+        nanny: bool = False,
+        workers: list[str] | None = None,
+        wait: bool = True,
+        on_error: Literal["raise", "return", "ignore"] = "raise",
+        **kwargs,
     ):
         responses = await self.scheduler.broadcast(
             msg=dict(
@@ -2399,18 +2621,46 @@ class Client(SyncMethodMixin):
             ),
             workers=workers,
             nanny=nanny,
+            on_error="return_pickle",
         )
         results = {}
         for key, resp in responses.items():
-            if resp["status"] == "OK":
-                results[key] = resp["result"]
+            if isinstance(resp, bytes):
+                # Pickled RPC exception
+                exc = loads(resp)
+                assert isinstance(exc, Exception)
             elif resp["status"] == "error":
-                typ, exc, tb = clean_exception(**resp)
-                raise exc.with_traceback(tb)
+                # Exception raised by the remote function
+                _, exc, tb = clean_exception(**resp)
+                exc = exc.with_traceback(tb)
+            else:
+                assert resp["status"] == "OK"
+                results[key] = resp["result"]
+                continue
+
+            if on_error == "raise":
+                raise exc
+            elif on_error == "return":
+                results[key] = exc
+            elif on_error != "ignore":
+                raise ValueError(
+                    "on_error must be 'raise', 'return', or 'ignore'; "
+                    f"got {on_error!r}"
+                )
+
         if wait:
             return results
 
-    def run(self, function, *args, **kwargs):
+    def run(
+        self,
+        function,
+        *args,
+        workers: list[str] | None = None,
+        wait: bool = True,
+        nanny: bool = False,
+        on_error: Literal["raise", "return", "ignore"] = "raise",
+        **kwargs,
+    ):
         """
         Run a function on all workers outside of task scheduling system
 
@@ -2426,10 +2676,14 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         function : callable
-        *args : arguments for remote function
-        **kwargs : keyword arguments for remote function
+            The function to run
+        *args : tuple
+            Optional arguments for the remote function
+        **kwargs : dict
+            Optional keyword arguments for the remote function
         workers : list
-            Workers on which to run the function. Defaults to all known workers.
+            Workers on which to run the function. Defaults to all known
+            workers.
         wait : boolean (optional)
             If the function is asynchronous whether or not to wait until that
             function finishes.
@@ -2437,6 +2691,17 @@ class Client(SyncMethodMixin):
             Whether to run ``function`` on the nanny. By default, the function
             is run on the worker process.  If specified, the addresses in
             ``workers`` should still be the worker addresses, not the nanny addresses.
+        on_error: "raise" | "return" | "ignore"
+            If the function raises an error on a worker:
+
+            raise
+                (default) Re-raise the exception on the client.
+                The output from other workers will be lost.
+            return
+                Return the Exception object instead of the function output for
+                the worker
+            ignore
+                Ignore the exception and remove the worker from the result dict
 
         Examples
         --------
@@ -2469,7 +2734,16 @@ class Client(SyncMethodMixin):
 
         >>> c.run(print_state, wait=False)  # doctest: +SKIP
         """
-        return self.sync(self._run, function, *args, **kwargs)
+        return self.sync(
+            self._run,
+            function,
+            *args,
+            workers=workers,
+            wait=wait,
+            nanny=nanny,
+            on_error=on_error,
+            **kwargs,
+        )
 
     @_deprecated(use_instead="Client.run which detects async functions automatically")
     def run_coroutine(self, function, *args, **kwargs):
@@ -2485,13 +2759,10 @@ class Client(SyncMethodMixin):
         function : a coroutine function
             (typically a function wrapped in gen.coroutine or
              a Python 3.5+ async function)
-        *args : arguments for remote function
-        **kwargs : keyword arguments for remote function
-        wait : boolean (default True)
-            Whether to wait for coroutines to end.
-        workers : list
-            Workers on which to run the function. Defaults to all known workers.
-
+        *args : tuple
+            Optional arguments for the remote function
+        **kwargs : dict
+            Optional keyword arguments for the remote function
         """
         return self.run(function, *args, **kwargs)
 
@@ -2499,9 +2770,9 @@ class Client(SyncMethodMixin):
     def _get_computation_code(stacklevel=None) -> str:
         """Walk up the stack to the user code and extract the code surrounding
         the compute/submit/persist call. All modules encountered which are
-        blacklisted by the option
+        ignored through the option
         `distributed.diagnostics.computations.ignore-modules` will be ignored.
-        This can be used to blacklist commonly used libraries which wrap
+        This can be used to exclude commonly used libraries which wrap
         dask/distributed compute calls.
 
         ``stacklevel`` may be used to explicitly indicate from which frame on
@@ -2640,22 +2911,39 @@ class Client(SyncMethodMixin):
         allow_other_workers : bool (defaults to False)
             Used with ``workers``. Indicates whether or not the computations
             may be performed on workers that are not in the `workers` set(s).
+        resources : dict (defaults to {})
+            Defines the ``resources`` each instance of this mapped task
+            requires on the worker; e.g. ``{'GPU': 2}``.
+            See :doc:`worker resources <resources>` for details on defining
+            resources.
+        sync : bool (optional)
+            Returns Futures if False or concrete values if True (default).
+        asynchronous: bool
+            If True the client is in asynchronous mode
+        direct : bool
+            Whether or not to connect directly to the workers, or to ask
+            the scheduler to serve as intermediary.  This can also be set when
+            creating the Client.
         retries : int (default to 0)
             Number of allowed automatic retries if computing a result fails
         priority : Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
-        resources : dict (defaults to {})
-            Defines the ``resources`` each instance of this mapped task requires
-            on the worker; e.g. ``{'GPU': 2}``.
-            See :doc:`worker resources <resources>` for details on defining
-            resources.
-        sync : bool (optional)
-            Returns Futures if False or concrete values if True (default).
-        direct : bool
-            Whether or not to connect directly to the workers, or to ask
-            the scheduler to serve as intermediary.  This can also be set when
-            creating the Client.
+        fifo_timeout : timedelta str (defaults to '60s')
+            Allowed amount of time between calls to consider the same priority
+        actors : bool or dict (default None)
+            Whether these tasks should exist on the worker as stateful actors.
+            Specified on a global (True/False) or per-task (``{'x': True,
+            'y': False}``) basis. See :doc:`actors` for additional details.
+
+
+        Returns
+        -------
+        results
+            If 'sync' is True, returns the results. Otherwise, returns the
+            known data packed
+            If 'sync' is False, returns the known data. Otherwise, returns
+            the results
 
         Examples
         --------
@@ -2728,6 +3016,13 @@ class Client(SyncMethodMixin):
         This normalizes the tasks within a collections task graph against the
         known futures within the scheduler.  It returns a copy of the
         collection with a task graph that includes the overlapping futures.
+
+        Parameters
+        ----------
+        collection
+
+        Returns
+        -------
 
         Examples
         --------
@@ -3063,6 +3358,8 @@ class Client(SyncMethodMixin):
         ----------
         filename : string
             Filename of .py, .egg or .zip file to send to workers
+        **kwargs : dict
+            Optional keyword arguments for the function
 
         Examples
         --------
@@ -3106,6 +3403,8 @@ class Client(SyncMethodMixin):
             A list of futures to balance, defaults all data
         workers : list, optional
             A list of workers on which to balance, defaults to all workers
+        **kwargs : dict
+            Optional keyword arguments for the function
         """
         return self.sync(self._rebalance, futures, workers, **kwargs)
 
@@ -3139,6 +3438,8 @@ class Client(SyncMethodMixin):
             Defaults to all.
         branching_factor : int, optional
             The number of workers that can copy data in each generation
+        **kwargs : dict
+            Optional keyword arguments for the remote function
 
         Examples
         --------
@@ -3170,6 +3471,8 @@ class Client(SyncMethodMixin):
         workers : list (optional)
             A list of workers that we care about specifically.
             Leave empty to receive information about all workers.
+        **kwargs : dict
+            Optional keyword arguments for the remote function
 
         Examples
         --------
@@ -3201,6 +3504,8 @@ class Client(SyncMethodMixin):
         ----------
         futures : list (optional)
             A list of futures, defaults to all data
+        **kwargs : dict
+            Optional keyword arguments for the remote function
 
         Examples
         --------
@@ -3241,6 +3546,8 @@ class Client(SyncMethodMixin):
         ----------
         workers : list (optional)
             A list of worker addresses, defaults to all
+        **kwargs : dict
+            Optional keyword arguments for the remote function
 
         Examples
         --------
@@ -3311,6 +3618,8 @@ class Client(SyncMethodMixin):
             A list of keys, defaults to all keys
         summary : boolean, (optional)
             Summarize keys into key types
+        **kwargs : dict
+            Optional keyword arguments for the remote function
 
         Examples
         --------
@@ -3461,6 +3770,11 @@ class Client(SyncMethodMixin):
     def scheduler_info(self, **kwargs):
         """Basic information about the workers in the cluster
 
+        Parameters
+        ----------
+        **kwargs : dict
+            Optional keyword arguments for the remote function
+
         Examples
         --------
         >>> c.scheduler_info()  # doctest: +SKIP
@@ -3487,20 +3801,23 @@ class Client(SyncMethodMixin):
 
         scheduler_info = self.scheduler.dump_state()
 
-        worker_info = self.scheduler.broadcast(
-            msg=dict(
-                op="dump_state",
-                exclude=exclude,
-            ),
+        workers_info = self.scheduler.broadcast(
+            msg={"op": "dump_state", "exclude": exclude},
+            on_error="return_pickle",
         )
-        versions = self._get_versions()
-        scheduler_info, worker_info, versions_info = await asyncio.gather(
-            scheduler_info, worker_info, versions
+        versions_info = self._get_versions()
+        scheduler_info, workers_info, versions_info = await asyncio.gather(
+            scheduler_info, workers_info, versions_info
         )
+        # Unpickle RPC errors and convert them to string
+        workers_info = {
+            k: repr(loads(v)) if isinstance(v, bytes) else v
+            for k, v in workers_info.items()
+        }
 
         state = {
             "scheduler": scheduler_info,
-            "workers": worker_info,
+            "workers": workers_info,
             "versions": versions_info,
         }
 
@@ -3546,7 +3863,7 @@ class Client(SyncMethodMixin):
         filename: str = "dask-cluster-dump",
         exclude: Collection[str] = (),
         format: Literal["msgpack", "yaml"] = "msgpack",
-    ) -> Awaitable | None:
+    ):
         """Extract a dump of the entire cluster state and persist to disk.
         This is intended for debugging purposes only.
 
@@ -3568,7 +3885,7 @@ class Client(SyncMethodMixin):
             The output filename. The appropriate file suffix (`.msgpack.gz` or
             `.yaml`) will be appended automatically.
         exclude:
-            A collection of attribute names which are supposed to be blacklisted
+            A collection of attribute names which are supposed to be excluded
             from the dump, e.g. to exclude code, tracebacks, logs, etc.
         format:
             Either msgpack or yaml. If msgpack is used (default), the output
@@ -3675,9 +3992,9 @@ class Client(SyncMethodMixin):
         workers : iterable
             List of worker addresses to retrieve.  Gets all workers by default.
         nanny : bool, default False
-            Whether to get the logs from the workers (False) or the nannies (True). If
-            specified, the addresses in `workers` should still be the worker addresses,
-            not the nanny addresses.
+            Whether to get the logs from the workers (False) or the nannies
+            (True). If specified, the addresses in `workers` should still be
+            the worker addresses, not the nanny addresses.
 
         Returns
         -------
@@ -3775,6 +4092,13 @@ class Client(SyncMethodMixin):
 
         See dask.distributed.Scheduler.retire_workers for the full docstring.
 
+        Parameters
+        ----------
+        workers
+        close_workers
+        **kwargs : dict
+            Optional keyword arguments for the remote function
+
         Examples
         --------
         You can get information about active workers using the following:
@@ -3864,15 +4188,10 @@ class Client(SyncMethodMixin):
 
     async def _get_versions(self, check=False, packages=[]):
         client = version_module.get_versions(packages=packages)
-        try:
-            scheduler = await self.scheduler.versions(packages=packages)
-        except KeyError:
-            scheduler = None
-        except TypeError:  # packages keyword not supported
-            scheduler = await self.scheduler.versions()  # this raises
-
+        scheduler = await self.scheduler.versions(packages=packages)
         workers = await self.scheduler.broadcast(
-            msg={"op": "versions", "packages": packages}
+            msg={"op": "versions", "packages": packages},
+            on_error="ignore",
         )
         result = {"scheduler": scheduler, "workers": workers, "client": client}
 
@@ -3886,10 +4205,25 @@ class Client(SyncMethodMixin):
         return result
 
     def futures_of(self, futures):
+        """Wrapper method of futures_of
+
+        Parameters
+        ----------
+        futures : tuple
+            The futures
+        """
         return futures_of(futures, client=self)
 
     def start_ipython(self, *args, **kwargs):
-        """Deprecated - Method moved to start_ipython_workers"""
+        """Deprecated - Method moved to start_ipython_workers
+
+        Parameters
+        ----------
+        *args : tuple
+            Optional arguments for the function
+        **kwargs : dict
+            Optional keyword arguments for the function
+        """
         raise Exception("Method moved to start_ipython_workers")
 
     async def _start_ipython_workers(self, workers):
@@ -4240,9 +4574,9 @@ class Client(SyncMethodMixin):
         Registers a lifecycle worker plugin for all current and future workers.
 
         This registers a new object to handle setup, task state transitions and
-        teardown for workers in this cluster. The plugin will instantiate itself
-        on all currently connected workers. It will also be run on any worker
-        that connects in the future.
+        teardown for workers in this cluster. The plugin will instantiate
+        itself on all currently connected workers. It will also be run on any
+        worker that connects in the future.
 
         The plugin may include methods ``setup``, ``teardown``, ``transition``,
         and ``release_key``.  See the
@@ -4280,7 +4614,8 @@ class Client(SyncMethodMixin):
         ...         pass
         ...     def teardown(self, worker: dask.distributed.Worker):
         ...         pass
-        ...     def transition(self, key: str, start: str, finish: str, **kwargs):
+        ...     def transition(self, key: str, start: str, finish: str,
+        ...                    **kwargs):
         ...         pass
         ...     def release_key(self, key: str, state: str, cause: str | None, reason: None, report: bool):
         ...         pass
@@ -4440,9 +4775,10 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
 
     Parameters
     ----------
-    fs : list of futures
+    fs : List[Future]
     timeout : number, optional
-        Time in seconds after which to raise a ``dask.distributed.TimeoutError``
+        Time in seconds after which to raise a
+        ``dask.distributed.TimeoutError``
     return_when : str, optional
         One of `ALL_COMPLETED` or `FIRST_COMPLETED`
 
@@ -4503,8 +4839,8 @@ class as_completed:
         Whether to wait and include results of futures as well;
         in this case `as_completed` yields a tuple of (future, result)
     raise_errors: bool (True)
-        Whether we should raise when the result of a future raises an exception;
-        only affects behavior when `with_results=True`.
+        Whether we should raise when the result of a future raises an
+        exception; only affects behavior when `with_results=True`.
 
     Examples
     --------
@@ -4734,7 +5070,18 @@ def AsCompleted(*args, **kwargs):
 
 
 def default_client(c=None):
-    """Return a client if one has started"""
+    """Return a client if one has started
+
+    Parameters
+    ----------
+    c : Client
+        The client
+
+    Returns
+    -------
+    c : Client
+        The client, if one has started
+    """
     c = c or _get_global_client()
     if c:
         return c
@@ -4747,12 +5094,37 @@ def default_client(c=None):
         )
 
 
-def ensure_default_get(client):
+def ensure_default_client(client):
+    """Ensures the client passed as argument is set as the default
+
+    Parameters
+    ----------
+    client : Client
+        The client
+    """
     dask.config.set(scheduler="dask.distributed")
     _set_global_client(client)
 
 
 def redict_collection(c, dsk):
+    """Change the dictionary in the collection
+
+    Parameters
+    ----------
+    c : collection
+        The collection
+    dsk : dict
+        The dictionary
+
+    Returns
+    -------
+    c : Delayed
+        If the collection is a 'Delayed' object the collection is returned
+    cc : collection
+        If the collection is not a 'Delayed' object a copy of the
+        collection with xthe new dictionary is returned
+
+    """
     from dask.delayed import Delayed
 
     if isinstance(c, Delayed):
@@ -4770,12 +5142,19 @@ def futures_of(o, client=None):
     ----------
     o : collection
         A possibly nested collection of Dask objects
+    client : Client, optional
+        The client
 
     Examples
     --------
     >>> futures_of(my_dask_dataframe)
     [<Future: finished key: ...>,
      <Future: pending  key: ...>]
+
+    Raises
+    ------
+    CancelledError
+        If one of the futures is cancelled a CancelledError is raised
 
     Returns
     -------
@@ -5030,12 +5409,13 @@ def temp_default_client(c):
     """Set the default client for the duration of the context
 
     .. note::
-       This function should be used exclusively for unit testing the default client
-       functionality. In all other cases, please use ``Client.as_current`` instead.
+       This function should be used exclusively for unit testing the default
+       client functionality. In all other cases, please use
+       ``Client.as_current`` instead.
 
     .. note::
-       Unlike ``Client.as_current``, this context manager is neither thread-local nor
-       task-local.
+       Unlike ``Client.as_current``, this context manager is neither
+       thread-local nor task-local.
 
     Parameters
     ----------
@@ -5066,3 +5446,16 @@ def _close_global_client():
 
 
 atexit.register(_close_global_client)
+
+
+def __getattr__(name):
+    if name == "ensure_default_get":
+        warnings.warn(
+            "`ensure_default_get` is deprecated and will be removed in a future release. "
+            "Please use `distributed.client.ensure_default_client` instead.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
+        return ensure_default_client
+    else:
+        raise AttributeError(f"module {__name__} has no attribute {name}")

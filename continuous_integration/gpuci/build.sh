@@ -41,7 +41,7 @@ gpuci_logger "Install dask"
 python -m pip install git+https://github.com/dask/dask
 
 gpuci_logger "Install distributed"
-python setup.py install
+python -m pip install -e .
 
 gpuci_logger "Check Python versions"
 python --version
@@ -52,4 +52,4 @@ conda config --show-sources
 conda list --show-channel-urls
 
 gpuci_logger "Python py.test for distributed"
-py.test $WORKSPACE -v -m gpu --runslow --junitxml="$WORKSPACE/junit-distributed.xml"
+py.test distributed -v -m gpu --runslow --junitxml="$WORKSPACE/junit-distributed.xml"

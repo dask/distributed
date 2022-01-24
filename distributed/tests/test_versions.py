@@ -2,6 +2,7 @@ import re
 import sys
 
 import pytest
+import tornado
 
 from distributed import Client, Worker
 from distributed.utils_test import gen_cluster
@@ -138,5 +139,23 @@ async def test_version_warning_in_cluster(s, a, b):
 
 def test_python_version():
     required = get_versions()["packages"]
-    assert "python" in required
     assert required["python"] == ".".join(map(str, sys.version_info))
+
+
+def test_version_custom_pkgs():
+    out = get_versions(
+        [
+            # Use custom function
+            ("distributed", lambda mod: "123"),
+            # Use version_of_package
+            "notexist",
+            ("pytest", None),  # has __version__
+            "tornado",  # has version
+            "math",  # has nothing
+        ]
+    )["packages"]
+    assert out["distributed"] == "123"
+    assert out["notexist"] is None
+    assert out["pytest"] == pytest.__version__
+    assert out["tornado"] == tornado.version
+    assert out["math"] is None

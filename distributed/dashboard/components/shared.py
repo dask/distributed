@@ -449,7 +449,6 @@ class SystemMonitor(DashboardComponent):
                 y_units="screen",
                 text="cpu",
                 text_font_size="1em",
-                render_mode="css",
                 source=self.label_source,
             )
         )
@@ -472,7 +471,6 @@ class SystemMonitor(DashboardComponent):
                 y_units="screen",
                 text="memory",
                 text_font_size="1em",
-                render_mode="css",
                 source=self.label_source,
             )
         )
