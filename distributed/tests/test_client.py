@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 import traceback
+import types
 import warnings
 import weakref
 import zipfile
@@ -88,6 +89,7 @@ from distributed.utils_test import (
     gen_cluster,
     gen_test,
     geninc,
+    get_cert,
     inc,
     map_varying,
     nodebug,
@@ -99,6 +101,7 @@ from distributed.utils_test import (
     slowdec,
     slowinc,
     throws,
+    tls_only_security,
     varying,
     wait_for,
 )
@@ -7339,3 +7342,96 @@ async def test_dump_cluster_state_error(c, s, a, b, tmp_path):
     )
     assert isinstance(state["workers"][b.address], dict)
     assert state["versions"]["workers"].keys() == {b.address}
+
+
+class TestClientSecurityLoader:
+    @contextmanager
+    def config_loader(self, monkeypatch, loader):
+        module_name = "totally_fake_module_name_1"
+        module = types.ModuleType(module_name)
+        module.loader = loader
+        with monkeypatch.context() as m:
+            m.setitem(sys.modules, module_name, module)
+            with dask.config.set(
+                {"distributed.client.security-loader": f"{module_name}.loader"}
+            ):
+                yield
+
+    @pytest.mark.asyncio
+    async def test_security_loader(self, monkeypatch):
+        security = tls_only_security()
+
+        async with Scheduler(
+            dashboard_address=":0", protocol="tls", security=security
+        ) as scheduler:
+
+            def loader(info):
+                assert info == {"address": scheduler.address}
+                return security
+
+            with self.config_loader(monkeypatch, loader):
+                async with Client(scheduler.address, asynchronous=True) as client:
+                    assert client.security is security
+
+    @pytest.mark.asyncio
+    async def test_security_loader_ignored_if_explicit_security_provided(
+        self, monkeypatch
+    ):
+        security = tls_only_security()
+
+        def loader(info):
+            assert False
+
+        async with Scheduler(
+            dashboard_address=":0", protocol="tls", security=security
+        ) as scheduler:
+            with self.config_loader(monkeypatch, loader):
+                async with Client(
+                    scheduler.address, security=security, asynchronous=True
+                ) as client:
+                    assert client.security is security
+
+    @pytest.mark.asyncio
+    async def test_security_loader_ignored_if_returns_none(self, monkeypatch):
+        """Test that if a security loader is configured, but it returns `None`,
+        then the default security configuration is used"""
+        ca_file = get_cert("tls-ca-cert.pem")
+        keycert = get_cert("tls-key-cert.pem")
+
+        config = {
+            "distributed.comm.require-encryption": True,
+            "distributed.comm.tls.ca-file": ca_file,
+            "distributed.comm.tls.client.cert": keycert,
+            "distributed.comm.tls.scheduler.cert": keycert,
+            "distributed.comm.tls.worker.cert": keycert,
+        }
+
+        def loader(info):
+            loader.called = True
+            return None
+
+        with dask.config.set(config):
+            async with Scheduler(dashboard_address=":0", protocol="tls") as scheduler:
+                # Smoketest to make sure config was picked up (so we're actually testing something)
+                assert scheduler.security.tls_client_cert
+                assert scheduler.security.tls_scheduler_cert
+                with self.config_loader(monkeypatch, loader):
+                    async with Client(scheduler.address, asynchronous=True) as client:
+                        assert (
+                            client.security.tls_client_cert
+                            == scheduler.security.tls_client_cert
+                        )
+
+        assert loader.called
+
+    @pytest.mark.asyncio
+    async def test_security_loader_import_failed(self):
+        security = tls_only_security()
+
+        with dask.config.set(
+            {"distributed.client.security-loader": "totally_fake_module_name_2.loader"}
+        ):
+            with pytest.raises(ImportError) as exc:
+                async with Client("tls://bad-address:8888", asynchronous=True):
+                    pass
+            assert "totally_fake_module_name_2.loader" in str(exc.value)
