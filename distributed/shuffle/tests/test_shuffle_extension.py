@@ -260,8 +260,10 @@ async def test_get_partition(c: Client, s: Scheduler, *workers: Worker):
     )
     await ext._barrier(metadata.id)
 
-    with pytest.raises(AssertionError, match="belongs on"):
-        ext.get_output_partition(metadata.id, 7)
+    for addr, ext in exts.items():
+        if metadata.worker_for(0) != addr:
+            with pytest.raises(AssertionError, match="belongs on"):
+                ext.get_output_partition(metadata.id, 0)
 
     full = pd.concat([p1, p2])
     expected_groups = full.groupby("partition")
@@ -278,6 +280,5 @@ async def test_get_partition(c: Client, s: Scheduler, *workers: Worker):
     # Once all partitions are retrieved, shuffles are cleaned up
     for ext in exts.values():
         assert not ext.shuffles
-
-    with pytest.raises(ValueError, match="not registered"):
-        ext.get_output_partition(metadata.id, 0)
+        with pytest.raises(ValueError, match="not registered"):
+            ext.get_output_partition(metadata.id, 0)
