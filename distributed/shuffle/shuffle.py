@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from dask.base import tokenize
-from dask.dataframe import DataFrame
 from dask.delayed import Delayed, delayed
 from dask.highlevelgraph import HighLevelGraph
 
@@ -11,6 +10,8 @@ from .shuffle_extension import NewShuffleMetadata, ShuffleId, ShuffleWorkerExten
 
 if TYPE_CHECKING:
     import pandas as pd
+
+    from dask.dataframe import DataFrame
 
 
 def get_ext() -> ShuffleWorkerExtension:
@@ -53,6 +54,8 @@ def rearrange_by_column_p2p(
     column: str,
     npartitions: int | None = None,
 ):
+    from dask.dataframe import DataFrame
+
     npartitions = npartitions or df.npartitions
     token = tokenize(df, column, npartitions)
 
