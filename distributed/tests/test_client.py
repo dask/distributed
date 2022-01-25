@@ -16,11 +16,13 @@ import warnings
 import weakref
 import zipfile
 from collections import deque
-from contextlib import suppress
+from collections.abc import Generator
+from contextlib import contextmanager, suppress
 from functools import partial
 from operator import add
 from threading import Semaphore
 from time import sleep
+from typing import Any
 
 import psutil
 import pytest
@@ -3782,9 +3784,35 @@ def test_reconnect(loop):
     c.close()
 
 
+class UnhandledException(Exception):
+    pass
+
+
+@contextmanager
+def catch_unhandled_exceptions() -> Generator[None, None, None]:
+    loop = asyncio.get_running_loop()
+    ctx: dict[str, Any] | None = None
+
+    old_handler = loop.get_exception_handler()
+
+    @loop.set_exception_handler
+    def _(loop: object, context: dict[str, Any]) -> None:
+        nonlocal ctx
+        ctx = context
+
+    try:
+        yield
+    finally:
+        loop.set_exception_handler(old_handler)
+    if ctx:
+        raise UnhandledException(ctx["message"]) from ctx.get("exception")
+
+
 @gen_cluster(client=True, nthreads=[], client_kwargs={"timeout": 0.5})
 async def test_reconnect_timeout(c, s):
-    with captured_logger(logging.getLogger("distributed.client")) as logger:
+    with catch_unhandled_exceptions(), captured_logger(
+        logging.getLogger("distributed.client")
+    ) as logger:
         await s.close()
         while c.status != "closed":
             await c._update_scheduler_info()
