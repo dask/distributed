@@ -39,18 +39,24 @@ class Security:
         Path to a key file for the client, encoded in PEM format.
         Alternatively, the key may be appended to the cert file, and this
         parameter be omitted.
+    tls_client_password : str, optional
+        A password to use to decrypt the client private key, if required.
     tls_scheduler_cert : str, optional
         Path to a certificate file for the scheduler, encoded in PEM format.
     tls_scheduler_key : str, optional
         Path to a key file for the scheduler, encoded in PEM format.
         Alternatively, the key may be appended to the cert file, and this
         parameter be omitted.
+    tls_scheduler_password : str, optional
+        A password to use to decrypt the scheduler private key, if required.
     tls_worker_cert : str, optional
         Path to a certificate file for a worker, encoded in PEM format.
     tls_worker_key : str, optional
         Path to a key file for a worker, encoded in PEM format.
         Alternatively, the key may be appended to the cert file, and this
         parameter be omitted.
+    tls_worker_password : str, optional
+        A password to use to decrypt the worker private key, if required.
     extra_conn_args : mapping, optional
         Mapping with keyword arguments to pass down to connections.
     """
@@ -63,10 +69,13 @@ class Security:
         "tls_max_version",
         "tls_client_key",
         "tls_client_cert",
+        "tls_client_password",
         "tls_scheduler_key",
         "tls_scheduler_cert",
+        "tls_scheduler_password",
         "tls_worker_key",
         "tls_worker_cert",
+        "tls_worker_password",
         "extra_conn_args",
     )
 
@@ -96,13 +105,22 @@ class Security:
         self._set_field(kwargs, "tls_client_key", "distributed.comm.tls.client.key")
         self._set_field(kwargs, "tls_client_cert", "distributed.comm.tls.client.cert")
         self._set_field(
+            kwargs, "tls_client_password", "distributed.comm.tls.client.password"
+        )
+        self._set_field(
             kwargs, "tls_scheduler_key", "distributed.comm.tls.scheduler.key"
         )
         self._set_field(
             kwargs, "tls_scheduler_cert", "distributed.comm.tls.scheduler.cert"
         )
+        self._set_field(
+            kwargs, "tls_scheduler_password", "distributed.comm.tls.scheduler.password"
+        )
         self._set_field(kwargs, "tls_worker_key", "distributed.comm.tls.worker.key")
         self._set_field(kwargs, "tls_worker_cert", "distributed.comm.tls.worker.cert")
+        self._set_field(
+            kwargs, "tls_worker_password", "distributed.comm.tls.worker.password"
+        )
 
     @classmethod
     def temporary(cls, **kwargs):
@@ -238,6 +256,7 @@ class Security:
             "ciphers": self.tls_ciphers,
             "cert": getattr(self, "tls_%s_cert" % role),
             "key": getattr(self, "tls_%s_key" % role),
+            "password": getattr(self, "tls_%s_password" % role),
         }
 
     def _get_tls_context(self, tls, purpose):
@@ -245,6 +264,7 @@ class Security:
             ca = tls["ca_file"]
             cert_path = cert = tls["cert"]
             key_path = key = tls.get("key")
+            password = tls.get("password")
 
             if "\n" in ca:
                 ctx = ssl.create_default_context(purpose=purpose, cadata=ca)
@@ -268,9 +288,9 @@ class Security:
                         key_path = os.path.join(tempdir, "dask.pem")
                         with open(key_path, "w") as f:
                             f.write(key)
-                    ctx.load_cert_chain(cert_path, key_path)
+                    ctx.load_cert_chain(cert_path, key_path, password=password)
             else:
-                ctx.load_cert_chain(cert_path, key_path)
+                ctx.load_cert_chain(cert_path, key_path, password=password)
 
             # Bidirectional authentication
             ctx.verify_mode = ssl.CERT_REQUIRED

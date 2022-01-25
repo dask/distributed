@@ -216,12 +216,16 @@ distributed:
         key: null       # Path to key file for scheduler. Alternatively, the key
                         # can be appended to the cert file above, and this field
                         # left blank.
+        password: null  # Password to use for decrypting the private key. Only
+                        # needed if uses password encrypted keys.
       worker:
         key: null
         cert: null
+        password: null
       client:
         key: null
         cert: null
+        password: null
 
     tcp:
       backend: tornado  # The backend to use for TCP, one of {tornado, asyncio}
