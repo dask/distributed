@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 import pytest
-from pandas.testing import assert_frame_equal
+
+import dask.dataframe as dd
 
 from distributed.utils_test import gen_cluster
 
@@ -182,7 +183,7 @@ async def test_add_partition(s: Scheduler, *workers: Worker):
         ext = exts[addr]
         received = ext.shuffles[metadata.id].output_partitions[int(i)]
         assert len(received) == 1
-        assert_frame_equal(data, received[0])
+        dd.utils.assert_eq(data, received[0])
 
     # TODO (resilience stage) test failed sends
 
@@ -276,7 +277,9 @@ async def test_get_partition(c: Client, s: Scheduler, *workers: Worker):
             expected = expected_groups.get_group(output_i)
         except KeyError:
             expected = metadata.empty
-        assert_frame_equal(expected, result)
+        dd.utils.assert_eq(expected, result)
+        # ^ NOTE: use `assert_eq` instead of `pd.testing.assert_frame_equal` directly
+        # to ignore order of the rows (`assert_eq` pre-sorts its inputs).
 
     # Once all partitions are retrieved, shuffles are cleaned up
     for ext in exts.values():
