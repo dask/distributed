@@ -648,13 +648,13 @@ def _handle_warn(event):
 
 
 def _maybe_call_security_loader(address):
-    security_loader = dask.config.get("distributed.client.security-loader")
-    if security_loader:
+    security_loader_term = dask.config.get("distributed.client.security-loader")
+    if security_loader_term:
         try:
-            security_loader = import_term(security_loader)
+            security_loader = import_term(security_loader_term)
         except Exception as exc:
             raise ImportError(
-                f"Failed to import `{security_loader}` configured at "
+                f"Failed to import `{security_loader_term}` configured at "
                 f"`distributed.client.security-loader` - is this module "
                 f"installed?"
             ) from exc

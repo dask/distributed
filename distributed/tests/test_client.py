@@ -7431,7 +7431,6 @@ class TestClientSecurityLoader:
         with dask.config.set(
             {"distributed.client.security-loader": "totally_fake_module_name_2.loader"}
         ):
-            with pytest.raises(ImportError) as exc:
+            with pytest.raises(ImportError, match="totally_fake_module_name_2.loader"):
                 async with Client("tls://bad-address:8888", asynchronous=True):
                     pass
-            assert "totally_fake_module_name_2.loader" in str(exc.value)
