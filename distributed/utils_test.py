@@ -678,7 +678,7 @@ def cluster(
             for worker in workers:
                 worker["address"] = worker["queue"].get(timeout=5)
         except queue.Empty:
-            raise pytest.xfail.Exception("Worker failed to start in test")
+            pytest.xfail("Worker failed to start in test")
 
         saddr = scheduler_q.get()
 
@@ -895,7 +895,7 @@ def gen_cluster(
     config: dict[str, Any] = {},
     clean_kwargs: dict[str, Any] = {},
     allow_unclosed: bool = False,
-    cluster_dump_directory: str | Literal[False] = "test_timeout_dump",
+    cluster_dump_directory: str | Literal[False] = "test_cluster_dump",
 ) -> Callable[[Callable], Callable]:
     from distributed import Client
 
@@ -979,15 +979,16 @@ def gen_cluster(
                                 **client_kwargs,
                             )
                             args = [c] + args
+
                         try:
                             coro = func(*args, *outer_args, **kwargs)
                             task = asyncio.create_task(coro)
-
                             coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
                             result = await coro2
                             if s.validate:
                                 s.validate_state()
-                        except asyncio.TimeoutError as e:
+
+                        except asyncio.TimeoutError:
                             assert task
                             buffer = io.StringIO()
                             # This stack indicates where the coro/test is suspended
@@ -1004,9 +1005,31 @@ def gen_cluster(
                             task.cancel()
                             while not task.cancelled():
                                 await asyncio.sleep(0.01)
+
+                            # Remove as much of the traceback as possible; it's
+                            # uninteresting boilerplate from utils_test and asyncio and
+                            # not from the code being tested.
                             raise TimeoutError(
-                                f"Test timeout after {timeout}s.\n{buffer.getvalue()}"
-                            ) from e
+                                f"Test timeout after {timeout}s.\n"
+                                "========== Test stack trace starts here ==========\n"
+                                f"{buffer.getvalue()}"
+                            ) from None
+
+                        except pytest.xfail.Exception:
+                            raise
+
+                        except Exception:
+                            if cluster_dump_directory and not has_pytestmark(
+                                test_func, "xfail"
+                            ):
+                                await dump_cluster_state(
+                                    s,
+                                    ws,
+                                    output_dir=cluster_dump_directory,
+                                    func_name=func.__name__,
+                                )
+                            raise
+
                         finally:
                             if client and c.status not in ("closing", "closed"):
                                 await c._close(fast=s.status == Status.closed)
@@ -1892,3 +1915,14 @@ class BrokenComm(Comm):
 
     def write(self, msg, serializers=None, on_error=None):
         raise OSError()
+
+
+def has_pytestmark(test_func: Callable, name: str) -> bool:
+    """Return True if the test function is marked by the given @pytest.mark.<name>;
+    False otherwise.
+
+    FIXME doesn't work with individually marked parameters inside
+          @pytest.mark.parametrize
+    """
+    marks = getattr(test_func, "pytestmark", [])
+    return any(mark.name == name for mark in marks)

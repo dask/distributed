@@ -16,11 +16,13 @@ import warnings
 import weakref
 import zipfile
 from collections import deque
-from contextlib import suppress
+from collections.abc import Generator
+from contextlib import contextmanager, suppress
 from functools import partial
 from operator import add
 from threading import Semaphore
 from time import sleep
+from typing import Any
 
 import psutil
 import pytest
@@ -2929,95 +2931,63 @@ async def test_badly_serialized_exceptions(c, s, a, b):
         await x
 
 
-@gen_cluster(
-    client=True,
-    Worker=Nanny,
-    worker_kwargs={"memory_limit": "1 GiB"},
-    config={"distributed.worker.memory.rebalance.sender-min": 0.3},
-)
-async def test_rebalance(c, s, *_):
+# Set rebalance() to work predictably on small amounts of managed memory. By default, it
+# uses optimistic memory, which would only be possible to test by allocating very large
+# amounts of managed memory, so that they would hide variations in unmanaged memory.
+REBALANCE_MANAGED_CONFIG = {
+    "distributed.worker.memory.rebalance.measure": "managed",
+    "distributed.worker.memory.rebalance.sender-min": 0,
+    "distributed.worker.memory.rebalance.sender-recipient-gap": 0,
+}
+
+
+@gen_cluster(client=True, config=REBALANCE_MANAGED_CONFIG)
+async def test_rebalance(c, s, a, b):
     """Test Client.rebalance(). These are just to test the Client wrapper around
     Scheduler.rebalance(); for more thorough tests on the latter see test_scheduler.py.
     """
-    # We used nannies to have separate processes for each worker
-    a, b = s.workers
-
-    # Generate 10 buffers worth 512 MiB total on worker a. This sends its memory
-    # utilisation slightly above 50% (after counting unmanaged) which is above the
-    # distributed.worker.memory.rebalance.sender-min threshold.
-    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
-    await wait(futures)
-    # Wait for heartbeats
-    while s.memory.process < 2 ** 29:
-        await asyncio.sleep(0.1)
-
-    assert await c.run(lambda dask_worker: len(dask_worker.data)) == {a: 10, b: 0}
-
+    futures = await c.scatter(range(100), workers=[a.address])
+    assert len(a.data) == 100
+    assert len(b.data) == 0
     await c.rebalance()
-
-    ndata = await c.run(lambda dask_worker: len(dask_worker.data))
-    # Allow for some uncertainty as the unmanaged memory is not stable
-    assert sum(ndata.values()) == 10
-    assert 3 <= ndata[a] <= 7
-    assert 3 <= ndata[b] <= 7
+    assert len(a.data) == 50
+    assert len(b.data) == 50
 
 
-@gen_cluster(
-    nthreads=[("127.0.0.1", 1)] * 3,
-    client=True,
-    Worker=Nanny,
-    worker_kwargs={"memory_limit": "1 GiB"},
-)
-async def test_rebalance_workers_and_keys(client, s, *_):
+@gen_cluster(nthreads=[("", 1)] * 3, client=True, config=REBALANCE_MANAGED_CONFIG)
+async def test_rebalance_workers_and_keys(client, s, a, b, c):
     """Test Client.rebalance(). These are just to test the Client wrapper around
     Scheduler.rebalance(); for more thorough tests on the latter see test_scheduler.py.
     """
-    a, b, c = s.workers
-    futures = client.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
-    await wait(futures)
-    # Wait for heartbeats
-    while s.memory.process < 2 ** 29:
-        await asyncio.sleep(0.1)
+    futures = await client.scatter(range(100), workers=[a.address])
+    assert (len(a.data), len(b.data), len(c.data)) == (100, 0, 0)
 
     # Passing empty iterables is not the same as omitting the arguments
     await client.rebalance([])
     await client.rebalance(workers=[])
-    assert await client.run(lambda dask_worker: len(dask_worker.data)) == {
-        a: 10,
-        b: 0,
-        c: 0,
-    }
+    assert (len(a.data), len(b.data), len(c.data)) == (100, 0, 0)
 
     # Limit rebalancing to two arbitrary keys and two arbitrary workers.
-    await client.rebalance([futures[3], futures[7]], [a, b])
-    assert await client.run(lambda dask_worker: len(dask_worker.data)) == {
-        a: 8,
-        b: 2,
-        c: 0,
-    }
+    await client.rebalance([futures[3], futures[7]], [a.address, b.address])
+    assert (len(a.data), len(b.data), len(c.data)) == (98, 2, 0)
 
     with pytest.raises(KeyError):
         await client.rebalance(workers=["notexist"])
 
 
 def test_rebalance_sync():
-    # can't use the 'c' fixture because we need workers to run in a separate process
-    with Client(n_workers=2, memory_limit="1 GiB", dashboard_address=":0") as c:
-        s = c.cluster.scheduler
-        a, b = (ws.address for ws in s.workers.values())
-        futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
-        wait(futures)
-        # Wait for heartbeat
-        while s.memory.process < 2 ** 29:
-            sleep(0.1)
+    with dask.config.set(REBALANCE_MANAGED_CONFIG):
+        with Client(n_workers=2, processes=False, dashboard_address=":0") as c:
+            s = c.cluster.scheduler
+            a = c.cluster.workers[0]
+            b = c.cluster.workers[1]
+            futures = c.scatter(range(100), workers=[a.address])
 
-        assert c.run(lambda dask_worker: len(dask_worker.data)) == {a: 10, b: 0}
-        c.rebalance()
-        ndata = c.run(lambda dask_worker: len(dask_worker.data))
-        # Allow for some uncertainty as the unmanaged memory is not stable
-        assert sum(ndata.values()) == 10
-        assert 3 <= ndata[a] <= 7
-        assert 3 <= ndata[b] <= 7
+            assert len(a.data) == 100
+            assert len(b.data) == 0
+            c.rebalance()
+            assert len(a.data) == 50
+            assert len(b.data) == 50
 
 
 @gen_cluster(client=True)
@@ -3782,9 +3752,35 @@ def test_reconnect(loop):
     c.close()
 
 
+class UnhandledException(Exception):
+    pass
+
+
+@contextmanager
+def catch_unhandled_exceptions() -> Generator[None, None, None]:
+    loop = asyncio.get_running_loop()
+    ctx: dict[str, Any] | None = None
+
+    old_handler = loop.get_exception_handler()
+
+    @loop.set_exception_handler
+    def _(loop: object, context: dict[str, Any]) -> None:
+        nonlocal ctx
+        ctx = context
+
+    try:
+        yield
+    finally:
+        loop.set_exception_handler(old_handler)
+    if ctx:
+        raise UnhandledException(ctx["message"]) from ctx.get("exception")
+
+
 @gen_cluster(client=True, nthreads=[], client_kwargs={"timeout": 0.5})
 async def test_reconnect_timeout(c, s):
-    with captured_logger(logging.getLogger("distributed.client")) as logger:
+    with catch_unhandled_exceptions(), captured_logger(
+        logging.getLogger("distributed.client")
+    ) as logger:
         await s.close()
         while c.status != "closed":
             await c._update_scheduler_info()
@@ -5747,43 +5743,37 @@ async def test_client_active_bad_port():
 
 
 @pytest.mark.parametrize("direct", [True, False])
-def test_turn_off_pickle(direct):
-    @gen_cluster()
-    async def test(s, a, b):
-        np = pytest.importorskip("numpy")
+@gen_cluster(client=True, client_kwargs={"serializers": ["dask", "msgpack"]})
+async def test_turn_off_pickle(c, s, a, b, direct):
+    np = pytest.importorskip("numpy")
 
-        async with Client(
-            s.address, asynchronous=True, serializers=["dask", "msgpack"]
-        ) as c:
-            assert (await c.submit(inc, 1)) == 2
-            await c.submit(np.ones, 5)
-            await c.scatter(1)
+    assert (await c.submit(inc, 1)) == 2
+    await c.submit(np.ones, 5)
+    await c.scatter(1)
 
-            # Can't send complex data
-            with pytest.raises(TypeError):
-                future = await c.scatter(inc)
+    # Can't send complex data
+    with pytest.raises(TypeError):
+        await c.scatter(inc)
 
-            # can send complex tasks (this uses pickle regardless)
-            future = c.submit(lambda x: x, inc)
-            await wait(future)
+    # can send complex tasks (this uses pickle regardless)
+    future = c.submit(lambda x: x, inc)
+    await wait(future)
 
-            # but can't receive complex results
-            with pytest.raises(TypeError):
-                await c.gather(future, direct=direct)
+    # but can't receive complex results
+    with pytest.raises(TypeError):
+        await c.gather(future, direct=direct)
 
-            # Run works
-            result = await c.run(lambda: 1)
-            assert list(result.values()) == [1, 1]
-            result = await c.run_on_scheduler(lambda: 1)
-            assert result == 1
+    # Run works
+    result = await c.run(lambda: 1)
+    assert list(result.values()) == [1, 1]
+    result = await c.run_on_scheduler(lambda: 1)
+    assert result == 1
 
-            # But not with complex return values
-            with pytest.raises(TypeError):
-                await c.run(lambda: inc)
-            with pytest.raises(TypeError):
-                await c.run_on_scheduler(lambda: inc)
-
-    test()
+    # But not with complex return values
+    with pytest.raises(TypeError):
+        await c.run(lambda: inc)
+    with pytest.raises(TypeError):
+        await c.run_on_scheduler(lambda: inc)
 
 
 @gen_cluster()
@@ -6620,21 +6610,19 @@ async def test_annotations_task_state(c, s, a, b):
 
 
 @pytest.mark.parametrize("fn", ["compute", "persist"])
-def test_annotations_compute_time(fn):
+@gen_cluster(client=True)
+async def test_annotations_compute_time(c, s, a, b, fn):
     da = pytest.importorskip("dask.array")
+    x = da.ones(10, chunks=(5,))
 
-    @gen_cluster(client=True)
-    async def test(c, s, a, b):
-        x = da.ones(10, chunks=(5,))
+    with dask.annotate(foo="bar"):
+        # Turn off optimization to avoid rewriting layers and picking up annotations
+        # that way. Instead, we want `compute`/`persist` to be able to pick them up.
+        fut = getattr(c, fn)(x, optimize_graph=False)
 
-        with dask.annotate(foo="bar"):
-            # Turn off optimization to avoid rewriting layers and picking up annotations
-            # that way. Instead, we want `compute`/`persist` to be able to pick them up.
-            x = await getattr(c, fn)(x, optimize_graph=False)
-
-        assert all({"foo": "bar"} == ts.annotations for ts in s.tasks.values())
-
-    test()
+    await wait(fut)
+    assert s.tasks
+    assert all(ts.annotations == {"foo": "bar"} for ts in s.tasks.values())
 
 
 @pytest.mark.xfail(reason="https://github.com/dask/dask/issues/7036")
