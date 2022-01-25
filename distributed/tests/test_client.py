@@ -4364,7 +4364,7 @@ async def test_retire_workers_2(c, s, a, b):
     assert a.address not in s.workers
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10)
+@gen_cluster(client=True, nthreads=[("", 1)] * 10)
 async def test_retire_many_workers(c, s, *workers):
     futures = await c.scatter(list(range(100)))
 
@@ -4380,8 +4380,16 @@ async def test_retire_many_workers(c, s, *workers):
 
     assert all(future.done() for future in futures)
     assert all(s.tasks[future.key].state == "memory" for future in futures)
-    for w, keys in s.has_what.items():
-        assert 15 < len(keys) < 50
+    assert await c.gather(futures) == list(range(100))
+
+    # Don't count how many task landed on each worker.
+    # Normally, tasks would be distributed evenly over the surviving workers. However,
+    # here all workers share the same process memory, so you'll get an unintuitive
+    # distribution of tasks if for any reason one transfer take longer than 2 seconds
+    # and as a consequence the Active Memory Manager ends up running for two iterations.
+    # This is something that will happen more frequently on low-powered CI machines.
+    # See test_active_memory_manager.py for tests that robustly verify the statistical
+    # distribution of tasks after worker retirement.
 
 
 @gen_cluster(
