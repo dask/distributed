@@ -3,8 +3,6 @@ source =
     distributed
 omit =
     distributed/tests/test*
-    distributed/hdfs.py
-    distributed/cluster.py
     distributed/*/tests/test*
     distributed/compatibility.py
     distributed/cli/utils.py
