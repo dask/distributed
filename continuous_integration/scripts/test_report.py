@@ -182,14 +182,18 @@ if __name__ == "__main__":
     for w in workflows:
         artifacts = get_artifacts_for_workflow(w["id"])
         # We also upload timeout reports as artifacts, but we don't want them here.
-        w["artifacts"] = [a for a in artifacts if "timeouts" not in a["name"]]
+        w["artifacts"] = [
+            a
+            for a in artifacts
+            if "timeouts" not in a["name"] and "cluster_dumps" not in a["name"]
+        ]
 
     print("Downloading and parsing artifacts...")
     for w in workflows:
         w["dfs"] = []
         for a in w["artifacts"]:
             xml = download_and_parse_artifact(a["archive_download_url"])
-            df = dataframe_from_jxml(xml)
+            df = dataframe_from_jxml(xml) if xml else None
             # Note: we assign a column with the workflow timestamp rather than the
             # artifact timestamp so that artifacts triggered under the same workflow
             # can be aligned according to the same trigger time.
