@@ -706,6 +706,17 @@ async def test_actor_future_awaitable(client, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_actor_future_awaitable_deadlock(client, s, a, b):
+    ac = await client.submit(Counter, actor=True)
+    f = ac.increment()
+
+    async def coro():
+        return await f
+
+    assert await asyncio.gather(coro(), coro()) == [1, 1]
+
+
+@gen_cluster(client=True)
 async def test_serialize_with_pickle(c, s, a, b):
     class Foo:
         def __init__(self):

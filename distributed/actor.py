@@ -1,3 +1,4 @@
+import abc
 import asyncio
 import functools
 import threading
@@ -140,9 +141,7 @@ class Actor(WrappedKey):
                 return attr
 
             elif callable(attr):
-                return lambda *args, **kwargs: ActorFuture(
-                    None, self._io_loop, result=attr(*args, **kwargs)
-                )
+                return lambda *args, **kwargs: _EagerActorFuture(attr(*args, **kwargs))
             else:
                 return attr
 
@@ -168,14 +167,13 @@ class Actor(WrappedKey):
                             raise OSError("Unable to contact Actor's worker")
                     return result
 
-                q = asyncio.Queue(loop=self._io_loop.asyncio_loop)
+                actor_future = _ActorFuture(io_loop=self._io_loop)
 
                 async def wait_then_add_to_queue():
-                    x = await run_actor_function_on_worker()
-                    await q.put(x)
+                    actor_future._set_result(await run_actor_function_on_worker())
 
                 self._io_loop.add_callback(wait_then_add_to_queue)
-                return ActorFuture(q, self._io_loop)
+                return actor_future
 
             return func
 
@@ -215,7 +213,7 @@ class ProxyRPC:
         return func
 
 
-class ActorFuture:
+class ActorFuture(abc.ABC):
     """Future to an actor's method call
 
     Whenever you call a method on an Actor you get an ActorFuture immediately
@@ -227,34 +225,67 @@ class ActorFuture:
     Actor
     """
 
-    def __init__(self, q, io_loop, result=None):
-        self.q = q
-        self.io_loop = io_loop
-        if result:
-            self._cached_result = result
-        self.status = "pending"
+    @abc.abstractmethod
+    def __await__(self):
+        pass
+
+    @abc.abstractmethod
+    def result(self):
+        pass
+
+    @abc.abstractmethod
+    def done(self):
+        pass
+
+    def __repr__(self):
+        return "<ActorFuture>"
+
+
+class _EagerActorFuture(ActorFuture):
+    """Future to an actor's method call when an actor calls another actor on the same worker"""
+
+    def __init__(self, result):
+        self._result = result
+
+    def __await__(self):
+        return self._result
+        yield
+
+    def result(self):
+        return self._result
+
+    def done(self):
+        return True
+
+
+class _ActorFuture(ActorFuture):
+    def __init__(self, io_loop):
+        self._io_loop = io_loop
+        self._event = None
+        self._out = None
 
     def __await__(self):
         return self._result().__await__()
 
     def done(self):
-        return self.status != "pending"
+        return self._event and self._event.is_set()
 
-    async def _result(self, raiseit=True):
-        if not hasattr(self, "_cached_result"):
-            out = await self.q.get()
-            if out["status"] == "OK":
-                self.status = "finished"
-                self._cached_result = out["result"]
-            else:
-                self.status = "error"
-                self._cached_result = out["exception"]
-        if self.status == "error":
-            raise self._cached_result
-        return self._cached_result
+    async def _result(self):
+        if self._event is None:
+            self._event = asyncio.Event()
+
+        await self._event.wait()
+        out = self._out
+        if out["status"] == "OK":
+            return out["result"]
+        raise out["exception"]
+
+    def _set_result(self, out):
+        if self._event is None:
+            self._event = asyncio.Event()
+
+        self._out = out
+        self._event.set()
 
     def result(self, timeout=None):
-        return sync(self.io_loop, self._result, callback_timeout=timeout)
-
-    def __repr__(self):
-        return "<ActorFuture>"
+        return sync(self._io_loop, self._result, callback_timeout=timeout)
