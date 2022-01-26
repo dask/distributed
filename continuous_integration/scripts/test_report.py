@@ -172,7 +172,7 @@ if __name__ == "__main__":
         for w in workflows
         if (
             pandas.to_datetime(w["created_at"])
-            > pandas.Timestamp.now(tz="UTC") - pandas.Timedelta(days=31)
+            > pandas.Timestamp.now(tz="UTC") - pandas.Timedelta(days=90)
             and w["conclusion"] != "cancelled"
             and w["name"].lower() == "tests"
         )
@@ -202,6 +202,7 @@ if __name__ == "__main__":
                     name=a["name"],
                     suite=suite_from_name(a["name"]),
                     date=w["created_at"],
+                    url=w["html_url"],
                 )
                 w["dfs"].append(df)
 
@@ -266,6 +267,7 @@ if __name__ == "__main__":
             .encode(
                 x=altair.X("date:O", scale=altair.Scale(domain=sorted(list(times)))),
                 y=altair.Y("test:N", title=None),
+                href=altair.Href("url:N"),
                 color=altair.Color(
                     "status:N",
                     scale=altair.Scale(
@@ -273,7 +275,7 @@ if __name__ == "__main__":
                         range=list(COLORS.values()),
                     ),
                 ),
-                tooltip=["test:N", "date:O", "status:N", "message:N"],
+                tooltip=["test:N", "date:O", "status:N", "message:N", "url:N"],
             )
             .properties(title=name)
             | altair.Chart(df_agg.assign(_="_"))
@@ -297,4 +299,11 @@ if __name__ == "__main__":
         .configure_axis(labelLimit=1000)  # test names are long
         .resolve_scale(x="shared")  # enforce aligned x axes
     )
-    altair_saver.save(chart, "test_report.html", embed_options={"renderer": "svg"})
+    altair_saver.save(
+        chart,
+        "test_report.html",
+        embed_options={
+            "renderer": "svg",  # Makes the text searchable
+            "loader": {"target": "_blank"},  # Open hrefs in a new window
+        },
+    )
