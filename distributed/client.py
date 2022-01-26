@@ -4546,6 +4546,7 @@ class Client(SyncMethodMixin):
                 "future release. Please add plugins by instance instead.",
                 category=FutureWarning,
             )
+            # note: plugin is constructed in async def _register_scheduler_plugin
         elif kwargs:
             raise ValueError("kwargs provided but plugin is already an instance")
 
