@@ -16,8 +16,8 @@ logger = logging.getLogger("distributed.dask_ssh")
         """Launch a distributed cluster over SSH. A 'dask-scheduler' process will run on the
         first host specified in [HOSTNAMES] or in the hostfile, unless --scheduler is specified
         explicitly. One or more 'dask-worker' processes will be run on each host. Use the flag
-        --num-workers to adjust how many dask-worker process are run on each host and the flag
-        --nthreads to adjust how many cpus are used by each dask-worker process."""
+        --nworkers to adjust how many dask-worker process are run on each host and the flag
+        --nthreads to adjust how many CPUs are used by each dask-worker process."""
     )
 )
 @click.option(
@@ -48,10 +48,11 @@ logger = logging.getLogger("distributed.dask_ssh")
     default=None,
     show_default=True,
     type=int,
-    help="Deprecated. Use --num-workers instead. Number of worker processes per host.",
+    help="Deprecated. Use --nworkers instead. Number of worker processes per host.",
 )
 @click.option(
-    "--num-workers",
+    "--nworkers",
+    "n_workers",  # This sets the Python argument name
     default=None,
     show_default=True,
     type=int,
@@ -138,7 +139,7 @@ def main(
     hostfile,
     nthreads,
     nprocs,
-    num_workers,
+    n_workers,
     ssh_username,
     ssh_port,
     ssh_private_key,
@@ -165,27 +166,27 @@ def main(
         print(ctx.get_help())
         exit(1)
 
-    if nprocs is not None and num_workers is not None:
+    if nprocs is not None and n_workers is not None:
         logger.error(
-            "Both --nprocs and --num-workers were specified. Use --num-workers only."
+            "Both --nprocs and --nworkers were specified. Use --nworkers only."
         )
         sys.exit(1)
     elif nprocs is not None:
         warnings.warn(
             "The --nprocs flag will be removed in a future release. It has been "
-            "renamed to --num-workers.",
+            "renamed to --nworkers.",
             FutureWarning,
         )
-        num_workers = nprocs
-    elif num_workers is None:
-        num_workers = 1
+        n_workers = nprocs
+    elif n_workers is None:
+        n_workers = 1
 
     c = SSHCluster(
         scheduler,
         scheduler_port,
         hostnames,
         nthreads,
-        num_workers,
+        n_workers,
         ssh_username,
         ssh_port,
         ssh_private_key,

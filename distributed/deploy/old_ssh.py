@@ -250,7 +250,7 @@ def start_worker(
     scheduler_port,
     worker_addr,
     nthreads,
-    num_workers,
+    n_workers,
     ssh_username,
     ssh_port,
     ssh_private_key,
@@ -266,8 +266,7 @@ def start_worker(
     cmd = (
         "{python} -m {remote_dask_worker} "
         "{scheduler_addr}:{scheduler_port} "
-        "--nthreads {nthreads}"
-        + (" --num-workers {num_workers}" if num_workers != 1 else "")
+        "--nthreads {nthreads}" + (" --nworkers {n_workers}" if n_workers != 1 else "")
     )
 
     if not nohost:
@@ -289,7 +288,7 @@ def start_worker(
         scheduler_port=scheduler_port,
         worker_addr=worker_addr,
         nthreads=nthreads,
-        num_workers=num_workers,
+        n_workers=n_workers,
         memory_limit=memory_limit,
         worker_port=worker_port,
         nanny_port=nanny_port,
@@ -339,7 +338,7 @@ class SSHCluster:
         scheduler_port,
         worker_addrs,
         nthreads=0,
-        num_workers=None,
+        n_workers=None,
         ssh_username=None,
         ssh_port=22,
         ssh_private_key=None,
@@ -357,21 +356,21 @@ class SSHCluster:
         self.scheduler_addr = scheduler_addr
         self.scheduler_port = scheduler_port
         self.nthreads = nthreads
-        if kwargs.get("nprocs") is not None and num_workers is not None:
+        if kwargs.get("nprocs") is not None and n_workers is not None:
             raise ValueError(
-                "Both nprocs and num_workers were specified. Use num_workers only."
+                "Both nprocs and n_workers were specified. Use n_workers only."
             )
         elif kwargs.get("nprocs") is not None:
             warnings.warn(
                 "The nprocs argument will be removed in a future release. It has been "
-                "renamed to num_workers.",
+                "renamed to n_workers.",
                 FutureWarning,
             )
-            num_workers = kwargs["nprocs"]
-        elif num_workers is None:
-            num_workers = 1
+            n_workers = kwargs["nprocs"]
+        elif n_workers is None:
+            n_workers = 1
 
-        self.num_workers = num_workers
+        self.n_workers = n_workers
 
         self.ssh_username = ssh_username
         self.ssh_port = ssh_port
@@ -459,7 +458,7 @@ class SSHCluster:
                 self.scheduler_port,
                 address,
                 self.nthreads,
-                self.num_workers,
+                self.n_workers,
                 self.ssh_username,
                 self.ssh_port,
                 self.ssh_private_key,

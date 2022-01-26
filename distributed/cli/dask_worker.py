@@ -56,7 +56,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--worker-port",
     default=None,
     help="Serving computation port, defaults to random. "
-    "When creating multiple workers with --num-workers, a sequential range of "
+    "When creating multiple workers with --nworkers, a sequential range of "
     "worker ports may be used by specifying the first and last available "
     "ports like <first-port>:<last-port>. For example, --worker-port=3000:3026 "
     "will use ports 3000, 3001, ..., 3025, 3026.",
@@ -65,7 +65,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--nanny-port",
     default=None,
     help="Serving nanny port, defaults to random. "
-    "When creating multiple nannies with --num-workers, a sequential range of "
+    "When creating multiple nannies with --nworkers, a sequential range of "
     "nanny ports may be used by specifying the first and last available "
     "ports like <first-port>:<last-port>. For example, --nanny-port=3000:3026 "
     "will use ports 3000, 3001, ..., 3025, 3026.",
@@ -129,25 +129,26 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     type=str,
     default=None,
     show_default=True,
-    help="Deprecated. Use '--num-workers' instead. Number of worker processes to "
+    help="Deprecated. Use '--nworkers' instead. Number of worker processes to "
     "launch. If negative, then (CPU_COUNT + 1 + nprocs) is used. "
     "Set to 'auto' to set nprocs and nthreads dynamically based on CPU_COUNT",
 )
 @click.option(
-    "--num-workers",
+    "--nworkers",
+    "n_workers",  # This sets the Python argument name
     type=str,
     default=None,
     show_default=True,
     help="Number of worker processes to launch. "
-    "If negative, then (CPU_COUNT + 1 + num-workers) is used. "
-    "Set to 'auto' to set num-workers and nthreads dynamically based on CPU_COUNT",
+    "If negative, then (CPU_COUNT + 1 + nworkers) is used. "
+    "Set to 'auto' to set nworkers and nthreads dynamically based on CPU_COUNT",
 )
 @click.option(
     "--name",
     type=str,
     default=None,
     help="A unique name for this worker like 'worker-1'. "
-    "If used with --nprocs then the process number "
+    "If used with --nworkers then the process number "
     "will be appended like name-0, name-1, name-2, ...",
 )
 @click.option(
@@ -183,7 +184,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     default=None,
     help='Resources for task constraints like "GPU=2 MEM=10e9". '
     "Resources are applied separately to each worker process "
-    "(only relevant when starting multiple worker processes with '--num_workers').",
+    "(only relevant when starting multiple worker processes with '--nworkers').",
 )
 @click.option(
     "--scheduler-file",
@@ -259,7 +260,7 @@ def main(
     nanny_port,
     nthreads,
     nprocs,
-    num_workers,
+    n_workers,
     nanny,
     name,
     pid_file,
@@ -305,38 +306,38 @@ def main(
         if v is not None
     }
 
-    if nprocs is not None and num_workers is not None:
+    if nprocs is not None and n_workers is not None:
         logger.error(
-            "Both --nprocs and --num-workers were specified. Use --num-workers only."
+            "Both --nprocs and --nworkers were specified. Use --nworkers only."
         )
         sys.exit(1)
     elif nprocs is not None:
         warnings.warn(
             "The --nprocs flag will be removed in a future release. It has been "
-            "renamed to --num-workers.",
+            "renamed to --nworkers.",
             FutureWarning,
         )
-        num_workers = nprocs
+        n_workers = nprocs
 
-    if num_workers == "auto":
-        num_workers, nthreads = nprocesses_nthreads()
-    elif num_workers is None:
-        num_workers = 1
+    if n_workers == "auto":
+        n_workers, nthreads = nprocesses_nthreads()
+    elif n_workers is None:
+        n_workers = 1
     else:
-        num_workers = int(num_workers)
+        n_workers = int(n_workers)
 
-    if num_workers < 0:
-        num_workers = CPU_COUNT + 1 + num_workers
+    if n_workers < 0:
+        n_workers = CPU_COUNT + 1 + n_workers
 
-    if num_workers <= 0:
+    if n_workers <= 0:
         logger.error(
-            "Failed to launch worker. Must specify --num-workers so that there's at least one process."
+            "Failed to launch worker. Must specify --nworkers so that there's at least one process."
         )
         sys.exit(1)
 
-    if num_workers > 1 and not nanny:
+    if n_workers > 1 and not nanny:
         logger.error(
-            "Failed to launch worker.  You cannot use the --no-nanny argument when num_workers > 1."
+            "Failed to launch worker.  You cannot use the --no-nanny argument when n_workers > 1."
         )
         sys.exit(1)
 
@@ -347,10 +348,10 @@ def main(
         )
         sys.exit(1)
 
-    if num_workers > 1 and listen_address:
+    if n_workers > 1 and listen_address:
         logger.error(
             "Failed to launch worker. "
-            "You cannot specify --listen-address when num_workers > 1."
+            "You cannot specify --listen-address when n_workers > 1."
         )
         sys.exit(1)
 
@@ -384,7 +385,7 @@ def main(
         port = worker_port
 
     if not nthreads:
-        nthreads = CPU_COUNT // num_workers
+        nthreads = CPU_COUNT // n_workers
 
     if pid_file:
         with open(pid_file, "w") as f:
@@ -445,11 +446,11 @@ def main(
             dashboard=dashboard,
             dashboard_address=dashboard_address,
             name=name
-            if num_workers == 1 or name is None or name == ""
+            if n_workers == 1 or name is None or name == ""
             else str(name) + "-" + str(i),
             **kwargs,
         )
-        for i in range(num_workers)
+        for i in range(n_workers)
     ]
 
     async def close_all():

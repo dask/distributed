@@ -68,7 +68,7 @@ If your computations are mostly Python code and don't release the GIL then it
 is advisable to run ``dask-worker`` processes with many processes and one
 thread per process::
 
-   $ dask-worker scheduler:8786 --num-workers 8 --nthreads 1
+   $ dask-worker scheduler:8786 --nworkers 8 --nthreads 1
 
 This will launch 8 worker processes each of which has its own
 ThreadPoolExecutor of size 1.

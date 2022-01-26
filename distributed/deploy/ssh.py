@@ -89,19 +89,19 @@ class Worker(Process):
         self.kwargs = copy.copy(kwargs)
         self.name = name
         self.remote_python = remote_python
-        if kwargs.get("nprocs") is not None and kwargs.get("num_workers") is not None:
+        if kwargs.get("nprocs") is not None and kwargs.get("n_workers") is not None:
             raise ValueError(
-                "Both nprocs and num_workers were specified. Use num_workers only."
+                "Both nprocs and n_workers were specified. Use n_workers only."
             )
         elif kwargs.get("nprocs") is not None:
             warnings.warn(
                 "The nprocs argument will be removed in a future release. It has been "
-                "renamed to num_workers.",
+                "renamed to n_workers.",
                 FutureWarning,
             )
-            self.num_workers = self.kwargs.pop("nprocs")
+            self.n_workers = self.kwargs.pop("nprocs")
         else:
-            self.num_workers = self.kwargs.pop("num_workers", 1)
+            self.n_workers = self.kwargs.pop("n_workers", 1)
 
     async def start(self):
         try:
@@ -150,7 +150,7 @@ class Worker(Process):
                                 **self.kwargs,
                             },
                         }
-                        for i in range(self.num_workers)
+                        for i in range(self.n_workers)
                     }
                 ),
             ]
@@ -160,7 +160,7 @@ class Worker(Process):
 
         # We watch stderr in order to get the address, then we return
         started_workers = 0
-        while started_workers < self.num_workers:
+        while started_workers < self.n_workers:
             line = await self.proc.stderr.readline()
             if not line.strip():
                 raise Exception("Worker failed to start")
@@ -260,7 +260,7 @@ old_cluster_kwargs = {
     "worker_addrs",
     "nthreads",
     "nprocs",
-    "num_workers",
+    "n_workers",
     "ssh_username",
     "ssh_port",
     "ssh_private_key",
@@ -349,7 +349,7 @@ def SSHCluster(
     >>> cluster = SSHCluster(
     ...     ["localhost", "localhost", "localhost", "localhost"],
     ...     connect_options={"known_hosts": None},
-    ...     worker_options={"nthreads": 2, "num_workers": 2},
+    ...     worker_options={"nthreads": 2, "n_workers": 2},
     ...     scheduler_options={"port": 0, "dashboard_address": ":8797"}
     ... )
     >>> client = Client(cluster)
