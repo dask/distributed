@@ -45,30 +45,32 @@ def dumps(
 
             header["compression"] = tuple(compression)
 
+        def create_sub_frames(obj) -> list:
+            typ = type(obj)
+            if typ is Serialized:
+                sub_header, sub_frames = obj.header, obj.frames
+            else:
+                sub_header, sub_frames = serialize_and_split(
+                    obj,
+                    serializers=serializers,
+                    on_error=on_error,
+                    context=context,
+                    size=frame_split_size,
+                )
+                _inplace_compress_frames(sub_header, sub_frames)
+            sub_header["num-sub-frames"] = len(sub_frames)
+            sub_header = msgpack.dumps(
+                sub_header, default=msgpack_encode_default, use_bin_type=True
+            )
+            return [sub_header] + sub_frames
+
         frames = [None]
 
         def _encode_default(obj):
             typ = type(obj)
             if typ is Serialize or typ is Serialized:
                 offset = len(frames)
-                if typ is Serialized:
-                    sub_header, sub_frames = obj.header, obj.frames
-                else:
-                    sub_header, sub_frames = serialize_and_split(
-                        obj,
-                        serializers=serializers,
-                        on_error=on_error,
-                        context=context,
-                        size=frame_split_size,
-                    )
-                    _inplace_compress_frames(sub_header, sub_frames)
-                sub_header["num-sub-frames"] = len(sub_frames)
-                frames.append(
-                    msgpack.dumps(
-                        sub_header, default=msgpack_encode_default, use_bin_type=True
-                    )
-                )
-                frames.extend(sub_frames)
+                frames.extend(create_sub_frames(obj))
                 return {"__Serialized__": offset}
             else:
                 return msgpack_encode_default(obj)
