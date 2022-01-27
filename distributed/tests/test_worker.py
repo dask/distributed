@@ -1406,7 +1406,7 @@ async def test_avoid_oversubscription(c, s, *workers):
 
     futures = [c.submit(len, x, pure=False, workers=[w.address]) for w in workers[1:]]
 
-    wait(futures)
+    await wait(futures)
 
     # Original worker not responsible for all transfers
     assert len(workers[0].outgoing_transfer_log) < len(workers) - 2
