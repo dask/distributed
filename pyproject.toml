@@ -1,2 +1,0 @@
-[tool.pytest.ini_options]
-addopts = "--ignore=continuous_integration --ignore=docs --ignore=.github"
