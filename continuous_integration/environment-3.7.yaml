@@ -10,7 +10,7 @@ dependencies:
   - bokeh
   - click
   - cloudpickle
-  - coverage<6.3
+  - coverage<6.3  # https://github.com/nedbat/coveragepy/issues/1310
   - cython  # Only tested here; also a dependency of crick
   - dask  # overridden by git tip below
   - filesystem-spec
