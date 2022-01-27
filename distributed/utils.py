@@ -335,6 +335,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
     main_tid = threading.get_ident()
     result = [None]
     error = [False]
+    _future = [None]
 
     @gen.coroutine
     def f():
@@ -345,6 +346,8 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             future = func(*args, **kwargs)
             if callback_timeout is not None:
                 future = asyncio.wait_for(future, callback_timeout)
+            future = asyncio.ensure_future(future)
+            _future[0] = future
             result[0] = yield future
         except Exception:
             error[0] = sys.exc_info()
@@ -357,7 +360,11 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             raise TimeoutError(f"timed out after {callback_timeout} s.")
     else:
         while not e.is_set():
-            e.wait(10)
+            try:
+                e.wait(10)
+            except KeyboardInterrupt:
+                loop.add_callback(_future[0].cancel)
+                raise
     if error[0]:
         typ, exc, tb = error[0]
         raise exc.with_traceback(tb)
