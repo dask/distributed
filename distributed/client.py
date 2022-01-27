@@ -86,6 +86,7 @@ from .utils import (
     TimeoutError,
     format_dashboard_link,
     has_keyword,
+    import_term,
     log_errors,
     no_default,
     sync,
@@ -640,6 +641,21 @@ def _handle_warn(event):
         warnings.warn(msg)
 
 
+def _maybe_call_security_loader(address):
+    security_loader_term = dask.config.get("distributed.client.security-loader")
+    if security_loader_term:
+        try:
+            security_loader = import_term(security_loader_term)
+        except Exception as exc:
+            raise ImportError(
+                f"Failed to import `{security_loader_term}` configured at "
+                f"`distributed.client.security-loader` - is this module "
+                f"installed?"
+            ) from exc
+        return security_loader({"address": address})
+    return None
+
+
 class Client(SyncMethodMixin):
     """Connect to and submit computation to a Dask cluster
 
@@ -819,6 +835,11 @@ class Client(SyncMethodMixin):
                     type(address)
                 )
             )
+
+        # If connecting to an address and no explicit security is configured, attempt
+        # to load security credentials with a security loader (if configured).
+        if security is None and isinstance(address, str):
+            security = _maybe_call_security_loader(address)
 
         if security is None:
             security = Security()
