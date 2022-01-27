@@ -10,7 +10,7 @@ dependencies:
   - bokeh
   - click
   - cloudpickle
-  - coverage
+  - coverage<6.3
   - dask  # overridden by git tip below
   - filesystem-spec
   - h5py
