@@ -23,7 +23,7 @@ def test_ssh_cli_nprocs_renamed_to_nworkers(loop):
     with popen(
         ["dask-ssh", f"--nprocs={n_workers}", "--nohost", "localhost"]
     ) as cluster:
-        with Client("tcp://127.0.0.1:8786", loop=loop) as c:
+        with Client("tcp://127.0.0.1:8786", timeout="15 seconds", loop=loop) as c:
             c.wait_for_workers(n_workers, timeout="15 seconds")
         # This interrupt is necessary for the cluster to place output into the stdout
         # and stderr pipes
