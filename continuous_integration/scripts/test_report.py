@@ -268,7 +268,7 @@ if __name__ == "__main__":
                 ),
                 tooltip=["suite:N", "date:O", "status:N", "message:N", "url:N"],
             )
-            .properties(title=name.split("."))
+            .properties(title=name)
             | altair.Chart(df_agg.assign(_="_"))
             .mark_rect(stroke="gray")
             .encode(
