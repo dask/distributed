@@ -1,6 +1,7 @@
 import abc
 import asyncio
 import functools
+import sys
 import threading
 
 from .client import Future
@@ -8,6 +9,33 @@ from .protocol import to_serialize
 from .utils import iscoroutinefunction, sync, thread_state
 from .utils_comm import WrappedKey
 from .worker import get_client, get_worker
+
+if sys.version_info >= (3, 10):
+    from asyncio import Event as _LateLoopEvent
+else:
+    # In python 3.10 asyncio.Lock and other primitives no longer support
+    # passing a loop kwarg to bind to a loop running in another thread
+    # e.g. calling from Client(asynchronous=False). Instead the loop is bound
+    # as late as possible: when calling any methods that wait on or wake
+    # Future instances. See: https://bugs.python.org/issue42392
+    class _LateLoopEvent:
+        def __init__(self):
+            self._event = None
+
+        def set(self):
+            if self._event is None:
+                self._event = asyncio.Event()
+
+            self._event.set()
+
+        def is_set(self):
+            return self._event is not None and self._event.is_set()
+
+        async def wait(self):
+            if self._event is None:
+                self._event = asyncio.Event()
+
+            return await self._event.wait()
 
 
 class Actor(WrappedKey):
@@ -261,19 +289,16 @@ class _EagerActorFuture(ActorFuture):
 class _ActorFuture(ActorFuture):
     def __init__(self, io_loop):
         self._io_loop = io_loop
-        self._event = None
+        self._event = _LateLoopEvent()
         self._out = None
 
     def __await__(self):
         return self._result().__await__()
 
     def done(self):
-        return self._event and self._event.is_set()
+        return self._event.is_set()
 
     async def _result(self):
-        if self._event is None:
-            self._event = asyncio.Event()
-
         await self._event.wait()
         out = self._out
         if out["status"] == "OK":
@@ -281,9 +306,6 @@ class _ActorFuture(ActorFuture):
         raise out["exception"]
 
     def _set_result(self, out):
-        if self._event is None:
-            self._event = asyncio.Event()
-
         self._out = out
         self._event.set()
 
