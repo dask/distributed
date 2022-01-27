@@ -1397,7 +1397,6 @@ async def test_prefer_gather_from_local_address(c, s, w1, w2, w3):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)] * 20,
-    timeout=500000,
     config={"distributed.worker.connections.incoming": 1},
 )
 async def test_avoid_oversubscription(c, s, *workers):
@@ -1407,10 +1406,7 @@ async def test_avoid_oversubscription(c, s, *workers):
 
     futures = [c.submit(len, x, pure=False, workers=[w.address]) for w in workers[1:]]
 
-    try:
-        await asyncio.wait_for(wait(futures), 10)
-    except asyncio.TimeoutError:
-        breakpoint()
+    wait(futures)
 
     # Original worker not responsible for all transfers
     assert len(workers[0].outgoing_transfer_log) < len(workers) - 2
