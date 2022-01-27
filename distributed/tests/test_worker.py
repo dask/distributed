@@ -57,7 +57,14 @@ from distributed.utils_test import (
     slowinc,
     slowsum,
 )
-from distributed.worker import Worker, error_message, logger, parse_memory_limit
+from distributed.worker import (
+    TaskState,
+    Worker,
+    _UniqueTaskHeap,
+    error_message,
+    logger,
+    parse_memory_limit,
+)
 
 pytestmark = pytest.mark.ci1
 
@@ -1390,7 +1397,7 @@ async def test_prefer_gather_from_local_address(c, s, w1, w2, w3):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)] * 20,
-    timeout=30,
+    timeout=500000,
     config={"distributed.worker.connections.incoming": 1},
 )
 async def test_avoid_oversubscription(c, s, *workers):
@@ -1400,7 +1407,10 @@ async def test_avoid_oversubscription(c, s, *workers):
 
     futures = [c.submit(len, x, pure=False, workers=[w.address]) for w in workers[1:]]
 
-    await wait(futures)
+    try:
+        await asyncio.wait_for(wait(futures), 10)
+    except asyncio.TimeoutError:
+        breakpoint()
 
     # Original worker not responsible for all transfers
     assert len(workers[0].outgoing_transfer_log) < len(workers) - 2
@@ -2186,12 +2196,26 @@ async def test_gpu_executor(c, s, w):
         assert "gpu" not in w.executors
 
 
-def assert_task_states_on_worker(expected, worker):
-    for dep_key, expected_state in expected.items():
-        assert dep_key in worker.tasks, (worker.name, dep_key, worker.tasks)
-        dep_ts = worker.tasks[dep_key]
-        assert dep_ts.state == expected_state, (worker.name, dep_ts, expected_state)
-    assert set(expected) == set(worker.tasks)
+async def assert_task_states_on_worker(expected, worker):
+    active_exc = None
+    for _ in range(10):
+        try:
+            for dep_key, expected_state in expected.items():
+                assert dep_key in worker.tasks, (worker.name, dep_key, worker.tasks)
+                dep_ts = worker.tasks[dep_key]
+                assert dep_ts.state == expected_state, (
+                    worker.name,
+                    dep_ts,
+                    expected_state,
+                )
+            assert set(expected) == set(worker.tasks)
+            return
+        except AssertionError as exc:
+            active_exc = exc
+            await asyncio.sleep(0.1)
+    # If after a second the workers are not in equilibrium, they are broken
+    assert active_exc
+    raise active_exc
 
 
 @gen_cluster(client=True)
@@ -2235,7 +2259,7 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
         g.key: "memory",
         res.key: "error",
     }
-    assert_task_states_on_worker(expected_states, a)
+    await assert_task_states_on_worker(expected_states, a)
     # Expected states after we release references to the futures
     f.release()
     g.release()
@@ -2251,7 +2275,7 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
         res.key: "error",
     }
 
-    assert_task_states_on_worker(expected_states, a)
+    await assert_task_states_on_worker(expected_states, a)
 
     res.release()
 
@@ -2304,7 +2328,7 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
         g.key: "memory",
         res.key: "error",
     }
-    assert_task_states_on_worker(expected_states, a)
+    await assert_task_states_on_worker(expected_states, a)
     # Expected states after we release references to the futures
 
     res.release()
@@ -2318,7 +2342,7 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
         g.key: "memory",
     }
 
-    assert_task_states_on_worker(expected_states, a)
+    await assert_task_states_on_worker(expected_states, a)
 
     f.release()
     g.release()
@@ -2369,7 +2393,7 @@ async def test_worker_state_error_release_error_int(c, s, a, b):
         g.key: "memory",
         res.key: "error",
     }
-    assert_task_states_on_worker(expected_states, a)
+    await assert_task_states_on_worker(expected_states, a)
     # Expected states after we release references to the futures
 
     f.release()
@@ -2383,8 +2407,8 @@ async def test_worker_state_error_release_error_int(c, s, a, b):
         g.key: "memory",
     }
 
-    assert_task_states_on_worker(expected_states, a)
-    assert_task_states_on_worker(expected_states, b)
+    await assert_task_states_on_worker(expected_states, a)
+    await assert_task_states_on_worker(expected_states, b)
 
     g.release()
 
@@ -2418,8 +2442,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
         g.key: "memory",
         h.key: "memory",
     }
-    await asyncio.sleep(0.05)
-    assert_task_states_on_worker(expected_states_A, a)
+    await assert_task_states_on_worker(expected_states_A, a)
 
     expected_states_B = {
         f.key: "memory",
@@ -2427,8 +2450,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
         h.key: "memory",
         res.key: "error",
     }
-    await asyncio.sleep(0.05)
-    assert_task_states_on_worker(expected_states_B, b)
+    await assert_task_states_on_worker(expected_states_B, b)
 
     f.release()
 
@@ -2436,8 +2458,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
         g.key: "memory",
         h.key: "memory",
     }
-    await asyncio.sleep(0.05)
-    assert_task_states_on_worker(expected_states_A, a)
+    await assert_task_states_on_worker(expected_states_A, a)
 
     expected_states_B = {
         f.key: "released",
@@ -2445,8 +2466,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
         h.key: "memory",
         res.key: "error",
     }
-    await asyncio.sleep(0.05)
-    assert_task_states_on_worker(expected_states_B, b)
+    await assert_task_states_on_worker(expected_states_B, b)
 
     g.release()
 
@@ -2454,8 +2474,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
         g.key: "released",
         h.key: "memory",
     }
-    await asyncio.sleep(0.05)
-    assert_task_states_on_worker(expected_states_A, a)
+    await assert_task_states_on_worker(expected_states_A, a)
 
     # B must not forget a task since all have a still valid dependent
     expected_states_B = {
@@ -2463,19 +2482,18 @@ async def test_worker_state_error_long_chain(c, s, a, b):
         h.key: "memory",
         res.key: "error",
     }
-    assert_task_states_on_worker(expected_states_B, b)
+    await assert_task_states_on_worker(expected_states_B, b)
     h.release()
-    await asyncio.sleep(0.05)
 
     expected_states_A = {}
-    assert_task_states_on_worker(expected_states_A, a)
+    await assert_task_states_on_worker(expected_states_A, a)
     expected_states_B = {
         f.key: "released",
         h.key: "released",
         res.key: "error",
     }
 
-    assert_task_states_on_worker(expected_states_B, b)
+    await assert_task_states_on_worker(expected_states_B, b)
     res.release()
 
     # We no longer hold any refs. Cluster should reset completely
@@ -3130,33 +3148,38 @@ async def test_missing_released_zombie_tasks(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_missing_released_zombie_tasks_2(c, s, a, b):
-    a.total_in_connections = 0
-    f1 = c.submit(inc, 1, key="f1", workers=[a.address])
-    f2 = c.submit(inc, f1, key="f2", workers=[b.address])
+    # If get_data_from_worker raises this will suggest a dead worker to B and it
+    # will transition the task to missing. We want to make sure that a missing
+    # task is properly released and not left as a zombie
+    with mock.patch.object(
+        distributed.worker,
+        "get_data_from_worker",
+        side_effect=CommClosedError,
+    ):
+        f1 = c.submit(inc, 1, key="f1", workers=[a.address])
+        f2 = c.submit(inc, f1, key="f2", workers=[b.address])
 
-    while f1.key not in b.tasks:
-        await asyncio.sleep(0)
+        while f1.key not in b.tasks:
+            await asyncio.sleep(0)
 
-    ts = b.tasks[f1.key]
-    assert ts.state == "fetch"
+        ts = b.tasks[f1.key]
+        assert ts.state == "fetch"
 
-    # A few things can happen to clear who_has. The dominant process is upon
-    # connection failure to a worker. Regardless of how the set was cleared, the
-    # task will be transitioned to missing where the worker is trying to
-    # reaquire this information from the scheduler. While this is happening on
-    # worker side, the tasks are released and we want to ensure that no dangling
-    # zombie tasks are left on the worker
-    ts.who_has.clear()
+        while not ts.state == "missing":
+            # If we sleep for a longer time, the worker will spin into an
+            # endless loop of asking the scheduler who_has and trying to connect
+            # to A
+            await asyncio.sleep(0)
 
-    del f1, f2
+        del f1, f2
 
-    while b.tasks:
-        await asyncio.sleep(0.01)
+        while b.tasks:
+            await asyncio.sleep(0.01)
 
-    assert_worker_story(
-        b.story(ts),
-        [("f1", "missing", "released", "released", {"f1": "forgotten"})],
-    )
+        assert_worker_story(
+            b.story(ts),
+            [("f1", "missing", "released", "released", {"f1": "forgotten"})],
+        )
 
 
 @pytest.mark.slow
@@ -3441,6 +3464,8 @@ async def test_Worker__to_dict(c, s, a):
         "config",
         "incoming_transfer_log",
         "outgoing_transfer_log",
+        "data_needed",
+        "pending_data_per_worker",
     }
     assert d["tasks"]["x"]["key"] == "x"
 
@@ -3462,3 +3487,139 @@ async def test_TaskState__to_dict(c, s, a):
     assert isinstance(tasks["z"], dict)
     assert tasks["x"]["dependents"] == ["<TaskState 'y' memory>"]
     assert tasks["y"]["dependencies"] == ["<TaskState 'x' memory>"]
+
+
+@gen_cluster(client=True)
+async def test_dups_in_pending_data_per_worker(c, s, a, b):
+    # There has been a condition leading to a deadlock (caught by AssertionError
+    # if validate is enabled) that was caused by not identifying a missing key
+    # properly
+
+    # We need to fetch a key which is repeatedly selected as part of the Worker.select_from_gather optimization
+    # since if it goes through the ordinary channels of ensure_communicating it
+    # is flagged immediately as missing
+
+    # this is a batch of futures we will fetch from A. We will use these as
+    # seeds, i.e. primary keys to fetch for the batched fetch optimization
+    futs = c.map(inc, range(100), workers=[a.address])
+    # This will be the culprit/missing key we selectively insert into the fetch
+    # queue. We will manipulate the state machine such that this would raise the
+    # AssertionError
+    missing_fut = c.submit(inc, -1, workers=[a.address], key="culprit")
+
+    # Ensure the data is available, scheduler is aware
+    await c.gather(futs)
+    await missing_fut
+
+    # MOCKs:
+    # We will mock ensure_communicating and ensure_computing to disable the
+    # every_cycle callback of our handle_scheduler
+    # Effectively this allows us to intercept the moment directly after a
+    # handle_compute_task handler was executed
+    with mock.patch.object(
+        Worker, "ensure_communicating", return_value=None
+    ) as comm_mock:
+        with mock.patch.object(
+            Worker, "ensure_computing", return_value=None
+        ) as comp_mock:
+            # This new worker will be the one where the exception is provoked
+            x = await Worker(s.address, name=2, validate=True)
+            # fill up the data needed heap with tasks that are fine to be scheduled
+
+            f1 = c.submit(sum, [*futs[:20]], workers=[x.address], key="f1", priority=10)
+            # Put the bad one in between
+            f2 = c.submit(inc, missing_fut, workers=[x.address], key="f2", priority=20)
+            # Put the bad one in between. Ensure the heap is full with all the
+            # tasks such that we have many batched fetches
+            f3 = c.submit(
+                sum, [*futs[20:40]], workers=[x.address], key="f3", priority=30
+            )
+
+            # wait for all the tasks to be registered. Without the mocks we
+            # could not cleanly assert this but this is an important test
+            # assumption
+            while len(x.data_needed) != 41:
+                await asyncio.sleep(0.01)
+            assert missing_fut.key in x.tasks
+            ts = x.tasks[missing_fut.key]
+            assert ts in x.pending_data_per_worker[a.address]
+            # not at the top of the heap
+            key = x.pending_data_per_worker[a.address].peak()
+            assert key != missing_fut.key
+
+    # This has been introducing duplicates to pending_data_per_worker
+    for _ in range(3):
+        await x.query_who_has(missing_fut.key)
+
+    # We will now remove culprit from A such that X will handle the missing
+    # response.
+    # To not have the scheduler reschedule this task immediately, we will create
+    # another replica on another worker. We don't want X to be made aware of
+    # this which is why we're disabling / mocking the query_who_has to ensure
+    # that there is no background update. In a more realistic environment, this
+    # can be caused by certain delays in communication, particulary if AMM is
+    # runing
+    # We could also use AMM to create a replica if the API supports this.
+    with mock.patch.object(Worker, "query_who_has", return_value=None) as who_has_mock:
+        f_copy = c.submit(
+            inc, missing_fut, key="copy-intention-culprit", workers=[b.address]
+        )
+        await f_copy
+
+        # Now remove the replica from A *before* X requests the data
+        a.handle_remove_replicas([missing_fut.key], stimulus_id="test")
+
+        # We want to ensure that the first batch includes all data for
+        x.target_message_size = sum(x.tasks[f.key].get_nbytes() for f in futs[:22])
+        x.ensure_communicating()
+
+        with mock.patch.object(
+            Worker, "ensure_communicating", return_value=None
+        ) as comm_mock:
+            with mock.patch.object(
+                Worker, "ensure_computing", return_value=None
+            ) as comp_mock:
+                while not x.data:
+                    await asyncio.sleep(0.01)
+
+        x.target_message_size = 1000000000
+        x.ensure_communicating()
+
+        await f1
+        await f2
+        await f3
+
+
+def test_unique_task_heap():
+    heap = _UniqueTaskHeap()
+
+    for x in range(10):
+        ts = TaskState(f"f{x}")
+        ts.priority = (0, 0, 1, x % 3)
+        heap.push(ts)
+    del ts
+
+    heap_list = list(heap)
+    # iteration does not empty heap
+    assert heap
+    assert heap_list == sorted(heap_list, key=lambda ts: ts.priority)
+
+    seen = set()
+    last_prio = (0, 0, 0, 0)
+    while heap:
+        peaked = heap.peak()
+        ts = heap.pop()
+        assert peaked == ts
+        seen.add(ts.key)
+        assert ts.priority
+        assert last_prio <= ts.priority
+        last_prio = last_prio
+
+    ts = TaskState("foo")
+    heap.push(ts)
+    heap.push(ts)
+    assert len(heap) == 1
+    assert heap.pop() == ts
+    assert not heap
+
+    assert isinstance(repr(heap), str)
