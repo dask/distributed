@@ -36,7 +36,7 @@ jobs:
       - name: Generate report
         shell: bash -l {0}
         run: |
-          python continuous_integration/scripts/test_report.py
+          python continuous_integration/scripts/generate_test_report.py
           mkdir deploy
           mv test_report.html deploy/
 
