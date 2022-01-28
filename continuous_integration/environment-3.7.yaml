@@ -15,6 +15,7 @@ dependencies:
   - dask  # overridden by git tip below
   - filesystem-spec
   - h5py
+  - importlib_metadata  # Only needed here
   - ipykernel
   - ipywidgets
   - jinja2
