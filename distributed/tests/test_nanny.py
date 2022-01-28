@@ -625,8 +625,8 @@ async def test_no_unnecessary_imports_on_worker(c, s, a, modname):
     It also slightly increases memory footprint.
     """
 
-    def assert_no_pandas(dask_worker):
-        assert "pandas" not in sys.modules
+    def assert_no_import(dask_worker):
+        assert modname not in sys.modules
 
     await c.wait_for_workers(1)
-    await c.run(assert_no_pandas)
+    await c.run(assert_no_import)
