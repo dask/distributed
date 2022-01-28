@@ -4,6 +4,7 @@ import logging
 import multiprocessing as mp
 import os
 import random
+import sys
 from contextlib import suppress
 from time import sleep
 from unittest import mock
@@ -610,3 +611,21 @@ async def test_environ_plugin(c, s, a, b):
         assert results[a.worker_address] == "123"
         assert results[b.worker_address] == "123"
         assert results[n.worker_address] == "123"
+
+
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/5723")
+@gen_cluster(client=True, Worker=Nanny, nthreads=[("", 1)])
+async def test_no_unnecessary_imports_on_worker(c, s, a):
+    """
+    Regression test against accidentally importing unnecessary modules at worker startup.
+
+    Importing modules like pandas slows down worker startup, especially if workers are
+    loading their software environment from NFS or other non-local filesystems.
+    It also slightly increases memory footprint.
+    """
+
+    def assert_no_pandas(dask_worker):
+        assert "pandas" not in sys.modules
+
+    await c.wait_for_workers(1)
+    await c.run(assert_no_pandas)
