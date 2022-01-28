@@ -3,6 +3,11 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+import pytest
+
+pd = pytest.importorskip("pandas")
+pytest.importorskip("dask.dataframe")
+
 import dask
 import dask.dataframe as dd
 from dask.blockwise import Blockwise
