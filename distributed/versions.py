@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import os
 import platform
 import struct
@@ -11,16 +10,14 @@ from collections.abc import Iterable
 from itertools import chain
 from typing import Any
 
-try:
-    import importlib.metadata
-except ImportError:
-    # Python 3.7 compatibility
-
+if sys.version_info >= (3, 8):
+    from importlib.metadata import version as _version
+else:
     import pkg_resources
 
-    _version = lambda modname: pkg_resources.get_distribution(modname).version
-else:
-    _version = importlib.metadata.version
+    def _version(distribution_name: str) -> str:
+        return pkg_resources.get_distribution(distribution_name).version
+
 
 required_packages = [
     "dask",
