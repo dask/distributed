@@ -3513,10 +3513,11 @@ def test_unique_task_heap():
     heap.push(ts)
     heap.push(ts)
     assert len(heap) == 1
-    assert heap.pop() == ts
-    assert not heap
 
     assert repr(heap) == "<UniqueTaskHeap: 1 items>"
+
+    assert heap.pop() == ts
+    assert not heap
 
     # Test that we're cleaning the seen set on pop
     heap.push(ts)
