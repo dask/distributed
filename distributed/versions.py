@@ -49,7 +49,7 @@ notes_mismatch_package = {
 }
 
 
-def get_versions(packages: Iterable[str] | None = None) -> dict[str, dict[str, Any]]:
+def get_versions(packages: Iterable[str] = ()) -> dict[str, dict[str, Any]]:
     """Return basic information on our software installation, and our installed versions
     of packages
     """
@@ -57,9 +57,7 @@ def get_versions(packages: Iterable[str] | None = None) -> dict[str, dict[str, A
         "host": get_system_info(),
         "packages": {
             "python": ".".join(map(str, sys.version_info)),
-            **get_package_info(
-                chain(required_packages, optional_packages, packages or [])
-            ),
+            **get_package_info(chain(required_packages, optional_packages, packages)),
         },
     }
 
