@@ -39,16 +39,6 @@ class Counter:
         return self.n
 
 
-class UsesCounter:
-    # An actor whose method argument is another actor
-
-    def do_inc(self, ac):
-        return ac.increment().result()
-
-    async def ado_inc(self, ac):
-        return await ac.ainc()
-
-
 class List:
     L: list = []
 
@@ -618,6 +608,12 @@ def test_worker_actor_handle_is_weakref_from_compute_sync(client):
 
 
 def test_one_thread_deadlock():
+    class UsesCounter:
+        # An actor whose method argument is another actor
+
+        def do_inc(self, ac):
+            return ac.increment().result()
+
     with cluster(nworkers=2) as (cl, w):
         client = Client(cl["address"])
         ac = client.submit(Counter, actor=True).result()
@@ -628,6 +624,12 @@ def test_one_thread_deadlock():
 
 @gen_cluster(client=True)
 async def test_async_deadlock(client, s, a, b):
+    class UsesCounter:
+        # An actor whose method argument is another actor
+
+        async def ado_inc(self, ac):
+            return await ac.ainc()
+
     ac = await client.submit(Counter, actor=True)
     ac2 = await client.submit(UsesCounter, actor=True, workers=[ac._address])
 
