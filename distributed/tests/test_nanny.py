@@ -613,8 +613,17 @@ async def test_environ_plugin(c, s, a, b):
         assert results[n.worker_address] == "123"
 
 
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/5723")
-@pytest.mark.parametrize("modname", ["numpy", "pandas"])
+@pytest.mark.parametrize(
+    "modname",
+    [
+        pytest.param(
+            "numpy",
+            marks=pytest.mark.xfail(reason="distributed#5723, distributed#5729"),
+        ),
+        "scipy",
+        pytest.param("pandas", marks=pytest.mark.xfail(reason="distributed#5723")),
+    ],
+)
 @gen_cluster(client=True, Worker=Nanny, nthreads=[("", 1)])
 async def test_no_unnecessary_imports_on_worker(c, s, a, modname):
     """
