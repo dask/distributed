@@ -66,6 +66,7 @@ class TestMergeMemroyviews:
         assert result == base
 
     def test_catch_non_memoryview(self):
+        pytest.importorskip("numpy")
         with pytest.raises(TypeError, match="Expected memoryview"):
             merge_memoryviews([b"1234", memoryview(b"4567")])
 

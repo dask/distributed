@@ -7235,7 +7235,7 @@ def _verify_cluster_dump(path, _format: str, addresses: set[str]) -> dict:
         path += ".msgpack.gz"
 
         with gzip.open(path) as fd_zip:
-            state = msgpack.unpack(fd_zip)
+            state = msgpack.unpack(fd_zip, raw=False)
     else:
         import yaml
 
