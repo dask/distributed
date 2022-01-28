@@ -522,8 +522,7 @@ to_serialize = Serialize
 
 
 class Serialized:
-    """
-    An object that is already serialized into header and frames
+    """An object that is already serialized into header and frames
 
     Normal serialization operations pass these objects through.  This is
     typically used within the scheduler which accepts messages that contain
@@ -537,6 +536,50 @@ class Serialized:
     def __eq__(self, other):
         return (
             isinstance(other, Serialized)
+            and other.header == self.header
+            and other.frames == self.frames
+        )
+
+    def __ne__(self, other):
+        return not (self == other)
+
+
+class ToPickle:
+    """Mark an object that should be pickled
+
+    Both the scheduler and workers with automatically unpickle this
+    object on arrival
+    """
+
+    def __init__(self, data):
+        self.data = data
+
+    def __repr__(self):
+        return "<ToPickle: %s>" % str(self.data)
+
+    def __eq__(self, other):
+        return isinstance(other, type(self)) and other.data == self.data
+
+    def __ne__(self, other):
+        return not (self == other)
+
+    def __hash__(self):
+        return hash(self.data)
+
+
+class Pickled:
+    """An object that is already pickled into header and frames
+
+    Normal pickled objects are unpickled by the scheduler.
+    """
+
+    def __init__(self, header, frames):
+        self.header = header
+        self.frames = frames
+
+    def __eq__(self, other):
+        return (
+            isinstance(other, type(self))
             and other.header == self.header
             and other.frames == self.frames
         )

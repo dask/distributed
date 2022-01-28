@@ -2,10 +2,13 @@ import logging
 
 import msgpack
 
+from . import pickle
 from .compression import decompress, maybe_compress
 from .serialize import (
+    Pickled,
     Serialize,
     Serialized,
+    ToPickle,
     merge_and_deserialize,
     msgpack_decode_default,
     msgpack_encode_default,
@@ -64,6 +67,23 @@ def dumps(
             )
             return [sub_header] + sub_frames
 
+        def create_pickle_sub_frames(obj) -> list:
+            typ = type(obj)
+            if typ is Pickled:
+                sub_header, sub_frames = obj.header, obj.frames
+            else:
+                sub_frames = []
+                sub_header = {
+                    "pickled-obj": pickle.dumps(
+                        obj.data, buffer_callback=sub_frames.append
+                    )
+                }
+                _inplace_compress_frames(sub_header, sub_frames)
+
+            sub_header["num-sub-frames"] = len(sub_frames)
+            sub_header = msgpack.dumps(sub_header)
+            return [sub_header] + sub_frames
+
         frames = [None]
 
         def _encode_default(obj):
@@ -72,6 +92,10 @@ def dumps(
                 offset = len(frames)
                 frames.extend(create_sub_frames(obj))
                 return {"__Serialized__": offset}
+            elif typ is ToPickle or typ is Pickled:
+                offset = len(frames)
+                frames.extend(create_pickle_sub_frames(obj))
+                return {"__Pickled__": offset}
             else:
                 return msgpack_encode_default(obj)
 
@@ -107,8 +131,15 @@ def loads(frames, deserialize=True, deserializers=None):
                     )
                 else:
                     return Serialized(sub_header, sub_frames)
-            else:
-                return msgpack_decode_default(obj)
+
+            offset = obj.get("__Pickled__", 0)
+            if offset > 0:
+                sub_header = msgpack.loads(frames[offset])
+                offset += 1
+                sub_frames = frames[offset : offset + sub_header["num-sub-frames"]]
+                return pickle.loads(sub_header["pickled-obj"], buffers=sub_frames)
+
+            return msgpack_decode_default(obj)
 
         return msgpack.loads(
             frames[0], object_hook=_decode_default, use_list=False, **msgpack_opts
