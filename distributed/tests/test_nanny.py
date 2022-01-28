@@ -614,8 +614,9 @@ async def test_environ_plugin(c, s, a, b):
 
 
 @pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/5723")
+@pytest.mark.parametrize("modname", ["numpy", "pandas"])
 @gen_cluster(client=True, Worker=Nanny, nthreads=[("", 1)])
-async def test_no_unnecessary_imports_on_worker(c, s, a):
+async def test_no_unnecessary_imports_on_worker(c, s, a, modname):
     """
     Regression test against accidentally importing unnecessary modules at worker startup.
 
