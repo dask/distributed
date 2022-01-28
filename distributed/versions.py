@@ -22,7 +22,7 @@ except ImportError:
 else:
     _version = importlib.metadata.version
 
-required_packages: list[str] = [
+required_packages = [
     "dask",
     "distributed",
     "msgpack",
@@ -31,7 +31,7 @@ required_packages: list[str] = [
     "toolz",
 ]
 
-optional_packages: list[str] = [
+optional_packages = [
     "numpy",
     "pandas",
     "lz4",
