@@ -258,7 +258,7 @@ class ActorFuture(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def result(self):
+    def result(self, timeout=None):
         pass
 
     @abc.abstractmethod
@@ -279,7 +279,7 @@ class _EagerActorFuture(ActorFuture):
         return self._result
         yield
 
-    def result(self):
+    def result(self, timeout=None):
         return self._result
 
     def done(self):
