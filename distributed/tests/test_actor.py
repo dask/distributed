@@ -637,6 +637,21 @@ def test_one_thread_deadlock_timeout():
         assert ac2.do_inc(ac).result() == 1
 
 
+def test_one_thread_deadlock_sync_client():
+    class UsesCounter:
+        # An actor whose method argument is another actor
+
+        def do_inc(self, ac):
+            return get_client().sync(ac.increment)
+
+    with cluster(nworkers=2) as (cl, w):
+        client = Client(cl["address"])
+        ac = client.submit(Counter, actor=True).result()
+        ac2 = client.submit(UsesCounter, actor=True, workers=[ac._address]).result()
+
+        assert ac2.do_inc(ac).result() == 1
+
+
 @gen_cluster(client=True)
 async def test_async_deadlock(client, s, a, b):
     class UsesCounter:
