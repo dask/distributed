@@ -3485,107 +3485,6 @@ async def test_TaskState__to_dict(c, s, a):
     assert tasks["y"]["dependencies"] == ["<TaskState 'x' memory>"]
 
 
-@gen_cluster(client=True)
-async def test_dups_in_pending_data_per_worker(c, s, a, b):
-    # There has been a condition leading to a deadlock (caught by AssertionError
-    # if validate is enabled) that was caused by not identifying a missing key
-    # properly
-
-    # We need to fetch a key which is repeatedly selected as part of the Worker.select_from_gather optimization
-    # since if it goes through the ordinary channels of ensure_communicating it
-    # is flagged immediately as missing
-
-    # this is a batch of futures we will fetch from A. We will use these as
-    # seeds, i.e. primary keys to fetch for the batched fetch optimization
-    futs = c.map(inc, range(100), workers=[a.address])
-    # This will be the culprit/missing key we selectively insert into the fetch
-    # queue. We will manipulate the state machine such that this would raise the
-    # AssertionError
-    missing_fut = c.submit(inc, -1, workers=[a.address], key="culprit")
-
-    # Ensure the data is available, scheduler is aware
-    await c.gather(futs)
-    await missing_fut
-
-    # MOCKs:
-    # We will mock ensure_communicating and ensure_computing to disable the
-    # every_cycle callback of our handle_scheduler
-    # Effectively this allows us to intercept the moment directly after a
-    # handle_compute_task handler was executed
-    with mock.patch.object(
-        Worker, "ensure_communicating", return_value=None
-    ) as comm_mock:
-        with mock.patch.object(
-            Worker, "ensure_computing", return_value=None
-        ) as comp_mock:
-            # This new worker will be the one where the exception is provoked
-            x = await Worker(s.address, name=2, validate=True)
-            # fill up the data needed heap with tasks that are fine to be scheduled
-
-            f1 = c.submit(sum, [*futs[:20]], workers=[x.address], key="f1", priority=10)
-            # Put the bad one in between
-            f2 = c.submit(inc, missing_fut, workers=[x.address], key="f2", priority=20)
-            # Put the bad one in between. Ensure the heap is full with all the
-            # tasks such that we have many batched fetches
-            f3 = c.submit(
-                sum, [*futs[20:40]], workers=[x.address], key="f3", priority=30
-            )
-
-            # wait for all the tasks to be registered. Without the mocks we
-            # could not cleanly assert this but this is an important test
-            # assumption
-            while len(x.data_needed) != 41:
-                await asyncio.sleep(0.01)
-            assert missing_fut.key in x.tasks
-            ts = x.tasks[missing_fut.key]
-            assert ts in x.pending_data_per_worker[a.address]
-            # not at the top of the heap
-            key = x.pending_data_per_worker[a.address].peak()
-            assert key != missing_fut.key
-
-    # This has been introducing duplicates to pending_data_per_worker
-    for _ in range(3):
-        await x.query_who_has(missing_fut.key)
-
-    # We will now remove culprit from A such that X will handle the missing
-    # response.
-    # To not have the scheduler reschedule this task immediately, we will create
-    # another replica on another worker. We don't want X to be made aware of
-    # this which is why we're disabling / mocking the query_who_has to ensure
-    # that there is no background update. In a more realistic environment, this
-    # can be caused by certain delays in communication, particulary if AMM is
-    # runing
-    # We could also use AMM to create a replica if the API supports this.
-    with mock.patch.object(Worker, "query_who_has", return_value=None) as who_has_mock:
-        f_copy = c.submit(
-            inc, missing_fut, key="copy-intention-culprit", workers=[b.address]
-        )
-        await f_copy
-
-        # Now remove the replica from A *before* X requests the data
-        a.handle_remove_replicas([missing_fut.key], stimulus_id="test")
-
-        # We want to ensure that the first batch includes all data for
-        x.target_message_size = sum(x.tasks[f.key].get_nbytes() for f in futs[:22])
-        x.ensure_communicating()
-
-        with mock.patch.object(
-            Worker, "ensure_communicating", return_value=None
-        ) as comm_mock:
-            with mock.patch.object(
-                Worker, "ensure_computing", return_value=None
-            ) as comp_mock:
-                while not x.data:
-                    await asyncio.sleep(0.01)
-
-        x.target_message_size = 1000000000
-        x.ensure_communicating()
-
-        await f1
-        await f2
-        await f3
-
-
 def test_unique_task_heap():
     heap = _UniqueTaskHeap()
 
@@ -3593,19 +3492,18 @@ def test_unique_task_heap():
         ts = TaskState(f"f{x}")
         ts.priority = (0, 0, 1, x % 3)
         heap.push(ts)
-    del ts
 
     heap_list = list(heap)
     # iteration does not empty heap
-    assert heap
+    assert len(heap) == 10
     assert heap_list == sorted(heap_list, key=lambda ts: ts.priority)
 
     seen = set()
     last_prio = (0, 0, 0, 0)
     while heap:
-        peaked = heap.peak()
+        peeked = heap.peek()
         ts = heap.pop()
-        assert peaked == ts
+        assert peeked == ts
         seen.add(ts.key)
         assert ts.priority
         assert last_prio <= ts.priority
@@ -3618,4 +3516,11 @@ def test_unique_task_heap():
     assert heap.pop() == ts
     assert not heap
 
-    assert isinstance(repr(heap), str)
+    assert repr(heap) == "<UniqueTaskHeap: 1 items>"
+
+    # Test that we're cleaning the seen set on pop
+    heap.push(ts)
+    assert len(heap) == 1
+    assert heap.pop() == ts
+
+    assert repr(heap) == "<UniqueTaskHeap: 0 items>"

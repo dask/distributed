@@ -200,6 +200,8 @@ class TaskState:
 
     """
 
+    priority: tuple[int, ...] | None
+
     def __init__(self, key, runspec=None):
         assert key is not None
         self.key = key
@@ -207,7 +209,7 @@ class TaskState:
         self.dependencies = set()
         self.dependents = set()
         self.duration = None
-        self.priority: tuple[int, ...] | None = None
+        self.priority = None
         self.state = "released"
         self.who_has = set()
         self.coming_from = None
@@ -275,14 +277,12 @@ class TaskState:
 
 
 class _UniqueTaskHeap:
-    def __init__(self, collection: Collection[TaskState] | None = None) -> None:
-        """A heap of TaskState objects ordered by TaskState.priority
-        Ties are broken by string comparison of the key.
-        Keys are guaranteed to be unique.
-        Iterating over this object returns the elements in priority order.
-        """
-        if collection is None:
-            collection = []
+    """A heap of TaskState objects ordered by TaskState.priority
+    Ties are broken by string comparison of the key. Keys are guaranteed to be
+    unique. Iterating over this object returns the elements in priority order.
+    """
+
+    def __init__(self, collection: Collection[TaskState] = ()):
         self._known = {ts.key for ts in collection}
         self._heap = [(ts.priority, ts.key, ts) for ts in collection]
         heapq.heapify(self._heap)
@@ -301,11 +301,11 @@ class _UniqueTaskHeap:
 
     def pop(self) -> TaskState:
         """Pop the task with highest priority from the heap."""
-        _, _, ts = heapq.heappop(self._heap)
-        self._known.remove(ts.key)
+        _, key, ts = heapq.heappop(self._heap)
+        self._known.remove(key)
         return ts
 
-    def peak(self) -> TaskState:
+    def peek(self) -> TaskState:
         """Get the highest priority TaskState without removing it from the heap"""
         return self._heap[0][2]
 
