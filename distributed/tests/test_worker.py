@@ -3161,7 +3161,7 @@ async def test_missing_released_zombie_tasks_2(c, s, a, b):
         ts = b.tasks[f1.key]
         assert ts.state == "fetch"
 
-        while not ts.state == "missing":
+        while ts.state != "missing":
             # If we sleep for a longer time, the worker will spin into an
             # endless loop of asking the scheduler who_has and trying to connect
             # to A
