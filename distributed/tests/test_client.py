@@ -7140,6 +7140,28 @@ async def test_events_subscribe_topic(c, s, a):
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
+async def test_events_subscribe_topic_cancelled(c, s, a):
+    event_handler_started = asyncio.Event()
+    exc_info = None
+
+    async def user_event_handler(event):
+        nonlocal exc_info
+        c.unsubscribe_topic("test-topic")
+        event_handler_started.set()
+        with pytest.raises(asyncio.CancelledError) as exc_info:
+            await asyncio.sleep(0.5)
+
+    c.subscribe_topic("test-topic", user_event_handler)
+    while not s.event_subscriber["test-topic"]:
+        await asyncio.sleep(0.01)
+
+    a.log_event("test-topic", {})
+    await event_handler_started.wait()
+    await c._close(fast=True)
+    assert exc_info is not None
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_events_all_servers_use_same_channel(c, s, a):
     """Ensure that logs from all server types (scheduler, worker, nanny)
     and the clients themselves arrive"""

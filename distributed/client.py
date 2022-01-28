@@ -1515,12 +1515,11 @@ class Client(SyncMethodMixin):
                 _set_global_client(None)
 
             if (
-                not fast
-                and handle_report_task is not None
+                handle_report_task is not None
                 and handle_report_task is not current_task
             ):
                 with suppress(TimeoutError, asyncio.CancelledError):
-                    await asyncio.wait_for(handle_report_task, 2)
+                    await asyncio.wait_for(handle_report_task, 0 if fast else 2)
 
             with suppress(AttributeError):
                 await self.scheduler.close_rpc()
