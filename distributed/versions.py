@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import importlib.metadata
+import importlib
 import os
 import platform
 import struct
@@ -10,6 +10,17 @@ import sys
 from collections.abc import Iterable
 from itertools import chain
 from typing import Any
+
+try:
+    import importlib.metadata
+except ImportError:
+    # Python 3.7 compatibility
+
+    import pkg_resources
+
+    _version = lambda modname: pkg_resources.get_distribution(modname).version
+else:
+    _version = importlib.metadata.version
 
 required_packages: list[str] = [
     "dask",
@@ -74,7 +85,7 @@ def get_package_info(pkgs: Iterable[str]) -> dict[str, str | None]:
     pversions: dict[str, str | None] = {}
     for modname in pkgs:
         try:
-            pversions[modname] = importlib.metadata.version(modname)
+            pversions[modname] = _version(modname)
         except Exception:
             pversions[modname] = None
 
