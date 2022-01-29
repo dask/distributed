@@ -333,12 +333,11 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
 
     e = threading.Event()
     main_tid = threading.get_ident()
-    result = [None]
-    error = [False]
-    _future = [None]
+    result = error = future = None  # set up non-locals
 
     @gen.coroutine
     def f():
+        nonlocal result, error, future
         try:
             if main_tid == threading.get_ident():
                 raise RuntimeError("sync() called from thread of running loop")
@@ -347,10 +346,9 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             if callback_timeout is not None:
                 future = asyncio.wait_for(future, callback_timeout)
             future = asyncio.ensure_future(future)
-            _future[0] = future
-            result[0] = yield future
+            result = yield future
         except Exception:
-            error[0] = sys.exc_info()
+            error = sys.exc_info()
         finally:
             e.set()
 
@@ -363,13 +361,13 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             try:
                 e.wait(10)
             except KeyboardInterrupt:
-                loop.add_callback(_future[0].cancel)
+                loop.add_callback(future.cancel)
                 raise
-    if error[0]:
-        typ, exc, tb = error[0]
+    if error:
+        typ, exc, tb = error
         raise exc.with_traceback(tb)
     else:
-        return result[0]
+        return result
 
 
 class LoopRunner:
