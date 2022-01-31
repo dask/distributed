@@ -57,7 +57,7 @@ from .core import (
     pingpong,
     send_recv,
 )
-from .diagnostics import nvml
+from .diagnostics import nvml, rmm
 from .diagnostics.plugin import _get_plugin_name
 from .diskutils import WorkDir, WorkSpace
 from .http import get_handlers
@@ -4685,6 +4685,16 @@ else:
         return nvml.one_time()
 
     DEFAULT_STARTUP_INFORMATION["gpu"] = gpu_startup
+
+try:
+    import rmm as _rmm
+except (Exception, RuntimeError):
+    pass
+else:
+    async def rmm_metric(worker):
+        result = await offload(rmm.real_time)
+        return result
+    DEFAULT_METRICS["rmm"] = rmm_metric
 
 
 def print(*args, **kwargs):

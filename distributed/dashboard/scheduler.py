@@ -5,6 +5,7 @@ from tornado.ioloop import IOLoop
 
 from .components.nvml import gpu_doc  # noqa: 1708
 from .components.nvml import NVML_ENABLED, gpu_memory_doc, gpu_utilization_doc
+from .components.rmm import rmm_memory_doc
 from .components.scheduler import (
     AggregateAction,
     BandwidthTypes,
@@ -97,6 +98,7 @@ applications = {
     "/individual-profile-server": individual_profile_server_doc,
     "/individual-gpu-memory": gpu_memory_doc,
     "/individual-gpu-utilization": gpu_utilization_doc,
+    "/individual-rmm-memory": rmm_memory_doc
 }
 
 
