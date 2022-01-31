@@ -2,7 +2,6 @@ import asyncio
 import os
 import sys
 import threading
-import warnings
 from functools import partial
 
 import pytest

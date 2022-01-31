@@ -1,4 +1,5 @@
 import asyncio
+import warnings
 
 import pytest
 
@@ -264,11 +265,13 @@ async def test_assert_no_warning_no_overload(c, s, a):
     class Dummy(WorkerPlugin):
         pass
 
-    with pytest.warns(None):
+    with warnings.catch_warnings(record=True) as record:
         await c.register_worker_plugin(Dummy())
         assert await c.submit(inc, 1, key="x") == 2
         while "x" in a.tasks:
             await asyncio.sleep(0.01)
+
+    assert not record
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
