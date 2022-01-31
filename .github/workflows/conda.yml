@@ -78,4 +78,10 @@ jobs:
           # install anaconda for upload
           mamba install anaconda-client
 
-          anaconda upload --label dev **.tar.bz2
+          anaconda upload --label dev noarch/*.tar.bz2
+          anaconda upload --label dev linux-64/*.tar.bz2
+          anaconda upload --label dev linux-aarch64/*.tar.bz2
+          anaconda upload --label dev linux-ppc64le/*.tar.bz2
+          anaconda upload --label dev osx-64/*.tar.bz2
+          anaconda upload --label dev osx-arm64/*.tar.bz2
+          anaconda upload --label dev win-64/*.tar.bz2
