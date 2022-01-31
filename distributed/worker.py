@@ -534,6 +534,7 @@ class Worker(ServerNode):
     name: Any
     scheduler_delay: float
     stream_comms: dict[str, BatchedSend]
+    heartbeat_interval: float
     heartbeat_active: bool
     _ipython_kernel: Any | None = None
     services: dict[str, Any] = {}
@@ -572,6 +573,7 @@ class Worker(ServerNode):
         preload_argv: list[str] | list[list[str]] | None = None,
         security: Security | dict[str, Any] | None = None,
         contact_address: str | None = None,
+        heartbeat_interval: Any = "1s",
         memory_monitor_interval: Any = "200ms",
         memory_target_fraction: float | Literal[False] | None = None,
         memory_spill_fraction: float | Literal[False] | None = None,
@@ -947,8 +949,10 @@ class Worker(ServerNode):
             "worker": self,
         }
 
-        pc = PeriodicCallback(self.heartbeat, 1000)
+        self.heartbeat_interval = parse_timedelta(heartbeat_interval, default="ms")
+        pc = PeriodicCallback(self.heartbeat, self.heartbeat_interval * 1000)
         self.periodic_callbacks["heartbeat"] = pc
+
         pc = PeriodicCallback(
             lambda: self.batched_stream.send({"op": "keep-alive"}), 60000
         )
