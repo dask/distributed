@@ -3217,7 +3217,11 @@ async def test_set_restrictions(c, s, a, b):
     await f
 
 
-@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 3,
+    worker_kwargs={"memory_monitor_interval": "20ms"},
+)
 async def test_avoid_paused_workers(c, s, w1, w2, w3):
     w2.memory_pause_fraction = 1e-15
     while s.workers[w2.address].status != Status.paused:
@@ -3230,7 +3234,11 @@ async def test_avoid_paused_workers(c, s, w1, w2, w3):
     assert len(w1.data) + len(w3.data) == 8
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    worker_kwargs={"memory_monitor_interval": "20ms"},
+)
 async def test_unpause_schedules_unrannable_tasks(c, s, a):
     a.memory_pause_fraction = 1e-15
     while s.workers[a.address].status != Status.paused:

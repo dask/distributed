@@ -1207,7 +1207,7 @@ async def test_robust_to_bad_sizeof_estimates(c, s, a):
     nthreads=[("127.0.0.1", 2)],
     client=True,
     worker_kwargs={
-        "memory_monitor_interval": 10,
+        "memory_monitor_interval": "20ms",
         "memory_spill_fraction": False,  # don't spill
         "memory_target_fraction": False,
         "memory_pause_fraction": 0.5,
