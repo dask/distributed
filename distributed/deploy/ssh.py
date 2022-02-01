@@ -99,9 +99,27 @@ class Worker(Process):
                 "renamed to n_workers.",
                 FutureWarning,
             )
-            self.n_workers = self.kwargs.pop("nprocs")
+            self.n_workers = self.kwargs.pop("nprocs", 1)
         else:
             self.n_workers = self.kwargs.pop("n_workers", 1)
+
+    @property
+    def nprocs(self):
+        warnings.warn(
+            "The nprocs attribute will be removed in a future release. It has been "
+            "renamed to n_workers.",
+            FutureWarning,
+        )
+        return self.n_workers
+
+    @nprocs.setter
+    def nprocs(self, value):
+        warnings.warn(
+            "The nprocs attribute will be removed in a future release. It has been "
+            "renamed to n_workers.",
+            FutureWarning,
+        )
+        self.n_workers = value
 
     async def start(self):
         try:

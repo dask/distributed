@@ -78,6 +78,26 @@ async def test_n_workers():
 
 
 @pytest.mark.asyncio
+async def test_nprocs_attribute_is_deprecated():
+    async with SSHCluster(
+        ["127.0.0.1"] * 2,
+        connect_options=dict(known_hosts=None),
+        asynchronous=True,
+        scheduler_options={"idle_timeout": "5s"},
+        worker_options={"death_timeout": "5s"},
+    ) as cluster:
+        assert len(cluster.workers) == 1
+        worker = cluster.workers[0]
+        assert worker.n_workers == 1
+        with pytest.warns(FutureWarning, match="renamed to n_workers"):
+            assert worker.nprocs == 1
+        with pytest.warns(FutureWarning, match="renamed to n_workers"):
+            worker.nprocs = 3
+
+        assert worker.n_workers == 3
+
+
+@pytest.mark.asyncio
 async def test_ssh_nprocs_renamed_to_n_workers():
     with pytest.warns(FutureWarning, match="renamed to n_workers"):
         async with SSHCluster(

@@ -356,17 +356,22 @@ class SSHCluster:
         self.scheduler_addr = scheduler_addr
         self.scheduler_port = scheduler_port
         self.nthreads = nthreads
-        if kwargs.get("nprocs") is not None and n_workers is not None:
+        nprocs = kwargs.pop("nprocs", None)
+        if kwargs:
+            raise TypeError(
+                f"__init__() got an unexpected keyword argument {', '.join(kwargs.keys())}"
+            )
+        if nprocs is not None and n_workers is not None:
             raise ValueError(
                 "Both nprocs and n_workers were specified. Use n_workers only."
             )
-        elif kwargs.get("nprocs") is not None:
+        elif nprocs is not None:
             warnings.warn(
                 "The nprocs argument will be removed in a future release. It has been "
                 "renamed to n_workers.",
                 FutureWarning,
             )
-            n_workers = kwargs["nprocs"]
+            n_workers = nprocs
         elif n_workers is None:
             n_workers = 1
 
@@ -425,6 +430,24 @@ class SSHCluster:
     @gen.coroutine
     def _start(self):
         pass
+
+    @property
+    def nprocs(self):
+        warnings.warn(
+            "The nprocs attribute will be removed in a future release. It has been "
+            "renamed to n_workers.",
+            FutureWarning,
+        )
+        return self.n_workers
+
+    @nprocs.setter
+    def nprocs(self, value):
+        warnings.warn(
+            "The nprocs attribute will be removed in a future release. It has been "
+            "renamed to n_workers.",
+            FutureWarning,
+        )
+        self.n_workers = value
 
     @property
     def scheduler_address(self):
