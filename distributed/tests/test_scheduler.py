@@ -2474,8 +2474,8 @@ def clear_leak():
 async def assert_memory(
     scheduler_or_workerstate,
     attr: str,
-    min_: float,
-    max_: float,
+    min_mib: float,
+    max_mib: float,
     timeout: float = 10,
 ) -> None:
     t0 = time()
