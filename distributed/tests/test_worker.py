@@ -59,8 +59,8 @@ from distributed.utils_test import (
 )
 from distributed.worker import (
     TaskState,
+    UniqueTaskHeap,
     Worker,
-    _UniqueTaskHeap,
     error_message,
     logger,
     parse_memory_limit,
@@ -3486,7 +3486,7 @@ async def test_TaskState__to_dict(c, s, a):
 
 
 def test_unique_task_heap():
-    heap = _UniqueTaskHeap()
+    heap = UniqueTaskHeap()
 
     for x in range(10):
         ts = TaskState(f"f{x}")

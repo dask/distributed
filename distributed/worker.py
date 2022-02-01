@@ -117,7 +117,6 @@ PROCESSING = {
     "resumed",
 }
 READY = {"ready", "constrained"}
-FETCH_INTENDED = {"missing", "fetch", "flight", "cancelled", "resumed"}
 
 # Worker.status subsets
 RUNNING = {Status.running, Status.paused, Status.closing_gracefully}
@@ -276,7 +275,7 @@ class TaskState:
         )
 
 
-class _UniqueTaskHeap:
+class UniqueTaskHeap(Collection):
     """A heap of TaskState objects ordered by TaskState.priority
     Ties are broken by string comparison of the key. Keys are guaranteed to be
     unique. Iterating over this object returns the elements in priority order.
@@ -315,7 +314,7 @@ class _UniqueTaskHeap:
         return x in self._known
 
     def __iter__(self) -> Iterator[TaskState]:
-        return iter([ts for _, _, ts in sorted(self._heap)])
+        return (ts for _, _, ts in sorted(self._heap))
 
     def __len__(self) -> int:
         return len(self._known)
@@ -399,8 +398,8 @@ class Worker(ServerNode):
     * **data.disk:** ``{key: object}``:
         Dictionary mapping keys to actual values stored on disk. Only
         available if condition for **data** being a zict.Buffer is met.
-    * **data_needed**: heap(TaskState)
-        The keys which still require data in order to execute, arranged in a deque
+    * **data_needed**: UniqueTaskHeap
+        The tasks which still require data in order to execute, prioritized as a heap
     * **ready**: [keys]
         Keys that are ready to run.  Stored in a LIFO stack
     * **constrained**: [keys]
@@ -415,7 +414,7 @@ class Worker(ServerNode):
         long-running clients.
     * **has_what**: ``{worker: {deps}}``
         The data that we care about that we think a worker has
-    * **pending_data_per_worker**: ``{worker: heap(TaskState)}``
+    * **pending_data_per_worker**: ``{worker: UniqueTaskHeap}``
         The data on each worker that we still want, prioritized as a heap
     * **in_flight_tasks**: ``int``
         A count of the number of tasks that are coming to us in current
@@ -514,10 +513,10 @@ class Worker(ServerNode):
     tasks: dict[str, TaskState]
     waiting_for_data_count: int
     has_what: defaultdict[str, set[str]]  # {worker address: {ts.key, ...}
-    pending_data_per_worker: defaultdict[str, _UniqueTaskHeap]
+    pending_data_per_worker: defaultdict[str, UniqueTaskHeap]
     nanny: Nanny | None
     _lock: threading.Lock
-    data_needed: _UniqueTaskHeap
+    data_needed: UniqueTaskHeap
     in_flight_workers: dict[str, set[str]]  # {worker address: {ts.key, ...}}
     total_out_connections: int
     total_in_connections: int
@@ -666,11 +665,11 @@ class Worker(ServerNode):
         self.tasks = {}
         self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)
-        self.pending_data_per_worker = defaultdict(_UniqueTaskHeap)
+        self.pending_data_per_worker = defaultdict(UniqueTaskHeap)
         self.nanny = nanny
         self._lock = threading.Lock()
 
-        self.data_needed = _UniqueTaskHeap()
+        self.data_needed = UniqueTaskHeap()
 
         self.in_flight_workers = {}
         self.total_out_connections = dask.config.get(
@@ -681,7 +680,7 @@ class Worker(ServerNode):
         )
         self.comm_threshold_bytes = int(10e6)
         self.comm_nbytes = 0
-        self._missing_dep_flight: set[TaskState] = set()
+        self._missing_dep_flight = set()
 
         self.threads = {}
 
@@ -3132,10 +3131,7 @@ class Worker(ServerNode):
                         self.batched_stream.send(
                             {"op": "missing-data", "errant_worker": worker, "key": d}
                         )
-                        if not ts.who_has:
-                            recommendations[ts] = "missing"
-                        else:
-                            recommendations[ts] = "fetch"
+                        recommendations[ts] = "fetch" if ts.who_has else "missing"
                 del data, response
                 self.transitions(recommendations, stimulus_id=stimulus_id)
                 self.ensure_computing()
