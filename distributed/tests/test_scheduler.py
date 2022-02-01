@@ -2476,17 +2476,18 @@ async def assert_memory(
     attr: str,
     min_mib: float,
     max_mib: float,
+    *,
     timeout: float = 10,
 ) -> None:
     t0 = time()
     while True:
         minfo = scheduler_or_workerstate.memory
         nmib = getattr(minfo, attr) / 2 ** 20
-        if min_ <= nmib <= max_:
+        if min_mib <= nmib <= max_mib:
             return
         if time() - t0 > timeout:
             raise AssertionError(
-                f"Expected {min_} MiB <= {attr} <= {max_} MiB; got:\n{minfo!r}"
+                f"Expected {min_mib} MiB <= {attr} <= {max_mib} MiB; got:\n{minfo!r}"
             )
         await asyncio.sleep(0.01)
 
