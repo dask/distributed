@@ -123,7 +123,7 @@ def get_fileno_limit():
 
 
 @toolz.memoize
-def _get_ip(host, port, family):
+def _get_ip(host, port, warn, family):
     # By using a UDP socket, we don't actually try to connect but
     # simply select the local address through which *host* is reachable.
     sock = socket.socket(family, socket.SOCK_DGRAM)
@@ -132,11 +132,12 @@ def _get_ip(host, port, family):
         ip = sock.getsockname()[0]
         return ip
     except OSError as e:
-        warnings.warn(
-            "Couldn't detect a suitable IP address for "
-            "reaching %r, defaulting to hostname: %s" % (host, e),
-            RuntimeWarning,
-        )
+        if warn:
+            warnings.warn(
+                "Couldn't detect a suitable IP address for "
+                "reaching %r, defaulting to hostname: %s" % (host, e),
+                RuntimeWarning,
+            )
         addr_info = socket.getaddrinfo(
             socket.gethostname(), port, family, socket.SOCK_DGRAM, socket.IPPROTO_UDP
         )[0]
@@ -145,21 +146,21 @@ def _get_ip(host, port, family):
         sock.close()
 
 
-def get_ip(host="8.8.8.8", port=80):
+def get_ip(host="8.8.8.8", port=80, warn=True):
     """
     Get the local IP address through which the *host* is reachable.
 
     *host* defaults to a well-known Internet host (one of Google's public
     DNS servers).
     """
-    return _get_ip(host, port, family=socket.AF_INET)
+    return _get_ip(host, port, warn, family=socket.AF_INET)
 
 
-def get_ipv6(host="2001:4860:4860::8888", port=80):
+def get_ipv6(host="2001:4860:4860::8888", port=80, warn=True):
     """
     The same as get_ip(), but for IPv6.
     """
-    return _get_ip(host, port, family=socket.AF_INET6)
+    return _get_ip(host, port, warn, family=socket.AF_INET6)
 
 
 def get_ip_interface(ifname):
