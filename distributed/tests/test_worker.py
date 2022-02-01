@@ -1640,8 +1640,6 @@ def assert_amm_transfer_story(key: str, w_from: Worker, w_to: Worker) -> None:
         [
             (key, "ensure-task-exists", "released"),
             (key, "released", "fetch", "fetch", {}),
-            (key, "fetch", "missing", "missing", {}),
-            (key, "missing", "fetch", "fetch", {}),
             ("gather-dependencies", w_from.address, lambda set_: key in set_),
             (key, "fetch", "flight", "flight", {}),
             ("request-dep", w_from.address, lambda set_: key in set_),

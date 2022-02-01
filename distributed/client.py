@@ -4103,10 +4103,12 @@ class Client(SyncMethodMixin):
         else:
             raise ValueError(f"No event handler known for topic {topic}.")
 
-    def retire_workers(self, workers=None, close_workers=True, **kwargs):
+    def retire_workers(
+        self, workers: list[str] | None = None, close_workers: bool = True, **kwargs
+    ):
         """Retire certain workers on the scheduler
 
-        See dask.distributed.Scheduler.retire_workers for the full docstring.
+        See :meth:`distributed.Scheduler.retire_workers` for the full docstring.
 
         Parameters
         ----------

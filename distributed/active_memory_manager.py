@@ -515,28 +515,30 @@ class RetireWorker(ActiveMemoryManagerPolicy):
     1. This is the only worker in the cluster, or
     2. All workers are either paused or being retired at the same time
 
-    In either case, this policy will fail to move out all keys and
-    Scheduler.retire_workers will abort the retirement. The flag ``no_recipients`` will
-    be raised.
+    In either case, this policy will fail to move out all keys and set the
+    ``no_recipients`` boolean to True. :meth:`~distributed.Scheduler.retire_workers`
+    will abort the retirement.
 
     There is a third use case, where a task fails to be replicated away for whatever
-    reason; in this case we'll just wait for the next AMM iteration and try again
-    (possibly with a different receiving worker, e.g. if the receiving worker was
-    hung but not yet declared dead).
+    reason, e.g. because its recipient is unresponsive but the Scheduler doesn't know
+    yet. In this case we'll just wait for the next AMM iteration and try again (possibly
+    with a different receiving worker, e.g. if the receiving worker was hung but not yet
+    declared dead).
 
     **Retiring a worker with spilled tasks**
 
     On its very first iteration, this policy suggests that other workers should fetch
-    all unique in-memory tasks. Frequently, this means that in the next few moments the
-    worker to be retired will be bombarded by :meth:`distributed.worker.Worker.get_data`
-    calls from the rest of the cluster. This can be a problem if most of the managed
-    memory of the worker has been spilled out, as it could send the worker above the
-    terminate threshold. Two measures are in place in order to prevent this:
+    all unique in-memory tasks of the retiring worker. Frequently, this means that in
+    the next few moments the retiring worker will be bombarded by
+    :meth:`distributed.worker.Worker.get_data` calls from the rest of the cluster. This
+    can be a problem if most of the managed memory of the worker has been spilled out,
+    as it could send the worker above its terminate threshold. Two measures are in place
+    in order to prevent this:
 
-    - At every iteration, this policy drops all tasks that have already been replicated
-      somewhere else. This makes room for further tasks to be moved out of the spill
-      file in order to be replicated onto another worker.
-    - Once a worker passes the ``pause`` threshold,
+    - At every iteration, this policy drops all tasks on the retiring worker that have
+      already been replicated somewhere else. This makes room for further tasks to be
+      moved out of the spill file in order to be replicated onto another worker.
+    - Once the worker passes the ``pause`` threshold,
       :meth:`~distributed.worker.Worker.get_data` throttles the number of outgoing
       connections to 1.
 
@@ -554,7 +556,7 @@ class RetireWorker(ActiveMemoryManagerPolicy):
         self.no_recipients = False
 
     def __repr__(self) -> str:
-        return f"RetireWorker({self.address})"
+        return f"RetireWorker({self.address!r})"
 
     def run(self):
         """"""

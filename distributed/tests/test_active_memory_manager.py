@@ -852,7 +852,7 @@ async def test_RetireWorker_no_recipients(c, s, w1, w2, w3, w4):
     assert not s.extensions["amm"].policies
     assert set(s.workers) in ({w2.address, w3.address}, {w2.address, w4.address})
     # After a Scheduler -> Worker -> WorkerState roundtrip, workers that failed to
-    # retired went back from closing_gracefully to running and can run tasks
+    # retire went back from closing_gracefully to running and can run tasks
     while any(ws.status != Status.running for ws in s.workers.values()):
         await asyncio.sleep(0.01)
     assert await c.submit(inc, 1) == 2
@@ -881,7 +881,7 @@ async def test_RetireWorker_all_recipients_are_paused(c, s, a, b):
     assert set(s.workers) == {a.address, b.address}
 
     # After a Scheduler -> Worker -> WorkerState roundtrip, workers that failed to
-    # retired went back from closing_gracefully to running and can run tasks
+    # retire went back from closing_gracefully to running and can run tasks
     while ws_a.status != Status.running:
         await asyncio.sleep(0.01)
     assert await c.submit(inc, 1) == 2
@@ -1011,7 +1011,7 @@ async def test_ReduceReplicas_stress(c, s, *nannies):
     await tensordot_stress(c)
 
 
-# @pytest.mark.slow
+@pytest.mark.slow
 @pytest.mark.avoid_ci(reason="distributed#5371")
 @pytest.mark.parametrize("use_ReduceReplicas", [False, True])
 @gen_cluster(

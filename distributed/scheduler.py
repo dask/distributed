@@ -6807,7 +6807,7 @@ class Scheduler(SchedulerState, ServerNode):
         comm=None,
         *,
         workers: "list[str] | None" = None,
-        names: "list[str] | None" = None,
+        names: "list | None" = None,
         close_workers: bool = False,
         remove: bool = True,
         **kwargs,
@@ -6816,7 +6816,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         Parameters
         ----------
-        workers: list (optional)
+        workers: list[str] (optional)
             List of worker addresses to retire.
         names: list (optional)
             List of worker names to retire.
@@ -6858,6 +6858,8 @@ class Scheduler(SchedulerState, ServerNode):
                         raise TypeError("names and workers are mutually exclusive")
                     if names:
                         logger.info("Retire worker names %s", names)
+                    # Support cases where names are passed through a CLI and become
+                    # strings
                     names_set = {str(name) for name in names}
                     wss = {
                         ws
@@ -6904,7 +6906,7 @@ class Scheduler(SchedulerState, ServerNode):
                         )
 
                         coros.append(
-                            self._retire_worker(
+                            self._track_retire_worker(
                                 ws,
                                 policy,
                                 prev_status=prev_status,
@@ -6929,7 +6931,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             return workers_info
 
-    async def _retire_worker(
+    async def _track_retire_worker(
         self,
         ws: WorkerState,
         policy: RetireWorker,
@@ -6942,7 +6944,8 @@ class Scheduler(SchedulerState, ServerNode):
         while not policy.done():
             if policy.no_recipients:
                 # Abort retirement. This time we don't need to worry about race
-                # conditions and we can wait for a round-trip.
+                # conditions and we can wait for a scheduler->worker->scheduler
+                # round-trip.
                 self.stream_comms[ws.address].send(
                     {"op": "worker-status-change", "status": prev_status.name}
                 )
