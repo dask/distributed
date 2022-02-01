@@ -15,6 +15,11 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.workflow_run.conclusion != 'skipped'
 
+    # Needed to post comments on the PR
+    permissions:
+      checks: write
+      pull-requests: write
+
     steps:
       - name: Download and extract artifacts
         env:
@@ -38,4 +43,3 @@ jobs:
           event_file: artifacts/Event File/event.json
           event_name: ${{ github.event.workflow_run.event }}
           files: artifacts/**/*.xml
-          comment_mode: off
