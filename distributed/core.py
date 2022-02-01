@@ -37,7 +37,6 @@ from .comm import (
 from .metrics import time
 from .system_monitor import SystemMonitor
 from .utils import (
-    CancelledError,
     TimeoutError,
     get_traceback,
     has_keyword,
@@ -519,7 +518,7 @@ class Server:
                             result = asyncio.ensure_future(result)
                             self._ongoing_coroutines.add(result)
                             result = await result
-                    except (CommClosedError, CancelledError):
+                    except (CommClosedError, asyncio.CancelledError):
                         if self.status in (Status.running, Status.paused):
                             logger.info("Lost connection to %r", address, exc_info=True)
                         break
@@ -641,16 +640,23 @@ def pingpong(comm):
     return b"pong"
 
 
-async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kwargs):
+async def send_recv(
+    comm: Comm,
+    *,
+    reply: bool = True,
+    serializers=None,
+    deserializers=None,
+    **kwargs,
+):
     """Send and recv with a Comm.
 
     Keyword arguments turn into the message
 
-    response = yield send_recv(comm, op='ping', reply=True)
+    response = await send_recv(comm, op='ping', reply=True)
     """
     msg = kwargs
     msg["reply"] = reply
-    please_close = kwargs.get("close")
+    please_close = kwargs.get("close", False)
     force_close = False
     if deserializers is None:
         deserializers = serializers
@@ -663,15 +669,23 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
             response = await comm.read(deserializers=deserializers)
         else:
             response = None
-    except OSError:
+    except (asyncio.TimeoutError, OSError):
         # On communication errors, we should simply close the communication
+        # Note that OSError includes CommClosedError and socket timeouts
         force_close = True
         raise
+    except asyncio.CancelledError:
+        # Do not reuse the comm to prevent the next call of send_recv from receiving
+        # data from this call and/or accidentally putting multiple waiters on read().
+        # Note that this relies on all Comm implementations to allow a write() in the
+        # middle of a read().
+        please_close = True
+        raise
     finally:
-        if please_close:
-            await comm.close()
-        elif force_close:
+        if force_close:
             comm.abort()
+        elif please_close:
+            await comm.close()
 
     if isinstance(response, dict) and response.get("status") == "uncaught-error":
         if comm.deserialize:
@@ -696,7 +710,7 @@ class rpc:
     """Conveniently interact with a remote server
 
     >>> remote = rpc(address)  # doctest: +SKIP
-    >>> response = yield remote.add(x=10, y=20)  # doctest: +SKIP
+    >>> response = await remote.add(x=10, y=20)  # doctest: +SKIP
 
     One rpc object can be reused for several interactions.
     Additionally, this object creates and destroys many comms as necessary
@@ -881,14 +895,12 @@ class PooledRPCCall:
             if self.deserializers is not None and kwargs.get("deserializers") is None:
                 kwargs["deserializers"] = self.deserializers
             comm = await self.pool.connect(self.addr)
-            name, comm.name = comm.name, "ConnectionPool." + key
+            prev_name, comm.name = comm.name, "ConnectionPool." + key
             try:
-                result = await send_recv(comm=comm, op=key, **kwargs)
+                return await send_recv(comm=comm, op=key, **kwargs)
             finally:
                 self.pool.reuse(self.addr, comm)
-                comm.name = name
-
-            return result
+                comm.name = prev_name
 
         return send_recv_from_rpc
 
@@ -916,14 +928,14 @@ class ConnectionPool:
 
         >>> rpc = ConnectionPool(limit=512)
         >>> scheduler = rpc('127.0.0.1:8786')
-        >>> workers = [rpc(address) for address ...]
+        >>> workers = [rpc(address) for address in ...]
 
-        >>> info = yield scheduler.identity()
+        >>> info = await scheduler.identity()
 
     It creates enough comms to satisfy concurrent connections to any
     particular address::
 
-        >>> a, b = yield [scheduler.who_has(), scheduler.has_what()]
+        >>> a, b = await asyncio.gather(scheduler.who_has(), scheduler.has_what())
 
     It reuses existing comms so that we don't have to continuously reconnect.
 
@@ -1043,7 +1055,7 @@ class ConnectionPool:
                     f"ConnectionPool not running. Status: {self.status}"
                 )
 
-            fut = asyncio.ensure_future(
+            fut = asyncio.create_task(
                 connect(
                     addr,
                     timeout=timeout or self.timeout,
@@ -1066,9 +1078,9 @@ class ConnectionPool:
             raise CommClosedError(
                 f"ConnectionPool not running. Status: {self.status}"
             ) from exc
-        except Exception as exc:
+        except Exception:
             self.semaphore.release()
-            raise exc
+            raise
         finally:
             self._connecting.discard(fut)
             self._n_connecting -= 1
@@ -1084,6 +1096,8 @@ class ConnectionPool:
         else:
             self.occupied[addr].remove(comm)
             if comm.closed():
+                # Either the user passed the close=True parameter to send_recv, or
+                # the RPC call raised OSError or CancelledError
                 self.semaphore.release()
             else:
                 self.available[addr].add(comm)

@@ -215,15 +215,14 @@ class UCX(Comm):
     4. Read all the data frames.
     """
 
-    def __init__(self, ep, local_addr: str, peer_addr: str, deserialize=True):
-        super().__init__()
+    def __init__(self, ep, local_addr: str, peer_addr: str, deserialize: bool = True):
+        super().__init__(deserialize=deserialize)
         self._ep = ep
         if local_addr:
             assert local_addr.startswith("ucx")
         assert peer_addr.startswith("ucx")
         self._local_addr = local_addr
         self._peer_addr = peer_addr
-        self.deserialize = deserialize
         self.comm_flag = None
 
         # When the UCX endpoint closes or errors the registered callback
@@ -307,9 +306,6 @@ class UCX(Comm):
 
     async def read(self, deserializers=("cuda", "dask", "pickle", "error")):
         with log_errors():
-            if self.closed():
-                raise CommClosedError("Endpoint is closed -- unable to read message")
-
             if deserializers is None:
                 deserializers = ("cuda", "dask", "pickle", "error")
 

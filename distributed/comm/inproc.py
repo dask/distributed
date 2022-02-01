@@ -159,12 +159,11 @@ class InProc(Comm):
         read_q,
         write_q,
         write_loop,
-        deserialize=True,
+        deserialize: bool = True,
     ):
-        super().__init__()
+        super().__init__(deserialize=deserialize)
         self._local_addr = local_addr
         self._peer_addr = peer_addr
-        self.deserialize = deserialize
         self._read_q = read_q
         self._write_q = write_q
         self._write_loop = write_loop

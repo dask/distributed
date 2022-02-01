@@ -155,11 +155,10 @@ class TCP(Comm):
         deserialize: bool = True,
     ):
         self._closed = False
-        super().__init__()
+        super().__init__(deserialize=deserialize)
         self._local_addr = local_addr
         self._peer_addr = peer_addr
         self.stream = stream
-        self.deserialize = deserialize
         self._finalizer = weakref.finalize(self, self._get_finalizer())
         self._finalizer.atexit = False
         self._extra: dict = {}

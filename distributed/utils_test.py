@@ -678,7 +678,7 @@ def cluster(
             for worker in workers:
                 worker["address"] = worker["queue"].get(timeout=5)
         except queue.Empty:
-            raise pytest.xfail.Exception("Worker failed to start in test")
+            pytest.xfail("Worker failed to start in test")
 
         saddr = scheduler_q.get()
 
@@ -895,7 +895,7 @@ def gen_cluster(
     config: dict[str, Any] = {},
     clean_kwargs: dict[str, Any] = {},
     allow_unclosed: bool = False,
-    cluster_dump_directory: str | Literal[False] = "test_timeout_dump",
+    cluster_dump_directory: str | Literal[False] = "test_cluster_dump",
 ) -> Callable[[Callable], Callable]:
     from distributed import Client
 
@@ -979,15 +979,16 @@ def gen_cluster(
                                 **client_kwargs,
                             )
                             args = [c] + args
+
                         try:
                             coro = func(*args, *outer_args, **kwargs)
                             task = asyncio.create_task(coro)
-
                             coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
                             result = await coro2
                             if s.validate:
                                 s.validate_state()
-                        except asyncio.TimeoutError as e:
+
+                        except asyncio.TimeoutError:
                             assert task
                             buffer = io.StringIO()
                             # This stack indicates where the coro/test is suspended
@@ -1004,9 +1005,31 @@ def gen_cluster(
                             task.cancel()
                             while not task.cancelled():
                                 await asyncio.sleep(0.01)
+
+                            # Remove as much of the traceback as possible; it's
+                            # uninteresting boilerplate from utils_test and asyncio and
+                            # not from the code being tested.
                             raise TimeoutError(
-                                f"Test timeout after {timeout}s.\n{buffer.getvalue()}"
-                            ) from e
+                                f"Test timeout after {timeout}s.\n"
+                                "========== Test stack trace starts here ==========\n"
+                                f"{buffer.getvalue()}"
+                            ) from None
+
+                        except pytest.xfail.Exception:
+                            raise
+
+                        except Exception:
+                            if cluster_dump_directory and not has_pytestmark(
+                                test_func, "xfail"
+                            ):
+                                await dump_cluster_state(
+                                    s,
+                                    ws,
+                                    output_dir=cluster_dump_directory,
+                                    func_name=func.__name__,
+                                )
+                            raise
+
                         finally:
                             if client and c.status not in ("closing", "closed"):
                                 await c._close(fast=s.status == Status.closed)
@@ -1124,7 +1147,7 @@ def raises(func, exc=Exception):
         return True
 
 
-def terminate_process(proc):
+def _terminate_process(proc):
     if proc.poll() is None:
         if sys.platform.startswith("win"):
             proc.send_signal(signal.CTRL_BREAK_EVENT)
@@ -1163,7 +1186,7 @@ def popen(args, **kwargs):
 
     finally:
         try:
-            terminate_process(proc)
+            _terminate_process(proc)
         finally:
             # XXX Also dump stdout if return code != 0 ?
             out, err = proc.communicate()
@@ -1173,23 +1196,6 @@ def popen(args, **kwargs):
 
                 print("\n\nPrint from stdout\n=================\n")
                 print(out.decode())
-
-
-def wait_for_port(address, timeout=5):
-    assert isinstance(address, tuple)
-    deadline = time() + timeout
-
-    while True:
-        timeout = deadline - time()
-        if timeout < 0:
-            raise RuntimeError(f"Failed to connect to {address}")
-        try:
-            sock = socket.create_connection(address, timeout=timeout)
-        except OSError:
-            pass
-        else:
-            sock.close()
-            break
 
 
 def wait_for(predicate, timeout, fail_func=None, period=0.001):
@@ -1872,3 +1878,34 @@ def _format_story(story: list[tuple]) -> str:
     if not story:
         return "(empty story)"
     return "- " + "\n- ".join(str(ev) for ev in story)
+
+
+class BrokenComm(Comm):
+    peer_address = ""
+    local_address = ""
+
+    def close(self):
+        pass
+
+    def closed(self):
+        return True
+
+    def abort(self):
+        pass
+
+    def read(self, deserializers=None):
+        raise OSError()
+
+    def write(self, msg, serializers=None, on_error=None):
+        raise OSError()
+
+
+def has_pytestmark(test_func: Callable, name: str) -> bool:
+    """Return True if the test function is marked by the given @pytest.mark.<name>;
+    False otherwise.
+
+    FIXME doesn't work with individually marked parameters inside
+          @pytest.mark.parametrize
+    """
+    marks = getattr(test_func, "pytestmark", [])
+    return any(mark.name == name for mark in marks)

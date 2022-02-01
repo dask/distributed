@@ -46,7 +46,7 @@ from dask import istask
 from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
-from .compatibility import PYPY, WINDOWS
+from .compatibility import WINDOWS
 from .metrics import time
 
 try:
@@ -67,11 +67,9 @@ no_default = "__no_default__"
 
 
 def _initialize_mp_context():
-    if WINDOWS or PYPY:
-        return multiprocessing
-    else:
-        method = dask.config.get("distributed.worker.multiprocessing-method")
-        ctx = multiprocessing.get_context(method)
+    method = dask.config.get("distributed.worker.multiprocessing-method")
+    ctx = multiprocessing.get_context(method)
+    if method == "forkserver":
         # Makes the test suite much faster
         preload = ["distributed"]
         if "pkg_resources" in sys.modules:
@@ -87,7 +85,8 @@ def _initialize_mp_context():
             else:
                 preload.append(pkg)
         ctx.set_forkserver_preload(preload)
-        return ctx
+
+    return ctx
 
 
 mp_context = _initialize_mp_context()

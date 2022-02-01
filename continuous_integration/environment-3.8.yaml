@@ -4,12 +4,13 @@ channels:
   - defaults
 dependencies:
   - python=3.8
+  - packaging
   - pip
   - asyncssh
   - bokeh
   - click
   - cloudpickle
-  - coverage
+  - coverage<6.3  # https://github.com/nedbat/coveragepy/issues/1310
   - dask  # overridden by git tip below
   - filesystem-spec
   - h5py

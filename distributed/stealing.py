@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from collections import defaultdict, deque
 from math import log2
 from time import time
@@ -14,7 +15,7 @@ import dask
 from dask.utils import parse_timedelta
 
 from .comm.addressing import get_address_host
-from .core import CommClosedError
+from .core import CommClosedError, Status
 from .diagnostics.plugin import SchedulerPlugin
 from .utils import log_errors, recursive_to_dict
 
@@ -233,7 +234,9 @@ class WorkStealing(SchedulerPlugin):
         try:
             if ts in self.in_flight:
                 return "in-flight"
-            stimulus_id = f"steal-{time()}"
+            # Stimulus IDs are used to verify the response, see
+            # `move_task_confirm`. Therefore, this must be truly unique.
+            stimulus_id = f"steal-{uuid.uuid4().hex}"
 
             key = ts.key
             self.remove_key_from_stealable(ts)
@@ -291,7 +294,7 @@ class WorkStealing(SchedulerPlugin):
                 self.in_flight[ts] = d
                 return
         except KeyError:
-            self.log(("already-aborted", key, state, stimulus_id))
+            self.log(("already-aborted", key, state, worker, stimulus_id))
             return
 
         thief = d["thief"]
@@ -390,22 +393,23 @@ class WorkStealing(SchedulerPlugin):
 
         with log_errors():
             i = 0
-            idle = s.idle.values()
-            saturated = s.saturated
+            # Paused and closing workers must never become thieves
+            idle = [ws for ws in s.idle.values() if ws.status == Status.running]
             if not idle or len(idle) == len(s.workers):
                 return
 
             log = []
             start = time()
 
-            if not s.saturated:
+            saturated = s.saturated
+            if not saturated:
                 saturated = topk(10, s.workers.values(), key=combined_occupancy)
                 saturated = [
                     ws
                     for ws in saturated
                     if combined_occupancy(ws) > 0.2 and len(ws.processing) > ws.nthreads
                 ]
-            elif len(s.saturated) < 20:
+            elif len(saturated) < 20:
                 saturated = sorted(saturated, key=combined_occupancy, reverse=True)
             if len(idle) < 20:
                 idle = sorted(idle, key=combined_occupancy)

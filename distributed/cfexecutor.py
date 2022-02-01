@@ -113,9 +113,11 @@ class ClientExecutor(cf.Executor):
 
         Raises
         ------
-        TimeoutError: If the entire result iterator could not be generated
-            before the given timeout.
-        Exception: If ``fn(*args)`` raises for any values.
+        concurrent.futures.TimeoutError:
+            If the entire result iterator could not be generated before the given
+            timeout.
+        Exception:
+            If ``fn(*args)`` raises for any values.
         """
         timeout = kwargs.pop("timeout", None)
         if timeout is not None:

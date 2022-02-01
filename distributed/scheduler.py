@@ -3922,6 +3922,7 @@ class Scheduler(SchedulerState, ServerNode):
             "heartbeat_worker": self.heartbeat_worker,
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
+            "get_task_prefix_states": self.get_task_prefix_states,
             "register_scheduler_plugin": self.register_scheduler_plugin,
             "register_worker_plugin": self.register_worker_plugin,
             "unregister_worker_plugin": self.unregister_worker_plugin,
@@ -4999,18 +5000,12 @@ class Scheduler(SchedulerState, ServerNode):
 
             self.remove_resources(address)
 
-            dh: dict = parent._host_info.get(host)
-            if dh is None:
-                parent._host_info[host] = dh = {}
-
+            dh: dict = parent._host_info[host]
             dh_addresses: set = dh["addresses"]
             dh_addresses.remove(address)
             dh["nthreads"] -= ws._nthreads
             parent._total_nthreads -= ws._nthreads
-
             if not dh_addresses:
-                dh = None
-                dh_addresses = None
                 del parent._host_info[host]
 
             self.rpc.remove(address)
@@ -7243,6 +7238,26 @@ class Scheduler(SchedulerState, ServerNode):
                 restrictions = {restrictions}
             ts._worker_restrictions = set(restrictions)
 
+    def get_task_prefix_states(self, comm=None):
+        with log_errors():
+            state = {}
+
+            for tp in self.task_prefixes.values():
+                active_states = tp.active_states
+                if any(
+                    active_states.get(s)
+                    for s in {"memory", "erred", "released", "processing", "waiting"}
+                ):
+                    state[tp.name] = {
+                        "memory": active_states["memory"],
+                        "erred": active_states["erred"],
+                        "released": active_states["released"],
+                        "processing": active_states["processing"],
+                        "waiting": active_states["waiting"],
+                    }
+
+        return state
+
     def get_task_status(self, comm=None, keys=None):
         parent: SchedulerState = cast(SchedulerState, self)
         return {
@@ -7620,7 +7635,7 @@ class Scheduler(SchedulerState, ServerNode):
         # Scheduler logs
         from distributed.dashboard.components.scheduler import SchedulerLogs
 
-        logs = SchedulerLogs(self)
+        logs = SchedulerLogs(self, start=start)
 
         from bokeh.models import Div, Panel, Tabs
 
@@ -7919,6 +7934,62 @@ class Scheduler(SchedulerState, ServerNode):
         else:  # Scale down?
             to_close = self.workers_to_close()
             return len(parent._workers_dv) - len(to_close)
+
+    def request_acquire_replicas(self, addr: str, keys: list, *, stimulus_id: str):
+        """Asynchronously ask a worker to acquire a replica of the listed keys from
+        other workers. This is a fire-and-forget operation which offers no feedback for
+        success or failure, and is intended for housekeeping and not for computation.
+        """
+        parent: SchedulerState = cast(SchedulerState, self)
+        ws: WorkerState
+        ts: TaskState
+
+        who_has = {}
+        for key in keys:
+            ts = parent._tasks[key]
+            who_has[key] = {ws._address for ws in ts._who_has}
+
+        self.stream_comms[addr].send(
+            {
+                "op": "acquire-replicas",
+                "keys": keys,
+                "who_has": who_has,
+                "stimulus_id": stimulus_id,
+            },
+        )
+
+    def request_remove_replicas(self, addr: str, keys: list, *, stimulus_id: str):
+        """Asynchronously ask a worker to discard its replica of the listed keys.
+        This must never be used to destroy the last replica of a key. This is a
+        fire-and-forget operation, intended for housekeeping and not for computation.
+
+        The replica disappears immediately from TaskState.who_has on the Scheduler side;
+        if the worker refuses to delete, e.g. because the task is a dependency of
+        another task running on it, it will (also asynchronously) inform the scheduler
+        to re-add itself to who_has. If the worker agrees to discard the task, there is
+        no feedback.
+        """
+        parent: SchedulerState = cast(SchedulerState, self)
+        ws: WorkerState = parent._workers_dv[addr]
+        validate = self.validate
+
+        # The scheduler immediately forgets about the replica and suggests the worker to
+        # drop it. The worker may refuse, at which point it will send back an add-keys
+        # message to reinstate it.
+        for key in keys:
+            ts: TaskState = parent._tasks[key]
+            if validate:
+                # Do not destroy the last copy
+                assert len(ts._who_has) > 1
+            self.remove_replica(ts, ws)
+
+        self.stream_comms[addr].send(
+            {
+                "op": "remove-replicas",
+                "keys": keys,
+                "stimulus_id": stimulus_id,
+            }
+        )
 
 
 @cfunc

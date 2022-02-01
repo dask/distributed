@@ -9,6 +9,7 @@ from tlz import merge
 from dask.utils import parse_timedelta, stringify
 
 from .client import Client, Future
+from .metrics import time
 from .utils import TimeoutError, log_errors
 from .worker import get_client, get_worker
 
@@ -74,10 +75,10 @@ class VariableExtension:
                 self.waiting_conditions[name].notify_all()
 
     async def get(self, comm=None, name=None, client=None, timeout=None):
-        start = self.scheduler.loop.time()
+        start = time()
         while name not in self.variables:
             if timeout is not None:
-                left = timeout - (self.scheduler.loop.time() - start)
+                left = timeout - (time() - start)
             else:
                 left = None
             if left and left < 0:

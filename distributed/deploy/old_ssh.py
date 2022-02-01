@@ -2,14 +2,16 @@ import logging
 import os
 import socket
 import sys
-import time
 import traceback
 import warnings
 from queue import Queue
 from threading import Thread
+from time import sleep
 
 from tlz import merge
 from tornado import gen
+
+from ..metrics import time
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +102,7 @@ def async_ssh(cmd_dict):
                 + bcolors.ENDC
             )
 
-            time.sleep(1)
+            sleep(1)
 
     # Execute the command, and grab file handles for stdout and stderr. Note
     # that we run the command using the user's default shell, but force it to
@@ -183,19 +185,19 @@ def async_ssh(cmd_dict):
     # thread to shut itself down.
     while cmd_dict["input_queue"].empty():
         # Kill some time so that this thread does not hog the CPU.
-        time.sleep(1.0)
+        sleep(1.0)
         # Send noise down the pipe to keep connection active
         transport.send_ignore()
         if communicate():
             break
 
     # Ctrl-C the executing command and wait a bit for command to end cleanly
-    start = time.time()
-    while time.time() < start + 5.0:
+    start = time()
+    while time() < start + 5.0:
         channel.send(b"\x03")  # Ctrl-C
         if communicate():
             break
-        time.sleep(1.0)
+        sleep(1.0)
 
     # Shutdown the channel, and close the SSH connection
     channel.close()
@@ -466,7 +468,7 @@ class SSHCluster:
 
                 # Kill some time and free up CPU before starting the next sweep
                 # through the processes.
-                time.sleep(0.1)
+                sleep(0.1)
 
             # end while true
 
