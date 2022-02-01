@@ -2546,7 +2546,7 @@ async def test_memory(c, s, *nannies):
     )
     await wait([f1, f2])
 
-    # On each worker, we now have 100 MiB managed + 50 MiB fresh leak
+    # On each worker, we now have 50 MiB managed + 100 MiB fresh leak
     await asyncio.gather(
         assert_memory(a, "managed_in_memory", 50, 51, timeout=0),
         assert_memory(b, "managed_in_memory", 50, 51, timeout=0),
