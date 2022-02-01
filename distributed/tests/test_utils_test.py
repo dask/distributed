@@ -15,7 +15,6 @@ import dask.config
 from distributed import Client, Nanny, Scheduler, Worker, config, default_client
 from distributed.core import Server, rpc
 from distributed.metrics import time
-from distributed.utils import get_ip
 from distributed.utils_test import (
     _LockedCommPool,
     _UnhashableCallable,
@@ -27,7 +26,6 @@ from distributed.utils_test import (
     inc,
     new_config,
     tls_only_security,
-    wait_for_port,
 )
 
 
@@ -230,26 +228,6 @@ def _listen(delay=0):
         yield serv
     finally:
         t.join(5.0)
-
-
-def test_wait_for_port():
-    t1 = time()
-    with pytest.raises(RuntimeError):
-        wait_for_port((get_ip(), 9999), 0.5)
-    t2 = time()
-    assert t2 - t1 >= 0.5
-
-    with _listen(0) as s1:
-        t1 = time()
-        wait_for_port(s1.getsockname())
-        t2 = time()
-        assert t2 - t1 <= 1.0
-
-    with _listen(1) as s1:
-        t1 = time()
-        wait_for_port(s1.getsockname())
-        t2 = time()
-        assert t2 - t1 <= 2.0
 
 
 def test_new_config():

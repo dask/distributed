@@ -5,9 +5,10 @@ import string
 from collections import Counter
 from typing import TYPE_CHECKING
 
-import pandas as pd
 import pytest
-from pandas.testing import assert_frame_equal
+
+pd = pytest.importorskip("pandas")
+dd = pytest.importorskip("dask.dataframe")
 
 from distributed.utils_test import gen_cluster
 
@@ -136,12 +137,13 @@ async def test_create(s: Scheduler, *workers: Worker):
     )
 
     metadata = await exts[0]._create_shuffle(new_metadata)
+    assert sorted(metadata.workers) == sorted(w.address for w in workers)
 
     # Check shuffle was created on all workers
     for ext in exts:
         assert len(ext.shuffles) == 1
         shuffle = ext.shuffles[new_metadata.id]
-        assert sorted(shuffle.metadata.workers) == sorted(w.address for w in workers)
+        assert shuffle.metadata.workers == metadata.workers
 
     # TODO (resilience stage) what happens if some workers already have
     # the ID registered, but others don't?
@@ -181,7 +183,7 @@ async def test_add_partition(s: Scheduler, *workers: Worker):
         ext = exts[addr]
         received = ext.shuffles[metadata.id].output_partitions[int(i)]
         assert len(received) == 1
-        assert_frame_equal(data, received[0])
+        dd.utils.assert_eq(data, received[0])
 
     # TODO (resilience stage) test failed sends
 
@@ -213,7 +215,7 @@ async def test_barrier(c: Client, s: Scheduler, *workers: Worker):
     await ext._barrier(metadata.id)
 
     # Check scheduler restrictions were set for unpack tasks
-    for key, i in zip(fs, range(metadata.npartitions)):
+    for i, key in enumerate(fs):
         assert s.tasks[key].worker_restrictions == {metadata.worker_for(i)}
 
     # Check all workers have been informed of the barrier
@@ -260,8 +262,10 @@ async def test_get_partition(c: Client, s: Scheduler, *workers: Worker):
     )
     await ext._barrier(metadata.id)
 
-    with pytest.raises(AssertionError, match="belongs on"):
-        ext.get_output_partition(metadata.id, 7)
+    for addr, ext in exts.items():
+        if metadata.worker_for(0) != addr:
+            with pytest.raises(AssertionError, match="belongs on"):
+                ext.get_output_partition(metadata.id, 0)
 
     full = pd.concat([p1, p2])
     expected_groups = full.groupby("partition")
@@ -273,11 +277,12 @@ async def test_get_partition(c: Client, s: Scheduler, *workers: Worker):
             expected = expected_groups.get_group(output_i)
         except KeyError:
             expected = metadata.empty
-        assert_frame_equal(expected, result)
+        dd.utils.assert_eq(expected, result)
+        # ^ NOTE: use `assert_eq` instead of `pd.testing.assert_frame_equal` directly
+        # to ignore order of the rows (`assert_eq` pre-sorts its inputs).
 
     # Once all partitions are retrieved, shuffles are cleaned up
     for ext in exts.values():
         assert not ext.shuffles
-
-    with pytest.raises(ValueError, match="not registered"):
-        ext.get_output_partition(metadata.id, 0)
+        with pytest.raises(ValueError, match="not registered"):
+            ext.get_output_partition(metadata.id, 0)

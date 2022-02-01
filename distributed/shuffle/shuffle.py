@@ -90,7 +90,7 @@ def rearrange_by_column_p2p(
     dsk = {
         (name, i): (shuffle_unpack, token, i, barrier_key) for i in range(npartitions)
     }
-    # TODO use this blockwise (https://github.com/coiled/oss-engineering/issues/49)
+    # TODO: update to use blockwise.
     # Changes task names, so breaks setting worker restrictions at the moment.
     # Also maybe would be nice if the `DataFrameIOLayer` interface supported this?
     # dsk = blockwise(
