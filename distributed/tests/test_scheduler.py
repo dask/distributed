@@ -2520,7 +2520,7 @@ async def test_memory(c, s, *nannies):
     assert a.memory.managed == 0
     assert b.memory.managed == 0
 
-    # Trigger potential imports inside WorkerPlugin events
+    # Trigger potential imports inside WorkerPlugin.transition
     await c.submit(inc, 0, workers=[a.address])
     await c.submit(inc, 1, workers=[b.address])
     # Wait for the memory readings to stabilize after workers go online
