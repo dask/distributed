@@ -86,6 +86,7 @@ from .utils import (
     TimeoutError,
     format_dashboard_link,
     has_keyword,
+    import_term,
     log_errors,
     no_default,
     sync,
@@ -261,8 +262,8 @@ class Future(WrappedKey):
 
         Returns
         -------
-        result : asyncio.Future
-            The Future that contains the result of the computation
+        result
+            The result of the computation. Or a coroutine if the client is asynchronous.
         """
         if self.client.asynchronous:
             return self.client.sync(self._result, callback_timeout=timeout)
@@ -420,8 +421,8 @@ class Future(WrappedKey):
 
         Returns
         -------
-        Future
-            The Future that contains the traceback
+        traceback
+            The traceback object. Or a coroutine if the client is asynchronous.
 
         See Also
         --------
@@ -434,14 +435,8 @@ class Future(WrappedKey):
         """Returns the type"""
         return self._state.type
 
-    def release(self, _in_destructor=False):
+    def release(self):
         """
-
-        Parameters
-        ----------
-        _in_destructor: bool
-            Not used
-
         Notes
         -----
         This method can be called from different threads
@@ -646,6 +641,21 @@ def _handle_warn(event):
         warnings.warn(msg)
 
 
+def _maybe_call_security_loader(address):
+    security_loader_term = dask.config.get("distributed.client.security-loader")
+    if security_loader_term:
+        try:
+            security_loader = import_term(security_loader_term)
+        except Exception as exc:
+            raise ImportError(
+                f"Failed to import `{security_loader_term}` configured at "
+                f"`distributed.client.security-loader` - is this module "
+                f"installed?"
+            ) from exc
+        return security_loader({"address": address})
+    return None
+
+
 class Client(SyncMethodMixin):
     """Connect to and submit computation to a Dask cluster
 
@@ -688,9 +698,11 @@ class Client(SyncMethodMixin):
     heartbeat_interval: int (optional)
         Time in milliseconds between heartbeats to scheduler
     serializers
-        The serializers to turn an object into a string
+        Iterable of approaches to use when serializing the object.
+        See :ref:`serialization` for more.
     deserializers
-        The deserializers to turn the string into the original object
+        Iterable of approaches to use when deserializing the object.
+        See :ref:`serialization` for more.
     extensions : list
         The extensions
     direct_to_workers: bool (optional)
@@ -823,6 +835,11 @@ class Client(SyncMethodMixin):
                     type(address)
                 )
             )
+
+        # If connecting to an address and no explicit security is configured, attempt
+        # to load security credentials with a security loader (if configured).
+        if security is None and isinstance(address, str):
+            security = _maybe_call_security_loader(address)
 
         if security is None:
             security = Security()
@@ -1498,12 +1515,11 @@ class Client(SyncMethodMixin):
                 _set_global_client(None)
 
             if (
-                not fast
-                and handle_report_task is not None
+                handle_report_task is not None
                 and handle_report_task is not current_task
             ):
                 with suppress(TimeoutError, asyncio.CancelledError):
-                    await asyncio.wait_for(handle_report_task, 2)
+                    await asyncio.wait_for(handle_report_task, 0 if fast else 2)
 
             with suppress(AttributeError):
                 await self.scheduler.close_rpc()
@@ -3016,10 +3032,13 @@ class Client(SyncMethodMixin):
 
         Parameters
         ----------
-        collection
+        collection : dask object
+            Collection like dask.array or dataframe or dask.value objects
 
         Returns
         -------
+        collection : dask object
+            Collection with its tasks replaced with any existing futures.
 
         Examples
         --------
@@ -5072,7 +5091,7 @@ def default_client(c=None):
     Parameters
     ----------
     c : Client
-        The client
+        The client to return. If None, the default client is returned.
 
     Returns
     -------
