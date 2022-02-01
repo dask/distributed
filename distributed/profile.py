@@ -135,7 +135,7 @@ def merge(*args):
     if not args:
         return create()
     s = {arg["identifier"] for arg in args}
-    if len(s) != 1:
+    if len(s) != 1:  # pragma: no cover
         raise ValueError("Expected identifiers, got %s" % str(s))
     children = defaultdict(list)
     for arg in args:
@@ -144,7 +144,7 @@ def merge(*args):
 
     try:
         children = {k: merge(*v) for k, v in children.items()}
-    except RecursionError:
+    except RecursionError:  # pragma: no cover
         children = {}
     count = sum(arg["count"] for arg in args)
     return {
@@ -218,10 +218,10 @@ def plot_data(state, profile_interval=0.010):
 
         try:
             fn = desc["filename"]
-        except IndexError:
+        except IndexError:  # pragma: no cover
             colors.append("gray")
         else:
-            if fn == "<low-level>":
+            if fn == "<low-level>":  # pragma: no cover
                 colors.append("lightgray")
             else:
                 colors.append(color_of(fn))
@@ -348,7 +348,7 @@ def get_profile(history, recent=None, start=None, stop=None, key=None):
 
     if stop is None:
         istop = None
-    else:
+    else:  # pragma: no cover
         istop = bisect.bisect_right(history, (stop,)) + 1
         if istop >= len(history):
             istop = None  # include end

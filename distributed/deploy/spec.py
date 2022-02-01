@@ -271,7 +271,7 @@ class SpecCluster(Cluster):
         self._lock = asyncio.Lock()
         self.status = Status.starting
 
-        if self.scheduler_spec is None:
+        if self.scheduler_spec is None:  # pragma: no cover
             try:
                 import distributed.dashboard  # noqa: F401
             except ImportError:
@@ -293,7 +293,7 @@ class SpecCluster(Cluster):
         )
         try:
             await super()._start()
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             self.status = Status.failed
             await self._close()
             raise RuntimeError(f"Cluster failed to start. {str(e)}") from e
@@ -432,7 +432,7 @@ class SpecCluster(Cluster):
 
     def _threads_per_worker(self) -> int:
         """Return the number of threads per worker for new workers"""
-        if not self.new_spec:
+        if not self.new_spec:  # pragma: no cover
             raise ValueError("To scale by cores= you must specify cores per worker")
 
         for name in ["nthreads", "ncores", "threads", "cores"]:
@@ -442,7 +442,7 @@ class SpecCluster(Cluster):
 
     def _memory_per_worker(self) -> int:
         """Return the memory limit per worker for new workers"""
-        if not self.new_spec:
+        if not self.new_spec:  # pragma: no cover
             raise ValueError(
                 "to scale by memory= your worker definition must include a "
                 "memory_limit definition"
