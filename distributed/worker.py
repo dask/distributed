@@ -13,7 +13,14 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict, deque, namedtuple
-from collections.abc import Callable, Collection, Iterable, Mapping, MutableMapping
+from collections.abc import (
+    Callable,
+    Collection,
+    Iterable,
+    Iterator,
+    Mapping,
+    MutableMapping,
+)
 from concurrent.futures import Executor
 from contextlib import suppress
 from datetime import timedelta
@@ -44,7 +51,7 @@ from dask.utils import (
     typename,
 )
 
-from . import comm, preloading, profile, shuffle, system, utils
+from . import comm, preloading, profile, system, utils
 from .batched import BatchedSend
 from .comm import Comm, connect, get_address_host
 from .comm.addressing import address_from_user_args, parse_address
@@ -67,6 +74,7 @@ from .proctitle import setproctitle
 from .protocol import pickle, to_serialize
 from .pubsub import PubSubWorkerExtension
 from .security import Security
+from .shuffle import ShuffleWorkerExtension
 from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .threadpoolexecutor import secede as tpe_secede
@@ -110,14 +118,11 @@ PROCESSING = {
     "resumed",
 }
 READY = {"ready", "constrained"}
-FETCH_INTENDED = {"missing", "fetch", "flight", "cancelled", "resumed"}
 
 # Worker.status subsets
 RUNNING = {Status.running, Status.paused, Status.closing_gracefully}
 
-DEFAULT_EXTENSIONS: list[type] = [PubSubWorkerExtension]
-if shuffle.SHUFFLE_AVAILABLE:
-    DEFAULT_EXTENSIONS.append(shuffle.ShuffleWorkerExtension)
+DEFAULT_EXTENSIONS: list[type] = [PubSubWorkerExtension, ShuffleWorkerExtension]
 
 DEFAULT_METRICS: dict[str, Callable[[Worker], Any]] = {}
 
@@ -193,6 +198,8 @@ class TaskState:
 
     """
 
+    priority: tuple[int, ...] | None
+
     def __init__(self, key, runspec=None):
         assert key is not None
         self.key = key
@@ -265,6 +272,54 @@ class TaskState:
         return self.state in PROCESSING or any(
             dep_ts.state in PROCESSING for dep_ts in self.dependents
         )
+
+
+class UniqueTaskHeap(Collection):
+    """A heap of TaskState objects ordered by TaskState.priority
+    Ties are broken by string comparison of the key. Keys are guaranteed to be
+    unique. Iterating over this object returns the elements in priority order.
+    """
+
+    def __init__(self, collection: Collection[TaskState] = ()):
+        self._known = {ts.key for ts in collection}
+        self._heap = [(ts.priority, ts.key, ts) for ts in collection]
+        heapq.heapify(self._heap)
+
+    def push(self, ts: TaskState) -> None:
+        """Add a new TaskState instance to the heap. If the key is already
+        known, no object is added.
+
+        Note: This does not update the priority / heap order in case priority
+        changes.
+        """
+        assert isinstance(ts, TaskState)
+        if ts.key not in self._known:
+            heapq.heappush(self._heap, (ts.priority, ts.key, ts))
+            self._known.add(ts.key)
+
+    def pop(self) -> TaskState:
+        """Pop the task with highest priority from the heap."""
+        _, key, ts = heapq.heappop(self._heap)
+        self._known.remove(key)
+        return ts
+
+    def peek(self) -> TaskState:
+        """Get the highest priority TaskState without removing it from the heap"""
+        return self._heap[0][2]
+
+    def __contains__(self, x: object) -> bool:
+        if isinstance(x, TaskState):
+            x = x.key
+        return x in self._known
+
+    def __iter__(self) -> Iterator[TaskState]:
+        return (ts for _, _, ts in sorted(self._heap))
+
+    def __len__(self) -> int:
+        return len(self._known)
+
+    def __repr__(self) -> str:
+        return f"<{type(self).__name__}: {len(self)} items>"
 
 
 class Worker(ServerNode):
@@ -342,8 +397,8 @@ class Worker(ServerNode):
     * **data.disk:** ``{key: object}``:
         Dictionary mapping keys to actual values stored on disk. Only
         available if condition for **data** being a zict.Buffer is met.
-    * **data_needed**: deque(keys)
-        The keys which still require data in order to execute, arranged in a deque
+    * **data_needed**: UniqueTaskHeap
+        The tasks which still require data in order to execute, prioritized as a heap
     * **ready**: [keys]
         Keys that are ready to run.  Stored in a LIFO stack
     * **constrained**: [keys]
@@ -358,8 +413,8 @@ class Worker(ServerNode):
         long-running clients.
     * **has_what**: ``{worker: {deps}}``
         The data that we care about that we think a worker has
-    * **pending_data_per_worker**: ``{worker: [dep]}``
-        The data on each worker that we still want, prioritized as a deque
+    * **pending_data_per_worker**: ``{worker: UniqueTaskHeap}``
+        The data on each worker that we still want, prioritized as a heap
     * **in_flight_tasks**: ``int``
         A count of the number of tasks that are coming to us in current
         peer-to-peer connections
@@ -457,10 +512,10 @@ class Worker(ServerNode):
     tasks: dict[str, TaskState]
     waiting_for_data_count: int
     has_what: defaultdict[str, set[str]]  # {worker address: {ts.key, ...}
-    pending_data_per_worker: defaultdict[str, deque[str]]
+    pending_data_per_worker: defaultdict[str, UniqueTaskHeap]
     nanny: Nanny | None
     _lock: threading.Lock
-    data_needed: list[tuple[int, str]]  # heap[(ts.priority, ts.key)]
+    data_needed: UniqueTaskHeap
     in_flight_workers: dict[str, set[str]]  # {worker address: {ts.key, ...}}
     total_out_connections: int
     total_in_connections: int
@@ -534,6 +589,7 @@ class Worker(ServerNode):
     name: Any
     scheduler_delay: float
     stream_comms: dict[str, BatchedSend]
+    heartbeat_interval: float
     heartbeat_active: bool
     _ipython_kernel: Any | None = None
     services: dict[str, Any] = {}
@@ -572,6 +628,7 @@ class Worker(ServerNode):
         preload_argv: list[str] | list[list[str]] | None = None,
         security: Security | dict[str, Any] | None = None,
         contact_address: str | None = None,
+        heartbeat_interval: Any = "1s",
         memory_monitor_interval: Any = "200ms",
         memory_target_fraction: float | Literal[False] | None = None,
         memory_spill_fraction: float | Literal[False] | None = None,
@@ -609,11 +666,11 @@ class Worker(ServerNode):
         self.tasks = {}
         self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)
-        self.pending_data_per_worker = defaultdict(deque)
+        self.pending_data_per_worker = defaultdict(UniqueTaskHeap)
         self.nanny = nanny
         self._lock = threading.Lock()
 
-        self.data_needed = []
+        self.data_needed = UniqueTaskHeap()
 
         self.in_flight_workers = {}
         self.total_out_connections = dask.config.get(
@@ -673,11 +730,11 @@ class Worker(ServerNode):
             ("executing", "released"): self.transition_executing_released,
             ("executing", "rescheduled"): self.transition_executing_rescheduled,
             ("fetch", "flight"): self.transition_fetch_flight,
-            ("fetch", "missing"): self.transition_fetch_missing,
             ("fetch", "released"): self.transition_generic_released,
             ("flight", "error"): self.transition_flight_error,
             ("flight", "fetch"): self.transition_flight_fetch,
             ("flight", "memory"): self.transition_flight_memory,
+            ("flight", "missing"): self.transition_flight_missing,
             ("flight", "released"): self.transition_flight_released,
             ("long-running", "error"): self.transition_generic_error,
             ("long-running", "memory"): self.transition_long_running_memory,
@@ -947,8 +1004,10 @@ class Worker(ServerNode):
             "worker": self,
         }
 
-        pc = PeriodicCallback(self.heartbeat, 1000)
+        self.heartbeat_interval = parse_timedelta(heartbeat_interval, default="ms")
+        pc = PeriodicCallback(self.heartbeat, self.heartbeat_interval * 1000)
         self.periodic_callbacks["heartbeat"] = pc
+
         pc = PeriodicCallback(
             lambda: self.batched_stream.send({"op": "keep-alive"}), 60000
         )
@@ -1156,6 +1215,10 @@ class Worker(ServerNode):
             "status": self.status,
             "ready": self.ready,
             "constrained": self.constrained,
+            "data_needed": list(self.data_needed),
+            "pending_data_per_worker": {
+                w: list(v) for w, v in self.pending_data_per_worker.items()
+            },
             "long_running": self.long_running,
             "executing_count": self.executing_count,
             "in_flight_tasks": self.in_flight_tasks,
@@ -1913,7 +1976,6 @@ class Worker(ServerNode):
         ts = self.tasks.get(key)
         if ts and ts.state in READY | {"waiting"}:
             self.log.append((key, "cancel-compute", reason, time()))
-            ts.scheduler_holds_ref = False
             # All possible dependents of TS should not be in state Processing on
             # scheduler side and therefore should not be assigned to a worker,
             # yet.
@@ -1942,7 +2004,7 @@ class Worker(ServerNode):
             if ts.state != "memory":
                 recommendations[ts] = "fetch"
 
-        self.update_who_has(who_has, stimulus_id=stimulus_id)
+        self.update_who_has(who_has)
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
     def ensure_task_exists(
@@ -2038,11 +2100,10 @@ class Worker(ServerNode):
 
         for msg in scheduler_msgs:
             self.batched_stream.send(msg)
+
+        self.update_who_has(who_has)
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
-        # We received new info, that's great but not related to the compute-task
-        # instruction
-        self.update_who_has(who_has, stimulus_id=stimulus_id)
         if nbytes is not None:
             for key, value in nbytes.items():
                 self.tasks[key].nbytes = value
@@ -2055,7 +2116,7 @@ class Worker(ServerNode):
         self._missing_dep_flight.discard(ts)
         ts.state = "fetch"
         ts.done = False
-        heapq.heappush(self.data_needed, (ts.priority, ts.key))
+        self.data_needed.push(ts)
         return {}, []
 
     def transition_missing_released(self, ts, *, stimulus_id):
@@ -2066,10 +2127,11 @@ class Worker(ServerNode):
         assert ts.key in self.tasks
         return recommendations, smsgs
 
-    def transition_fetch_missing(self, ts, *, stimulus_id):
-        # handle_missing will append to self.data_needed if new workers are found
+    def transition_flight_missing(self, ts, *, stimulus_id):
+        assert ts.done
         ts.state = "missing"
         self._missing_dep_flight.add(ts)
+        ts.done = False
         return {}, []
 
     def transition_released_fetch(self, ts, *, stimulus_id):
@@ -2077,10 +2139,10 @@ class Worker(ServerNode):
             assert ts.state == "released"
             assert ts.priority is not None
         for w in ts.who_has:
-            self.pending_data_per_worker[w].append(ts.key)
+            self.pending_data_per_worker[w].push(ts)
         ts.state = "fetch"
         ts.done = False
-        heapq.heappush(self.data_needed, (ts.priority, ts.key))
+        self.data_needed.push(ts)
         return {}, []
 
     def transition_generic_released(self, ts, *, stimulus_id):
@@ -2126,7 +2188,6 @@ class Worker(ServerNode):
         if self.validate:
             assert ts.state == "fetch"
             assert ts.who_has
-            assert ts.key not in self.data_needed
 
         ts.done = False
         ts.state = "flight"
@@ -2425,11 +2486,17 @@ class Worker(ServerNode):
         # we can reset the task and transition to fetch again. If it is not yet
         # finished, this should be a no-op
         if ts.done:
-            recommendations, smsgs = self.transition_generic_released(
-                ts, stimulus_id=stimulus_id
-            )
-            recommendations[ts] = "fetch"
-            return recommendations, smsgs
+            recommendations = {}
+            ts.state = "fetch"
+            ts.coming_from = None
+            ts.done = False
+            if not ts.who_has:
+                recommendations[ts] = "missing"
+            else:
+                self.data_needed.push(ts)
+                for w in ts.who_has:
+                    self.pending_data_per_worker[w].push(ts)
+            return recommendations, []
         else:
             return {}, []
 
@@ -2692,24 +2759,15 @@ class Worker(ServerNode):
                 self.total_out_connections,
             )
 
-            _, key = heapq.heappop(self.data_needed)
-
-            try:
-                ts = self.tasks[key]
-            except KeyError:
-                continue
+            ts = self.data_needed.pop()
 
             if ts.state != "fetch":
-                continue
-
-            if not ts.who_has:
-                self.transition(ts, "missing", stimulus_id=stimulus_id)
                 continue
 
             workers = [w for w in ts.who_has if w not in self.in_flight_workers]
             if not workers:
                 assert ts.priority is not None
-                skipped_worker_in_flight.append((ts.priority, ts.key))
+                skipped_worker_in_flight.append(ts)
                 continue
 
             host = get_address_host(self.address)
@@ -2740,7 +2798,7 @@ class Worker(ServerNode):
             )
 
         for el in skipped_worker_in_flight:
-            heapq.heappush(self.data_needed, el)
+            self.data_needed.push(el)
 
     def _get_task_finished_msg(self, ts):
         if ts.key not in self.data and ts.key not in self.actors:
@@ -2834,13 +2892,12 @@ class Worker(ServerNode):
         L = self.pending_data_per_worker[worker]
 
         while L:
-            d = L.popleft()
-            ts = self.tasks.get(d)
-            if ts is None or ts.state != "fetch":
+            ts = L.pop()
+            if ts.state != "fetch":
                 continue
             if total_bytes + ts.get_nbytes() > self.target_message_size:
                 break
-            deps.add(d)
+            deps.add(ts.key)
             total_bytes += ts.get_nbytes()
 
         return deps, total_bytes
@@ -3077,7 +3134,7 @@ class Worker(ServerNode):
                         self.batched_stream.send(
                             {"op": "missing-data", "errant_worker": worker, "key": d}
                         )
-                        recommendations[ts] = "fetch"
+                        recommendations[ts] = "fetch" if ts.who_has else "missing"
                 del data, response
                 self.transitions(recommendations, stimulus_id=stimulus_id)
                 self.ensure_computing()
@@ -3089,7 +3146,7 @@ class Worker(ServerNode):
                     self.repetitively_busy += 1
                     await asyncio.sleep(0.100 * 1.5 ** self.repetitively_busy)
 
-                    await self.query_who_has(*to_gather_keys, stimulus_id=stimulus_id)
+                    await self.query_who_has(*to_gather_keys)
 
                 self.ensure_communicating()
 
@@ -3108,7 +3165,12 @@ class Worker(ServerNode):
                     keys=[ts.key for ts in self._missing_dep_flight],
                 )
                 who_has = {k: v for k, v in who_has.items() if v}
-                self.update_who_has(who_has, stimulus_id=stimulus_id)
+                self.update_who_has(who_has)
+                recommendations = {}
+                for ts in self._missing_dep_flight:
+                    if ts.who_has:
+                        recommendations[ts] = "fetch"
+                self.transitions(recommendations, stimulus_id=stimulus_id)
 
             finally:
                 # This is quite arbitrary but the heartbeat has scaling implemented
@@ -3118,24 +3180,20 @@ class Worker(ServerNode):
                 self.ensure_communicating()
                 self.ensure_computing()
 
-    async def query_who_has(
-        self, *deps: str, stimulus_id: str
-    ) -> dict[str, Collection[str]]:
+    async def query_who_has(self, *deps: str) -> dict[str, Collection[str]]:
         with log_errors():
             who_has = await retry_operation(self.scheduler.who_has, keys=deps)
-            self.update_who_has(who_has, stimulus_id=stimulus_id)
+            self.update_who_has(who_has)
             return who_has
 
-    def update_who_has(
-        self, who_has: dict[str, Collection[str]], *, stimulus_id: str
-    ) -> None:
+    def update_who_has(self, who_has: dict[str, Collection[str]]) -> None:
         try:
-            recommendations = {}
             for dep, workers in who_has.items():
                 if not workers:
                     continue
 
                 if dep in self.tasks:
+                    dep_ts = self.tasks[dep]
                     if self.address in workers and self.tasks[dep].state != "memory":
                         logger.debug(
                             "Scheduler claims worker %s holds data for task %s which is not true.",
@@ -3144,18 +3202,11 @@ class Worker(ServerNode):
                         )
                         # Do not mutate the input dict. That's rude
                         workers = set(workers) - {self.address}
-                    dep_ts = self.tasks[dep]
-                    if dep_ts.state in FETCH_INTENDED:
-                        dep_ts.who_has.update(workers)
+                    dep_ts.who_has.update(workers)
 
-                        if dep_ts.state == "missing":
-                            recommendations[dep_ts] = "fetch"
-
-                        for worker in workers:
-                            self.has_what[worker].add(dep)
-                            self.pending_data_per_worker[worker].append(dep_ts.key)
-
-            self.transitions(recommendations, stimulus_id=stimulus_id)
+                    for worker in workers:
+                        self.has_what[worker].add(dep)
+                        self.pending_data_per_worker[worker].push(dep_ts)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -3874,16 +3925,19 @@ class Worker(ServerNode):
         assert ts.key not in self.data
         assert self.address not in ts.who_has
         assert not ts.done
+        assert ts in self.data_needed
+        assert ts.who_has
 
         for w in ts.who_has:
             assert ts.key in self.has_what[w]
+            assert ts in self.pending_data_per_worker[w]
 
     def validate_task_missing(self, ts):
         assert ts.key not in self.data
         assert not ts.who_has
         assert not ts.done
         assert not any(ts.key in has_what for has_what in self.has_what.values())
-        assert ts.key in self._missing_dep_flight
+        assert ts in self._missing_dep_flight
 
     def validate_task_cancelled(self, ts):
         assert ts.key not in self.data
@@ -3903,7 +3957,6 @@ class Worker(ServerNode):
         assert ts not in self._in_flight_tasks
         assert ts not in self._missing_dep_flight
         assert ts not in self._missing_dep_flight
-        assert not ts.who_has
         assert not any(ts.key in has_what for has_what in self.has_what.values())
         assert not ts.waiting_for_data
         assert not ts.done
@@ -3973,13 +4026,9 @@ class Worker(ServerNode):
                     assert (
                         ts_wait.state
                         in READY | {"executing", "flight", "fetch", "missing"}
-                        or ts_wait.key in self._missing_dep_flight
+                        or ts_wait in self._missing_dep_flight
                         or ts_wait.who_has.issubset(self.in_flight_workers)
                     ), (ts, ts_wait, self.story(ts), self.story(ts_wait))
-                if ts.state == "memory":
-                    assert isinstance(ts.nbytes, int)
-                    assert not ts.waiting_for_data
-                    assert ts.key in self.data or ts.key in self.actors
             assert self.waiting_for_data_count == waiting_for_data_count
             for worker, keys in self.has_what.items():
                 for k in keys:

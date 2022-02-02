@@ -6,12 +6,12 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NewType
 
-import pandas as pd
-
 from distributed.protocol import to_serialize
 from distributed.utils import sync
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from distributed.worker import Worker
 
 ShuffleId = NewType("ShuffleId", str)
@@ -103,6 +103,8 @@ class Shuffle:
         await asyncio.gather(*tasks)
 
     def get_output_partition(self, i: int) -> pd.DataFrame:
+        import pandas as pd
+
         assert self.transferred, "`get_output_partition` called before barrier task"
 
         assert self.metadata.worker_for(i) == self.worker.address, (

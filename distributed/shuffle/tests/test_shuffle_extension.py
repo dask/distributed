@@ -5,10 +5,10 @@ import string
 from collections import Counter
 from typing import TYPE_CHECKING
 
-import pandas as pd
 import pytest
 
-import dask.dataframe as dd
+pd = pytest.importorskip("pandas")
+dd = pytest.importorskip("dask.dataframe")
 
 from distributed.utils_test import gen_cluster
 

@@ -1,6 +1,59 @@
 Changelog
 =========
 
+.. _v2022.01.1:
+
+2022.01.1
+---------
+
+Released on January 28, 2022
+
+New Features
+^^^^^^^^^^^^
+- P2P shuffle skeleton (:pr:`5520`) `Gabe Joseph`_
+
+Enhancements
+^^^^^^^^^^^^
+- Fix ``<Task pending name='...' coro=<Client._handle_report()>`` (:pr:`5721`) `Thomas Grainger`_
+- Add ``distributed.client.security-loader`` config (:pr:`5693`) `Jim Crist-Harif`_
+- Avoid ``Client._handle_report`` cancelling itself on ``Client._close`` (:pr:`5672`) `Thomas Grainger`_
+- Paused workers shouldn't steal tasks (:pr:`5665`) `crusaderky`_
+- Add option for timestamps from output of ``Node.get_logs`` (:pr:`4932`) `Charles Blackmon-Luca`_
+- Don't use ``time.time()`` or ``IOLoop.time()`` (:pr:`5661`) `crusaderky`_
+
+Bug Fixes
+^^^^^^^^^
+- Raise plugin exceptions on ``Worker.start()`` (:pr:`4298`) `Peter Andreas Entschev`_
+
+Documentation
+^^^^^^^^^^^^^
+- Fixing docstrings (:pr:`5696`) `Julia Signell`_
+- Fix typo in ``Client.run`` docstring (:pr:`5687`) `Thomas Grainger`_
+- Update ``client.py`` docstrings (:pr:`5670`) `Tim Harris`_
+
+Maintenance
+^^^^^^^^^^^
+- Skip shuffle tests if ``pandas`` / ``dask.dataframe`` not installed (:pr:`5730`) `James Bourbeau`_
+- Improve test coverage (:pr:`5655`) `Sarah Charlotte Johnson`_
+- Test report improvements (:pr:`5714`) `Ian Rose`_
+- P2P shuffle: ignore row order in tests (:pr:`5706`) `Gabe Joseph`_
+- Fix flaky ``test_no_reconnect[--no-nanny]`` (:pr:`5686`) `Thomas Grainger`_
+- Pin coverage to 6.2 (:pr:`5716`) `Thomas Grainger`_
+- Check for new name of timeouts artifact and be more fault tolerant (:pr:`5707`) `Ian Rose`_
+- Revisit rebalance unit tests (:pr:`5697`) `crusaderky`_
+- Update comment in ``rearrange_by_column_p2p`` (:pr:`5701`) `James Bourbeau`_
+- Update gpuCI ``RAPIDS_VER`` to ``22.04`` (:pr:`5676`)
+- Fix groupby test after meta requirements got stricter in Dask PR#8563 (:pr:`5694`) `Julia Signell`_
+- Fix flaky ``test_close_gracefully`` and ``test_lifetime`` (:pr:`5677`) `crusaderky`_
+- Fix flaky ``test_workspace_concurrency`` (:pr:`5690`) `crusaderky`_
+- Fix flaky ``test_shuffle_extension.py::test_get_partition`` (:pr:`5689`) `Gabe Joseph`_
+- Fix flaky ``test_dump_cluster_unresponsive_remote_worker`` (:pr:`5679`) `crusaderky`_
+- Dump cluster state on all test failures (:pr:`5674`) `crusaderky`_
+- Update license format (:pr:`5652`) `James Bourbeau`_
+- Fix flaky ``test_drop_with_paused_workers_with_running_tasks_3_4`` (:pr:`5673`) `crusaderky`_
+- Do not raise an exception if the GitHub token cannot be found (:pr:`5668`) `Florian Jetter`_
+
+
 .. _v2022.01.0:
 
 2022.01.0
@@ -3152,3 +3205,6 @@ significantly without many new features.
 .. _`Aneesh Nema`: https://github.com/aneeshnema
 .. _`Deepyaman Datta`: https://github.com/deepyaman
 .. _`Garry O'Donnell`: https://github.com/garryod
+.. _`Thomas Grainger`: https://github.com/graingert
+.. _`Sarah Charlotte Johnson`: https://github.com/scharlottej13
+.. _`Tim Harris`: https://github.com/tharris72

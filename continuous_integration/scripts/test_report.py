@@ -172,7 +172,7 @@ if __name__ == "__main__":
         for w in workflows
         if (
             pandas.to_datetime(w["created_at"])
-            > pandas.Timestamp.now(tz="UTC") - pandas.Timedelta(days=31)
+            > pandas.Timestamp.now(tz="UTC") - pandas.Timedelta(days=90)
             and w["conclusion"] != "cancelled"
             and w["name"].lower() == "tests"
         )
@@ -202,28 +202,32 @@ if __name__ == "__main__":
                     name=a["name"],
                     suite=suite_from_name(a["name"]),
                     date=w["created_at"],
+                    url=w["html_url"],
                 )
                 w["dfs"].append(df)
 
-    # Compute the set of test suites which form the top-level grouping for the chart
-    # (e.g., ubuntu-latest-3.9, windows-latest-3.7)
-    suites = set()
+    # Make a top-level dict of dataframes, mapping test name to a dataframe
+    # of all check suites that ran that test.
+    # Note: we drop **all** tests which did not have at least one failure.
+    # This is because, as nice as a block of green tests can be, there are
+    # far too many tests to visualize at once, so we only want to look at
+    # flaky tests. If the test suite has been doing well, this chart should
+    # dwindle to nothing!
+    dfs = []
     for w in workflows:
-        for a in w["artifacts"]:
-            suites.add(suite_from_name(a["name"]))
-
-    # Make a top-level dict of dataframes, mapping test suite name to a long-form
-    # dataframe of all the tests run in that suite.
-    overall: dict[str, pandas.DataFrame] = {}
-    for s in sorted(suites):
-        overall
-        dfs = []
-        for w in workflows:
-            dfs.extend([df[df.suite == s] for df in w["dfs"]])
-        overall[s] = pandas.concat(dfs, axis=0)
+        dfs.extend([df for df in w["dfs"]])
+    total = pandas.concat(dfs, axis=0)
+    grouped = (
+        total.groupby(total.index)
+        .filter(lambda g: (g.status == "x").any())
+        .reset_index()
+        .assign(test=lambda df: df.file + "." + df.test)
+        .groupby("test")
+    )
+    overall = {name: grouped.get_group(name) for name in grouped.groups}
 
     # Get all of the workflow timestamps that we wound up with, which we can use
-    # below to align the different suites.
+    # below to align the different groups.
     times = set()
     for df in overall.values():
         times.update(df.date.unique())
@@ -232,18 +236,6 @@ if __name__ == "__main__":
     altair.data_transformers.disable_max_rows()
     charts = []
     for name, df in overall.items():
-        # Final reshaping for altair plotting.
-        # Note: we drop **all** tests which did not have at least one failure.
-        # This is because, as nice as a block of green tests can be, there are
-        # far too many tests to visualize at once, so we only want to look at
-        # flaky tests. If the test suite has been doing well, this chart should
-        # dwindle to nothing!
-        df = (
-            df.groupby(df.index)
-            .filter(lambda g: (g.status == "x").any())
-            .reset_index()
-            .assign(test=lambda df: df.file + "." + df.test)
-        )
         # Don't show this suite if it has passed all tests recently.
         if not len(df):
             continue
@@ -251,10 +243,10 @@ if __name__ == "__main__":
         # Create an aggregated form of the suite with overall pass rate
         # over the time in question.
         df_agg = (
-            df[df.status == "✓"]
-            .groupby("test")
+            df[df.status != "x"]
+            .groupby("suite")
             .size()
-            .truediv(df.groupby("test").size(), fill_value=0)
+            .truediv(df.groupby("suite").size(), fill_value=0)
             .to_frame(name="Pass Rate")
             .reset_index()
         )
@@ -265,7 +257,8 @@ if __name__ == "__main__":
             .mark_rect(stroke="gray")
             .encode(
                 x=altair.X("date:O", scale=altair.Scale(domain=sorted(list(times)))),
-                y=altair.Y("test:N", title=None),
+                y=altair.Y("suite:N", title=None),
+                href=altair.Href("url:N"),
                 color=altair.Color(
                     "status:N",
                     scale=altair.Scale(
@@ -273,13 +266,13 @@ if __name__ == "__main__":
                         range=list(COLORS.values()),
                     ),
                 ),
-                tooltip=["test:N", "date:O", "status:N", "message:N"],
+                tooltip=["suite:N", "date:O", "status:N", "message:N", "url:N"],
             )
             .properties(title=name)
             | altair.Chart(df_agg.assign(_="_"))
             .mark_rect(stroke="gray")
             .encode(
-                y=altair.Y("test:N", title=None, axis=altair.Axis(labels=False)),
+                y=altair.Y("suite:N", title=None, axis=altair.Axis(labels=False)),
                 x=altair.X("_:N", title=None),
                 color=altair.Color(
                     "Pass Rate:Q",
@@ -287,7 +280,7 @@ if __name__ == "__main__":
                         range=[COLORS["x"], COLORS["✓"]], domain=[0.0, 1.0]
                     ),
                 ),
-                tooltip=["test:N", "Pass Rate:Q"],
+                tooltip=["suite:N", "Pass Rate:Q"],
             )
         )
 
@@ -295,6 +288,14 @@ if __name__ == "__main__":
     chart = (
         altair.vconcat(*charts)
         .configure_axis(labelLimit=1000)  # test names are long
+        .configure_title(anchor="start")
         .resolve_scale(x="shared")  # enforce aligned x axes
     )
-    altair_saver.save(chart, "test_report.html", embed_options={"renderer": "svg"})
+    altair_saver.save(
+        chart,
+        "test_report.html",
+        embed_options={
+            "renderer": "svg",  # Makes the text searchable
+            "loader": {"target": "_blank"},  # Open hrefs in a new window
+        },
+    )
