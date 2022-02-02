@@ -751,12 +751,12 @@ class WorkerState:
         return ws
 
     def __repr__(self):
-        return "<WorkerState %r, name: %s, status: %s, memory: %d, processing: %d>" % (
-            self._address,
-            self._name,
-            self._status.name,
-            len(self._has_what),
-            len(self._processing),
+        name = f", name: {self.name}" if self.name != self.address else ""
+        return (
+            f"<WorkerState {self._address!r}{name}, "
+            f"status: {self._status.name}, "
+            f"memory: {len(self._has_what)}, "
+            f"processing: {len(self._processing)}>"
         )
 
     def _repr_html_(self):
@@ -3984,11 +3984,11 @@ class Scheduler(SchedulerState, ServerNode):
 
     def __repr__(self):
         parent: SchedulerState = cast(SchedulerState, self)
-        return '<Scheduler: "%s" workers: %d cores: %d, tasks: %d>' % (
-            self.address,
-            len(parent._workers_dv),
-            parent._total_nthreads,
-            len(parent._tasks),
+        return (
+            f"<Scheduler {self.address!r}, "
+            f"workers: {len(parent._workers_dv)}, "
+            f"cores: {parent._total_nthreads}, "
+            f"tasks: {len(parent._tasks)}>"
         )
 
     def _repr_html_(self):

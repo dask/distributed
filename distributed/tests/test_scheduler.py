@@ -3374,3 +3374,29 @@ async def test_non_idempotent_plugins(s):
     await s.register_scheduler_plugin(plugin=dumps(second), idempotent=False)
     assert "nonidempotentplugin" in s.plugins
     assert s.plugins["nonidempotentplugin"].instance == "second"
+
+
+@gen_cluster(nthreads=[("", 1)])
+async def test_repr(s, a):
+    async with Worker(s.address, nthreads=2) as b:  # name = address by default
+        ws_a = s.workers[a.address]
+        ws_b = s.workers[b.address]
+        while ws_b.status != Status.running:
+            await asyncio.sleep(0.01)
+        assert repr(s) == f"<Scheduler {s.address!r}, workers: 2, cores: 3, tasks: 0>"
+        assert (
+            repr(a)
+            == f"<Worker {a.address!r}, name: 0, status: running, stored: 0, running: 0/1, ready: 0, comm: 0, waiting: 0>"
+        )
+        assert (
+            repr(b)
+            == f"<Worker {b.address!r}, status: running, stored: 0, running: 0/2, ready: 0, comm: 0, waiting: 0>"
+        )
+        assert (
+            repr(ws_a)
+            == f"<WorkerState {a.address!r}, name: 0, status: running, memory: 0, processing: 0>"
+        )
+        assert (
+            repr(ws_b)
+            == f"<WorkerState {b.address!r}, status: running, memory: 0, processing: 0>"
+        )

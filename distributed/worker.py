@@ -1073,17 +1073,15 @@ class Worker(ServerNode):
     ##################
 
     def __repr__(self):
-        return "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>" % (
-            self.__class__.__name__,
-            self.address,
-            self.name,
-            self.status,
-            len(self.data),
-            self.executing_count,
-            self.nthreads,
-            len(self.ready),
-            self.in_flight_tasks,
-            self.waiting_for_data_count,
+        name = f", name: {self.name}" if self.name != self.address else ""
+        return (
+            f"<{self.__class__.__name__} {self.address!r}{name}, "
+            f"status: {self.status.name}, "
+            f"stored: {len(self.data)}, "
+            f"running: {self.executing_count}/{self.nthreads}, "
+            f"ready: {len(self.ready)}, "
+            f"comm: {self.in_flight_tasks}, "
+            f"waiting: {self.waiting_for_data_count}>"
         )
 
     @property
