@@ -35,6 +35,10 @@ class SpillBuffer(zict.Buffer):
         Minimum interval, in seconds, between warnings on the log file about full disk
     """
 
+    last_logged: float
+    min_log_interval: float
+    logged_pickle_errors: set[str]
+
     def __init__(
         self,
         spill_directory: str,
