@@ -57,7 +57,14 @@ from distributed.utils_test import (
     slowinc,
     slowsum,
 )
-from distributed.worker import Worker, error_message, logger, parse_memory_limit
+from distributed.worker import (
+    TaskState,
+    UniqueTaskHeap,
+    Worker,
+    error_message,
+    logger,
+    parse_memory_limit,
+)
 
 pytestmark = pytest.mark.ci1
 
@@ -1390,7 +1397,6 @@ async def test_prefer_gather_from_local_address(c, s, w1, w2, w3):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)] * 20,
-    timeout=30,
     config={"distributed.worker.connections.incoming": 1},
 )
 async def test_avoid_oversubscription(c, s, *workers):
@@ -1627,32 +1633,72 @@ async def test_worker_listens_on_same_interface_by_default(cleanup, Worker):
 
 @gen_cluster(client=True)
 async def test_close_gracefully(c, s, a, b):
-    futures = c.map(slowinc, range(200), delay=0.1)
+    futures = c.map(slowinc, range(200), delay=0.1, workers=[b.address])
 
-    while not b.data:
+    # Note: keys will appear in b.data several milliseconds before they switch to
+    # status=memory in s.tasks. It's important to sample the in-memory keys from the
+    # scheduler side, because those that the scheduler thinks are still processing won't
+    # be replicated by retire_workers().
+    while True:
+        mem = {k for k, ts in s.tasks.items() if ts.state == "memory"}
+        if len(mem) >= 8 and any(ts.state == "executing" for ts in b.tasks.values()):
+            break
         await asyncio.sleep(0.01)
-    mem = set(b.data)
-    proc = {ts for ts in b.tasks.values() if ts.state == "executing"}
-    assert proc
 
     await b.close_gracefully()
 
     assert b.status == Status.closed
     assert b.address not in s.workers
-    assert mem.issubset(a.data.keys())
-    for ts in proc:
-        assert ts.state in ("executing", "memory")
+
+    # All tasks that were in memory in b have been copied over to a;
+    # they have not been recomputed
+    for key in mem:
+        assert_worker_story(
+            a.story(key),
+            [
+                (key, "put-in-memory"),
+                (key, "receive-from-scatter"),
+            ],
+            strict=True,
+        )
+        assert key in a.data
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[])
-async def test_lifetime(c, s):
-    async with Worker(s.address) as a, Worker(s.address, lifetime="1 seconds") as b:
-        futures = c.map(slowinc, range(200), delay=0.1, worker=[b.address])
-        await asyncio.sleep(1.5)
-        assert b.status not in (Status.running, Status.paused)
-        await b.finished()
-        assert set(b.data) == set(a.data)  # successfully moved data over
+@gen_cluster(client=True, nthreads=[("", 1)], timeout=10)
+async def test_lifetime(c, s, a):
+    # Note: test was occasionally failing with lifetime="1 seconds"
+    async with Worker(s.address, lifetime="2 seconds") as b:
+        futures = c.map(slowinc, range(200), delay=0.1, workers=[b.address])
+
+        # Note: keys will appear in b.data several milliseconds before they switch to
+        # status=memory in s.tasks. It's important to sample the in-memory keys from the
+        # scheduler side, because those that the scheduler thinks are still processing
+        # won't be replicated by retire_workers().
+        while True:
+            mem = {k for k, ts in s.tasks.items() if ts.state == "memory"}
+            if len(mem) >= 8:
+                break
+            await asyncio.sleep(0.01)
+
+        assert b.status == Status.running
+        assert not a.data
+
+        while b.status != Status.closed:
+            await asyncio.sleep(0.01)
+
+    # All tasks that were in memory in b have been copied over to a;
+    # they have not been recomputed
+    for key in mem:
+        assert_worker_story(
+            a.story(key),
+            [
+                (key, "put-in-memory"),
+                (key, "receive-from-scatter"),
+            ],
+            strict=True,
+        )
+        assert key in a.data
 
 
 @gen_cluster(worker_kwargs={"lifetime": "10s", "lifetime_stagger": "2s"})
@@ -2146,12 +2192,26 @@ async def test_gpu_executor(c, s, w):
         assert "gpu" not in w.executors
 
 
-def assert_task_states_on_worker(expected, worker):
-    for dep_key, expected_state in expected.items():
-        assert dep_key in worker.tasks, (worker.name, dep_key, worker.tasks)
-        dep_ts = worker.tasks[dep_key]
-        assert dep_ts.state == expected_state, (worker.name, dep_ts, expected_state)
-    assert set(expected) == set(worker.tasks)
+async def assert_task_states_on_worker(expected, worker):
+    active_exc = None
+    for _ in range(10):
+        try:
+            for dep_key, expected_state in expected.items():
+                assert dep_key in worker.tasks, (worker.name, dep_key, worker.tasks)
+                dep_ts = worker.tasks[dep_key]
+                assert dep_ts.state == expected_state, (
+                    worker.name,
+                    dep_ts,
+                    expected_state,
+                )
+            assert set(expected) == set(worker.tasks)
+            return
+        except AssertionError as exc:
+            active_exc = exc
+            await asyncio.sleep(0.1)
+    # If after a second the workers are not in equilibrium, they are broken
+    assert active_exc
+    raise active_exc
 
 
 @gen_cluster(client=True)
@@ -2195,7 +2255,7 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
         g.key: "memory",
         res.key: "error",
     }
-    assert_task_states_on_worker(expected_states, a)
+    await assert_task_states_on_worker(expected_states, a)
     # Expected states after we release references to the futures
     f.release()
     g.release()
@@ -2211,7 +2271,7 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
         res.key: "error",
     }
 
-    assert_task_states_on_worker(expected_states, a)
+    await assert_task_states_on_worker(expected_states, a)
 
     res.release()
 
@@ -2264,7 +2324,7 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
         g.key: "memory",
         res.key: "error",
     }
-    assert_task_states_on_worker(expected_states, a)
+    await assert_task_states_on_worker(expected_states, a)
     # Expected states after we release references to the futures
 
     res.release()
@@ -2278,7 +2338,7 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
         g.key: "memory",
     }
 
-    assert_task_states_on_worker(expected_states, a)
+    await assert_task_states_on_worker(expected_states, a)
 
     f.release()
     g.release()
@@ -2329,7 +2389,7 @@ async def test_worker_state_error_release_error_int(c, s, a, b):
         g.key: "memory",
         res.key: "error",
     }
-    assert_task_states_on_worker(expected_states, a)
+    await assert_task_states_on_worker(expected_states, a)
     # Expected states after we release references to the futures
 
     f.release()
@@ -2343,8 +2403,8 @@ async def test_worker_state_error_release_error_int(c, s, a, b):
         g.key: "memory",
     }
 
-    assert_task_states_on_worker(expected_states, a)
-    assert_task_states_on_worker(expected_states, b)
+    await assert_task_states_on_worker(expected_states, a)
+    await assert_task_states_on_worker(expected_states, b)
 
     g.release()
 
@@ -2378,8 +2438,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
         g.key: "memory",
         h.key: "memory",
     }
-    await asyncio.sleep(0.05)
-    assert_task_states_on_worker(expected_states_A, a)
+    await assert_task_states_on_worker(expected_states_A, a)
 
     expected_states_B = {
         f.key: "memory",
@@ -2387,8 +2446,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
         h.key: "memory",
         res.key: "error",
     }
-    await asyncio.sleep(0.05)
-    assert_task_states_on_worker(expected_states_B, b)
+    await assert_task_states_on_worker(expected_states_B, b)
 
     f.release()
 
@@ -2396,8 +2454,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
         g.key: "memory",
         h.key: "memory",
     }
-    await asyncio.sleep(0.05)
-    assert_task_states_on_worker(expected_states_A, a)
+    await assert_task_states_on_worker(expected_states_A, a)
 
     expected_states_B = {
         f.key: "released",
@@ -2405,8 +2462,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
         h.key: "memory",
         res.key: "error",
     }
-    await asyncio.sleep(0.05)
-    assert_task_states_on_worker(expected_states_B, b)
+    await assert_task_states_on_worker(expected_states_B, b)
 
     g.release()
 
@@ -2414,8 +2470,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
         g.key: "released",
         h.key: "memory",
     }
-    await asyncio.sleep(0.05)
-    assert_task_states_on_worker(expected_states_A, a)
+    await assert_task_states_on_worker(expected_states_A, a)
 
     # B must not forget a task since all have a still valid dependent
     expected_states_B = {
@@ -2423,19 +2478,18 @@ async def test_worker_state_error_long_chain(c, s, a, b):
         h.key: "memory",
         res.key: "error",
     }
-    assert_task_states_on_worker(expected_states_B, b)
+    await assert_task_states_on_worker(expected_states_B, b)
     h.release()
-    await asyncio.sleep(0.05)
 
     expected_states_A = {}
-    assert_task_states_on_worker(expected_states_A, a)
+    await assert_task_states_on_worker(expected_states_A, a)
     expected_states_B = {
         f.key: "released",
         h.key: "released",
         res.key: "error",
     }
 
-    assert_task_states_on_worker(expected_states_B, b)
+    await assert_task_states_on_worker(expected_states_B, b)
     res.release()
 
     # We no longer hold any refs. Cluster should reset completely
@@ -3090,33 +3144,38 @@ async def test_missing_released_zombie_tasks(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_missing_released_zombie_tasks_2(c, s, a, b):
-    a.total_in_connections = 0
-    f1 = c.submit(inc, 1, key="f1", workers=[a.address])
-    f2 = c.submit(inc, f1, key="f2", workers=[b.address])
+    # If get_data_from_worker raises this will suggest a dead worker to B and it
+    # will transition the task to missing. We want to make sure that a missing
+    # task is properly released and not left as a zombie
+    with mock.patch.object(
+        distributed.worker,
+        "get_data_from_worker",
+        side_effect=CommClosedError,
+    ):
+        f1 = c.submit(inc, 1, key="f1", workers=[a.address])
+        f2 = c.submit(inc, f1, key="f2", workers=[b.address])
 
-    while f1.key not in b.tasks:
-        await asyncio.sleep(0)
+        while f1.key not in b.tasks:
+            await asyncio.sleep(0)
 
-    ts = b.tasks[f1.key]
-    assert ts.state == "fetch"
+        ts = b.tasks[f1.key]
+        assert ts.state == "fetch"
 
-    # A few things can happen to clear who_has. The dominant process is upon
-    # connection failure to a worker. Regardless of how the set was cleared, the
-    # task will be transitioned to missing where the worker is trying to
-    # reaquire this information from the scheduler. While this is happening on
-    # worker side, the tasks are released and we want to ensure that no dangling
-    # zombie tasks are left on the worker
-    ts.who_has.clear()
+        while ts.state != "missing":
+            # If we sleep for a longer time, the worker will spin into an
+            # endless loop of asking the scheduler who_has and trying to connect
+            # to A
+            await asyncio.sleep(0)
 
-    del f1, f2
+        del f1, f2
 
-    while b.tasks:
-        await asyncio.sleep(0.01)
+        while b.tasks:
+            await asyncio.sleep(0.01)
 
-    assert_worker_story(
-        b.story(ts),
-        [("f1", "missing", "released", "released", {"f1": "forgotten"})],
-    )
+        assert_worker_story(
+            b.story(ts),
+            [("f1", "missing", "released", "released", {"f1": "forgotten"})],
+        )
 
 
 @pytest.mark.slow
@@ -3401,6 +3460,8 @@ async def test_Worker__to_dict(c, s, a):
         "config",
         "incoming_transfer_log",
         "outgoing_transfer_log",
+        "data_needed",
+        "pending_data_per_worker",
     }
     assert d["tasks"]["x"]["key"] == "x"
 
@@ -3422,3 +3483,45 @@ async def test_TaskState__to_dict(c, s, a):
     assert isinstance(tasks["z"], dict)
     assert tasks["x"]["dependents"] == ["<TaskState 'y' memory>"]
     assert tasks["y"]["dependencies"] == ["<TaskState 'x' memory>"]
+
+
+def test_unique_task_heap():
+    heap = UniqueTaskHeap()
+
+    for x in range(10):
+        ts = TaskState(f"f{x}")
+        ts.priority = (0, 0, 1, x % 3)
+        heap.push(ts)
+
+    heap_list = list(heap)
+    # iteration does not empty heap
+    assert len(heap) == 10
+    assert heap_list == sorted(heap_list, key=lambda ts: ts.priority)
+
+    seen = set()
+    last_prio = (0, 0, 0, 0)
+    while heap:
+        peeked = heap.peek()
+        ts = heap.pop()
+        assert peeked == ts
+        seen.add(ts.key)
+        assert ts.priority
+        assert last_prio <= ts.priority
+        last_prio = last_prio
+
+    ts = TaskState("foo")
+    heap.push(ts)
+    heap.push(ts)
+    assert len(heap) == 1
+
+    assert repr(heap) == "<UniqueTaskHeap: 1 items>"
+
+    assert heap.pop() == ts
+    assert not heap
+
+    # Test that we're cleaning the seen set on pop
+    heap.push(ts)
+    assert len(heap) == 1
+    assert heap.pop() == ts
+
+    assert repr(heap) == "<UniqueTaskHeap: 0 items>"

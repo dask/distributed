@@ -286,7 +286,10 @@ properties:
               For a list of handlers see the `dask.distributed.Scheduler.handlers` attribute.
 
           multiprocessing-method:
-            type: string
+            enum:
+              - spawn
+              - fork
+              - forkserver
             description: |
               How we create new workers, one of "spawn", "forkserver", or "fork"
 
@@ -556,6 +559,17 @@ properties:
           scheduler-info-interval:
             type: string
             description: Interval between scheduler-info updates
+
+          security-loader:
+            type: [string, 'null']
+            description: |
+              A fully qualified name (e.g. ``module.submodule.function``) of
+              a callback to use for loading security credentials for the
+              client. If no security object is explicitly passed when creating
+              a ``Client``, this callback is called with a dict containing
+              client information (currently just ``address``), and should
+              return a ``Security`` object to use for this client, or ``None``
+              to fallback to the default security configuration.
 
       deploy:
         type: object
