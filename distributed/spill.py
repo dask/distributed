@@ -26,14 +26,13 @@ class SpillBuffer(zict.Buffer):
     Paramaters
     ----------
     spill_directory: str
-        Directory use as storage in slow. See zict.Func and zict.File
+        Location on disk to write the spill files to
     target: int
-        target memory when to start to spill. See also zict.Buffer and zict.LRU n and weight.
-    max_spill: int
-        Limit of number of bytes to be spilled on disk.
-        (default: read from config key distributed.worker.memory.spill-limit)
-    min_log_interval: float
-        Minimum logging time interval. Default 2 seconds.
+        Managed memory, in bytes, to start spilling at
+    max_spill: int | False, optional
+        Limit of number of bytes to be spilled on disk. Set to False to disable.
+    min_log_interval: float, optional
+        Minimum interval, in seconds, between warnings on the log file about full disk
     """
 
     def __init__(
