@@ -54,13 +54,9 @@ class SpillBuffer(zict.Buffer):
             n=target,
             weight=_in_memory_weight,
         )
-        self.time_log_maxspill: float = 0
-        self.time_log_oserror: float = 0
-        self.time_log_pickle: float = 0
-
+        self.last_logged = 0
         self.min_log_interval = min_log_interval
-
-        self.logged_pickle_keys: set = set()  # keys logged with pickle error
+        self.logged_pickle_errors = set()  # keys logged with pickle error
 
     def __setitem__(self, key, value):
         try:
