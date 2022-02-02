@@ -79,15 +79,15 @@ def test_nanny_worker_ports(loop):
 @pytest.mark.slow
 def test_nanny_worker_port_range(loop):
     with popen(["dask-scheduler", "--port", "9359", "--no-dashboard"]) as sched:
-        nprocs = 3
+        n_workers = 3
         worker_port = "9684:9686"
         nanny_port = "9688:9690"
         with popen(
             [
                 "dask-worker",
                 "127.0.0.1:9359",
-                "--nprocs",
-                f"{nprocs}",
+                "--nworkers",
+                f"{n_workers}",
                 "--host",
                 "127.0.0.1",
                 "--worker-port",
@@ -99,7 +99,7 @@ def test_nanny_worker_port_range(loop):
         ):
             with Client("127.0.0.1:9359", loop=loop) as c:
                 start = time()
-                while len(c.scheduler_info()["workers"]) < nprocs:
+                while len(c.scheduler_info()["workers"]) < n_workers:
                     sleep(0.1)
                     assert time() - start < 60
 
@@ -121,7 +121,7 @@ def test_nanny_worker_port_range_too_many_workers_raises(loop):
             [
                 "dask-worker",
                 "127.0.0.1:9359",
-                "--nprocs",
+                "--nworkers",
                 "3",
                 "--host",
                 "127.0.0.1",
@@ -291,10 +291,10 @@ def test_scheduler_address_env(loop, monkeypatch):
                     assert time() < start + 10
 
 
-def test_nprocs_requires_nanny(loop):
+def test_nworkers_requires_nanny(loop):
     with popen(["dask-scheduler", "--no-dashboard"]):
         with popen(
-            ["dask-worker", "127.0.0.1:8786", "--nprocs=2", "--no-nanny"]
+            ["dask-worker", "127.0.0.1:8786", "--nworkers=2", "--no-nanny"]
         ) as worker:
             assert any(
                 b"Failed to launch worker" in worker.stderr.readline()
@@ -302,25 +302,25 @@ def test_nprocs_requires_nanny(loop):
             )
 
 
-def test_nprocs_negative(loop):
+def test_nworkers_negative(loop):
     with popen(["dask-scheduler", "--no-dashboard"]):
-        with popen(["dask-worker", "127.0.0.1:8786", "--nprocs=-1"]):
+        with popen(["dask-worker", "127.0.0.1:8786", "--nworkers=-1"]):
             with Client("tcp://127.0.0.1:8786", loop=loop) as c:
                 c.wait_for_workers(cpu_count(), timeout="10 seconds")
 
 
-def test_nprocs_auto(loop):
+def test_nworkers_auto(loop):
     with popen(["dask-scheduler", "--no-dashboard"]):
-        with popen(["dask-worker", "127.0.0.1:8786", "--nprocs=auto"]):
+        with popen(["dask-worker", "127.0.0.1:8786", "--nworkers=auto"]):
             with Client("tcp://127.0.0.1:8786", loop=loop) as c:
                 procs, _ = nprocesses_nthreads()
                 c.wait_for_workers(procs, timeout="10 seconds")
 
 
-def test_nprocs_expands_name(loop):
+def test_nworkers_expands_name(loop):
     with popen(["dask-scheduler", "--no-dashboard"]):
-        with popen(["dask-worker", "127.0.0.1:8786", "--nprocs", "2", "--name", "0"]):
-            with popen(["dask-worker", "127.0.0.1:8786", "--nprocs", "2"]):
+        with popen(["dask-worker", "127.0.0.1:8786", "--nworkers", "2", "--name", "0"]):
+            with popen(["dask-worker", "127.0.0.1:8786", "--nworkers", "2"]):
                 with Client("tcp://127.0.0.1:8786", loop=loop) as c:
                     start = time()
                     while len(c.scheduler_info()["workers"]) < 4:
@@ -332,6 +332,30 @@ def test_nprocs_expands_name(loop):
                     foos = [n for n in names if n.startswith("0-")]
                     assert len(foos) == 2
                     assert len(set(names)) == 4
+
+
+def test_worker_cli_nprocs_renamed_to_nworkers(loop):
+    n_workers = 2
+    with popen(["dask-scheduler", "--no-dashboard"]):
+        with popen(
+            ["dask-worker", "127.0.0.1:8786", f"--nprocs={n_workers}"]
+        ) as worker:
+            assert any(
+                b"renamed to --nworkers" in worker.stderr.readline() for i in range(15)
+            )
+            with Client("tcp://127.0.0.1:8786", loop=loop) as c:
+                c.wait_for_workers(n_workers, timeout="30 seconds")
+
+
+def test_worker_cli_nworkers_with_nprocs_is_an_error():
+    with popen(["dask-scheduler", "--no-dashboard"]):
+        with popen(
+            ["dask-worker", "127.0.0.1:8786", "--nprocs=2", "--nworkers=2"]
+        ) as worker:
+            assert any(
+                b"Both --nprocs and --nworkers" in worker.stderr.readline()
+                for i in range(15)
+            )
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
