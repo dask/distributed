@@ -78,12 +78,11 @@ class SpillBuffer(zict.Buffer):
             pass
         except OSError:
             now = time.time()
-            if now - self.time_log_oserror >= self.min_log_interval:
+            if now - self.self.last_logged >= self.min_log_interval:
                 logger.error(
                     "Spill to disk failed; keeping data in memory", exc_info=True
                 )
-                self.time_log_oserror = now
-            pass
+                self.self.last_logged = now
         except PickleError as e:
             key_e, orig_e = e.args
             if key_e == key:
