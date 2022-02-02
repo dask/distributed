@@ -98,10 +98,12 @@ def test_spillbuffer(tmpdir):
     assert buf.slow.total_weight == pickle_large_size * 2
 
 
-@pytest.mark.skipif(
+requires_zict_210 = pytest.mark.skipif(
     parse_version(zict.__version__) <= parse_version("2.0.0"),
-    reason="requires zict version > 2.0.0 or higher",
+    reason="requires zict version > 2.0.0",
 )
+
+@requires_zict_210
 def test_spillbuffer_maxlim(tmpdir):
     buf = SpillBuffer(str(tmpdir), target=200, max_spill=600, min_log_interval=0)
 
