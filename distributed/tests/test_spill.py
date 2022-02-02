@@ -109,7 +109,7 @@ def test_spillbuffer_maxlim(tmpdir):
 
     a, b, c, d = "a" * 200, "b" * 100, "c" * 100, "d" * 200
 
-    psize_a = sum(len(frame) for frame in serialize_bytelist(a))  # this is size in disk
+    psize_a = sum(len(frame) for frame in serialize_bytelist(a))  # size on disk
 
     # size of a is bigger than target and is smaller than max_spill, key should be in slow
     buf["a"] = a
@@ -206,7 +206,7 @@ class MyError(Exception):
     parse_version(zict.__version__) <= parse_version("2.0.0"),
     reason="requires zict version > 2.0.0 or higher",
 )
-def test_spillbuffer_bad_key(tmpdir):
+def test_spillbuffer_fail_to_serialize(tmpdir):
     buf = SpillBuffer(str(tmpdir), target=200, max_spill=600, min_log_interval=0)
 
     class Bad:
@@ -217,7 +217,7 @@ def test_spillbuffer_bad_key(tmpdir):
             raise MyError()
 
         def __sizeof__(self):
-            return int(self.size)
+            return self.size
 
     # bad data individually larger than spill threshold target 200
     a = Bad(size=200)
