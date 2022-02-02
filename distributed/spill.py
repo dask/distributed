@@ -166,6 +166,11 @@ class Slow(zict.Func):
 
         pickled_size = sum(len(frame) for frame in pickled)
 
+        # Thanks to Buffer.__setitem__, we never update existing keys in slow,
+        # but always delete them and reinsert them.
+        assert key not in self.d
+        assert key not in self.weight_by_key
+        
         if (
             self.max_weight is not False
             and self.total_weight + pickled_size > self.max_weight
