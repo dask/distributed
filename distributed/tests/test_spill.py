@@ -2,7 +2,7 @@ import logging
 import subprocess
 
 import pytest
-import zict
+zict = pytest.importorskip("zict")
 from packaging.version import parse as parse_version
 
 from dask.sizeof import sizeof
