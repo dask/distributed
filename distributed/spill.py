@@ -98,13 +98,16 @@ class SpillBuffer(zict.Buffer):
                 # There's nothing wrong with the new key. The older key is still in memory.
                 assert key_e in self.fast
                 assert key_e not in self.slow
-                now = time.time()
-                if (key_e not in self.logged_pickle_keys) and (
-                    now - self.time_log_pickle >= self.min_log_interval
-                ):
+                if key_e not in self.logged_pickle_errors:
                     logger.error(f"Failed to pickle {key!r}", exc_info=True)
-                    self.logged_pickle_keys.add(key_e)
-                pass
+                    self.logged_pickle_errors.add(key_e)
+                    
+        else:  # no errors raised
+            self.logged_pickle_errors.discard(key)
+            
+    def __delitem__(self, key):
+        super().__delitem__(key)
+        self.logged_pickle_errors.discard(key)
 
     @property
     def memory(self) -> Mapping[Hashable, Any]:
