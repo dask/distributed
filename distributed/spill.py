@@ -70,11 +70,11 @@ class SpillBuffer(zict.Buffer):
             # key is in self.fast; no keys have been lost on eviction
             # Note: requires zict > 2.0
             now = time.time()
-            if now - self.time_log_maxspill >= self.min_log_interval:
+            if now - self.last_logged >= self.min_log_interval:
                 logger.warning(
                     "Spill file on disk reached capacity; keeping data in memory"
                 )
-                self.time_log_maxspill = now
+                self.self.last_logged = now
             pass
         except OSError:
             now = time.time()
