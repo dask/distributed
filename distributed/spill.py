@@ -176,14 +176,9 @@ class Slow(zict.Func):
             and self.total_weight + pickled_size > self.max_weight
         ):
             # Stop callbacks and ensure that the key ends up in SpillBuffer.fast
-            self.total_weight -= self.weight_by_key.pop(key, 0)
-            self.d.pop(key, None)
             # To be caught by SpillBuffer.__setitem__
             raise MaxSpillExceeded(key)
 
-        # Thanks to Buffer.__setitem__, we never update existing keys in slow,
-        # but always delete them and reinsert them.
-        assert key not in self.weight_by_key
         # Store to disk through File.
         # This may raise OSError, which is caught by SpillBuffer above.
         self.d[key] = pickled
