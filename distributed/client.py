@@ -4531,15 +4531,25 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         plugin : SchedulerPlugin
-            Plugin class or object to pass to the scheduler.
+            SchedulerPlugin instance to pass to the scheduler.
         name : str
             Name for the plugin; if None, a name is taken from the
             plugin instance or automatically generated if not present.
         **kwargs : Any
-            Arguments passed to the Plugin class (if Plugin is an
+            deprecated; Arguments passed to the Plugin class (if Plugin is an
             instance kwargs are unused).
 
         """
+        if isinstance(plugin, type):
+            warnings.warn(
+                "Adding plugins by class is deprecated and will be disabled in a "
+                "future release. Please add plugins by instance instead.",
+                category=FutureWarning,
+            )
+            # note: plugin is constructed in async def _register_scheduler_plugin
+        elif kwargs:
+            raise ValueError("kwargs provided but plugin is already an instance")
+
         if name is None:
             name = _get_plugin_name(plugin)
 
@@ -4610,7 +4620,7 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         plugin : WorkerPlugin or NannyPlugin
-            The plugin object to register.
+            WorkerPlugin or NannyPlugin instance to register.
         name : str, optional
             A name for the plugin.
             Registering a plugin with the same name will have no effect.
@@ -4618,8 +4628,9 @@ class Client(SyncMethodMixin):
         nanny : bool, optional
             Whether to register the plugin with workers or nannies.
         **kwargs : optional
-            If you pass a class as the plugin, instead of a class instance, then the
-            class will be instantiated with any extra keyword arguments.
+            Deprecated; If you pass a class as the plugin, instead of a class
+            instance, then the class will be instantiated with any extra
+            keyword arguments.
 
         Examples
         --------
@@ -4655,7 +4666,14 @@ class Client(SyncMethodMixin):
         unregister_worker_plugin
         """
         if isinstance(plugin, type):
+            warnings.warn(
+                "Adding plugins by class is deprecated and will be disabled in a "
+                "future release. Please add plugins by instance instead.",
+                category=FutureWarning,
+            )
             plugin = plugin(**kwargs)
+        elif kwargs:
+            raise ValueError("kwargs provided but plugin is already an instance")
 
         if name is None:
             name = _get_plugin_name(plugin)
