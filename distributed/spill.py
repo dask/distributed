@@ -74,15 +74,15 @@ class SpillBuffer(zict.Buffer):
                 logger.warning(
                     "Spill file on disk reached capacity; keeping data in memory"
                 )
-                self.self.last_logged = now
+                self.last_logged = now
             pass
         except OSError:
             now = time.time()
-            if now - self.self.last_logged >= self.min_log_interval:
+            if now - self.last_logged >= self.min_log_interval:
                 logger.error(
                     "Spill to disk failed; keeping data in memory", exc_info=True
                 )
-                self.self.last_logged = now
+                self.last_logged = now
         except PickleError as e:
             key_e, orig_e = e.args
             if key_e == key:
@@ -101,10 +101,10 @@ class SpillBuffer(zict.Buffer):
                 if key_e not in self.logged_pickle_errors:
                     logger.error(f"Failed to pickle {key!r}", exc_info=True)
                     self.logged_pickle_errors.add(key_e)
-                    
+
         else:  # no errors raised
             self.logged_pickle_errors.discard(key)
-            
+
     def __delitem__(self, key):
         super().__delitem__(key)
         self.logged_pickle_errors.discard(key)
@@ -170,7 +170,7 @@ class Slow(zict.Func):
         # but always delete them and reinsert them.
         assert key not in self.d
         assert key not in self.weight_by_key
-        
+
         if (
             self.max_weight is not False
             and self.total_weight + pickled_size > self.max_weight
