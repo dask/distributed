@@ -16,6 +16,7 @@ from distributed import (
     get_client,
     wait,
 )
+from distributed.actor import _LateLoopEvent
 from distributed.metrics import time
 from distributed.utils_test import cluster, gen_cluster
 
@@ -254,6 +255,27 @@ def test_sync(client):
 
     assert "ActorFuture" in repr(future)
     assert "distributed.actor" not in repr(future)
+
+
+def test_timeout(client):
+    class Waiter:
+        def __init__(self):
+            self.event = _LateLoopEvent()
+
+        async def set(self):
+            self.event.set()
+
+        async def wait(self):
+            return await self.event.wait()
+
+    event = client.submit(Waiter, actor=True).result()
+    future = event.wait()
+
+    with pytest.raises(asyncio.TimeoutError):
+        future.result(timeout="0.001s")
+
+    event.set().result()
+    assert future.result() is True
 
 
 @gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "1s"})
@@ -528,11 +550,9 @@ async def test_actors_in_profile(c, s, a):
 
 @gen_cluster(client=True)
 async def test_waiter(c, s, a, b):
-    from tornado.locks import Event
-
     class Waiter:
         def __init__(self):
-            self.event = Event()
+            self.event = _LateLoopEvent()
 
         async def set(self):
             self.event.set()
