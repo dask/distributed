@@ -61,8 +61,8 @@ jobs:
 
       - name: Install stacktrace
         shell: bash -l {0}
-        # stacktrace for Python 3.8 has not been released at the moment of writing
-        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version < '3.8' }}
+        # stacktrace for Python 3.8+ has not been released at the moment of writing
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.7' }}
         run: mamba install -c conda-forge -c defaults -c numba libunwind stacktrace
 
       - name: Hack around https://github.com/ipython/ipython/issues/12197
