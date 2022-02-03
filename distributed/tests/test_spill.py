@@ -223,7 +223,7 @@ def test_spillbuffer_fail_to_serialize(tmpdir):
     assert sizeof(a) > 200
 
     # Exception caught in the worker
-    with pytest.raises(Exception):
+    with pytest.raises(TypeError, match="Could not serialize"):
         with captured_logger(
             logging.getLogger("distributed.protocol.pickle")
         ) as logs_bad_key:
