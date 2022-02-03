@@ -268,7 +268,8 @@ def test_spillbuffer_oserror(tmpdir):
     assert set(buf.fast) == {"b"}
     assert set(buf.slow) == {"a"}
 
-    # modify permissions of disk to be read only
+    # modify permissions of disk to be read only.
+    # This causes writes to raise OSError, just like in case of disk full.
     subprocess.call(["chmod", "-R", "-w", str(tmpdir)])
 
     # Add key > than target
