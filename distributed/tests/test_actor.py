@@ -8,7 +8,7 @@ import dask
 
 from distributed import (
     Actor,
-    ActorFuture,
+    BaseActorFuture,
     Client,
     Future,
     Nanny,
@@ -103,7 +103,7 @@ async def test_worker_actions(c, s, a, b, separate_thread):
         assert counter._address == a_address
 
         future = counter.increment(separate_thread=separate_thread)
-        assert isinstance(future, ActorFuture)
+        assert isinstance(future, BaseActorFuture)
         assert "Future" in type(future).__name__
         end = future.result(timeout=1)
         assert end > start
@@ -730,7 +730,7 @@ async def test_actor_future_awaitable(client, s, a, b):
     ac = await client.submit(Counter, actor=True)
     futures = [ac.increment() for _ in range(10)]
 
-    assert all([isinstance(future, ActorFuture) for future in futures])
+    assert all([isinstance(future, BaseActorFuture) for future in futures])
 
     out = await asyncio.gather(*futures)
     assert all([future.done() for future in futures])

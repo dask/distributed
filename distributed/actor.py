@@ -43,7 +43,7 @@ class Actor(WrappedKey):
 
     An actor allows remote control of a stateful object living on a remote
     worker.  Method calls on this object trigger operations on the remote
-    object and return ActorFutures on which we can block to get results.
+    object and return BaseActorFutures on which we can block to get results.
 
     Examples
     --------
@@ -65,7 +65,7 @@ class Actor(WrappedKey):
     >>> counter
     <Actor: Counter, key=Counter-1234abcd>
 
-    Calling methods on this object immediately returns deferred ``ActorFuture``
+    Calling methods on this object immediately returns deferred ``BaseActorFuture``
     objects.  You can call ``.result()`` on these objects to block and get the
     result of the function call.
 
@@ -169,7 +169,7 @@ class Actor(WrappedKey):
                 return attr
 
             elif callable(attr):
-                return lambda *args, **kwargs: _EagerActorFuture(attr(*args, **kwargs))
+                return lambda *args, **kwargs: EagerActorFuture(attr(*args, **kwargs))
             else:
                 return attr
 
@@ -195,7 +195,7 @@ class Actor(WrappedKey):
                             raise OSError("Unable to contact Actor's worker")
                     return result
 
-                actor_future = _ActorFuture(io_loop=self._io_loop)
+                actor_future = ActorFuture(io_loop=self._io_loop)
 
                 async def wait_then_add_to_queue():
                     actor_future._set_result(await run_actor_function_on_worker())
@@ -241,10 +241,10 @@ class ProxyRPC:
         return func
 
 
-class ActorFuture(abc.ABC):
+class BaseActorFuture(abc.ABC):
     """Future to an actor's method call
 
-    Whenever you call a method on an Actor you get an ActorFuture immediately
+    Whenever you call a method on an Actor you get a BaseActorFuture immediately
     while the computation happens in the background.  You can call ``.result``
     to block and collect the full result
 
@@ -269,7 +269,7 @@ class ActorFuture(abc.ABC):
         return "<ActorFuture>"
 
 
-class _EagerActorFuture(ActorFuture):
+class EagerActorFuture(BaseActorFuture):
     """Future to an actor's method call when an actor calls another actor on the same worker"""
 
     def __init__(self, result):
@@ -286,7 +286,7 @@ class _EagerActorFuture(ActorFuture):
         return True
 
 
-class _ActorFuture(ActorFuture):
+class ActorFuture(BaseActorFuture):
     def __init__(self, io_loop):
         self._io_loop = io_loop
         self._event = _LateLoopEvent()
