@@ -1,0 +1,56 @@
+name: dask-distributed
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - packaging
+  - pip
+  - asyncssh
+  - bokeh
+  - click
+  - cloudpickle
+  - coverage<6.3  # https://github.com/nedbat/coveragepy/issues/1310
+  - dask  # overridden by git tip below
+  - filesystem-spec  # overridden by git tip below
+  - h5py
+  - ipykernel
+  - ipywidgets
+  - jinja2
+  - joblib  # overridden by git tip below
+  - jupyter_client
+  - lz4  # Only tested here
+  - msgpack-python
+  - netcdf4
+  - paramiko
+  - pre-commit
+  - prometheus_client
+  - psutil
+  - pynvml  # Only tested here
+  - pytest
+  - pytest-cov
+  - pytest-faulthandler
+  - pytest-repeat
+  - pytest-rerunfailures
+  - pytest-timeout
+  - python-blosc  # Only tested here
+  - python-snappy  # Only tested here
+  - requests
+  - s3fs  # overridden by git tip below
+  - scikit-learn
+  - scipy
+  - sortedcollections
+  - tblib
+  - toolz
+  - tornado=6
+  - zict  # overridden by git tip below
+  - zstandard
+  - pip:
+      - git+https://github.com/dask/dask
+      - git+https://github.com/dask/s3fs
+      - git+https://github.com/dask/zict
+      # FIXME https://github.com/dask/distributed/issues/5345
+      # - git+https://github.com/intake/filesystem_spec
+      - git+https://github.com/joblib/joblib
+      - keras
+      - pytest-asyncio<0.14.0 # `pytest-asyncio<0.14.0` isn't available on conda-forge for Python 3.10
