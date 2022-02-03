@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Hashable, Mapping
+from collections.abc import Mapping
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -110,14 +110,14 @@ class SpillBuffer(zict.Buffer):
         self.logged_pickle_errors.discard(key)
 
     @property
-    def memory(self) -> Mapping[Hashable, Any]:
+    def memory(self) -> Mapping[str, Any]:
         """Key/value pairs stored in RAM. Alias of zict.Buffer.fast.
         For inspection only - do not modify directly!
         """
         return self.fast
 
     @property
-    def disk(self) -> Mapping[Hashable, Any]:
+    def disk(self) -> Mapping[str, Any]:
         """Key/value pairs spilled out to disk. Alias of zict.Buffer.slow.
         For inspection only - do not modify directly!
         """
@@ -128,7 +128,7 @@ class SpillBuffer(zict.Buffer):
         return self.slow.total_weight
 
 
-def _in_memory_weight(key: Hashable, value: Any) -> int:
+def _in_memory_weight(key: str, value: Any) -> int:
     return safe_sizeof(value)
 
 
@@ -142,7 +142,7 @@ class PickleError(Exception):
 
 class Slow(zict.Func):
     max_weight: int | Literal[False]
-    weight_by_key: dict[Hashable, int]
+    weight_by_key: dict[str, int]
     total_weight: int
 
     def __init__(self, spill_directory: str, max_weight: int | Literal[False] = False):
