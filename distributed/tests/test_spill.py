@@ -287,7 +287,7 @@ def test_spillbuffer_oserror(tmpdir):
     assert set(buf.fast) == {"b"}
     assert set(buf.slow) == {"a"}
 
-    # add key to fast which is small than target but when add it triggers spill, which triggers OSError
+    # add key to fast which is smaller than target but when added it triggers spill, which triggers OSError
     with captured_logger(logging.getLogger("distributed.spill")) as logs_oserror_evict:
         buf["d"] = d
 
