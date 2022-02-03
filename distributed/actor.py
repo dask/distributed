@@ -1,14 +1,28 @@
+from __future__ import annotations
+
 import abc
 import asyncio
 import functools
 import sys
 import threading
+from dataclasses import dataclass
+from datetime import timedelta
+from typing import Generic, Literal, NoReturn, TypeVar
+
+from tornado.ioloop import IOLoop
 
 from .client import Future
 from .protocol import to_serialize
 from .utils import iscoroutinefunction, sync, thread_state
 from .utils_comm import WrappedKey
 from .worker import get_client, get_worker
+
+_T = TypeVar("_T")
+
+if sys.version_info >= (3, 9):
+    from collections.abc import Awaitable, Generator
+else:
+    from typing import Awaitable, Generator
 
 if sys.version_info >= (3, 10):
     from asyncio import Event as _LateLoopEvent
@@ -19,19 +33,19 @@ else:
     # as late as possible: when calling any methods that wait on or wake
     # Future instances. See: https://bugs.python.org/issue42392
     class _LateLoopEvent:
-        def __init__(self):
-            self._event = None
+        def __init__(self) -> None:
+            self._event: asyncio.Event | None = None
 
-        def set(self):
+        def set(self) -> None:
             if self._event is None:
                 self._event = asyncio.Event()
 
             self._event.set()
 
-        def is_set(self):
+        def is_set(self) -> bool:
             return self._event is not None and self._event.is_set()
 
-        async def wait(self):
+        async def wait(self) -> bool:
             if self._event is None:
                 self._event = asyncio.Event()
 
@@ -193,7 +207,9 @@ class Actor(WrappedKey):
                             return await run_actor_function_on_worker()
                         else:  # pragma: no cover
                             raise OSError("Unable to contact Actor's worker")
-                    return result
+                    if result["status"] == "OK":
+                        return _OK(result["result"])
+                    return _Error(result["exception"])
 
                 actor_future = ActorFuture(io_loop=self._io_loop)
 
@@ -241,7 +257,7 @@ class ProxyRPC:
         return func
 
 
-class BaseActorFuture(abc.ABC):
+class BaseActorFuture(abc.ABC, Awaitable[_T]):
     """Future to an actor's method call
 
     Whenever you call a method on an Actor you get a BaseActorFuture immediately
@@ -254,60 +270,72 @@ class BaseActorFuture(abc.ABC):
     """
 
     @abc.abstractmethod
-    def __await__(self):
-        pass
+    def result(self, timeout: str | timedelta | float | None = None) -> _T:
+        ...
 
     @abc.abstractmethod
-    def result(self, timeout=None):
-        pass
+    def done(self) -> bool:
+        ...
 
-    @abc.abstractmethod
-    def done(self):
-        pass
-
-    def __repr__(self):
+    def __repr__(self) -> Literal["<ActorFuture>"]:
         return "<ActorFuture>"
 
 
-class EagerActorFuture(BaseActorFuture):
+@dataclass(frozen=True, eq=False)
+class EagerActorFuture(BaseActorFuture[_T]):
     """Future to an actor's method call when an actor calls another actor on the same worker"""
 
-    def __init__(self, result):
-        self._result = result
+    _result: _T
 
-    def __await__(self):
+    def __await__(self) -> Generator[object, None, _T]:
         return self._result
         yield
 
-    def result(self, timeout=None):
+    def result(self, timeout: object = None) -> _T:
         return self._result
 
-    def done(self):
+    def done(self) -> Literal[True]:
         return True
 
 
-class ActorFuture(BaseActorFuture):
-    def __init__(self, io_loop):
+@dataclass(frozen=True, eq=False)
+class _OK(Generic[_T]):
+    _v: _T
+
+    def unwrap(self) -> _T:
+        return self._v
+
+
+@dataclass(frozen=True, eq=False)
+class _Error:
+    _e: Exception
+
+    def unwrap(self) -> NoReturn:
+        raise self._e
+
+
+@dataclass(frozen=False, eq=False)
+class ActorFuture(BaseActorFuture[_T]):
+    def __init__(self, io_loop: IOLoop):
         self._io_loop = io_loop
         self._event = _LateLoopEvent()
-        self._out = None
+        self._out: _Error | _OK[_T] | None = None
 
-    def __await__(self):
+    def __await__(self) -> Generator[object, None, _T]:
         return self._result().__await__()
 
-    def done(self):
+    def done(self) -> bool:
         return self._event.is_set()
 
-    async def _result(self):
+    async def _result(self) -> _T:
         await self._event.wait()
         out = self._out
-        if out["status"] == "OK":
-            return out["result"]
-        raise out["exception"]
+        assert out is not None
+        return out.unwrap()
 
-    def _set_result(self, out):
+    def _set_result(self, out: _Error | _OK[_T]) -> None:
         self._out = out
         self._event.set()
 
-    def result(self, timeout=None):
+    def result(self, timeout: str | timedelta | float | None = None) -> _T:
         return sync(self._io_loop, self._result, callback_timeout=timeout)
