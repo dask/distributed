@@ -2,6 +2,7 @@ import logging
 import subprocess
 
 import pytest
+
 zict = pytest.importorskip("zict")
 from packaging.version import parse as parse_version
 
@@ -103,6 +104,7 @@ requires_zict_210 = pytest.mark.skipif(
     reason="requires zict version > 2.0.0",
 )
 
+
 @requires_zict_210
 def test_spillbuffer_maxlim(tmpdir):
     buf = SpillBuffer(str(tmpdir), target=200, max_spill=600, min_log_interval=0)
@@ -202,10 +204,7 @@ class MyError(Exception):
     pass
 
 
-@pytest.mark.skipif(
-    parse_version(zict.__version__) <= parse_version("2.0.0"),
-    reason="requires zict version > 2.0.0 or higher",
-)
+@requires_zict_210
 def test_spillbuffer_fail_to_serialize(tmpdir):
     buf = SpillBuffer(str(tmpdir), target=200, max_spill=600, min_log_interval=0)
 
@@ -247,10 +246,7 @@ def test_spillbuffer_fail_to_serialize(tmpdir):
     assert set(buf.fast) == {"b", "c"}
 
 
-@pytest.mark.skipif(
-    parse_version(zict.__version__) <= parse_version("2.0.0"),
-    reason="requires zict version > 2.0.0 or higher",
-)
+@requires_zict_210
 @pytest.mark.skipif(WINDOWS, reason="Needs chmod")
 def test_spillbuffer_oserror(tmpdir):
     buf = SpillBuffer(str(tmpdir), target=200, max_spill=800, min_log_interval=0)
