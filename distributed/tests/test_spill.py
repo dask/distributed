@@ -109,7 +109,7 @@ requires_zict_210 = pytest.mark.skipif(
 def test_spillbuffer_maxlim(tmpdir):
     buf = SpillBuffer(str(tmpdir), target=200, max_spill=600, min_log_interval=0)
 
-    a, b, c, d = "a" * 200, "b" * 100, "c" * 100, "d" * 200
+    a, b, c, d, e = "a" * 200, "b" * 100, "c" * 100, "d" * 200, "e" * 100
 
     psize_a = sum(len(frame) for frame in serialize_bytelist(a))  # size on disk
 
@@ -145,6 +145,24 @@ def test_spillbuffer_maxlim(tmpdir):
     assert buf.slow.weight_by_key == {"a": psize_a, "b": psize_b}
     assert buf.slow.total_weight == psize_a + psize_b
 
+    # size of e < target but e+c > target, this will trigger movement of c to slow
+    # but the max spill limit prevents it. Resulting in e remaining in fast
+    se = sizeof(e)
+
+    with captured_logger(logging.getLogger("distributed.spill")) as logs_e:
+        buf["e"] = e
+
+    assert "disk reached capacity" in logs_e.getvalue()
+
+    assert set(buf.fast) == {"c", "e"}
+    assert buf.fast.weights == {"c": sc, "e": se}
+    assert buf["e"] == e
+    assert buf.fast.total_weight == sc + se
+
+    assert set(buf.slow) == {"a", "b"}
+    assert buf.slow.weight_by_key == {"a": psize_a, "b": psize_b}
+    assert buf.slow.total_weight == psize_a + psize_b
+
     # size of d > target, d should go to slow but slow reached the max_spill limit then d
     # will end up on fast with c (which can't be move to slow because it won't fit either)
     sd = sizeof(d)
@@ -153,10 +171,14 @@ def test_spillbuffer_maxlim(tmpdir):
 
     assert "disk reached capacity" in logs_d.getvalue()
 
-    assert set(buf.fast) == {"c", "d"}
-    assert buf.fast.weights == {"c": sc, "d": sd}
+    assert set(buf.fast) == {"c", "d", "e"}
+    assert buf.fast.weights == {"c": sc, "d": sd, "e": se}
     assert buf["d"] == d
-    assert buf.fast.total_weight == sc + sd
+    assert buf.fast.total_weight == sc + sd + se
+
+    assert set(buf.slow) == {"a", "b"}
+    assert buf.slow.weight_by_key == {"a": psize_a, "b": psize_b}
+    assert buf.slow.total_weight == psize_a + psize_b
 
     # Overwrite a key that was in slow, but the size of the new key is larger than max_spill
     # We overwrite `a` with something bigger than max_spill, it will try to write in slow
@@ -176,9 +198,9 @@ def test_spillbuffer_maxlim(tmpdir):
 
     assert "disk reached capacity" in logs_alarge.getvalue()
 
-    assert set(buf.fast) == {"a", "d"}
+    assert set(buf.fast) == {"a", "d", "e"}
     assert set(buf.slow) == {"b", "c"}
-    assert buf.fast.total_weight == sd + sizeof(a_large)
+    assert buf.fast.total_weight == sd + sizeof(a_large) + se
     assert buf.slow.total_weight == 2 * psize_b
 
     # Overwrite a key that was in fast, but the size of the new key is larger than max_spill
@@ -194,9 +216,9 @@ def test_spillbuffer_maxlim(tmpdir):
 
     assert "disk reached capacity" in logs_dlarge.getvalue()
 
-    assert set(buf.fast) == {"a", "d"}
+    assert set(buf.fast) == {"a", "d", "e"}
     assert set(buf.slow) == {"b", "c"}
-    assert buf.fast.total_weight == 2 * sizeof(a_large)
+    assert buf.fast.total_weight == 2 * sizeof(a_large) + se
     assert buf.slow.total_weight == 2 * psize_b
 
 
