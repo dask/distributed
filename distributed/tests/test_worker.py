@@ -1180,33 +1180,39 @@ async def test_statistical_profiling_2(c, s, a, b):
 
 
 @gen_cluster(
-    nthreads=[("127.0.0.1", 1)],
+    nthreads=[("", 1)],
     client=True,
-    worker_kwargs={"memory_monitor_interval": 10},
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": 0.7,
+    },
+    worker_kwargs={"memory_monitor_interval": "10ms"},
 )
 async def test_robust_to_bad_sizeof_estimates(c, s, a):
-    np = pytest.importorskip("numpy")
-    memory = psutil.Process().memory_info().rss
+    """Test that the spill threshold uses the process memory and not the managed memory
+    reported by sizeof(), which may be inaccurate
+    """
+    memory = s.workers[a.address].memory.process
+    # Reach 'spill' threshold after 400MB of managed data
     a.memory_limit = memory / 0.7 + 400e6
 
     class BadAccounting:
-        def __init__(self, data):
-            self.data = data
+        """100 MB process memory, 10 bytes reported managed memory"""
+
+        def __init__(self, *args):
+            self.data = "x" * int(100e6)
 
         def __sizeof__(self):
             return 10
 
-    def f(n):
-        x = np.ones(int(n), dtype="u1")
-        result = BadAccounting(x)
-        return result
+        def __reduce__(self):
+            """Speed up test by writing very little to disk when spilling"""
+            return BadAccounting, ()
 
-    futures = c.map(f, [100e6] * 8, pure=False)
+    futures = c.map(BadAccounting, range(8))
 
-    start = time()
     while not a.data.disk:
-        await asyncio.sleep(0.1)
-        assert time() < start + 5
+        await asyncio.sleep(0.01)
 
 
 @pytest.mark.slow
