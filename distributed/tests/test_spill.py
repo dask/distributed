@@ -1,5 +1,5 @@
 import logging
-import subprocess
+import os
 
 import pytest
 
@@ -292,7 +292,7 @@ def test_spillbuffer_oserror(tmpdir):
 
     # modify permissions of disk to be read only.
     # This causes writes to raise OSError, just like in case of disk full.
-    subprocess.call(["chmod", "-R", "-w", str(tmpdir)])
+    os.chmod(tmpdir, 0o555)
 
     # Add key > than target
     with captured_logger(logging.getLogger("distributed.spill")) as logs_oserror_slow:
