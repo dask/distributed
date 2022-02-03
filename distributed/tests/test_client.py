@@ -5873,7 +5873,11 @@ async def test_scatter_error_cancel(c, s, a, b):
 @pytest.mark.parametrize("workers_arg", [False, True])
 @pytest.mark.parametrize("direct", [False, True])
 @pytest.mark.parametrize("broadcast", [False, True, 10])
-@gen_cluster(client=True, nthreads=[("", 1)] * 10)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 10,
+    worker_kwargs={"memory_monitor_interval": "20ms"},
+)
 async def test_scatter_and_replicate_avoid_paused_workers(
     c, s, *workers, workers_arg, direct, broadcast
 ):

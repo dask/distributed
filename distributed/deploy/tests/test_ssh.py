@@ -59,13 +59,13 @@ async def test_basic():
 
 
 @pytest.mark.asyncio
-async def test_nprocs():
+async def test_n_workers():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
         connect_options=dict(known_hosts=None),
         asynchronous=True,
         scheduler_options={"idle_timeout": "5s"},
-        worker_options={"death_timeout": "5s", "nprocs": 2},
+        worker_options={"death_timeout": "5s", "n_workers": 2},
     ) as cluster:
         assert len(cluster.workers) == 2
         async with Client(cluster, asynchronous=True) as client:
@@ -75,6 +75,54 @@ async def test_nprocs():
         assert not cluster._supports_scaling
 
         assert "SSH" in repr(cluster)
+
+
+@pytest.mark.asyncio
+async def test_nprocs_attribute_is_deprecated():
+    async with SSHCluster(
+        ["127.0.0.1"] * 2,
+        connect_options=dict(known_hosts=None),
+        asynchronous=True,
+        scheduler_options={"idle_timeout": "5s"},
+        worker_options={"death_timeout": "5s"},
+    ) as cluster:
+        assert len(cluster.workers) == 1
+        worker = cluster.workers[0]
+        assert worker.n_workers == 1
+        with pytest.warns(FutureWarning, match="renamed to n_workers"):
+            assert worker.nprocs == 1
+        with pytest.warns(FutureWarning, match="renamed to n_workers"):
+            worker.nprocs = 3
+
+        assert worker.n_workers == 3
+
+
+@pytest.mark.asyncio
+async def test_ssh_nprocs_renamed_to_n_workers():
+    with pytest.warns(FutureWarning, match="renamed to n_workers"):
+        async with SSHCluster(
+            ["127.0.0.1"] * 3,
+            connect_options=dict(known_hosts=None),
+            asynchronous=True,
+            scheduler_options={"idle_timeout": "5s"},
+            worker_options={"death_timeout": "5s", "nprocs": 2},
+        ) as cluster:
+            assert len(cluster.workers) == 2
+            async with Client(cluster, asynchronous=True) as client:
+                await client.wait_for_workers(4)
+
+
+@pytest.mark.asyncio
+async def test_ssh_n_workers_with_nprocs_is_an_error():
+    with pytest.raises(ValueError, match="Both nprocs and n_workers"):
+        async with SSHCluster(
+            ["127.0.0.1"] * 3,
+            connect_options=dict(known_hosts=None),
+            asynchronous=True,
+            scheduler_options={},
+            worker_options={"n_workers": 2, "nprocs": 2},
+        ) as cluster:
+            assert not cluster
 
 
 @pytest.mark.asyncio
