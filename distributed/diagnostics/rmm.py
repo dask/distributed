@@ -18,7 +18,7 @@ def real_time():
 
     rmm_used = (
         mr.get_allocated_bytes()
-        if isinstance(mr, rmm.mr.TrackingResourceAdaptor)
+        if hasattr(mr, "get_allocated_bytes")
         else 0
     )
 
