@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Hashable, Mapping
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -142,7 +142,7 @@ class PickleError(Exception):
 
 class Slow(zict.Func):
     max_weight: int | Literal[False]
-    weight_by_key: dict[str, int]
+    weight_by_key: dict[Hashable, int]
     total_weight: int
 
     def __init__(self, spill_directory: str, max_weight: int | Literal[False] = False):
