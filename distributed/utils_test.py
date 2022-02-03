@@ -1637,7 +1637,7 @@ def term_or_kill_active_children(timeout: float) -> None:
 def check_process_leak(
     check: bool = True, check_timeout: float = 40, term_timeout: float = 3
 ):
-    """Terminate any subprocesses spawned inside the context
+    """Terminate any currently-running subprocesses at both the beginning and end of this context
 
     Parameters
     ----------
