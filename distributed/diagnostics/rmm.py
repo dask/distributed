@@ -11,7 +11,7 @@ def _get_pool_size_for_mr(mr):
         return pool_size
 
 def _get_allocated_bytes_for_mr(mr):
-    import rmm_async
+    import rmm
 
     if not hasattr(mr, "get_allocated_bytes"):
         if hasattr(mr, "upstream_mr"):
