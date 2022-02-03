@@ -252,6 +252,8 @@ def test_spillbuffer_fail_to_serialize(tmpdir):
             buf["a"] = a
 
     assert "Failed to serialize" in logs_bad_key.getvalue()
+    assert not set(buf.fast)
+    assert not set(buf.slow)
 
     b = Bad(size=100)  # this is small enough to fit in memory/fast
 
@@ -266,6 +268,8 @@ def test_spillbuffer_fail_to_serialize(tmpdir):
 
     assert "Failed to pickle" in logs_bad_key_mem.getvalue()
     assert set(buf.fast) == {"b", "c"}
+    assert buf.fast.total_weight == sizeof(b) + sizeof(c)
+    assert not set(buf.slow)
 
 
 @requires_zict_210
