@@ -3,6 +3,9 @@ on:
   push:
     branches:
       - main
+  repository_dispatch:
+    types:
+      - trigger-build
   pull_request:
 
 # When this workflow is queued, automatically cancel any previous running
