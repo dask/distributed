@@ -91,7 +91,6 @@ class ThreadPoolExecutor(thread.ThreadPoolExecutor):
             self._threads.add(t)
             t.start()
 
-
     def _get_next_effective_thread_id(self):
         # This should be used with a lock held
         if len(self._threads) < self._max_workers:
