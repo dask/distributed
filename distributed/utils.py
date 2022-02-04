@@ -352,17 +352,21 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
         finally:
             e.set()
 
+    def wait(timeout):
+        try:
+            return e.wait(timeout)
+        except KeyboardInterrupt:
+            loop.add_callback(future.cancel)
+            raise
+
     loop.add_callback(f)
     if callback_timeout is not None:
-        if not e.wait(callback_timeout):
+        if not wait(callback_timeout):
             raise TimeoutError(f"timed out after {callback_timeout} s.")
     else:
         while not e.is_set():
-            try:
-                e.wait(10)
-            except KeyboardInterrupt:
-                loop.add_callback(future.cancel)
-                raise
+            wait(10)
+
     if error:
         typ, exc, tb = error
         raise exc.with_traceback(tb)
