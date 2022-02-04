@@ -69,6 +69,11 @@ class Status(Enum):
 
 
 Status.lookup = {s.name: s for s in Status}  # type: ignore
+Status.ANY_RUNNING = {  # type: ignore
+    Status.running,
+    Status.paused,
+    Status.closing_gracefully,
+}
 
 
 class RPCClosed(IOError):
@@ -257,7 +262,7 @@ class Server:
         async def _():
             timeout = getattr(self, "death_timeout", 0)
             async with self._startup_lock:
-                if self.status in (Status.running, Status.paused):
+                if self.status in Status.ANY_RUNNING:
                     return self
                 if timeout:
                     try:
@@ -519,7 +524,7 @@ class Server:
                             self._ongoing_coroutines.add(result)
                             result = await result
                     except (CommClosedError, asyncio.CancelledError):
-                        if self.status in (Status.running, Status.paused):
+                        if self.status in Status.ANY_RUNNING:
                             logger.info("Lost connection to %r", address, exc_info=True)
                         break
                     except Exception as e:

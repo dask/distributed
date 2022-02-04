@@ -77,7 +77,7 @@ from .utils import (
     reset_logger_locks,
     sync,
 )
-from .worker import RUNNING, Worker
+from .worker import Worker
 
 try:
     import dask.array  # register config
@@ -1685,7 +1685,7 @@ def check_instances():
     for w in Worker._instances:
         with suppress(RuntimeError):  # closed IOLoop
             w.loop.add_callback(w.close, report=False, executor_wait=False)
-            if w.status in RUNNING:
+            if w.status in Status.ANY_RUNNING:
                 w.loop.add_callback(w.close)
     Worker._instances.clear()
 

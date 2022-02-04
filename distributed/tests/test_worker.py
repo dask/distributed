@@ -1631,6 +1631,35 @@ async def test_worker_listens_on_same_interface_by_default(cleanup, Worker):
             assert s.ip == w.ip
 
 
+def assert_amm_transfer_story(key: str, w_from: Worker, w_to: Worker) -> None:
+    """Test that an in-memory key was transferred from worker w_from to worker w_to by
+    the Active Memory Manager and it was not recalculated on w_to
+    """
+    assert_worker_story(
+        w_to.story(key),
+        [
+            (key, "ensure-task-exists", "released"),
+            (key, "released", "fetch", "fetch", {}),
+            ("gather-dependencies", w_from.address, lambda set_: key in set_),
+            (key, "fetch", "flight", "flight", {}),
+            ("request-dep", w_from.address, lambda set_: key in set_),
+            ("receive-dep", w_from.address, lambda set_: key in set_),
+            (key, "put-in-memory"),
+            (key, "flight", "memory", "memory", {}),
+        ],
+        # There may be additional ('missing', 'fetch', 'fetch') events if transfers
+        # are slow enough that the Active Memory Manager ends up requesting them a
+        # second time. Here we're asserting that no matter how slow CI is, all
+        # transfers will be completed within 2 seconds (hardcoded interval in
+        # Scheduler.retire_worker when AMM is not enabled).
+        strict=True,
+    )
+    assert key in w_to.data
+    # The key may or may not still be in w_from.data, depending if the AMM had the
+    # chance to run a second time after the copy was successful.
+
+
+@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_close_gracefully(c, s, a, b):
     futures = c.map(slowinc, range(200), delay=0.1, workers=[b.address])
@@ -1645,6 +1674,8 @@ async def test_close_gracefully(c, s, a, b):
             break
         await asyncio.sleep(0.01)
 
+    assert any(ts for ts in b.tasks.values() if ts.state == "executing")
+
     await b.close_gracefully()
 
     assert b.status == Status.closed
@@ -1653,15 +1684,7 @@ async def test_close_gracefully(c, s, a, b):
     # All tasks that were in memory in b have been copied over to a;
     # they have not been recomputed
     for key in mem:
-        assert_worker_story(
-            a.story(key),
-            [
-                (key, "put-in-memory"),
-                (key, "receive-from-scatter"),
-            ],
-            strict=True,
-        )
-        assert key in a.data
+        assert_amm_transfer_story(key, b, a)
 
 
 @pytest.mark.slow
@@ -1690,15 +1713,7 @@ async def test_lifetime(c, s, a):
     # All tasks that were in memory in b have been copied over to a;
     # they have not been recomputed
     for key in mem:
-        assert_worker_story(
-            a.story(key),
-            [
-                (key, "put-in-memory"),
-                (key, "receive-from-scatter"),
-            ],
-            strict=True,
-        )
-        assert key in a.data
+        assert_amm_transfer_story(key, b, a)
 
 
 @gen_cluster(worker_kwargs={"lifetime": "10s", "lifetime_stagger": "2s"})
