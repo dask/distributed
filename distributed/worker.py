@@ -4523,7 +4523,7 @@ def apply_function_simple(
     -------
     msg: dictionary with status, result/error, timings, etc..
     """
-    ident = threading.get_ident()
+    ident = threading.current_thread()._effective_thread_id
     start = time()
     try:
         result = function(*args, **kwargs)
@@ -4559,7 +4559,7 @@ async def apply_function_async(
     -------
     msg: dictionary with status, result/error, timings, etc..
     """
-    ident = threading.get_ident()
+    ident = threading.current_thread()._effective_thread_id
     start = time()
     try:
         result = await function(*args, **kwargs)
