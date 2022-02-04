@@ -352,11 +352,15 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
         finally:
             e.set()
 
+    def cancel():
+        if future is not None:
+            future.cancel()
+
     def wait(timeout):
         try:
             return e.wait(timeout)
         except KeyboardInterrupt:
-            loop.add_callback(future.cancel)
+            loop.add_callback(cancel)
             raise
 
     loop.add_callback(f)
