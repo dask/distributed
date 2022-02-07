@@ -929,7 +929,7 @@ class Client(SyncMethodMixin):
             preload = cast("list[str]", dask.config.get("distributed.client.preload"))
         if not preload_argv:
             preload_argv = cast(
-                "list[str]", dask.config.get("distributed.client.preload-argv")
+                "list[list[str]]", dask.config.get("distributed.client.preload-argv")
             )
 
         # These two asserts are for typing
