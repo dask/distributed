@@ -9,8 +9,10 @@ import io
 import logging
 import logging.config
 import multiprocessing
+import operator
 import os
 import re
+import shlex
 import shutil
 import signal
 import socket
@@ -27,6 +29,8 @@ from glob import glob
 from itertools import count
 from time import sleep
 from typing import Any, Literal
+
+import psutil
 
 from distributed.compatibility import MACOS
 from distributed.scheduler import Scheduler
@@ -92,6 +96,39 @@ logging_levels = {
 
 _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
+
+
+@pytest.fixture(autouse=True)
+def log_process_info():
+    yield
+    benchmarks = [
+        "cpu_percent",
+        "memory_percent",
+        "num_handles" if sys.platform == "win32" else "num_fds",
+    ]
+    processes = [
+        p.info
+        for p in psutil.process_iter(
+            attrs=["name", "cmdline", "username", *benchmarks], ad_value=0
+        )
+    ]
+
+    def format_cmdline(proc):
+        cmdline = proc["cmdline"]
+        if cmdline == 0:
+            return "<no cmdline>"
+        return shlex.join(cmdline)
+
+    for benchmark in benchmarks:
+        print(f"===== {benchmark} =====")
+        for proc in sorted(
+            processes,
+            key=operator.itemgetter(benchmark),
+            reverse=True,
+        )[:10]:
+            print(
+                f"{proc[benchmark]}: {proc['name']} {format_cmdline(proc)} {proc['username']}"
+            )
 
 
 @pytest.fixture(scope="session")
