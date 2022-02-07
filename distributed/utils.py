@@ -26,6 +26,7 @@ from contextvars import ContextVar
 from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
+from types import ModuleType
 from typing import Any as AnyType
 from typing import ClassVar, Container
 
@@ -941,12 +942,12 @@ def open_port(host=""):
     return port
 
 
-def import_file(path):
+def import_file(path: str):
     """Loads modules for a file (.py, .zip, .egg)"""
     directory, filename = os.path.split(path)
     name, ext = os.path.splitext(filename)
-    names_to_import = []
-    tmp_python_path = None
+    names_to_import: list[str] = []
+    tmp_python_path: str | None = None
 
     if ext in (".py",):  # , '.pyc'):
         if directory not in sys.path:
@@ -962,7 +963,7 @@ def import_file(path):
         names = (mod_info.name for mod_info in pkgutil.iter_modules([path]))
         names_to_import.extend(names)
 
-    loaded = []
+    loaded: list[ModuleType] = []
     if not names_to_import:
         logger.warning("Found nothing to import from %s", filename)
     else:
