@@ -525,9 +525,9 @@ properties:
           preload:
             type: array
             description: |
-              Run custom modules during the lifetime of the scheduler
+              Run custom modules during the lifetime of the nanny
 
-              You can run custom modules when the scheduler starts up and closes down.
+              You can run custom modules when the nanny starts up and closes down.
               See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
 
           preload-argv:
