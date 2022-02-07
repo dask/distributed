@@ -162,7 +162,9 @@ distributed:
   client:
     heartbeat: 5s  # Interval between client heartbeats
     scheduler-info-interval: 2s  # Interval between scheduler-info updates
-    security-loader: null  # A callable to load security credentials if none are provided explicitly
+    security-loader: null  # A callable to load security credentials if none are provided explicitl
+    preload: []             # Run custom modules with Nanny
+    preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.htmly
 
   deploy:
     lost-worker-timeout: 15s  # Interval after which to hard-close a lost worker job

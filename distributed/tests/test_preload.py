@@ -5,6 +5,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
+from textwrap import dedent
 from time import sleep
 
 import pytest
@@ -288,3 +289,15 @@ async def test_web_preload_worker(cleanup, worker_preload):
     async with Scheduler(port=8786, host="localhost") as s:
         async with Nanny(preload_nanny=["http://127.0.0.1:12346/preload"]) as nanny:
             assert nanny.scheduler_addr == s.address
+
+
+@gen_cluster(nthreads=[])
+async def test_client_preload_text(s: Scheduler):
+    text = dedent(
+        """\
+        def dask_setup(client):
+            client.foo = "setup"
+        """
+    )
+    async with Client(address=s.address, asynchronous=True, preload=text) as c:
+        assert c.foo == "setup"

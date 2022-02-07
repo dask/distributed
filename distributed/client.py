@@ -24,7 +24,7 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
@@ -55,6 +55,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import PeriodicCallback
 
+from . import preloading
 from . import versions as version_module  # type: ignore
 from .batched import BatchedSend
 from .cfexecutor import ClientExecutor
@@ -754,6 +755,8 @@ class Client(SyncMethodMixin):
 
     _default_event_handlers = {"print": _handle_print, "warn": _handle_warn}
 
+    preloads: list[preloading.Preload]
+
     def __init__(
         self,
         address=None,
@@ -770,6 +773,8 @@ class Client(SyncMethodMixin):
         extensions=DEFAULT_EXTENSIONS,
         direct_to_workers=None,
         connection_limit=512,
+        preload=None,
+        preload_argv=None,
         **kwargs,
     ):
         if timeout == no_default:
@@ -919,6 +924,18 @@ class Client(SyncMethodMixin):
 
         for ext in extensions:
             ext(self)
+
+        if not preload:
+            preload = cast("list[str]", dask.config.get("distributed.client.preload"))
+        if not preload_argv:
+            preload_argv = cast(
+                "list[str]", dask.config.get("distributed.client.preload-argv")
+            )
+
+        # These two asserts are for typing
+        assert preload is not None
+        assert preload_argv is not None
+        self.preloads = preloading.process_preloads(self, preload, preload_argv)
 
         self.start(timeout=timeout)
         Client._instances.add(self)
@@ -1180,6 +1197,9 @@ class Client(SyncMethodMixin):
 
         for topic, handler in Client._default_event_handlers.items():
             self.subscribe_topic(topic, handler)
+
+        for preload in self.preloads:
+            await preload.start()
 
         self._handle_report_task = asyncio.create_task(self._handle_report())
 
