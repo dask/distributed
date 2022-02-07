@@ -16,6 +16,9 @@ from unittest import mock
 
 import psutil
 import pytest
+
+zict = pytest.importorskip("zict")
+from packaging.version import parse as parse_version
 from tlz import first, pluck, sliding_window
 
 import dask
@@ -441,82 +444,85 @@ async def test_io_loop(s):
         assert w.io_loop is s.loop
 
 
-@gen_cluster(client=True, nthreads=[])
-async def test_spill_to_disk(c, s):
+@gen_cluster(
+    client=True, nthreads=[("", 1)], worker_kwargs={"memory_limit": 1200 / 0.6}
+)
+async def test_spill_to_disk(c, s, w):
     np = pytest.importorskip("numpy")
-    async with Worker(
-        s.address,
-        loop=s.loop,
-        memory_limit=1200 / 0.6,
-        memory_pause_fraction=None,
-        memory_spill_fraction=None,
-    ) as w:
+    # size on memory 500
+    x = c.submit(np.zeros, 500, dtype="u1", key="x")
+    y = c.submit(np.zeros, 500, dtype="u1", key="y")
+    await wait([x, y])
 
-        x = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="x")
-        await wait(x)
-        y = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="y")
-        await wait(y)
+    assert set(w.data) == {x.key, y.key}
+    assert set(w.data.memory) == {x.key, y.key}
 
-        assert set(w.data) == {x.key, y.key}
-        assert set(w.data.memory) == {x.key, y.key}
+    z = c.submit(np.zeros, 500, dtype="u1", key="z")
+    await wait(z)
+    assert set(w.data) == {x.key, y.key, z.key}
+    assert set(w.data.memory) == {y.key, z.key}
+    assert set(w.data.disk) == {x.key}
 
-        z = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="z")
-        await wait(z)
-        assert set(w.data) == {x.key, y.key, z.key}
-        assert set(w.data.memory) == {y.key, z.key}
-        assert set(w.data.disk) == {x.key}
-
-        await x
-        assert set(w.data.memory) == {x.key, z.key}
-        assert set(w.data.disk) == {y.key}
+    await x
+    assert set(w.data.memory) == {x.key, z.key}
+    assert set(w.data.disk) == {y.key}
 
 
-@gen_cluster(client=True, nthreads=[])
-async def test_spill_to_disk_constrained(c, s):
+requires_zict_210 = pytest.mark.skipif(
+    parse_version(zict.__version__) <= parse_version("2.0.0"),
+    reason="requires zict version > 2.0.0",
+)
+
+
+@requires_zict_210
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    worker_kwargs={"memory_limit": 1600, "max_spill": 600},
+)
+async def test_spill_to_disk_constrained(c, s, w):
     np = pytest.importorskip("numpy")
-    async with Worker(
-        s.address,
-        loop=s.loop,
-        memory_limit=1600,
-        memory_pause_fraction=None,
-        memory_spill_fraction=None,
-        max_spill=600,
-    ) as w:
 
-        # since memory_spill_fraction=None spills starts at 1600*0.7=1120
-        # size of x on disk would be 425 (it fits)
-        # size of z on disk would be 726 (does not fit)
+    # since memory_spill_fraction=None spills starts at 1600*0.7=1120
+    # size of x on disk would be 425 (it fits)
+    # size of y or z on disk would be 726 (does not fit)
 
-        x = c.submit(
-            np.random.randint, 0, 255, size=200, dtype="u1", key="x"
-        )  # size on memory 200
-        await wait(x)
-        y = c.submit(
-            np.random.randint, 0, 255, size=500, dtype="u1", key="y"
-        )  # size on memory 500
-        await wait(y)
+    # size on memory 200
+    x = c.submit(np.zeros, 200, dtype="u1", key="x")
+    await wait(x)
+    # size on memory 500
+    y = c.submit(np.zeros, 500, dtype="u1", key="y")
+    await wait(y)
 
-        assert set(w.data) == {x.key, y.key}
-        assert set(w.data.memory) == {x.key, y.key}
+    assert set(w.data) == {x.key, y.key}
+    assert set(w.data.memory) == {x.key, y.key}
 
-        z = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="z")
-        await wait(z)
-        assert set(w.data) == {x.key, y.key, z.key}
-        assert set(w.data.memory) == {
-            y.key,
-            z.key,
-        }  # z does not fit in disk keep in memory
-        assert set(w.data.disk) == {x.key}  # target memory exceeded evict x
+    z = c.submit(np.zeros, 500, dtype="u1", key="z")
+    await wait(z)
 
-        zb = c.submit(np.random.randint, 0, 255, size=1700, dtype="u1", key="zb")
-        await wait(zb)
-        assert set(w.data) == {x.key, y.key, z.key, zb.key}
-        assert set(w.data.memory) == {
-            y.key,
-            z.key,
-            zb.key,
-        }  # zb does not fit in disk keep in memory
-        assert set(w.data.disk) == {x.key}  # only x fits on disk
+    assert set(w.data) == {x.key, y.key, z.key}
+
+    # max_spill has not been reached
+    assert set(w.data.memory) == {y.key, z.key}
+    assert set(w.data.disk) == {x.key}
+
+    # zb is individually larger than max_spill
+    zb = c.submit(np.zeros, 1700, dtype="u1", key="zb")
+    await wait(zb)
+
+    assert set(w.data.memory) == {y.key, z.key, zb.key}
+    assert set(w.data.disk) == {x.key}
+
+    del zb
+    while "zb" in w.data:
+        await asyncio.sleep(0.01)
+
+    # zc is individually smaller than max_spill, but the evicted key together with
+    # x it exceeds max_spill
+    zc = c.submit(np.zeros, 500, dtype="u1", key="zc")
+    await wait(zc)
+    assert set(w.data.memory) == {y.key, z.key, zc.key}
+    assert set(w.data.disk) == {x.key}
 
 
 @gen_cluster(client=True)
