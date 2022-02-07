@@ -24,7 +24,7 @@ distributed:
     worker-ttl: null        # like '60s'. Time to live for workers.  They must heartbeat faster than this
     pickle: True            # Is the scheduler allowed to deserialize arbitrary bytestrings
     preload: []             # Run custom modules with Scheduler
-    preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.html
+    preload-argv: []        # See https://docs.dask.org/en/latest/how-to/customize-initialization.html
     unknown-task-duration: 500ms  # Default duration for all tasks with unknown durations ("15m", "2h")
     default-task-durations:  # How long we expect function names to run ("1h", "1s") (helps for long tasks)
       rechunk-split: 1us
@@ -80,7 +80,7 @@ distributed:
       outgoing: 50          # This helps to control network saturation
       incoming: 10
     preload: []             # Run custom modules with Worker
-    preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.html
+    preload-argv: []        # See https://docs.dask.org/en/latest/how-to/customize-initialization.html
     daemon: True
     validate: False         # Check worker state at every step for debugging
     resources: {}           # Key: value pairs specifying worker resources.
@@ -153,7 +153,7 @@ distributed:
 
   nanny:
     preload: []             # Run custom modules with Nanny
-    preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.html
+    preload-argv: []        # See https://docs.dask.org/en/latest/how-to/customize-initialization.html
     environ:
       MALLOC_TRIM_THRESHOLD_: 65536
       OMP_NUM_THREADS: 1
@@ -163,8 +163,8 @@ distributed:
     heartbeat: 5s  # Interval between client heartbeats
     scheduler-info-interval: 2s  # Interval between scheduler-info updates
     security-loader: null  # A callable to load security credentials if none are provided explicitl
-    preload: []             # Run custom modules with Nanny
-    preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.htmly
+    preload: []             # Run custom modules with Client
+    preload-argv: []        # See https://docs.dask.org/en/latest/how-to/customize-initialization.html
 
   deploy:
     lost-worker-timeout: 15s  # Interval after which to hard-close a lost worker job

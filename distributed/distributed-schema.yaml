@@ -131,14 +131,14 @@ properties:
               Run custom modules during the lifetime of the scheduler
 
               You can run custom modules when the scheduler starts up and closes down.
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           preload-argv:
             type: array
             description: |
               Arguments to pass into the preload scripts described above
 
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           unknown-task-duration:
             type: string
@@ -324,14 +324,14 @@ properties:
               Run custom modules during the lifetime of the worker
 
               You can run custom modules when the worker starts up and closes down.
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           preload-argv:
             type: array
             description: |
               Arguments to pass into the preload scripts described above
 
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           daemon:
             type: boolean
@@ -528,14 +528,14 @@ properties:
               Run custom modules during the lifetime of the nanny
 
               You can run custom modules when the nanny starts up and closes down.
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           preload-argv:
             type: array
             description: |
               Arguments to pass into the preload scripts described above
 
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           environ:
             type: object
@@ -576,14 +576,14 @@ properties:
               Run custom modules during the lifetime of the client
 
               You can run custom modules when the client starts up and closes down.
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           preload-argv:
             type: array
             description: |
               Arguments to pass into the preload scripts described above
 
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
 
       deploy:
