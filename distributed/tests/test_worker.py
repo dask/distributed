@@ -937,13 +937,17 @@ async def test_dataframe_attribute_error(c, s, a, b):
 @gen_cluster(client=True)
 async def test_fail_write_to_disk(c, s, a, b):
     class Bad:
+        def __init__(self, size):
+            self.size = size
+
         def __getstate__(self):
             raise TypeError()
 
         def __sizeof__(self):
-            return int(100e9)
+            return self.size
 
-    future = c.submit(Bad)
+    # Key immediately store to disk, fails to serialize
+    future = c.submit(Bad, int(100e9))
     await wait(future)
 
     assert future.status == "error"
