@@ -9,7 +9,6 @@ import io
 import logging
 import logging.config
 import multiprocessing
-import operator
 import os
 import re
 import shlex
@@ -106,12 +105,57 @@ def log_process_info():
         "memory_percent",
         "num_handles" if sys.platform == "win32" else "num_fds",
     ]
-    processes = [
-        p.info
-        for p in psutil.process_iter(
-            attrs=["name", "cmdline", "username", *benchmarks], ad_value=0
-        )
-    ]
+    ad_value = 0
+    attrs = ["ppid", "pid", "name", "cmdline", "username", *benchmarks]
+    processes = {
+        p.info["pid"]: {"info": p.info, "children": []}
+        for p in psutil.process_iter(attrs=attrs, ad_value=ad_value)
+    }
+
+    roots = []
+    for process in processes.copy().values():
+        info = process["info"]
+        if info["pid"] == 0:
+            roots.append(process)
+            continue
+
+        ppid = info["ppid"]
+        try:
+            parent = processes[ppid]
+        except KeyError:
+            # On windows process_iter can return processes with a ppid that
+            # doesn't exist in the rest of the process_iter result, so we
+            # make a fake parent and add it to possible roots.
+            parent = {
+                "info": {
+                    **{attr: ad_value for attr in attrs},
+                    "pid": ppid,
+                },
+                "children": [process],
+            }
+            roots.append(parent)
+            processes[ppid] = parent
+        else:
+            parent["children"].append(process)
+
+    def compute_total(proc):
+        try:
+            return proc["total"]
+        except KeyError:
+            pass
+
+        info = proc["info"]
+        total = {benchmark: info[benchmark] for benchmark in benchmarks}
+        for child in proc["children"]:
+            child_total = compute_total(child)
+            for benchmark in benchmarks:
+                total[benchmark] += child_total[benchmark]
+
+        proc["total"] = total
+        return total
+
+    for process in processes.values():
+        compute_total(process)
 
     def format_cmdline(proc):
         cmdline = proc["cmdline"]
@@ -119,16 +163,28 @@ def log_process_info():
             return "<no cmdline>"
         return shlex.join(cmdline)
 
+    def print_tree(benchmark, tree, max_depth=20, indent=""):
+        if max_depth <= 0:
+            return
+
+        for i, proc in enumerate(
+            sorted(tree, key=lambda v: v["total"][benchmark], reverse=True)
+        ):
+            if i >= 5:
+                print(f"{indent}...")
+                break
+            total = proc["total"]
+            info = proc["info"]
+            print(
+                f"{indent}{total[benchmark]}: {info['pid']} {info['name']} "
+                f"{format_cmdline(info)} {info['username']}"
+            )
+            print_tree(benchmark, proc["children"], max_depth - 1, indent=indent + "  ")
+
+    print()
     for benchmark in benchmarks:
         print(f"===== {benchmark} =====")
-        for proc in sorted(
-            processes,
-            key=operator.itemgetter(benchmark),
-            reverse=True,
-        )[:10]:
-            print(
-                f"{proc[benchmark]}: {proc['name']} {format_cmdline(proc)} {proc['username']}"
-            )
+        print_tree(benchmark, roots)
 
 
 @pytest.fixture(scope="session")
