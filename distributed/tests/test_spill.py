@@ -241,8 +241,7 @@ def test_spillbuffer_fail_to_serialize(tmpdir):
             return self.size
 
     # bad data individually larger than spill threshold target 200
-    a = Bad(size=200)
-    assert sizeof(a) > 200
+    a = Bad(size=201)
 
     # Exception caught in the worker
     with pytest.raises(TypeError, match="Could not serialize"):
