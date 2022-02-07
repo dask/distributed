@@ -948,7 +948,7 @@ async def test_fail_write_to_disk(c, s, a, b):
 
     assert future.status == "error"
 
-    with pytest.raises(Exception):
+    with pytest.raises(TypeError, match="Could not serialize"):
         await future
 
     futures = c.map(inc, range(10))
