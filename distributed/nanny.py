@@ -88,7 +88,6 @@ class Nanny(ServerNode):
         scheduler_file=None,
         worker_port=0,
         nthreads=None,
-        ncores=None,
         loop=None,
         local_dir=None,
         local_directory=None,
@@ -171,10 +170,6 @@ class Nanny(ServerNode):
             protocol_address = self.scheduler_addr.split("://")
             if len(protocol_address) == 2:
                 protocol = protocol_address[0]
-
-        if ncores is not None:
-            warnings.warn("the ncores= parameter has moved to nthreads=")
-            nthreads = ncores
 
         self._given_worker_port = worker_port
         self.nthreads = nthreads or CPU_COUNT
