@@ -97,13 +97,13 @@ def download_and_parse_artifact(url):
     """
     Download the artifact at the url parse it.
     """
-    r = get_from_github(url)
-    f = zipfile.ZipFile(io.BytesIO(r.content))
     try:
+        r = get_from_github(url)
+        f = zipfile.ZipFile(io.BytesIO(r.content))
         run = junitparser.JUnitXml.fromstring(f.read(f.filelist[0].filename))
         return run
     except Exception:
-        print(f"Failed to parse {url}")
+        print(f"Failed to download/parse {url}")
         return None
 
 
