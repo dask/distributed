@@ -608,7 +608,6 @@ class Worker(ServerNode):
         scheduler_port: int | None = None,
         *,
         scheduler_file: str | None = None,
-        ncores: None = None,  # Deprecated, use nthreads instead
         nthreads: int | None = None,
         loop: IOLoop | None = None,
         local_dir: None = None,  # Deprecated, use local_directory instead
@@ -836,10 +835,6 @@ class Worker(ServerNode):
                 )
         self._interface = interface
         self._protocol = protocol
-
-        if ncores is not None:
-            warnings.warn("the ncores= parameter has moved to nthreads=")
-            nthreads = ncores
 
         self.nthreads = nthreads or CPU_COUNT
         if resources is None:
@@ -1184,7 +1179,6 @@ class Worker(ServerNode):
             "id": self.id,
             "scheduler": self.scheduler.address,
             "nthreads": self.nthreads,
-            "ncores": self.nthreads,  # backwards compatibility
             "memory_limit": self.memory_limit,
         }
 
@@ -2909,7 +2903,7 @@ class Worker(ServerNode):
         warnings.warn(
             "The attribute `Worker.total_comm_bytes` has been renamed to `comm_threshold_bytes`. "
             "Future versions will only support the new name.",
-            DeprecationWarning,
+            FutureWarning,
         )
         return self.comm_threshold_bytes
 
@@ -3880,11 +3874,11 @@ class Worker(ServerNode):
             if hasattr(plugin, method_name):
                 if method_name == "release_key":
                     warnings.warn(
-                        "The `WorkerPlugin.release_key` hook is depreacted and will be "
+                        "The `WorkerPlugin.release_key` hook is deprecated and will be "
                         "removed in a future version. A similar event can now be "
                         "caught by filtering for a `finish=='released'` event in the "
                         "`WorkerPlugin.transition` hook.",
-                        DeprecationWarning,
+                        FutureWarning,
                     )
 
                 try:

@@ -20,7 +20,6 @@ import sys
 import tempfile
 import threading
 import uuid
-import warnings
 import weakref
 from collections import defaultdict
 from collections.abc import Callable
@@ -883,7 +882,6 @@ def gen_cluster(
         ("127.0.0.1", 1),
         ("127.0.0.1", 2),
     ],
-    ncores: None = None,  # deprecated
     scheduler="127.0.0.1",
     timeout: float = _TEST_TIMEOUT,
     security: Security | dict[str, Any] | None = None,
@@ -923,9 +921,6 @@ def gen_cluster(
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"
     )
-    if ncores is not None:
-        warnings.warn("ncores= has moved to nthreads=", stacklevel=2)
-        nthreads = ncores
 
     scheduler_kwargs = merge(
         {"dashboard": False, "dashboard_address": ":0"}, scheduler_kwargs
