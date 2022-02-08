@@ -199,8 +199,6 @@ globals()["ALL_TASK_STATES"] = ALL_TASK_STATES
 COMPILED = declare(bint, compiled)
 globals()["COMPILED"] = COMPILED
 
-_taskstate_to_dict_guard: bool = False
-
 
 @final
 @cclass
@@ -786,6 +784,40 @@ class WorkerState:
             "nanny": self._nanny,
             **self._extra,
         }
+
+    @ccall
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()):  # -> dict | str
+        """
+        A very verbose dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
+
+        Parameters
+        ----------
+        exclude:
+            A list of attributes which must not be present in the output.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        TaskState._to_dict
+
+        Notes
+        -----
+        This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
+        See same method on TaskState for more info.
+        """
+        members = inspect.getmembers(self)
+        info = {
+            k: v
+            for k, v in members
+            if not k.startswith("_")
+            and k not in exclude
+            and k not in {"has_what", "versions"}
+            and not callable(v)
+        }
+        # Convert dict_keys to set
+        info["has_what"] = set(self._has_what)
+        return recursive_to_dict(info, exclude=exclude)
 
 
 @final
@@ -1735,7 +1767,7 @@ class TaskState:
         return nbytes
 
     @ccall
-    def _to_dict(self, *, exclude: "Container[str]" = ()):  # -> dict | str
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()):  # -> dict | str
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
@@ -1748,27 +1780,24 @@ class TaskState:
         See also
         --------
         Client.dump_cluster_state
+
+        Notes
+        -----
+        This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
+        When a task references another task, or when a WorkerState.tasks contains tasks,
+        this method is not executed for the inner task, even if the inner task was never
+        seen before; you get a repr instead. All tasks should neatly appear under
+        Scheduler.tasks. This also prevents a RecursionError during particularly heavy
+        loads, which have been observed to happen whenever there's an acyclic dependency
+        chain of ~200+ tasks.
         """
-        # When a task references another task, just print the task repr. All tasks
-        # should neatly appear under Scheduler.tasks. This also prevents a
-        # RecursionError during particularly heavy loads, which have been observed to
-        # happen whenever there's an acyclic dependency chain of ~200+ tasks.
-        global _taskstate_to_dict_guard
-        if _taskstate_to_dict_guard:
-            return repr(self)
-        _taskstate_to_dict_guard = True
-        try:
-            members = inspect.getmembers(self)
-            return recursive_to_dict(
-                {
-                    k: v
-                    for k, v in members
-                    if not k.startswith("_") and k not in exclude and not callable(v)
-                },
-                exclude=exclude,
-            )
-        finally:
-            _taskstate_to_dict_guard = False
+        members = inspect.getmembers(self)
+        info = {
+            k: v
+            for k, v in members
+            if not k.startswith("_") and k not in exclude and not callable(v)
+        }
+        return recursive_to_dict(info, exclude=exclude)
 
 
 class _StateLegacyMapping(Mapping):
@@ -4016,7 +4045,7 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> dict:
         """
         A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
+        Not type stable and not intended for roundtrips.
 
         Parameters
         ----------

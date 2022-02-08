@@ -700,3 +700,49 @@ def test_recursive_to_dict():
         ["C:", "[<C>, <C>]"],
         ["C:", "[<C>, <C>]"],
     ]
+
+
+def test_to_dict_no_nest():
+    class Person:
+        def __init__(self, name):
+            self.name = name
+            self.children = []
+            self.pets = []
+            ...
+
+        def _to_dict_no_nest(self, exclude=()):
+            return recursive_to_dict(self.__dict__, exclude=exclude)
+
+        def __repr__(self):
+            return self.name
+
+    class Pet:
+        def __init__(self, name):
+            self.name = name
+            self.owners = []
+            ...
+
+        def _to_dict_no_nest(self, exclude=()):
+            return recursive_to_dict(self.__dict__, exclude=exclude)
+
+        def __repr__(self):
+            return self.name
+
+    alice = Person("Alice")
+    bob = Person("Bob")
+    charlie = Pet("Charlie")
+    alice.children.append(bob)
+    alice.pets.append(charlie)
+    bob.pets.append(charlie)
+    charlie.owners[:] = [alice, bob]
+    info = {"people": [alice, bob], "pets": [charlie]}
+    expect = {
+        "people": [
+            {"name": "Alice", "children": ["Bob"], "pets": ["Charlie"]},
+            {"name": "Bob", "children": [], "pets": ["Charlie"]},
+        ],
+        "pets": [
+            {"name": "Charlie", "owners": ["Alice", "Bob"]},
+        ],
+    }
+    assert recursive_to_dict(info) == expect

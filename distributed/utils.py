@@ -1452,12 +1452,27 @@ def __getattr__(name):
 # already been encountered, a string representation will be returned instead. This is
 # necessary since we have multiple cyclic referencing data structures.
 _recursive_to_dict_seen: ContextVar[set[int]] = ContextVar("_recursive_to_dict_seen")
+_to_dict_no_nest_flag = False
 
 
 def recursive_to_dict(obj: AnyType, *, exclude: Container[str] = ()) -> AnyType:
     """Recursively convert arbitrary Python objects to a JSON-serializable
-    representation. This is intended for debugging purposes only and calls ``_to_dict``
-    methods on encountered objects, if available.
+    representation. This is intended for debugging purposes only.
+
+    The following objects are supported:
+
+    list, tuple, set, frozenset, deque, dict
+        Descended into these objects recursively. Python-specific collections are
+        converted to JSON-friendly variants.
+    Classes that define ``_to_dict(self, *, exclude: Container[str] = ())``:
+        Call the method and dump its output
+    Classes that define ``_to_dict_no_nest(self, *, exclude: Container[str] = ())``:
+        Like above, but prevents nested calls (see below)
+    Other Python objects
+        Dump the output of ``repr()``
+    Objects already encountered before, regardless of type
+        Dump the output of ``repr()``. This breaks circular references and shortens the
+        output.
 
     Parameters
     ----------
@@ -1465,6 +1480,85 @@ def recursive_to_dict(obj: AnyType, *, exclude: Container[str] = ()) -> AnyType:
         A list of attribute names to be excluded from the dump.
         This will be forwarded to the objects ``_to_dict`` methods and these methods
         are required to accept this parameter.
+
+    **``_to_dict_no_nest`` vs. ``_to_dict``**
+
+    The presence of the ``_to_dict_no_nest`` method signals ``recursive_to_dict`` to
+    have a mutually exclusive full dict representation with other objects that also have
+    the ``_to_dict_no_nest``, regardless of their class. Only the outermost object in a
+    nested structure has the method invoked; all others are
+    dumped as their string repr instead, even if they were not encountered before.
+
+    Example:
+
+    .. code-block:: python
+
+        >>> class Person:
+        ...     def __init__(self, name):
+        ...         self.name = name
+        ...         self.children = []
+        ...         self.pets = []
+        ...
+        ...     def _to_dict_no_nest(self, exclude=()):
+        ...         return recursive_to_dict(self.__dict__, exclude=exclude)
+        ...
+        ...     def __repr__(self):
+        ...         return self.name
+
+        >>> class Pet:
+        ...     def __init__(self, name):
+        ...         self.name = name
+        ...         self.owners = []
+        ...
+        ...     def _to_dict_no_nest(self, exclude=()):
+        ...         return recursive_to_dict(self.__dict__, exclude=exclude)
+        ...
+        ...     def __repr__(self):
+        ...         return self.name
+
+        >>> alice = Person("Alice")
+        >>> bob = Person("Bob")
+        >>> charlie = Pet("Charlie")
+        >>> alice.children.append(bob)
+        >>> alice.pets.append(charlie)
+        >>> bob.pets.append(charlie)
+        >>> charlie.owners[:] = [alice, bob]
+        >>> recursive_to_dict({"people": [alice, bob], "pets": [charlie]})
+        {
+            "people": [
+                {"name": "Alice", "children": ["Bob"], "pets": ["Charlie"]},
+                {"name": "Bob", "children": [], "pets": ["Charlie"]},
+            ],
+            "pets": [
+                {"name": "Charlie", "owners": ["Alice", "Bob"]},
+            ],
+        }
+
+    If we changed the methods to ``_to_dict``, the output would instead be:
+
+    .. code-block:: python
+
+        {
+            "people": [
+                {
+                    "name": "Alice",
+                    "children": [
+                        {
+                            "name": "Bob",
+                            "children": [],
+                            "pets": [{"name": "Charlie", "owners": ["Alice", "Bob"]}],
+                        },
+                    ],
+                    pets: ["Charlie"],
+                ],
+                "Bob",
+            ],
+            "pets": ["Charlie"],
+        }
+
+    Also notice that, if in the future someone will swap the creation of the
+    ``children`` and ``pets`` attributes inside ``Person.__init__``, the output with
+    ``_to_dict`` will change completely whereas the one with ``_to_dict_no_nest`` won't!
     """
     if isinstance(obj, (int, float, bool, str)) or obj is None:
         return obj
@@ -1481,6 +1575,19 @@ def recursive_to_dict(obj: AnyType, *, exclude: Container[str] = ()) -> AnyType:
     try:
         if id(obj) in seen:
             return repr(obj)
+
+        if hasattr(obj, "_to_dict_no_nest"):
+            global _to_dict_no_nest_flag
+            if _to_dict_no_nest_flag:
+                return repr(obj)
+
+            seen.add(id(obj))
+            _to_dict_no_nest_flag = True
+            try:
+                return obj._to_dict_no_nest(exclude=exclude)
+            finally:
+                _to_dict_no_nest_flag = False
+
         seen.add(id(obj))
 
         if hasattr(obj, "_to_dict"):
