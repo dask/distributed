@@ -24,7 +24,7 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
@@ -926,11 +926,9 @@ class Client(SyncMethodMixin):
             ext(self)
 
         if not preload:
-            preload = cast("list[str]", dask.config.get("distributed.client.preload"))
+            preload = dask.config.get("distributed.client.preload")
         if not preload_argv:
-            preload_argv = cast(
-                "list[list[str]]", dask.config.get("distributed.client.preload-argv")
-            )
+            preload_argv = dask.config.get("distributed.client.preload-argv")
 
         # These two asserts are for typing
         assert preload is not None
@@ -1528,6 +1526,9 @@ class Client(SyncMethodMixin):
                     await self.cluster.close()
 
             await self.rpc.close()
+
+            for preload in self.preloads:
+                await preload.teardown()
 
             self.status = "closed"
 

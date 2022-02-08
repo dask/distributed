@@ -297,10 +297,15 @@ async def test_client_preload_text(s: Scheduler):
         """\
         def dask_setup(client):
             client.foo = "setup"
+
+
+        def dask_teardown(client):
+            client.foo = "teardown"
         """
     )
     async with Client(address=s.address, asynchronous=True, preload=text) as c:
         assert c.foo == "setup"
+    assert c.foo == "teardown"
 
 
 @gen_cluster(nthreads=[])
@@ -309,11 +314,16 @@ async def test_client_preload_config(s):
         """\
         def dask_setup(client):
             client.foo = "setup"
+
+
+        def dask_teardown(client):
+            client.foo = "teardown"
         """
     )
     with dask.config.set({"distributed.client.preload": [text]}):
         async with Client(address=s.address, asynchronous=True) as c:
             assert c.foo == "setup"
+        assert c.foo == "teardown"
 
 
 @gen_cluster(nthreads=[])
