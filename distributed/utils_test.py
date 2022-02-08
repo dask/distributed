@@ -97,9 +97,7 @@ _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
 
 
-@pytest.fixture(autouse=True)
-def log_process_info():
-    yield
+def _log_process_info():
     benchmarks = [
         "cpu_percent",
         "memory_percent",
@@ -165,6 +163,8 @@ def log_process_info():
 
     def print_tree(benchmark, tree, max_depth=20, indent=""):
         if max_depth <= 0:
+            if tree:
+                print(f"{indent}...")
             return
 
         for i, proc in enumerate(
@@ -1074,6 +1074,7 @@ def gen_cluster(
                                 workers[:] = ws
                                 args = [s] + workers
                                 break
+                        _log_process_info()
                         if s is False:
                             raise Exception("Could not start cluster")
                         if client:
@@ -1137,6 +1138,7 @@ def gen_cluster(
                             raise
 
                         finally:
+                            _log_process_info()
                             if client and c.status not in ("closing", "closed"):
                                 await c._close(fast=s.status == Status.closed)
                             await end_cluster(s, workers)
