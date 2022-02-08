@@ -1304,6 +1304,45 @@ async def test_get_task_prefix_states(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_get_worker_memory(c, s, a, b):
+    res = s.get_worker_memory()
+    assert res[0]["managed_in_memory"] == 0 and res[1]["managed_in_memory"] == 0
+
+    x = await c.submit(inc, 1)
+    res = s.get_worker_memory()
+
+    assert isinstance(res, list)
+    assert len(res) == 2
+    assert {
+        "limit",
+        "managed_in_memory",
+        "managed_spilled",
+        "process",
+        "unmanaged_old",
+        "unmanaged_recent",
+    } == set(res[0].keys())
+    assert res[0]["managed_in_memory"] > 0 or res[1]["managed_in_memory"] > 0
+
+
+@gen_cluster(client=True)
+async def test_get_worker_processing(c, s, a, b):
+    res = s.get_worker_processing()
+    assert res == [0, 0]
+
+    def foo():
+        sleep(0.1)
+
+    x = c.submit(foo)
+
+    while s.get_worker_processing() == [0, 0]:
+        await asyncio.sleep(0.01)
+
+    res = s.get_worker_processing()
+    assert sum(res) == 1
+    del x
+
+
+@gen_cluster(client=True)
 async def test_get_nbytes(c, s, a, b):
     [x] = await c.scatter([1])
     assert s.get_nbytes(summary=False) == {x.key: sizeof(1)}

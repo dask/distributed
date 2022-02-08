@@ -3933,6 +3933,8 @@ class Scheduler(SchedulerState, ServerNode):
             "subscribe_worker_status": self.subscribe_worker_status,
             "start_task_metadata": self.start_task_metadata,
             "stop_task_metadata": self.stop_task_metadata,
+            "get_worker_memory": self.get_worker_memory,
+            "get_worker_processing": self.get_worker_processing,
         }
 
         connection_limit = get_fileno_limit() / 2
@@ -7307,6 +7309,26 @@ class Scheduler(SchedulerState, ServerNode):
                     }
 
         return state
+
+    def get_worker_memory(self, comm=None):
+        workers = self.workers.values()
+        memory = []
+        for ws in workers:
+            limit = getattr(ws, "memory_limit", 0)
+            memory.append(
+                {
+                    "process": ws.memory.process,
+                    "managed_in_memory": ws.memory.managed_in_memory,
+                    "unmanaged_old": ws.memory.unmanaged_old,
+                    "unmanaged_recent": ws.memory.unmanaged_recent,
+                    "managed_spilled": ws.memory.managed_spilled,
+                    "limit": limit,
+                }
+            )
+        return memory
+
+    def get_worker_processing(self, comm=None):
+        return [len(getattr(ws, "processing", 0)) for ws in self.workers.values()]
 
     def get_task_status(self, comm=None, keys=None):
         parent: SchedulerState = cast(SchedulerState, self)
