@@ -9,6 +9,7 @@ import json
 import logging
 import multiprocessing
 import os
+import pickle
 import pkgutil
 import re
 import socket
@@ -1008,7 +1009,7 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
         return len(frame)
     else:
         try:
-            return frame.nbytes
+            return memoryview(frame).nbytes
         except AttributeError:
             return len(frame)
 
