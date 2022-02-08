@@ -172,7 +172,7 @@ if __name__ == "__main__":
         for w in workflows
         if (
             pandas.to_datetime(w["created_at"])
-            > pandas.Timestamp.now(tz="UTC") - pandas.Timedelta(days=90)
+            > pandas.Timestamp.now(tz="UTC") - pandas.Timedelta(days=60)
             and w["conclusion"] != "cancelled"
             and w["name"].lower() == "tests"
         )
