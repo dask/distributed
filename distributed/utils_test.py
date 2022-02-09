@@ -1249,7 +1249,6 @@ if has_ipv6():
     def requires_ipv6(test_func):
         return test_func
 
-
 else:
     requires_ipv6 = pytest.mark.skip("ipv6 required")
 

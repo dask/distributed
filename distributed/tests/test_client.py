@@ -243,7 +243,7 @@ async def test_custom_key_with_batches(c, s, a, b):
     """Test of <https://github.com/dask/distributed/issues/4588>"""
 
     futs = c.map(
-        lambda x: x ** 2,
+        lambda x: x**2,
         range(10),
         batch_size=5,
         key=[str(x) for x in range(10)],
@@ -4507,7 +4507,7 @@ async def test_normalize_collection_dask_array(c, s, a, b):
 def test_normalize_collection_with_released_futures(c):
     da = pytest.importorskip("dask.array")
 
-    x = da.arange(2 ** 20, chunks=2 ** 10)
+    x = da.arange(2**20, chunks=2**10)
     y = x.persist()
     wait(y)
     sol = y.sum().compute()
@@ -5153,7 +5153,7 @@ def test_get_client_no_cluster():
     Worker._instances.clear()
 
     msg = "No global client found and no address provided"
-    with pytest.raises(ValueError, match=fr"^{msg}$"):
+    with pytest.raises(ValueError, match=rf"^{msg}$"):
         get_client()
 
 

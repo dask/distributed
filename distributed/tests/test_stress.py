@@ -33,7 +33,7 @@ teardown_module = nodebug_teardown_module
 
 @gen_cluster(client=True)
 async def test_stress_1(c, s, a, b):
-    n = 2 ** 6
+    n = 2**6
 
     seq = c.map(inc, range(n))
     while len(seq) > 1:

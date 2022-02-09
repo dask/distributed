@@ -302,7 +302,7 @@ async def connect(
             intermediate_cap = intermediate_cap * 1.5
             # FullJitter see https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
 
-            upper_cap = min(time_left(), backoff_base * (2 ** attempt))
+            upper_cap = min(time_left(), backoff_base * (2**attempt))
             backoff = random.uniform(0, upper_cap)
             attempt += 1
             logger.debug(

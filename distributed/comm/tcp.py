@@ -268,7 +268,7 @@ class TCP(Comm):
         frames_nbytes = [nbytes(header), *frames_nbytes]
         frames_nbytes_total += frames_nbytes[0]
 
-        if frames_nbytes_total < 2 ** 17:  # 128kiB
+        if frames_nbytes_total < 2**17:  # 128kiB
             # small enough, send in one go
             frames = [b"".join(frames)]
             frames_nbytes = [frames_nbytes_total]

@@ -151,7 +151,7 @@ class Cluster(SyncMethodMixin):
                         exc_info=True,
                     )
             # Sleep, with error backoff
-            interval = min(max_interval, self._sync_interval * 1.5 ** err_count)
+            interval = min(max_interval, self._sync_interval * 1.5**err_count)
             await asyncio.sleep(interval)
 
     async def _close(self):
