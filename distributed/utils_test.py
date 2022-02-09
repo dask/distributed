@@ -54,6 +54,7 @@ from . import system
 from . import versions as version_module
 from .client import Client, _global_clients, default_client
 from .comm import Comm
+from .comm.tcp import BaseTCPConnector
 from .compatibility import WINDOWS
 from .config import initialize_logging
 from .core import CommClosedError, ConnectionPool, Status, connect, rpc
@@ -1559,6 +1560,8 @@ def save_sys_modules():
 def check_thread_leak():
     """Context manager to ensure we haven't leaked any threads"""
     active_threads_start = threading.enumerate()
+    # "TCP-Executor" threads are never stopped once they are started
+    BaseTCPConnector.warmup()
 
     yield
 
@@ -1568,15 +1571,8 @@ def check_thread_leak():
             thread
             for thread in threading.enumerate()
             if thread not in active_threads_start
-            and "Threaded" not in thread.name
-            and "watch message" not in thread.name
-            and "TCP-Executor" not in thread.name
-            # TODO: Make sure profile thread is cleaned up
-            # and remove the line below
-            and "Profile" not in thread.name
-            # asyncio default executor thread pool is not shut down until loop
-            # is shut down
-            and "asyncio_" not in thread.name
+            # FIXME this looks like a genuine leak that needs fixing
+            and "watch message queue" not in thread.name
         ]
         if not bad_threads:
             break
