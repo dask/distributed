@@ -166,18 +166,22 @@ if __name__ == "__main__":
     print("Getting all recent workflows...")
     workflows = get_workflow_listing()
 
-    # Filter the workflows listing to be in the last month,
+    # Filter the workflows listing to be in the retention period,
     # and only be test runs (i.e., no linting) that completed.
     workflows = [
         w
         for w in workflows
         if (
             pandas.to_datetime(w["created_at"])
-            > pandas.Timestamp.now(tz="UTC") - pandas.Timedelta(days=60)
+            > pandas.Timestamp.now(tz="UTC") - pandas.Timedelta(days=90)
             and w["conclusion"] != "cancelled"
             and w["name"].lower() == "tests"
         )
     ]
+    # Each workflow processed takes ~10-15 API requests. To avoid being
+    # rate limited by GitHub (1000 requests per hour) we choose just the
+    # most recent N runs. This also keeps the viz size from blowing up.
+    workflows = sorted(workflows, key=lambda w: w["created_at"])[-50:]
 
     print("Getting the artifact listing for each workflow...")
     for w in workflows:
