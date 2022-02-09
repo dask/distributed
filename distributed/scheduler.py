@@ -787,11 +787,6 @@ class WorkerState:
             **self._extra,
         }
 
-    @property
-    def ncores(self):
-        warnings.warn("WorkerState.ncores has moved to WorkerState.nthreads")
-        return self._nthreads
-
 
 @final
 @cclass

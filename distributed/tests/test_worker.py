@@ -3461,7 +3461,6 @@ async def test_Worker__to_dict(c, s, a):
         "id",
         "scheduler",
         "nthreads",
-        "ncores",
         "memory_limit",
         "address",
         "status",
