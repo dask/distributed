@@ -3722,6 +3722,7 @@ class Worker(ServerNode):
                         format_bytes(memory),
                         format_bytes(self.memory_limit),
                     )
+                    await self.close_gracefully(restart=True)
                     break
                 k, v, weight = self.data.fast.evict()
                 del k, v

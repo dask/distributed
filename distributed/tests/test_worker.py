@@ -507,6 +507,32 @@ async def test_io_loop(s):
         assert w.io_loop is s.loop
 
 
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 1)],
+    worker_kwargs={"memory_limit": "512MB"},
+)
+async def test_memory_leak(c, s, a, b):
+    import numpy as np
+    import time
+
+    x = {}
+
+    def memory_leaking_fn(data):
+        # leak 12MB blocks
+        x[data] = np.random.randint(100, size=12 * 1024 ** 2 // 8)
+
+        time.sleep(0.1)
+        return data
+
+    futures = c.map(memory_leaking_fn, range(1000))
+
+    for f in futures:
+        f.result()
+
+
 @gen_cluster(client=True, nthreads=[])
 async def test_spill_to_disk(c, s):
     np = pytest.importorskip("numpy")
