@@ -161,17 +161,16 @@ class FDChecker(ResourceChecker, name="fds"):
         BaseTCPConnector.warmup()
 
     def measure(self) -> int:
-        proc = psutil.Process()
-        return proc.num_handles() if WINDOWS else proc.num_fds()  # type: ignore
+        if WINDOWS:
+            # Don't use num_handles(); you'll get tens of thousands of reported leaks
+            return 0
+        return psutil.Process().num_fds()
 
     def has_leak(self, before: int, after: int) -> bool:
         return after > before
 
     def format(self, before: int, after: int) -> str:
-        return (
-            f"leaked {after - before} {'handle' if WINDOWS else 'file descriptor'}(s) "
-            f"({before}->{after})"
-        )
+        return f"leaked {after - before} file descriptor(s) ({before}->{after})"
 
 
 class RSSMemoryChecker(ResourceChecker, name="memory"):
