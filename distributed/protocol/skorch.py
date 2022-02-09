@@ -1,28 +1,42 @@
-import cloudpickle
 import skorch
-from .serialize import dask_serialize, dask_deserialize
+
+from . import pickle
+from .serialize import dask_deserialize, dask_serialize
+
 
 @dask_serialize.register(skorch.NeuralNet)
-def serialize_skorch(x):
+def serialize_skorch(x, context=None):
+    protocol = (context or {}).get("pickle-protocol", None)
+    headers = {}
     has_module = hasattr(x, "module_")
-    headers = {"has_module": has_module}
     if has_module:
         module = x.__dict__.pop("module_")
-        try:
-            frames = [cloudpickle.dumps(x)]
-            frames = frames + [cloudpickle.dumps(module)]
-        finally:
-            x.__dict__["module_"] = module
+        # module's is an interactively defined class on client so its namespace is often `__main__` .
+        # Pickle has problems pickling when interactively defined classes  when they are
+        # set as an attributes of another object.
+        # By pickling it on its own we are able to serialize successfully
+        frames = [None]
+        buffer_callback = lambda f: frames.append(memoryview(f))
+        frames[0] = pickle.dumps(x, buffer_callback=buffer_callback, protocol=protocol)
+        headers["subframe-split"] = i = len(frames)
+        frames.append(None)
+        frames[i] = pickle.dumps(
+            module, buffer_callback=buffer_callback, protocol=protocol
+        )
+        x.__dict__["module_"] = module
     else:
-        frames = [cloudpickle.dumps(x)]
+        frames = [None]
+        buffer_callback = lambda f: frames.append(memoryview(f))
+        frames[0] = pickle.dumps(x, buffer_callback=buffer_callback, protocol=protocol)
 
     return headers, frames
 
 
 @dask_deserialize.register(skorch.NeuralNet)
 def deserialize_skorch(header, frames):
-    model = cloudpickle.loads(frames[0])
-    if header["has_module"]:
-        module = cloudpickle.loads(frames[1])
+    i = header.get("subframe-split")
+    model = pickle.loads(frames[0], buffers=frames[1:i])
+    if i is not None:
+        module = pickle.loads(frames[i], buffers=frames[i + 1 :])
         model.module_ = module
     return model
