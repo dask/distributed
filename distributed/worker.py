@@ -718,6 +718,7 @@ class Worker(ServerNode):
             ("resumed", "released"): self.transition_generic_released,
             ("resumed", "waiting"): self.transition_resumed_waiting,
             ("resumed", "fetch"): self.transition_resumed_fetch,
+            ("resumed", "missing"): self.transition_resumed_missing,
             ("constrained", "executing"): self.transition_constrained_executing,
             ("constrained", "released"): self.transition_generic_released,
             ("error", "released"): self.transition_generic_released,
@@ -2330,33 +2331,55 @@ class Worker(ServerNode):
 
         See also `transition_resumed_waiting`
         """
-        # if the next state is already intended to be fetch or if the
-        # coro/thread is still running (ts.done==False), this is a noop
-        if ts._next == "fetch":
-            return {}, []
-        ts._next = "fetch"
-
+        recs, smsgs = {}, []
         if ts.done:
             next_state = ts._next
-            recs, smsgs = self.transition_generic_released(ts, stimulus_id=stimulus_id)
+            # if the next state is already intended to be fetch or if the
+            # coro/thread is still running (ts.done==False), this is a noop
+            if ts._next != "fetch":
+                recs, smsgs = self.transition_generic_released(
+                    ts, stimulus_id=stimulus_id
+                )
             recs[ts] = next_state
-            return recs, smsgs
-        return {}, []
+        else:
+            ts._next = "fetch"
+        return recs, smsgs
+
+    def transition_resumed_missing(self, ts, *, stimulus_id):
+        """
+        See transition_resumed_fetch
+        """
+        recs, smsgs = {}, []
+        if ts.done:
+            next_state = ts._next
+            # if the next state is already intended to be waiting or if the
+            # coro/thread is still running (ts.done==False), this is a noop
+            if ts._next != "missing":
+                recs, smsgs = self.transition_generic_released(
+                    ts, stimulus_id=stimulus_id
+                )
+            recs[ts] = next_state
+        else:
+            ts._next = "missing"
+        return recs, smsgs
 
     def transition_resumed_waiting(self, ts, *, stimulus_id):
         """
         See transition_resumed_fetch
         """
-        if ts._next == "waiting":
-            return {}, []
-        ts._next = "waiting"
-
+        recs, smsgs = {}, []
         if ts.done:
             next_state = ts._next
-            recs, smsgs = self.transition_generic_released(ts, stimulus_id=stimulus_id)
+            # if the next state is already intended to be waiting or if the
+            # coro/thread is still running (ts.done==False), this is a noop
+            if ts._next != "waiting":
+                recs, smsgs = self.transition_generic_released(
+                    ts, stimulus_id=stimulus_id
+                )
             recs[ts] = next_state
-            return recs, smsgs
-        return {}, []
+        else:
+            ts._next = "waiting"
+        return recs, smsgs
 
     def transition_cancelled_fetch(self, ts, *, stimulus_id):
         if ts.done:
