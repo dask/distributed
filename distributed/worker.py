@@ -3652,8 +3652,11 @@ class Worker(ServerNode):
                         format_bytes(self.memory_limit),
                     )
                     break
-                k, v, weight = self.data.fast.evict()
-                del k, v
+                weight = self.data.evict()
+                if weight == -1:
+                    # Failed to evict: disk full, spill size limit exceeded, or pickle error
+                    break
+
                 total += weight
                 count += 1
                 # If the current buffer is filled with a lot of small values,
@@ -3670,6 +3673,7 @@ class Worker(ServerNode):
                     # before trying to evict even more data.
                     self._throttled_gc.collect()
                     memory = proc.memory_info().rss
+
             check_pause(memory)
             if count:
                 logger.debug(

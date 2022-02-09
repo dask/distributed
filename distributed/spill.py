@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Hashable, Mapping
+from contextlib import contextmanager
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -62,11 +63,11 @@ class SpillBuffer(zict.Buffer):
         self.min_log_interval = min_log_interval
         self.logged_pickle_errors = set()  # keys logged with pickle error
 
-    def __setitem__(self, key, value):
+    @contextmanager
+    def handle_errors(self, key: str | None):
         try:
-            super().__setitem__(key, value)
-        except MaxSpillExceeded as e:
-            key_e = e.args[0]  # otherwise it returns (key_e, )
+            yield
+        except MaxSpillExceeded:
             # key is in self.fast; no keys have been lost on eviction
             # Note: requires zict > 2.0
             now = time.time()
@@ -75,7 +76,7 @@ class SpillBuffer(zict.Buffer):
                     "Spill file on disk reached capacity; keeping data in memory"
                 )
                 self.last_logged = now
-            pass
+            raise HandledError()
         except OSError:
             now = time.time()
             if now - self.last_logged >= self.min_log_interval:
@@ -83,9 +84,11 @@ class SpillBuffer(zict.Buffer):
                     "Spill to disk failed; keeping data in memory", exc_info=True
                 )
                 self.last_logged = now
+            raise HandledError()
         except PickleError as e:
             key_e, orig_e = e.args
             if key_e == key:
+                assert key is not None
                 # The key we just inserted failed to serialize.
                 # This happens only when the key is individually larger than target.
                 # The exception will be caught by Worker and logged; the status of
@@ -99,11 +102,25 @@ class SpillBuffer(zict.Buffer):
                 assert key_e in self.fast
                 assert key_e not in self.slow
                 if key_e not in self.logged_pickle_errors:
-                    logger.error(f"Failed to pickle {key!r}", exc_info=True)
+                    logger.error(f"Failed to pickle {key_e!r}", exc_info=True)
                     self.logged_pickle_errors.add(key_e)
+                raise HandledError()
 
-        else:  # no errors raised
-            self.logged_pickle_errors.discard(key)
+    def __setitem__(self, key, value):
+        try:
+            with self.handle_errors(key):
+                super().__setitem__(key, value)
+                self.logged_pickle_errors.discard(key)
+        except HandledError:
+            pass
+
+    def evict(self) -> int:
+        try:
+            with self.handle_errors(None):
+                _, _, weight = self.fast.evict()
+                return weight
+        except HandledError:
+            return -1
 
     def __delitem__(self, key):
         super().__delitem__(key)
@@ -137,6 +154,10 @@ class MaxSpillExceeded(Exception):
 
 
 class PickleError(Exception):
+    pass
+
+
+class HandledError(Exception):
     pass
 
 
