@@ -1,7 +1,9 @@
 """A pytest plugin to trace resource leaks.
 
-Enabled from the command line with -L / --leaks. See `pytest --help` for further
-configuration settings.
+Usage
+-----
+This plugin is enabled from the command line with -L / --leaks.
+See `pytest --help` for further configuration settings.
 
 You may mark individual tests as known to be leaking with the fixture
 
@@ -14,6 +16,32 @@ e.g.
     @pytest.mark.leaking("threads")
 
 If you do, the specified checks won't report errors.
+
+Known issues
+------------
+- Tests that contain imports will be flagged as leaking RAM (memory and tracemallock
+  checks) if it's the first time in the test suite that the import happens; e.g.
+
+      def test1():
+          pytest.importorskip("numpy")
+
+  Same issue happens with tests that populate global caches (e.g. linecache, re).
+  A previous version of this plugin had an option to silently retry a test once after a
+  failure; that version is no longer working as of the latest pytest. Reinstating the
+  flag would solve this issue. See pytest_rerunfailures code for inspiration.
+
+- The @gen_cluster fixture leaks 2 fds on the first test decorated with it within a test
+  suite; this is likely caused by an incomplete warmup routine of
+  distributed.comm.tcp.BaseTCPConnector.
+  This issue would also be fixed by rerunning failing tests.
+
+- The @pytest.mark.flaky decorator (pytest_rerunfailures) completely disables this
+  plugin for the decorated tests.
+
+- You cannot expect the process memory to go down immediately and deterministically as
+  soon as you garbage collect Python objects. This makes the 'memory' check very
+  unreliable. On Linux, this can be improved by reducing the MALLOC_TRIM glibc setting
+  (see distributed.yaml).
 """
 from __future__ import annotations
 
@@ -125,7 +153,7 @@ class DemoChecker(ResourceChecker, name="demo"):
         return after > before
 
     def format(self, before: int, after: int) -> str:
-        return f"Counter increased from {before} to {after}"
+        return f"counter increased from {before} to {after}"
 
 
 class FDChecker(ResourceChecker, name="fds"):
@@ -133,15 +161,17 @@ class FDChecker(ResourceChecker, name="fds"):
         BaseTCPConnector.warmup()
 
     def measure(self) -> int:
-        if WINDOWS:
-            return 0
-        return psutil.Process().num_fds()
+        proc = psutil.Process()
+        return proc.num_handles() if WINDOWS else proc.num_fds()  # type: ignore
 
     def has_leak(self, before: int, after: int) -> bool:
         return after > before
 
     def format(self, before: int, after: int) -> str:
-        return f"leaked {after - before} file descriptor(s)"
+        return (
+            f"leaked {after - before} {'handle' if WINDOWS else 'file descriptor'}(s) "
+            f"({before}->{after})"
+        )
 
 
 class RSSMemoryChecker(ResourceChecker, name="memory"):
@@ -174,7 +204,7 @@ class ActiveThreadsChecker(ResourceChecker, name="threads"):
     ) -> str:
         leaked = after - before
         assert leaked
-        return f"leaked {len(leaked)} Python threads: {sorted(leaked, key=str)}"
+        return f"leaked {len(leaked)} Python thread(s): {sorted(leaked, key=str)}"
 
 
 class ChildProcess:
@@ -288,9 +318,8 @@ class TracemallocMemoryChecker(ResourceChecker, name="tracemalloc"):
         diff = snap_after.compare_to(snap_before, "traceback")
 
         lines = [
-            "leaked {:.1f} MiB of traced Python memory".format(
-                (bytes_after - bytes_before) / 2 ** 20
-            )
+            f"leaked {(bytes_after - bytes_before) / 2 ** 20:.1f} MiB "
+            "of traced Python memory"
         ]
         for stat in diff[: self.NDIFF]:
             size_diff = stat.size_diff or stat.size
