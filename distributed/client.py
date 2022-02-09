@@ -1478,6 +1478,9 @@ class Client(SyncMethodMixin):
 
         self.status = "closing"
 
+        for preload in self.preloads:
+            await preload.teardown()
+
         with suppress(AttributeError):
             for pc in self._periodic_callbacks.values():
                 pc.stop()
@@ -1526,9 +1529,6 @@ class Client(SyncMethodMixin):
                     await self.cluster.close()
 
             await self.rpc.close()
-
-            for preload in self.preloads:
-                await preload.teardown()
 
             self.status = "closed"
 
