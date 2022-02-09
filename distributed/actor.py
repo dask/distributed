@@ -314,7 +314,6 @@ class _Error:
         raise self._e
 
 
-@dataclass(frozen=False, eq=False)
 class ActorFuture(BaseActorFuture[_T]):
     def __init__(self, io_loop: IOLoop):
         self._io_loop = io_loop
