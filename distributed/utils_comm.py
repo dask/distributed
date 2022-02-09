@@ -352,7 +352,7 @@ async def retry(
     Returns
     -------
     Any
-        Whatever `await `coro()` returned
+        Whatever `await coro()` returned
     """
     # this loop is a no-op in case max_retries<=0
     for i_try in range(count):
