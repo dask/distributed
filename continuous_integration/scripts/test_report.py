@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import io
 import os
 import re
@@ -137,7 +138,7 @@ def dataframe_from_jxml(run):
             else:
                 s = "x"
             status.append(s)
-            message.append(m)
+            message.append(html.escape(m))
     df = pandas.DataFrame(
         {"file": fname, "test": tname, "status": status, "message": message}
     )
