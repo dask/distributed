@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import io
 import os
 import re
@@ -137,7 +138,7 @@ def dataframe_from_jxml(run):
             else:
                 s = "x"
             status.append(s)
-            message.append(m)
+            message.append(html.escape(m))
     df = pandas.DataFrame(
         {"file": fname, "test": tname, "status": status, "message": message}
     )
@@ -165,7 +166,7 @@ if __name__ == "__main__":
     print("Getting all recent workflows...")
     workflows = get_workflow_listing()
 
-    # Filter the workflows listing to be in the last month,
+    # Filter the workflows listing to be in the retention period,
     # and only be test runs (i.e., no linting) that completed.
     workflows = [
         w
@@ -177,6 +178,10 @@ if __name__ == "__main__":
             and w["name"].lower() == "tests"
         )
     ]
+    # Each workflow processed takes ~10-15 API requests. To avoid being
+    # rate limited by GitHub (1000 requests per hour) we choose just the
+    # most recent N runs. This also keeps the viz size from blowing up.
+    workflows = sorted(workflows, key=lambda w: w["created_at"])[-50:]
 
     print("Getting the artifact listing for each workflow...")
     for w in workflows:
