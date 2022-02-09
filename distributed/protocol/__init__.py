@@ -120,7 +120,7 @@ def _register_cuml():
     with suppress(ImportError):
         from cuml.comm import serialize
 
-        
+
 @dask_serialize.register_lazy("skorch")
 @dask_deserialize.register_lazy("skorch")
 def _register_skorch():
