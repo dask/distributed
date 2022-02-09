@@ -7436,3 +7436,10 @@ class TestClientSecurityLoader:
             with pytest.raises(ImportError, match="totally_fake_module_name_2.loader"):
                 async with Client("tls://bad-address:8888", asynchronous=True):
                     pass
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_wait_for_workers_updates_info(c, s):
+    async with Worker(s.address):
+        await c.wait_for_workers(1)
+        assert c.scheduler_info()["workers"]
