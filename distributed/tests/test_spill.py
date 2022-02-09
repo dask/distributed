@@ -226,19 +226,20 @@ class MyError(Exception):
     pass
 
 
+class Bad:
+    def __init__(self, size):
+        self.size = size
+
+    def __getstate__(self):
+        raise MyError()
+
+    def __sizeof__(self):
+        return self.size
+
+
 @requires_zict_210
 def test_spillbuffer_fail_to_serialize(tmpdir):
     buf = SpillBuffer(str(tmpdir), target=200, max_spill=600, min_log_interval=0)
-
-    class Bad:
-        def __init__(self, size):
-            self.size = size
-
-        def __getstate__(self):
-            raise MyError()
-
-        def __sizeof__(self):
-            return self.size
 
     # bad data individually larger than spill threshold target 200
     a = Bad(size=201)
@@ -318,3 +319,47 @@ def test_spillbuffer_oserror(tmpdir):
 
     assert buf.slow.weight_by_key == {"a": 329}
     assert buf.fast.weights == {"b": 149, "d": 149}
+
+
+@requires_zict_210
+def test_spillbuffer_evict(tmpdir):
+    buf = SpillBuffer(str(tmpdir), target=300, min_log_interval=0)
+
+    a_bad = Bad(size=100)
+    a = "a" * 100
+    sa_bad = sizeof(a_bad)
+    sa = sizeof(a)
+    sa_pickle = sum(len(frame) for frame in serialize_bytelist(a))
+
+    buf["a"] = a
+
+    assert set(buf.fast) == {"a"}
+    assert not set(buf.slow)
+    assert buf.fast.weights == {"a": sa}
+
+    # successful eviction
+    buf.evict()
+
+    assert not set(buf.fast)
+    assert set(buf.slow) == {"a"}
+    assert buf.slow.weight_by_key == {"a": sa_pickle}
+
+    buf["a_bad"] = a_bad
+
+    assert set(buf.fast) == {"a_bad"}
+    assert buf.fast.weights == {"a_bad": sa_bad}
+    assert set(buf.slow) == {"a"}
+    assert buf.slow.weight_by_key == {"a": sa_pickle}
+
+    # unsuccessful eviction
+    with captured_logger(
+        logging.getLogger("distributed.protocol.pickle")
+    ) as logs_evict_key:
+        buf.evict()
+
+    assert "Failed to serialize" in logs_evict_key.getvalue()
+    # bad keys stays in fast
+    assert set(buf.fast) == {"a_bad"}
+    assert buf.fast.weights == {"a_bad": sa_bad}
+    assert set(buf.slow) == {"a"}
+    assert buf.slow.weight_by_key == {"a": sa_pickle}
