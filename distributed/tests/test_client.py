@@ -4642,13 +4642,14 @@ async def test_client_timeout():
     """`await Client(...)` keeps retrying for 10 seconds if it can't find the Scheduler
     straight away
     """
-    c = Client("127.0.0.1:57484", asynchronous=True)
-    client_start_fut = asyncio.ensure_future(c)
-    await asyncio.sleep(4)
-    async with Scheduler(port=57484, dashboard_address=":0"):
-        await client_start_fut
-        assert await c.run_on_scheduler(lambda: 123) == 123
-        await c.close()
+    with dask.config.set({"distributed.comm.timeouts.connect": "10s"}):
+        c = Client("127.0.0.1:57484", asynchronous=True)
+        client_start_fut = asyncio.ensure_future(c)
+        await asyncio.sleep(2)
+        async with Scheduler(port=57484, dashboard_address=":0"):
+            await client_start_fut
+            assert await c.run_on_scheduler(lambda: 123) == 123
+            await c.close()
 
 
 @gen_cluster(client=True)
