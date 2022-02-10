@@ -119,7 +119,7 @@ def test_ucx_config_w_env_var(cleanup, loop):
             ],
             env=env,
         ):
-            with Client(sched_addr, loop=loop, timeout=10) as c:
+            with Client(sched_addr, loop=loop, timeout=60) as c:
                 while not c.scheduler_info()["workers"]:
                     sleep(0.1)
 

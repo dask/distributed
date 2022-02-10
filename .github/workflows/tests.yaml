@@ -124,8 +124,11 @@ jobs:
           fi
           source continuous_integration/scripts/set_ulimit.sh
 
-          pytest distributed -m "not avoid_ci and ${{ matrix.partition }}" --runslow \
-            --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID --cov=distributed --cov-report=xml
+          pytest distributed \
+            -m "not avoid_ci and ${{ matrix.partition }}" --runslow \
+            --leaks=fds,processes,threads \
+            --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \
+            --cov=distributed --cov-report=xml
 
       # - name: Debug with tmate on failure
       #   if: ${{ failure() }}

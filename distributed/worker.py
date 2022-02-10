@@ -893,13 +893,16 @@ class Worker(ServerNode):
         ):
             from .spill import SpillBuffer
 
-            self.data = SpillBuffer(
-                os.path.join(self.local_directory, "storage"),
-                target=int(
+            if self.memory_target_fraction:
+                target = int(
                     self.memory_limit
                     * (self.memory_target_fraction or self.memory_spill_fraction)
                 )
-                or sys.maxsize,
+            else:
+                target = sys.maxsize
+            self.data = SpillBuffer(
+                os.path.join(self.local_directory, "storage"),
+                target=target,
                 max_spill=self.max_spill,
             )
         else:
@@ -3150,7 +3153,7 @@ class Worker(ServerNode):
                 else:
                     # Exponential backoff to avoid hammering scheduler/worker
                     self.repetitively_busy += 1
-                    await asyncio.sleep(0.100 * 1.5 ** self.repetitively_busy)
+                    await asyncio.sleep(0.100 * 1.5**self.repetitively_busy)
 
                     await self.query_who_has(*to_gather_keys)
 
