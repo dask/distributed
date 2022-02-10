@@ -107,6 +107,9 @@ class SpillBuffer(zict.Buffer):
                 raise HandledError()
 
     def __setitem__(self, key, value):
+        """Sets items on the Spill Buffer. Handles errors raised due to max spill reached,
+        os errors, and pickle errors, on a key that was just inserted.
+        """
         try:
             with self.handle_errors(key):
                 super().__setitem__(key, value)
@@ -115,6 +118,9 @@ class SpillBuffer(zict.Buffer):
             pass
 
     def evict(self) -> int:
+        """Handles eviction errors, when eviction mechanism from set item is bypassed. This occurs
+        when distributed.worker.memory.target: False, but there is a distributed.worker.memory.spill.
+        """
         try:
             with self.handle_errors(None):
                 _, _, weight = self.fast.evict()
