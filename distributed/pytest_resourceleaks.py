@@ -174,7 +174,7 @@ class FDChecker(ResourceChecker, name="fds"):
 
 
 class RSSMemoryChecker(ResourceChecker, name="memory"):
-    LEAK_THRESHOLD = 10 * 2 ** 20
+    LEAK_THRESHOLD = 10 * 2**20
 
     def measure(self) -> int:
         return psutil.Process().memory_info().rss
@@ -283,7 +283,7 @@ class ChildProcessesChecker(ResourceChecker, name="processes"):
 
 class TracemallocMemoryChecker(ResourceChecker, name="tracemalloc"):
     # Report a leak if the traced memory increased by at least this many bytes
-    LEAK_THRESHOLD = 2 ** 20
+    LEAK_THRESHOLD = 2**20
     # Report at most this many leaks
     NDIFF = 5
     # Report less than NDIFF leaks if they amount to less than this many bytes
