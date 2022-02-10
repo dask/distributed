@@ -1739,8 +1739,10 @@ def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
                         reset_config()
 
                         if not ON_CI:
+                            # Tests should set this explicitly if they are
+                            # relying on timeouts
                             ctx = dask.config.set(
-                                {"distributed.comm.timeouts.connect": "5s"}
+                                {"distributed.comm.timeouts.connect": "300s"}
                             )
                         else:
                             ctx = nullcontext()
