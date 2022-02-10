@@ -507,37 +507,6 @@ async def test_io_loop(s):
         assert w.io_loop is s.loop
 
 
-@gen_cluster(client=True, nthreads=[])
-async def test_spill_to_disk(c, s):
-    np = pytest.importorskip("numpy")
-    w = await Worker(
-        s.address,
-        loop=s.loop,
-        memory_limit=1200 / 0.6,
-        memory_pause_fraction=None,
-        memory_spill_fraction=None,
-    )
-
-    x = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="x")
-    await wait(x)
-    y = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="y")
-    await wait(y)
-
-    assert set(w.data) == {x.key, y.key}
-    assert set(w.data.memory) == {x.key, y.key}
-
-    z = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="z")
-    await wait(z)
-    assert set(w.data) == {x.key, y.key, z.key}
-    assert set(w.data.memory) == {y.key, z.key}
-    assert set(w.data.disk) == {x.key}
-
-    await x
-    assert set(w.data.memory) == {x.key, z.key}
-    assert set(w.data.disk) == {y.key}
-    await w.close()
-
-
 @gen_cluster(client=True)
 async def test_access_key(c, s, a, b):
     def f(i):
@@ -580,23 +549,6 @@ async def test_Executor(c, s):
             assert result == 2
 
             assert e._threads  # had to do some work
-
-
-@pytest.mark.skip(
-    reason="Other tests leak memory, so process-level checks trigger immediately"
-)
-@gen_cluster(
-    client=True,
-    nthreads=[("127.0.0.1", 1)],
-    timeout=30,
-    worker_kwargs={"memory_limit": 10e6},
-)
-async def test_spill_by_default(c, s, w):
-    da = pytest.importorskip("dask.array")
-    x = da.ones(int(10e6 * 0.7), chunks=1e6, dtype="u1")
-    y = c.persist(x)
-    await wait(y)
-    assert len(w.data.disk)  # something is on disk
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], worker_kwargs={"reconnect": False})
@@ -1180,23 +1132,64 @@ async def test_statistical_profiling_2(c, s, a, b):
 
 
 @gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    worker_kwargs=dict(
+        memory_limit=1200 / 0.6,
+        memory_target_fraction=0.6,
+        memory_spill_fraction=False,
+        memory_pause_fraction=False,
+    ),
+)
+async def test_spill_target_threshold(c, s, a):
+    """Test distributed.worker.memory.target threshold. Note that in this test we
+    disabled spill and pause thresholds, which work on the process memory, and just left
+    the target threshold, which works on managed memory so it is unperturbed by the
+    several hundreds of MB of unmanaged memory that are typical of the test suite.
+    """
+    x = c.submit(lambda: "x" * 500, key="x")
+    await wait(x)
+    y = c.submit(lambda: "y" * 500, key="y")
+    await wait(y)
+
+    assert set(a.data) == {"x", "y"}
+    assert set(a.data.memory) == {"x", "y"}
+
+    z = c.submit(lambda: "z" * 500, key="z")
+    await wait(z)
+    assert set(a.data) == {"x", "y", "z"}
+    assert set(a.data.memory) == {"y", "z"}
+    assert set(a.data.disk) == {"x"}
+
+    await x
+    assert set(a.data.memory) == {"x", "z"}
+    assert set(a.data.disk) == {"y"}
+
+
+@gen_cluster(
     nthreads=[("", 1)],
     client=True,
-    config={
-        "distributed.worker.memory.target": False,
-        "distributed.worker.memory.spill": 0.7,
-    },
-    worker_kwargs={"memory_monitor_interval": "10ms"},
+    worker_kwargs=dict(
+        memory_monitor_interval="10ms",
+        memory_target_fraction=False,
+        memory_spill_fraction=0.7,
+        memory_pause_fraction=False,
+    ),
 )
-async def test_robust_to_bad_sizeof_estimates(c, s, a):
-    """Test that the spill threshold uses the process memory and not the managed memory
-    reported by sizeof(), which may be inaccurate
+async def test_spill_spill_threshold(c, s, a):
+    """Test distributed.worker.memory.spill threshold.
+    Test that the spill threshold uses the process memory and not the managed memory
+    reported by sizeof(), which may be inaccurate.
     """
+    # Reach 'spill' threshold after 400MB of managed data. We need to be generous in
+    # order to avoid flakiness due to fluctuations in unmanaged memory.
+    # FIXME https://github.com/dask/distributed/issues/5367
+    #       This works just by luck for the purpose of the spill and pause thresholds,
+    #       and does NOT work for the target threshold.
     memory = s.workers[a.address].memory.process
-    # Reach 'spill' threshold after 400MB of managed data
     a.memory_limit = memory / 0.7 + 400e6
 
-    class BadAccounting:
+    class UnderReport:
         """100 MB process memory, 10 bytes reported managed memory"""
 
         def __init__(self, *args):
@@ -1207,48 +1200,96 @@ async def test_robust_to_bad_sizeof_estimates(c, s, a):
 
         def __reduce__(self):
             """Speed up test by writing very little to disk when spilling"""
-            return BadAccounting, ()
+            return UnderReport, ()
 
-    futures = c.map(BadAccounting, range(8))
+    futures = c.map(UnderReport, range(8))
 
     while not a.data.disk:
         await asyncio.sleep(0.01)
 
 
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    worker_kwargs=dict(
+        # FIXME https://github.com/dask/distributed/issues/5367
+        #       Can't reconfigure the absolute target threshold after the worker
+        #       started, so we're setting it here to something extremely small and then
+        #       increasing the memory_limit dynamically below in order to test the
+        #       spill threshold.
+        memory_limit=1,
+        memory_monitor_interval="10ms",
+        memory_target_fraction=False,
+        memory_spill_fraction=0.7,
+        memory_pause_fraction=False,
+    ),
+)
+async def test_spill_no_target_threshold(c, s, a):
+    """Test that you can enable the spill threshold while leaving the target threshold
+    to False
+    """
+    memory = s.workers[a.address].memory.process
+    a.memory_limit = memory / 0.7 + 400e6
+
+    class OverReport:
+        """Configurable process memory, 10 GB reported managed memory"""
+
+        def __init__(self, size):
+            self.data = "x" * size
+
+        def __sizeof__(self):
+            return int(10e9)
+
+        def __reduce__(self):
+            """Speed up test by writing very little to disk when spilling"""
+            return OverReport, (len(self.data),)
+
+    f1 = c.submit(OverReport, 0, key="f1")
+    await wait(f1)
+    assert set(a.data.memory) == {"f1"}
+
+    futures = c.map(OverReport, range(int(100e6), int(100e6) + 8))
+
+    while not a.data.disk:
+        await asyncio.sleep(0.01)
+    assert "f1" in a.data.disk
+
+
 @pytest.mark.slow
 @gen_cluster(
-    nthreads=[("127.0.0.1", 2)],
+    nthreads=[("", 1)],
     client=True,
-    worker_kwargs={
-        "memory_monitor_interval": "20ms",
-        "memory_spill_fraction": False,  # don't spill
-        "memory_target_fraction": False,
-        "memory_pause_fraction": 0.5,
-    },
+    worker_kwargs=dict(
+        memory_monitor_interval="10ms",
+        memory_target_fraction=False,
+        memory_spill_fraction=False,
+        memory_pause_fraction=0.8,
+    ),
 )
 async def test_pause_executor(c, s, a):
+    # See notes in test_spill_spill_threshold
     memory = psutil.Process().memory_info().rss
-    a.memory_limit = memory / 0.5 + 200e6
-    np = pytest.importorskip("numpy")
+    a.memory_limit = memory / 0.8 + 200e6
 
     def f():
-        x = np.ones(int(400e6), dtype="u1")
+        x = "x" * int(250e6)
         sleep(1)
 
     with captured_logger(logging.getLogger("distributed.worker")) as logger:
-        future = c.submit(f)
+        future = c.submit(f, key="x")
         futures = c.map(slowinc, range(30), delay=0.1)
 
         while a.status != Status.paused:
             await asyncio.sleep(0.01)
 
-        out = logger.getvalue()
-        assert "memory" in out.lower()
-        assert "pausing" in out.lower()
+        assert "Pausing worker" in logger.getvalue()
+        assert sum(f.status == "finished" for f in futures) < 4
 
-    assert sum(f.status == "finished" for f in futures) < 4
+        while a.status != Status.running:
+            await asyncio.sleep(0.01)
 
-    await wait(futures)
+        assert "Resuming worker" in logger.getvalue()
+        await wait(futures)
 
 
 @gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "50 ms"})
