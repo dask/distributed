@@ -19,6 +19,15 @@ from .utils import msgpack_opts
 logger = logging.getLogger(__name__)
 
 
+def ensure_memoryview(obj):
+    """Ensure `obj` is a memoryview of datatype bytes"""
+    ret = memoryview(obj)
+    if ret.nbytes:
+        return ret.cast("B")
+    else:
+        return ret
+
+
 def dumps(
     msg, serializers=None, on_error="message", context=None, frame_split_size=None
 ) -> list:
@@ -75,7 +84,12 @@ def dumps(
                 sub_frames = []
                 sub_header = {
                     "pickled-obj": pickle.dumps(
-                        obj.data, buffer_callback=sub_frames.append
+                        obj.data,
+                        # In to support len() and slicing, we convert `PickleBuffer`
+                        # objects to memoryviews of bytes.
+                        buffer_callback=lambda x: sub_frames.append(
+                            ensure_memoryview(x)
+                        ),
                     )
                 }
                 _inplace_compress_frames(sub_header, sub_frames)

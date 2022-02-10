@@ -9,7 +9,6 @@ import json
 import logging
 import multiprocessing
 import os
-import pickle
 import pkgutil
 import re
 import socket
