@@ -17,7 +17,6 @@ from unittest import mock
 import psutil
 import pytest
 
-zict = pytest.importorskip("zict")
 from packaging.version import parse as parse_version
 from tlz import first, pluck, sliding_window
 
@@ -535,8 +534,12 @@ async def test_spill_to_disk(c, s, w):
     assert set(w.data.disk) == {y.key}
 
 
+try:
+    import zict
+except ImportError:
+    zict = None
 requires_zict_210 = pytest.mark.skipif(
-    parse_version(zict.__version__) <= parse_version("2.0.0"),
+    not zict or parse_version(zict.__version__) <= parse_version("2.0.0"),
     reason="requires zict version > 2.0.0",
 )
 
@@ -1051,15 +1054,17 @@ async def test_fail_write_to_disk_evict(c, s, w):
     x = c.submit(np.zeros, 500, dtype="u1", key="x")
 
     with captured_logger(
-        logging.getLogger("distributed.protocol.pickle")
+        logging.getLogger("distributed.spill")
     ) as logs_evict_key:
         await wait(x)
 
     # tries to evict bad key, fails to serialize, key remains in fast
-    assert "Failed to serialize" in logs_evict_key.getvalue()
+    logs_value = logs_evict_key.getvalue()
+    assert "Failed to pickle" in logs_value
+    assert "Traceback" in logs_value
     assert set(w.data) == {x.key, bad.key}
     assert set(w.data.memory) == {x.key, bad.key}
-    assert not set(w.data.disk)
+    assert not w.data.disk
 
 
 @pytest.mark.skip(reason="Our logic here is faulty")

@@ -461,7 +461,7 @@ class Worker(ServerNode):
         (default: read from config key distributed.worker.memory.pause)
     max_spill: int, string or False
         Limit of number of bytes to be spilled on disk.
-        (default: read from config key distributed.worker.memory.spill-limit)
+        (default: read from config key distributed.worker.memory.max-spill)
     executor: concurrent.futures.Executor, dict[str, concurrent.futures.Executor], "offload"
         The executor(s) to use. Depending on the type, it has the following meanings:
             - Executor instance: The default executor.
