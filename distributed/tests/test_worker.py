@@ -3266,6 +3266,69 @@ async def _wait_for_state(key: str, worker: Worker, state: str):
 
 
 @gen_cluster(client=True)
+async def test_task_flight_compute_oserror(c, s, a, b):
+    """If the remote worker dies while a task is in flight, the task may be
+    rescheduled to be computed on the worker trying to fetch the data.
+    However, the OSError caused by the dead remote would try to transition the
+    task to missing which is not what we want. This test ensures that the task
+    is properly transitioned to executing and the scheduler doesn't reschedule
+    anything and rejects the "false missing" signal from the worker, if there is
+    any.
+    """
+
+    write_queue = asyncio.Queue()
+    write_event = asyncio.Event()
+    b.rpc = _LockedCommPool(
+        b.rpc,
+        write_queue=write_queue,
+        write_event=write_event,
+    )
+    futs = c.submit(map, inc, range(10))
+    await wait(futs)
+    assert a.data
+    assert write_queue.empty()
+    f1 = c.submit(sum, futs, workers=[b.address])
+    peer, msg = await write_queue.get()
+    assert peer == a.address
+    assert msg["op"] == "get_data"
+    in_flight_tasks = [ts for ts in b.tasks.values() if ts.key != f1.key]
+    assert all(ts.state == "flight" for ts in in_flight_tasks)
+    await a.close()
+    write_event.set()
+
+    await f1
+
+    # If the above doesn't deadlock the behavior should be OK. We're still
+    # asserting a few internals to make sure that if things change this is done
+    # deliberately
+
+    sum_story = b.story(f1.key)
+    expected_sum_story = [
+        (f1.key, "compute-task"),
+        (
+            f1.key,
+            "released",
+            "waiting",
+            "waiting",
+            {ts.key: "fetch" for ts in in_flight_tasks},
+        ),
+        # inc is lost and needs to be recomputed. Therefore, sum is released
+        ("free-keys", (f1.key,)),
+        (f1.key, "release-key"),
+        (f1.key, "waiting", "released", "released", {f1.key: "forgotten"}),
+        (f1.key, "released", "forgotten", "forgotten", {}),
+        # Now, we actually compute the task *once*. This must not cycle back
+        (f1.key, "compute-task"),
+        (f1.key, "released", "waiting", "waiting", {f1.key: "ready"}),
+        (f1.key, "waiting", "ready", "ready", {}),
+        (f1.key, "ready", "executing", "executing", {}),
+        (f1.key, "put-in-memory"),
+        (f1.key, "executing", "memory", "memory", {}),
+    ]
+    assert_worker_story(sum_story, expected_sum_story, strict=True)
+
+
+@gen_cluster(client=True)
 async def test_gather_dep_cancelled_rescheduled(c, s, a, b):
     """At time of writing, the gather_dep implementation filtered tasks again
     for in-flight state. The response parser, however, did not distinguish
