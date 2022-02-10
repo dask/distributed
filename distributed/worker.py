@@ -3140,7 +3140,7 @@ class Worker(ServerNode):
                 else:
                     # Exponential backoff to avoid hammering scheduler/worker
                     self.repetitively_busy += 1
-                    await asyncio.sleep(0.100 * 1.5 ** self.repetitively_busy)
+                    await asyncio.sleep(0.100 * 1.5**self.repetitively_busy)
 
                     await self.query_who_has(*to_gather_keys)
 

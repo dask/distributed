@@ -3205,7 +3205,7 @@ async def test_missing_released_zombie_tasks_2(c, s, a, b):
     Worker=Nanny,
     nthreads=[("", 1)],
     config={"distributed.worker.memory.pause": 0.5},
-    worker_kwargs={"memory_limit": 2 ** 29},  # 500 MiB
+    worker_kwargs={"memory_limit": 2**29},  # 500 MiB
 )
 async def test_worker_status_sync(c, s, a):
     (ws,) = s.workers.values()
@@ -3214,7 +3214,7 @@ async def test_worker_status_sync(c, s, a):
         await asyncio.sleep(0.01)
 
     def leak():
-        distributed._test_leak = "x" * 2 ** 28  # 250 MiB
+        distributed._test_leak = "x" * 2**28  # 250 MiB
 
     def clear_leak():
         del distributed._test_leak

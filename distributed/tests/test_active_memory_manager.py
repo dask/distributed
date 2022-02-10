@@ -338,9 +338,9 @@ async def test_drop_from_worker_with_least_free_memory(c, s, *nannies):
     futures = await c.scatter({"x": 1}, broadcast=True)
     assert s.tasks["x"].who_has == {ws1, ws2, ws3, ws4}
     # Allocate enough RAM to be safely more than unmanaged memory
-    clog = c.submit(lambda: "x" * 2 ** 29, workers=[a3])  # 512 MiB
+    clog = c.submit(lambda: "x" * 2**29, workers=[a3])  # 512 MiB
     # await wait(clog) is not enough; we need to wait for the heartbeats
-    while ws3.memory.optimistic < 2 ** 29:
+    while ws3.memory.optimistic < 2**29:
         await asyncio.sleep(0.01)
     s.extensions["amm"].run_once()
 
@@ -620,11 +620,11 @@ async def test_replicate_to_worker_with_most_free_memory(c, s, *nannies):
     futures = await c.scatter({"x": 1}, workers=[a1])
     assert s.tasks["x"].who_has == {ws1}
     # Allocate enough RAM to be safely more than unmanaged memory
-    clog2 = c.submit(lambda: "x" * 2 ** 29, workers=[a2])  # 512 MiB
-    clog4 = c.submit(lambda: "x" * 2 ** 29, workers=[a4])  # 512 MiB
+    clog2 = c.submit(lambda: "x" * 2**29, workers=[a2])  # 512 MiB
+    clog4 = c.submit(lambda: "x" * 2**29, workers=[a4])  # 512 MiB
     # await wait(clog) is not enough; we need to wait for the heartbeats
     for ws in (ws2, ws4):
-        while ws.memory.optimistic < 2 ** 29:
+        while ws.memory.optimistic < 2**29:
             await asyncio.sleep(0.01)
     s.extensions["amm"].run_once()
 
@@ -823,12 +823,12 @@ async def test_RetireWorker_with_ReduceReplicas(c, s, *nannies, use_ReduceReplic
     if not use_ReduceReplicas:
         s.extensions["amm"].policies.clear()
 
-    x = c.submit(lambda: "x" * 2 ** 26, key="x", workers=[ws_a.address])  # 64 MiB
-    y = c.submit(lambda: "y" * 2 ** 26, key="y", workers=[ws_a.address])  # 64 MiB
+    x = c.submit(lambda: "x" * 2**26, key="x", workers=[ws_a.address])  # 64 MiB
+    y = c.submit(lambda: "y" * 2**26, key="y", workers=[ws_a.address])  # 64 MiB
     z = c.submit(lambda x: None, x, key="z", workers=[ws_b.address])  # copy x to ws_b
     # Make sure that the worker NOT being retired has the most RAM usage to test that
     # it is not being picked first since there's a retiring worker.
-    w = c.submit(lambda: "w" * 2 ** 28, key="w", workers=[ws_b.address])  # 256 MiB
+    w = c.submit(lambda: "w" * 2**28, key="w", workers=[ws_b.address])  # 256 MiB
     await wait([x, y, z, w])
 
     await c.retire_workers([ws_a.address], remove=False)
