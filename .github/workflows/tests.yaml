@@ -1,6 +1,10 @@
 name: Tests
 
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 6,18 * * *"
 
 # When this workflow is queued, automatically cancel any previous running
 # or pending jobs from the same branch
@@ -130,7 +134,7 @@ jobs:
       - name: Coverage
         uses: codecov/codecov-action@v1
 
-      - name: Upload test artifacts
+      - name: Upload test results
         # ensure this runs even if pytest fails
         if: >
           always() &&
@@ -139,13 +143,24 @@ jobs:
         with:
           name: ${{ env.TEST_ID }}
           path: reports
-      - name: Upload timeout reports
+      - name: Upload gen_cluster dumps for failed tests
         # ensure this runs even if pytest fails
         if: >
           always() &&
           (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
         uses: actions/upload-artifact@v2
         with:
-          name: ${{ env.TEST_ID }}-timeouts
-          path: test_timeout_dump
+          name: ${{ env.TEST_ID }}_cluster_dumps
+          path: test_cluster_dump
           if-no-files-found: ignore
+
+  # Publish an artifact for the event; used by publish-test-results.yaml
+  event_file:
+    name: "Event File"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Upload
+        uses: actions/upload-artifact@v2
+        with:
+          name: Event File
+          path: ${{ github.event_path }}

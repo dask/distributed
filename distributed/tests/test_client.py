@@ -12,15 +12,18 @@ import subprocess
 import sys
 import threading
 import traceback
+import types
 import warnings
 import weakref
 import zipfile
 from collections import deque
-from contextlib import suppress
+from collections.abc import Generator
+from contextlib import contextmanager, suppress
 from functools import partial
 from operator import add
 from threading import Semaphore
 from time import sleep
+from typing import Any
 
 import psutil
 import pytest
@@ -86,6 +89,7 @@ from distributed.utils_test import (
     gen_cluster,
     gen_test,
     geninc,
+    get_cert,
     inc,
     map_varying,
     nodebug,
@@ -97,6 +101,7 @@ from distributed.utils_test import (
     slowdec,
     slowinc,
     throws,
+    tls_only_security,
     varying,
     wait_for,
 )
@@ -2929,95 +2934,63 @@ async def test_badly_serialized_exceptions(c, s, a, b):
         await x
 
 
-@gen_cluster(
-    client=True,
-    Worker=Nanny,
-    worker_kwargs={"memory_limit": "1 GiB"},
-    config={"distributed.worker.memory.rebalance.sender-min": 0.3},
-)
-async def test_rebalance(c, s, *_):
+# Set rebalance() to work predictably on small amounts of managed memory. By default, it
+# uses optimistic memory, which would only be possible to test by allocating very large
+# amounts of managed memory, so that they would hide variations in unmanaged memory.
+REBALANCE_MANAGED_CONFIG = {
+    "distributed.worker.memory.rebalance.measure": "managed",
+    "distributed.worker.memory.rebalance.sender-min": 0,
+    "distributed.worker.memory.rebalance.sender-recipient-gap": 0,
+}
+
+
+@gen_cluster(client=True, config=REBALANCE_MANAGED_CONFIG)
+async def test_rebalance(c, s, a, b):
     """Test Client.rebalance(). These are just to test the Client wrapper around
     Scheduler.rebalance(); for more thorough tests on the latter see test_scheduler.py.
     """
-    # We used nannies to have separate processes for each worker
-    a, b = s.workers
-
-    # Generate 10 buffers worth 512 MiB total on worker a. This sends its memory
-    # utilisation slightly above 50% (after counting unmanaged) which is above the
-    # distributed.worker.memory.rebalance.sender-min threshold.
-    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
-    await wait(futures)
-    # Wait for heartbeats
-    while s.memory.process < 2 ** 29:
-        await asyncio.sleep(0.1)
-
-    assert await c.run(lambda dask_worker: len(dask_worker.data)) == {a: 10, b: 0}
-
+    futures = await c.scatter(range(100), workers=[a.address])
+    assert len(a.data) == 100
+    assert len(b.data) == 0
     await c.rebalance()
-
-    ndata = await c.run(lambda dask_worker: len(dask_worker.data))
-    # Allow for some uncertainty as the unmanaged memory is not stable
-    assert sum(ndata.values()) == 10
-    assert 3 <= ndata[a] <= 7
-    assert 3 <= ndata[b] <= 7
+    assert len(a.data) == 50
+    assert len(b.data) == 50
 
 
-@gen_cluster(
-    nthreads=[("127.0.0.1", 1)] * 3,
-    client=True,
-    Worker=Nanny,
-    worker_kwargs={"memory_limit": "1 GiB"},
-)
-async def test_rebalance_workers_and_keys(client, s, *_):
+@gen_cluster(nthreads=[("", 1)] * 3, client=True, config=REBALANCE_MANAGED_CONFIG)
+async def test_rebalance_workers_and_keys(client, s, a, b, c):
     """Test Client.rebalance(). These are just to test the Client wrapper around
     Scheduler.rebalance(); for more thorough tests on the latter see test_scheduler.py.
     """
-    a, b, c = s.workers
-    futures = client.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
-    await wait(futures)
-    # Wait for heartbeats
-    while s.memory.process < 2 ** 29:
-        await asyncio.sleep(0.1)
+    futures = await client.scatter(range(100), workers=[a.address])
+    assert (len(a.data), len(b.data), len(c.data)) == (100, 0, 0)
 
     # Passing empty iterables is not the same as omitting the arguments
     await client.rebalance([])
     await client.rebalance(workers=[])
-    assert await client.run(lambda dask_worker: len(dask_worker.data)) == {
-        a: 10,
-        b: 0,
-        c: 0,
-    }
+    assert (len(a.data), len(b.data), len(c.data)) == (100, 0, 0)
 
     # Limit rebalancing to two arbitrary keys and two arbitrary workers.
-    await client.rebalance([futures[3], futures[7]], [a, b])
-    assert await client.run(lambda dask_worker: len(dask_worker.data)) == {
-        a: 8,
-        b: 2,
-        c: 0,
-    }
+    await client.rebalance([futures[3], futures[7]], [a.address, b.address])
+    assert (len(a.data), len(b.data), len(c.data)) == (98, 2, 0)
 
     with pytest.raises(KeyError):
         await client.rebalance(workers=["notexist"])
 
 
 def test_rebalance_sync():
-    # can't use the 'c' fixture because we need workers to run in a separate process
-    with Client(n_workers=2, memory_limit="1 GiB", dashboard_address=":0") as c:
-        s = c.cluster.scheduler
-        a, b = (ws.address for ws in s.workers.values())
-        futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
-        wait(futures)
-        # Wait for heartbeat
-        while s.memory.process < 2 ** 29:
-            sleep(0.1)
+    with dask.config.set(REBALANCE_MANAGED_CONFIG):
+        with Client(n_workers=2, processes=False, dashboard_address=":0") as c:
+            s = c.cluster.scheduler
+            a = c.cluster.workers[0]
+            b = c.cluster.workers[1]
+            futures = c.scatter(range(100), workers=[a.address])
 
-        assert c.run(lambda dask_worker: len(dask_worker.data)) == {a: 10, b: 0}
-        c.rebalance()
-        ndata = c.run(lambda dask_worker: len(dask_worker.data))
-        # Allow for some uncertainty as the unmanaged memory is not stable
-        assert sum(ndata.values()) == 10
-        assert 3 <= ndata[a] <= 7
-        assert 3 <= ndata[b] <= 7
+            assert len(a.data) == 100
+            assert len(b.data) == 0
+            c.rebalance()
+            assert len(a.data) == 50
+            assert len(b.data) == 50
 
 
 @gen_cluster(client=True)
@@ -3782,9 +3755,35 @@ def test_reconnect(loop):
     c.close()
 
 
+class UnhandledException(Exception):
+    pass
+
+
+@contextmanager
+def catch_unhandled_exceptions() -> Generator[None, None, None]:
+    loop = asyncio.get_running_loop()
+    ctx: dict[str, Any] | None = None
+
+    old_handler = loop.get_exception_handler()
+
+    @loop.set_exception_handler
+    def _(loop: object, context: dict[str, Any]) -> None:
+        nonlocal ctx
+        ctx = context
+
+    try:
+        yield
+    finally:
+        loop.set_exception_handler(old_handler)
+    if ctx:
+        raise UnhandledException(ctx["message"]) from ctx.get("exception")
+
+
 @gen_cluster(client=True, nthreads=[], client_kwargs={"timeout": 0.5})
 async def test_reconnect_timeout(c, s):
-    with captured_logger(logging.getLogger("distributed.client")) as logger:
+    with catch_unhandled_exceptions(), captured_logger(
+        logging.getLogger("distributed.client")
+    ) as logger:
         await s.close()
         while c.status != "closed":
             await c._update_scheduler_info()
@@ -4365,7 +4364,7 @@ async def test_retire_workers_2(c, s, a, b):
     assert a.address not in s.workers
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10)
+@gen_cluster(client=True, nthreads=[("", 1)] * 10)
 async def test_retire_many_workers(c, s, *workers):
     futures = await c.scatter(list(range(100)))
 
@@ -4381,8 +4380,16 @@ async def test_retire_many_workers(c, s, *workers):
 
     assert all(future.done() for future in futures)
     assert all(s.tasks[future.key].state == "memory" for future in futures)
-    for w, keys in s.has_what.items():
-        assert 15 < len(keys) < 50
+    assert await c.gather(futures) == list(range(100))
+
+    # Don't count how many task landed on each worker.
+    # Normally, tasks would be distributed evenly over the surviving workers. However,
+    # here all workers share the same process memory, so you'll get an unintuitive
+    # distribution of tasks if for any reason one transfer take longer than 2 seconds
+    # and as a consequence the Active Memory Manager ends up running for two iterations.
+    # This is something that will happen more frequently on low-powered CI machines.
+    # See test_active_memory_manager.py for tests that robustly verify the statistical
+    # distribution of tasks after worker retirement.
 
 
 @gen_cluster(
@@ -5747,43 +5754,37 @@ async def test_client_active_bad_port():
 
 
 @pytest.mark.parametrize("direct", [True, False])
-def test_turn_off_pickle(direct):
-    @gen_cluster()
-    async def test(s, a, b):
-        np = pytest.importorskip("numpy")
+@gen_cluster(client=True, client_kwargs={"serializers": ["dask", "msgpack"]})
+async def test_turn_off_pickle(c, s, a, b, direct):
+    np = pytest.importorskip("numpy")
 
-        async with Client(
-            s.address, asynchronous=True, serializers=["dask", "msgpack"]
-        ) as c:
-            assert (await c.submit(inc, 1)) == 2
-            await c.submit(np.ones, 5)
-            await c.scatter(1)
+    assert (await c.submit(inc, 1)) == 2
+    await c.submit(np.ones, 5)
+    await c.scatter(1)
 
-            # Can't send complex data
-            with pytest.raises(TypeError):
-                future = await c.scatter(inc)
+    # Can't send complex data
+    with pytest.raises(TypeError):
+        await c.scatter(inc)
 
-            # can send complex tasks (this uses pickle regardless)
-            future = c.submit(lambda x: x, inc)
-            await wait(future)
+    # can send complex tasks (this uses pickle regardless)
+    future = c.submit(lambda x: x, inc)
+    await wait(future)
 
-            # but can't receive complex results
-            with pytest.raises(TypeError):
-                await c.gather(future, direct=direct)
+    # but can't receive complex results
+    with pytest.raises(TypeError):
+        await c.gather(future, direct=direct)
 
-            # Run works
-            result = await c.run(lambda: 1)
-            assert list(result.values()) == [1, 1]
-            result = await c.run_on_scheduler(lambda: 1)
-            assert result == 1
+    # Run works
+    result = await c.run(lambda: 1)
+    assert list(result.values()) == [1, 1]
+    result = await c.run_on_scheduler(lambda: 1)
+    assert result == 1
 
-            # But not with complex return values
-            with pytest.raises(TypeError):
-                await c.run(lambda: inc)
-            with pytest.raises(TypeError):
-                await c.run_on_scheduler(lambda: inc)
-
-    test()
+    # But not with complex return values
+    with pytest.raises(TypeError):
+        await c.run(lambda: inc)
+    with pytest.raises(TypeError):
+        await c.run_on_scheduler(lambda: inc)
 
 
 @gen_cluster()
@@ -5872,7 +5873,11 @@ async def test_scatter_error_cancel(c, s, a, b):
 @pytest.mark.parametrize("workers_arg", [False, True])
 @pytest.mark.parametrize("direct", [False, True])
 @pytest.mark.parametrize("broadcast", [False, True, 10])
-@gen_cluster(client=True, nthreads=[("", 1)] * 10)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 10,
+    worker_kwargs={"memory_monitor_interval": "20ms"},
+)
 async def test_scatter_and_replicate_avoid_paused_workers(
     c, s, *workers, workers_arg, direct, broadcast
 ):
@@ -6434,7 +6439,7 @@ async def test_performance_report(c, s, a, b):
     assert "Dask Performance Report" in data
     assert "x = da.random" in data
     assert "Threads: 4" in data
-    assert "distributed.scheduler - INFO - Clear task state" in data
+    assert "No logs to report" in data
     assert dask.__version__ in data
 
     # stacklevel=2 captures code two frames back -- which in this case
@@ -6566,6 +6571,16 @@ async def test_get_task_metadata_multiple(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_register_worker_plugin_exception(c, s, a, b):
+    class MyPlugin:
+        def setup(self, worker=None):
+            raise ValueError("Setup failed")
+
+    with pytest.raises(ValueError, match="Setup failed"):
+        await c.register_worker_plugin(MyPlugin())
+
+
+@gen_cluster(client=True)
 async def test_log_event(c, s, a, b):
 
     # Log an event from inside a task
@@ -6610,21 +6625,19 @@ async def test_annotations_task_state(c, s, a, b):
 
 
 @pytest.mark.parametrize("fn", ["compute", "persist"])
-def test_annotations_compute_time(fn):
+@gen_cluster(client=True)
+async def test_annotations_compute_time(c, s, a, b, fn):
     da = pytest.importorskip("dask.array")
+    x = da.ones(10, chunks=(5,))
 
-    @gen_cluster(client=True)
-    async def test(c, s, a, b):
-        x = da.ones(10, chunks=(5,))
+    with dask.annotate(foo="bar"):
+        # Turn off optimization to avoid rewriting layers and picking up annotations
+        # that way. Instead, we want `compute`/`persist` to be able to pick them up.
+        fut = getattr(c, fn)(x, optimize_graph=False)
 
-        with dask.annotate(foo="bar"):
-            # Turn off optimization to avoid rewriting layers and picking up annotations
-            # that way. Instead, we want `compute`/`persist` to be able to pick them up.
-            x = await getattr(c, fn)(x, optimize_graph=False)
-
-        assert all({"foo": "bar"} == ts.annotations for ts in s.tasks.values())
-
-    test()
+    await wait(fut)
+    assert s.tasks
+    assert all(ts.annotations == {"foo": "bar"} for ts in s.tasks.values())
 
 
 @pytest.mark.xfail(reason="https://github.com/dask/dask/issues/7036")
@@ -7139,6 +7152,28 @@ async def test_events_subscribe_topic(c, s, a):
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
+async def test_events_subscribe_topic_cancelled(c, s, a):
+    event_handler_started = asyncio.Event()
+    exc_info = None
+
+    async def user_event_handler(event):
+        nonlocal exc_info
+        c.unsubscribe_topic("test-topic")
+        event_handler_started.set()
+        with pytest.raises(asyncio.CancelledError) as exc_info:
+            await asyncio.sleep(0.5)
+
+    c.subscribe_topic("test-topic", user_event_handler)
+    while not s.event_subscriber["test-topic"]:
+        await asyncio.sleep(0.01)
+
+    a.log_event("test-topic", {})
+    await event_handler_started.wait()
+    await c._close(fast=True)
+    assert exc_info is not None
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_events_all_servers_use_same_channel(c, s, a):
     """Ensure that logs from all server types (scheduler, worker, nanny)
     and the clients themselves arrive"""
@@ -7309,3 +7344,95 @@ async def test_dump_cluster_state_error(c, s, a, b, tmp_path):
     )
     assert isinstance(state["workers"][b.address], dict)
     assert state["versions"]["workers"].keys() == {b.address}
+
+
+class TestClientSecurityLoader:
+    @contextmanager
+    def config_loader(self, monkeypatch, loader):
+        module_name = "totally_fake_module_name_1"
+        module = types.ModuleType(module_name)
+        module.loader = loader
+        with monkeypatch.context() as m:
+            m.setitem(sys.modules, module_name, module)
+            with dask.config.set(
+                {"distributed.client.security-loader": f"{module_name}.loader"}
+            ):
+                yield
+
+    @pytest.mark.asyncio
+    async def test_security_loader(self, monkeypatch):
+        security = tls_only_security()
+
+        async with Scheduler(
+            dashboard_address=":0", protocol="tls", security=security
+        ) as scheduler:
+
+            def loader(info):
+                assert info == {"address": scheduler.address}
+                return security
+
+            with self.config_loader(monkeypatch, loader):
+                async with Client(scheduler.address, asynchronous=True) as client:
+                    assert client.security is security
+
+    @pytest.mark.asyncio
+    async def test_security_loader_ignored_if_explicit_security_provided(
+        self, monkeypatch
+    ):
+        security = tls_only_security()
+
+        def loader(info):
+            assert False
+
+        async with Scheduler(
+            dashboard_address=":0", protocol="tls", security=security
+        ) as scheduler:
+            with self.config_loader(monkeypatch, loader):
+                async with Client(
+                    scheduler.address, security=security, asynchronous=True
+                ) as client:
+                    assert client.security is security
+
+    @pytest.mark.asyncio
+    async def test_security_loader_ignored_if_returns_none(self, monkeypatch):
+        """Test that if a security loader is configured, but it returns `None`,
+        then the default security configuration is used"""
+        ca_file = get_cert("tls-ca-cert.pem")
+        keycert = get_cert("tls-key-cert.pem")
+
+        config = {
+            "distributed.comm.require-encryption": True,
+            "distributed.comm.tls.ca-file": ca_file,
+            "distributed.comm.tls.client.cert": keycert,
+            "distributed.comm.tls.scheduler.cert": keycert,
+            "distributed.comm.tls.worker.cert": keycert,
+        }
+
+        def loader(info):
+            loader.called = True
+            return None
+
+        with dask.config.set(config):
+            async with Scheduler(dashboard_address=":0", protocol="tls") as scheduler:
+                # Smoketest to make sure config was picked up (so we're actually testing something)
+                assert scheduler.security.tls_client_cert
+                assert scheduler.security.tls_scheduler_cert
+                with self.config_loader(monkeypatch, loader):
+                    async with Client(scheduler.address, asynchronous=True) as client:
+                        assert (
+                            client.security.tls_client_cert
+                            == scheduler.security.tls_client_cert
+                        )
+
+        assert loader.called
+
+    @pytest.mark.asyncio
+    async def test_security_loader_import_failed(self):
+        security = tls_only_security()
+
+        with dask.config.set(
+            {"distributed.client.security-loader": "totally_fake_module_name_2.loader"}
+        ):
+            with pytest.raises(ImportError, match="totally_fake_module_name_2.loader"):
+                async with Client("tls://bad-address:8888", asynchronous=True):
+                    pass

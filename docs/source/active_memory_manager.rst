@@ -257,3 +257,6 @@ API reference
    :undoc-members:
 
 .. autoclass:: distributed.active_memory_manager.ReduceReplicas
+
+.. autoclass:: distributed.active_memory_manager.RetireWorker
+   :members:

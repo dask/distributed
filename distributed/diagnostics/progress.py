@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from collections import defaultdict
 from timeit import default_timer
 
@@ -11,6 +10,7 @@ from tlz import groupby, valmap
 from dask.base import tokenize
 from dask.utils import stringify
 
+from ..metrics import time
 from ..utils import key_split
 from .plugin import SchedulerPlugin
 
@@ -312,7 +312,7 @@ class GroupTiming(SchedulerPlugin):
 
     def _init(self):
         """Shared initializatoin code between __init__ and restart"""
-        now = time.time()
+        now = time()
 
         # Timestamps for tracking compute durations by task group.
         # Start with length 2 so that we always can compute a valid dt later.
@@ -329,13 +329,14 @@ class GroupTiming(SchedulerPlugin):
         if start == "processing" and finish == "memory":
             startstops = kwargs.get("startstops")
             if not startstops:
-                logger.warn(
-                    f"Task {key} finished processing, but timing information seems to be missing"
+                logger.warning(
+                    f"Task {key} finished processing, but timing information seems to "
+                    "be missing"
                 )
                 return
 
             # Possibly extend the timeseries if another dt has passed
-            now = time.time()
+            now = time()
             self.time[-1] = now
             while self.time[-1] - self.time[-2] > self.dt:
                 self.time[-1] = self.time[-2] + self.dt

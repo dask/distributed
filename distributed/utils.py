@@ -46,7 +46,7 @@ from dask import istask
 from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
-from .compatibility import PYPY, WINDOWS
+from .compatibility import WINDOWS
 from .metrics import time
 
 try:
@@ -67,11 +67,9 @@ no_default = "__no_default__"
 
 
 def _initialize_mp_context():
-    if WINDOWS or PYPY:
-        return multiprocessing
-    else:
-        method = dask.config.get("distributed.worker.multiprocessing-method")
-        ctx = multiprocessing.get_context(method)
+    method = dask.config.get("distributed.worker.multiprocessing-method")
+    ctx = multiprocessing.get_context(method)
+    if method == "forkserver":
         # Makes the test suite much faster
         preload = ["distributed"]
         if "pkg_resources" in sys.modules:
@@ -87,7 +85,8 @@ def _initialize_mp_context():
             else:
                 preload.append(pkg)
         ctx.set_forkserver_preload(preload)
-        return ctx
+
+    return ctx
 
 
 mp_context = _initialize_mp_context()
@@ -334,11 +333,11 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
 
     e = threading.Event()
     main_tid = threading.get_ident()
-    result = [None]
-    error = [False]
+    result = error = future = None  # set up non-locals
 
     @gen.coroutine
     def f():
+        nonlocal result, error, future
         try:
             if main_tid == threading.get_ident():
                 raise RuntimeError("sync() called from thread of running loop")
@@ -346,24 +345,37 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             future = func(*args, **kwargs)
             if callback_timeout is not None:
                 future = asyncio.wait_for(future, callback_timeout)
-            result[0] = yield future
+            future = asyncio.ensure_future(future)
+            result = yield future
         except Exception:
-            error[0] = sys.exc_info()
+            error = sys.exc_info()
         finally:
             e.set()
 
+    def cancel():
+        if future is not None:
+            future.cancel()
+
+    def wait(timeout):
+        try:
+            return e.wait(timeout)
+        except KeyboardInterrupt:
+            loop.add_callback(cancel)
+            raise
+
     loop.add_callback(f)
     if callback_timeout is not None:
-        if not e.wait(callback_timeout):
+        if not wait(callback_timeout):
             raise TimeoutError(f"timed out after {callback_timeout} s.")
     else:
         while not e.is_set():
-            e.wait(10)
-    if error[0]:
-        typ, exc, tb = error[0]
+            wait(10)
+
+    if error:
+        typ, exc, tb = error
         raise exc.with_traceback(tb)
     else:
-        return result[0]
+        return result
 
 
 class LoopRunner:
@@ -1240,8 +1252,8 @@ def cli_keywords(d: dict, cls=None, cmd=None):
     cmd : string or object
         A string with the name of a module, or the module containing a
         click-generated command with a "main" function, or the function itself.
-        It may be used to parse a module's custom arguments (i.e., arguments that
-        are not part of Worker class), such as nprocs from dask-worker CLI or
+        It may be used to parse a module's custom arguments (that is, arguments that
+        are not part of Worker class), such as nworkers from dask-worker CLI or
         enable_nvlink from dask-cuda-worker CLI.
 
     Examples
