@@ -451,8 +451,9 @@ async def test_spill_to_disk(c, s, w):
     np = pytest.importorskip("numpy")
     # size on memory 500
     x = c.submit(np.zeros, 500, dtype="u1", key="x")
+    await wait(x)
     y = c.submit(np.zeros, 500, dtype="u1", key="y")
-    await wait([x, y])
+    await wait(y)
 
     assert set(w.data) == {x.key, y.key}
     assert set(w.data.memory) == {x.key, y.key}
@@ -934,19 +935,21 @@ async def test_dataframe_attribute_error(c, s, a, b):
     assert result.data == 123
 
 
+class Bad:
+    def __init__(self, size):
+        self.size = size
+
+    def __getstate__(self):
+        raise TypeError()
+
+    def __sizeof__(self):
+        return self.size
+
+
 @gen_cluster(client=True)
 async def test_fail_write_to_disk(c, s, a, b):
-    class Bad:
-        def __init__(self, size):
-            self.size = size
 
-        def __getstate__(self):
-            raise TypeError()
-
-        def __sizeof__(self):
-            return self.size
-
-    # Key immediately store to disk, fails to serialize
+    # Key immediately stored to disk, fails to serialize
     future = c.submit(Bad, int(100e9))
     await wait(future)
 
@@ -958,6 +961,39 @@ async def test_fail_write_to_disk(c, s, a, b):
     futures = c.map(inc, range(10))
     results = await c._gather(futures)
     assert results == list(map(inc, range(10)))
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    worker_kwargs={"memory_limit": 2000},
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": 0.5,
+    },
+)
+async def test_fail_write_to_disk_evict(c, s, w):
+    """Test eviction triggered due to spill fraction and no target memory."""
+    np = pytest.importorskip("numpy")
+    # size on memory 500
+    bad = c.submit(Bad, 500, key="bad")
+    await wait(bad)
+
+    # key is in fast
+    assert bad.status == "finished"
+
+    x = c.submit(np.zeros, 500, dtype="u1", key="x")
+
+    with captured_logger(
+        logging.getLogger("distributed.protocol.pickle")
+    ) as logs_evict_key:
+        await wait(x)
+
+    # tries to evict bad key, fails to serialize, key remains in fast
+    assert "Failed to serialize" in logs_evict_key.getvalue()
+    assert set(w.data) == {x.key, bad.key}
+    assert set(w.data.memory) == {x.key, bad.key}
+    assert not set(w.data.disk)
 
 
 @pytest.mark.skip(reason="Our logic here is faulty")
