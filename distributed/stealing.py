@@ -502,9 +502,36 @@ class WorkStealing(SchedulerPlugin):
 
     def potential_thieves_for(self, ts, idle, sat):
         if _has_restrictions(ts):
-            return [ws for ws in idle if _can_steal(ws, ts, sat)]
+            return [ws for ws in idle if self.can_steal(ws, ts, sat)]
         else:
             return idle
+
+    def can_steal(self, thief, ts, victim):
+        """Determine whether worker ``thief`` can steal task ``ts`` from worker
+        ``victim``.
+
+        Assumes that `ts` has some restrictions.
+        """
+        if (
+            ts.host_restrictions
+            and get_address_host(thief.address) not in ts.host_restrictions
+        ):
+            return False
+        elif ts.worker_restrictions and thief.address not in ts.worker_restrictions:
+            return False
+
+        if not ts.resource_restrictions:
+            return True
+
+        for resource, value in ts.resource_restrictions.items():
+            try:
+                supplied = thief.resources[resource]
+            except KeyError:
+                return False
+            else:
+                if supplied < value:
+                    return False
+        return True
 
 
 def _has_restrictions(ts):
@@ -514,34 +541,6 @@ def _has_restrictions(ts):
     return not ts.loose_restrictions and (
         ts.host_restrictions or ts.worker_restrictions or ts.resource_restrictions
     )
-
-
-def _can_steal(thief, ts, victim):
-    """Determine whether worker ``thief`` can steal task ``ts`` from worker
-    ``victim``.
-
-    Assumes that `ts` has some restrictions.
-    """
-    if (
-        ts.host_restrictions
-        and get_address_host(thief.address) not in ts.host_restrictions
-    ):
-        return False
-    elif ts.worker_restrictions and thief.address not in ts.worker_restrictions:
-        return False
-
-    if not ts.resource_restrictions:
-        return True
-
-    for resource, value in ts.resource_restrictions.items():
-        try:
-            supplied = thief.resources[resource]
-        except KeyError:
-            return False
-        else:
-            if supplied < value:
-                return False
-    return True
 
 
 fast_tasks = {"split-shuffle"}
