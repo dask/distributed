@@ -4987,14 +4987,14 @@ class Scheduler(SchedulerState, ServerNode):
 
             ws: WorkerState = parent._workers_dv[address]
 
-            self.log_event(
-                ["all", address],
-                {
-                    "action": "remove-worker",
-                    "worker": ws.address,
-                    "processing-tasks": dict(ws._processing),
-                },
-            )
+            event_msg = {
+                "action": "remove-worker",
+                "processing-tasks": dict(ws._processing),
+            }
+            self.log_event(address, event_msg.copy())
+            event_msg["worker"] = address
+            self.log_event("all", event_msg)
+
             logger.info("Remove worker %s", ws)
             if close:
                 with suppress(AttributeError, CommClosedError):
