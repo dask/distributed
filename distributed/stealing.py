@@ -430,10 +430,7 @@ class WorkStealing(SchedulerPlugin):
                         if not idle:
                             break
 
-                        if _has_restrictions(ts):
-                            thieves = [ws for ws in idle if _can_steal(ws, ts, sat)]
-                        else:
-                            thieves = idle
+                        thieves = self.potential_thieves_for(ts, idle, sat)
                         if not thieves:
                             break
                         thief = thieves[i % len(thieves)]
@@ -466,10 +463,7 @@ class WorkStealing(SchedulerPlugin):
                             continue
 
                         i += 1
-                        if _has_restrictions(ts):
-                            thieves = [ws for ws in idle if _can_steal(ws, ts, sat)]
-                        else:
-                            thieves = idle
+                        thieves = self.potential_thieves_for(ts, idle, sat)
                         if not thieves:
                             continue
                         thief = thieves[i % len(thieves)]
@@ -505,6 +499,12 @@ class WorkStealing(SchedulerPlugin):
                 if any(x in keys for x in t):
                     out.append(t)
         return out
+
+    def potential_thieves_for(self, ts, idle, sat):
+        if _has_restrictions(ts):
+            return [ws for ws in idle if _can_steal(ws, ts, sat)]
+        else:
+            return idle
 
 
 def _has_restrictions(ts):
