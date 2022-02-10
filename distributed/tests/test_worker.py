@@ -16,8 +16,7 @@ from unittest import mock
 
 import psutil
 import pytest
-
-# from packaging.version import parse as parse_version
+from packaging.version import parse as parse_version
 from tlz import first, pluck, sliding_window
 
 import dask
@@ -929,39 +928,51 @@ async def test_fail_write_to_disk(c, s, a, b):
     assert results == list(map(inc, range(10)))
 
 
-# @gen_cluster(
-#     client=True,
-#     nthreads=[("", 1)],
-#     worker_kwargs={"memory_limit": 2000},
-#     config={
-#         "distributed.worker.memory.target": False,
-#         "distributed.worker.memory.spill": 0.5,
-#     },
-# )
-# async def test_fail_write_to_disk_evict(c, s, w):
-#     """Test eviction triggered due to spill fraction and no target memory."""
-#     np = pytest.importorskip("numpy")
-#     # size on memory 500
-#     bad = c.submit(Bad, 500, key="bad")
-#     await wait(bad)
+try:
+    import zict
+except ImportError:
+    zict = None
+requires_zict_210 = pytest.mark.skipif(
+    not zict or parse_version(zict.__version__) <= parse_version("2.0.0"),
+    reason="requires zict version > 2.0.0",
+)
 
-#     # key is in fast
-#     assert bad.status == "finished"
 
-#     x = c.submit(np.zeros, 500, dtype="u1", key="x")
+@requires_zict_210
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    worker_kwargs=dict(
+        memory_limit=2000,
+        memory_target_fraction=False,
+        memory_spill_fraction=0.5,
+        memory_pause_fraction=False,
+    ),
+)
+async def test_fail_write_to_disk_evict(c, s, w):
+    """Test eviction triggered due to spill fraction and no target memory."""
+    np = pytest.importorskip("numpy")
+    # size on memory 500
+    bad = c.submit(Bad, 500, key="bad")
+    await wait(bad)
 
-#     with captured_logger(
-#         logging.getLogger("distributed.spill")
-#     ) as logs_evict_key:
-#         await wait(x)
+    # key is in fast
+    assert bad.status == "finished"
 
-#     # tries to evict bad key, fails to serialize, key remains in fast
-#     logs_value = logs_evict_key.getvalue()
-#     assert "Failed to pickle" in logs_value
-#     assert "Traceback" in logs_value
-#     assert set(w.data) == {x.key, bad.key}
-#     assert set(w.data.memory) == {x.key, bad.key}
-#     assert not w.data.disk
+    x = c.submit(np.zeros, 500, dtype="u1", key="x")
+
+    with captured_logger(logging.getLogger("distributed.spill")) as logs_evict_key:
+        await wait(x)
+
+    # tries to evict bad key, fails to serialize, key remains in fast
+    # This test is not passing since this is empty. I think we should have use the logs
+    # from logging.getLogger("distributed.protocol.pickle")
+    logs_value = logs_evict_key.getvalue()
+    assert "Failed to pickle" in logs_value
+    assert "Traceback" in logs_value
+    assert set(w.data) == {x.key, bad.key}
+    assert set(w.data.memory) == {x.key, bad.key}
+    assert not w.data.disk
 
 
 @pytest.mark.skip(reason="Our logic here is faulty")
@@ -1209,6 +1220,64 @@ async def test_spill_target_threshold(c, s, a):
     assert set(a.data.disk) == {"y"}
 
 
+@requires_zict_210
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    worker_kwargs=dict(
+        memory_limit=1600,
+        max_spill=600,
+        memory_target_fraction=0.6,
+        memory_spill_fraction=False,
+        memory_pause_fraction=False,
+    ),
+)
+async def test_spill_to_disk_constrained(c, s, w):
+    """If running locally pass --leaks=fds,processes,threads"""
+    np = pytest.importorskip("numpy")
+
+    # since memory_spill_fraction=False spills starts at 1600*0.6=960
+    # size of x on disk would be 425 (it fits)
+    # size of y or z on disk would be 726 (does not fit)
+
+    # size on memory 200
+    x = c.submit(np.zeros, 200, dtype="u1", key="x")
+    await wait(x)
+    # size on memory 500
+    y = c.submit(np.zeros, 500, dtype="u1", key="y")
+    await wait(y)
+
+    assert set(w.data) == {x.key, y.key}
+    assert set(w.data.memory) == {x.key, y.key}
+
+    z = c.submit(np.zeros, 500, dtype="u1", key="z")
+    await wait(z)
+
+    assert set(w.data) == {x.key, y.key, z.key}
+
+    # max_spill has not been reached
+    assert set(w.data.memory) == {y.key, z.key}
+    assert set(w.data.disk) == {x.key}
+
+    # zb is individually larger than max_spill
+    zb = c.submit(np.zeros, 1700, dtype="u1", key="zb")
+    await wait(zb)
+
+    assert set(w.data.memory) == {y.key, z.key, zb.key}
+    assert set(w.data.disk) == {x.key}
+
+    del zb
+    while "zb" in w.data:
+        await asyncio.sleep(0.01)
+
+    # zc is individually smaller than max_spill, but the evicted key together with
+    # x it exceeds max_spill
+    zc = c.submit(np.zeros, 500, dtype="u1", key="zc")
+    await wait(zc)
+    assert set(w.data.memory) == {y.key, z.key, zc.key}
+    assert set(w.data.disk) == {x.key}
+
+
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
@@ -1270,6 +1339,7 @@ async def test_spill_spill_threshold(c, s, a):
 async def test_spill_no_target_threshold(c, s, a):
     """Test that you can enable the spill threshold while leaving the target threshold
     to False
+    If running locally pass --leaks=fds,processes,threads
     """
     memory = s.workers[a.address].memory.process
     a.memory_limit = memory / 0.7 + 400e6

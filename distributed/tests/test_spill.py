@@ -252,7 +252,7 @@ def test_spillbuffer_fail_to_serialize(tmpdir):
     # This is coming from distributed.protocol.pickle and it's a single line that does not contain
     # a traceback. The exception will be intercepted by worker.py, which will also print the
     # traceback.
-    logs_value = logs_bad_key.getvalue()
+    logs_value = logs_bad_key.getvalue()  # This is empty, is that ok?
     assert "Failed to pickle" not in logs_value
     assert "Traceback" not in logs_value
     assert not set(buf.fast)
