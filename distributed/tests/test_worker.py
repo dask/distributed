@@ -3283,7 +3283,7 @@ async def test_task_flight_compute_oserror(c, s, a, b):
         write_queue=write_queue,
         write_event=write_event,
     )
-    futs = c.submit(map, inc, range(10))
+    futs = c.submit(map, inc, range(10), workers=[a.address], allow_other_workers=True)
     await wait(futs)
     assert a.data
     assert write_queue.empty()
