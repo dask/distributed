@@ -247,11 +247,16 @@ def test_spillbuffer_fail_to_serialize(tmpdir):
     # Exception caught in the worker
     with pytest.raises(TypeError, match="Could not serialize"):
         with captured_logger(
-            logging.getLogger("distributed.protocol.pickle")
+            logging.getLogger("distributed.spill")
         ) as logs_bad_key:
             buf["a"] = a
 
-    assert "Failed to serialize" in logs_bad_key.getvalue()
+    # This is coming from distributed.protocol.pickle and it's a single line that does not contain
+    # a traceback. The exception will be intercepted by worker.py, which will also print the
+    # traceback.
+    logs_value = logs_bad_key.getvalue()
+    assert "Failed to serialize" in logs_value
+    assert "Traceback" not in logs_value
     assert not set(buf.fast)
     assert not set(buf.slow)
 
