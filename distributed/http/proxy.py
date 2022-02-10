@@ -67,7 +67,6 @@ try:
             # returns ProxyHandler coroutine
             return super().proxy(self.host, port, proxied_path)
 
-
 except ImportError:
     logger.info(
         "To route to workers diagnostics web server "

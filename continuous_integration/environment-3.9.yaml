@@ -11,7 +11,7 @@ dependencies:
   - bokeh
   - click
   - cloudpickle
-  - coverage<6.3  # https://github.com/nedbat/coveragepy/issues/1310
+  - coverage
   - dask  # overridden by git tip below
   - filesystem-spec  # overridden by git tip below
   - h5py
@@ -23,6 +23,7 @@ dependencies:
   - lz4  # Only tested here
   - msgpack-python
   - netcdf4
+  - pillow<9.0  # https://github.com/pytorch/pytorch/issues/72293
   - paramiko
   - pre-commit
   - prometheus_client

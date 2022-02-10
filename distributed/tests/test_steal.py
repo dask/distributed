@@ -838,7 +838,11 @@ async def test_steal_twice(c, s, a, b):
     await asyncio.gather(*(w.close() for w in workers))
 
 
-@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 3,
+    worker_kwargs={"memory_monitor_interval": "20ms"},
+)
 async def test_paused_workers_must_not_steal(c, s, w1, w2, w3):
     w2.memory_pause_fraction = 1e-15
     while s.workers[w2.address].status != Status.paused:

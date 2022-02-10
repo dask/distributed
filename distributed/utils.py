@@ -333,11 +333,11 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
 
     e = threading.Event()
     main_tid = threading.get_ident()
-    result = [None]
-    error = [False]
+    result = error = future = None  # set up non-locals
 
     @gen.coroutine
     def f():
+        nonlocal result, error, future
         try:
             if main_tid == threading.get_ident():
                 raise RuntimeError("sync() called from thread of running loop")
@@ -345,24 +345,37 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             future = func(*args, **kwargs)
             if callback_timeout is not None:
                 future = asyncio.wait_for(future, callback_timeout)
-            result[0] = yield future
+            future = asyncio.ensure_future(future)
+            result = yield future
         except Exception:
-            error[0] = sys.exc_info()
+            error = sys.exc_info()
         finally:
             e.set()
 
+    def cancel():
+        if future is not None:
+            future.cancel()
+
+    def wait(timeout):
+        try:
+            return e.wait(timeout)
+        except KeyboardInterrupt:
+            loop.add_callback(cancel)
+            raise
+
     loop.add_callback(f)
     if callback_timeout is not None:
-        if not e.wait(callback_timeout):
+        if not wait(callback_timeout):
             raise TimeoutError(f"timed out after {callback_timeout} s.")
     else:
         while not e.is_set():
-            e.wait(10)
-    if error[0]:
-        typ, exc, tb = error[0]
+            wait(10)
+
+    if error:
+        typ, exc, tb = error
         raise exc.with_traceback(tb)
     else:
-        return result[0]
+        return result
 
 
 class LoopRunner:
@@ -856,12 +869,12 @@ def read_block(f, offset, length, delimiter=None):
     """
     if delimiter:
         f.seek(offset)
-        seek_delimiter(f, delimiter, 2 ** 16)
+        seek_delimiter(f, delimiter, 2**16)
         start = f.tell()
         length -= start - offset
 
         f.seek(start + length)
-        seek_delimiter(f, delimiter, 2 ** 16)
+        seek_delimiter(f, delimiter, 2**16)
         end = f.tell()
 
         offset = start
