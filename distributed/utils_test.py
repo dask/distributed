@@ -80,6 +80,9 @@ try:
 except ImportError:
     pass
 
+# https://docs.github.com/en/actions/learn-github-actions/environment-variables#default-environment-variables
+ON_CI = bool(os.environ.get("CI", False))
+
 
 logger = logging.getLogger(__name__)
 
@@ -1735,13 +1738,19 @@ def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
                     with check_active_rpc(loop, timeout):
                         reset_config()
 
-                        dask.config.set({"distributed.comm.timeouts.connect": "5s"})
-                        # Restore default logging levels
-                        # XXX use pytest hooks/fixtures instead?
-                        for name, level in logging_levels.items():
-                            logging.getLogger(name).setLevel(level)
+                        if not ON_CI:
+                            ctx = dask.config.set(
+                                {"distributed.comm.timeouts.connect": "5s"}
+                            )
+                        else:
+                            ctx = nullcontext()
+                        with ctx:
+                            # Restore default logging levels
+                            # XXX use pytest hooks/fixtures instead?
+                            for name, level in logging_levels.items():
+                                logging.getLogger(name).setLevel(level)
 
-                        yield loop
+                            yield loop
 
 
 @pytest.fixture
