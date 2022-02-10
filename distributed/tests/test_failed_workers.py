@@ -101,43 +101,6 @@ async def test_gather_then_submit_after_failed_workers(c, s, w, x, y, z):
 
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(Worker=Nanny, client=True, timeout=60)
-async def test_failed_worker_without_warning(c, s, a, b):
-    L = c.map(inc, range(10))
-    await wait(L)
-
-    original_pid = a.pid
-    with suppress(CommClosedError):
-        await c._run(os._exit, 1, workers=[a.worker_address])
-    start = time()
-    while a.pid == original_pid:
-        await asyncio.sleep(0.01)
-        assert time() - start < 10
-
-    await asyncio.sleep(0.5)
-
-    start = time()
-    while len(s.nthreads) < 2:
-        await asyncio.sleep(0.01)
-        assert time() - start < 10
-
-    await wait(L)
-
-    L2 = c.map(inc, range(10, 20))
-    await wait(L2)
-    assert all(len(keys) > 0 for keys in s.has_what.values())
-    nthreads2 = dict(s.nthreads)
-
-    await c.restart()
-
-    L = c.map(inc, range(10))
-    await wait(L)
-    assert all(len(keys) > 0 for keys in s.has_what.values())
-
-    assert not (set(nthreads2) & set(s.nthreads))  # no overlap
-
-
-@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
-@gen_cluster(Worker=Nanny, client=True, timeout=60)
 async def test_restart(c, s, a, b):
     assert s.nthreads == {a.worker_address: 1, b.worker_address: 2}
 
