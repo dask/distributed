@@ -271,7 +271,10 @@ def test_spillbuffer_fail_to_serialize(tmpdir):
         # but keep b in fast since it's not pickable
         buf["c"] = c
 
-    assert "Failed to pickle" in logs_bad_key_mem.getvalue()
+    # worker.py won't intercept the exception here, so spill.py must dump the traceback
+    logs_value = logs_bad_key_mem.getvalue()
+    assert "Failed to pickle" in logs_value  # from distributed.spill
+    assert "Traceback" in logs_value  # from distributed.spill
     assert set(buf.fast) == {"b", "c"}
     assert buf.fast.total_weight == sizeof(b) + sizeof(c)
     assert not set(buf.slow)
@@ -343,9 +346,10 @@ def test_spillbuffer_evict(tmpdir):
     assert buf.fast.weights == {"a": sa}
 
     # successful eviction
-    buf.evict()
+    weight = buf.evict()
+    assert weight == sa
 
-    assert not set(buf.fast)
+    assert not buf.fast
     assert set(buf.slow) == {"a"}
     assert buf.slow.weight_by_key == {"a": sa_pickle}
 
@@ -358,11 +362,12 @@ def test_spillbuffer_evict(tmpdir):
 
     # unsuccessful eviction
     with captured_logger(
-        logging.getLogger("distributed.protocol.pickle")
+        logging.getLogger("distributed.spill")
     ) as logs_evict_key:
-        buf.evict()
+        weight = buf.evict()
+    assert weight == -1
 
-    assert "Failed to serialize" in logs_evict_key.getvalue()
+    assert "Failed to pickle" in logs_evict_key.getvalue()
     # bad keys stays in fast
     assert set(buf.fast) == {"a_bad"}
     assert buf.fast.weights == {"a_bad": sa_bad}
