@@ -1558,9 +1558,10 @@ def save_sys_modules():
 @contextmanager
 def check_thread_leak():
     """Context manager to ensure we haven't leaked any threads"""
-    active_threads_start = threading.enumerate()
     # "TCP-Executor" threads are never stopped once they are started
     BaseTCPConnector.warmup()
+
+    active_threads_start = threading.enumerate()
 
     yield
 
