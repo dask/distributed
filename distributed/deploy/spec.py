@@ -271,7 +271,7 @@ class SpecCluster(Cluster):
         self._lock = asyncio.Lock()
         self.status = Status.starting
 
-        if self.scheduler_spec is None:  # pragma: no cover
+        if self.scheduler_spec is None:
             try:
                 import distributed.dashboard  # noqa: F401
             except ImportError:

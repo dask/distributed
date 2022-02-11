@@ -348,7 +348,7 @@ def get_profile(history, recent=None, start=None, stop=None, key=None):
 
     if stop is None:
         istop = None
-    else:  # pragma: no cover
+    else:
         istop = bisect.bisect_right(history, (stop,)) + 1
         if istop >= len(history):
             istop = None  # include end

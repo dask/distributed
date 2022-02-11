@@ -143,7 +143,7 @@ class Actor(WrappedKey):
                 return lambda *args, **kwargs: ActorFuture(
                     None, self._io_loop, result=attr(*args, **kwargs)
                 )
-            else:  # pragma: no cover
+            else:
                 return attr
 
         attr = getattr(self._cls, key)
