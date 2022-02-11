@@ -992,6 +992,7 @@ async def test_fail_write_to_disk_spill(c, s, a):
     """Test failure to evict a key, triggered by the spill threshold"""
     with captured_logger(logging.getLogger("distributed.spill")) as logs:
         bad = c.submit(FailToPickle, actual_size=1_000_000, key="bad")
+        await wait(bad)
 
         # Must wait for memory monitor to kick in
         while True:
