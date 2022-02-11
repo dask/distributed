@@ -29,7 +29,7 @@ from itertools import count
 from time import sleep
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:  # pragma: no cover
+if TYPE_CHECKING:
     from typing_extensions import Literal
 
 from distributed.compatibility import MACOS
@@ -37,7 +37,7 @@ from distributed.scheduler import Scheduler
 
 try:
     import ssl
-except ImportError:  # pragma: no cover
+except ImportError:
     ssl = None  # type: ignore
 
 import pytest
@@ -98,14 +98,14 @@ _offload_executor.submit(lambda: None).result()  # create thread during import
 
 
 @pytest.fixture(scope="session")
-def valid_python_script(tmpdir_factory):  # pragma: no cover
+def valid_python_script(tmpdir_factory):
     local_file = tmpdir_factory.mktemp("data").join("file.py")
     local_file.write("print('hello world!')")
     return local_file
 
 
 @pytest.fixture(scope="session")
-def client_contract_script(tmpdir_factory):  # pragma: no cover
+def client_contract_script(tmpdir_factory):
     local_file = tmpdir_factory.mktemp("data").join("distributed_script.py")
     lines = (
         "from distributed import Client",
@@ -117,7 +117,7 @@ def client_contract_script(tmpdir_factory):  # pragma: no cover
 
 
 @pytest.fixture(scope="session")
-def invalid_python_script(tmpdir_factory):  # pragma: no cover
+def invalid_python_script(tmpdir_factory):
     local_file = tmpdir_factory.mktemp("data").join("file.py")
     local_file.write("a+1")
     return local_file
@@ -153,7 +153,7 @@ def loop():
                 sync(loop, cleanup_global_workers, callback_timeout=0.500)
                 loop.add_callback(loop.stop)
             except RuntimeError as e:
-                if not re.match("IOLoop is clos(ed|ing)", str(e)):  # pragma: no cover
+                if not re.match("IOLoop is clos(ed|ing)", str(e)):
                     raise
             except TimeoutError:
                 pass
@@ -240,7 +240,7 @@ def nodebug(func):
     """
 
     @functools.wraps(func)
-    def wrapped(*args, **kwargs):  # pragma: no cover
+    def wrapped(*args, **kwargs):
         old_asyncio_debug = os.environ.get("PYTHONASYNCIODEBUG")
         if old_asyncio_debug is not None:
             del os.environ["PYTHONASYNCIODEBUG"]
@@ -259,7 +259,7 @@ def nodebug_setup_module(module):
     debug facilities.
     """
     module._old_asyncio_debug = os.environ.get("PYTHONASYNCIODEBUG")
-    if module._old_asyncio_debug is not None:  # pragma: no cover
+    if module._old_asyncio_debug is not None:
         del os.environ["PYTHONASYNCIODEBUG"]
 
 
@@ -268,7 +268,7 @@ def nodebug_teardown_module(module):
     A teardown_module() that you can install in a test module to reenable
     debug facilities.
     """
-    if module._old_asyncio_debug is not None:  # pragma: no cover
+    if module._old_asyncio_debug is not None:
         os.environ["PYTHONASYNCIODEBUG"] = module._old_asyncio_debug
 
 
@@ -390,7 +390,7 @@ def varying(items):
     def func():
         dct = slot.get()
         i = dct[key]
-        if i == len(items):  # pragma: no cover
+        if i == len(items):
             raise IndexError
         else:
             x = items[i]
@@ -528,7 +528,7 @@ def check_active_rpc(loop, active_rpc_timeout=1):
     # as Nanny does.
     # (*) (example: gather_from_workers())
 
-    def fail():  # pragma: no cover
+    def fail():
         pytest.fail(
             "some RPCs left active by test: %s" % (set(rpc.active) - active_before)
         )
@@ -579,7 +579,7 @@ c = client
 
 
 @pytest.fixture
-def client_secondary(loop, cluster_fixture):  # pragma: no cover
+def client_secondary(loop, cluster_fixture):
     scheduler, workers = cluster_fixture
     with Client(scheduler["address"], loop=loop) as client:
         yield client
@@ -695,7 +695,7 @@ def cluster(
                     nthreads = loop.run_sync(s.ncores)
                     if len(nthreads) == nworkers:
                         break
-                    if time() - start > 5:  # pragma: no cover
+                    if time() - start > 5:
                         raise Exception("Timeout on cluster creation")
 
             # avoid sending processes down to function
@@ -751,7 +751,7 @@ def cluster(
             client.close()
 
     start = time()
-    while any(proc.is_alive() for proc in ws):  # pragma: no cover
+    while any(proc.is_alive() for proc in ws):
         text = str(list(ws))
         sleep(0.2)
         assert time() < start + 5, ("Workers still around after five seconds", text)
@@ -953,7 +953,7 @@ def gen_cluster(
                                     scheduler_kwargs=scheduler_kwargs,
                                     worker_kwargs=worker_kwargs,
                                 )
-                            except Exception as e:  # pragma: no cover
+                            except Exception as e:
                                 logger.error(
                                     "Failed to start gen_cluster: "
                                     f"{e.__class__.__name__}: {e}; retrying",
@@ -964,7 +964,7 @@ def gen_cluster(
                                 workers[:] = ws
                                 args = [s] + workers
                                 break
-                        if s is False:  # pragma: no cover
+                        if s is False:
                             raise Exception("Could not start cluster")
                         if client:
                             c = await Client(
@@ -1011,7 +1011,7 @@ def gen_cluster(
                                 f"{buffer.getvalue()}"
                             ) from None
 
-                        except pytest.xfail.Exception:  # pragma: no cover
+                        except pytest.xfail.Exception:
                             raise
 
                         except Exception:
@@ -1053,7 +1053,7 @@ def gen_cluster(
                                 if not get_unclosed():
                                     break
                                 await asyncio.sleep(0.05)
-                            else:  # pragma: no cover
+                            else:
                                 if allow_unclosed:
                                     print(f"Unclosed Comms: {get_unclosed()}")
                                 else:
@@ -1072,7 +1072,7 @@ def gen_cluster(
                 if getattr(w, "data", None):
                     try:
                         w.data.clear()
-                    except OSError:  # pragma: no cover
+                    except OSError:
                         # zict backends can fail if their storage directory
                         # was already removed
                         pass
@@ -1176,7 +1176,7 @@ def popen(args, **kwargs):
     proc = subprocess.Popen(args, **kwargs)
     try:
         yield proc
-    except Exception:  # pragma: no cover
+    except Exception:
         dump_stdout = True
         raise
 
@@ -1186,7 +1186,7 @@ def popen(args, **kwargs):
         finally:
             # XXX Also dump stdout if return code != 0 ?
             out, err = proc.communicate()
-            if dump_stdout:  # pragma: no cover
+            if dump_stdout:
                 print("\n\nPrint from stderr\n  %s\n=================\n" % args[0][0])
                 print(err.decode())
 
@@ -1318,7 +1318,7 @@ async def assert_can_connect_locally_4(port, **kwargs):
     await asyncio.gather(*futures)
 
 
-async def assert_can_connect_from_everywhere_6(port, **kwargs):  # pragma: no cover
+async def assert_can_connect_from_everywhere_6(port, **kwargs):
     """
     Check that the local *port* is reachable from all IPv6 addresses.
     """
@@ -1332,7 +1332,7 @@ async def assert_can_connect_from_everywhere_6(port, **kwargs):  # pragma: no co
     await asyncio.gather(*futures)
 
 
-async def assert_can_connect_locally_6(port, **kwargs):  # pragma: no cover
+async def assert_can_connect_locally_6(port, **kwargs):
     """
     Check that the local *port* is only reachable from local IPv6 addresses.
     """
@@ -1405,7 +1405,7 @@ def new_config(new_config):
 
 
 @contextmanager
-def new_environment(changes):  # pragma: no cover
+def new_environment(changes):
     saved_environ = os.environ.copy()
     os.environ.update(changes)
     try:
@@ -1431,7 +1431,7 @@ def new_config_file(c):
         try:
             yield
         finally:
-            if old_file:  # pragma: no cover
+            if old_file:
                 os.environ["DASK_CONFIG"] = old_file
             else:
                 del os.environ["DASK_CONFIG"]
@@ -1522,7 +1522,7 @@ def get_client_ssl_context(
     return ctx
 
 
-def bump_rlimit(limit, desired):  # pragma: no cover
+def bump_rlimit(limit, desired):
     resource = pytest.importorskip("resource")
     try:
         soft, hard = resource.getrlimit(limit)
@@ -1834,7 +1834,7 @@ def xfail_ssl_issue5601():
     pytest.importorskip("cryptography")
     try:
         Security.temporary()
-    except ImportError:  # pragma: no cover
+    except ImportError:
         if MACOS:
             pytest.xfail(reason="distributed#5601")
         raise
