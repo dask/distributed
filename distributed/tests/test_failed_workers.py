@@ -29,6 +29,7 @@ from distributed.utils_test import (
 pytestmark = pytest.mark.ci1
 
 
+@pytest.mark.slow()
 def test_submit_after_failed_worker_sync(loop):
     with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -39,6 +40,7 @@ def test_submit_after_failed_worker_sync(loop):
             assert total.result() == sum(map(inc, range(10)))
 
 
+@pytest.mark.slow()
 @gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
 async def test_submit_after_failed_worker_async(c, s, a, b):
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
