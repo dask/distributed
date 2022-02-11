@@ -98,14 +98,14 @@ _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="session")  # pragma: no cover
 def valid_python_script(tmpdir_factory):
     local_file = tmpdir_factory.mktemp("data").join("file.py")
     local_file.write("print('hello world!')")
     return local_file
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="session")  # pragma: no cover
 def client_contract_script(tmpdir_factory):
     local_file = tmpdir_factory.mktemp("data").join("distributed_script.py")
     lines = (
@@ -117,7 +117,7 @@ def client_contract_script(tmpdir_factory):
     return local_file
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="session")  # pragma: no cover
 def invalid_python_script(tmpdir_factory):
     local_file = tmpdir_factory.mktemp("data").join("file.py")
     local_file.write("a+1")
@@ -154,7 +154,7 @@ def loop():
                 sync(loop, cleanup_global_workers, callback_timeout=0.500)
                 loop.add_callback(loop.stop)
             except RuntimeError as e:
-                if not re.match("IOLoop is clos(ed|ing)", str(e)):
+                if not re.match("IOLoop is clos(ed|ing)", str(e)):  # pragma: no cover
                     raise
             except TimeoutError:
                 pass
@@ -240,7 +240,7 @@ def nodebug(func):
     Warning: this doesn't affect already created IOLoops.
     """
 
-    @functools.wraps(func)
+    @functools.wraps(func)  # pragma: no cover
     def wrapped(*args, **kwargs):
         old_asyncio_debug = os.environ.get("PYTHONASYNCIODEBUG")
         if old_asyncio_debug is not None:
@@ -260,7 +260,7 @@ def nodebug_setup_module(module):
     debug facilities.
     """
     module._old_asyncio_debug = os.environ.get("PYTHONASYNCIODEBUG")
-    if module._old_asyncio_debug is not None:
+    if module._old_asyncio_debug is not None:  # pragma: no cover
         del os.environ["PYTHONASYNCIODEBUG"]
 
 
@@ -269,7 +269,7 @@ def nodebug_teardown_module(module):
     A teardown_module() that you can install in a test module to reenable
     debug facilities.
     """
-    if module._old_asyncio_debug is not None:
+    if module._old_asyncio_debug is not None:  # pragma: no cover
         os.environ["PYTHONASYNCIODEBUG"] = module._old_asyncio_debug
 
 
@@ -580,7 +580,7 @@ c = client
 
 
 @pytest.fixture
-def client_secondary(loop, cluster_fixture):
+def client_secondary(loop, cluster_fixture):  # pragma: no cover
     scheduler, workers = cluster_fixture
     with Client(scheduler["address"], loop=loop) as client:
         yield client
@@ -954,7 +954,7 @@ def gen_cluster(
                                     scheduler_kwargs=scheduler_kwargs,
                                     worker_kwargs=worker_kwargs,
                                 )
-                            except Exception as e:
+                            except Exception as e:  # pragma: no cover
                                 logger.error(
                                     "Failed to start gen_cluster: "
                                     f"{e.__class__.__name__}: {e}; retrying",
@@ -1012,7 +1012,7 @@ def gen_cluster(
                                 f"{buffer.getvalue()}"
                             ) from None
 
-                        except pytest.xfail.Exception:
+                        except pytest.xfail.Exception:  # pragma: no cover
                             raise
 
                         except Exception:
@@ -1054,7 +1054,7 @@ def gen_cluster(
                                 if not get_unclosed():
                                     break
                                 await asyncio.sleep(0.05)
-                            else:
+                            else:  # pragma: no cover
                                 if allow_unclosed:
                                     print(f"Unclosed Comms: {get_unclosed()}")
                                 else:
@@ -1187,7 +1187,7 @@ def popen(args, **kwargs):
         finally:
             # XXX Also dump stdout if return code != 0 ?
             out, err = proc.communicate()
-            if dump_stdout:
+            if dump_stdout:  # pragma: no cover
                 print("\n\nPrint from stderr\n  %s\n=================\n" % args[0][0])
                 print(err.decode())
 
