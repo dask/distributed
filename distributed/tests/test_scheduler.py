@@ -2356,7 +2356,7 @@ async def test_unknown_task_duration_config_2(s, a, b):
 @gen_cluster(client=True)
 async def test_retire_state_change(c, s, a, b):
     np = pytest.importorskip("numpy")
-    y = c.map(lambda x: x ** 2, range(10))
+    y = c.map(lambda x: x**2, range(10))
     await c.scatter(y)
     coros = []
     for x in range(2):
@@ -2461,8 +2461,8 @@ _test_leak = []
 
 
 def leaking(out_mib, leak_mib, sleep_time):
-    out = "x" * (out_mib * 2 ** 20)
-    _test_leak.append("x" * (leak_mib * 2 ** 20))
+    out = "x" * (out_mib * 2**20)
+    _test_leak.append("x" * (leak_mib * 2**20))
     sleep(sleep_time)
     return out
 
@@ -2482,7 +2482,7 @@ async def assert_memory(
     t0 = time()
     while True:
         minfo = scheduler_or_workerstate.memory
-        nmib = getattr(minfo, attr) / 2 ** 20
+        nmib = getattr(minfo, attr) / 2**20
         if min_mib <= nmib <= max_mib:
             return
         if time() - t0 > timeout:
@@ -2559,8 +2559,8 @@ async def test_memory(c, s, *nannies):
 
     # Force the output of f1 and f2 to spill to disk
     print_memory_info("Before spill")
-    a_leak = round(700 * 0.7 - a.memory.process / 2 ** 20)
-    b_leak = round(700 * 0.7 - b.memory.process / 2 ** 20)
+    a_leak = round(700 * 0.7 - a.memory.process / 2**20)
+    b_leak = round(700 * 0.7 - b.memory.process / 2**20)
     assert a_leak > 50 and b_leak > 50
     a_leak += 10
     b_leak += 10
@@ -2615,8 +2615,8 @@ async def test_memory(c, s, *nannies):
 
     print_memory_info("Before clearing memory leak")
 
-    prev_unmanaged_a = a.memory.unmanaged / 2 ** 20
-    prev_unmanaged_b = b.memory.unmanaged / 2 ** 20
+    prev_unmanaged_a = a.memory.unmanaged / 2**20
+    prev_unmanaged_b = b.memory.unmanaged / 2**20
     await c.run(clear_leak)
 
     await asyncio.gather(
@@ -2639,7 +2639,7 @@ async def test_memory_no_zict(c, s, a, b):
     assert isinstance(b.data, dict)
     f = c.submit(leaking, 10, 0, 0)
     await f
-    assert 10 * 2 ** 20 < s.memory.managed_in_memory < 11 * 2 ** 20
+    assert 10 * 2**20 < s.memory.managed_in_memory < 11 * 2**20
     assert s.memory.managed_spilled == 0
 
 
@@ -2722,7 +2722,7 @@ async def test_rebalance(c, s, a, b):
     # utilisation slightly above 50% (after counting unmanaged) which is above the
     # distributed.worker.memory.rebalance.sender-min threshold.
     futures = c.map(
-        lambda _: "x" * (2 ** 29 // 500), range(500), workers=[a.worker_address]
+        lambda _: "x" * (2**29 // 500), range(500), workers=[a.worker_address]
     )
     await wait(futures)
     # Wait for heartbeats
@@ -2854,8 +2854,8 @@ async def test_rebalance_no_limit(c, s, a, b):
 async def test_rebalance_no_recipients(c, s, a, b):
     """There are sender workers, but no recipient workers"""
     # Fill 25% of the memory of a and 10% of the memory of b
-    fut_a = c.map(lambda _: "x" * (2 ** 20), range(250), workers=[a.worker_address])
-    fut_b = c.map(lambda _: "x" * (2 ** 20), range(100), workers=[b.worker_address])
+    fut_a = c.map(lambda _: "x" * (2**20), range(250), workers=[a.worker_address])
+    fut_b = c.map(lambda _: "x" * (2**20), range(100), workers=[b.worker_address])
     await wait(fut_a + fut_b)
     await assert_memory(s, "managed", 350, 351)
     await assert_ndata(c, {a.worker_address: 250, b.worker_address: 100})
@@ -2903,9 +2903,9 @@ async def test_rebalance_skip_all_recipients(c, s, a, b):
 async def test_rebalance_sender_below_mean(c, s, *_):
     """A task remains on the sender because moving it would send it below the mean"""
     a, b = s.workers
-    f1 = c.submit(lambda: "x" * (400 * 2 ** 20), workers=[a])
+    f1 = c.submit(lambda: "x" * (400 * 2**20), workers=[a])
     await wait([f1])
-    f2 = c.submit(lambda: "x" * (10 * 2 ** 20), workers=[a])
+    f2 = c.submit(lambda: "x" * (10 * 2**20), workers=[a])
     await wait([f2])
     await assert_memory(s, "managed", 410, 411)
     await assert_ndata(c, {a: 2, b: 0})
@@ -2934,7 +2934,7 @@ async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
     await s.rebalance()
     await assert_ndata(c, {a: 10, b: 0})
 
-    large_future = c.submit(lambda: "x" * (300 * 2 ** 20), workers=[a])
+    large_future = c.submit(lambda: "x" * (300 * 2**20), workers=[a])
     await wait([large_future])
     await assert_memory(s, "managed", 300, 301)
     await assert_ndata(c, {a: 11, b: 0})

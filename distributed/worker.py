@@ -717,6 +717,7 @@ class Worker(ServerNode):
             ("resumed", "released"): self.transition_generic_released,
             ("resumed", "waiting"): self.transition_resumed_waiting,
             ("resumed", "fetch"): self.transition_resumed_fetch,
+            ("resumed", "missing"): self.transition_resumed_missing,
             ("constrained", "executing"): self.transition_constrained_executing,
             ("constrained", "released"): self.transition_generic_released,
             ("error", "released"): self.transition_generic_released,
@@ -884,13 +885,15 @@ class Worker(ServerNode):
         ):
             from .spill import SpillBuffer
 
-            self.data = SpillBuffer(
-                os.path.join(self.local_directory, "storage"),
-                target=int(
+            if self.memory_target_fraction:
+                target = int(
                     self.memory_limit
                     * (self.memory_target_fraction or self.memory_spill_fraction)
                 )
-                or sys.maxsize,
+            else:
+                target = sys.maxsize
+            self.data = SpillBuffer(
+                os.path.join(self.local_directory, "storage"), target=target
             )
         else:
             self.data = {}
@@ -2304,7 +2307,7 @@ class Worker(ServerNode):
             stimulus_id=stimulus_id,
         )
 
-    def transition_resumed_fetch(self, ts, *, stimulus_id):
+    def _transition_from_resumed(self, ts, finish, *, stimulus_id):
         """`resumed` is an intermediate degenerate state which splits further up
         into two states depending on what the last signal / next state is
         intended to be. There are only two viable choices depending on whether
@@ -2324,33 +2327,37 @@ class Worker(ServerNode):
 
         See also `transition_resumed_waiting`
         """
-        # if the next state is already intended to be fetch or if the
-        # coro/thread is still running (ts.done==False), this is a noop
-        if ts._next == "fetch":
-            return {}, []
-        ts._next = "fetch"
-
+        recs, smsgs = {}, []
         if ts.done:
             next_state = ts._next
-            recs, smsgs = self.transition_generic_released(ts, stimulus_id=stimulus_id)
+            # if the next state is already intended to be waiting or if the
+            # coro/thread is still running (ts.done==False), this is a noop
+            if ts._next != finish:
+                recs, smsgs = self.transition_generic_released(
+                    ts, stimulus_id=stimulus_id
+                )
             recs[ts] = next_state
-            return recs, smsgs
-        return {}, []
+        else:
+            ts._next = finish
+        return recs, smsgs
+
+    def transition_resumed_fetch(self, ts, *, stimulus_id):
+        """
+        See Worker._transition_from_resumed
+        """
+        return self._transition_from_resumed(ts, "fetch", stimulus_id=stimulus_id)
+
+    def transition_resumed_missing(self, ts, *, stimulus_id):
+        """
+        See Worker._transition_from_resumed
+        """
+        return self._transition_from_resumed(ts, "missing", stimulus_id=stimulus_id)
 
     def transition_resumed_waiting(self, ts, *, stimulus_id):
         """
-        See transition_resumed_fetch
+        See Worker._transition_from_resumed
         """
-        if ts._next == "waiting":
-            return {}, []
-        ts._next = "waiting"
-
-        if ts.done:
-            next_state = ts._next
-            recs, smsgs = self.transition_generic_released(ts, stimulus_id=stimulus_id)
-            recs[ts] = next_state
-            return recs, smsgs
-        return {}, []
+        return self._transition_from_resumed(ts, "waiting", stimulus_id=stimulus_id)
 
     def transition_cancelled_fetch(self, ts, *, stimulus_id):
         if ts.done:
@@ -3140,7 +3147,7 @@ class Worker(ServerNode):
                 else:
                     # Exponential backoff to avoid hammering scheduler/worker
                     self.repetitively_busy += 1
-                    await asyncio.sleep(0.100 * 1.5 ** self.repetitively_busy)
+                    await asyncio.sleep(0.100 * 1.5**self.repetitively_busy)
 
                     await self.query_who_has(*to_gather_keys)
 

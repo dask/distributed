@@ -869,12 +869,12 @@ def read_block(f, offset, length, delimiter=None):
     """
     if delimiter:
         f.seek(offset)
-        seek_delimiter(f, delimiter, 2 ** 16)
+        seek_delimiter(f, delimiter, 2**16)
         start = f.tell()
         length -= start - offset
 
         f.seek(start + length)
-        seek_delimiter(f, delimiter, 2 ** 16)
+        seek_delimiter(f, delimiter, 2**16)
         end = f.tell()
 
         offset = start

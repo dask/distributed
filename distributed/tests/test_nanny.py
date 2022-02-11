@@ -188,8 +188,8 @@ async def test_nanny_death_timeout(s):
 @gen_cluster(client=True, Worker=Nanny)
 async def test_random_seed(c, s, a, b):
     async def check_func(func):
-        x = c.submit(func, 0, 2 ** 31, pure=False, workers=a.worker_address)
-        y = c.submit(func, 0, 2 ** 31, pure=False, workers=b.worker_address)
+        x = c.submit(func, 0, 2**31, pure=False, workers=a.worker_address)
+        y = c.submit(func, 0, 2**31, pure=False, workers=b.worker_address)
         assert x.key != y.key
         x = await x
         y = await y

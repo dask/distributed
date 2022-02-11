@@ -1092,7 +1092,7 @@ async def check_deserialize(addr):
     # as a separate payload
     # TODO: currently bytestrings are not transferred as a separate payload
 
-    _uncompressible = os.urandom(1024 ** 2) * 4  # end size: 8 MB
+    _uncompressible = os.urandom(1024**2) * 4  # end size: 8 MB
 
     msg = {
         "op": "update",
@@ -1151,7 +1151,7 @@ async def check_deserialize_roundtrip(addr):
     """
     # Test with long bytestrings, large enough to be transferred
     # as a separate payload
-    _uncompressible = os.urandom(1024 ** 2) * 4  # end size: 4 MB
+    _uncompressible = os.urandom(1024**2) * 4  # end size: 4 MB
 
     msg = {
         "op": "update",

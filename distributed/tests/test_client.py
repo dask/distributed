@@ -243,7 +243,7 @@ async def test_custom_key_with_batches(c, s, a, b):
     """Test of <https://github.com/dask/distributed/issues/4588>"""
 
     futs = c.map(
-        lambda x: x ** 2,
+        lambda x: x**2,
         range(10),
         batch_size=5,
         key=[str(x) for x in range(10)],
@@ -4507,7 +4507,7 @@ async def test_normalize_collection_dask_array(c, s, a, b):
 def test_normalize_collection_with_released_futures(c):
     da = pytest.importorskip("dask.array")
 
-    x = da.arange(2 ** 20, chunks=2 ** 10)
+    x = da.arange(2**20, chunks=2**10)
     y = x.persist()
     wait(y)
     sol = y.sum().compute()
@@ -4642,13 +4642,14 @@ async def test_client_timeout():
     """`await Client(...)` keeps retrying for 10 seconds if it can't find the Scheduler
     straight away
     """
-    c = Client("127.0.0.1:57484", asynchronous=True)
-    client_start_fut = asyncio.ensure_future(c)
-    await asyncio.sleep(4)
-    async with Scheduler(port=57484, dashboard_address=":0"):
-        await client_start_fut
-        assert await c.run_on_scheduler(lambda: 123) == 123
-        await c.close()
+    with dask.config.set({"distributed.comm.timeouts.connect": "10s"}):
+        c = Client("127.0.0.1:57484", asynchronous=True)
+        client_start_fut = asyncio.ensure_future(c)
+        await asyncio.sleep(2)
+        async with Scheduler(port=57484, dashboard_address=":0"):
+            await client_start_fut
+            assert await c.run_on_scheduler(lambda: 123) == 123
+            await c.close()
 
 
 @gen_cluster(client=True)
@@ -5153,7 +5154,7 @@ def test_get_client_no_cluster():
     Worker._instances.clear()
 
     msg = "No global client found and no address provided"
-    with pytest.raises(ValueError, match=fr"^{msg}$"):
+    with pytest.raises(ValueError, match=rf"^{msg}$"):
         get_client()
 
 
@@ -7436,3 +7437,10 @@ class TestClientSecurityLoader:
             with pytest.raises(ImportError, match="totally_fake_module_name_2.loader"):
                 async with Client("tls://bad-address:8888", asynchronous=True):
                     pass
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_wait_for_workers_updates_info(c, s):
+    async with Worker(s.address):
+        await c.wait_for_workers(1)
+        assert c.scheduler_info()["workers"]
