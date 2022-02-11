@@ -1339,7 +1339,6 @@ async def test_spill_spill_threshold(c, s, a):
 async def test_spill_no_target_threshold(c, s, a):
     """Test that you can enable the spill threshold while leaving the target threshold
     to False
-    If running locally pass --leaks=fds,processes,threads
     """
     memory = s.workers[a.address].memory.process
     a.memory_limit = memory / 0.7 + 400e6
