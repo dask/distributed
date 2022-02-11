@@ -24,6 +24,8 @@ exclude_lines =
     [\s(.]pynvml[\s(.]
     # exclude LOG_PDB
     LOG_PDB
+    # always ignore type checking blocks
+    TYPE_CHECKING
 
 [html]
 directory = coverage_html_report
