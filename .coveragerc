@@ -26,6 +26,7 @@ exclude_lines =
     LOG_PDB
     # always ignore type checking blocks
     TYPE_CHECKING
+    except ImportError
 
 [html]
 directory = coverage_html_report
