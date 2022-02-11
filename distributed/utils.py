@@ -1008,7 +1008,7 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
         return len(frame)
     else:
         try:
-            return memoryview(frame).nbytes
+            return frame.nbytes
         except AttributeError:
             return len(frame)
 
