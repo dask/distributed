@@ -249,9 +249,6 @@ def test_spillbuffer_fail_to_serialize(tmpdir):
         with captured_logger(logging.getLogger("distributed.spill")) as logs_bad_key:
             buf["a"] = a
 
-    # This is coming from distributed.protocol.pickle and it's a single line that does not contain
-    # a traceback. The exception will be intercepted by worker.py, which will also print the
-    # traceback.
     # spill.py must remain silent because we're already logging in worker.py
     assert not logs_bad_key.getvalue()
     assert not set(buf.fast)
