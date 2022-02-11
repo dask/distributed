@@ -51,7 +51,7 @@ from .metrics import time
 
 try:
     from dask.context import thread_state
-except ImportError:  # pragma: no cover
+except ImportError:
     thread_state = threading.local()
 
 # For some reason this is required in python >= 3.9

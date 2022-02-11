@@ -15,7 +15,7 @@ from dask.utils import parse_timedelta
 from ..metrics import time
 
 if TYPE_CHECKING:
-    from ..scheduler import WorkerState  # pragma: no cover
+    from ..scheduler import WorkerState
 
 
 logger = logging.getLogger(__name__)
