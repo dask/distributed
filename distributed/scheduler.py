@@ -4369,6 +4369,9 @@ class Scheduler(SchedulerState, ServerNode):
                     await comm.write(msg)
                 return
 
+            self.log_event(address, {"action": "add-worker"})
+            self.log_event("all", {"action": "add-worker", "worker": address})
+
             ws: WorkerState
             parent._workers[address] = ws = WorkerState(
                 address=address,
@@ -4478,8 +4481,6 @@ class Scheduler(SchedulerState, ServerNode):
 
             self.send_all(client_msgs, worker_msgs)
 
-            self.log_event(address, {"action": "add-worker"})
-            self.log_event("all", {"action": "add-worker", "worker": address})
             logger.info("Register worker %s", ws)
 
             msg = {
@@ -4981,13 +4982,14 @@ class Scheduler(SchedulerState, ServerNode):
 
             ws: WorkerState = parent._workers_dv[address]
 
-            self.log_event(
-                ["all", address],
-                {
-                    "action": "remove-worker",
-                    "processing-tasks": dict(ws._processing),
-                },
-            )
+            event_msg = {
+                "action": "remove-worker",
+                "processing-tasks": dict(ws._processing),
+            }
+            self.log_event(address, event_msg.copy())
+            event_msg["worker"] = address
+            self.log_event("all", event_msg)
+
             logger.info("Remove worker %s", ws)
             if close:
                 with suppress(AttributeError, CommClosedError):
@@ -5476,6 +5478,22 @@ class Scheduler(SchedulerState, ServerNode):
         self.send_all(client_msgs, worker_msgs)
 
     def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
+        """Signal that `errant_worker` does not hold `key`
+
+        This may either indicate that `errant_worker` is dead or that we may be
+        working with stale data and need to remove `key` from the workers
+        `has_what`.
+
+        If no replica of a task is available anymore, the task is transitioned
+        back to released and rescheduled, if possible.
+
+        Parameters
+        ----------
+        key : str, optional
+            Task key that could not be found, by default None
+        errant_worker : str, optional
+            Address of the worker supposed to hold a replica, by default None
+        """
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("handle missing data key=%s worker=%s", key, errant_worker)
         self.log_event(errant_worker, {"action": "missing-data", "key": key})
@@ -5483,9 +5501,10 @@ class Scheduler(SchedulerState, ServerNode):
         if ts is None:
             return
         ws: WorkerState = parent._workers_dv.get(errant_worker)
+
         if ws is not None and ws in ts._who_has:
             parent.remove_replica(ts, ws)
-        if not ts._who_has:
+        if ts.state == "memory" and not ts._who_has:
             if ts._run_spec:
                 self.transitions({key: "released"})
             else:
