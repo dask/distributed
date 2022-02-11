@@ -2586,13 +2586,11 @@ async def test_hold_on_to_replicas(c, s, *workers):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[
-        ("", 1),
-        ("", 1),
-    ],
+@pytest.mark.xfail(
+    WINDOWS and sys.version_info[:2] == (3, 8),
+    reason="https://github.com/dask/distributed/issues/5621",
 )
+@gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
 async def test_worker_reconnects_mid_compute(c, s, a, b):
     """Ensure that, if a worker disconnects while computing a result, the scheduler will
     still accept the result.
@@ -2660,13 +2658,11 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
         await asyncio.sleep(0.001)
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[
-        ("", 1),
-        ("", 1),
-    ],
+@pytest.mark.xfail(
+    WINDOWS and sys.version_info[:2] == (3, 8),
+    reason="https://github.com/dask/distributed/issues/5621",
 )
+@gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
 async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, a, b):
     """
     Ensure that a reconnecting worker does not break the scheduler regardless of
