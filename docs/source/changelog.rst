@@ -1,6 +1,65 @@
 Changelog
 =========
 
+.. _v2022.02.0:
+
+2022.02.0
+---------
+
+Released on February 11, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Update ``client.scheduler_info`` in ``wait_for_workers`` (:pr:`5785`) `Matthew Rocklin`_
+- Increase robustness to ``TimeoutError`` during connect (:pr:`5096`) `Florian Jetter`_
+- Respect ``KeyboardInterrupt`` in ``sync`` (:pr:`5758`) `Thomas Grainger`_
+- Add workflow / recipe to generate Dask/distributed pre-releases (:pr:`5636`) `Charles Blackmon-Luca`_
+- Review ``Scheduler`` / ``Worker`` display repr (:pr:`5746`) `crusaderky`_
+- AMM: Graceful Worker Retirement (:pr:`5381`) `crusaderky`_
+- AMM: tentatively stabilize flaky tests around worker pause (:pr:`5735`) `crusaderky`_
+- AMM: speed up and stabilize test_memory (:pr:`5737`) `crusaderky`_
+- Defer pandas import on worker in P2P shuffle (:pr:`5695`) `Gabe Joseph`_
+
+Bug Fixes
+^^^^^^^^^
+- Fix for ``distributed.worker.memory.target=False`` and ``spill=0.7`` (:pr:`5788`) `crusaderky`_
+- Transition ``flight`` to ``missing`` if no ``who_has`` (:pr:`5653`) `Florian Jetter`_
+
+Deprecations
+^^^^^^^^^^^^
+- Remove deprecated ``ncores`` (:pr:`5780`) `crusaderky`_
+- Deprecate registering plugins by class (:pr:`5699`) `Thomas Grainger`_
+- Deprecate ``--nprocs`` option for ``dask-worker`` CLI (:pr:`5641`) `Bryan W. Weber`_
+
+
+Documentation
+^^^^^^^^^^^^^
+- Fix imbalanced backticks (:pr:`5784`) `Matthias Bussonnier`_
+
+Maintenance
+^^^^^^^^^^^
+- xfail ``test_worker_reconnects_mid_compute`` (:pr:`5797`) `crusaderky`_
+- Fix linting CI build (:pr:`5794`) `James Bourbeau`_
+- Update ``pre-commit`` versions (:pr:`5782`) `James Bourbeau`_
+- Reactivate ``pytest_resourceleaks`` (:pr:`5771`) `crusaderky`_
+- Set test assumption for ``test_client_timeout`` (:pr:`5790`) `Florian Jetter`_
+- Remove client timeout from ``test_ucx_config_w_env_var`` (:pr:`5792`) `Florian Jetter`_
+- Remove ``test_failed_worker_without_warning`` (:pr:`5789`) `Florian Jetter`_
+- Fix longitudinal report (:pr:`5783`) `Ian Rose`_
+- Fix flaky ``test_robust_to_bad_sizeof_estimates`` (:pr:`5753`) `crusaderky`_
+- Revert "Pin coverage to 6.2 (:pr:`5716`)" (:pr:`5770`) `Thomas Grainger`_
+- Trigger test runs periodically to increases failure statistics (:pr:`5769`) `Florian Jetter`_
+- More fault tolerant test report (:pr:`5732`) `Ian Rose`_
+- Pin ``pillow<9`` to work around ``torch`` incompatability (:pr:`5755`) `Thomas Grainger`_
+- Overhaul ``check_process_leak`` (:pr:`5739`) `crusaderky`_
+- Fix flaky ``test_exit_callback test`` (:pr:`5713`) `Jim Crist-Harif`_
+- Generate tests summary (:pr:`5710`) `crusaderky`_
+- Upload different architectured pre-releases separately (:pr:`5741`) `Charles Blackmon-Luca`_
+- Ignore non-test directories (:pr:`5720`) `Gabe Joseph`_
+- Bump gpuCI ``PYTHON_VER`` to 3.9 (:pr:`5738`) `Charles Blackmon-Luca`_
+- Regression: threads noted down before they start (:pr:`5796`) `crusaderky`_
+
+
 .. _v2022.01.1:
 
 2022.01.1
@@ -3208,3 +3267,4 @@ significantly without many new features.
 .. _`Thomas Grainger`: https://github.com/graingert
 .. _`Sarah Charlotte Johnson`: https://github.com/scharlottej13
 .. _`Tim Harris`: https://github.com/tharris72
+.. _`Bryan W. Weber`: https://github.com/bryanwweber
