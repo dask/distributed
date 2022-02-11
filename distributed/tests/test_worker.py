@@ -914,7 +914,10 @@ class Bad:
 @gen_cluster(client=True)
 async def test_fail_write_to_disk(c, s, a, b):
 
-    # Key immediately stored to disk, fails to serialize
+    """Test failure to spill triggered by key which is individually larger
+    than target. The data is lost and the task is marked as failed;
+    the worker remains in useable condition.
+    """
     future = c.submit(Bad, int(100e9))
     await wait(future)
 
@@ -924,9 +927,39 @@ async def test_fail_write_to_disk(c, s, a, b):
         await future
 
     futures = c.map(inc, range(10))
-    results = await c._gather(futures)
+    results = await c.gather(futures)
     assert results == list(map(inc, range(10)))
 
+
+@gen_cluster(
+    client=True, 
+    nthreads=[("", 1)],
+    worker_kwargs=dict(
+        memory_limit=1000,
+        memory_target_fraction=0.5,
+        memory_spill_fraction=False,
+        memory_pause_fraction=False,
+    )
+)
+async def test_fail_write_to_disk_2(c, s, a):
+    """Test failure to spill triggered by key which is individually smaller
+    than target, so it is not spilled immediately. The data is retained and
+    the task is NOT marked as failed; the worker remains in useable condition.
+    """
+    x = c.submit(Bad, 250)
+    await wait(x, key="x")
+    assert x.status == "memory"
+    assert set(a.data.memory) == {"x"}
+    
+    
+    y = c.submit(lambda: "y" * 500, key="y")
+    await(y)
+    assert set(a.data.memory) == {"x", "y"}
+    assert not a.data.disk
+
+    futures = c.map(inc, range(10))
+    results = await c.gather(futures)
+    assert results == list(map(inc, range(10)))
 
 try:
     import zict
@@ -943,36 +976,26 @@ requires_zict_210 = pytest.mark.skipif(
     client=True,
     nthreads=[("", 1)],
     worker_kwargs=dict(
-        memory_limit=2000,
+        memory_limit=1,  # Spill everything
         memory_target_fraction=False,
-        memory_spill_fraction=0.5,
+        memory_spill_fraction=0.01,
         memory_pause_fraction=False,
     ),
 )
-async def test_fail_write_to_disk_evict(c, s, w):
-    """Test eviction triggered due to spill fraction and no target memory."""
-    np = pytest.importorskip("numpy")
-    # size on memory 500
-    bad = c.submit(Bad, 500, key="bad")
-    await wait(bad)
+async def test_fail_write_to_disk_evict(c, s, a):
+    """Test failure to evict a key, triggered by the spill threshold"""
+
+    with captured_logger(logging.getLogger("distributed.spill")) as logs:
+        bad = c.submit(Bad, 1, key="bad")
+        await wait(bad)
+
+    logs_value = logs.getvalue()
+    assert "Failed to pickle" in logs_value
+    assert "Traceback" in logs_value
 
     # key is in fast
     assert bad.status == "finished"
-
-    x = c.submit(np.zeros, 500, dtype="u1", key="x")
-
-    with captured_logger(logging.getLogger("distributed.spill")) as logs_evict_key:
-        await wait(x)
-
-    # tries to evict bad key, fails to serialize, key remains in fast
-    # This test is not passing since this is empty. I think we should have use the logs
-    # from logging.getLogger("distributed.protocol.pickle")
-    logs_value = logs_evict_key.getvalue()
-    assert "Failed to pickle" in logs_value
-    assert "Traceback" in logs_value
-    assert set(w.data) == {x.key, bad.key}
-    assert set(w.data.memory) == {x.key, bad.key}
-    assert not w.data.disk
+    assert bad.key in a.data.fast
 
 
 @pytest.mark.skip(reason="Our logic here is faulty")
@@ -1233,24 +1256,20 @@ async def test_spill_target_threshold(c, s, a):
     ),
 )
 async def test_spill_to_disk_constrained(c, s, w):
-    """If running locally pass --leaks=fds,processes,threads"""
-    np = pytest.importorskip("numpy")
+    """Test distributed.worker.memory.max-spill parameter"""
+    # spills starts at 1600*0.6=960 bytes of managed memory
 
-    # since memory_spill_fraction=False spills starts at 1600*0.6=960
-    # size of x on disk would be 425 (it fits)
-    # size of y or z on disk would be 726 (does not fit)
-
-    # size on memory 200
-    x = c.submit(np.zeros, 200, dtype="u1", key="x")
+    # size in memory ~200; size on disk ~400
+    x = c.submit(lambda: "x" * 200, key="x")
     await wait(x)
-    # size on memory 500
-    y = c.submit(np.zeros, 500, dtype="u1", key="y")
+    # size in memory ~500; size on disk ~700
+    y = c.submit(lambda: "y" * 500, key="y")
     await wait(y)
 
     assert set(w.data) == {x.key, y.key}
     assert set(w.data.memory) == {x.key, y.key}
 
-    z = c.submit(np.zeros, 500, dtype="u1", key="z")
+    z = c.submit(lambda: "z" * 500, key="z")
     await wait(z)
 
     assert set(w.data) == {x.key, y.key, z.key}
@@ -1260,7 +1279,7 @@ async def test_spill_to_disk_constrained(c, s, w):
     assert set(w.data.disk) == {x.key}
 
     # zb is individually larger than max_spill
-    zb = c.submit(np.zeros, 1700, dtype="u1", key="zb")
+    zb = c.submit(lambda: "z" * 1700, key="zb")
     await wait(zb)
 
     assert set(w.data.memory) == {y.key, z.key, zb.key}
@@ -1272,7 +1291,7 @@ async def test_spill_to_disk_constrained(c, s, w):
 
     # zc is individually smaller than max_spill, but the evicted key together with
     # x it exceeds max_spill
-    zc = c.submit(np.zeros, 500, dtype="u1", key="zc")
+    zc = c.submit(lambda: "z" * 500, key="zc")
     await wait(zc)
     assert set(w.data.memory) == {y.key, z.key, zc.key}
     assert set(w.data.disk) == {x.key}
