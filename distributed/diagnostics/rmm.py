@@ -1,4 +1,10 @@
-def _get_pool_size_for_mr(mr):
+"""
+Diagnostics for GPU memory managed by RMM (RAPIDS memory manager).
+"""
+
+def _get_pool_size(mr):
+    # if the memory resource or any of its upstreams
+    # is a `PoolMemoryResource`, get its pool size
     import rmm
 
     if not isinstance(mr, rmm.mr.PoolMemoryResource):
@@ -10,7 +16,7 @@ def _get_pool_size_for_mr(mr):
         pool_size = mr.pool_size()
         return pool_size
 
-def _get_allocated_bytes_for_mr(mr):
+def _get_allocated_bytes(mr):
     import rmm
 
     if not hasattr(mr, "get_allocated_bytes"):
