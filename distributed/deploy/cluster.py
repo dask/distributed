@@ -218,7 +218,7 @@ class Cluster(SyncMethodMixin):
             self.scheduler_info.update(msg)
         elif op == "remove":
             del self.scheduler_info["workers"][msg]
-        else:  # pragma: no cover
+        else:
             raise ValueError("Invalid op", op, msg)
 
     def adapt(self, Adaptive=Adaptive, **kwargs) -> Adaptive:
@@ -407,7 +407,7 @@ class Cluster(SyncMethodMixin):
                     update()
 
             scale.on_click(scale_cb)
-        else:  # pragma: no cover
+        else:
             accordion = HTML("")
 
         scale_status = HTML(self._scaling_status())

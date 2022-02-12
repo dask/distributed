@@ -48,7 +48,7 @@ class Workers(RequestHandler):
 class Worker(RequestHandler):
     def get(self, worker):
         worker = escape.url_unescape(worker)
-        if worker not in self.server.workers:  # pragma: no cover
+        if worker not in self.server.workers:
             self.send_error(404)
             return
         with log_errors():
@@ -70,7 +70,7 @@ class Worker(RequestHandler):
 class Task(RequestHandler):
     def get(self, task):
         task = escape.url_unescape(task)
-        if task not in self.server.tasks:  # pragma: no cover
+        if task not in self.server.tasks:
             self.send_error(404)
             return
         with log_errors():
