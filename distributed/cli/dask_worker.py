@@ -284,7 +284,7 @@ def main(
     enable_proctitle_on_current()
     enable_proctitle_on_children()
 
-    if bokeh_port is not None:  # pragma: no cover
+    if bokeh_port is not None:
         warnings.warn(
             "The --bokeh-port flag has been renamed to --dashboard-address. "
             "Consider adding ``--dashboard-address :%d`` " % bokeh_port
@@ -375,7 +375,7 @@ def main(
         else:
             # if contact address is not present we use the listen_address for contact
             contact_address = listen_address
-    except ValueError as e:  # pragma: no cover
+    except ValueError as e:
         logger.error("Failed to launch worker. " + str(e))
         sys.exit(1)
 
@@ -480,7 +480,7 @@ def main(
         if not signal_fired:
             logger.info("Timed out starting worker")
         sys.exit(1)
-    except KeyboardInterrupt:  # pragma: no cover
+    except KeyboardInterrupt:
         pass
     finally:
         logger.info("End worker")
@@ -492,4 +492,4 @@ def go():
 
 
 if __name__ == "__main__":
-    go()  # pragma: no cover
+    go()
