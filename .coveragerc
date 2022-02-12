@@ -5,6 +5,7 @@ omit =
     distributed/tests/test*
     distributed/*/tests/test*
     distributed/cli/utils.py
+    distributed/cli/dask_spec.py
     distributed/deploy/ssh.py
     distributed/_ipython_utils.py
     distributed/_version.py
