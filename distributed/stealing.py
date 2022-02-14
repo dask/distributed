@@ -115,7 +115,6 @@ class WorkStealing(SchedulerPlugin):
 
         Parameters
         ----------
-        comm:
         exclude:
             A list of attributes which must not be present in the output.
 

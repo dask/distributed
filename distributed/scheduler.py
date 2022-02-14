@@ -272,7 +272,7 @@ class ClientState:
     def versions(self):
         return self._versions
 
-    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()):  # -> dict | str
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
@@ -814,7 +814,7 @@ class WorkerState:
             **self._extra,
         }
 
-    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()):  # -> dict | str
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
@@ -1199,7 +1199,7 @@ class TaskGroup:
     def __len__(self):
         return sum(self._states.values())
 
-    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()):  # -> dict | str
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
@@ -1804,7 +1804,7 @@ class TaskState:
             nbytes += ts.get_nbytes()
         return nbytes
 
-    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()):  # -> dict | str
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.

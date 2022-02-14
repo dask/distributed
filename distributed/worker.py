@@ -232,7 +232,7 @@ class TaskState:
         nbytes = self.nbytes
         return nbytes if nbytes is not None else DEFAULT_DATA_SIZE
 
-    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict | str:
+    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
