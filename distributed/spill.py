@@ -70,7 +70,7 @@ class SpillBuffer(zict.Buffer):
         except MaxSpillExceeded as e:
             # key is in self.fast; no keys have been lost on eviction
             # Note: requires zict > 2.0
-            key_e, = e.args
+            (key_e,) = e.args
             assert key_e in self.fast
             assert key_e not in self.slow
             now = time.time()
@@ -92,7 +92,7 @@ class SpillBuffer(zict.Buffer):
         except PickleError as e:
             key_e, orig_e = e.args
             assert key_e in self.fast
-            assert key_e not in self.slow            
+            assert key_e not in self.slow
             if key_e == key:
                 assert key is not None
                 # The key we just inserted failed to serialize.
@@ -102,31 +102,32 @@ class SpillBuffer(zict.Buffer):
                 del self[key]
                 raise orig_e
             else:
-                # The key we just inserted is smaller than target, but it caused another,
-                # unrelated key to be spilled out of the LRU, and that key failed to serialize.
-                # There's nothing wrong with the new key. The older key is still in memory.
+                # The key we just inserted is smaller than target, but it caused
+                # another, unrelated key to be spilled out of the LRU, and that key
+                # failed to serialize. There's nothing wrong with the new key. The older
+                # key is still in memory.
                 if key_e not in self.logged_pickle_errors:
                     logger.error(f"Failed to pickle {key_e!r}", exc_info=True)
                     self.logged_pickle_errors.add(key_e)
                 raise HandledError()
 
     def __setitem__(self, key: str, value: Any) -> None:
-        """If sizeof(value) < target, write key/value pair to self.fast; this may in turn
-        cause older keys to be spilled from fast to slow.
+        """If sizeof(value) < target, write key/value pair to self.fast; this may in
+        turn cause older keys to be spilled from fast to slow.
         If sizeof(value) >= target, write key/value pair directly to self.slow instead.
-        
+
         Raises
         ------
         Exception
-            sizeof(value) >= target, and value failed to pickle. 
+            sizeof(value) >= target, and value failed to pickle.
             The key/value pair has been forgotten.
-        
+
         In all other cases:
-        
+
         - an older value was evicted and failed to pickle,
         - this value or an older one caused the disk to fill and raise OSError,
-        - this value or an odler one caused the max_spill threshold to be exceeded,
-        
+        - this value or an older one caused the max_spill threshold to be exceeded,
+
         this method does not raise and guarantees that the key/value that caused the
         issue remained in fast.
         """
@@ -141,9 +142,9 @@ class SpillBuffer(zict.Buffer):
     def evict(self) -> int:
         """Manually evict the oldest key/value pair, even if target has not been reached.
         Returns sizeof(value).
-        If the eviction failed (value failed to pickle, disk full, or max_spill exceeded), return
-        -1; the key/value pair that caused the issue will remain in fast. 
-        This method never raises.
+        If the eviction failed (value failed to pickle, disk full, or max_spill
+        exceeded), return -1; the key/value pair that caused the issue will remain in
+        fast. This method never raises.
         """
         try:
             with self.handle_errors(None):
@@ -180,6 +181,7 @@ class SpillBuffer(zict.Buffer):
 
 def _in_memory_weight(key: str, value: Any) -> int:
     return safe_sizeof(value)
+
 
 # Internal exceptions. These are never raised by SpillBuffer.
 class MaxSpillExceeded(Exception):
