@@ -7308,29 +7308,58 @@ async def test_dump_cluster_state_json(c, s, a, b, tmp_path):
 
 
 @gen_cluster(client=True)
-async def test_dump_cluster_state_exclude(c, s, a, b, tmp_path):
+async def test_dump_cluster_state_exclude_default(c, s, a, b, tmp_path):
     futs = c.map(inc, range(10))
     while len(s.tasks) != len(futs):
         await asyncio.sleep(0.01)
-    exclude = [
-        # these are TaskState attributes
-        "_runspec",
-        "runspec",
+    excluded_by_default = [
+        "run_spec",
     ]
+
     filename = tmp_path / "foo"
-    await c.dump_cluster_state(filename=filename, format="yaml")
+    await c.dump_cluster_state(
+        filename=filename,
+        format="yaml",
+    )
 
     with open(f"{filename}.yaml") as fd:
         state = yaml.safe_load(fd)
 
     assert "workers" in state
     assert len(state["workers"]) == len(s.workers)
+    for worker, worker_dump in state["workers"].items():
+        for k, task_dump in worker_dump["tasks"].items():
+            assert not any(blocked in task_dump for blocked in excluded_by_default)
+            assert k in s.tasks
     assert "scheduler" in state
     assert "tasks" in state["scheduler"]
     tasks = state["scheduler"]["tasks"]
     assert len(tasks) == len(futs)
     for k, task_dump in tasks.items():
-        assert not any(blocked in task_dump for blocked in exclude)
+        assert not any(blocked in task_dump for blocked in excluded_by_default)
+        assert k in s.tasks
+
+    await c.dump_cluster_state(
+        filename=filename,
+        format="yaml",
+        exclude=(),
+    )
+
+    with open(f"{filename}.yaml") as fd:
+        state = yaml.safe_load(fd)
+
+    assert "workers" in state
+    assert len(state["workers"]) == len(s.workers)
+    for worker, worker_dump in state["workers"].items():
+        for k, task_dump in worker_dump["tasks"].items():
+            assert all(blocked in task_dump for blocked in excluded_by_default)
+            assert k in s.tasks
+    assert "scheduler" in state
+    assert "tasks" in state["scheduler"]
+    tasks = state["scheduler"]["tasks"]
+    assert len(tasks) == len(futs)
+    for k, task_dump in tasks.items():
+        assert all(blocked in task_dump for blocked in excluded_by_default)
         assert k in s.tasks
 
 

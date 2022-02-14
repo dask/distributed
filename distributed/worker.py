@@ -185,7 +185,7 @@ class TaskState:
     Parameters
     ----------
     key: str
-    runspec: SerializedTask
+    run_spec: SerializedTask
         A named tuple containing the ``function``, ``args``, ``kwargs`` and
         ``task`` associated with this `TaskState` instance. This defaults to
         ``None`` and can remain empty if it is a dependency that this worker
@@ -193,12 +193,38 @@ class TaskState:
 
     """
 
+    key: str
+    run_spec: object
+    dependencies: set[TaskState]
+    dependents: set[TaskState]
+    duration: float | None
     priority: tuple[int, ...] | None
+    state: str
+    who_has: set[str]
+    coming_from: str
+    waiting_for_data: set[TaskState]
+    waiters: set[TaskState]
+    resource_restrictions: dict
+    exception: Exception | None
+    exception_text: str | None
+    traceback: object | None
+    traceback_text: str | None
+    type: type | None
+    suspicious_count: int
+    startstops: list[dict]
+    start_time: float | None
+    stop_time: float | None
+    metadata: dict
+    nbytes: float | None
+    annotations: dict | None
+    done: bool
+    _previous: str | None
+    _next: str | None
 
-    def __init__(self, key, runspec=None):
+    def __init__(self, key, run_spec=None):
         assert key is not None
         self.key = key
-        self.runspec = runspec
+        self.run_spec = run_spec
         self.dependencies = set()
         self.dependents = set()
         self.duration = None
@@ -2029,7 +2055,7 @@ class Worker(ServerNode):
         except KeyError:
             self.tasks[key] = ts = TaskState(key)
 
-        ts.runspec = SerializedTask(function, args, kwargs, task)
+        ts.run_spec = SerializedTask(function, args, kwargs, task)
 
         assert isinstance(priority, tuple)
         priority = priority + (self.generation,)
@@ -3413,15 +3439,15 @@ class Worker(ServerNode):
         return True
 
     async def _maybe_deserialize_task(self, ts, *, stimulus_id):
-        if not isinstance(ts.runspec, SerializedTask):
-            return ts.runspec
+        if not isinstance(ts.run_spec, SerializedTask):
+            return ts.run_spec
         try:
             start = time()
             # Offload deserializing large tasks
-            if sizeof(ts.runspec) > OFFLOAD_THRESHOLD:
-                function, args, kwargs = await offload(_deserialize, *ts.runspec)
+            if sizeof(ts.run_spec) > OFFLOAD_THRESHOLD:
+                function, args, kwargs = await offload(_deserialize, *ts.run_spec)
             else:
-                function, args, kwargs = _deserialize(*ts.runspec)
+                function, args, kwargs = _deserialize(*ts.run_spec)
             stop = time()
 
             if stop - start > 0.010:
@@ -3500,7 +3526,7 @@ class Worker(ServerNode):
             if self.validate:
                 assert not ts.waiting_for_data
                 assert ts.state == "executing"
-                assert ts.runspec is not None
+                assert ts.run_spec is not None
 
             function, args, kwargs = await self._maybe_deserialize_task(
                 ts, stimulus_id=stimulus_id
@@ -3687,6 +3713,7 @@ class Worker(ServerNode):
                 )
                 self.status = Status.running
                 self.ensure_computing()
+                self.ensure_communicating()
 
         check_pause(memory)
         # Dump data to disk if above 70%
@@ -3889,7 +3916,7 @@ class Worker(ServerNode):
 
     def validate_task_executing(self, ts):
         assert ts.state == "executing"
-        assert ts.runspec is not None
+        assert ts.run_spec is not None
         assert ts.key not in self.data
         assert not ts.waiting_for_data
         for dep in ts.dependencies:
@@ -3910,7 +3937,7 @@ class Worker(ServerNode):
         assert ts.key not in self.data
         assert ts.state == "waiting"
         assert not ts.done
-        if ts.dependencies and ts.runspec:
+        if ts.dependencies and ts.run_spec:
             assert not all(dep.key in self.data for dep in ts.dependencies)
 
     def validate_task_flight(self, ts):
