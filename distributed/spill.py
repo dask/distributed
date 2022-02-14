@@ -91,7 +91,10 @@ class SpillBuffer(zict.Buffer):
             raise HandledError()
         except PickleError as e:
             key_e, orig_e = e.args
-            assert key_e in self.fast
+            if parse_version(zict.__version__) <= parse_version("2.0.0"):
+                pass
+            else:
+                assert key_e in self.fast
             assert key_e not in self.slow
             if key_e == key:
                 assert key is not None
@@ -99,7 +102,10 @@ class SpillBuffer(zict.Buffer):
                 # This happens only when the key is individually larger than target.
                 # The exception will be caught by Worker and logged; the status of
                 # the task will be set to error.
-                del self[key]
+                if parse_version(zict.__version__) <= parse_version("2.0.0"):
+                    pass
+                else:
+                    del self[key]
                 raise orig_e
             else:
                 # The key we just inserted is smaller than target, but it caused
@@ -136,7 +142,10 @@ class SpillBuffer(zict.Buffer):
                 super().__setitem__(key, value)
                 self.logged_pickle_errors.discard(key)
         except HandledError:
-            assert key in self.fast
+            if parse_version(zict.__version__) <= parse_version("2.0.0"):
+                pass
+            else:
+                assert key in self.fast
             assert key not in self.slow
 
     def evict(self) -> int:

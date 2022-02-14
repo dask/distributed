@@ -970,7 +970,10 @@ async def test_fail_write_to_disk_target_2(c, s, a):
 
     y = c.submit(lambda: "y" * 256, key="y")
     await wait(y)
-    assert set(a.data.memory) == {"x", "y"}
+    if parse_version(zict.__version__) <= parse_version("2.0.0"):
+        assert set(a.data.memory) == {"y"}
+    else:
+        assert set(a.data.memory) == {"x", "y"}
     assert not a.data.disk
 
     await assert_basic_futures(c)
