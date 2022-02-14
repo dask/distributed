@@ -10,7 +10,7 @@ def _get_pool_size(mr):
 
     if not isinstance(mr, rmm.mr.PoolMemoryResource):
         if hasattr(mr, "upstream_mr"):
-            return _get_pool_size_for_mr(mr.upstream_mr)
+            return _get_pool_size(mr.upstream_mr)
         else:
             return 0
     else:
@@ -19,11 +19,9 @@ def _get_pool_size(mr):
 
 
 def _get_allocated_bytes(mr):
-    import rmm
-
     if not hasattr(mr, "get_allocated_bytes"):
         if hasattr(mr, "upstream_mr"):
-            return _get_allocated_bytes_for_mr(mr.upstream_mr)
+            return _get_allocated_bytes(mr.upstream_mr)
         else:
             return 0
     else:
@@ -34,7 +32,7 @@ def real_time():
     import rmm
 
     mr = rmm.mr.get_current_device_resource()
-    rmm_pool_size = _get_pool_size_for_mr(mr)
-    rmm_used = _get_allocated_bytes_for_mr(mr)
+    rmm_pool_size = _get_pool_size(mr)
+    rmm_used = _get_allocated_bytes(mr)
     rmm_total = max(rmm_pool_size, rmm_used)
     return {"rmm-used": rmm_used, "rmm-total": rmm_total}

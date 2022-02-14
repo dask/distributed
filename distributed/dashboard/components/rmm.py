@@ -12,10 +12,8 @@ from bokeh.models import (
 from bokeh.plotting import figure
 from tornado import escape
 
-from dask.utils import format_bytes
-
 from distributed.dashboard.components import DashboardComponent, add_periodic_callback
-from distributed.dashboard.components.scheduler import BOKEH_THEME, TICKS_1024, env
+from distributed.dashboard.components.scheduler import BOKEH_THEME, TICKS_1024
 from distributed.dashboard.utils import update
 from distributed.utils import log_errors
 

@@ -4697,6 +4697,7 @@ else:
         return result
 
     DEFAULT_METRICS["rmm"] = rmm_metric
+    del _rmm
 
 
 def print(*args, **kwargs):
