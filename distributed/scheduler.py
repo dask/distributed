@@ -272,6 +272,38 @@ class ClientState:
     def versions(self):
         return self._versions
 
+    @ccall
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()):  # -> dict | str
+        """
+        A very verbose dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
+
+        Parameters
+        ----------
+        exclude:
+            A list of attributes which must not be present in the output.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        TaskState._to_dict
+
+        Notes
+        -----
+        This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
+        See same method on TaskState for more info.
+        """
+        members = inspect.getmembers(self)
+        info = {
+            k: v
+            for k, v in members
+            if not k.startswith("_")
+            and k not in exclude
+            and k != "versions"
+            and not callable(v)
+        }
+        return recursive_to_dict(info, exclude=exclude)
+
 
 @final
 @cclass
@@ -391,6 +423,16 @@ class MemoryState:
             f"  - unmanaged (recent): {format_bytes(self.unmanaged_recent)}\n"
             f"Spilled to disk       : {format_bytes(self._managed_spilled)}\n"
         )
+
+    def _to_dict(self, *, exclude: "Container[str]" = ()) -> dict:
+        d = {
+            "process": self._process,
+            "managed_in_memory": self._managed_in_memory,
+            "unmanaged_old": self._unmanaged_old,
+            "unmanaged_recent": self.unmanaged_recent,
+            "managed_spilled": self._managed_spilled,
+        }
+        return {k: v for k, v in d.items() if k not in exclude}
 
 
 @final
@@ -1177,6 +1219,29 @@ class TaskGroup:
 
     def __len__(self):
         return sum(self._states.values())
+
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()):  # -> dict | str
+        """
+        A very verbose dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
+
+        Parameters
+        ----------
+        exclude:
+            A list of attributes which must not be present in the output.
+
+        Notes
+        -----
+        This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
+        See same method on TaskState for more info.
+        """
+        members = inspect.getmembers(self)
+        info = {
+            k: v
+            for k, v in members
+            if not k.startswith("_") and k not in exclude and not callable(v)
+        }
+        return recursive_to_dict(info, exclude=exclude)
 
 
 @final
@@ -4063,6 +4128,11 @@ class Scheduler(SchedulerState, ServerNode):
             "transition_log": self.transition_log,
             "log": self.log,
             "tasks": self.tasks,
+            "task_groups": self.task_groups,
+            # Overwrite dict of WorkerState.identity from info
+            "workers": self.workers,
+            "clients": self.clients,
+            "memory": self.memory,
             "events": self.events,
             "extensions": self.extensions,
         }
