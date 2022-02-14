@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import os
 
@@ -14,6 +16,10 @@ from distributed.spill import SpillBuffer
 from distributed.utils_test import captured_logger
 
 
+def psize(*objs) -> int:
+    return sum(len(frame) for obj in objs for frame in serialize_bytelist(obj))
+
+
 def test_spillbuffer(tmpdir):
     buf = SpillBuffer(str(tmpdir), target=300)
     # Convenience aliases
@@ -24,19 +30,16 @@ def test_spillbuffer(tmpdir):
     assert buf.slow.total_weight == 0
     assert buf.spilled_total == 0
 
-    a, b, c, d = "a" * 100, "b" * 100, "c" * 100, "d" * 100
-    inmem_size = sizeof(a)
-    pickle_size = sum(len(frame) for frame in serialize_bytelist(a))
+    a, b, c, d = "a" * 100, "b" * 99, "c" * 98, "d" * 97
 
     # Test assumption made by this test, mostly for non CPython implementations
-    assert 100 < inmem_size < 200
-    # assert 100 < pickle_size < 200 #this is not true pickled size = 229
-    assert inmem_size != pickle_size
+    assert 100 < sizeof(a) < 200
+    assert sizeof(a) != psize(a)
 
     buf["a"] = a
     assert not buf.slow
-    assert buf.fast.weights == {"a": inmem_size}
-    assert buf.fast.total_weight == inmem_size
+    assert buf.fast.weights == {"a": sizeof(a)}
+    assert buf.fast.total_weight == sizeof(a)
     assert buf.slow.weight_by_key == {}
     assert buf.slow.total_weight == 0
     assert buf["a"] == a
@@ -48,55 +51,55 @@ def test_spillbuffer(tmpdir):
 
     buf["c"] = c
     assert set(buf.slow) == {"a"}
-    assert buf.slow.weight_by_key == {"a": pickle_size}
-    assert buf.slow.total_weight == pickle_size
+    assert buf.slow.weight_by_key == {"a": psize(a)}
+    assert buf.slow.total_weight == psize(a)
 
     assert buf["a"] == a
     assert set(buf.slow) == {"b"}
-    assert buf.slow.weight_by_key == {"b": pickle_size}
-    assert buf.slow.total_weight == pickle_size
+    assert buf.slow.weight_by_key == {"b": psize(b)}
+    assert buf.slow.total_weight == psize(b)
 
     buf["d"] = d
     assert set(buf.slow) == {"b", "c"}
-    assert buf.slow.weight_by_key == {"b": pickle_size, "c": pickle_size}
-    assert buf.slow.total_weight == pickle_size * 2
+    assert buf.slow.weight_by_key == {"b": psize(b), "c": psize(c)}
+    assert buf.slow.total_weight == psize(b, c)
 
     # Deleting an in-memory key does not automatically move spilled keys back to memory
     del buf["a"]
     assert set(buf.slow) == {"b", "c"}
-    assert buf.slow.weight_by_key == {"b": pickle_size, "c": pickle_size}
-    assert buf.slow.total_weight == pickle_size * 2
+    assert buf.slow.weight_by_key == {"b": psize(b), "c": psize(c)}
+    assert buf.slow.total_weight == psize(b, c)
     with pytest.raises(KeyError):
         buf["a"]
 
     # Deleting a spilled key updates the metadata
     del buf["b"]
     assert set(buf.slow) == {"c"}
-    assert buf.slow.weight_by_key == {"c": pickle_size}
-    assert buf.slow.total_weight == pickle_size
+    assert buf.slow.weight_by_key == {"c": psize(c)}
+    assert buf.slow.total_weight == psize(c)
     with pytest.raises(KeyError):
         buf["b"]
 
     # Updating a spilled key moves it to the top of the LRU and to memory
     buf["c"] = c * 2
     assert set(buf.slow) == {"d"}
-    assert buf.slow.weight_by_key == {"d": pickle_size}
-    assert buf.slow.total_weight == pickle_size
+    assert buf.slow.weight_by_key == {"d": psize(d)}
+    assert buf.slow.total_weight == psize(d)
 
     # Single key is larger than target and goes directly into slow
     e = "e" * 500
-    pickle_large_size = sum(len(frame) for frame in serialize_bytelist(e))
 
     buf["e"] = e
     assert set(buf.slow) == {"d", "e"}
-    assert buf.slow.weight_by_key == {"d": pickle_size, "e": pickle_large_size}
-    assert buf.slow.total_weight == pickle_size + pickle_large_size
+    assert buf.slow.weight_by_key == {"d": psize(d), "e": psize(e)}
+    assert buf.slow.total_weight == psize(d, e)
 
     # Updating a spilled key with another larger than target updates slow directly
-    buf["d"] = "d" * 500
+    d = "d" * 500
+    buf["d"] = d
     assert set(buf.slow) == {"d", "e"}
-    assert buf.slow.weight_by_key == {"d": pickle_large_size, "e": pickle_large_size}
-    assert buf.slow.total_weight == pickle_large_size * 2
+    assert buf.slow.weight_by_key == {"d": psize(d), "e": psize(e)}
+    assert buf.slow.total_weight == psize(d, e)
 
 
 requires_zict_210 = pytest.mark.skipif(
@@ -109,45 +112,40 @@ requires_zict_210 = pytest.mark.skipif(
 def test_spillbuffer_maxlim(tmpdir):
     buf = SpillBuffer(str(tmpdir), target=200, max_spill=600, min_log_interval=0)
 
-    a, b, c, d, e = "a" * 200, "b" * 100, "c" * 100, "d" * 200, "e" * 100
+    a, b, c, d, e = "a" * 200, "b" * 100, "c" * 99, "d" * 199, "e" * 98
 
-    psize_a = sum(len(frame) for frame in serialize_bytelist(a))  # size on disk
-
-    # size of a is bigger than target and is smaller than max_spill, key should be in slow
+    # size of a is bigger than target and is smaller than max_spill;
+    # key should be in slow
     buf["a"] = a
     assert not buf.fast
     assert not buf.fast.weights
     assert set(buf.slow) == {"a"}
-    assert buf.slow.weight_by_key == {"a": psize_a}
-    assert buf.slow.total_weight == psize_a
+    assert buf.slow.weight_by_key == {"a": psize(a)}
+    assert buf.slow.total_weight == psize(a)
     assert buf["a"] == a
 
     # size of b is smaller than target key should be in fast
-    sb = sizeof(b)
     buf["b"] = b
     assert set(buf.fast) == {"b"}
-    assert buf.fast.weights == {"b": sb}
+    assert buf.fast.weights == {"b": sizeof(b)}
     assert buf["b"] == b
-    assert buf.fast.total_weight == sb
+    assert buf.fast.total_weight == sizeof(b)
 
-    # size of c is smaller than target but b+c > target, c should stay in fast and b move to slow
-    # since the max_spill limit has not been reached yet
-    sc = sizeof(c)
-    psize_b = sum(len(frame) for frame in serialize_bytelist(b))
+    # size of c is smaller than target but b+c > target, c should stay in fast and b
+    # move to slow since the max_spill limit has not been reached yet
 
     buf["c"] = c
     assert set(buf.fast) == {"c"}
-    assert buf.fast.weights == {"c": sc}
+    assert buf.fast.weights == {"c": sizeof(c)}
     assert buf["c"] == c
-    assert buf.fast.total_weight == sc
+    assert buf.fast.total_weight == sizeof(c)
 
     assert set(buf.slow) == {"a", "b"}
-    assert buf.slow.weight_by_key == {"a": psize_a, "b": psize_b}
-    assert buf.slow.total_weight == psize_a + psize_b
+    assert buf.slow.weight_by_key == {"a": psize(a), "b": psize(b)}
+    assert buf.slow.total_weight == psize(a, b)
 
     # size of e < target but e+c > target, this will trigger movement of c to slow
     # but the max spill limit prevents it. Resulting in e remaining in fast
-    se = sizeof(e)
 
     with captured_logger(logging.getLogger("distributed.spill")) as logs_e:
         buf["e"] = e
@@ -155,43 +153,36 @@ def test_spillbuffer_maxlim(tmpdir):
     assert "disk reached capacity" in logs_e.getvalue()
 
     assert set(buf.fast) == {"c", "e"}
-    assert buf.fast.weights == {"c": sc, "e": se}
+    assert buf.fast.weights == {"c": sizeof(c), "e": sizeof(e)}
     assert buf["e"] == e
-    assert buf.fast.total_weight == sc + se
+    assert buf.fast.total_weight == sizeof(c) + sizeof(e)
 
     assert set(buf.slow) == {"a", "b"}
-    assert buf.slow.weight_by_key == {"a": psize_a, "b": psize_b}
-    assert buf.slow.total_weight == psize_a + psize_b
+    assert buf.slow.weight_by_key == {"a": psize(a), "b": psize(b)}
+    assert buf.slow.total_weight == psize(a, b)
 
-    # size of d > target, d should go to slow but slow reached the max_spill limit then d
-    # will end up on fast with c (which can't be move to slow because it won't fit either)
-    sd = sizeof(d)
+    # size of d > target, d should go to slow but slow reached the max_spill limit then
+    # d will end up on fast with c (which can't be move to slow because it won't fit
+    # either)
     with captured_logger(logging.getLogger("distributed.spill")) as logs_d:
         buf["d"] = d
 
     assert "disk reached capacity" in logs_d.getvalue()
 
     assert set(buf.fast) == {"c", "d", "e"}
-    assert buf.fast.weights == {"c": sc, "d": sd, "e": se}
+    assert buf.fast.weights == {"c": sizeof(c), "d": sizeof(d), "e": sizeof(e)}
     assert buf["d"] == d
-    assert buf.fast.total_weight == sc + sd + se
+    assert buf.fast.total_weight == sizeof(c) + sizeof(d) + sizeof(e)
 
     assert set(buf.slow) == {"a", "b"}
-    assert buf.slow.weight_by_key == {"a": psize_a, "b": psize_b}
-    assert buf.slow.total_weight == psize_a + psize_b
+    assert buf.slow.weight_by_key == {"a": psize(a), "b": psize(b)}
+    assert buf.slow.total_weight == psize(a, b)
 
-    # Overwrite a key that was in slow, but the size of the new key is larger than max_spill
-    # We overwrite `a` with something bigger than max_spill, it will try to write in slow
-    # it will trigger exception and locate it in fast, where it will trigger total_weight being
-    # bigger than the target and the LRU dict has more than one element, causing this to evict
-    # `c` (lower priority) with no complains since we have room on slow. But this condition
-    # self.total_weight > self.n and len(self.d) > 1 is still true on the LRU (we have `a` and `d`
-    # here) so it'll try to evict `d` but it doesn't fit in slow, which will trigger another exception
-    # kepping it finally on fast
+    # Overwrite a key that was in slow, but the size of the new key is larger than
+    # max_spill
 
     a_large = "a" * 500
-    psize_alarge = sum(len(frame) for frame in serialize_bytelist(a_large))
-    assert psize_alarge > 600  # size of max_spill
+    assert psize(a_large) > 600  # size of max_spill
 
     with captured_logger(logging.getLogger("distributed.spill")) as logs_alarge:
         buf["a"] = a_large
@@ -200,17 +191,13 @@ def test_spillbuffer_maxlim(tmpdir):
 
     assert set(buf.fast) == {"a", "d", "e"}
     assert set(buf.slow) == {"b", "c"}
-    assert buf.fast.total_weight == sd + sizeof(a_large) + se
-    assert buf.slow.total_weight == 2 * psize_b
+    assert buf.fast.total_weight == sizeof(d) + sizeof(a_large) + sizeof(e)
+    assert buf.slow.total_weight == psize(b, c)
 
-    # Overwrite a key that was in fast, but the size of the new key is larger than max_spill
-    # We overwrite `d` with something bigger than max_spill, it will try to write in slow
-    # it will trigger exception and locate it in fast, where it will trigger total_weight being
-    # bigger than the target and the LRU dict has more than one element, this will try to evict
-    # `a` (lower priority) but it will fail because it doesn't fit in slow, which will trigger
-    # another exception kepping it finally on fast
+    # Overwrite a key that was in fast, but the size of the new key is larger than
+    # max_spill
 
-    d_large = "d" * 500
+    d_large = "d" * 501
     with captured_logger(logging.getLogger("distributed.spill")) as logs_dlarge:
         buf["d"] = d_large
 
@@ -218,8 +205,8 @@ def test_spillbuffer_maxlim(tmpdir):
 
     assert set(buf.fast) == {"a", "d", "e"}
     assert set(buf.slow) == {"b", "c"}
-    assert buf.fast.total_weight == 2 * sizeof(a_large) + se
-    assert buf.slow.total_weight == 2 * psize_b
+    assert buf.fast.total_weight == sizeof(a_large) + sizeof(d_large) + sizeof(e)
+    assert buf.slow.total_weight == psize(b, c)
 
 
 class MyError(Exception):
@@ -259,7 +246,7 @@ def test_spillbuffer_fail_to_serialize(tmpdir):
     buf["b"] = b
     assert set(buf.fast) == {"b"}
 
-    c = 100 * "c"
+    c = "c" * 100
     with captured_logger(logging.getLogger("distributed.spill")) as logs_bad_key_mem:
         # This will go to fast and try to kick b out,
         # but keep b in fast since it's not pickable
@@ -282,8 +269,8 @@ def test_spillbuffer_oserror(tmpdir):
     a, b, c, d = (
         "a" * 200,
         "b" * 100,
-        "c" * 200,
-        "d" * 100,
+        "c" * 201,
+        "d" * 101,
     )
 
     # let's have something in fast and something in slow
@@ -304,14 +291,15 @@ def test_spillbuffer_oserror(tmpdir):
     assert set(buf.fast) == {"b", "c"}
     assert set(buf.slow) == {"a"}
 
-    assert buf.slow.weight_by_key == {"a": 329}
-    assert buf.fast.weights == {"b": 149, "c": 249}
+    assert buf.slow.weight_by_key == {"a": psize(a)}
+    assert buf.fast.weights == {"b": sizeof(b), "c": sizeof(c)}
 
     del buf["c"]
     assert set(buf.fast) == {"b"}
     assert set(buf.slow) == {"a"}
 
-    # add key to fast which is smaller than target but when added it triggers spill, which triggers OSError
+    # add key to fast which is smaller than target but when added it triggers spill,
+    # which triggers OSError
     with captured_logger(logging.getLogger("distributed.spill")) as logs_oserror_evict:
         buf["d"] = d
 
@@ -319,8 +307,8 @@ def test_spillbuffer_oserror(tmpdir):
     assert set(buf.fast) == {"b", "d"}
     assert set(buf.slow) == {"a"}
 
-    assert buf.slow.weight_by_key == {"a": 329}
-    assert buf.fast.weights == {"b": 149, "d": 149}
+    assert buf.slow.weight_by_key == {"a": psize(a)}
+    assert buf.fast.weights == {"b": sizeof(b), "d": sizeof(d)}
 
 
 @requires_zict_210
@@ -329,30 +317,27 @@ def test_spillbuffer_evict(tmpdir):
 
     a_bad = Bad(size=100)
     a = "a" * 100
-    sa_bad = sizeof(a_bad)
-    sa = sizeof(a)
-    sa_pickle = sum(len(frame) for frame in serialize_bytelist(a))
 
     buf["a"] = a
 
     assert set(buf.fast) == {"a"}
     assert not set(buf.slow)
-    assert buf.fast.weights == {"a": sa}
+    assert buf.fast.weights == {"a": sizeof(a)}
 
     # successful eviction
     weight = buf.evict()
-    assert weight == sa
+    assert weight == sizeof(a)
 
     assert not buf.fast
     assert set(buf.slow) == {"a"}
-    assert buf.slow.weight_by_key == {"a": sa_pickle}
+    assert buf.slow.weight_by_key == {"a": psize(a)}
 
     buf["a_bad"] = a_bad
 
     assert set(buf.fast) == {"a_bad"}
-    assert buf.fast.weights == {"a_bad": sa_bad}
+    assert buf.fast.weights == {"a_bad": sizeof(a_bad)}
     assert set(buf.slow) == {"a"}
-    assert buf.slow.weight_by_key == {"a": sa_pickle}
+    assert buf.slow.weight_by_key == {"a": psize(a)}
 
     # unsuccessful eviction
     with captured_logger(logging.getLogger("distributed.spill")) as logs_evict_key:
@@ -362,6 +347,6 @@ def test_spillbuffer_evict(tmpdir):
     assert "Failed to pickle" in logs_evict_key.getvalue()
     # bad keys stays in fast
     assert set(buf.fast) == {"a_bad"}
-    assert buf.fast.weights == {"a_bad": sa_bad}
+    assert buf.fast.weights == {"a_bad": sizeof(a_bad)}
     assert set(buf.slow) == {"a"}
-    assert buf.slow.weight_by_key == {"a": sa_pickle}
+    assert buf.slow.weight_by_key == {"a": psize(a)}
