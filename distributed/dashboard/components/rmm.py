@@ -26,6 +26,7 @@ class RMMMemoryUsage(DashboardComponent):
     managed by RMM. If an RMM pool is being used, shows the amount of
     pool memory utilized.
     """
+
     def __init__(self, scheduler, width=600, **kwargs):
         with log_errors():
             self.last = 0
@@ -155,7 +156,7 @@ class RMMMemoryUsage(DashboardComponent):
                 "worker": worker,
                 "gpu-index": gpu_index,
                 "y": y,
-                "escaped_worker": [escape.url_escape(w) for w in worker]
+                "escaped_worker": [escape.url_escape(w) for w in worker],
             }
             self.memory_figure.x_range.end = memory_total
             update(self.source, result)

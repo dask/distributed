@@ -4691,9 +4691,11 @@ try:
 except (Exception, RuntimeError):
     pass
 else:
+
     async def rmm_metric(worker):
         result = await offload(rmm.real_time)
         return result
+
     DEFAULT_METRICS["rmm"] = rmm_metric
 
 
