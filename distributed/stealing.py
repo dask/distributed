@@ -108,7 +108,7 @@ class WorkStealing(SchedulerPlugin):
             pc.stop()
         await self._in_flight_event.wait()
 
-    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
+    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict:
         """
         A very verbose dictionary representation for debugging purposes.
         Not type stable and not inteded for roundtrips.
@@ -123,16 +123,7 @@ class WorkStealing(SchedulerPlugin):
         --------
         Client.dump_cluster_state
         """
-        return recursive_to_dict(
-            {
-                "stealable_all": self.stealable_all,
-                "stealable": self.stealable,
-                "key_stealable": self.key_stealable,
-                "in_flight": self.in_flight,
-                "in_flight_occupancy": self.in_flight_occupancy,
-            },
-            exclude=exclude,
-        )
+        return recursive_to_dict(self, exclude=exclude, members=True)
 
     def log(self, msg):
         return self.scheduler.log_event("stealing", msg)

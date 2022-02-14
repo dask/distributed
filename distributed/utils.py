@@ -20,6 +20,7 @@ import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
 from collections import OrderedDict, UserDict, deque
+from collections.abc import KeysView, ValuesView
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
@@ -1455,13 +1456,15 @@ _recursive_to_dict_seen: ContextVar[set[int]] = ContextVar("_recursive_to_dict_s
 _to_dict_no_nest_flag = False
 
 
-def recursive_to_dict(obj: AnyType, *, exclude: Container[str] = ()) -> AnyType:
+def recursive_to_dict(
+    obj: AnyType, *, exclude: Container[str] = (), members: bool = False
+) -> AnyType:
     """Recursively convert arbitrary Python objects to a JSON-serializable
     representation. This is intended for debugging purposes only.
 
     The following objects are supported:
 
-    list, tuple, set, frozenset, deque, dict
+    list, tuple, set, frozenset, deque, dict, dict_keys, dict_values
         Descended into these objects recursively. Python-specific collections are
         converted to JSON-friendly variants.
     Classes that define ``_to_dict(self, *, exclude: Container[str] = ())``:
@@ -1480,6 +1483,8 @@ def recursive_to_dict(obj: AnyType, *, exclude: Container[str] = ()) -> AnyType:
         A list of attribute names to be excluded from the dump.
         This will be forwarded to the objects ``_to_dict`` methods and these methods
         are required to accept this parameter.
+    members:
+        If True, convert the top-level Python object to a dict of its public members
 
     **``_to_dict_no_nest`` vs. ``_to_dict``**
 
@@ -1565,6 +1570,13 @@ def recursive_to_dict(obj: AnyType, *, exclude: Container[str] = ()) -> AnyType:
     if isinstance(obj, (type, bytes)):
         return repr(obj)
 
+    if members:
+        obj = {
+            k: v
+            for k, v in inspect.getmembers(obj)
+            if not k.startswith("_") and k not in exclude and not callable(v)
+        }
+
     # Prevent infinite recursion
     try:
         seen = _recursive_to_dict_seen.get()
@@ -1592,7 +1604,7 @@ def recursive_to_dict(obj: AnyType, *, exclude: Container[str] = ()) -> AnyType:
 
         if hasattr(obj, "_to_dict"):
             return obj._to_dict(exclude=exclude)
-        if isinstance(obj, (list, tuple, set, frozenset, deque)):
+        if isinstance(obj, (list, tuple, set, frozenset, deque, KeysView, ValuesView)):
             return [recursive_to_dict(el, exclude=exclude) for el in obj]
         if isinstance(obj, dict):
             res = {}

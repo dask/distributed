@@ -406,6 +406,7 @@ class Server:
             "thread_id": self.thread_id,
         }
         info.update(extra)
+        info = {k: v for k, v in info.items() if k not in exclude}
         return recursive_to_dict(info, exclude=exclude)
 
     def echo(self, comm=None, data=None):

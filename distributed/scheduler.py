@@ -272,7 +272,6 @@ class ClientState:
     def versions(self):
         return self._versions
 
-    @ccall
     def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()):  # -> dict | str
         """
         A very verbose dictionary representation for debugging purposes.
@@ -293,16 +292,11 @@ class ClientState:
         This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
         See same method on TaskState for more info.
         """
-        members = inspect.getmembers(self)
-        info = {
-            k: v
-            for k, v in members
-            if not k.startswith("_")
-            and k not in exclude
-            and k != "versions"
-            and not callable(v)
-        }
-        return recursive_to_dict(info, exclude=exclude)
+        return recursive_to_dict(
+            self,
+            exclude=set(exclude) | {"versions"},  # type: ignore
+            members=True,
+        )
 
 
 @final
@@ -424,16 +418,8 @@ class MemoryState:
             f"Spilled to disk       : {format_bytes(self._managed_spilled)}\n"
         )
 
-    @ccall
     def _to_dict(self, *, exclude: "Container[str]" = ()) -> dict:
-        d = {
-            "process": self._process,
-            "managed_in_memory": self._managed_in_memory,
-            "unmanaged_old": self._unmanaged_old,
-            "unmanaged_recent": self.unmanaged_recent,
-            "managed_spilled": self._managed_spilled,
-        }
-        return {k: v for k, v in d.items() if k not in exclude}
+        return recursive_to_dict(self, exclude=exclude, members=True)
 
 
 @final
@@ -828,7 +814,6 @@ class WorkerState:
             **self._extra,
         }
 
-    @ccall
     def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()):  # -> dict | str
         """
         A very verbose dictionary representation for debugging purposes.
@@ -849,18 +834,11 @@ class WorkerState:
         This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
         See same method on TaskState for more info.
         """
-        members = inspect.getmembers(self)
-        info = {
-            k: v
-            for k, v in members
-            if not k.startswith("_")
-            and k not in exclude
-            and k not in {"has_what", "versions"}
-            and not callable(v)
-        }
-        # Convert dict_keys to set
-        info["has_what"] = set(self._has_what)
-        return recursive_to_dict(info, exclude=exclude)
+        return recursive_to_dict(
+            self,
+            exclude=set(exclude) | {"versions"},  # type: ignore
+            members=True,
+        )
 
 
 @final
@@ -1236,13 +1214,7 @@ class TaskGroup:
         This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
         See same method on TaskState for more info.
         """
-        members = inspect.getmembers(self)
-        info = {
-            k: v
-            for k, v in members
-            if not k.startswith("_") and k not in exclude and not callable(v)
-        }
-        return recursive_to_dict(info, exclude=exclude)
+        return recursive_to_dict(self, exclude=exclude, members=True)
 
 
 @final
@@ -1832,7 +1804,6 @@ class TaskState:
             nbytes += ts.get_nbytes()
         return nbytes
 
-    @ccall
     def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()):  # -> dict | str
         """
         A very verbose dictionary representation for debugging purposes.
@@ -1857,13 +1828,7 @@ class TaskState:
         loads, which have been observed to happen whenever there's an acyclic dependency
         chain of ~200+ tasks.
         """
-        members = inspect.getmembers(self)
-        info = {
-            k: v
-            for k, v in members
-            if not k.startswith("_") and k not in exclude and not callable(v)
-        }
-        return recursive_to_dict(info, exclude=exclude)
+        return recursive_to_dict(self, exclude=exclude, members=True)
 
 
 class _StateLegacyMapping(Mapping):
@@ -4137,6 +4102,7 @@ class Scheduler(SchedulerState, ServerNode):
             "events": self.events,
             "extensions": self.extensions,
         }
+        extra = {k: v for k, v in extra.items() if k not in exclude}
         info.update(recursive_to_dict(extra, exclude=exclude))
         return info
 
