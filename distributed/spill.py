@@ -125,7 +125,7 @@ class SpillBuffer(zict.Buffer):
 
         - an older value was evicted and failed to pickle,
         - this value or an older one caused the disk to fill and raise OSError,
-        - this value or an odler one caused the max_spill threshold to be exceeded,
+        - this value or an older one caused the max_spill threshold to be exceeded,
 
         this method does not raise and guarantees that the key/value that caused the
         issue remained in fast.
