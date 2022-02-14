@@ -653,6 +653,23 @@ def test_recursive_to_dict():
         def __repr__(self):
             return "<D>"
 
+    class E:
+        def __init__(self):
+            self.x = 1  # Public attribute; dump
+            self._y = 2  # Private attribute; don't dump
+            self.foo = 3  # In exclude; don't dump
+
+        @property
+        def z(self):  # Public property; dump
+            return 4
+
+        def f(self):  # Callable; don't dump
+            return 5
+
+        def _to_dict(self, *, exclude):
+            # Output: {"x": 1, "z": 4}
+            return recursive_to_dict(self, exclude=exclude, members=True)
+
     inp = [
         1,
         1.1,
@@ -669,6 +686,9 @@ def test_recursive_to_dict():
         {5, 6},
         frozenset([7, 8]),
         deque([9, 10]),
+        {3: 4, 1: 2}.keys(),
+        {3: 4, 1: 2}.values(),
+        E(),
     ]
     expect = [
         1,
@@ -686,6 +706,9 @@ def test_recursive_to_dict():
         list({5, 6}),
         list(frozenset([7, 8])),
         [9, 10],
+        [3, 1],
+        [4, 2],
+        {"x": 1, "z": 4},
     ]
     assert recursive_to_dict(inp, exclude=["foo"]) == expect
 
@@ -702,7 +725,7 @@ def test_recursive_to_dict():
     ]
 
 
-def test_to_dict_no_nest():
+def test_recursive_to_dict_no_nest():
     class Person:
         def __init__(self, name):
             self.name = name
