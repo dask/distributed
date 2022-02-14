@@ -103,6 +103,8 @@ def test_ucx_config_w_env_var(cleanup, loop):
     env["DASK_RMM__POOL_SIZE"] = "1000.00 MB"
 
     port = "13339"
+    # Using localhost appears to be less flaky than {HOST}. Additionally, this is
+    # closer to how other dask-worker tests are written.
     sched_addr = f"ucx://127.0.0.1:{port}"
 
     with popen(
