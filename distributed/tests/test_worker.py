@@ -934,7 +934,7 @@ async def assert_basic_futures(c: Client) -> None:
 async def test_fail_write_to_disk_target_1(c, s, a, b):
     """Test failure to spill triggered by key which is individually larger
     than target. The data is lost and the task is marked as failed;
-    the worker remains in useable condition.
+    the worker remains in usable condition.
     """
     future = c.submit(FailToPickle, reported_size=100e9)
     await wait(future)
