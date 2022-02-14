@@ -109,18 +109,13 @@ class WorkStealing(SchedulerPlugin):
         await self._in_flight_event.wait()
 
     def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict:
-        """
-        A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
-
-        Parameters
-        ----------
-        exclude:
-            A list of attributes which must not be present in the output.
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
 
         See also
         --------
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
         """
         return recursive_to_dict(self, exclude=exclude, members=True)
 

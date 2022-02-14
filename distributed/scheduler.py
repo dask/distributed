@@ -273,24 +273,14 @@ class ClientState:
         return self._versions
 
     def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
-        """
-        A very verbose dictionary representation for debugging purposes.
+        """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
-
-        Parameters
-        ----------
-        exclude:
-            A list of attributes which must not be present in the output.
 
         See also
         --------
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
         TaskState._to_dict
-
-        Notes
-        -----
-        This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
-        See same method on TaskState for more info.
         """
         return recursive_to_dict(
             self,
@@ -419,6 +409,14 @@ class MemoryState:
         )
 
     def _to_dict(self, *, exclude: "Container[str]" = ()) -> dict:
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+        """
         return recursive_to_dict(self, exclude=exclude, members=True)
 
 
@@ -815,24 +813,14 @@ class WorkerState:
         }
 
     def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
-        """
-        A very verbose dictionary representation for debugging purposes.
+        """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
-
-        Parameters
-        ----------
-        exclude:
-            A list of attributes which must not be present in the output.
 
         See also
         --------
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
         TaskState._to_dict
-
-        Notes
-        -----
-        This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
-        See same method on TaskState for more info.
         """
         return recursive_to_dict(
             self,
@@ -1200,19 +1188,14 @@ class TaskGroup:
         return sum(self._states.values())
 
     def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
-        """
-        A very verbose dictionary representation for debugging purposes.
+        """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
-        Parameters
-        ----------
-        exclude:
-            A list of attributes which must not be present in the output.
-
-        Notes
-        -----
-        This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
-        See same method on TaskState for more info.
+        See also
+        --------
+        Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+        TaskState._to_dict
         """
         return recursive_to_dict(self, exclude=exclude, members=True)
 
@@ -1805,18 +1788,13 @@ class TaskState:
         return nbytes
 
     def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
-        """
-        A very verbose dictionary representation for debugging purposes.
+        """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
-
-        Parameters
-        ----------
-        exclude:
-            A list of attributes which must not be present in the output.
 
         See also
         --------
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
 
         Notes
         -----
@@ -4074,20 +4052,14 @@ class Scheduler(SchedulerState, ServerNode):
     def _to_dict(
         self, comm: "Comm | None" = None, *, exclude: "Container[str]" = ()
     ) -> dict:
-        """
-        A very verbose dictionary representation for debugging purposes.
+        """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
-
-        Parameters
-        ----------
-        comm:
-        exclude:
-            A list of attributes which must not be present in the output.
 
         See also
         --------
         Server.identity
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
         """
         info = super()._to_dict(exclude=exclude)
         extra = {
