@@ -961,7 +961,7 @@ async def test_fail_write_to_disk_target_1(c, s, a, b):
 async def test_fail_write_to_disk_target_2(c, s, a):
     """Test failure to spill triggered by key which is individually smaller
     than target, so it is not spilled immediately. The data is retained and
-    the task is NOT marked as failed; the worker remains in useable condition.
+    the task is NOT marked as failed; the worker remains in usable condition.
     """
     x = c.submit(FailToPickle, reported_size=256, key="x")
     await wait(x)
