@@ -424,6 +424,7 @@ class MemoryState:
             f"Spilled to disk       : {format_bytes(self._managed_spilled)}\n"
         )
 
+    @ccall
     def _to_dict(self, *, exclude: "Container[str]" = ()) -> dict:
         d = {
             "process": self._process,
