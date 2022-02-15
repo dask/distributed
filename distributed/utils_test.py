@@ -8,6 +8,7 @@ import inspect
 import io
 import logging
 import logging.config
+import multiprocessing
 import os
 import queue
 import re
@@ -19,7 +20,6 @@ import sys
 import tempfile
 import threading
 import uuid
-import warnings
 import weakref
 from collections import defaultdict
 from collections.abc import Callable
@@ -51,6 +51,7 @@ from . import system
 from . import versions as version_module
 from .client import Client, _global_clients, default_client
 from .comm import Comm
+from .comm.tcp import BaseTCPConnector
 from .compatibility import WINDOWS
 from .config import initialize_logging
 from .core import CommClosedError, ConnectionPool, Status, connect, rpc
@@ -73,7 +74,7 @@ from .utils import (
     reset_logger_locks,
     sync,
 )
-from .worker import RUNNING, Worker
+from .worker import Worker
 
 try:
     import dask.array  # register config
@@ -879,7 +880,6 @@ def gen_cluster(
         ("127.0.0.1", 1),
         ("127.0.0.1", 2),
     ],
-    ncores: None = None,  # deprecated
     scheduler="127.0.0.1",
     timeout: float = _TEST_TIMEOUT,
     security: Security | dict[str, Any] | None = None,
@@ -919,9 +919,6 @@ def gen_cluster(
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"
     )
-    if ncores is not None:
-        warnings.warn("ncores= has moved to nthreads=", stacklevel=2)
-        nthreads = ncores
 
     scheduler_kwargs = merge(
         {"dashboard": False, "dashboard_address": ":0"}, scheduler_kwargs
@@ -1245,7 +1242,6 @@ if has_ipv6():
     def requires_ipv6(test_func):
         return test_func
 
-
 else:
     requires_ipv6 = pytest.mark.skip("ipv6 required")
 
@@ -1559,6 +1555,9 @@ def save_sys_modules():
 @contextmanager
 def check_thread_leak():
     """Context manager to ensure we haven't leaked any threads"""
+    # "TCP-Executor" threads are never stopped once they are started
+    BaseTCPConnector.warmup()
+
     active_threads_start = threading.enumerate()
 
     yield
@@ -1569,15 +1568,8 @@ def check_thread_leak():
             thread
             for thread in threading.enumerate()
             if thread not in active_threads_start
-            and "Threaded" not in thread.name
-            and "watch message" not in thread.name
-            and "TCP-Executor" not in thread.name
-            # TODO: Make sure profile thread is cleaned up
-            # and remove the line below
-            and "Profile" not in thread.name
-            # asyncio default executor thread pool is not shut down until loop
-            # is shut down
-            and "asyncio_" not in thread.name
+            # FIXME this looks like a genuine leak that needs fixing
+            and "watch message queue" not in thread.name
         ]
         if not bad_threads:
             break
@@ -1592,24 +1584,67 @@ def check_thread_leak():
             assert False, (bad_thread, call_stacks)
 
 
+def wait_active_children(timeout: float) -> list[multiprocessing.Process]:
+    """Wait until timeout for mp_context.active_children() to terminate.
+    Return list of active subprocesses after the timeout expired.
+    """
+    t0 = time()
+    while True:
+        # Do not sample the subprocesses once at the beginning with
+        # `for proc in mp_context.active_children: ...`, assume instead that new
+        # children processes may be spawned before the timeout expires.
+        children = mp_context.active_children()
+        if not children:
+            return []
+        join_timeout = timeout - time() + t0
+        if join_timeout <= 0:
+            return children
+        children[0].join(timeout=join_timeout)
+
+
+def term_or_kill_active_children(timeout: float) -> None:
+    """Send SIGTERM to mp_context.active_children(), wait up to 3 seconds for processes
+    to die, then send SIGKILL to the survivors
+    """
+    children = mp_context.active_children()
+    for proc in children:
+        proc.terminate()
+
+    children = wait_active_children(timeout=timeout)
+    for proc in children:
+        proc.kill()
+
+    children = wait_active_children(timeout=30)
+    if children:  # pragma: nocover
+        logger.warning("Leaked unkillable children processes: %s", children)
+        # It should be impossible to ignore SIGKILL on Linux/MacOSX
+        assert WINDOWS
+
+
 @contextmanager
-def check_process_leak(check=True):
-    for proc in mp_context.active_children():
-        proc.terminate()
+def check_process_leak(
+    check: bool = True, check_timeout: float = 40, term_timeout: float = 3
+):
+    """Terminate any currently-running subprocesses at both the beginning and end of this context
 
-    yield
-
-    if check:
-        for i in range(200):
-            if not set(mp_context.active_children()):
-                break
-            else:
-                sleep(0.2)
-        else:
-            assert not mp_context.active_children()
-
-    for proc in mp_context.active_children():
-        proc.terminate()
+    Parameters
+    ----------
+    check : bool, optional
+        If True, raise AssertionError if any processes survive at the exit
+    check_timeout: float, optional
+        Wait up to these many seconds for subprocesses to terminate before failing
+    term_timeout: float, optional
+        After sending SIGTERM to a subprocess, wait up to these many seconds before
+        sending SIGKILL
+    """
+    term_or_kill_active_children(timeout=term_timeout)
+    try:
+        yield
+        if check:
+            children = wait_active_children(timeout=check_timeout)
+            assert not children, f"Test leaked subprocesses: {children}"
+    finally:
+        term_or_kill_active_children(timeout=term_timeout)
 
 
 @contextmanager
@@ -1638,7 +1673,7 @@ def check_instances():
     for w in Worker._instances:
         with suppress(RuntimeError):  # closed IOLoop
             w.loop.add_callback(w.close, report=False, executor_wait=False)
-            if w.status in RUNNING:
+            if w.status in Status.ANY_RUNNING:
                 w.loop.add_callback(w.close)
     Worker._instances.clear()
 

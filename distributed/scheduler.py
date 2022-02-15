@@ -54,7 +54,7 @@ from distributed.utils import recursive_to_dict
 
 from . import preloading, profile
 from . import versions as version_module
-from .active_memory_manager import ActiveMemoryManagerExtension
+from .active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from .batched import BatchedSend
 from .comm import (
     Comm,
@@ -188,8 +188,6 @@ globals()["ALL_TASK_STATES"] = ALL_TASK_STATES
 COMPILED = declare(bint, compiled)
 globals()["COMPILED"] = COMPILED
 
-_taskstate_to_dict_guard: bool = False
-
 
 @final
 @cclass
@@ -262,6 +260,22 @@ class ClientState:
     @property
     def versions(self):
         return self._versions
+
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+        TaskState._to_dict
+        """
+        return recursive_to_dict(
+            self,
+            exclude=set(exclude) | {"versions"},  # type: ignore
+            members=True,
+        )
 
 
 @final
@@ -382,6 +396,17 @@ class MemoryState:
             f"  - unmanaged (recent): {format_bytes(self.unmanaged_recent)}\n"
             f"Spilled to disk       : {format_bytes(self._managed_spilled)}\n"
         )
+
+    def _to_dict(self, *, exclude: "Container[str]" = ()) -> dict:
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+        """
+        return recursive_to_dict(self, exclude=exclude, members=True)
 
 
 @final
@@ -740,12 +765,12 @@ class WorkerState:
         return ws
 
     def __repr__(self):
-        return "<WorkerState %r, name: %s, status: %s, memory: %d, processing: %d>" % (
-            self._address,
-            self._name,
-            self._status.name,
-            len(self._has_what),
-            len(self._processing),
+        name = f", name: {self.name}" if self.name != self.address else ""
+        return (
+            f"<WorkerState {self._address!r}{name}, "
+            f"status: {self._status.name}, "
+            f"memory: {len(self._has_what)}, "
+            f"processing: {len(self._processing)}>"
         )
 
     def _repr_html_(self):
@@ -776,10 +801,21 @@ class WorkerState:
             **self._extra,
         }
 
-    @property
-    def ncores(self):
-        warnings.warn("WorkerState.ncores has moved to WorkerState.nthreads")
-        return self._nthreads
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+        TaskState._to_dict
+        """
+        return recursive_to_dict(
+            self,
+            exclude=set(exclude) | {"versions"},  # type: ignore
+            members=True,
+        )
 
 
 @final
@@ -1139,6 +1175,18 @@ class TaskGroup:
 
     def __len__(self):
         return sum(self._states.values())
+
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+        TaskState._to_dict
+        """
+        return recursive_to_dict(self, exclude=exclude, members=True)
 
 
 @final
@@ -1728,41 +1776,26 @@ class TaskState:
             nbytes += ts.get_nbytes()
         return nbytes
 
-    @ccall
-    def _to_dict(self, *, exclude: "Container[str]" = ()):  # -> dict | str
-        """
-        A very verbose dictionary representation for debugging purposes.
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
+        """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
-
-        Parameters
-        ----------
-        exclude:
-            A list of attributes which must not be present in the output.
 
         See also
         --------
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+
+        Notes
+        -----
+        This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
+        When a task references another task, or when a WorkerState.tasks contains tasks,
+        this method is not executed for the inner task, even if the inner task was never
+        seen before; you get a repr instead. All tasks should neatly appear under
+        Scheduler.tasks. This also prevents a RecursionError during particularly heavy
+        loads, which have been observed to happen whenever there's an acyclic dependency
+        chain of ~200+ tasks.
         """
-        # When a task references another task, just print the task repr. All tasks
-        # should neatly appear under Scheduler.tasks. This also prevents a
-        # RecursionError during particularly heavy loads, which have been observed to
-        # happen whenever there's an acyclic dependency chain of ~200+ tasks.
-        global _taskstate_to_dict_guard
-        if _taskstate_to_dict_guard:
-            return repr(self)
-        _taskstate_to_dict_guard = True
-        try:
-            members = inspect.getmembers(self)
-            return recursive_to_dict(
-                {
-                    k: v
-                    for k, v in members
-                    if not k.startswith("_") and k not in exclude and not callable(v)
-                },
-                exclude=exclude,
-            )
-        finally:
-            _taskstate_to_dict_guard = False
+        return recursive_to_dict(self, exclude=exclude, members=True)
 
 
 class _StateLegacyMapping(Mapping):
@@ -3973,11 +4006,11 @@ class Scheduler(SchedulerState, ServerNode):
 
     def __repr__(self):
         parent: SchedulerState = cast(SchedulerState, self)
-        return '<Scheduler: "%s" workers: %d cores: %d, tasks: %d>' % (
-            self.address,
-            len(parent._workers_dv),
-            parent._total_nthreads,
-            len(parent._tasks),
+        return (
+            f"<Scheduler {self.address!r}, "
+            f"workers: {len(parent._workers_dv)}, "
+            f"cores: {parent._total_nthreads}, "
+            f"tasks: {len(parent._tasks)}>"
         )
 
     def _repr_html_(self):
@@ -4008,29 +4041,29 @@ class Scheduler(SchedulerState, ServerNode):
     def _to_dict(
         self, comm: "Comm | None" = None, *, exclude: "Container[str]" = ()
     ) -> dict:
-        """
-        A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
-
-        Parameters
-        ----------
-        comm:
-        exclude:
-            A list of attributes which must not be present in the output.
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
 
         See also
         --------
         Server.identity
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
         """
         info = super()._to_dict(exclude=exclude)
         extra = {
             "transition_log": self.transition_log,
             "log": self.log,
             "tasks": self.tasks,
+            "task_groups": self.task_groups,
+            # Overwrite dict of WorkerState.identity from info
+            "workers": self.workers,
+            "clients": self.clients,
+            "memory": self.memory,
             "events": self.events,
             "extensions": self.extensions,
         }
+        extra = {k: v for k, v in extra.items() if k not in exclude}
         info.update(recursive_to_dict(extra, exclude=exclude))
         return info
 
@@ -4363,6 +4396,9 @@ class Scheduler(SchedulerState, ServerNode):
                     await comm.write(msg)
                 return
 
+            self.log_event(address, {"action": "add-worker"})
+            self.log_event("all", {"action": "add-worker", "worker": address})
+
             ws: WorkerState
             parent._workers[address] = ws = WorkerState(
                 address=address,
@@ -4472,8 +4508,6 @@ class Scheduler(SchedulerState, ServerNode):
 
             self.send_all(client_msgs, worker_msgs)
 
-            self.log_event(address, {"action": "add-worker"})
-            self.log_event("all", {"action": "add-worker", "worker": address})
             logger.info("Register worker %s", ws)
 
             msg = {
@@ -4975,13 +5009,14 @@ class Scheduler(SchedulerState, ServerNode):
 
             ws: WorkerState = parent._workers_dv[address]
 
-            self.log_event(
-                ["all", address],
-                {
-                    "action": "remove-worker",
-                    "processing-tasks": dict(ws._processing),
-                },
-            )
+            event_msg = {
+                "action": "remove-worker",
+                "processing-tasks": dict(ws._processing),
+            }
+            self.log_event(address, event_msg.copy())
+            event_msg["worker"] = address
+            self.log_event("all", event_msg)
+
             logger.info("Remove worker %s", ws)
             if close:
                 with suppress(AttributeError, CommClosedError):
@@ -5470,6 +5505,22 @@ class Scheduler(SchedulerState, ServerNode):
         self.send_all(client_msgs, worker_msgs)
 
     def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
+        """Signal that `errant_worker` does not hold `key`
+
+        This may either indicate that `errant_worker` is dead or that we may be
+        working with stale data and need to remove `key` from the workers
+        `has_what`.
+
+        If no replica of a task is available anymore, the task is transitioned
+        back to released and rescheduled, if possible.
+
+        Parameters
+        ----------
+        key : str, optional
+            Task key that could not be found, by default None
+        errant_worker : str, optional
+            Address of the worker supposed to hold a replica, by default None
+        """
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("handle missing data key=%s worker=%s", key, errant_worker)
         self.log_event(errant_worker, {"action": "missing-data", "key": key})
@@ -5477,9 +5528,10 @@ class Scheduler(SchedulerState, ServerNode):
         if ts is None:
             return
         ws: WorkerState = parent._workers_dv.get(errant_worker)
+
         if ws is not None and ws in ts._who_has:
             parent.remove_replica(ts, ws)
-        if not ts._who_has:
+        if ts.state == "memory" and not ts._who_has:
             if ts._run_spec:
                 self.transitions({key: "released"})
             else:
@@ -6794,29 +6846,31 @@ class Scheduler(SchedulerState, ServerNode):
     async def retire_workers(
         self,
         comm=None,
-        workers=None,
-        remove=True,
-        close_workers=False,
-        names=None,
-        lock=True,
+        *,
+        workers: "list[str] | None" = None,
+        names: "list | None" = None,
+        close_workers: bool = False,
+        remove: bool = True,
         **kwargs,
     ) -> dict:
         """Gracefully retire workers from cluster
 
         Parameters
         ----------
-        workers: list (optional)
+        workers: list[str] (optional)
             List of worker addresses to retire.
-            If not provided we call ``workers_to_close`` which finds a good set
         names: list (optional)
             List of worker names to retire.
-        remove: bool (defaults to True)
-            Whether or not to remove the worker metadata immediately or else
-            wait for the worker to contact us
+            Mutually exclusive with ``workers``.
+            If neither ``workers`` nor ``names`` are provided, we call
+            ``workers_to_close`` which finds a good set.
         close_workers: bool (defaults to False)
             Whether or not to actually close the worker explicitly from here.
             Otherwise we expect some external job scheduler to finish off the
             worker.
+        remove: bool (defaults to True)
+            Whether or not to remove the worker metadata immediately or else
+            wait for the worker to contact us
         **kwargs: dict
             Extra options to pass to workers_to_close to determine which
             workers we should drop
@@ -6834,78 +6888,126 @@ class Scheduler(SchedulerState, ServerNode):
         ws: WorkerState
         ts: TaskState
         with log_errors():
-            async with self._lock if lock else empty_context:
+            # This lock makes retire_workers, rebalance, and replicate mutually
+            # exclusive and will no longer be necessary once rebalance and replicate are
+            # migrated to the Active Memory Manager.
+            # Note that, incidentally, it also prevents multiple calls to retire_workers
+            # from running in parallel - this is unnecessary.
+            async with self._lock:
                 if names is not None:
                     if workers is not None:
                         raise TypeError("names and workers are mutually exclusive")
                     if names:
                         logger.info("Retire worker names %s", names)
-                    names = set(map(str, names))
-                    workers = {
-                        ws._address
+                    # Support cases where names are passed through a CLI and become
+                    # strings
+                    names_set = {str(name) for name in names}
+                    wss = {
+                        ws
                         for ws in parent._workers_dv.values()
-                        if str(ws._name) in names
+                        if str(ws._name) in names_set
                     }
-                elif workers is None:
-                    while True:
-                        try:
-                            workers = self.workers_to_close(**kwargs)
-                            if not workers:
-                                return {}
-                            return await self.retire_workers(
-                                workers=workers,
-                                remove=remove,
-                                close_workers=close_workers,
-                                lock=False,
-                            )
-                        except KeyError:  # keys left during replicate
-                            pass
-
-                workers = {
-                    parent._workers_dv[w] for w in workers if w in parent._workers_dv
-                }
-                if not workers:
+                elif workers is not None:
+                    wss = {
+                        parent._workers_dv[address]
+                        for address in workers
+                        if address in parent._workers_dv
+                    }
+                else:
+                    wss = {
+                        parent._workers_dv[address]
+                        for address in self.workers_to_close(**kwargs)
+                    }
+                if not wss:
                     return {}
-                logger.info("Retire workers %s", workers)
 
-                # Keys orphaned by retiring those workers
-                keys = {k for w in workers for k in w.has_what}
-                keys = {ts._key for ts in keys if ts._who_has.issubset(workers)}
-
-                if keys:
-                    other_workers = set(parent._workers_dv.values()) - workers
-                    if not other_workers:
-                        return {}
-                    logger.info("Moving %d keys to other workers", len(keys))
-                    await self.replicate(
-                        keys=keys,
-                        workers=[ws._address for ws in other_workers],
-                        n=1,
-                        delete=False,
-                        lock=False,
+                stop_amm = False
+                amm: ActiveMemoryManagerExtension = self.extensions["amm"]
+                if not amm.running:
+                    amm = ActiveMemoryManagerExtension(
+                        self, policies=set(), register=False, start=True, interval=2.0
                     )
+                    stop_amm = True
 
-                worker_keys = {ws._address: ws.identity() for ws in workers}
-                if close_workers:
-                    await asyncio.gather(
-                        *[self.close_worker(worker=w, safe=True) for w in worker_keys]
-                    )
-                if remove:
-                    await asyncio.gather(
-                        *[self.remove_worker(address=w, safe=True) for w in worker_keys]
-                    )
+                try:
+                    coros = []
+                    for ws in wss:
+                        logger.info("Retiring worker %s", ws._address)
 
-                self.log_event(
-                    "all",
-                    {
-                        "action": "retire-workers",
-                        "workers": worker_keys,
-                        "moved-keys": len(keys),
-                    },
+                        policy = RetireWorker(ws._address)
+                        amm.add_policy(policy)
+
+                        # Change Worker.status to closing_gracefully. Immediately set
+                        # the same on the scheduler to prevent race conditions.
+                        prev_status = ws.status
+                        ws.status = Status.closing_gracefully
+                        self.running.discard(ws)
+                        self.stream_comms[ws.address].send(
+                            {"op": "worker-status-change", "status": ws.status.name}
+                        )
+
+                        coros.append(
+                            self._track_retire_worker(
+                                ws,
+                                policy,
+                                prev_status=prev_status,
+                                close_workers=close_workers,
+                                remove=remove,
+                            )
+                        )
+
+                    # Give the AMM a kick, in addition to its periodic running. This is
+                    # to avoid unnecessarily waiting for a potentially arbitrarily long
+                    # time (depending on interval settings)
+                    amm.run_once()
+
+                    workers_info = dict(await asyncio.gather(*coros))
+                    workers_info.pop(None, None)
+                finally:
+                    if stop_amm:
+                        amm.stop()
+
+            self.log_event("all", {"action": "retire-workers", "workers": workers_info})
+            self.log_event(list(workers_info), {"action": "retired"})
+
+            return workers_info
+
+    async def _track_retire_worker(
+        self,
+        ws: WorkerState,
+        policy: RetireWorker,
+        prev_status: Status,
+        close_workers: bool,
+        remove: bool,
+    ) -> tuple:  # tuple[str | None, dict]
+        parent: SchedulerState = cast(SchedulerState, self)
+
+        while not policy.done():
+            if policy.no_recipients:
+                # Abort retirement. This time we don't need to worry about race
+                # conditions and we can wait for a scheduler->worker->scheduler
+                # round-trip.
+                self.stream_comms[ws.address].send(
+                    {"op": "worker-status-change", "status": prev_status.name}
                 )
-                self.log_event(list(worker_keys), {"action": "retired"})
+                return None, {}
 
-                return worker_keys
+            # Sleep 0.01s when there are 4 tasks or less
+            # Sleep 0.5s when there are 200 or more
+            poll_interval = max(0.01, min(0.5, len(ws.has_what) / 400))
+            await asyncio.sleep(poll_interval)
+
+        logger.debug(
+            "All unique keys on worker %s have been replicated elsewhere", ws._address
+        )
+
+        if close_workers and ws._address in parent._workers_dv:
+            await self.close_worker(worker=ws._address, safe=True)
+        if remove:
+            await self.remove_worker(address=ws._address, safe=True)
+
+        logger.info("Retired worker %s", ws._address)
+        return ws._address, ws.identity()
 
     def add_keys(self, comm=None, worker=None, keys=(), stimulus_id=None):
         """

@@ -95,23 +95,28 @@ async def test_ucx_config(cleanup):
 
 
 @pytest.mark.flaky(
-    reruns=10, reruns_delay=5, condition=ucp.get_ucx_version() < (1, 11, 0)
+    reruns=10,
+    reruns_delay=5,
 )
 def test_ucx_config_w_env_var(cleanup, loop):
     env = os.environ.copy()
     env["DASK_RMM__POOL_SIZE"] = "1000.00 MB"
 
     port = "13339"
-    sched_addr = f"ucx://{HOST}:{port}"
+    # Using localhost appears to be less flaky than {HOST}. Additionally, this is
+    # closer to how other dask-worker tests are written.
+    sched_addr = f"ucx://127.0.0.1:{port}"
 
     with popen(
         ["dask-scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port],
         env=env,
-    ) as sched:
+    ):
         with popen(
             [
                 "dask-worker",
                 sched_addr,
+                "--host",
+                "127.0.0.1",
                 "--no-dashboard",
                 "--protocol",
                 "ucx",
@@ -119,7 +124,7 @@ def test_ucx_config_w_env_var(cleanup, loop):
             ],
             env=env,
         ):
-            with Client(sched_addr, loop=loop, timeout=10) as c:
+            with Client(sched_addr, loop=loop, timeout=60) as c:
                 while not c.scheduler_info()["workers"]:
                     sleep(0.1)
 

@@ -69,6 +69,11 @@ class Status(Enum):
 
 
 Status.lookup = {s.name: s for s in Status}  # type: ignore
+Status.ANY_RUNNING = {  # type: ignore
+    Status.running,
+    Status.paused,
+    Status.closing_gracefully,
+}
 
 
 class RPCClosed(IOError):
@@ -257,7 +262,7 @@ class Server:
         async def _():
             timeout = getattr(self, "death_timeout", 0)
             async with self._startup_lock:
-                if self.status in (Status.running, Status.paused):
+                if self.status in Status.ANY_RUNNING:
                     return self
                 if timeout:
                     try:
@@ -379,20 +384,14 @@ class Server:
     def _to_dict(
         self, comm: Comm | None = None, *, exclude: Container[str] = ()
     ) -> dict:
-        """
-        A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
-
-        Parameters
-        ----------
-        comm:
-        exclude:
-            A list of attributes which must not be present in the output.
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
 
         See also
         --------
         Server.identity
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
         """
         info = self.identity()
         extra = {
@@ -401,6 +400,7 @@ class Server:
             "thread_id": self.thread_id,
         }
         info.update(extra)
+        info = {k: v for k, v in info.items() if k not in exclude}
         return recursive_to_dict(info, exclude=exclude)
 
     def echo(self, comm=None, data=None):
@@ -519,7 +519,7 @@ class Server:
                             self._ongoing_coroutines.add(result)
                             result = await result
                     except (CommClosedError, asyncio.CancelledError):
-                        if self.status in (Status.running, Status.paused):
+                        if self.status in Status.ANY_RUNNING:
                             logger.info("Lost connection to %r", address, exc_info=True)
                         break
                     except Exception as e:

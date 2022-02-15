@@ -352,7 +352,7 @@ async def retry(
     Returns
     -------
     Any
-        Whatever `await `coro()` returned
+        Whatever `await coro()` returned
     """
     # this loop is a no-op in case max_retries<=0
     for i_try in range(count):
@@ -363,7 +363,7 @@ async def retry(
             logger.info(
                 f"Retrying {operation} after exception in attempt {i_try}/{count}: {ex}"
             )
-            delay = min(delay_min * (2 ** i_try - 1), delay_max)
+            delay = min(delay_min * (2**i_try - 1), delay_max)
             if jitter_fraction > 0:
                 delay *= 1 + random.random() * jitter_fraction
             await asyncio.sleep(delay)

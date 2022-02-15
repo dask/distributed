@@ -53,7 +53,6 @@ except ImportError:
         def _unlock_file(file_):
             _WinAPI_UnlockFile(msvcrt.get_osfhandle(file_.fileno()), 0, 0, 1, 0)
 
-
 else:
     _lock_file_blocking_available = True
 

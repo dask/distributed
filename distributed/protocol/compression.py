@@ -194,7 +194,7 @@ def maybe_compress(
         return None, payload
     if len(payload) < min_size:
         return None, payload
-    if len(payload) > 2 ** 31:  # Too large, compression libraries often fail
+    if len(payload) > 2**31:  # Too large, compression libraries often fail
         return None, payload
 
     min_size = int(min_size)
