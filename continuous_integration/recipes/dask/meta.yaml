@@ -1,7 +1,5 @@
-{% set version = environ.get('GIT_DESCRIBE_TAG', '0.0.0.dev') + environ.get('VERSION_SUFFIX', '') %}
-{% set dask_version = environ.get('DASK_VERSION', '0.0.0.dev') %}
-{% set dask_build = environ.get('DASK_BUILD', '') %}
-{% set py_version=environ.get('CONDA_PY', 36) %}
+{% set version = environ.get('VERSION', '0.0.0.dev') + environ.get('VERSION_SUFFIX', '') %}
+{% set dask_version = environ.get('DASK_CORE_VERSION', '0.0.0.dev') %}
 
 
 package:
