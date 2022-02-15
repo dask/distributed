@@ -162,7 +162,7 @@ else:
 
 
 if sys.version_info < (3, 8):
-    try:
+    try:  # pragma: no cover
         import pickle5 as pickle
     except ImportError:
         import pickle
@@ -2354,7 +2354,7 @@ class SchedulerState:
                         worker_msgs[w] = new_msgs
 
                 start = "released"
-            else:
+            else:  # pragma: no cover
                 raise RuntimeError("Impossible transition from %r to %r" % start_finish)
 
             finish2 = ts._state
@@ -2399,7 +2399,7 @@ class SchedulerState:
                     del parent._task_groups[tg._name]
 
             return recommendations, client_msgs, worker_msgs
-        except Exception:
+        except Exception:  # pragma: no cover
             logger.exception("Error transitioning %r from %r to %r", key, start, finish)
             if LOG_PDB:
                 import pdb
@@ -2495,7 +2495,7 @@ class SchedulerState:
                     ts.state = "no-worker"
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -2542,7 +2542,7 @@ class SchedulerState:
                     ts.state = "no-worker"
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -2578,7 +2578,7 @@ class SchedulerState:
             ts.state = "memory"
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -2750,7 +2750,7 @@ class SchedulerState:
             worker_msgs[worker] = [_task_to_msg(self, ts)]
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -2790,7 +2790,7 @@ class SchedulerState:
                 assert ts._who_has
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -2886,7 +2886,7 @@ class SchedulerState:
                 assert not ts._waiting_on
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -2956,7 +2956,7 @@ class SchedulerState:
                 assert not ts._waiting_on
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -3001,7 +3001,7 @@ class SchedulerState:
 
             # TODO: waiting data?
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -3049,7 +3049,7 @@ class SchedulerState:
             ts.state = "released"
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -3086,7 +3086,7 @@ class SchedulerState:
                 ts._waiters.clear()
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -3137,7 +3137,7 @@ class SchedulerState:
                 assert not ts._processing_on
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -3226,7 +3226,7 @@ class SchedulerState:
                 assert not ts._processing_on
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -3256,7 +3256,7 @@ class SchedulerState:
             ts._waiters.clear()
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -3311,7 +3311,7 @@ class SchedulerState:
             self.remove_key(key)
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -3349,7 +3349,7 @@ class SchedulerState:
             self.remove_key(key)
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -4468,7 +4468,7 @@ class Scheduler(SchedulerState, ServerNode):
                     result = plugin.add_worker(scheduler=self, worker=address)
                     if inspect.isawaitable(result):
                         await result
-                except Exception as e:
+                except Exception as e:  # pragma: no cover
                     logger.exception(e)
 
             recommendations: dict = {}
@@ -4890,7 +4890,7 @@ class Scheduler(SchedulerState, ServerNode):
                     resources=resources,
                     annotations=annotations,
                 )
-            except Exception as e:
+            except Exception as e:  # pragma: no cover
                 logger.exception(e)
 
         self.transitions(recommendations)
@@ -5091,7 +5091,7 @@ class Scheduler(SchedulerState, ServerNode):
                     result = plugin.remove_worker(scheduler=self, worker=address)
                     if inspect.isawaitable(result):
                         await result
-                except Exception as e:
+                except Exception as e:  # pragma: no cover
                     logger.exception(e)
 
             if not parent._workers_dv:
@@ -5269,13 +5269,13 @@ class Scheduler(SchedulerState, ServerNode):
                 ts.validate()
                 try:
                     func = getattr(self, "validate_" + ts._state.replace("-", "_"))
-                except AttributeError:
+                except AttributeError:  # pragma: no cover
                     logger.error(
                         "self.validate_%s not found", ts._state.replace("-", "_")
                     )
                 else:
                     func(key)
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -5382,7 +5382,7 @@ class Scheduler(SchedulerState, ServerNode):
             try:
                 c.send(msg)
                 # logger.debug("Scheduler sends message to client %s", msg)
-            except CommClosedError:
+            except CommClosedError:  # pragma: no cover
                 if self.status == Status.running:
                     logger.critical(
                         "Closed comm %r while trying to write %s", c, msg, exc_info=True
@@ -5403,7 +5403,7 @@ class Scheduler(SchedulerState, ServerNode):
         for plugin in list(self.plugins.values()):
             try:
                 plugin.add_client(scheduler=self, client=client)
-            except Exception as e:
+            except Exception as e:  # pragma: no cover
                 logger.exception(e)
 
         try:
@@ -5458,7 +5458,7 @@ class Scheduler(SchedulerState, ServerNode):
             for plugin in list(self.plugins.values()):
                 try:
                     plugin.remove_client(scheduler=self, client=client)
-                except Exception as e:
+                except Exception as e:  # pragma: no cover
                     logger.exception(e)
 
         def remove_client_from_events():
@@ -5477,7 +5477,7 @@ class Scheduler(SchedulerState, ServerNode):
         try:
             msg: dict = _task_to_msg(parent, ts, duration)
             self.worker_send(worker, msg)
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -5485,7 +5485,7 @@ class Scheduler(SchedulerState, ServerNode):
                 pdb.set_trace()
             raise
 
-    def handle_uncaught_error(self, **msg):
+    def handle_uncaught_error(self, **msg):  # pragma: no cover
         logger.exception(clean_exception(**msg)[1])
 
     def handle_task_finished(self, key=None, worker=None, **msg):
@@ -5569,7 +5569,7 @@ class Scheduler(SchedulerState, ServerNode):
         duration accounting as if the task has stopped.
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        if key not in parent._tasks:
+        if key not in parent._tasks:  # pragma: no cover
             logger.debug("Skipping long_running since key %s was already released", key)
             return
         ts: TaskState = parent._tasks[key]
@@ -5578,7 +5578,7 @@ class Scheduler(SchedulerState, ServerNode):
             steal.remove_key_from_stealable(ts)
 
         ws: WorkerState = ts._processing_on
-        if ws is None:
+        if ws is None:  # pragma: no cover
             logger.debug("Received long-running signal from duplicate task. Ignoring.")
             return
 
@@ -5799,7 +5799,7 @@ class Scheduler(SchedulerState, ServerNode):
         stream_comms: dict = self.stream_comms
         try:
             stream_comms[worker].send(msg)
-        except (CommClosedError, AttributeError):
+        except (CommClosedError, AttributeError):  # pragma: no cover
             self.loop.add_callback(self.remove_worker, address=worker)
 
     def client_send(self, client, msg):
@@ -5828,7 +5828,7 @@ class Scheduler(SchedulerState, ServerNode):
                 continue
             try:
                 c.send(*msgs)
-            except CommClosedError:
+            except CommClosedError:  # pragma: no cover
                 if self.status == Status.running:
                     logger.critical(
                         "Closed comm %r while trying to write %s",
@@ -5999,7 +5999,7 @@ class Scheduler(SchedulerState, ServerNode):
                     # Ask the worker to close if it doesn't have a nanny,
                     # otherwise the nanny will kill it anyway
                     await self.remove_worker(address=addr, close=addr not in nannies)
-                except Exception:
+                except Exception:  # pragma: no cover
                     logger.info(
                         "Exception while restarting.  This is normal", exc_info=True
                     )
@@ -6009,7 +6009,7 @@ class Scheduler(SchedulerState, ServerNode):
             for plugin in list(self.plugins.values()):
                 try:
                     plugin.restart(self)
-                except Exception as e:
+                except Exception as e:  # pragma: no cover
                     logger.exception(e)
 
             logger.debug("Send kill signal to nannies: %s", nannies)
@@ -6030,7 +6030,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
             try:
                 resps = await asyncio.wait_for(resps, timeout)
-            except TimeoutError:
+            except TimeoutError:  # pragma: no cover
                 logger.error(
                     "Nannies didn't report back restarted within "
                     "timeout.  Continuuing with restart process"
@@ -7124,7 +7124,7 @@ class Scheduler(SchedulerState, ServerNode):
         Caution: this runs arbitrary Python code on the scheduler.  This should
         eventually be phased out.  It is mostly used by diagnostics.
         """
-        if not dask.config.get("distributed.scheduler.pickle"):
+        if not dask.config.get("distributed.scheduler.pickle"):  # pragma: no cover
             logger.warn(
                 "Tried to call 'feed' route with custom functions, but "
                 "pickle is disallowed.  Set the 'distributed.scheduler.pickle'"
@@ -7945,7 +7945,7 @@ class Scheduler(SchedulerState, ServerNode):
                 next_time, self.reevaluate_occupancy, worker_index=worker_index
             )
 
-        except Exception:
+        except Exception:  # pragma: no cover
             logger.error("Error in reevaluate occupancy", exc_info=True)
             raise
 
@@ -8571,13 +8571,13 @@ class WorkerStatusPlugin(SchedulerPlugin):
         del ident["last_seen"]
         try:
             self.bcomm.send(["add", {"workers": {worker: ident}}])
-        except CommClosedError:
+        except CommClosedError:  # pragma: no cover
             self.scheduler.remove_plugin(name=self.name)
 
     def remove_worker(self, worker=None, **kwargs):
         try:
             self.bcomm.send(["remove", worker])
-        except CommClosedError:
+        except CommClosedError:  # pragma: no cover
             self.scheduler.remove_plugin(name=self.name)
 
     def teardown(self):
