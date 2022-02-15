@@ -2844,7 +2844,7 @@ class SchedulerState:
                     {
                         "op": "cancel-compute",
                         "key": key,
-                        "reason": "Finished on different worker",
+                        "stimulus_id": f"processing-memory-{time()}",
                     }
                 ]
 
