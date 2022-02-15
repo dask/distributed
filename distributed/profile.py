@@ -136,7 +136,7 @@ def merge(*args):
         return create()
     s = {arg["identifier"] for arg in args}
     if len(s) != 1:  # pragma: no cover
-        raise ValueError("Expected identifiers, got %s" % str(s))
+        raise ValueError(f"Expected identifiers, got {s}")
     children = defaultdict(list)
     for arg in args:
         for child in arg["children"]:

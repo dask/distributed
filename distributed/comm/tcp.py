@@ -369,7 +369,7 @@ def _expect_tls_context(connection_args):
         raise TypeError(
             "TLS expects a `ssl_context` argument of type "
             "ssl.SSLContext (perhaps check your TLS configuration?)"
-            "  Instead got %s" % str(ctx)
+            f" Instead got {ctx!r}"
         )
     return ctx
 
