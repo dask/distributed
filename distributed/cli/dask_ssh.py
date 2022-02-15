@@ -162,7 +162,7 @@ def main(
         if not scheduler:
             scheduler = hostnames[0]
 
-    except IndexError:
+    except IndexError:  # pragma: no cover
         print(ctx.get_help())
         exit(1)
 
@@ -202,25 +202,25 @@ def main(
 
     import distributed
 
-    print("\n---------------------------------------------------------------")
+    print("\n---------------------------------------------------------------")  # pragma: no cover
     print(
         "                 Dask.distributed v{version}\n".format(
             version=distributed.__version__
         )
-    )
-    print(f"Worker nodes: {len(hostnames)}")
-    for i, host in enumerate(hostnames):
+    )  # pragma: no cover
+    print(f"Worker nodes: {len(hostnames)}")  # pragma: no cover
+    for i, host in enumerate(hostnames):  # pragma: no cover
         print(f"  {i}: {host}")
-    print(f"\nscheduler node: {scheduler}:{scheduler_port}")
-    print("---------------------------------------------------------------\n\n")
+    print(f"\nscheduler node: {scheduler}:{scheduler_port}")  # pragma: no cover
+    print("---------------------------------------------------------------\n\n")  # pragma: no cover
 
     # Monitor the output of remote processes.  This blocks until the user issues a KeyboardInterrupt.
     c.monitor_remote_processes()
 
     # Close down the remote processes and exit.
-    print("\n[ dask-ssh ]: Shutting down remote processes (this may take a moment).")
+    print("\n[ dask-ssh ]: Shutting down remote processes (this may take a moment).")  # pragma: no cover
     c.shutdown()
-    print("[ dask-ssh ]: Remote processes have been terminated. Exiting.")
+    print("[ dask-ssh ]: Remote processes have been terminated. Exiting.")  # pragma: no cover
 
 
 def go():
@@ -229,4 +229,4 @@ def go():
 
 
 if __name__ == "__main__":
-    go()
+    go()  # pragma: no cover
