@@ -12,6 +12,12 @@ omit =
     distributed/pytest_resourceleaks.py
     distributed/comm/ucx.py
     distributed/asyncio.py
+    distributed/protocol/arrow.py
+    distributed/protocol/cupy.py
+    distributed/protocol/numba.py
+    distributed/protocol/rmm.py
+    distributed/protocol/sparse.py
+
 
 [report]
 show_missing = True
