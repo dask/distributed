@@ -239,7 +239,7 @@ class Slow(zict.Func):
             assert key not in self.weight_by_key
         else:
             self.d.pop(key, 0)
-            self.total_weight -= self.weight_by_key.pop(key, PickledSize(0, 0))
+            self.total_weight -= self.weight_by_key.pop(key, 0)
 
         if (
             self.max_weight is not False
