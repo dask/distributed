@@ -124,10 +124,12 @@ class RMMMemoryUsage(DashboardComponent):
             memory_total = 0
 
             for idx, ws in enumerate(workers):
-                rmm_metrics = ws.metrics["rmm"]
-                gpu_extra = ws.extra["gpu"]
-                gpu_metrics = ws.metrics["gpu"]
-
+                try:
+                    rmm_metrics = ws.metrics["rmm"]
+                    gpu_extra = ws.extra["gpu"]
+                    gpu_metrics = ws.metrics["gpu"]
+                except KeyError:
+                    continue
                 rmm_total_worker = rmm_metrics["rmm-total"]
                 rmm_used_worker = rmm_metrics["rmm-used"]  # RMMM memory only
                 gpu_used_worker = gpu_metrics["memory-used"]  # All GPU memory

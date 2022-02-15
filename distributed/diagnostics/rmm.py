@@ -2,12 +2,15 @@
 Diagnostics for GPU memory managed by RMM (RAPIDS memory manager).
 """
 
+try:
+    import rmm
+except ImportError:
+    rmm = None
+
 
 def _get_pool_size(mr):
     # if the memory resource or any of its upstreams
     # is a `PoolMemoryResource`, get its pool size
-    import rmm
-
     if not isinstance(mr, rmm.mr.PoolMemoryResource):
         if hasattr(mr, "upstream_mr"):
             return _get_pool_size(mr.upstream_mr)
@@ -29,8 +32,8 @@ def _get_allocated_bytes(mr):
 
 
 def real_time():
-    import rmm
-
+    if rmm is None:
+        return {"rmm-used": None, "rmm-total": None}
     mr = rmm.mr.get_current_device_resource()
     rmm_pool_size = _get_pool_size(mr)
     rmm_used = _get_allocated_bytes(mr)
