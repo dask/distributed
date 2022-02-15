@@ -3817,7 +3817,7 @@ class Client(SyncMethodMixin):
         format: Literal["msgpack", "yaml"],
     ) -> None:
 
-        scheduler_info = self.scheduler.dump_state()
+        scheduler_info = self.scheduler.dump_state(exclude=exclude)
 
         workers_info = self.scheduler.broadcast(
             msg={"op": "dump_state", "exclude": exclude},
@@ -3879,7 +3879,7 @@ class Client(SyncMethodMixin):
     def dump_cluster_state(
         self,
         filename: str = "dask-cluster-dump",
-        exclude: Collection[str] = (),
+        exclude: Collection[str] = ("run_spec",),
         format: Literal["msgpack", "yaml"] = "msgpack",
     ):
         """Extract a dump of the entire cluster state and persist to disk.
@@ -3905,6 +3905,10 @@ class Client(SyncMethodMixin):
         exclude:
             A collection of attribute names which are supposed to be excluded
             from the dump, e.g. to exclude code, tracebacks, logs, etc.
+
+            Defaults to exclude `run_spec` which is the serialized user code. This
+            is typically not required for debugging. To allow serialization of
+            this, pass an empty tuple.
         format:
             Either msgpack or yaml. If msgpack is used (default), the output
             will be stored in a gzipped file as msgpack.
