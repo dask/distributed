@@ -647,7 +647,9 @@ def test_one_thread_deadlock_timeout():
         # An actor whose method argument is another actor
 
         def do_inc(self, ac):
-            return ac.increment().result(timeout=1)
+            # ac.increment() returns an EagerActorFuture and so the timeout
+            # cannot expire
+            return ac.increment().result(timeout=0.001)
 
     with cluster(nworkers=1) as (cl, _):
         client = Client(cl["address"])
