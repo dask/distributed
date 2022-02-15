@@ -213,10 +213,10 @@ class Actor(WrappedKey):
 
                 actor_future = ActorFuture(io_loop=self._io_loop)
 
-                async def wait_then_add_to_queue():
+                async def wait_then_set_result():
                     actor_future._set_result(await run_actor_function_on_worker())
 
-                self._io_loop.add_callback(wait_then_add_to_queue)
+                self._io_loop.add_callback(wait_then_set_result)
                 return actor_future
 
             return func
