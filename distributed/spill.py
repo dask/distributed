@@ -238,7 +238,7 @@ class Slow(zict.Func):
             assert key not in self.d
             assert key not in self.weight_by_key
         else:
-            self.d.pop(key, 0)
+            self.d.pop(key, None)
             self.total_weight -= self.weight_by_key.pop(key, 0)
 
         if (
