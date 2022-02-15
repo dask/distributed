@@ -98,14 +98,14 @@ _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
 
 
-@pytest.fixture(scope="session")  # pragma: no cover
+@pytest.fixture(scope="session")
 def valid_python_script(tmpdir_factory):
     local_file = tmpdir_factory.mktemp("data").join("file.py")
     local_file.write("print('hello world!')")
     return local_file
 
 
-@pytest.fixture(scope="session")  # pragma: no cover
+@pytest.fixture(scope="session")
 def client_contract_script(tmpdir_factory):
     local_file = tmpdir_factory.mktemp("data").join("distributed_script.py")
     lines = (
@@ -117,7 +117,7 @@ def client_contract_script(tmpdir_factory):
     return local_file
 
 
-@pytest.fixture(scope="session")  # pragma: no cover
+@pytest.fixture(scope="session")
 def invalid_python_script(tmpdir_factory):
     local_file = tmpdir_factory.mktemp("data").join("file.py")
     local_file.write("a+1")
