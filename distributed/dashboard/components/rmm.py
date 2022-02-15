@@ -1,4 +1,5 @@
 import math
+from textwrap import dedent
 
 from bokeh.core.properties import without_property_validation
 from bokeh.models import (
@@ -11,6 +12,8 @@ from bokeh.models import (
 )
 from bokeh.plotting import figure
 from tornado import escape
+
+from dask.utils import format_bytes
 
 from distributed.dashboard.components import DashboardComponent, add_periodic_callback
 from distributed.dashboard.components.scheduler import BOKEH_THEME, TICKS_1024
@@ -144,7 +147,7 @@ class RMMMemoryUsage(DashboardComponent):
                 y.append(idx)
 
                 memory_max = max(memory_max, gpu_used_worker)
-                memory_total = max(memory_total, gpu_extra["memory-total"])
+                memory_total += gpu_extra["memory-total"]
 
             result = {
                 "rmm-total": rmm_total,
@@ -158,7 +161,19 @@ class RMMMemoryUsage(DashboardComponent):
                 "y": y,
                 "escaped_worker": [escape.url_escape(w) for w in worker],
             }
-            self.memory_figure.x_range.end = memory_total
+            self.memory_figure.x_range.end = memory_max
+
+            self.memory_figure.title.text = dedent(
+                """\
+                RMM Utilization: {} / {}\n
+                GPU Memory: {} / {}
+                """.format(
+                    format_bytes(sum(rmm_used)),
+                    format_bytes(sum(rmm_total)),
+                    format_bytes(sum([*rmm_total, *external_used])),
+                    format_bytes(memory_total),
+                )
+            )
             update(self.source, result)
 
 
