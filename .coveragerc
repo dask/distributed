@@ -10,6 +10,7 @@ omit =
     distributed/_version.py
     distributed/pytest_resourceleaks.py
     distributed/comm/ucx.py
+    distributed/asyncio.py
 
 [report]
 show_missing = True
@@ -22,6 +23,9 @@ exclude_lines =
     [\s(.]pynvml[\s(.]
     # exclude LOG_PDB
     LOG_PDB
+    # always ignore type checking blocks
+    TYPE_CHECKING
+    except ImportError
 
 [html]
 directory = coverage_html_report

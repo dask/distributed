@@ -164,7 +164,7 @@ class Actor(WrappedKey):
                         if self._future and not self._future.done():
                             await self._future
                             return await run_actor_function_on_worker()
-                        else:
+                        else:  # pragma: no cover
                             raise OSError("Unable to contact Actor's worker")
                     return result
 

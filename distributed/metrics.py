@@ -14,13 +14,13 @@ def _psutil_caller(method_name, default=_empty_namedtuple):
     # Import only once to avoid the cost of a failing import at each wrapper() call
     try:
         import psutil
-    except ImportError:
+    except ImportError:  # pragma: no cover
         return default
 
     meth = getattr(psutil, method_name)
 
     @wraps(meth)
-    def wrapper():
+    def wrapper():  # pragma: no cover
         try:
             return meth()
         except RuntimeError:
@@ -90,6 +90,6 @@ process_time = timemod.process_time
 try:
     # thread_time is supported on Python 3.7+ but not all platforms
     thread_time = timemod.thread_time
-except (AttributeError, OSError):
+except (AttributeError, OSError):  # pragma: no cover
     # process_time is supported on Python 3.3+ everywhere
     thread_time = process_time

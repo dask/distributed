@@ -36,7 +36,7 @@ def setproctitle(title):
     if not enabled:
         try:
             enabled = int(os.environ.get("DASK_PARENT", "")) != os.getpid()
-        except ValueError:
+        except ValueError:  # pragma: no cover
             pass
     if enabled:
         setproctitle_mod.setproctitle(title)
