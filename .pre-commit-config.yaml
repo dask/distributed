@@ -38,7 +38,6 @@ repos:
           - types-PyYAML
           - types-setuptools
           - types-psutil
-          # Libraries exclusively imported under `if TYPE_CHECKING:`
           # Typed libraries
           - numpy
           - dask
