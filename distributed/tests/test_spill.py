@@ -16,8 +16,11 @@ from distributed.spill import SpillBuffer
 from distributed.utils_test import captured_logger
 
 
-def psize(*objs) -> int:
-    return sum(len(frame) for obj in objs for frame in serialize_bytelist(obj))
+def psize(*objs) -> tuple[int, int]:
+    return (
+        sum(sizeof(o) for o in objs),
+        sum(len(frame) for obj in objs for frame in serialize_bytelist(obj)),
+    )
 
 
 def test_spillbuffer(tmpdir):
@@ -27,27 +30,27 @@ def test_spillbuffer(tmpdir):
     assert buf.disk is buf.slow
 
     assert not buf.slow.weight_by_key
-    assert buf.slow.total_weight == 0
-    assert buf.spilled_total == 0
+    assert buf.slow.total_weight == (0, 0)
+    assert buf.spilled_total == (0, 0)
 
     a, b, c, d = "a" * 100, "b" * 99, "c" * 98, "d" * 97
 
     # Test assumption made by this test, mostly for non CPython implementations
     assert 100 < sizeof(a) < 200
-    assert sizeof(a) != psize(a)
+    assert psize(a)[0] != psize(a)[1]
 
     buf["a"] = a
     assert not buf.slow
     assert buf.fast.weights == {"a": sizeof(a)}
     assert buf.fast.total_weight == sizeof(a)
     assert buf.slow.weight_by_key == {}
-    assert buf.slow.total_weight == 0
+    assert buf.slow.total_weight == (0, 0)
     assert buf["a"] == a
 
     buf["b"] = b
     assert not buf.slow
     assert not buf.slow.weight_by_key
-    assert buf.slow.total_weight == 0
+    assert buf.slow.total_weight == (0, 0)
 
     buf["c"] = c
     assert set(buf.slow) == {"a"}
@@ -182,7 +185,7 @@ def test_spillbuffer_maxlim(tmpdir):
     # max_spill
 
     a_large = "a" * 500
-    assert psize(a_large) > 600  # size of max_spill
+    assert psize(a_large)[1] > 600  # size of max_spill
 
     with captured_logger(logging.getLogger("distributed.spill")) as logs_alarge:
         buf["a"] = a_large
