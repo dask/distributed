@@ -653,6 +653,23 @@ def test_recursive_to_dict():
         def __repr__(self):
             return "<D>"
 
+    class E:
+        def __init__(self):
+            self.x = 1  # Public attribute; dump
+            self._y = 2  # Private attribute; don't dump
+            self.foo = 3  # In exclude; don't dump
+
+        @property
+        def z(self):  # Public property; dump
+            return 4
+
+        def f(self):  # Callable; don't dump
+            return 5
+
+        def _to_dict(self, *, exclude):
+            # Output: {"x": 1, "z": 4}
+            return recursive_to_dict(self, exclude=exclude, members=True)
+
     inp = [
         1,
         1.1,
@@ -669,6 +686,9 @@ def test_recursive_to_dict():
         {5, 6},
         frozenset([7, 8]),
         deque([9, 10]),
+        {3: 4, 1: 2}.keys(),
+        {3: 4, 1: 2}.values(),
+        E(),
     ]
     expect = [
         1,
@@ -686,6 +706,9 @@ def test_recursive_to_dict():
         list({5, 6}),
         list(frozenset([7, 8])),
         [9, 10],
+        [3, 1],
+        [4, 2],
+        {"x": 1, "z": 4},
     ]
     assert recursive_to_dict(inp, exclude=["foo"]) == expect
 
@@ -700,3 +723,49 @@ def test_recursive_to_dict():
         ["C:", "[<C>, <C>]"],
         ["C:", "[<C>, <C>]"],
     ]
+
+
+def test_recursive_to_dict_no_nest():
+    class Person:
+        def __init__(self, name):
+            self.name = name
+            self.children = []
+            self.pets = []
+            ...
+
+        def _to_dict_no_nest(self, exclude=()):
+            return recursive_to_dict(self.__dict__, exclude=exclude)
+
+        def __repr__(self):
+            return self.name
+
+    class Pet:
+        def __init__(self, name):
+            self.name = name
+            self.owners = []
+            ...
+
+        def _to_dict_no_nest(self, exclude=()):
+            return recursive_to_dict(self.__dict__, exclude=exclude)
+
+        def __repr__(self):
+            return self.name
+
+    alice = Person("Alice")
+    bob = Person("Bob")
+    charlie = Pet("Charlie")
+    alice.children.append(bob)
+    alice.pets.append(charlie)
+    bob.pets.append(charlie)
+    charlie.owners[:] = [alice, bob]
+    info = {"people": [alice, bob], "pets": [charlie]}
+    expect = {
+        "people": [
+            {"name": "Alice", "children": ["Bob"], "pets": ["Charlie"]},
+            {"name": "Bob", "children": [], "pets": ["Charlie"]},
+        ],
+        "pets": [
+            {"name": "Charlie", "owners": ["Alice", "Bob"]},
+        ],
+    }
+    assert recursive_to_dict(info) == expect

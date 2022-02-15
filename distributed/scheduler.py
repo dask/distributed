@@ -199,8 +199,6 @@ globals()["ALL_TASK_STATES"] = ALL_TASK_STATES
 COMPILED = declare(bint, compiled)
 globals()["COMPILED"] = COMPILED
 
-_taskstate_to_dict_guard: bool = False
-
 
 @final
 @cclass
@@ -273,6 +271,22 @@ class ClientState:
     @property
     def versions(self):
         return self._versions
+
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+        TaskState._to_dict
+        """
+        return recursive_to_dict(
+            self,
+            exclude=set(exclude) | {"versions"},  # type: ignore
+            members=True,
+        )
 
 
 @final
@@ -393,6 +407,17 @@ class MemoryState:
             f"  - unmanaged (recent): {format_bytes(self.unmanaged_recent)}\n"
             f"Spilled to disk       : {format_bytes(self._managed_spilled)}\n"
         )
+
+    def _to_dict(self, *, exclude: "Container[str]" = ()) -> dict:
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+        """
+        return recursive_to_dict(self, exclude=exclude, members=True)
 
 
 @final
@@ -787,6 +812,22 @@ class WorkerState:
             **self._extra,
         }
 
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+        TaskState._to_dict
+        """
+        return recursive_to_dict(
+            self,
+            exclude=set(exclude) | {"versions"},  # type: ignore
+            members=True,
+        )
+
 
 @final
 @cclass
@@ -1145,6 +1186,18 @@ class TaskGroup:
 
     def __len__(self):
         return sum(self._states.values())
+
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+        TaskState._to_dict
+        """
+        return recursive_to_dict(self, exclude=exclude, members=True)
 
 
 @final
@@ -1734,41 +1787,26 @@ class TaskState:
             nbytes += ts.get_nbytes()
         return nbytes
 
-    @ccall
-    def _to_dict(self, *, exclude: "Container[str]" = ()):  # -> dict | str
-        """
-        A very verbose dictionary representation for debugging purposes.
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
+        """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
-
-        Parameters
-        ----------
-        exclude:
-            A list of attributes which must not be present in the output.
 
         See also
         --------
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+
+        Notes
+        -----
+        This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
+        When a task references another task, or when a WorkerState.tasks contains tasks,
+        this method is not executed for the inner task, even if the inner task was never
+        seen before; you get a repr instead. All tasks should neatly appear under
+        Scheduler.tasks. This also prevents a RecursionError during particularly heavy
+        loads, which have been observed to happen whenever there's an acyclic dependency
+        chain of ~200+ tasks.
         """
-        # When a task references another task, just print the task repr. All tasks
-        # should neatly appear under Scheduler.tasks. This also prevents a
-        # RecursionError during particularly heavy loads, which have been observed to
-        # happen whenever there's an acyclic dependency chain of ~200+ tasks.
-        global _taskstate_to_dict_guard
-        if _taskstate_to_dict_guard:
-            return repr(self)
-        _taskstate_to_dict_guard = True
-        try:
-            members = inspect.getmembers(self)
-            return recursive_to_dict(
-                {
-                    k: v
-                    for k, v in members
-                    if not k.startswith("_") and k not in exclude and not callable(v)
-                },
-                exclude=exclude,
-            )
-        finally:
-            _taskstate_to_dict_guard = False
+        return recursive_to_dict(self, exclude=exclude, members=True)
 
 
 class _StateLegacyMapping(Mapping):
@@ -4014,29 +4052,29 @@ class Scheduler(SchedulerState, ServerNode):
     def _to_dict(
         self, comm: "Comm | None" = None, *, exclude: "Container[str]" = ()
     ) -> dict:
-        """
-        A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
-
-        Parameters
-        ----------
-        comm:
-        exclude:
-            A list of attributes which must not be present in the output.
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
 
         See also
         --------
         Server.identity
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
         """
         info = super()._to_dict(exclude=exclude)
         extra = {
             "transition_log": self.transition_log,
             "log": self.log,
             "tasks": self.tasks,
+            "task_groups": self.task_groups,
+            # Overwrite dict of WorkerState.identity from info
+            "workers": self.workers,
+            "clients": self.clients,
+            "memory": self.memory,
             "events": self.events,
             "extensions": self.extensions,
         }
+        extra = {k: v for k, v in extra.items() if k not in exclude}
         info.update(recursive_to_dict(extra, exclude=exclude))
         return info
 

@@ -131,8 +131,6 @@ DEFAULT_DATA_SIZE = parse_bytes(
 
 SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "task"])
 
-_taskstate_to_dict_guard = False
-
 
 class InvalidTransition(Exception):
     pass
@@ -234,36 +232,24 @@ class TaskState:
         nbytes = self.nbytes
         return nbytes if nbytes is not None else DEFAULT_DATA_SIZE
 
-    def _to_dict(self, *, exclude: Container[str] = ()) -> dict | str:
-        """
-        A very verbose dictionary representation for debugging purposes.
+    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict:
+        """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
-
-        Parameters
-        ----------
-        comm:
-        exclude:
-            A list of attributes which must not be present in the output.
 
         See also
         --------
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+
+        Notes
+        -----
+        This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
+        When a task references another task, just print the task repr. All tasks
+        should neatly appear under Worker.tasks. This also prevents a RecursionError
+        during particularly heavy loads, which have been observed to happen whenever
+        there's an acyclic dependency chain of ~200+ tasks.
         """
-        # When a task references another task, just print the task repr. All tasks
-        # should neatly appear under Worker.tasks. This also prevents a RecursionError
-        # during particularly heavy loads, which have been observed to happen whenever
-        # there's an acyclic dependency chain of ~200+ tasks.
-        global _taskstate_to_dict_guard
-        if _taskstate_to_dict_guard:
-            return repr(self)
-        _taskstate_to_dict_guard = True
-        try:
-            return recursive_to_dict(
-                {k: v for k, v in self.__dict__.items() if k not in exclude},
-                exclude=exclude,
-            )
-        finally:
-            _taskstate_to_dict_guard = False
+        return recursive_to_dict(self, exclude=exclude, members=True)
 
     def is_protected(self) -> bool:
         return self.state in PROCESSING or any(
@@ -1188,20 +1174,14 @@ class Worker(ServerNode):
     def _to_dict(
         self, comm: Comm | None = None, *, exclude: Container[str] = ()
     ) -> dict:
-        """
-        A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
-
-        Parameters
-        ----------
-        comm:
-        exclude:
-            A list of attributes which must not be present in the output.
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
 
         See also
         --------
         Worker.identity
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
         """
         info = super()._to_dict(exclude=exclude)
         extra = {
@@ -1228,6 +1208,7 @@ class Worker(ServerNode):
             "outgoing_transfer_log": self.outgoing_transfer_log,
         }
         info.update(extra)
+        info = {k: v for k, v in info.items() if k not in exclude}
         return recursive_to_dict(info, exclude=exclude)
 
     #####################

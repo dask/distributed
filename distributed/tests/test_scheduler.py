@@ -3294,9 +3294,9 @@ async def test_unpause_schedules_unrannable_tasks(c, s, a):
     assert await fut == 2
 
 
-@gen_cluster(client=True)
-async def test_Scheduler__to_dict(c, s, a, b):
-    futs = c.map(inc, range(100))
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_Scheduler__to_dict(c, s, a):
+    futs = c.map(inc, range(2))
 
     await c.gather(futs)
     d = s._to_dict()
@@ -3312,10 +3312,46 @@ async def test_Scheduler__to_dict(c, s, a, b):
         "thread_id",
         "transition_log",
         "log",
+        "memory",
         "tasks",
+        "task_groups",
         "events",
+        "clients",
     }
-    assert d["tasks"][futs[0].key]
+    # TaskStates are serialized as dicts under tasks and as strings under
+    # workers.*.has_what and under clients.*.wants_what
+    # WorkerStates are serialized s dicts under workers and as
+    # strings under tasks.*.who_has
+    assert d["tasks"][futs[0].key]["who_has"] == [
+        f"<WorkerState '{a.address}', "
+        "name: 0, status: running, memory: 2, processing: 0>"
+    ]
+    assert sorted(d["workers"][a.address]["has_what"]) == sorted(
+        [
+            f"<TaskState '{futs[0].key}' memory>",
+            f"<TaskState '{futs[1].key}' memory>",
+        ]
+    )
+    assert sorted(d["clients"][c.id]["wants_what"]) == sorted(
+        [
+            f"<TaskState '{futs[0].key}' memory>",
+            f"<TaskState '{futs[1].key}' memory>",
+        ]
+    )
+
+    # TaskGroups are serialized as dicts under task_groups and as strings under
+    # tasks.*.group
+    assert d["tasks"][futs[0].key]["group"] == "<inc: memory: 2>"
+    assert d["task_groups"]["inc"]["prefix"] == "<inc: memory: 2>"
+
+    # ClientStates are serialized as dicts under clients and as strings under
+    # tasks.*.who_wants
+    assert d["clients"][c.id]["client_key"] == c.id
+    assert d["tasks"][futs[0].key]["who_wants"] == [f"<Client '{c.id}'>"]
+
+    # Test MemoryState dump
+    assert isinstance(d["memory"]["process"], int)
+    assert isinstance(d["workers"][a.address]["memory"]["process"], int)
 
 
 @gen_cluster(client=True, nthreads=[])
