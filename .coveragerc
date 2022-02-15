@@ -18,7 +18,6 @@ omit =
     distributed/protocol/rmm.py
     distributed/protocol/sparse.py
 
-
 [report]
 show_missing = True
 exclude_lines =
