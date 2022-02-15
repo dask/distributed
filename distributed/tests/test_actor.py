@@ -634,10 +634,10 @@ def test_one_thread_deadlock():
         def do_inc(self, ac):
             return ac.increment().result()
 
-    with cluster(nworkers=2) as (cl, w):
+    with cluster(nworkers=1) as (cl, _):
         client = Client(cl["address"])
         ac = client.submit(Counter, actor=True).result()
-        ac2 = client.submit(UsesCounter, actor=True, workers=[ac._address]).result()
+        ac2 = client.submit(UsesCounter, actor=True).result()
 
         assert ac2.do_inc(ac).result() == 1
 
@@ -649,10 +649,10 @@ def test_one_thread_deadlock_timeout():
         def do_inc(self, ac):
             return ac.increment().result(timeout=1)
 
-    with cluster(nworkers=2) as (cl, w):
+    with cluster(nworkers=1) as (cl, _):
         client = Client(cl["address"])
         ac = client.submit(Counter, actor=True).result()
-        ac2 = client.submit(UsesCounter, actor=True, workers=[ac._address]).result()
+        ac2 = client.submit(UsesCounter, actor=True).result()
 
         assert ac2.do_inc(ac).result() == 1
 
@@ -664,16 +664,16 @@ def test_one_thread_deadlock_sync_client():
         def do_inc(self, ac):
             return get_client().sync(ac.increment)
 
-    with cluster(nworkers=2) as (cl, w):
+    with cluster(nworkers=1) as (cl, _):
         client = Client(cl["address"])
         ac = client.submit(Counter, actor=True).result()
-        ac2 = client.submit(UsesCounter, actor=True, workers=[ac._address]).result()
+        ac2 = client.submit(UsesCounter, actor=True).result()
 
         assert ac2.do_inc(ac).result() == 1
 
 
-@gen_cluster(client=True)
-async def test_async_deadlock(client, s, a, b):
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_async_deadlock(client, s, a):
     class UsesCounter:
         # An actor whose method argument is another actor
 
@@ -681,7 +681,7 @@ async def test_async_deadlock(client, s, a, b):
             return await ac.ainc()
 
     ac = await client.submit(Counter, actor=True)
-    ac2 = await client.submit(UsesCounter, actor=True, workers=[ac._address])
+    ac2 = await client.submit(UsesCounter, actor=True)
 
     assert (await ac2.ado_inc(ac)) == 1
 
