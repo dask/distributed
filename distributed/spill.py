@@ -17,6 +17,7 @@ from .protocol import deserialize_bytes, serialize_bytelist
 from .sizeof import safe_sizeof
 
 logger = logging.getLogger(__name__)
+has_zict_210 = parse_version(zict.__version__) > parse_version("2.0.0")
 
 
 class SpillBuffer(zict.Buffer):
@@ -48,9 +49,7 @@ class SpillBuffer(zict.Buffer):
         min_log_interval: float = 2,
     ):
 
-        if max_spill is not False and parse_version(zict.__version__) <= parse_version(
-            "2.0.0"
-        ):
+        if max_spill and not has_zict_210:
             raise ValueError("zict > 2.0.0 required to set max_weight")
 
         super().__init__(
@@ -102,10 +101,11 @@ class SpillBuffer(zict.Buffer):
                 # This happens only when the key is individually larger than target.
                 # The exception will be caught by Worker and logged; the status of
                 # the task will be set to error.
-                if parse_version(zict.__version__) <= parse_version("2.0.0"):
-                    pass
-                else:
+                if has_zict_210:
                     del self[key]
+                else:
+                    assert key not in self.fast
+                    assert key not in self.slow
                 raise orig_e
             else:
                 # The key we just inserted is smaller than target, but it caused
@@ -142,10 +142,11 @@ class SpillBuffer(zict.Buffer):
                 super().__setitem__(key, value)
                 self.logged_pickle_errors.discard(key)
         except HandledError:
-            if parse_version(zict.__version__) <= parse_version("2.0.0"):
-                pass
-            else:
+            if has_zict_210:
                 assert key in self.fast
+            else:
+                assert key not in self.fast
+                logger.error("Key %s lost. Please upgrade to zict >= 2.1.0", key)
             assert key not in self.slow
 
     def evict(self) -> int:
@@ -231,10 +232,14 @@ class Slow(zict.Func):
 
         pickled_size = sum(len(frame) for frame in pickled)
 
-        # Thanks to Buffer.__setitem__, we never update existing keys in slow,
-        # but always delete them and reinsert them.
-        assert key not in self.d
-        assert key not in self.weight_by_key
+        if has_zict_210:
+            # Thanks to Buffer.__setitem__, we never update existing
+            # keys in slow, but always delete them and reinsert them.
+            assert key not in self.d
+            assert key not in self.weight_by_key
+        else:
+            self.d.pop(key, 0)
+            self.total_weight -= self.weight_by_key.pop(key, PickledSize(0, 0))
 
         if (
             self.max_weight is not False
