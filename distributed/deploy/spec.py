@@ -296,7 +296,7 @@ class SpecCluster(Cluster):
         except Exception as e:  # pragma: no cover
             self.status = Status.failed
             await self._close()
-            raise RuntimeError(f"Cluster failed to start. {str(e)}") from e
+            raise RuntimeError(f"Cluster failed to start: {e}") from e
 
     def _correct_state(self):
         if self._correct_state_waiting:
