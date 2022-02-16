@@ -16,6 +16,7 @@ from unittest import mock
 
 import psutil
 import pytest
+from packaging.version import parse as parse_version
 from tlz import first, pluck, sliding_window
 
 import dask
@@ -67,6 +68,17 @@ from distributed.worker import (
 )
 
 pytestmark = pytest.mark.ci1
+
+try:
+    import zict
+except ImportError:
+    zict = None
+
+requires_zict = pytest.mark.skipif(not zict, reason="requires zict")
+requires_zict_210 = pytest.mark.skipif(
+    not zict or parse_version(zict.__version__) <= parse_version("2.0.0"),
+    reason="requires zict version > 2.0.0",
+)
 
 
 @gen_cluster(nthreads=[])
@@ -899,58 +911,107 @@ async def test_dataframe_attribute_error(c, s, a, b):
     assert result.data == 123
 
 
+class FailToPickle:
+    def __init__(self, *, reported_size=0, actual_size=0):
+        self.reported_size = int(reported_size)
+        self.data = "x" * int(actual_size)
+
+    def __getstate__(self):
+        raise TypeError()
+
+    def __sizeof__(self):
+        return self.reported_size
+
+
+async def assert_basic_futures(c: Client) -> None:
+    futures = c.map(inc, range(10))
+    results = await c.gather(futures)
+    assert results == list(map(inc, range(10)))
+
+
+@requires_zict
 @gen_cluster(client=True)
-async def test_fail_write_to_disk(c, s, a, b):
-    class Bad:
-        def __getstate__(self):
-            raise TypeError()
-
-        def __sizeof__(self):
-            return int(100e9)
-
-    future = c.submit(Bad)
+async def test_fail_write_to_disk_target_1(c, s, a, b):
+    """Test failure to spill triggered by key which is individually larger
+    than target. The data is lost and the task is marked as failed;
+    the worker remains in usable condition.
+    """
+    future = c.submit(FailToPickle, reported_size=100e9)
     await wait(future)
 
     assert future.status == "error"
 
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="Could not serialize"):
         await future
 
-    futures = c.map(inc, range(10))
-    results = await c._gather(futures)
-    assert results == list(map(inc, range(10)))
+    await assert_basic_futures(c)
 
 
-@pytest.mark.skip(reason="Our logic here is faulty")
+@requires_zict
 @gen_cluster(
-    nthreads=[("127.0.0.1", 2)], client=True, worker_kwargs={"memory_limit": 10e9}
+    client=True,
+    nthreads=[("", 1)],
+    worker_kwargs=dict(
+        memory_limit="1 kiB",
+        memory_target_fraction=0.5,
+        memory_spill_fraction=False,
+        memory_pause_fraction=False,
+    ),
 )
-async def test_fail_write_many_to_disk(c, s, a):
-    a.validate = False
-    await asyncio.sleep(0.1)
-    assert a.status == Status.running
+async def test_fail_write_to_disk_target_2(c, s, a):
+    """Test failure to spill triggered by key which is individually smaller
+    than target, so it is not spilled immediately. The data is retained and
+    the task is NOT marked as failed; the worker remains in usable condition.
+    """
+    x = c.submit(FailToPickle, reported_size=256, key="x")
+    await wait(x)
+    assert x.status == "finished"
+    assert set(a.data.memory) == {"x"}
 
-    class Bad:
-        def __init__(self, x):
-            pass
+    y = c.submit(lambda: "y" * 256, key="y")
+    await wait(y)
+    if parse_version(zict.__version__) <= parse_version("2.0.0"):
+        assert set(a.data.memory) == {"y"}
+    else:
+        assert set(a.data.memory) == {"x", "y"}
+    assert not a.data.disk
 
-        def __getstate__(self):
-            raise TypeError()
+    await assert_basic_futures(c)
 
-        def __sizeof__(self):
-            return int(2e9)
 
-    futures = c.map(Bad, range(11))
-    future = c.submit(lambda *args: 123, *futures)
+@requires_zict_210
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    worker_kwargs=dict(
+        memory_monitor_interval="10ms",
+        memory_limit="1 kiB",  # Spill everything
+        memory_target_fraction=False,
+        memory_spill_fraction=0.7,
+        memory_pause_fraction=False,
+    ),
+)
+async def test_fail_write_to_disk_spill(c, s, a):
+    """Test failure to evict a key, triggered by the spill threshold"""
+    with captured_logger(logging.getLogger("distributed.spill")) as logs:
+        bad = c.submit(FailToPickle, actual_size=1_000_000, key="bad")
+        await wait(bad)
 
-    await wait(future)
+        # Must wait for memory monitor to kick in
+        while True:
+            logs_value = logs.getvalue()
+            if logs_value:
+                break
+            await asyncio.sleep(0.01)
 
-    with pytest.raises(Exception) as info:
-        await future
+    assert "Failed to pickle" in logs_value
+    assert "Traceback" in logs_value
 
-    # workers still operational
-    result = await c.submit(inc, 1, workers=a.address)
-    assert result == 2
+    # key is in fast
+    assert bad.status == "finished"
+    assert bad.key in a.data.fast
+
+    await assert_basic_futures(c)
 
 
 @gen_cluster()
@@ -1166,6 +1227,61 @@ async def test_spill_target_threshold(c, s, a):
     assert set(a.data.disk) == {"y"}
 
 
+@requires_zict_210
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    worker_kwargs=dict(
+        memory_limit=1600,
+        max_spill=600,
+        memory_target_fraction=0.6,
+        memory_spill_fraction=False,
+        memory_pause_fraction=False,
+    ),
+)
+async def test_spill_constrained(c, s, w):
+    """Test distributed.worker.memory.max-spill parameter"""
+    # spills starts at 1600*0.6=960 bytes of managed memory
+
+    # size in memory ~200; size on disk ~400
+    x = c.submit(lambda: "x" * 200, key="x")
+    await wait(x)
+    # size in memory ~500; size on disk ~700
+    y = c.submit(lambda: "y" * 500, key="y")
+    await wait(y)
+
+    assert set(w.data) == {x.key, y.key}
+    assert set(w.data.memory) == {x.key, y.key}
+
+    z = c.submit(lambda: "z" * 500, key="z")
+    await wait(z)
+
+    assert set(w.data) == {x.key, y.key, z.key}
+
+    # max_spill has not been reached
+    assert set(w.data.memory) == {y.key, z.key}
+    assert set(w.data.disk) == {x.key}
+
+    # zb is individually larger than max_spill
+    zb = c.submit(lambda: "z" * 1700, key="zb")
+    await wait(zb)
+
+    assert set(w.data.memory) == {y.key, z.key, zb.key}
+    assert set(w.data.disk) == {x.key}
+
+    del zb
+    while "zb" in w.data:
+        await asyncio.sleep(0.01)
+
+    # zc is individually smaller than max_spill, but the evicted key together with
+    # x it exceeds max_spill
+    zc = c.submit(lambda: "z" * 500, key="zc")
+    await wait(zc)
+    assert set(w.data.memory) == {y.key, z.key, zc.key}
+    assert set(w.data.disk) == {x.key}
+
+
+@requires_zict
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
@@ -1208,6 +1324,7 @@ async def test_spill_spill_threshold(c, s, a):
         await asyncio.sleep(0.01)
 
 
+@requires_zict
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,

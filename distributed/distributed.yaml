@@ -145,6 +145,10 @@ distributed:
       pause: 0.80  # fraction at which we pause worker threads
       terminate: 0.95  # fraction at which we terminate the worker
 
+      # Max size of the spill file on disk (e.g. "10 GB")
+      # Set to false for no maximum.
+      max-spill: false
+
     http:
       routes:
         - distributed.http.worker.prometheus
