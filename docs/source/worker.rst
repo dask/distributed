@@ -161,13 +161,14 @@ by dask-worker ::
 Workers use a few different heuristics to keep memory use beneath this limit:
 
 1.  At 60% of memory load (as estimated by ``sizeof``), spill least recently used data
-    to disk
+    to disk.
 2.  At 70% of memory load (as reported by the OS), spill least recently used data to
     disk regardless of what is reported by ``sizeof``; this accounts for memory used by
-    the python interpreter, modules, global variables, memory leaks, etc.
+    the python interpreter, modules, global variables, memory leaks, etc. The spilling
+    stops when the memory goes below 60%, in a hysteresis cycle.
 3.  At 80% of memory load (as reported by the OS), stop accepting new work on local
-    thread pool
-4.  At 95% of memory load (as reported by the OS), terminate and restart the worker
+    thread pool.
+4.  At 95% of memory load (as reported by the OS), terminate and restart the worker.
 
 These values can be configured by modifying the ``~/.config/dask/distributed.yaml``
 file:
@@ -183,6 +184,9 @@ file:
          spill: 0.70  # fraction at which we spill to disk
          pause: 0.80  # fraction at which we pause worker threads
          terminate: 0.95  # fraction at which we terminate the worker
+
+It is possible to individually disable any of these by setting its value to False.
+Setting 'target' while leaving 'spill' active disables the spill hysteresis cycle.
 
 
 Spill data to disk

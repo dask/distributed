@@ -1365,11 +1365,66 @@ async def test_spill_no_target_threshold(c, s, a):
     await wait(f1)
     assert set(a.data.memory) == {"f1"}
 
-    futures = c.map(OverReport, range(int(100e6), int(100e6) + 8))
+    with captured_logger("distributed.worker") as logger:
+        futures = c.map(OverReport, range(int(100e6), int(100e6) + 5))
 
+        while not a.data.disk:
+            await asyncio.sleep(0.01)
+        assert "f1" in a.data.disk
+        await asyncio.sleep(0.5)
+
+    # Spilling normally starts at the spill threshold and stops at the target threshold.
+    # In this special case, it stops as soon as the process memory goes below the spill
+    # threshold, e.g. without a hysteresis cycle. Test that we didn't instead dump the
+    # whole data to disk (memory_limit * target = 0)
+    assert "Unmanaged memory use is high" not in logger.getvalue()
+
+
+@pytest.mark.slow
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    worker_kwargs=dict(
+        memory_limit="1 GiB",  # See FIXME note in previous test
+        memory_monitor_interval="10ms",
+        memory_target_fraction=0.4,
+        memory_spill_fraction=0.7,
+        memory_pause_fraction=False,
+    ),
+)
+async def test_spill_hysteresis(c, s, a):
+    memory = s.workers[a.address].memory.process
+    a.memory_limit = memory + 2**30
+
+    # Under-report managed memory, so that we reach the spill threshold for process
+    # memory withouth first reaching the target threshold for managed memory
+    class UnderReport:
+        def __init__(self):
+            self.data = "x" * (50 * 2**20)  # 50 MiB
+
+        def __sizeof__(self):
+            return 1
+
+        def __reduce__(self):
+            """Speed up test by writing very little to disk when spilling"""
+            return UnderReport, ()
+
+    max_in_memory = 0
+    futures = []
     while not a.data.disk:
+        futures.append(c.submit(UnderReport, pure=False))
+        max_in_memory = max(max_in_memory, len(a.data.memory))
+        await wait(futures)
+        await asyncio.sleep(0.1)
+        max_in_memory = max(max_in_memory, len(a.data.memory))
+
+    # If there were no hysteresis, we would lose exactly 1 key.
+    # Note that, for this test to be meaningful, memory must shrink down readily when
+    # we deallocate Python objects. This is not always the case on Windows and MacOSX;
+    # on Linux we set MALLOC_TRIM to help in that regard.
+    # To verify that this test is useful, set target=spill and watch it fail.
+    while len(a.data.memory) > max_in_memory - 3:
         await asyncio.sleep(0.01)
-    assert "f1" in a.data.disk
 
 
 @pytest.mark.slow

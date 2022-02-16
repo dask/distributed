@@ -3743,7 +3743,14 @@ class Worker(ServerNode):
                 frac * 100,
             )
             start = time()
-            target = self.memory_limit * self.memory_target_fraction
+            # Implement hysteresis cycle where spilling starts at the spill threshold
+            # and stops at the target threshold. Normally that here the target threshold
+            # defines process memory, whereas normally it defines reported managed
+            # memory (e.g. output of sizeof() ).
+            # If target=False, disable hysteresis.
+            target = self.memory_limit * (
+                self.memory_target_fraction or self.memory_spill_fraction
+            )
             count = 0
             need = memory - target
             while memory > target:
