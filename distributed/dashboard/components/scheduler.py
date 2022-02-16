@@ -3044,7 +3044,7 @@ class WorkerTable(DashboardComponent):
             "memory",
             "memory_limit",
             "memory_percent",
-            "memory_managed",
+            "memory_managed_in_memory",
             "memory_unmanaged_old",
             "memory_unmanaged_recent",
             "memory_spilled",
@@ -3072,7 +3072,7 @@ class WorkerTable(DashboardComponent):
             "memory",
             "memory_limit",
             "memory_percent",
-            "memory_managed",
+            "memory_managed_in_memory",
             "memory_unmanaged_old",
             "memory_unmanaged_recent",
             "memory_spilled",
@@ -3083,7 +3083,7 @@ class WorkerTable(DashboardComponent):
         column_title_renames = {
             "memory_limit": "limit",
             "memory_percent": "memory %",
-            "memory_managed": "managed",
+            "memory_managed_in_memory": "managed",
             "memory_unmanaged_old": "unmanaged old",
             "memory_unmanaged_recent": "unmanaged recent",
             "memory_spilled": "spilled",
@@ -3104,7 +3104,7 @@ class WorkerTable(DashboardComponent):
             "memory_percent": NumberFormatter(format="0.0 %"),
             "memory": NumberFormatter(format="0.0 b"),
             "memory_limit": NumberFormatter(format="0.0 b"),
-            "memory_managed": NumberFormatter(format="0.0 b"),
+            "memory_managed_in_memory": NumberFormatter(format="0.0 b"),
             "memory_unmanaged_old": NumberFormatter(format="0.0 b"),
             "memory_unmanaged_recent": NumberFormatter(format="0.0 b"),
             "memory_spilled": NumberFormatter(format="0.0 b"),
@@ -3231,7 +3231,7 @@ class WorkerTable(DashboardComponent):
             else:
                 data["memory_percent"][-1] = ""
             data["memory_limit"][-1] = ws.memory_limit
-            data["memory_managed"][-1] = minfo.managed_in_memory
+            data["memory_managed_in_memory"][-1] = minfo.managed_in_memory
             data["memory_unmanaged_old"][-1] = minfo.unmanaged_old
             data["memory_unmanaged_recent"][-1] = minfo.unmanaged_recent
             data["memory_unmanaged_recent"][-1] = minfo.unmanaged_recent

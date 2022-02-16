@@ -5,7 +5,7 @@ import time
 from collections.abc import Mapping
 from contextlib import contextmanager
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import zict
 from packaging.version import parse as parse_version
@@ -18,6 +18,21 @@ from .sizeof import safe_sizeof
 
 logger = logging.getLogger(__name__)
 has_zict_210 = parse_version(zict.__version__) > parse_version("2.0.0")
+
+
+class SpilledSize(NamedTuple):
+    """Size of a key/value pair when spilled to disk, in bytes"""
+
+    # output of sizeof()
+    memory: int
+    # pickled size
+    disk: int
+
+    def __add__(self, other: SpilledSize) -> SpilledSize:  # type: ignore
+        return SpilledSize(self.memory + other.memory, self.disk + other.disk)
+
+    def __sub__(self, other: SpilledSize) -> SpilledSize:  # type: ignore
+        return SpilledSize(self.memory - other.memory, self.disk - other.disk)
 
 
 class SpillBuffer(zict.Buffer):
@@ -182,9 +197,14 @@ class SpillBuffer(zict.Buffer):
         return self.slow
 
     @property
-    def spilled_total(self) -> int:
-        """Number of bytes spilled to disk.
-        Note that this is the pickled size, which may differ from the output of sizeof().
+    def spilled_total(self) -> SpilledSize:
+        """Number of bytes spilled to disk. Tuple of
+
+        - output of sizeof()
+        - pickled size
+
+        The two may differ substantially, e.g. if sizeof() is inaccurate or in case of
+        compression.
         """
         return self.slow.total_weight
 
@@ -208,8 +228,8 @@ class HandledError(Exception):
 
 class Slow(zict.Func):
     max_weight: int | Literal[False]
-    weight_by_key: dict[str, int]
-    total_weight: int
+    weight_by_key: dict[str, SpilledSize]
+    total_weight: SpilledSize
 
     def __init__(self, spill_directory: str, max_weight: int | Literal[False] = False):
         super().__init__(
@@ -219,7 +239,7 @@ class Slow(zict.Func):
         )
         self.max_weight = max_weight
         self.weight_by_key = {}
-        self.total_weight = 0
+        self.total_weight = SpilledSize(0, 0)
 
     def __setitem__(self, key: str, value: Any) -> None:
         try:
@@ -239,11 +259,11 @@ class Slow(zict.Func):
             assert key not in self.weight_by_key
         else:
             self.d.pop(key, None)
-            self.total_weight -= self.weight_by_key.pop(key, 0)
+            self.total_weight -= self.weight_by_key.pop(key, SpilledSize(0, 0))
 
         if (
             self.max_weight is not False
-            and self.total_weight + pickled_size > self.max_weight
+            and self.total_weight.disk + pickled_size > self.max_weight
         ):
             # Stop callbacks and ensure that the key ends up in SpillBuffer.fast
             # To be caught by SpillBuffer.__setitem__
@@ -253,8 +273,9 @@ class Slow(zict.Func):
         # This may raise OSError, which is caught by SpillBuffer above.
         self.d[key] = pickled
 
-        self.weight_by_key[key] = pickled_size
-        self.total_weight += pickled_size
+        weight = SpilledSize(safe_sizeof(value), pickled_size)
+        self.weight_by_key[key] = weight
+        self.total_weight += weight
 
     def __delitem__(self, key: str) -> None:
         super().__delitem__(key)

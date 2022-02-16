@@ -1159,7 +1159,13 @@ class Worker(ServerNode):
         elif self._status != Status.closed:
             self.loop.call_later(0.05, self._send_worker_status_change)
 
-    async def get_metrics(self):
+    async def get_metrics(self) -> dict:
+        try:
+            spilled_memory, spilled_disk = self.data.spilled_total  # type: ignore
+        except AttributeError:
+            # spilling is disabled
+            spilled_memory, spilled_disk = 0, 0
+
         out = dict(
             executing=self.executing_count,
             in_memory=len(self.data),
@@ -1170,7 +1176,10 @@ class Worker(ServerNode):
                 "workers": dict(self.bandwidth_workers),
                 "types": keymap(typename, self.bandwidth_types),
             },
-            spilled_nbytes=getattr(self.data, "spilled_total", 0),
+            spilled_nbytes={
+                "memory": spilled_memory,
+                "disk": spilled_disk,
+            },
         )
         out.update(self.monitor.recent())
 
