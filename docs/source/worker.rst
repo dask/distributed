@@ -285,7 +285,8 @@ unmanaged recent
 
 spilled
     managed memory that has been spilled to disk. This is not included in the 'managed'
-    measure above.
+    measure above. This measure reports the number of bytes actually spilled to disk,
+    which may differ from the output of ``sizeof`` particularly in case of compression.
 
 The sum of managed + unmanaged + unmanaged recent is equal by definition to the process
 memory.

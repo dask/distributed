@@ -52,7 +52,8 @@ def get_workflow_listing(repo="dask/distributed", branch="main", event="push"):
     """
     Get a list of workflow runs from GitHub actions.
     """
-    params = {"per_page": 100, "branch": branch, "event": event}
+    since = str((pandas.Timestamp.now(tz="UTC") - pandas.Timedelta(days=90)).date())
+    params = {"per_page": 100, "branch": branch, "event": event, "created": f">{since}"}
     r = get_from_github(
         f"https://api.github.com/repos/{repo}/actions/runs", params=params
     )
@@ -164,7 +165,9 @@ if __name__ == "__main__":
     if not TOKEN:
         raise RuntimeError("Failed to find a GitHub Token")
     print("Getting all recent workflows...")
-    workflows = get_workflow_listing()
+    workflows = get_workflow_listing(event="push") + get_workflow_listing(
+        event="schedule"
+    )
 
     # Filter the workflows listing to be in the retention period,
     # and only be test runs (i.e., no linting) that completed.
