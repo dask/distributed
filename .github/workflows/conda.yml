@@ -46,8 +46,7 @@ jobs:
           arr=($(conda search --override-channels -c dask/label/dev dask-core | tail -n 1))
 
           # extract dask-core pre-release version / build
-          export DASK_VERSION=${arr[1]}
-          export DASK_BUILD=${arr[2]}
+          export DASK_CORE_VERSION=${arr[1]}
 
           # distributed pre-release build
           conda mambabuild continuous_integration/recipes/distributed \

@@ -23,7 +23,6 @@ dependencies:
   - lz4  # Only tested here
   - msgpack-python
   - netcdf4
-  - pillow<9.0  # https://github.com/pytorch/pytorch/issues/72293
   - paramiko
   - pre-commit
   - prometheus_client

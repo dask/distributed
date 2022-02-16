@@ -284,13 +284,16 @@ class MemoryState:
     """Memory readings on a worker or on the whole cluster.
 
     managed
-        Sum of the output of sizeof() for all dask keys held by the worker, both in
-        memory and spilled to disk
+        Sum of the output of sizeof() for all dask keys held by the worker in memory,
+        plus number of bytes spilled to disk
     managed_in_memory
-        Sum of the output of sizeof() for the dask keys held in RAM
+        Sum of the output of sizeof() for the dask keys held in RAM. Note that this may
+        be inaccurate, which may cause inaccurate unmanaged memory (see below).
     managed_spilled
-        Sum of the output of sizeof() for the dask keys spilled to the hard drive.
-        Note that this is the size in memory; serialized size may be different.
+        Number of bytes  for the dask keys spilled to the hard drive.
+        Note that this is the size on disk; size in memory may be different due to
+        compression and inaccuracies in sizeof(). In other words, given the same keys,
+        'managed' will change depending if the keys are in memory or spilled.
     process
         Total RSS memory measured by the OS on the worker process.
         This is always exactly equal to managed_in_memory + unmanaged.
@@ -330,7 +333,7 @@ class MemoryState:
         *,
         process: Py_ssize_t,
         unmanaged_old: Py_ssize_t,
-        managed: Py_ssize_t,
+        managed_in_memory: Py_ssize_t,
         managed_spilled: Py_ssize_t,
     ):
         # Some data arrives with the heartbeat, some other arrives in realtime as the
@@ -338,9 +341,9 @@ class MemoryState:
         # This can cause glitches where a partial measure is larger than the whole, so
         # we need to force all numbers to add up exactly by definition.
         self._process = process
-        self._managed_spilled = min(managed_spilled, managed)
+        self._managed_in_memory = min(self._process, managed_in_memory)
+        self._managed_spilled = managed_spilled
         # Subtractions between unsigned ints guaranteed by construction to be >= 0
-        self._managed_in_memory = min(managed - self._managed_spilled, process)
         self._unmanaged_old = min(unmanaged_old, process - self._managed_in_memory)
 
     @property
@@ -361,14 +364,22 @@ class MemoryState:
 
     @classmethod
     def sum(cls, *infos: "MemoryState") -> "MemoryState":
-        out = MemoryState(process=0, unmanaged_old=0, managed=0, managed_spilled=0)
+        process = 0
+        unmanaged_old = 0
+        managed_in_memory = 0
+        managed_spilled = 0
         ms: MemoryState
         for ms in infos:
-            out._process += ms._process
-            out._managed_spilled += ms._managed_spilled
-            out._managed_in_memory += ms._managed_in_memory
-            out._unmanaged_old += ms._unmanaged_old
-        return out
+            process += ms._process
+            unmanaged_old += ms._unmanaged_old
+            managed_spilled += ms._managed_spilled
+            managed_in_memory += ms._managed_in_memory
+        return MemoryState(
+            process=process,
+            unmanaged_old=unmanaged_old,
+            managed_in_memory=managed_in_memory,
+            managed_spilled=managed_spilled,
+        )
 
     @property
     def managed(self) -> Py_ssize_t:
@@ -673,8 +684,11 @@ class WorkerState:
             # metrics["memory"] is None if the worker sent a heartbeat before its
             # SystemMonitor ever had a chance to run
             process=self._metrics["memory"] or 0,
-            managed=self._nbytes,
-            managed_spilled=self._metrics["spilled_nbytes"],
+            # self._nbytes is instantaneous; metrics may lag behind by a heartbeat
+            managed_in_memory=max(
+                0, self._nbytes - self._metrics["spilled_nbytes"]["memory"]
+            ),
+            managed_spilled=self._metrics["spilled_nbytes"]["disk"],
             unmanaged_old=self._memory_unmanaged_old,
         )
 
@@ -4319,7 +4333,10 @@ class Scheduler(SchedulerState, ServerNode):
         # SystemMonitor ever had a chance to run.
         # ws._nbytes is updated at a different time and sizeof() may not be accurate,
         # so size may be (temporarily) negative; floor it to zero.
-        size = max(0, (metrics["memory"] or 0) - ws._nbytes + metrics["spilled_nbytes"])
+        size = max(
+            0,
+            (metrics["memory"] or 0) - ws._nbytes + metrics["spilled_nbytes"]["memory"],
+        )
 
         ws._memory_other_history.append((local_now, size))
         if not memory_unmanaged_old:
