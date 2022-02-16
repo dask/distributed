@@ -98,6 +98,13 @@ tick_maximum_delay = parse_timedelta(
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 
+def _expects_comm(func):
+    import inspect
+
+    sig = inspect.signature(func)
+    return "comm" in sig.parameters or "stream" in sig.parameters
+
+
 class Server:
     """Dask Distributed Server
 
@@ -379,7 +386,7 @@ class Server:
             _, self._port = get_address_host_port(self.address)
         return self._port
 
-    def identity(self, comm=None) -> dict[str, str]:
+    def identity(self) -> dict[str, str]:
         return {"type": type(self).__name__, "id": self.id}
 
     def _to_dict(
@@ -404,7 +411,7 @@ class Server:
         info = {k: v for k, v in info.items() if k not in exclude}
         return recursive_to_dict(info, exclude=exclude)
 
-    def echo(self, comm=None, data=None):
+    def echo(self, data=None):
         return data
 
     async def listen(self, port_or_addr=None, allow_offload=True, **kwargs):
@@ -514,7 +521,10 @@ class Server:
 
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
-                        result = handler(comm, **msg)
+                        if _expects_comm(handler):
+                            result = handler(comm, **msg)
+                        else:
+                            result = handler(**msg)
                         if inspect.isawaitable(result):
                             result = asyncio.ensure_future(result)
                             self._ongoing_coroutines.add(result)

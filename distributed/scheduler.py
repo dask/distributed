@@ -4037,7 +4037,7 @@ class Scheduler(SchedulerState, ServerNode):
             tasks=parent._tasks,
         )
 
-    def identity(self, comm=None):
+    def identity(self):
         """Basic information about ourselves and our cluster"""
         parent: SchedulerState = cast(SchedulerState, self)
         d = {
@@ -4173,7 +4173,7 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle(f"dask-scheduler [{self.address}]")
         return self
 
-    async def close(self, comm=None, fast=False, close_workers=False):
+    async def close(self, fast=False, close_workers=False):
         """Send cleanup signal to all coroutines then wait until finished
 
         See Also
@@ -4243,7 +4243,7 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle("dask-scheduler [closed]")
         disable_gc_diagnosis()
 
-    async def close_worker(self, comm=None, worker=None, safe=None):
+    async def close_worker(self, worker: str, safe: bool = False):
         """Remove a worker from the cluster
 
         This both removes the worker from our local state and also sends a
@@ -4975,7 +4975,7 @@ class Scheduler(SchedulerState, ServerNode):
                 **kwargs,
             )
 
-    def stimulus_retry(self, comm=None, keys=None, client=None):
+    def stimulus_retry(self, keys, client=None):
         parent: SchedulerState = cast(SchedulerState, self)
         logger.info("Client %s requests to retry %d keys", client, len(keys))
         if client:
@@ -5005,7 +5005,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return tuple(seen)
 
-    async def remove_worker(self, comm=None, address=None, safe=False, close=True):
+    async def remove_worker(self, address: str, safe: bool = False, close: bool = True):
         """
         Remove worker from cluster
 
@@ -5555,7 +5555,7 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 self.transitions({key: "forgotten"})
 
-    def release_worker_data(self, comm=None, key=None, worker=None):
+    def release_worker_data(self, key, worker):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState = parent._workers_dv.get(worker)
         ts: TaskState = parent._tasks.get(key)
@@ -5771,9 +5771,7 @@ class Scheduler(SchedulerState, ServerNode):
                 f"Could not find plugin {name!r} among the current scheduler plugins"
             )
 
-    async def register_scheduler_plugin(
-        self, comm=None, plugin=None, name=None, idempotent=None
-    ):
+    async def register_scheduler_plugin(self, plugin, name=None, idempotent=None):
         """Register a plugin on the scheduler."""
         if not dask.config.get("distributed.scheduler.pickle"):
             raise ValueError(
@@ -5910,7 +5908,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return keys
 
-    async def gather(self, comm=None, keys=None, serializers=None):
+    async def gather(self, keys, serializers=None):
         """Collect data from workers to the scheduler"""
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState
@@ -7027,7 +7025,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Retired worker %s", ws._address)
         return ws._address, ws.identity()
 
-    def add_keys(self, comm=None, worker=None, keys=(), stimulus_id=None):
+    def add_keys(self, worker=None, keys=(), stimulus_id=None):
         """
         Learn that a worker has certain keys
 
@@ -7063,12 +7061,10 @@ class Scheduler(SchedulerState, ServerNode):
 
     def update_data(
         self,
-        comm=None,
         *,
         who_has: dict,
         nbytes: dict,
         client=None,
-        serializers=None,
     ):
         """
         Learn that new data has entered the network from an external source
@@ -7176,7 +7172,7 @@ class Scheduler(SchedulerState, ServerNode):
             del v["last_seen"]
         return ident
 
-    def get_processing(self, comm=None, workers=None):
+    def get_processing(self, workers=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState
         ts: TaskState
@@ -7191,7 +7187,7 @@ class Scheduler(SchedulerState, ServerNode):
                 for w, ws in parent._workers_dv.items()
             }
 
-    def get_who_has(self, comm=None, keys=None):
+    def get_who_has(self, keys=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState
         ts: TaskState
@@ -7208,7 +7204,7 @@ class Scheduler(SchedulerState, ServerNode):
                 for key, ts in parent._tasks.items()
             }
 
-    def get_has_what(self, comm=None, workers=None):
+    def get_has_what(self, workers=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState
         ts: TaskState
@@ -7226,7 +7222,7 @@ class Scheduler(SchedulerState, ServerNode):
                 for w, ws in parent._workers_dv.items()
             }
 
-    def get_ncores(self, comm=None, workers=None):
+    def get_ncores(self, workers=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState
         if workers is not None:
@@ -7239,7 +7235,7 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             return {w: ws._nthreads for w, ws in parent._workers_dv.items()}
 
-    def get_ncores_running(self, comm=None, workers=None):
+    def get_ncores_running(self, workers=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ncores = self.get_ncores(workers=workers)
         return {
@@ -7248,7 +7244,7 @@ class Scheduler(SchedulerState, ServerNode):
             if parent._workers_dv[w].status == Status.running
         }
 
-    async def get_call_stack(self, comm=None, keys=None):
+    async def get_call_stack(self, keys=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState
         dts: TaskState
@@ -7279,7 +7275,7 @@ class Scheduler(SchedulerState, ServerNode):
         response = {w: r for w, r in zip(workers, results) if r}
         return response
 
-    def get_nbytes(self, comm=None, keys=None, summary=True):
+    def get_nbytes(self, keys=None, summary=True):
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState
         with log_errors():
@@ -7298,7 +7294,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             return result
 
-    def run_function(self, stream, function, args=(), kwargs={}, wait=True):
+    def run_function(self, comm, function, args=(), kwargs=None, wait=True):
         """Run a function within this process
 
         See Also
@@ -7313,11 +7309,11 @@ class Scheduler(SchedulerState, ServerNode):
                 "deserializing arbitrary bytestrings using pickle via the "
                 "'distributed.scheduler.pickle' configuration setting."
             )
-
+        kwargs = kwargs or {}
         self.log_event("all", {"action": "run-function", "function": function})
-        return run(self, stream, function=function, args=args, kwargs=kwargs, wait=wait)
+        return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
-    def set_metadata(self, comm=None, keys=None, value=None):
+    def set_metadata(self, keys=None, value=None):
         parent: SchedulerState = cast(SchedulerState, self)
         metadata = parent._task_metadata
         for key in keys[:-1]:
@@ -7326,7 +7322,7 @@ class Scheduler(SchedulerState, ServerNode):
             metadata = metadata[key]
         metadata[keys[-1]] = value
 
-    def get_metadata(self, comm=None, keys=None, default=no_default):
+    def get_metadata(self, keys, default=no_default):
         parent: SchedulerState = cast(SchedulerState, self)
         metadata = parent._task_metadata
         for key in keys[:-1]:
@@ -7339,7 +7335,7 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 raise
 
-    def set_restrictions(self, comm=None, worker=None):
+    def set_restrictions(self, worker: "dict[str, set[str] | str]"):
         ts: TaskState
         for key, restrictions in worker.items():
             ts = self.tasks[key]
@@ -7347,7 +7343,7 @@ class Scheduler(SchedulerState, ServerNode):
                 restrictions = {restrictions}
             ts._worker_restrictions = set(restrictions)
 
-    def get_task_prefix_states(self, comm=None):
+    def get_task_prefix_states(self):
         with log_errors():
             state = {}
 
@@ -7367,14 +7363,14 @@ class Scheduler(SchedulerState, ServerNode):
 
         return state
 
-    def get_task_status(self, comm=None, keys=None):
+    def get_task_status(self, keys=None):
         parent: SchedulerState = cast(SchedulerState, self)
         return {
             key: (parent._tasks[key].state if key in parent._tasks else None)
             for key in keys
         }
 
-    def get_task_stream(self, comm=None, start=None, stop=None, count=None):
+    def get_task_stream(self, start=None, stop=None, count=None):
         from distributed.diagnostics.task_stream import TaskStreamPlugin
 
         if TaskStreamPlugin.name not in self.plugins:
@@ -7384,11 +7380,11 @@ class Scheduler(SchedulerState, ServerNode):
 
         return plugin.collect(start=start, stop=stop, count=count)
 
-    def start_task_metadata(self, comm=None, name=None):
+    def start_task_metadata(self, name=None):
         plugin = CollectTaskMetaDataPlugin(scheduler=self, name=name)
         self.add_plugin(plugin)
 
-    def stop_task_metadata(self, comm=None, name=None):
+    def stop_task_metadata(self, name=None):
         plugins = [
             p
             for p in list(self.plugins.values())
@@ -7517,7 +7513,7 @@ class Scheduler(SchedulerState, ServerNode):
     # Utility functions #
     #####################
 
-    def add_resources(self, comm=None, worker=None, resources=None):
+    def add_resources(self, worker: str, resources=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState = parent._workers_dv[worker]
         if resources:
@@ -7582,7 +7578,7 @@ class Scheduler(SchedulerState, ServerNode):
                 out.update({ww for ww in parent._workers if w in ww})  # TODO: quadratic
         return list(out)
 
-    def start_ipython(self, comm=None):
+    def start_ipython(self):
         """Start an IPython kernel
 
         Returns Jupyter connection info dictionary.
@@ -7683,7 +7679,7 @@ class Scheduler(SchedulerState, ServerNode):
         return {"counts": counts, "keys": keys}
 
     async def performance_report(
-        self, comm=None, start=None, last_count=None, code="", mode=None
+        self, start: float, last_count: int, code="", mode=None
     ):
         parent: SchedulerState = cast(SchedulerState, self)
         stop = time()
@@ -7709,7 +7705,7 @@ class Scheduler(SchedulerState, ServerNode):
         # Task stream
         task_stream = self.get_task_stream(start=start)
         total_tasks = len(task_stream)
-        timespent = defaultdict(int)
+        timespent: dict[int, float] = defaultdict(int)
         for d in task_stream:
             for x in d.get("startstops", []):
                 timespent[x["action"]] += x["stop"] - x["start"]
@@ -7850,7 +7846,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return data
 
-    async def get_worker_logs(self, comm=None, n=None, workers=None, nanny=False):
+    async def get_worker_logs(self, n=None, workers=None, nanny=False):
         results = await self.broadcast(
             msg={"op": "get_logs", "n": n}, workers=workers, nanny=nanny
         )
@@ -7885,7 +7881,7 @@ class Scheduler(SchedulerState, ServerNode):
     def unsubscribe_topic(self, topic, client):
         self.event_subscriber[topic].discard(client)
 
-    def get_events(self, comm=None, topic=None):
+    def get_events(self, topic=None):
         if topic is not None:
             return tuple(self.events[topic])
         else:
@@ -7990,7 +7986,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
             self.loop.add_callback(self.close)
 
-    def adaptive_target(self, comm=None, target_duration=None):
+    def adaptive_target(self, target_duration=None):
         """Desired number of workers based on the current workload
 
         This looks at the current running tasks and memory use, and returns a

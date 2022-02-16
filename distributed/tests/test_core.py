@@ -13,6 +13,7 @@ from distributed.core import (
     ConnectionPool,
     Server,
     Status,
+    _expects_comm,
     clean_exception,
     coerce_to_address,
     connect,
@@ -835,7 +836,7 @@ async def test_deserialize_error():
 
     comm = await connect(server.address, deserialize=False)
     with pytest.raises(Exception) as info:
-        await send_recv(comm, op="throws")
+        await send_recv(comm, op="throws", x="foo")
 
     assert type(info.value) == Exception
     for c in str(info.value):
@@ -994,3 +995,47 @@ async def test_close_grace_period_for_handlers():
         await asyncio.wait_for(fut, 0.5)
     await comm.close()
     await server.close()
+
+
+def test_expects_comm():
+    class A:
+        def empty(self):
+            ...
+
+        def one_arg(self, arg):
+            ...
+
+        def comm_arg(self, comm):
+            ...
+
+        def stream_arg(self, stream):
+            ...
+
+        def two_arg(self, arg, other):
+            ...
+
+        def comm_arg_other(self, comm, other):
+            ...
+
+        def stream_arg_other(self, stream, other):
+            ...
+
+        def arg_kwarg(self, arg, other=None):
+            ...
+
+        def comm_argonly(self, comm, *, other):
+            ...
+
+        def comm_kwarg_only(self, /, comm, other):
+            ...
+
+    assert not _expects_comm(A.empty)
+    assert not _expects_comm(A.one_arg)
+    assert _expects_comm(A.comm_arg)
+    assert _expects_comm(A.stream_arg)
+    assert not _expects_comm(A.two_arg)
+    assert _expects_comm(A.comm_arg_other)
+    assert _expects_comm(A.stream_arg_other)
+    assert not _expects_comm(A.arg_kwarg)
+    assert _expects_comm(A.comm_argonly)
+    assert _expects_comm(A.comm_kwarg_only)

@@ -99,7 +99,7 @@ async def test_str(s, a, b):
 @gen_cluster(nthreads=[])
 async def test_identity(s):
     async with Worker(s.address) as w:
-        ident = w.identity(None)
+        ident = w.identity()
         assert "Worker" in ident["type"]
         assert ident["scheduler"] == s.address
         assert isinstance(ident["nthreads"], int)
