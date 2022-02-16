@@ -98,32 +98,6 @@ _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
 
 
-@pytest.fixture(scope="session")
-def valid_python_script(tmpdir_factory):
-    local_file = tmpdir_factory.mktemp("data").join("file.py")
-    local_file.write("print('hello world!')")
-    return local_file
-
-
-@pytest.fixture(scope="session")
-def client_contract_script(tmpdir_factory):
-    local_file = tmpdir_factory.mktemp("data").join("distributed_script.py")
-    lines = (
-        "from distributed import Client",
-        "e = Client('127.0.0.1:8989')",
-        "print(e)",
-    )
-    local_file.write("\n".join(lines))
-    return local_file
-
-
-@pytest.fixture(scope="session")
-def invalid_python_script(tmpdir_factory):
-    local_file = tmpdir_factory.mktemp("data").join("file.py")
-    local_file.write("a+1")
-    return local_file
-
-
 async def cleanup_global_workers():
     for worker in Worker._instances:
         await worker.close(report=False, executor_wait=False)
