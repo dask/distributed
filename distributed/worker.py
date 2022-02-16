@@ -471,6 +471,9 @@ class Worker(ServerNode):
     memory_pause_fraction: float or False
         Fraction of memory at which we stop running new tasks
         (default: read from config key distributed.worker.memory.pause)
+    max_spill: int, string or False
+        Limit of number of bytes to be spilled on disk.
+        (default: read from config key distributed.worker.memory.max-spill)
     executor: concurrent.futures.Executor, dict[str, concurrent.futures.Executor], "offload"
         The executor(s) to use. Depending on the type, it has the following meanings:
             - Executor instance: The default executor.
@@ -589,6 +592,7 @@ class Worker(ServerNode):
     memory_target_fraction: float | Literal[False]
     memory_spill_fraction: float | Literal[False]
     memory_pause_fraction: float | Literal[False]
+    max_spill: int | Literal[False]
     data: MutableMapping[str, Any]  # {task key: task payload}
     actors: dict[str, Actor | None]
     loop: IOLoop
@@ -641,6 +645,7 @@ class Worker(ServerNode):
         memory_target_fraction: float | Literal[False] | None = None,
         memory_spill_fraction: float | Literal[False] | None = None,
         memory_pause_fraction: float | Literal[False] | None = None,
+        max_spill: float | str | Literal[False] | None = None,
         extensions: list[type] | None = None,
         metrics: Mapping[str, Callable[[Worker], Any]] = DEFAULT_METRICS,
         startup_information: Mapping[
@@ -886,6 +891,10 @@ class Worker(ServerNode):
             else dask.config.get("distributed.worker.memory.pause")
         )
 
+        if max_spill is None:
+            max_spill = dask.config.get("distributed.worker.memory.max-spill")
+        self.max_spill = False if max_spill is False else parse_bytes(max_spill)
+
         if isinstance(data, MutableMapping):
             self.data = data
         elif callable(data):
@@ -905,7 +914,9 @@ class Worker(ServerNode):
             else:
                 target = sys.maxsize
             self.data = SpillBuffer(
-                os.path.join(self.local_directory, "storage"), target=target
+                os.path.join(self.local_directory, "storage"),
+                target=target,
+                max_spill=self.max_spill,
             )
         else:
             self.data = {}
@@ -3738,8 +3749,11 @@ class Worker(ServerNode):
                         format_bytes(self.memory_limit),
                     )
                     break
-                k, v, weight = self.data.fast.evict()
-                del k, v
+                weight = self.data.evict()
+                if weight == -1:
+                    # Failed to evict: disk full, spill size limit exceeded, or pickle error
+                    break
+
                 total += weight
                 count += 1
                 # If the current buffer is filled with a lot of small values,
@@ -3756,6 +3770,7 @@ class Worker(ServerNode):
                     # before trying to evict even more data.
                     self._throttled_gc.collect()
                     memory = proc.memory_info().rss
+
             check_pause(memory)
             if count:
                 logger.debug(
