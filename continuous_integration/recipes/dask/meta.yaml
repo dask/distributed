@@ -18,9 +18,9 @@ build:
 
 requirements:
   host:
-    - python >=3.7
+    - python >=3.8
   run:
-    - python >=3.7
+    - python >=3.8
     - dask-core >={{ dask_version }}
     - distributed {{ version }}=*_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
     - cytoolz >=0.8.2
