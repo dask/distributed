@@ -2406,7 +2406,12 @@ async def test_quiet_cluster_round_robin(c, s, a, b):
 
 
 def test_memorystate():
-    m = MemoryState(process=100, unmanaged_old=15, managed=80, managed_spilled=12)
+    m = MemoryState(
+        process=100,
+        unmanaged_old=15,
+        managed_in_memory=68,
+        managed_spilled=12,
+    )
     assert m.process == 100
     assert m.managed == 80
     assert m.managed_in_memory == 68
@@ -2431,8 +2436,18 @@ def test_memorystate():
 
 
 def test_memorystate_sum():
-    m1 = MemoryState(process=100, unmanaged_old=15, managed=80, managed_spilled=12)
-    m2 = MemoryState(process=80, unmanaged_old=10, managed=60, managed_spilled=2)
+    m1 = MemoryState(
+        process=100,
+        unmanaged_old=15,
+        managed_in_memory=68,
+        managed_spilled=12,
+    )
+    m2 = MemoryState(
+        process=80,
+        unmanaged_old=10,
+        managed_in_memory=58,
+        managed_spilled=2,
+    )
     m3 = MemoryState.sum(m1, m2)
     assert m3.process == 180
     assert m3.unmanaged_old == 25
@@ -2441,14 +2456,17 @@ def test_memorystate_sum():
 
 
 @pytest.mark.parametrize(
-    "process,unmanaged_old,managed,managed_spilled", list(product(*[[0, 1, 2, 3]] * 4))
+    "process,unmanaged_old,managed_in_memory,managed_spilled",
+    list(product(*[[0, 1, 2, 3]] * 4)),
 )
-def test_memorystate_adds_up(process, unmanaged_old, managed, managed_spilled):
+def test_memorystate_adds_up(
+    process, unmanaged_old, managed_in_memory, managed_spilled
+):
     """Input data is massaged by __init__ so that everything adds up by construction"""
     m = MemoryState(
         process=process,
         unmanaged_old=unmanaged_old,
-        managed=managed,
+        managed_in_memory=managed_in_memory,
         managed_spilled=managed_spilled,
     )
     assert m.managed_in_memory + m.unmanaged == m.process
@@ -2572,12 +2590,28 @@ async def test_memory(c, s, *nannies):
         ]
     )
 
-    # Timeout needs to be enough to spill 100 MiB to disk
-    await asyncio.gather(
-        assert_memory(a, "managed_spilled", 50, 51, timeout=10),
-        assert_memory(b, "managed_spilled", 50, 51, timeout=10),
-        assert_memory(s, "managed_spilled", 100, 101, timeout=10.1),
-    )
+    # dask serialization compresses ("x" * 50 * 2**20) from 50 MiB to ~200 kiB.
+    # Test that managed_spilled reports the actual size on disk and not the output of
+    # sizeof().
+    # FIXME https://github.com/dask/distributed/issues/5807
+    #       This would be more robust if we could just enable zlib compression in
+    #       @gen_cluster
+    from distributed.protocol.compression import default_compression
+
+    if default_compression:
+        await asyncio.gather(
+            assert_memory(a, "managed_spilled", 0.1, 0.5, timeout=3),
+            assert_memory(b, "managed_spilled", 0.1, 0.5, timeout=3),
+            assert_memory(s, "managed_spilled", 0.2, 1.0, timeout=3.1),
+        )
+    else:
+        # Long timeout to allow spilling 100 MiB to disk
+        await asyncio.gather(
+            assert_memory(a, "managed_spilled", 50, 51, timeout=10),
+            assert_memory(b, "managed_spilled", 50, 51, timeout=10),
+            assert_memory(s, "managed_spilled", 100, 102, timeout=10.1),
+        )
+
     # FIXME on Windows and MacOS we occasionally observe managed_in_memory = 49 bytes
     await asyncio.gather(
         assert_memory(a, "managed_in_memory", 0, 0.1, timeout=0),
