@@ -1366,7 +1366,7 @@ async def test_spill_no_target_threshold(c, s, a):
     assert set(a.data.memory) == {"f1"}
 
     with captured_logger("distributed.worker") as logger:
-        futures = c.map(OverReport, range(int(100e6), int(100e6) + 5))
+        futures = c.map(OverReport, range(int(100e6), int(100e6) + 8))
 
         while not a.data.disk:
             await asyncio.sleep(0.01)
