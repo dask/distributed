@@ -291,6 +291,10 @@ async def test_web_preload_worker(cleanup, worker_preload):
             assert nanny.scheduler_addr == s.address
 
 
+# This test is blocked on https://github.com/dask/distributed/issues/5819
+@pytest.mark.xfail(
+    reason="The preload argument to the client isn't supported yet", strict=True
+)
 @gen_cluster(nthreads=[])
 async def test_client_preload_text(s: Scheduler):
     text = dedent(
@@ -326,6 +330,10 @@ async def test_client_preload_config(s):
         assert c.foo == "teardown"
 
 
+# This test is blocked on https://github.com/dask/distributed/issues/5819
+@pytest.mark.xfail(
+    reason="The preload argument to the client isn't supported yet", strict=True
+)
 @gen_cluster(nthreads=[])
 async def test_client_preload_click(s):
     text = dedent(

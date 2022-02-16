@@ -773,8 +773,6 @@ class Client(SyncMethodMixin):
         extensions=DEFAULT_EXTENSIONS,
         direct_to_workers=None,
         connection_limit=512,
-        preload=None,
-        preload_argv=None,
         **kwargs,
     ):
         if timeout == no_default:
@@ -925,14 +923,10 @@ class Client(SyncMethodMixin):
         for ext in extensions:
             ext(self)
 
-        if not preload:
-            preload = dask.config.get("distributed.client.preload")
-        if not preload_argv:
-            preload_argv = dask.config.get("distributed.client.preload-argv")
+        preload = dask.config.get("distributed.client.preload")
+        preload_argv = dask.config.get("distributed.client.preload-argv")
 
         # These two asserts are for typing
-        assert preload is not None
-        assert preload_argv is not None
         self.preloads = preloading.process_preloads(self, preload, preload_argv)
 
         self.start(timeout=timeout)
