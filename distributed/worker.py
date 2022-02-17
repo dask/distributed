@@ -16,6 +16,7 @@ from collections import defaultdict, deque, namedtuple
 from collections.abc import (
     Callable,
     Collection,
+    Container,
     Iterable,
     Iterator,
     Mapping,
@@ -26,7 +27,7 @@ from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import TYPE_CHECKING, Any, ClassVar, Container, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 if TYPE_CHECKING:
     from .diagnostics.plugin import WorkerPlugin

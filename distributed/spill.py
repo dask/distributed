@@ -5,13 +5,10 @@ import time
 from collections.abc import Mapping
 from contextlib import contextmanager
 from functools import partial
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 import zict
 from packaging.version import parse as parse_version
-
-if TYPE_CHECKING:
-    from typing_extensions import Literal
 
 from .protocol import deserialize_bytes, serialize_bytelist
 from .sizeof import safe_sizeof
