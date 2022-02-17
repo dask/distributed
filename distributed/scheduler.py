@@ -17,6 +17,7 @@ from collections import defaultdict, deque
 from collections.abc import (
     Callable,
     Collection,
+    Container,
     Hashable,
     Iterable,
     Iterator,
@@ -27,7 +28,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import ClassVar, Container, Literal
+from typing import ClassVar, Literal
 from typing import cast as pep484_cast
 
 import psutil

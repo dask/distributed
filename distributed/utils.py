@@ -20,7 +20,7 @@ import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
 from collections import OrderedDict, UserDict, deque
-from collections.abc import KeysView, ValuesView
+from collections.abc import Container, KeysView, ValuesView
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
@@ -28,7 +28,7 @@ from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
 from typing import Any as AnyType
-from typing import ClassVar, Container
+from typing import ClassVar
 
 import click
 import tblib.pickling_support

@@ -4,9 +4,9 @@ import asyncio
 import logging
 import uuid
 from collections import defaultdict, deque
+from collections.abc import Container
 from math import log2
 from time import time
-from typing import Container
 
 from tlz import topk
 from tornado.ioloop import PeriodicCallback
