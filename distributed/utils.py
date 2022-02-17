@@ -1213,7 +1213,7 @@ def parse_ports(port):
             raise ValueError(
                 "When specifying a range of ports like port_start:port_stop, "
                 "port_stop must be greater than port_start, but got "
-                f"port_start={port_start} and port_stop={port_stop}"
+                f"{port_start=} and {port_stop=}"
             )
         ports = list(range(port_start, port_stop + 1))
 
