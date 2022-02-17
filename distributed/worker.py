@@ -1319,7 +1319,7 @@ class Worker(ServerNode):
             except OSError:
                 logger.info("Waiting to connect to: %26s", self.scheduler.address)
                 await asyncio.sleep(0.1)
-            except TimeoutError:
+            except TimeoutError:  # pragma: no cover
                 logger.info("Timed out when connecting to scheduler")
         if response["status"] != "OK":
             raise ValueError(f"Unexpected response from register: {response!r}")
@@ -1671,7 +1671,7 @@ class Worker(ServerNode):
                         c._asynchronous = True
                         if c.asynchronous:
                             await c.close()
-                        else:
+                        else:  # pragma: no cover
                             # There is still the chance that even with us
                             # telling the client to be async, itself will decide
                             # otherwise
@@ -1694,7 +1694,7 @@ class Worker(ServerNode):
             # before closing self.batched_stream, otherwise the local endpoint
             # may be closed too early and errors be raised on the scheduler when
             # trying to send closing message.
-            if self._protocol == "ucx":
+            if self._protocol == "ucx":  # pragma: no cover
                 await asyncio.sleep(0.2)
 
             if (
@@ -1891,7 +1891,7 @@ class Worker(ServerNode):
 
                 try:
                     recs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
-                except Exception as e:
+                except Exception as e:  # pragma: no cover
                     msg = error_message(e)
                     recommendations = {ts: tuple(msg.values())}
                 else:
@@ -2120,7 +2120,7 @@ class Worker(ServerNode):
             "error",
         }:
             recommendations[ts] = "waiting"
-        else:
+        else:  # pragma: no cover
             raise RuntimeError(f"Unexpected task state encountered {ts} {stimulus_id}")
 
         for msg in scheduler_msgs:
@@ -3236,7 +3236,7 @@ class Worker(ServerNode):
                     for worker in workers:
                         self.has_what[worker].add(dep)
                         self.pending_data_per_worker[worker].push(dep_ts)
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -3339,10 +3339,10 @@ class Worker(ServerNode):
             self._notify_plugins(
                 "release_key", key, state_before, cause, reason, report
             )
-        except CommClosedError:
+        except CommClosedError:  # pragma: no cover
             # Batched stream send might raise if it was already closed
             pass
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -3516,7 +3516,7 @@ class Worker(ServerNode):
                     self.transition(ts, "memory", stimulus_id=stimulus_id)
                 elif ts.state in READY:
                     self.transition(ts, "executing", stimulus_id=stimulus_id)
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -4396,7 +4396,7 @@ async def get_data_from_worker(
             )
             try:
                 status = response["status"]
-            except KeyError:
+            except KeyError:  # pragma: no cover
                 raise ValueError("Unexpected response", response)
             else:
                 if status == "OK":
@@ -4818,7 +4818,7 @@ def warn(*args, **kwargs):
     """
     try:
         worker = get_worker()
-    except ValueError:
+    except ValueError:  # pragma: no cover
         pass
     else:
         worker.log_event("warn", {"args": args, "kwargs": kwargs})
