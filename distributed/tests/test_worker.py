@@ -1365,19 +1365,20 @@ async def test_spill_no_target_threshold(c, s, a):
     await wait(f1)
     assert set(a.data.memory) == {"f1"}
 
-    with captured_logger("distributed.worker") as logger:
-        futures = c.map(OverReport, range(int(100e6), int(100e6) + 8))
+    futures = c.map(OverReport, range(int(100e6), int(100e6) + 8))
 
-        while not a.data.disk:
-            await asyncio.sleep(0.01)
-        assert "f1" in a.data.disk
-        await asyncio.sleep(0.5)
+    while not a.data.disk:
+        await asyncio.sleep(0.01)
+    assert "f1" in a.data.disk
 
     # Spilling normally starts at the spill threshold and stops at the target threshold.
     # In this special case, it stops as soon as the process memory goes below the spill
     # threshold, e.g. without a hysteresis cycle. Test that we didn't instead dump the
     # whole data to disk (memory_limit * target = 0)
-    assert "Unmanaged memory use is high" not in logger.getvalue()
+    start = time()
+    while time() < start + 0.5:
+        assert a.data.memory
+        await asyncio.sleep(0)
 
 
 @pytest.mark.slow
