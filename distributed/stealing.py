@@ -258,7 +258,7 @@ class WorkStealing(SchedulerPlugin):
         except CommClosedError:
             logger.info("Worker comm %r closed while stealing: %r", victim, ts)
             return "comm-closed"
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -338,7 +338,7 @@ class WorkStealing(SchedulerPlugin):
                 self.log(("confirm", *_log_msg))
             else:
                 raise ValueError(f"Unexpected task state: {state}")
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
