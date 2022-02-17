@@ -44,6 +44,10 @@ class RMMMemoryUsage(DashboardComponent):
                     "gpu-index": [0, 0],
                     "y": [1, 2],
                     "escaped_worker": ["a", "b"],
+                    "rmm_memory_text": [
+                        "RMM memory used: 1B/1B\nTotal GPU memory used: 1B/2B",
+                        "RMM memory used: 1B/1B\nTotal GPU memory used: 1B/2B",
+                    ],
                 }
             )
 
@@ -106,7 +110,7 @@ class RMMMemoryUsage(DashboardComponent):
                 fig.yaxis.visible = False
 
             hover = HoverTool()
-            hover.tooltips = "@worker : @memory_text"
+            hover.tooltips = "@worker : @rmm_memory_text"
             hover.point_policy = "follow_mouse"
             memory.add_tools(hover)
 
@@ -124,30 +128,54 @@ class RMMMemoryUsage(DashboardComponent):
             worker = []
             external_used_x = []
             memory_max = 0
-            memory_total = 0
+            gpu_total = []
+            rmm_memory_text = []
 
             for idx, ws in enumerate(workers):
                 try:
                     rmm_metrics = ws.metrics["rmm"]
-                    gpu_extra = ws.extra["gpu"]
                     gpu_metrics = ws.metrics["gpu"]
+                    gpu_info = ws.extra["gpu"]
                 except KeyError:
                     continue
-                rmm_total_worker = rmm_metrics["rmm-total"]
-                rmm_used_worker = rmm_metrics["rmm-used"]  # RMMM memory only
-                gpu_used_worker = gpu_metrics["memory-used"]  # All GPU memory
+                rmm_total_worker = rmm_metrics["rmm-total"]  # RMM memory only
+                rmm_used_worker = rmm_metrics["rmm-used"]
+                gpu_total_worker = gpu_info["memory-total"]  # All GPU memory
+                gpu_used_worker = gpu_metrics["memory-used"]
+
                 external_used_worker = gpu_used_worker - rmm_total_worker
 
                 rmm_total.append(rmm_total_worker)
                 rmm_used.append(rmm_used_worker)
+                gpu_total.append(gpu_total_worker)
                 external_used.append(external_used_worker)
                 external_used_x.append(rmm_total_worker + external_used_worker / 2)
                 worker.append(ws.address)
                 gpu_index.append(idx)
                 y.append(idx)
 
-                memory_max = max(memory_max, gpu_used_worker)
-                memory_total += gpu_extra["memory-total"]
+                memory_max = max(memory_max, gpu_total_worker)
+
+                rmm_memory_text.append(
+                    "RMM memory used: {}/{}\nTotal GPU memory used: {}/{}".format(
+                        format_bytes(rmm_used_worker),
+                        format_bytes(rmm_total_worker),
+                        format_bytes(gpu_used_worker),
+                        format_bytes(gpu_total_worker),
+                    )
+                )
+
+            self.memory_figure.title.text = dedent(
+                """\
+                RMM Utilization: {} / {}\n
+                GPU Memory: {} / {}
+                """.format(
+                    format_bytes(sum(rmm_used)),
+                    format_bytes(sum(rmm_total)),
+                    format_bytes(sum([*rmm_total, *external_used])),
+                    format_bytes(sum(gpu_total)),
+                )
+            )
 
             result = {
                 "rmm-total": rmm_total,
@@ -160,20 +188,11 @@ class RMMMemoryUsage(DashboardComponent):
                 "gpu-index": gpu_index,
                 "y": y,
                 "escaped_worker": [escape.url_escape(w) for w in worker],
+                "rmm_memory_text": rmm_memory_text,
             }
+
             self.memory_figure.x_range.end = memory_max
 
-            self.memory_figure.title.text = dedent(
-                """\
-                RMM Utilization: {} / {}\n
-                GPU Memory: {} / {}
-                """.format(
-                    format_bytes(sum(rmm_used)),
-                    format_bytes(sum(rmm_total)),
-                    format_bytes(sum([*rmm_total, *external_used])),
-                    format_bytes(memory_total),
-                )
-            )
             update(self.source, result)
 
 
