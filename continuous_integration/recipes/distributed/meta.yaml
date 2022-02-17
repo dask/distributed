@@ -17,7 +17,6 @@ source:
 
 build:
   number: {{ GIT_DESCRIBE_NUMBER }}
-  string: py{{ python | replace(".", "") }}_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}_{{ build_ext }}
 
 outputs:
   - name: distributed-proc
@@ -38,6 +37,8 @@ outputs:
   - name: distributed
     version: {{ version }}
     build:
+      number: {{ GIT_DESCRIBE_NUMBER }}
+      string: py{{ python | replace(".", "") }}_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}_{{ build_ext }}
       script: python -m pip install . -vv                                           # [not cython_enabled]
       script: python -m pip install . -vv --install-option="--with-cython=profile"  # [cython_enabled]
       track_features: {{ "[cythonized-scheduler]" if cython_enabled else "" }}
