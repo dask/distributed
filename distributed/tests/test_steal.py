@@ -3,7 +3,6 @@ import contextlib
 import itertools
 import logging
 import random
-import sys
 import weakref
 from operator import mul
 from time import sleep
@@ -14,7 +13,7 @@ from tlz import concat, sliding_window
 import dask
 
 from distributed import Lock, Nanny, Worker, wait, worker_client
-from distributed.compatibility import LINUX, WINDOWS
+from distributed.compatibility import LINUX
 from distributed.config import config
 from distributed.core import Status
 from distributed.metrics import time
@@ -799,12 +798,6 @@ async def test_steal_communication_heavy_tasks(c, s, a, b):
     assert s.processing[b.address]
 
 
-@pytest.mark.flaky(
-    condition=WINDOWS and sys.version_info[:2] == (3, 7),
-    reruns=20,
-    reruns_delay=5,
-    reason="b.in_flight_tasks == 1",
-)
 @gen_cluster(client=True)
 async def test_steal_twice(c, s, a, b):
     x = c.submit(inc, 1, workers=a.address)

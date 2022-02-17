@@ -7,6 +7,7 @@ import logging
 import math
 import operator
 import os
+import pickle
 import random
 import sys
 import uuid
@@ -26,11 +27,8 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import TYPE_CHECKING, ClassVar, Container
+from typing import ClassVar, Container, Literal
 from typing import cast as pep484_cast
-
-if TYPE_CHECKING:
-    from typing_extensions import Literal
 
 import psutil
 from sortedcontainers import SortedDict, SortedSet
@@ -159,15 +157,6 @@ else:
 
     def nogil(func):
         return func
-
-
-if sys.version_info < (3, 8):
-    try:  # pragma: no cover
-        import pickle5 as pickle
-    except ImportError:
-        import pickle
-else:
-    import pickle
 
 
 logger = logging.getLogger(__name__)

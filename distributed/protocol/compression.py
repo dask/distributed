@@ -10,7 +10,7 @@ import random
 from collections.abc import Callable
 from contextlib import suppress
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import Literal
 
 from tlz import identity
 
@@ -26,9 +26,6 @@ except ImportError:
     blosc = False
 
 from ..utils import ensure_bytes
-
-if TYPE_CHECKING:
-    from typing_extensions import Literal
 
 compressions: dict[
     str | None | Literal[False],
