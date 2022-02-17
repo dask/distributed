@@ -24,12 +24,9 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar, Literal
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
-
-if TYPE_CHECKING:
-    from typing_extensions import Literal
 
 import dask
 from dask.base import collections_to_dsk, normalize_token, tokenize

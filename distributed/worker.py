@@ -26,7 +26,7 @@ from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import TYPE_CHECKING, Any, ClassVar, Container, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Container, Literal, NamedTuple, TypedDict, cast
 
 from tlz import first, keymap, merge, pluck  # noqa: F401
 from tornado.ioloop import IOLoop, PeriodicCallback
@@ -95,7 +95,7 @@ from .utils_perf import ThrottledGC, disable_gc_diagnosis, enable_gc_diagnosis
 from .versions import get_versions
 
 if TYPE_CHECKING:
-    from typing_extensions import Literal, TypeAlias, TypedDict
+    from typing_extensions import TypeAlias
 
     from .actor import Actor
     from .client import Client
@@ -105,13 +105,6 @@ if TYPE_CHECKING:
     # {TaskState -> finish: str | (finish: str, *args)}
     Recs: TypeAlias = "dict[TaskState, str | tuple]"
     Smsgs: TypeAlias = "list[dict[str, Any]]"
-
-    # TODO: Move outside of TYPE_CHECKING after dropping Python 3.7
-    class StartStop(TypedDict, total=False):
-        action: str
-        start: float
-        stop: float
-        source: str  # optional
 
 
 logger = logging.getLogger(__name__)
@@ -148,6 +141,13 @@ class SerializedTask(NamedTuple):
     args: tuple
     kwargs: dict[str, Any]
     task: object  # distributed.scheduler.TaskState.run_spec
+
+
+class StartStop(TypedDict, total=False):
+    action: str
+    start: float
+    stop: float
+    source: str  # optional
 
 
 class InvalidTransition(Exception):

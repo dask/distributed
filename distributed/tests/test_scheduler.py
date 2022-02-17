@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import operator
+import pickle
 import re
 import sys
 from itertools import product
@@ -42,14 +43,6 @@ from distributed.utils_test import (
     varying,
 )
 from distributed.worker import dumps_function, dumps_task, get_worker
-
-if sys.version_info < (3, 8):
-    try:
-        import pickle5 as pickle
-    except ImportError:
-        import pickle
-else:
-    import pickle
 
 pytestmark = pytest.mark.ci1
 
