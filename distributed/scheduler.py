@@ -5005,7 +5005,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return tuple(seen)
 
-    async def remove_worker(self, address: str, safe: bool = False, close: bool = True):
+    async def remove_worker(self, address, safe=False, close=True):
         """
         Remove worker from cluster
 
