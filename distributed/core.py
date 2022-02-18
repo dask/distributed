@@ -624,6 +624,7 @@ class Server:
                 yield asyncio.sleep(0.05)
             else:
                 break
+        yield self.rpc.close()
         yield [comm.close() for comm in list(self._comms)]  # then forcefully close
         for cb in self._ongoing_coroutines:
             cb.cancel()

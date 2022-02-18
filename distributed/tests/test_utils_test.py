@@ -293,7 +293,7 @@ class MyServer(Server):
 @pytest.mark.asyncio
 async def test_locked_comm_drop_in_replacement(loop):
 
-    async with MyServer({}) as a:
+    async with MyServer({}) as a, await MyServer({}) as b:
         await a.listen(0)
 
         read_event = asyncio.Event()
@@ -304,7 +304,6 @@ async def test_locked_comm_drop_in_replacement(loop):
             original_pool, read_event=read_event, read_queue=read_queue
         )
 
-        b = await MyServer({})
         await b.listen(0)
         # Event is set, the pool works like an ordinary pool
         res = await a.rpc(b.address).ping()

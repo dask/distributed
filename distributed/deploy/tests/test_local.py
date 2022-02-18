@@ -530,7 +530,6 @@ def test_death_timeout_raises(loop):
             loop=loop,
         ) as cluster:
             pass
-    LocalCluster._instances.clear()  # ignore test hygiene checks
 
 
 @gen_test()
