@@ -7335,7 +7335,7 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 raise
 
-    def set_restrictions(self, worker: "dict[str, set[str] | str]"):
+    def set_restrictions(self, worker: "dict[str, Collection[str] | str]"):
         ts: TaskState
         for key, restrictions in worker.items():
             ts = self.tasks[key]
@@ -7705,7 +7705,7 @@ class Scheduler(SchedulerState, ServerNode):
         # Task stream
         task_stream = self.get_task_stream(start=start)
         total_tasks = len(task_stream)
-        timespent: dict[int, float] = defaultdict(int)
+        timespent: "defaultdict[int, float]" = defaultdict(float)
         for d in task_stream:
             for x in d.get("startstops", []):
                 timespent[x["action"]] += x["stop"] - x["start"]

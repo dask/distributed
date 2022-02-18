@@ -1023,10 +1023,10 @@ def test_expects_comm():
         def arg_kwarg(self, arg, other=None):
             ...
 
-        def comm_argonly(self, comm, *, other):
+        def comm_posarg_only(self, comm, /, other):
             ...
 
-        def comm_kwarg_only(self, /, comm, other):
+        def comm_kwarg_only(self, *, comm, other):
             ...
 
     assert not _expects_comm(A.empty)
@@ -1037,5 +1037,5 @@ def test_expects_comm():
     assert _expects_comm(A.comm_arg_other)
     assert _expects_comm(A.stream_arg_other)
     assert not _expects_comm(A.arg_kwarg)
-    assert _expects_comm(A.comm_argonly)
+    assert _expects_comm(A.comm_posarg_only)
     assert _expects_comm(A.comm_kwarg_only)

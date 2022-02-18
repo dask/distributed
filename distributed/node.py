@@ -87,7 +87,7 @@ class ServerNode(Server):
         logger.addHandler(self._deque_handler)
         weakref.finalize(self, logger.removeHandler, self._deque_handler)
 
-    def get_logs(self, start=-1, n=None, timestamps=False):
+    def get_logs(self, start=0, n=None, timestamps=False):
         """
         Fetch log entries for this node
 

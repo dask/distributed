@@ -99,8 +99,6 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 
 def _expects_comm(func):
-    import inspect
-
     sig = inspect.signature(func)
     return "comm" in sig.parameters or "stream" in sig.parameters
 
