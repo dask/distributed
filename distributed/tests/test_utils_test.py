@@ -293,85 +293,85 @@ class MyServer(Server):
 @pytest.mark.asyncio
 async def test_locked_comm_drop_in_replacement(loop):
 
-    a = await MyServer({})
-    await a.listen(0)
+    async with MyServer({}) as a:
+        await a.listen(0)
 
-    read_event = asyncio.Event()
-    read_event.set()
-    read_queue = asyncio.Queue()
-    original_pool = a.rpc
-    a.rpc = _LockedCommPool(original_pool, read_event=read_event, read_queue=read_queue)
+        read_event = asyncio.Event()
+        read_event.set()
+        read_queue = asyncio.Queue()
+        original_pool = a.rpc
+        a.rpc = _LockedCommPool(
+            original_pool, read_event=read_event, read_queue=read_queue
+        )
 
-    b = await MyServer({})
-    await b.listen(0)
-    # Event is set, the pool works like an ordinary pool
-    res = await a.rpc(b.address).ping()
-    assert await read_queue.get() == (b.address, "pong")
-    assert res == "pong"
-    assert b.counter == 1
+        b = await MyServer({})
+        await b.listen(0)
+        # Event is set, the pool works like an ordinary pool
+        res = await a.rpc(b.address).ping()
+        assert await read_queue.get() == (b.address, "pong")
+        assert res == "pong"
+        assert b.counter == 1
 
-    read_event.clear()
-    # Can also be used without a lock to intercept network traffic
-    a.rpc = _LockedCommPool(original_pool, read_queue=read_queue)
-    a.rpc.remove(b.address)
-    res = await a.rpc(b.address).ping()
-    assert await read_queue.get() == (b.address, "pong")
+        read_event.clear()
+        # Can also be used without a lock to intercept network traffic
+        a.rpc = _LockedCommPool(original_pool, read_queue=read_queue)
+        a.rpc.remove(b.address)
+        res = await a.rpc(b.address).ping()
+        assert await read_queue.get() == (b.address, "pong")
 
 
 @pytest.mark.asyncio
 async def test_locked_comm_intercept_read(loop):
 
-    a = await MyServer({})
-    await a.listen(0)
-    b = await MyServer({})
-    await b.listen(0)
+    async with MyServer({}) as a, MyServer({}) as b:
+        await a.listen(0)
+        await b.listen(0)
 
-    read_event = asyncio.Event()
-    read_queue = asyncio.Queue()
-    a.rpc = _LockedCommPool(a.rpc, read_event=read_event, read_queue=read_queue)
+        read_event = asyncio.Event()
+        read_queue = asyncio.Queue()
+        a.rpc = _LockedCommPool(a.rpc, read_event=read_event, read_queue=read_queue)
 
-    async def ping_pong():
-        return await a.rpc(b.address).ping()
+        async def ping_pong():
+            return await a.rpc(b.address).ping()
 
-    fut = asyncio.create_task(ping_pong())
+        fut = asyncio.create_task(ping_pong())
 
-    # We didn't block the write but merely the read. The remove should have
-    # received the message and responded already
-    while not b.counter:
-        await asyncio.sleep(0.001)
+        # We didn't block the write but merely the read. The remove should have
+        # received the message and responded already
+        while not b.counter:
+            await asyncio.sleep(0.001)
 
-    with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(asyncio.shield(fut), 0.01)
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.shield(fut), 0.01)
 
-    assert await read_queue.get() == (b.address, "pong")
-    read_event.set()
-    assert await fut == "pong"
+        assert await read_queue.get() == (b.address, "pong")
+        read_event.set()
+        assert await fut == "pong"
 
 
 @pytest.mark.asyncio
 async def test_locked_comm_intercept_write(loop):
 
-    a = await MyServer({})
-    await a.listen(0)
-    b = await MyServer({})
-    await b.listen(0)
+    async with MyServer({}) as a, MyServer({}) as b:
+        await a.listen(0)
+        await b.listen(0)
 
-    write_event = asyncio.Event()
-    write_queue = asyncio.Queue()
-    a.rpc = _LockedCommPool(a.rpc, write_event=write_event, write_queue=write_queue)
+        write_event = asyncio.Event()
+        write_queue = asyncio.Queue()
+        a.rpc = _LockedCommPool(a.rpc, write_event=write_event, write_queue=write_queue)
 
-    async def ping_pong():
-        return await a.rpc(b.address).ping()
+        async def ping_pong():
+            return await a.rpc(b.address).ping()
 
-    fut = asyncio.create_task(ping_pong())
+        fut = asyncio.create_task(ping_pong())
 
-    with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(asyncio.shield(fut), 0.01)
-    # Write was blocked. The remote hasn't received the message, yet
-    assert b.counter == 0
-    assert await write_queue.get() == (b.address, {"op": "ping", "reply": True})
-    write_event.set()
-    assert await fut == "pong"
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.shield(fut), 0.01)
+        # Write was blocked. The remote hasn't received the message, yet
+        assert b.counter == 0
+        assert await write_queue.get() == (b.address, {"op": "ping", "reply": True})
+        write_event.set()
+        assert await fut == "pong"
 
 
 @pytest.mark.slow()
