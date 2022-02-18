@@ -625,6 +625,7 @@ def cluster(
     scheduler_kwargs={},
     config={},
 ):
+    pytest.skip("Let's see if this mess is causing problems")
     ws = weakref.WeakSet()
     enable_proctitle_on_children()
 
