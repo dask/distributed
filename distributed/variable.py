@@ -34,7 +34,11 @@ class VariableExtension:
         self.started = asyncio.Condition()
 
         self.scheduler.handlers.update(
-            {"variable_set": self.set, "variable_get": self.get}
+            {
+                "variable_set": self.set,
+                "variable_is_set": self.is_set,
+                "variable_get": self.get,
+            }
         )
 
         self.scheduler.stream_handlers["variable-future-release"] = self.future_release
@@ -59,6 +63,9 @@ class VariableExtension:
             async with self.started:
                 self.started.notify_all()
         self.variables[name] = record
+
+    async def is_set(self, comm=None, name=None, client=None):
+        return name in self.variables
 
     async def release(self, key, name):
         while self.waiting[key, name]:
@@ -190,6 +197,16 @@ class Variable:
             Must be either a Future or a msgpack-encodable value
         """
         return self.client.sync(self._set, value, **kwargs)
+
+    async def _is_set(self):
+        return await self.client.scheduler.variable_is_set(
+            name=self.name, client=self.client.id
+        )
+
+    def is_set(self, **kwargs):
+        """Check the variable has been set
+        """
+        return self.client.sync(self._is_set, **kwargs)
 
     async def _get(self, timeout=None):
         d = await self.client.scheduler.variable_get(
