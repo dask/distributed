@@ -1,15 +1,24 @@
+import logging
+import sys
+import warnings
+from textwrap import dedent
+
 import click
 
 from distributed.cli.utils import check_python_3
 from distributed.deploy.old_ssh import SSHCluster
 
+logger = logging.getLogger("distributed.dask_ssh")
+
 
 @click.command(
-    help="""Launch a distributed cluster over SSH. A 'dask-scheduler' process will run on the
-                         first host specified in [HOSTNAMES] or in the hostfile (unless --scheduler is specified
-                         explicitly). One or more 'dask-worker' processes will be run each host in [HOSTNAMES] or
-                         in the hostfile. Use command line flags to adjust how many dask-worker process are run on
-                         each host (--nprocs) and how many cpus are used by each dask-worker process (--nthreads)."""
+    help=dedent(
+        """Launch a distributed cluster over SSH. A 'dask-scheduler' process will run on the
+        first host specified in [HOSTNAMES] or in the hostfile, unless --scheduler is specified
+        explicitly. One or more 'dask-worker' processes will be run on each host. Use the flag
+        --nworkers to adjust how many dask-worker process are run on each host and the flag
+        --nthreads to adjust how many CPUs are used by each dask-worker process."""
+    )
 )
 @click.option(
     "--scheduler",
@@ -36,7 +45,15 @@ from distributed.deploy.old_ssh import SSHCluster
 )
 @click.option(
     "--nprocs",
-    default=1,
+    default=None,
+    show_default=True,
+    type=int,
+    help="Deprecated. Use --nworkers instead. Number of worker processes per host.",
+)
+@click.option(
+    "--nworkers",
+    "n_workers",  # This sets the Python argument name
+    default=None,
     show_default=True,
     type=int,
     help="Number of worker processes per host.",
@@ -122,6 +139,7 @@ def main(
     hostfile,
     nthreads,
     nprocs,
+    n_workers,
     ssh_username,
     ssh_port,
     ssh_private_key,
@@ -148,12 +166,27 @@ def main(
         print(ctx.get_help())
         exit(1)
 
+    if nprocs is not None and n_workers is not None:
+        logger.error(
+            "Both --nprocs and --nworkers were specified. Use --nworkers only."
+        )
+        sys.exit(1)
+    elif nprocs is not None:
+        warnings.warn(
+            "The --nprocs flag will be removed in a future release. It has been "
+            "renamed to --nworkers.",
+            FutureWarning,
+        )
+        n_workers = nprocs
+    elif n_workers is None:
+        n_workers = 1
+
     c = SSHCluster(
         scheduler,
         scheduler_port,
         hostnames,
         nthreads,
-        nprocs,
+        n_workers,
         ssh_username,
         ssh_port,
         ssh_private_key,
@@ -196,4 +229,4 @@ def go():
 
 
 if __name__ == "__main__":
-    go()
+    go()  # pragma: no cover

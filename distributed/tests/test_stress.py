@@ -33,7 +33,7 @@ teardown_module = nodebug_teardown_module
 
 @gen_cluster(client=True)
 async def test_stress_1(c, s, a, b):
-    n = 2 ** 6
+    n = 2**6
 
     seq = c.map(inc, range(n))
     while len(seq) > 1:
@@ -85,6 +85,9 @@ def test_cancel_stress_sync(loop):
                 c.cancel(f)
 
 
+@pytest.mark.xfail(
+    reason="Flaky and re-fails on rerun. See https://github.com/dask/distributed/issues/5388"
+)
 @pytest.mark.slow
 @gen_cluster(
     nthreads=[],
@@ -104,7 +107,7 @@ async def test_stress_creation_and_deletion(c, s):
     async def create_and_destroy_worker(delay):
         start = time()
         while time() < start + 5:
-            async with Nanny(s.address, nthreads=2):
+            async with Nanny(s.address, nthreads=2) as n:
                 await asyncio.sleep(delay)
             print("Killed nanny")
 
@@ -173,10 +176,11 @@ def vsum(*args):
 
 @pytest.mark.avoid_ci
 @pytest.mark.slow
-@pytest.mark.timeout(1100)  # Override timeout from setup.cfg
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 80, timeout=1000)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 80)
 async def test_stress_communication(c, s, *workers):
     s.validate = False  # very slow otherwise
+    for w in workers:
+        w.validate = False
     da = pytest.importorskip("dask.array")
     # Test consumes many file descriptors and can hang if the limit is too low
     resource = pytest.importorskip("resource")
@@ -185,7 +189,7 @@ async def test_stress_communication(c, s, *workers):
     n = 20
     xs = [da.random.random((100, 100), chunks=(5, 5)) for i in range(n)]
     ys = [x + x.T for x in xs]
-    z = da.atop(vsum, "ij", *concat(zip(ys, ["ij"] * n)), dtype="float64")
+    z = da.blockwise(vsum, "ij", *concat(zip(ys, ["ij"] * n)), dtype="float64")
 
     future = c.compute(z.sum())
 

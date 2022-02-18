@@ -3,7 +3,7 @@ from contextlib import contextmanager
 try:
     import ssl
 except ImportError:
-    ssl = None
+    ssl = None  # type: ignore
 
 import pytest
 
@@ -11,7 +11,7 @@ import dask
 
 from distributed.comm import connect, listen
 from distributed.security import Security
-from distributed.utils_test import get_cert
+from distributed.utils_test import gen_test, get_cert, xfail_ssl_issue5601
 
 ca_file = get_cert("tls-ca-cert.pem")
 
@@ -42,6 +42,8 @@ def test_defaults():
     assert sec.tls_scheduler_cert is None
     assert sec.tls_worker_key is None
     assert sec.tls_worker_cert is None
+    assert sec.tls_min_version is ssl.TLSVersion.TLSv1_2
+    assert sec.tls_max_version is None
     assert sec.extra_conn_args == {}
 
 
@@ -85,6 +87,29 @@ def test_from_config():
     assert sec.tls_worker_cert == "wcert.pem"
 
 
+@pytest.mark.parametrize("min_ver", [None, 1.2, 1.3])
+@pytest.mark.parametrize("max_ver", [None, 1.2, 1.3])
+def test_min_max_version_from_config(min_ver, max_ver):
+    versions = {1.2: ssl.TLSVersion.TLSv1_2, 1.3: ssl.TLSVersion.TLSv1_3}
+    min_ver_val = versions.get(min_ver, ssl.TLSVersion.TLSv1_2)
+    max_ver_val = versions.get(max_ver)
+    c = {
+        "distributed.comm.tls.min-version": min_ver,
+        "distributed.comm.tls.max-version": max_ver,
+    }
+    with dask.config.set(c):
+        sec = Security()
+    assert sec.tls_min_version == min_ver_val
+    assert sec.tls_max_version == max_ver_val
+
+
+@pytest.mark.parametrize("field", ["min-version", "max-version"])
+def test_min_max_version_config_errors(field):
+    with dask.config.set({f"distributed.comm.tls.{field}": "bad"}):
+        with pytest.raises(ValueError, match="'bad' is not supported, expected one of"):
+            sec = Security()
+
+
 def test_kwargs():
     c = {
         "distributed.comm.tls.ca-file": "ca.pem",
@@ -96,11 +121,15 @@ def test_kwargs():
             tls_scheduler_cert="newcert.pem",
             require_encryption=True,
             tls_ca_file=None,
+            tls_min_version=None,
+            tls_max_version=ssl.TLSVersion.TLSv1_3,
             extra_conn_args={"headers": {"Auth": "Token abc"}},
         )
     assert sec.require_encryption is True
     assert sec.tls_ca_file is None
     assert sec.tls_ciphers is None
+    assert sec.tls_min_version is ssl.TLSVersion.TLSv1_2
+    assert sec.tls_max_version is ssl.TLSVersion.TLSv1_3
     assert sec.tls_client_key is None
     assert sec.tls_client_cert is None
     assert sec.tls_scheduler_key == "skey.pem"
@@ -110,12 +139,25 @@ def test_kwargs():
     assert sec.extra_conn_args == {"headers": {"Auth": "Token abc"}}
 
 
-def test_repr():
+@pytest.mark.parametrize("key", ["tls_min_version", "tls_max_version"])
+def test_min_max_version_kwarg_errors(key):
+    with pytest.raises(ValueError, match="'bad' is not supported, expected one of"):
+        sec = Security(**{key: "bad"})
+
+
+def test_repr_temp_keys():
+    xfail_ssl_issue5601()
+    pytest.importorskip("cryptography")
+    sec = Security.temporary()
+    representation = repr(sec)
+    assert "Temporary (In-memory)" in representation
+
+
+def test_repr_local_keys():
     sec = Security(tls_ca_file="ca.pem", tls_scheduler_cert="scert.pem")
-    assert (
-        repr(sec)
-        == "Security(require_encryption=True, tls_ca_file='ca.pem', tls_scheduler_cert='scert.pem')"
-    )
+    representation = repr(sec)
+    assert "ca.pem" in representation
+    assert "scert.pem" in representation
 
 
 def test_tls_config_for_role():
@@ -161,12 +203,16 @@ def test_connection_args():
     def basic_checks(ctx):
         assert ctx.verify_mode == ssl.CERT_REQUIRED
         assert ctx.check_hostname is False
+        assert ctx.minimum_version is ssl.TLSVersion.TLSv1_2
+        assert ctx.maximum_version is ssl.TLSVersion.TLSv1_3
 
     c = {
         "distributed.comm.tls.ca-file": ca_file,
         "distributed.comm.tls.scheduler.key": key1,
         "distributed.comm.tls.scheduler.cert": cert1,
         "distributed.comm.tls.worker.cert": keycert1,
+        "distributed.comm.tls.min-version": None,
+        "distributed.comm.tls.max-version": 1.3,
     }
     with dask.config.set(c):
         sec = Security()
@@ -233,12 +279,16 @@ def test_listen_args():
     def basic_checks(ctx):
         assert ctx.verify_mode == ssl.CERT_REQUIRED
         assert ctx.check_hostname is False
+        assert ctx.minimum_version is ssl.TLSVersion.TLSv1_2
+        assert ctx.maximum_version is ssl.TLSVersion.TLSv1_3
 
     c = {
         "distributed.comm.tls.ca-file": ca_file,
         "distributed.comm.tls.scheduler.key": key1,
         "distributed.comm.tls.scheduler.cert": cert1,
         "distributed.comm.tls.worker.cert": keycert1,
+        "distributed.comm.tls.min-version": None,
+        "distributed.comm.tls.max-version": 1.3,
     }
     with dask.config.set(c):
         sec = Security()
@@ -277,7 +327,7 @@ def test_listen_args():
     assert len(tls_13_ciphers) in (0, 3)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tls_listen_connect():
     """
     Functional test for TLS connection args.
@@ -325,7 +375,7 @@ async def test_tls_listen_connect():
         comm.abort()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_require_encryption():
     """
     Functional test for "require_encryption" setting.
@@ -389,6 +439,7 @@ async def test_require_encryption():
 
 
 def test_temporary_credentials():
+    xfail_ssl_issue5601()
     pytest.importorskip("cryptography")
 
     sec = Security.temporary()
@@ -406,14 +457,16 @@ def test_temporary_credentials():
 
 
 def test_extra_conn_args_in_temporary_credentials():
+    xfail_ssl_issue5601()
     pytest.importorskip("cryptography")
 
     sec = Security.temporary(extra_conn_args={"headers": {"X-Request-ID": "abcd"}})
     assert sec.extra_conn_args == {"headers": {"X-Request-ID": "abcd"}}
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tls_temporary_credentials_functional():
+    xfail_ssl_issue5601()
     pytest.importorskip("cryptography")
 
     async def handle_comm(comm):

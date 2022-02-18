@@ -1,5 +1,4 @@
 import random
-import time
 from concurrent.futures import (
     FIRST_COMPLETED,
     FIRST_EXCEPTION,
@@ -8,11 +7,12 @@ from concurrent.futures import (
     as_completed,
     wait,
 )
+from time import sleep
 
 import pytest
 from tlz import take
 
-from distributed.compatibility import MACOS
+from distributed.metrics import time
 from distributed.utils import CancelledError
 from distributed.utils_test import inc, slowadd, slowdec, slowinc, throws, varying
 
@@ -87,19 +87,19 @@ def test_wait(client):
 
 def test_cancellation(client):
     with client.get_executor(pure=False) as e:
-        fut = e.submit(time.sleep, 2.0)
-        start = time.time()
+        fut = e.submit(sleep, 2.0)
+        start = time()
         while number_of_processing_tasks(client) == 0:
-            assert time.time() < start + 30
-            time.sleep(0.01)
+            assert time() < start + 30
+            sleep(0.01)
         assert not fut.done()
 
         fut.cancel()
         assert fut.cancelled()
-        start = time.time()
+        start = time()
         while number_of_processing_tasks(client) != 0:
-            assert time.time() < start + 30
-            time.sleep(0.01)
+            assert time() < start + 30
+            sleep(0.01)
 
         with pytest.raises(CancelledError):
             fut.result()
@@ -127,7 +127,7 @@ def test_cancellation_as_completed(client):
         assert n_cancelled == 2
 
 
-@pytest.mark.flaky(condition=MACOS, reruns=10, reruns_delay=5)
+@pytest.mark.slow()
 def test_map(client):
     with client.get_executor() as e:
         N = 10
@@ -139,7 +139,7 @@ def test_map(client):
 
     with client.get_executor(pure=False) as e:
         N = 10
-        it = e.map(slowinc, range(N), [0.1] * N, timeout=0.4)
+        it = e.map(slowinc, range(N), [0.3] * N, timeout=1.2)
         results = []
         with pytest.raises(TimeoutError):
             for x in it:
@@ -149,13 +149,14 @@ def test_map(client):
     with client.get_executor(pure=False) as e:
         N = 10
         # Not consuming the iterator will cancel remaining tasks
-        it = e.map(slowinc, range(N), [0.1] * N)
+        it = e.map(slowinc, range(N), [0.3] * N)
         for x in take(2, it):
             pass
         # Some tasks still processing
         assert number_of_processing_tasks(client) > 0
         # Garbage collect the iterator => remaining tasks are cancelled
         del it
+        sleep(0.5)
         assert number_of_processing_tasks(client) == 0
 
 
@@ -219,27 +220,27 @@ def test_retries(client):
 def test_shutdown_wait(client):
     # shutdown(wait=True) waits for pending tasks to finish
     e = client.get_executor()
-    start = time.time()
-    fut = e.submit(time.sleep, 1.0)
+    start = time()
+    fut = e.submit(sleep, 1.0)
     e.shutdown()
-    assert time.time() >= start + 1.0
-    time.sleep(0.1)  # wait for future outcome to propagate
+    assert time() >= start + 1.0
+    sleep(0.1)  # wait for future outcome to propagate
     assert fut.done()
     fut.result()  # doesn't raise
 
     with pytest.raises(RuntimeError):
-        e.submit(time.sleep, 1.0)
+        e.submit(sleep, 1.0)
 
 
 def test_shutdown_nowait(client):
     # shutdown(wait=False) cancels pending tasks
     e = client.get_executor()
-    start = time.time()
-    fut = e.submit(time.sleep, 5.0)
+    start = time()
+    fut = e.submit(sleep, 5.0)
     e.shutdown(wait=False)
-    assert time.time() < start + 2.0
-    time.sleep(0.1)  # wait for future outcome to propagate
+    assert time() < start + 2.0
+    sleep(0.1)  # wait for future outcome to propagate
     assert fut.cancelled()
 
     with pytest.raises(RuntimeError):
-        e.submit(time.sleep, 1.0)
+        e.submit(sleep, 1.0)

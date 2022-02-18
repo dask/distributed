@@ -1,13 +1,14 @@
+from __future__ import annotations
+
 import asyncio
-import collections
 import copy
 import functools
 import gc
 import inspect
 import io
-import itertools
 import logging
 import logging.config
+import multiprocessing
 import os
 import queue
 import re
@@ -19,20 +20,25 @@ import sys
 import tempfile
 import threading
 import uuid
-import warnings
 import weakref
+from collections import defaultdict
+from collections.abc import Callable
 from contextlib import contextmanager, nullcontext, suppress
 from glob import glob
+from itertools import count
 from time import sleep
+from typing import Any, Literal
 
+from distributed.compatibility import MACOS
 from distributed.scheduler import Scheduler
 
 try:
     import ssl
 except ImportError:
-    ssl = None
+    ssl = None  # type: ignore
 
 import pytest
+import yaml
 from tlz import assoc, memoize, merge
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -42,8 +48,10 @@ import dask
 from distributed.comm.tcp import TCP
 
 from . import system
+from . import versions as version_module
 from .client import Client, _global_clients, default_client
 from .comm import Comm
+from .comm.tcp import BaseTCPConnector
 from .compatibility import WINDOWS
 from .config import initialize_logging
 from .core import CommClosedError, ConnectionPool, Status, connect, rpc
@@ -51,6 +59,7 @@ from .deploy import SpecCluster
 from .diagnostics.plugin import WorkerPlugin
 from .metrics import time
 from .nanny import Nanny
+from .node import ServerNode
 from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (
@@ -64,7 +73,6 @@ from .utils import (
     mp_context,
     reset_logger_locks,
     sync,
-    thread_state,
 )
 from .worker import Worker
 
@@ -335,7 +343,8 @@ def slowidentity(*args, **kwargs):
 
 
 class _UnhashableCallable:
-    __hash__ = None
+    # FIXME https://github.com/python/mypy/issues/4266
+    __hash__ = None  # type: ignore
 
     def __call__(self, x):
         return x + 1
@@ -351,8 +360,8 @@ def run_for(duration, timer=time):
 
 
 # This dict grows at every varying() invocation
-_varying_dict = collections.defaultdict(int)
-_varying_key_gen = itertools.count()
+_varying_dict: defaultdict[str, int] = defaultdict(int)
+_varying_key_gen = count()
 
 
 class _ModuleSlot:
@@ -414,7 +423,7 @@ async def asyncinc(x, delay=0.02):
     return x + 1
 
 
-_readone_queues = {}
+_readone_queues: dict[Any, asyncio.Queue] = {}
 
 
 async def readone(comm):
@@ -667,7 +676,7 @@ def cluster(
             for worker in workers:
                 worker["address"] = worker["queue"].get(timeout=5)
         except queue.Empty:
-            raise pytest.xfail.Exception("Worker failed to start in test")
+            pytest.xfail("Worker failed to start in test")
 
         saddr = scheduler_q.get()
 
@@ -763,11 +772,17 @@ async def disconnect(addr, timeout=3, rpc_kwargs=None):
 
 
 async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
-    await asyncio.gather(*[disconnect(addr, timeout, rpc_kwargs) for addr in addresses])
+    await asyncio.gather(*(disconnect(addr, timeout, rpc_kwargs) for addr in addresses))
 
 
-def gen_test(timeout=_TEST_TIMEOUT):
+def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
     """Coroutine test
+
+    @pytest.mark.parametrize("param", [1, 2, 3])
+    @gen_test(timeout=5)
+    async def test_foo(param)
+        await ... # use tornado coroutines
+
 
     @gen_test(timeout=5)
     async def test_foo():
@@ -779,28 +794,32 @@ def gen_test(timeout=_TEST_TIMEOUT):
     )
 
     def _(func):
-        def test_func():
+        def test_func(*args, **kwargs):
             with clean() as loop:
+                injected_func = functools.partial(func, *args, **kwargs)
                 if iscoroutinefunction(func):
-                    cor = func
+                    cor = injected_func
                 else:
-                    cor = gen.coroutine(func)
+                    cor = gen.coroutine(injected_func)
+
                 loop.run_sync(cor, timeout=timeout)
 
+        # Patch the signature so pytest can inject fixtures
+        test_func.__signature__ = inspect.signature(func)
         return test_func
 
     return _
 
 
 async def start_cluster(
-    nthreads,
-    scheduler_addr,
-    loop,
-    security=None,
-    Worker=Worker,
-    scheduler_kwargs={},
-    worker_kwargs={},
-):
+    nthreads: list[tuple[str, int] | tuple[str, int, dict]],
+    scheduler_addr: str,
+    loop: IOLoop,
+    security: Security | dict[str, Any] | None = None,
+    Worker: type[ServerNode] = Worker,
+    scheduler_kwargs: dict[str, Any] = {},
+    worker_kwargs: dict[str, Any] = {},
+) -> tuple[Scheduler, list[ServerNode]]:
     s = await Scheduler(
         loop=loop,
         validate=True,
@@ -809,6 +828,7 @@ async def start_cluster(
         host=scheduler_addr,
         **scheduler_kwargs,
     )
+
     workers = [
         Worker(
             s.address,
@@ -818,7 +838,11 @@ async def start_cluster(
             loop=loop,
             validate=True,
             host=ncore[0],
-            **(merge(worker_kwargs, ncore[2]) if len(ncore) > 2 else worker_kwargs),
+            **(
+                merge(worker_kwargs, ncore[2])  # type: ignore
+                if len(ncore) > 2
+                else worker_kwargs
+            ),
         )
         for i, ncore in enumerate(nthreads)
     ]
@@ -826,12 +850,14 @@ async def start_cluster(
     await asyncio.gather(*workers)
 
     start = time()
-    while len(s.workers) < len(nthreads) or any(
-        comm.comm is None for comm in s.stream_comms.values()
+    while (
+        len(s.workers) < len(nthreads)
+        or any(ws.status != Status.running for ws in s.workers.values())
+        or any(comm.comm is None for comm in s.stream_comms.values())
     ):
         await asyncio.sleep(0.01)
         if time() > start + 30:
-            await asyncio.gather(*[w.close(timeout=1) for w in workers])
+            await asyncio.gather(*(w.close(timeout=1) for w in workers))
             await s.close(fast=True)
             raise TimeoutError("Cluster creation timeout")
     return s, workers
@@ -844,27 +870,30 @@ async def end_cluster(s, workers):
         with suppress(TimeoutError, CommClosedError, EnvironmentError):
             await w.close(report=False)
 
-    await asyncio.gather(*[end_worker(w) for w in workers])
+    await asyncio.gather(*(end_worker(w) for w in workers))
     await s.close()  # wait until scheduler stops completely
     s.stop()
 
 
 def gen_cluster(
-    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 2)],
-    ncores=None,
+    nthreads: list[tuple[str, int] | tuple[str, int, dict]] = [
+        ("127.0.0.1", 1),
+        ("127.0.0.1", 2),
+    ],
     scheduler="127.0.0.1",
-    timeout=_TEST_TIMEOUT,
-    security=None,
-    Worker=Worker,
-    client=False,
-    scheduler_kwargs={},
-    worker_kwargs={},
-    client_kwargs={},
-    active_rpc_timeout=1,
-    config={},
-    clean_kwargs={},
-    allow_unclosed=False,
-):
+    timeout: float = _TEST_TIMEOUT,
+    security: Security | dict[str, Any] | None = None,
+    Worker: type[ServerNode] = Worker,
+    client: bool = False,
+    scheduler_kwargs: dict[str, Any] = {},
+    worker_kwargs: dict[str, Any] = {},
+    client_kwargs: dict[str, Any] = {},
+    active_rpc_timeout: float = 1,
+    config: dict[str, Any] = {},
+    clean_kwargs: dict[str, Any] = {},
+    allow_unclosed: bool = False,
+    cluster_dump_directory: str | Literal[False] = "test_cluster_dump",
+) -> Callable[[Callable], Callable]:
     from distributed import Client
 
     """ Coroutine test with small cluster
@@ -890,9 +919,6 @@ def gen_cluster(
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"
     )
-    if ncores is not None:
-        warnings.warn("ncores= has moved to nthreads=", stacklevel=2)
-        nthreads = ncores
 
     scheduler_kwargs = merge(
         {"dashboard": False, "dashboard_address": ":0"}, scheduler_kwargs
@@ -903,7 +929,7 @@ def gen_cluster(
 
     def _(func):
         if not iscoroutinefunction(func):
-            func = gen.coroutine(func)
+            raise RuntimeError("gen_cluster only works for coroutine functions.")
 
         @functools.wraps(func)
         def test_func(*outer_args, **kwargs):
@@ -947,12 +973,57 @@ def gen_cluster(
                                 **client_kwargs,
                             )
                             args = [c] + args
+
                         try:
-                            future = func(*args, *outer_args, **kwargs)
-                            future = asyncio.wait_for(future, timeout)
-                            result = await future
+                            coro = func(*args, *outer_args, **kwargs)
+                            task = asyncio.create_task(coro)
+                            coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
+                            result = await coro2
                             if s.validate:
                                 s.validate_state()
+
+                        except asyncio.TimeoutError:
+                            assert task
+                            buffer = io.StringIO()
+                            # This stack indicates where the coro/test is suspended
+                            task.print_stack(file=buffer)
+
+                            if cluster_dump_directory:
+                                await dump_cluster_state(
+                                    s,
+                                    ws,
+                                    output_dir=cluster_dump_directory,
+                                    func_name=func.__name__,
+                                )
+
+                            task.cancel()
+                            while not task.cancelled():
+                                await asyncio.sleep(0.01)
+
+                            # Remove as much of the traceback as possible; it's
+                            # uninteresting boilerplate from utils_test and asyncio and
+                            # not from the code being tested.
+                            raise TimeoutError(
+                                f"Test timeout after {timeout}s.\n"
+                                "========== Test stack trace starts here ==========\n"
+                                f"{buffer.getvalue()}"
+                            ) from None
+
+                        except pytest.xfail.Exception:
+                            raise
+
+                        except Exception:
+                            if cluster_dump_directory and not has_pytestmark(
+                                test_func, "xfail"
+                            ):
+                                await dump_cluster_state(
+                                    s,
+                                    ws,
+                                    output_dir=cluster_dump_directory,
+                                    func_name=func.__name__,
+                                )
+                            raise
+
                         finally:
                             if client and c.status not in ("closing", "closed"):
                                 await c._close(fast=s.status == Status.closed)
@@ -1027,6 +1098,41 @@ def gen_cluster(
     return _
 
 
+async def dump_cluster_state(
+    s: Scheduler, ws: list[ServerNode], output_dir: str, func_name: str
+) -> None:
+    """A variant of Client.dump_cluster_state, which does not rely on any of the below
+    to work:
+
+    - Having a client at all
+    - Client->Scheduler comms
+    - Scheduler->Worker comms (unless using Nannies)
+    """
+    scheduler_info = s._to_dict()
+    workers_info: dict[str, Any]
+    versions_info = version_module.get_versions()
+
+    if not ws or isinstance(ws[0], Worker):
+        workers_info = {w.address: w._to_dict() for w in ws}
+    else:
+        workers_info = await s.broadcast(msg={"op": "dump_state"}, on_error="return")
+        workers_info = {
+            k: repr(v) if isinstance(v, Exception) else v
+            for k, v in workers_info.items()
+        }
+
+    state = {
+        "scheduler": scheduler_info,
+        "workers": workers_info,
+        "versions": versions_info,
+    }
+    os.makedirs(output_dir, exist_ok=True)
+    fname = os.path.join(output_dir, func_name) + ".yaml"
+    with open(fname, "w") as fh:
+        yaml.safe_dump(state, fh)  # Automatically convert tuples to lists
+    print(f"Dumped cluster state to {fname}")
+
+
 def raises(func, exc=Exception):
     try:
         func()
@@ -1035,7 +1141,7 @@ def raises(func, exc=Exception):
         return True
 
 
-def terminate_process(proc):
+def _terminate_process(proc):
     if proc.poll() is None:
         if sys.platform.startswith("win"):
             proc.send_signal(signal.CTRL_BREAK_EVENT)
@@ -1074,7 +1180,7 @@ def popen(args, **kwargs):
 
     finally:
         try:
-            terminate_process(proc)
+            _terminate_process(proc)
         finally:
             # XXX Also dump stdout if return code != 0 ?
             out, err = proc.communicate()
@@ -1084,23 +1190,6 @@ def popen(args, **kwargs):
 
                 print("\n\nPrint from stdout\n=================\n")
                 print(out.decode())
-
-
-def wait_for_port(address, timeout=5):
-    assert isinstance(address, tuple)
-    deadline = time() + timeout
-
-    while True:
-        timeout = deadline - time()
-        if timeout < 0:
-            raise RuntimeError(f"Failed to connect to {address}")
-        try:
-            sock = socket.create_connection(address, timeout=timeout)
-        except OSError:
-            pass
-        else:
-            sock.close()
-            break
 
 
 def wait_for(predicate, timeout, fail_func=None, period=0.001):
@@ -1152,7 +1241,6 @@ if has_ipv6():
 
     def requires_ipv6(test_func):
         return test_func
-
 
 else:
     requires_ipv6 = pytest.mark.skip("ipv6 required")
@@ -1467,6 +1555,9 @@ def save_sys_modules():
 @contextmanager
 def check_thread_leak():
     """Context manager to ensure we haven't leaked any threads"""
+    # "TCP-Executor" threads are never stopped once they are started
+    BaseTCPConnector.warmup()
+
     active_threads_start = threading.enumerate()
 
     yield
@@ -1477,12 +1568,8 @@ def check_thread_leak():
             thread
             for thread in threading.enumerate()
             if thread not in active_threads_start
-            and "Threaded" not in thread.name
-            and "watch message" not in thread.name
-            and "TCP-Executor" not in thread.name
-            # TODO: Make sure profile thread is cleaned up
-            # and remove the line below
-            and "Profile" not in thread.name
+            # FIXME this looks like a genuine leak that needs fixing
+            and "watch message queue" not in thread.name
         ]
         if not bad_threads:
             break
@@ -1497,24 +1584,67 @@ def check_thread_leak():
             assert False, (bad_thread, call_stacks)
 
 
+def wait_active_children(timeout: float) -> list[multiprocessing.Process]:
+    """Wait until timeout for mp_context.active_children() to terminate.
+    Return list of active subprocesses after the timeout expired.
+    """
+    t0 = time()
+    while True:
+        # Do not sample the subprocesses once at the beginning with
+        # `for proc in mp_context.active_children: ...`, assume instead that new
+        # children processes may be spawned before the timeout expires.
+        children = mp_context.active_children()
+        if not children:
+            return []
+        join_timeout = timeout - time() + t0
+        if join_timeout <= 0:
+            return children
+        children[0].join(timeout=join_timeout)
+
+
+def term_or_kill_active_children(timeout: float) -> None:
+    """Send SIGTERM to mp_context.active_children(), wait up to 3 seconds for processes
+    to die, then send SIGKILL to the survivors
+    """
+    children = mp_context.active_children()
+    for proc in children:
+        proc.terminate()
+
+    children = wait_active_children(timeout=timeout)
+    for proc in children:
+        proc.kill()
+
+    children = wait_active_children(timeout=30)
+    if children:  # pragma: nocover
+        logger.warning("Leaked unkillable children processes: %s", children)
+        # It should be impossible to ignore SIGKILL on Linux/MacOSX
+        assert WINDOWS
+
+
 @contextmanager
-def check_process_leak(check=True):
-    for proc in mp_context.active_children():
-        proc.terminate()
+def check_process_leak(
+    check: bool = True, check_timeout: float = 40, term_timeout: float = 3
+):
+    """Terminate any currently-running subprocesses at both the beginning and end of this context
 
-    yield
-
-    if check:
-        for i in range(200):
-            if not set(mp_context.active_children()):
-                break
-            else:
-                sleep(0.2)
-        else:
-            assert not mp_context.active_children()
-
-    for proc in mp_context.active_children():
-        proc.terminate()
+    Parameters
+    ----------
+    check : bool, optional
+        If True, raise AssertionError if any processes survive at the exit
+    check_timeout: float, optional
+        Wait up to these many seconds for subprocesses to terminate before failing
+    term_timeout: float, optional
+        After sending SIGTERM to a subprocess, wait up to these many seconds before
+        sending SIGKILL
+    """
+    term_or_kill_active_children(timeout=term_timeout)
+    try:
+        yield
+        if check:
+            children = wait_active_children(timeout=check_timeout)
+            assert not children, f"Test leaked subprocesses: {children}"
+    finally:
+        term_or_kill_active_children(timeout=term_timeout)
 
 
 @contextmanager
@@ -1543,7 +1673,7 @@ def check_instances():
     for w in Worker._instances:
         with suppress(RuntimeError):  # closed IOLoop
             w.loop.add_callback(w.close, report=False, executor_wait=False)
-            if w.status == Status.running:
+            if w.status in Status.ANY_RUNNING:
                 w.loop.add_callback(w.close)
     Worker._instances.clear()
 
@@ -1594,9 +1724,6 @@ def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
                             logging.getLogger(name).setLevel(level)
 
                         yield loop
-
-                        with suppress(AttributeError):
-                            del thread_state.on_event_loop_thread
 
 
 @pytest.fixture
@@ -1692,3 +1819,125 @@ class _LockedCommPool(ConnectionPool):
         return LockedComm(
             comm, self.read_event, self.read_queue, self.write_event, self.write_queue
         )
+
+
+def xfail_ssl_issue5601():
+    """Work around https://github.com/dask/distributed/issues/5601 where any test that
+    inits Security.temporary() crashes on MacOS GitHub Actions CI
+    """
+    pytest.importorskip("cryptography")
+    try:
+        Security.temporary()
+    except ImportError:
+        if MACOS:
+            pytest.xfail(reason="distributed#5601")
+        raise
+
+
+def assert_worker_story(
+    story: list[tuple], expect: list[tuple], *, strict: bool = False
+) -> None:
+    """Test the output of ``Worker.story``
+
+    Parameters
+    ==========
+    story: list[tuple]
+        Output of Worker.story
+    expect: list[tuple]
+        Expected events. Each expected event must contain exactly 2 less fields than the
+        story (the last two fields are always the stimulus_id and the timestamp).
+
+        Elements of the expect tuples can be
+
+        - callables, which accept a single element of the event tuple as argument and
+          return True for match and False for no match;
+        - arbitrary objects, which are compared with a == b
+
+        e.g.
+        .. code-block:: python
+
+            expect=[
+                ("x", "missing", "fetch", "fetch", {}),
+                ("gather-dependencies", worker_addr, lambda set_: "x" in set_),
+            ]
+
+    strict: bool, optional
+        If True, the story must contain exactly as many events as expect.
+        If False (the default), the story may contain more events than expect; extra
+        events are ignored.
+    """
+    now = time()
+    prev_ts = 0.0
+    for ev in story:
+        try:
+            assert len(ev) > 2
+            assert isinstance(ev, tuple)
+            assert isinstance(ev[-2], str) and ev[-2]  # stimulus_id
+            assert isinstance(ev[-1], float)  # timestamp
+            assert prev_ts <= ev[-1]  # Timestamps are monotonic ascending
+            # Timestamps are within the last hour. It's been observed that a timestamp
+            # generated in a Nanny process can be a few milliseconds in the future.
+            assert now - 3600 < ev[-1] <= now + 1
+            prev_ts = ev[-1]
+        except AssertionError:
+            raise AssertionError(
+                f"Malformed story event: {ev}\nin story:\n{_format_story(story)}"
+            )
+
+    try:
+        if strict and len(story) != len(expect):
+            raise StopIteration()
+        story_it = iter(story)
+        for ev_expect in expect:
+            while True:
+                event = next(story_it)
+                # Ignore (stimulus_id, timestamp)
+                event = event[:-2]
+                if len(event) == len(ev_expect) and all(
+                    ex(ev) if callable(ex) else ev == ex
+                    for ev, ex in zip(event, ev_expect)
+                ):
+                    break
+    except StopIteration:
+        raise AssertionError(
+            f"assert_worker_story({strict=}) failed\n"
+            f"story:\n{_format_story(story)}\n"
+            f"expect:\n{_format_story(expect)}"
+        ) from None
+
+
+def _format_story(story: list[tuple]) -> str:
+    if not story:
+        return "(empty story)"
+    return "- " + "\n- ".join(str(ev) for ev in story)
+
+
+class BrokenComm(Comm):
+    peer_address = ""
+    local_address = ""
+
+    def close(self):
+        pass
+
+    def closed(self):
+        return True
+
+    def abort(self):
+        pass
+
+    def read(self, deserializers=None):
+        raise OSError()
+
+    def write(self, msg, serializers=None, on_error=None):
+        raise OSError()
+
+
+def has_pytestmark(test_func: Callable, name: str) -> bool:
+    """Return True if the test function is marked by the given @pytest.mark.<name>;
+    False otherwise.
+
+    FIXME doesn't work with individually marked parameters inside
+          @pytest.mark.parametrize
+    """
+    marks = getattr(test_func, "pytestmark", [])
+    return any(mark.name == name for mark in marks)

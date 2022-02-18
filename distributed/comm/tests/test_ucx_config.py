@@ -1,3 +1,4 @@
+import os
 from time import sleep
 
 import pytest
@@ -30,7 +31,7 @@ async def test_ucx_config(cleanup):
         "rdmacm": False,
         "net-devices": "",
         "tcp": True,
-        "cuda_copy": True,
+        "cuda-copy": True,
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
@@ -49,7 +50,7 @@ async def test_ucx_config(cleanup):
         "rdmacm": False,
         "net-devices": "mlx5_0:1",
         "tcp": True,
-        "cuda_copy": False,
+        "cuda-copy": False,
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
@@ -68,7 +69,7 @@ async def test_ucx_config(cleanup):
         "rdmacm": True,
         "net-devices": "all",
         "tcp": True,
-        "cuda_copy": True,
+        "cuda-copy": True,
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
@@ -79,30 +80,51 @@ async def test_ucx_config(cleanup):
             assert ucx_config.get("TLS") == "rc,tcp,rdmacm,cuda_copy"
         assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "rdmacm"
 
+    ucx = {
+        "nvlink": None,
+        "infiniband": None,
+        "rdmacm": None,
+        "net-devices": None,
+        "tcp": None,
+        "cuda-copy": None,
+    }
 
-def test_ucx_config_w_env_var(cleanup, loop, monkeypatch):
-    size = "1000.00 MB"
-    monkeypatch.setenv("DASK_RMM__POOL_SIZE", size)
+    with dask.config.set({"distributed.comm.ucx": ucx}):
+        ucx_config = _scrub_ucx_config()
+        assert ucx_config == {}
 
-    dask.config.refresh()
+
+@pytest.mark.flaky(
+    reruns=10,
+    reruns_delay=5,
+)
+def test_ucx_config_w_env_var(cleanup, loop):
+    env = os.environ.copy()
+    env["DASK_RMM__POOL_SIZE"] = "1000.00 MB"
 
     port = "13339"
-    sched_addr = f"ucx://{HOST}:{port}"
+    # Using localhost appears to be less flaky than {HOST}. Additionally, this is
+    # closer to how other dask-worker tests are written.
+    sched_addr = f"ucx://127.0.0.1:{port}"
 
     with popen(
-        ["dask-scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port]
-    ) as sched:
+        ["dask-scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port],
+        env=env,
+    ):
         with popen(
             [
                 "dask-worker",
                 sched_addr,
+                "--host",
+                "127.0.0.1",
                 "--no-dashboard",
                 "--protocol",
                 "ucx",
                 "--no-nanny",
-            ]
-        ) as w:
-            with Client(sched_addr, loop=loop, timeout=10) as c:
+            ],
+            env=env,
+        ):
+            with Client(sched_addr, loop=loop, timeout=60) as c:
                 while not c.scheduler_info()["workers"]:
                     sleep(0.1)
 
@@ -112,7 +134,6 @@ def test_ucx_config_w_env_var(cleanup, loop, monkeypatch):
                 )
                 assert rmm_resource == rmm.mr.PoolMemoryResource
 
-                worker_addr = list(c.scheduler_info()["workers"])[0]
-                worker_rmm_usage = c.run(rmm.mr.get_current_device_resource_type)
-                rmm_resource = worker_rmm_usage[worker_addr]
-                assert rmm_resource == rmm.mr.PoolMemoryResource
+                rmm_resource_workers = c.run(rmm.mr.get_current_device_resource_type)
+                for v in rmm_resource_workers.values():
+                    assert v == rmm.mr.PoolMemoryResource

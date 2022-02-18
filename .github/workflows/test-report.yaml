@@ -1,0 +1,47 @@
+name: Test Report
+
+on:
+  schedule:
+    - cron: "47 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  test-report:
+    name: Test Report
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Setup Conda Environment
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          miniforge-variant: Mambaforge
+          miniforge-version: latest
+          condarc-file: continuous_integration/condarc
+          use-mamba: true
+          python-version: 3.9
+          environment-file: continuous_integration/scripts/test-report-environment.yml
+          activate-environment: dask-distributed
+
+      - name: Show conda options
+        shell: bash -l {0}
+        run: conda config --show
+
+      - name: mamba list
+        shell: bash -l {0}
+        run: mamba list
+
+      - name: Generate report
+        shell: bash -l {0}
+        run: |
+          python continuous_integration/scripts/test_report.py
+          mkdir deploy
+          mv test_report.html deploy/
+
+      - name: Deploy 🚀
+        uses: JamesIves/github-pages-deploy-action@4.1.7
+        with:
+          branch: gh-pages
+          folder: deploy

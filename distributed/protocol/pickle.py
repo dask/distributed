@@ -1,16 +1,7 @@
 import logging
-import sys
+import pickle
 
 import cloudpickle
-
-if sys.version_info < (3, 8):
-    try:
-        import pickle5 as pickle
-    except ImportError:
-        import pickle
-else:
-    import pickle
-
 
 HIGHEST_PROTOCOL = pickle.HIGHEST_PROTOCOL
 

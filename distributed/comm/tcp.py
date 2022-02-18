@@ -7,13 +7,14 @@ import struct
 import sys
 import weakref
 from ssl import SSLCertVerificationError, SSLError
+from typing import ClassVar
 
 from tornado import gen
 
 try:
     import ssl
 except ImportError:
-    ssl = None
+    ssl = None  # type: ignore
 
 from tlz import sliding_window
 from tornado import netutil
@@ -30,7 +31,7 @@ from ..threadpoolexecutor import ThreadPoolExecutor
 from ..utils import ensure_ip, get_ip, get_ipv6, nbytes
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, FatalCommClosedError, Listener
-from .registry import Backend, backends
+from .registry import Backend
 from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to_frames
 
 logger = logging.getLogger(__name__)
@@ -147,16 +148,21 @@ class TCP(Comm):
 
     max_shard_size = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
 
-    def __init__(self, stream, local_addr, peer_addr, deserialize=True):
+    def __init__(
+        self,
+        stream,
+        local_addr: str,
+        peer_addr: str,
+        deserialize: bool = True,
+    ):
         self._closed = False
-        super().__init__()
+        super().__init__(deserialize=deserialize)
         self._local_addr = local_addr
         self._peer_addr = peer_addr
         self.stream = stream
-        self.deserialize = deserialize
         self._finalizer = weakref.finalize(self, self._get_finalizer())
         self._finalizer.atexit = False
-        self._extra = {}
+        self._extra: dict = {}
 
         ref = weakref.ref(self)
 
@@ -171,7 +177,8 @@ class TCP(Comm):
 
     def _get_finalizer(self):
         def finalize(stream=self.stream, r=repr(self)):
-            # stream is None if a StreamClosedError is raised during interpreter shutdown
+            # stream is None if a StreamClosedError is raised during interpreter
+            # shutdown
             if stream is not None and not stream.closed():
                 logger.warning(f"Closing dangling stream in {r}")
                 stream.close()
@@ -179,11 +186,11 @@ class TCP(Comm):
         return finalize
 
     @property
-    def local_address(self):
+    def local_address(self) -> str:
         return self._local_addr
 
     @property
-    def peer_address(self):
+    def peer_address(self) -> str:
         return self._peer_addr
 
     async def read(self, deserializers=None):
@@ -262,7 +269,7 @@ class TCP(Comm):
         frames_nbytes = [nbytes(header), *frames_nbytes]
         frames_nbytes_total += frames_nbytes[0]
 
-        if frames_nbytes_total < 2 ** 17:  # 128kiB
+        if frames_nbytes_total < 2**17:  # 128kiB
             # small enough, send in one go
             frames = [b"".join(frames)]
             frames_nbytes = [frames_nbytes_total]
@@ -362,7 +369,7 @@ def _expect_tls_context(connection_args):
         raise TypeError(
             "TLS expects a `ssl_context` argument of type "
             "ssl.SSLContext (perhaps check your TLS configuration?)"
-            "  Instead got %s" % str(ctx)
+            f" Instead got {ctx!r}"
         )
     return ctx
 
@@ -378,9 +385,37 @@ class RequireEncryptionMixin:
 
 
 class BaseTCPConnector(Connector, RequireEncryptionMixin):
-    _executor = ThreadPoolExecutor(2, thread_name_prefix="TCP-Executor")
-    _resolver = netutil.ExecutorResolver(close_executor=False, executor=_executor)
-    client = TCPClient(resolver=_resolver)
+    _executor: ClassVar[ThreadPoolExecutor] = ThreadPoolExecutor(
+        2, thread_name_prefix="TCP-Executor"
+    )
+    _client: ClassVar[TCPClient]
+
+    @classmethod
+    def warmup(cls) -> None:
+        """Pre-start threads and sockets to avoid catching them in checks for thread and
+        fd leaks
+        """
+        ex = cls._executor
+        while len(ex._threads) < ex._max_workers:
+            ex._adjust_thread_count()
+        cls._get_client()
+
+    @classmethod
+    def _get_client(cls):
+        if not hasattr(cls, "_client"):
+            resolver = netutil.ExecutorResolver(
+                close_executor=False, executor=cls._executor
+            )
+            cls._client = TCPClient(resolver=resolver)
+        return cls._client
+
+    @property
+    def client(self):
+        # The `TCPClient` is cached on the class itself to avoid creating
+        # excess `ThreadPoolExecutor`s. We delay creation until inside an async
+        # function to avoid accessing an IOLoop from a context where a backing
+        # event loop doesn't exist.
+        return self._get_client()
 
     async def connect(self, address, deserialize=True, **connection_args):
         self._check_encryption(address, connection_args)
@@ -391,8 +426,8 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
             stream = await self.client.connect(
                 ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
             )
-            # Under certain circumstances tornado will have a closed connnection with an error and not raise
-            # a StreamClosedError.
+            # Under certain circumstances tornado will have a closed connnection with an
+            # error and not raise a StreamClosedError.
             #
             # This occurs with tornado 5.x and openssl 1.1+
             if stream.closed() and stream.error:
@@ -443,11 +478,13 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         comm_handler,
         deserialize=True,
         allow_offload=True,
+        default_host=None,
         default_port=0,
         **connection_args,
     ):
         self._check_encryption(address, connection_args)
         self.ip, self.port = parse_host_port(address, default_port)
+        self.default_host = default_host
         self.comm_handler = comm_handler
         self.deserialize = deserialize
         self.allow_offload = allow_offload
@@ -504,7 +541,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         try:
             await self.on_connection(comm)
         except CommClosedError:
-            logger.info("Connection closed before handshake completed")
+            logger.info("Connection from %s closed before handshake completed", address)
             return
 
         await self.comm_handler(comm)
@@ -533,7 +570,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         The contact address as a string.
         """
         host, port = self.get_host_port()
-        host = ensure_concrete_host(host)
+        host = ensure_concrete_host(host, default_host=self.default_host)
         return self.prefix + unparse_host_port(host, port)
 
 
@@ -613,7 +650,3 @@ class TCPBackend(BaseTCPBackend):
 class TLSBackend(BaseTCPBackend):
     _connector_class = TLSConnector
     _listener_class = TLSListener
-
-
-backends["tcp"] = TCPBackend()
-backends["tls"] = TLSBackend()

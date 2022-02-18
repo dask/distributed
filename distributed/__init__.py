@@ -1,10 +1,10 @@
 from . import config  # isort:skip; load distributed configuration first
+from . import widgets  # isort:skip; load distributed widgets second
 import dask
-from dask.config import config
-from dask.utils import import_required
+from dask.config import config  # type: ignore
 
 from ._version import get_versions
-from .actor import Actor, ActorFuture
+from .actor import Actor, BaseActorFuture
 from .client import (
     Client,
     CompatibleExecutor,
@@ -43,31 +43,10 @@ from .semaphore import Semaphore
 from .threadpoolexecutor import rejoin
 from .utils import CancelledError, TimeoutError, sync
 from .variable import Variable
-from .worker import Reschedule, Worker, get_client, get_worker, secede
+from .worker import Reschedule, Worker, get_client, get_worker, print, secede, warn
 from .worker_client import local_client, worker_client
 
 versions = get_versions()
 __version__ = versions["version"]
 __git_revision__ = versions["full-revisionid"]
 del get_versions, versions
-
-if dask.config.get("distributed.admin.event-loop") in ("asyncio", "tornado"):
-    pass
-elif dask.config.get("distributed.admin.event-loop") == "uvloop":
-    import_required(
-        "uvloop",
-        "The distributed.admin.event-loop configuration value "
-        "is set to 'uvloop' but the uvloop module is not installed"
-        "\n\n"
-        "Please either change the config value or install one of the following\n"
-        "    conda install uvloop\n"
-        "    pip install uvloop",
-    )
-    import uvloop
-
-    uvloop.install()
-else:
-    raise ValueError(
-        "Expected distributed.admin.event-loop to be in ('asyncio', 'tornado', 'uvloop'), got %s"
-        % dask.config.get("distributed.admin.event-loop")
-    )

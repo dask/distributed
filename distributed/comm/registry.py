@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 
 
@@ -54,7 +56,7 @@ class Backend(ABC):
 
 
 # The {scheme: Backend} mapping
-backends = {}
+backends: dict[str, Backend] = {}
 
 
 def get_backend(scheme: str, require: bool = True) -> Backend:

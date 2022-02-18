@@ -5,7 +5,6 @@ from datetime import timedelta
 from time import monotonic, sleep
 
 import pytest
-from tornado.ioloop import IOLoop
 
 from distributed import Client, Nanny, TimeoutError, Variable, wait, worker_client
 from distributed.compatibility import WINDOWS
@@ -130,10 +129,10 @@ async def test_timeout(c, s, a, b):
 
 def test_timeout_sync(client):
     v = Variable("v")
-    start = IOLoop.current().time()
+    start = time()
     with pytest.raises(TimeoutError):
         v.get(timeout=0.2)
-    stop = IOLoop.current().time()
+    stop = time()
 
     if WINDOWS:
         assert 0.1 < stop - start < 2.0

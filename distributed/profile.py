@@ -24,12 +24,15 @@ We represent this tree as a nested dictionary with the following form:
                    'children': {...}}}
     }
 """
+from __future__ import annotations
+
 import bisect
 import linecache
 import sys
 import threading
 from collections import defaultdict, deque
 from time import sleep
+from typing import Any
 
 import tlz as toolz
 
@@ -132,8 +135,8 @@ def merge(*args):
     if not args:
         return create()
     s = {arg["identifier"] for arg in args}
-    if len(s) != 1:
-        raise ValueError("Expected identifiers, got %s" % str(s))
+    if len(s) != 1:  # pragma: no cover
+        raise ValueError(f"Expected identifiers, got {s}")
     children = defaultdict(list)
     for arg in args:
         for child in arg["children"]:
@@ -141,7 +144,7 @@ def merge(*args):
 
     try:
         children = {k: merge(*v) for k, v in children.items()}
-    except RecursionError:
+    except RecursionError:  # pragma: no cover
         children = {}
     count = sum(arg["count"] for arg in args)
     return {
@@ -152,7 +155,7 @@ def merge(*args):
     }
 
 
-def create():
+def create() -> dict[str, Any]:
     return {
         "count": 0,
         "children": {},
@@ -215,10 +218,10 @@ def plot_data(state, profile_interval=0.010):
 
         try:
             fn = desc["filename"]
-        except IndexError:
+        except IndexError:  # pragma: no cover
             colors.append("gray")
         else:
-            if fn == "<low-level>":
+            if fn == "<low-level>":  # pragma: no cover
                 colors.append("lightgray")
             else:
                 colors.append(color_of(fn))

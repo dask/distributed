@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from distributed import Worker, WorkerPlugin
@@ -33,9 +35,6 @@ class MyPlugin(WorkerPlugin):
         self.observed_notifications.append(
             {"key": key, "start": start, "finish": finish}
         )
-
-    def release_key(self, key, state, cause, reason, report):
-        self.observed_notifications.append({"key": key, "state": state})
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -86,15 +85,37 @@ async def test_remove_with_client_raises(c, s):
 
 @gen_cluster(client=True, nthreads=[])
 async def test_create_with_client_and_plugin_from_class(c, s):
-    await c.register_worker_plugin(MyPlugin, data=456)
+    with pytest.warns(FutureWarning, match=r"Adding plugins by class is deprecated"):
+        await c.register_worker_plugin(MyPlugin, data=456)
 
     worker = await Worker(s.address, loop=s.loop)
     assert worker._my_plugin_status == "setup"
     assert worker._my_plugin_data == 456
 
     # Give the plugin a new name so that it registers
-    await c.register_worker_plugin(MyPlugin, name="new", data=789)
+    with pytest.warns(FutureWarning, match=r"Adding plugins by class is deprecated"):
+        await c.register_worker_plugin(MyPlugin, data=789, name="new")
     assert worker._my_plugin_data == 789
+
+
+@gen_cluster(nthreads=[], client=True)
+async def test_plugin_class_warns(c, s):
+    class EmptyPlugin:
+        pass
+
+    with pytest.warns(FutureWarning, match=r"Adding plugins by class is deprecated"):
+        await c.register_worker_plugin(EmptyPlugin)
+
+
+@gen_cluster(nthreads=[], client=True)
+async def test_unused_kwargs_throws(c, s):
+    class EmptyPlugin:
+        pass
+
+    with pytest.raises(
+        ValueError, match=r"kwargs provided but plugin is already an instance"
+    ):
+        await c.register_worker_plugin(EmptyPlugin(), data=789)
 
 
 @gen_cluster(client=True, worker_kwargs={"plugins": [MyPlugin(5)]})
@@ -107,11 +128,12 @@ async def test_create_on_construction(c, s, a, b):
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
 async def test_normal_task_transitions_called(c, s, w):
     expected_notifications = [
-        {"key": "task", "start": "new", "finish": "waiting"},
+        {"key": "task", "start": "released", "finish": "waiting"},
         {"key": "task", "start": "waiting", "finish": "ready"},
         {"key": "task", "start": "ready", "finish": "executing"},
         {"key": "task", "start": "executing", "finish": "memory"},
-        {"key": "task", "state": "memory"},
+        {"key": "task", "start": "memory", "finish": "released"},
+        {"key": "task", "start": "released", "finish": "forgotten"},
     ]
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
@@ -127,11 +149,12 @@ async def test_failing_task_transitions_called(c, s, w):
         raise Exception()
 
     expected_notifications = [
-        {"key": "task", "start": "new", "finish": "waiting"},
+        {"key": "task", "start": "released", "finish": "waiting"},
         {"key": "task", "start": "waiting", "finish": "ready"},
         {"key": "task", "start": "ready", "finish": "executing"},
         {"key": "task", "start": "executing", "finish": "error"},
-        {"key": "task", "state": "error"},
+        {"key": "task", "start": "error", "finish": "released"},
+        {"key": "task", "start": "released", "finish": "forgotten"},
     ]
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
@@ -147,11 +170,12 @@ async def test_failing_task_transitions_called(c, s, w):
 )
 async def test_superseding_task_transitions_called(c, s, w):
     expected_notifications = [
-        {"key": "task", "start": "new", "finish": "waiting"},
+        {"key": "task", "start": "released", "finish": "waiting"},
         {"key": "task", "start": "waiting", "finish": "constrained"},
         {"key": "task", "start": "constrained", "finish": "executing"},
         {"key": "task", "start": "executing", "finish": "memory"},
-        {"key": "task", "state": "memory"},
+        {"key": "task", "start": "memory", "finish": "released"},
+        {"key": "task", "start": "released", "finish": "forgotten"},
     ]
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
@@ -166,16 +190,18 @@ async def test_dependent_tasks(c, s, w):
     dsk = {"dep": 1, "task": (inc, "dep")}
 
     expected_notifications = [
-        {"key": "dep", "start": "new", "finish": "waiting"},
+        {"key": "dep", "start": "released", "finish": "waiting"},
         {"key": "dep", "start": "waiting", "finish": "ready"},
         {"key": "dep", "start": "ready", "finish": "executing"},
         {"key": "dep", "start": "executing", "finish": "memory"},
-        {"key": "task", "start": "new", "finish": "waiting"},
+        {"key": "task", "start": "released", "finish": "waiting"},
         {"key": "task", "start": "waiting", "finish": "ready"},
         {"key": "task", "start": "ready", "finish": "executing"},
         {"key": "task", "start": "executing", "finish": "memory"},
-        {"key": "dep", "state": "memory"},
-        {"key": "task", "state": "memory"},
+        {"key": "dep", "start": "memory", "finish": "released"},
+        {"key": "task", "start": "memory", "finish": "released"},
+        {"key": "task", "start": "released", "finish": "forgotten"},
+        {"key": "dep", "start": "released", "finish": "forgotten"},
     ]
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
@@ -183,24 +209,6 @@ async def test_dependent_tasks(c, s, w):
     await c.register_worker_plugin(plugin)
     await c.get(dsk, "task", sync=False)
     await async_wait_for(lambda: not w.tasks, timeout=10)
-
-
-@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
-async def test_registering_with_name_arg(c, s, w):
-    class FooWorkerPlugin:
-        def setup(self, worker):
-            if hasattr(worker, "foo"):
-                raise RuntimeError(f"Worker {worker.address} already has foo!")
-
-            worker.foo = True
-
-    responses = await c.register_worker_plugin(FooWorkerPlugin(), name="foo")
-    assert list(responses.values()) == [{"status": "OK"}]
-
-    async with Worker(s.address, loop=s.loop):
-        with pytest.warns(FutureWarning, match="worker plugin will be overwritten"):
-            responses = await c.register_worker_plugin(FooWorkerPlugin(), name="foo")
-        assert list(responses.values()) == [{"status": "repeat"}] * 2
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -219,3 +227,92 @@ async def test_default_name(c, s, w):
     await c.register_worker_plugin(MyCustomPlugin())
     assert len(w.plugins) == 1
     assert next(iter(w.plugins)).startswith("MyCustomPlugin-")
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_release_key_deprecated(c, s, a):
+    class ReleaseKeyDeprecated(WorkerPlugin):
+        def __init__(self):
+            self._called = False
+
+        def release_key(self, key, state, cause, reason, report):
+            # Ensure that the handler still works
+            self._called = True
+            assert state == "memory"
+            assert key == "task"
+
+        def teardown(self, worker):
+            assert self._called
+            return super().teardown(worker)
+
+    await c.register_worker_plugin(ReleaseKeyDeprecated())
+
+    with pytest.warns(
+        FutureWarning, match="The `WorkerPlugin.release_key` hook is deprecated"
+    ):
+        assert await c.submit(inc, 1, key="x") == 2
+        while "x" in a.tasks:
+            await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_assert_no_warning_no_overload(c, s, a):
+    """Assert we do not receive a deprecation warning if we do not overload any
+    methods
+    """
+
+    class Dummy(WorkerPlugin):
+        pass
+
+    with pytest.warns(None):
+        await c.register_worker_plugin(Dummy())
+        assert await c.submit(inc, 1, key="x") == 2
+        while "x" in a.tasks:
+            await asyncio.sleep(0.01)
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_WorkerPlugin_overwrite(c, s, w):
+    class MyCustomPlugin(WorkerPlugin):
+        name = "custom"
+
+        def setup(self, worker):
+            self.worker = worker
+            self.worker.foo = 0
+
+        def transition(self, *args, **kwargs):
+            self.worker.foo = 123
+
+        def teardown(self, worker):
+            del self.worker.foo
+
+    await c.register_worker_plugin(MyCustomPlugin())
+
+    assert w.foo == 0
+
+    await c.submit(inc, 0)
+    assert w.foo == 123
+
+    while s.tasks or w.tasks:
+        await asyncio.sleep(0.01)
+
+    class MyCustomPlugin(WorkerPlugin):
+        name = "custom"
+
+        def setup(self, worker):
+            self.worker = worker
+            self.worker.bar = 0
+
+        def transition(self, *args, **kwargs):
+            self.worker.bar = 456
+
+        def teardown(self, worker):
+            del self.worker.bar
+
+    await c.register_worker_plugin(MyCustomPlugin())
+
+    assert not hasattr(w, "foo")
+    assert w.bar == 0
+
+    await c.submit(inc, 0)
+    assert w.bar == 456

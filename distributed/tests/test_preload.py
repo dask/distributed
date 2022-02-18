@@ -3,17 +3,19 @@ import os
 import shutil
 import sys
 import tempfile
-import time
+import urllib.error
+import urllib.request
+from time import sleep
 
 import pytest
 import tornado
-import urllib3
 from tornado import web
 
 import dask
 
 from distributed import Client, Nanny, Scheduler, Worker
 from distributed.compatibility import MACOS
+from distributed.metrics import time
 from distributed.utils_test import captured_logger, cluster, gen_cluster, gen_test
 
 PY_VERSION = sys.version_info[:2]
@@ -74,7 +76,7 @@ def dask_teardown(worker):
     worker.foo = 'teardown'
 """
     with dask.config.set(
-        {"distributed.worker.preload": text, "distributed.nanny.preload": text}
+        {"distributed.worker.preload": [text], "distributed.nanny.preload": [text]}
     ):
         async with Nanny(s.address) as w:
             assert w.foo == "setup"
@@ -178,23 +180,23 @@ def create_preload_application():
 def scheduler_preload():
     p = multiprocessing.Process(target=create_preload_application)
     p.start()
-    start = time.time()
+    start = time()
     while not p.is_alive():
-        if time.time() > start + 5:
+        if time() > start + 5:
             raise AssertionError("Process didn't come up")
-        time.sleep(0.5)
+        sleep(0.5)
     # Make sure we can query the server
-    client = urllib3.PoolManager()
-    start = time.time()
+    start = time()
+    request = urllib.request.Request("http://127.0.0.1:12345/preload", method="GET")
     while True:
         try:
-            response = client.request("GET", "http://127.0.0.1:12345/preload")
+            response = urllib.request.urlopen(request)
             if response.status == 200:
                 break
-        except urllib3.exceptions.HTTPError as e:
-            if time.time() > start + 10:
+        except urllib.error.URLError as e:
+            if time() > start + 10:
                 raise AssertionError("Webserver didn't come up", e)
-            time.sleep(0.5)
+            sleep(0.5)
 
     yield
     p.kill()
@@ -255,23 +257,23 @@ def create_worker_preload_application():
 def worker_preload():
     p = multiprocessing.Process(target=create_worker_preload_application)
     p.start()
-    start = time.time()
+    start = time()
     while not p.is_alive():
-        if time.time() > start + 5:
+        if time() > start + 5:
             raise AssertionError("Process didn't come up")
-        time.sleep(0.5)
+        sleep(0.5)
     # Make sure we can query the server
-    client = urllib3.PoolManager()
-    start = time.time()
+    request = urllib.request.Request("http://127.0.0.1:12346/preload", method="GET")
+    start = time()
     while True:
         try:
-            response = client.request("GET", "http://127.0.0.1:12346/preload")
+            response = urllib.request.urlopen(request)
             if response.status == 200:
                 break
-        except urllib3.exceptions.HTTPError as e:
-            if time.time() > start + 10:
+        except urllib.error.URLError as e:
+            if time() > start + 10:
                 raise AssertionError("Webserver didn't come up", e)
-            time.sleep(0.5)
+            sleep(0.5)
 
     yield
     p.kill()

@@ -1,16 +1,15 @@
+from __future__ import annotations
+
+import copy
 import logging
 import sys
 import warnings
 import weakref
-from typing import List, Union
+from json import dumps
 
 import dask
 import dask.config
 
-from ..core import Status
-from ..scheduler import Scheduler as _Scheduler
-from ..utils import cli_keywords
-from ..worker import Worker as _Worker
 from .spec import ProcessInterface, SpecCluster
 
 logger = logging.getLogger(__name__)
@@ -42,9 +41,6 @@ class Process(ProcessInterface):
         self.connection.close()
         await super().close()
 
-    def __repr__(self):
-        return f"<SSH {type(self).__name__}: status={self.status}>"
-
 
 class Worker(Process):
     """A Remote Dask Worker controled by SSH
@@ -55,8 +51,8 @@ class Worker(Process):
         The address of the scheduler
     address: str
         The hostname where we should run this worker
-    worker_module: str
-        The python module to run to start the worker.
+    worker_class: str
+        The python class to use to create the worker.
     connect_options: dict
         kwargs to be passed to asyncssh connections
     remote_python: str
@@ -72,23 +68,67 @@ class Worker(Process):
         address: str,
         connect_options: dict,
         kwargs: dict,
-        worker_module="distributed.cli.dask_worker",
+        worker_module="deprecated",
+        worker_class="distributed.Nanny",
         remote_python=None,
         loop=None,
         name=None,
     ):
         super().__init__()
 
+        if worker_module != "deprecated":
+            raise ValueError(
+                "worker_module has been deprecated in favor of worker_class. "
+                "Please specify a Python class rather than a CLI module."
+            )
+
         self.address = address
         self.scheduler = scheduler
-        self.worker_module = worker_module
+        self.worker_class = worker_class
         self.connect_options = connect_options
-        self.kwargs = kwargs
+        self.kwargs = copy.copy(kwargs)
         self.name = name
         self.remote_python = remote_python
+        if kwargs.get("nprocs") is not None and kwargs.get("n_workers") is not None:
+            raise ValueError(
+                "Both nprocs and n_workers were specified. Use n_workers only."
+            )
+        elif kwargs.get("nprocs") is not None:
+            warnings.warn(
+                "The nprocs argument will be removed in a future release. It has been "
+                "renamed to n_workers.",
+                FutureWarning,
+            )
+            self.n_workers = self.kwargs.pop("nprocs", 1)
+        else:
+            self.n_workers = self.kwargs.pop("n_workers", 1)
+
+    @property
+    def nprocs(self):
+        warnings.warn(
+            "The nprocs attribute will be removed in a future release. It has been "
+            "renamed to n_workers.",
+            FutureWarning,
+        )
+        return self.n_workers
+
+    @nprocs.setter
+    def nprocs(self, value):
+        warnings.warn(
+            "The nprocs attribute will be removed in a future release. It has been "
+            "renamed to n_workers.",
+            FutureWarning,
+        )
+        self.n_workers = value
 
     async def start(self):
-        import asyncssh  # import now to avoid adding to module startup time
+        try:
+            import asyncssh  # import now to avoid adding to module startup time
+        except ImportError:
+            raise ImportError(
+                "Dask's SSHCluster requires the `asyncssh` package to be installed. "
+                "Please install it using pip or conda."
+            )
 
         self.connection = await asyncssh.connect(self.address, **self.connect_options)
 
@@ -116,26 +156,35 @@ class Worker(Process):
                 set_env,
                 self.remote_python,
                 "-m",
-                self.worker_module,
+                "distributed.cli.dask_spec",
                 self.scheduler,
-                "--name",
-                str(self.name),
+                "--spec",
+                "'%s'"
+                % dumps(
+                    {
+                        i: {
+                            "cls": self.worker_class,
+                            "opts": {
+                                **self.kwargs,
+                            },
+                        }
+                        for i in range(self.n_workers)
+                    }
+                ),
             ]
-            + cli_keywords(self.kwargs, cls=_Worker, cmd=self.worker_module)
         )
 
         self.proc = await self.connection.create_process(cmd)
 
         # We watch stderr in order to get the address, then we return
-        while True:
+        started_workers = 0
+        while started_workers < self.n_workers:
             line = await self.proc.stderr.readline()
             if not line.strip():
                 raise Exception("Worker failed to start")
             logger.info(line.strip())
             if "worker at" in line:
-                self.address = line.split("worker at:")[1].strip()
-                self.status = Status.running
-                break
+                started_workers += 1
         logger.debug("%s", line)
         await super().start()
 
@@ -167,7 +216,13 @@ class Scheduler(Process):
         self.remote_python = remote_python
 
     async def start(self):
-        import asyncssh  # import now to avoid adding to module startup time
+        try:
+            import asyncssh  # import now to avoid adding to module startup time
+        except ImportError:
+            raise ImportError(
+                "Dask's SSHCluster requires the `asyncssh` package to be installed. "
+                "Please install it using pip or conda."
+            )
 
         logger.debug("Created Scheduler Connection")
 
@@ -197,9 +252,10 @@ class Scheduler(Process):
                 set_env,
                 self.remote_python,
                 "-m",
-                "distributed.cli.dask_scheduler",
+                "distributed.cli.dask_spec",
+                "--spec",
+                "'%s'" % dumps({"cls": "distributed.Scheduler", "opts": self.kwargs}),
             ]
-            + cli_keywords(self.kwargs, cls=_Scheduler)
         )
         self.proc = await self.connection.create_process(cmd)
 
@@ -222,6 +278,7 @@ old_cluster_kwargs = {
     "worker_addrs",
     "nthreads",
     "nprocs",
+    "n_workers",
     "ssh_username",
     "ssh_port",
     "ssh_private_key",
@@ -236,12 +293,13 @@ old_cluster_kwargs = {
 
 
 def SSHCluster(
-    hosts: List[str] = None,
-    connect_options: Union[List[dict], dict] = {},
+    hosts: list[str] | None = None,
+    connect_options: dict | list[dict] = {},
     worker_options: dict = {},
     scheduler_options: dict = {},
-    worker_module: str = "distributed.cli.dask_worker",
-    remote_python: Union[str, List[str]] = None,
+    worker_module: str = "deprecated",
+    worker_class: str = "distributed.Nanny",
+    remote_python: str | list[str] | None = None,
     **kwargs,
 ):
     """Deploy a Dask cluster using SSH
@@ -265,7 +323,7 @@ def SSHCluster(
 
     Parameters
     ----------
-    hosts : List[str]
+    hosts : list[str]
         List of hostnames or addresses on which to launch our cluster.
         The first will be used for the scheduler and the rest for workers.
     connect_options : dict or list of dict, optional
@@ -278,13 +336,22 @@ def SSHCluster(
         Keywords to pass on to workers.
     scheduler_options : dict, optional
         Keywords to pass on to scheduler.
-    worker_module : str, optional
-        Python module to call to start the worker.
+    worker_class: str
+        The python class to use to create the worker(s).
     remote_python : str or list of str, optional
         Path to Python on remote nodes.
 
     Examples
     --------
+    Create a cluster with one worker:
+
+    >>> from dask.distributed import Client, SSHCluster
+    >>> cluster = SSHCluster(["localhost", "localhost"])
+    >>> client = Client(cluster)
+
+    Create a cluster with three workers, each with two threads
+    and host the dashdoard on port 8797:
+
     >>> from dask.distributed import Client, SSHCluster
     >>> cluster = SSHCluster(
     ...     ["localhost", "localhost", "localhost", "localhost"],
@@ -294,15 +361,26 @@ def SSHCluster(
     ... )
     >>> client = Client(cluster)
 
-    An example using a different worker module, in particular the
-    ``dask-cuda-worker`` command from the ``dask-cuda`` project.
+    Create a cluster with two workers on each host:
+
+    >>> from dask.distributed import Client, SSHCluster
+    >>> cluster = SSHCluster(
+    ...     ["localhost", "localhost", "localhost", "localhost"],
+    ...     connect_options={"known_hosts": None},
+    ...     worker_options={"nthreads": 2, "n_workers": 2},
+    ...     scheduler_options={"port": 0, "dashboard_address": ":8797"}
+    ... )
+    >>> client = Client(cluster)
+
+    An example using a different worker class, in particular the
+    ``CUDAWorker`` from the ``dask-cuda`` project:
 
     >>> from dask.distributed import Client, SSHCluster
     >>> cluster = SSHCluster(
     ...     ["localhost", "hostwithgpus", "anothergpuhost"],
     ...     connect_options={"known_hosts": None},
     ...     scheduler_options={"port": 0, "dashboard_address": ":8797"},
-    ...     worker_module="dask_cuda.cli.dask_cuda_worker")
+    ...     worker_class="dask_cuda.CUDAWorker")
     >>> client = Client(cluster)
 
     See Also
@@ -311,6 +389,12 @@ def SSHCluster(
     dask.distributed.Worker
     asyncssh.connect
     """
+    if worker_module != "deprecated":
+        raise ValueError(
+            "worker_module has been deprecated in favor of worker_class. "
+            "Please specify a Python class rather than a CLI module."
+        )
+
     if set(kwargs) & old_cluster_kwargs:
         from .old_ssh import SSHCluster as OldSSHCluster
 
@@ -360,7 +444,7 @@ def SSHCluster(
                 if isinstance(connect_options, dict)
                 else connect_options[i + 1],
                 "kwargs": worker_options,
-                "worker_module": worker_module,
+                "worker_class": worker_class,
                 "remote_python": remote_python[i + 1]
                 if isinstance(remote_python, list)
                 else remote_python,

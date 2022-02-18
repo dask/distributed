@@ -15,8 +15,10 @@ from .components.scheduler import (
     MemoryByKey,
     Occupancy,
     SystemMonitor,
+    SystemTimeseries,
     TaskGraph,
     TaskGroupGraph,
+    TaskGroupProgress,
     TaskProgress,
     TaskStream,
     WorkerNetworkBandwidth,
@@ -58,6 +60,7 @@ applications = {
     "/individual-progress": individual_doc(TaskProgress, 100, height=160),
     "/individual-graph": individual_doc(TaskGraph, 200),
     "/individual-groups": individual_doc(TaskGroupGraph, 200),
+    "/individual-group-progress": individual_doc(TaskGroupProgress, 200),
     "/individual-workers-memory": individual_doc(WorkersMemory, 100),
     "/individual-cluster-memory": individual_doc(ClusterMemory, 100),
     "/individual-cpu": individual_doc(CurrentLoad, 100, fig_attr="cpu_figure"),
@@ -68,8 +71,23 @@ applications = {
     "/individual-workers": individual_doc(WorkerTable, 500),
     "/individual-bandwidth-types": individual_doc(BandwidthTypes, 500),
     "/individual-bandwidth-workers": individual_doc(BandwidthWorkers, 500),
-    "/individual-workers-network-bandwidth": individual_doc(
-        WorkerNetworkBandwidth, 500
+    "/individual-workers-network": individual_doc(
+        WorkerNetworkBandwidth, 500, fig_attr="bandwidth"
+    ),
+    "/individual-workers-disk": individual_doc(
+        WorkerNetworkBandwidth, 500, fig_attr="disk"
+    ),
+    "/individual-workers-network-timeseries": individual_doc(
+        SystemTimeseries, 500, fig_attr="bandwidth"
+    ),
+    "/individual-workers-cpu-timeseries": individual_doc(
+        SystemTimeseries, 500, fig_attr="cpu"
+    ),
+    "/individual-workers-memory-timeseries": individual_doc(
+        SystemTimeseries, 500, fig_attr="memory"
+    ),
+    "/individual-workers-disk-timeseries": individual_doc(
+        SystemTimeseries, 500, fig_attr="disk"
     ),
     "/individual-memory-by-key": individual_doc(MemoryByKey, 500),
     "/individual-compute-time-per-key": individual_doc(ComputePerKey, 500),

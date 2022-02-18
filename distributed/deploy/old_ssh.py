@@ -2,18 +2,16 @@ import logging
 import os
 import socket
 import sys
-import time
 import traceback
-
-try:
-    from queue import Queue
-except ImportError:  # Python 2.7 fix
-    from Queue import Queue
-
+import warnings
+from queue import Queue
 from threading import Thread
+from time import sleep
 
 from tlz import merge
 from tornado import gen
+
+from ..metrics import time
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +60,7 @@ def async_ssh(cmd_dict):
             print(
                 "[ dask-ssh ] : "
                 + bcolors.FAIL
-                + "SSH connection error when connecting to {addr}:{port}"
+                + "SSH connection error when connecting to {addr}:{port} "
                 "to run '{cmd}'".format(
                     addr=cmd_dict["address"],
                     port=cmd_dict["ssh_port"],
@@ -104,7 +102,7 @@ def async_ssh(cmd_dict):
                 + bcolors.ENDC
             )
 
-            time.sleep(1)
+            sleep(1)
 
     # Execute the command, and grab file handles for stdout and stderr. Note
     # that we run the command using the user's default shell, but force it to
@@ -187,19 +185,19 @@ def async_ssh(cmd_dict):
     # thread to shut itself down.
     while cmd_dict["input_queue"].empty():
         # Kill some time so that this thread does not hog the CPU.
-        time.sleep(1.0)
+        sleep(1.0)
         # Send noise down the pipe to keep connection active
         transport.send_ignore()
         if communicate():
             break
 
     # Ctrl-C the executing command and wait a bit for command to end cleanly
-    start = time.time()
-    while time.time() < start + 5.0:
+    start = time()
+    while time() < start + 5.0:
         channel.send(b"\x03")  # Ctrl-C
         if communicate():
             break
-        time.sleep(1.0)
+        sleep(1.0)
 
     # Shutdown the channel, and close the SSH connection
     channel.close()
@@ -254,7 +252,7 @@ def start_worker(
     scheduler_port,
     worker_addr,
     nthreads,
-    nprocs,
+    n_workers,
     ssh_username,
     ssh_port,
     ssh_private_key,
@@ -270,7 +268,7 @@ def start_worker(
     cmd = (
         "{python} -m {remote_dask_worker} "
         "{scheduler_addr}:{scheduler_port} "
-        "--nthreads {nthreads}" + (" --nprocs {nprocs}" if nprocs != 1 else "")
+        "--nthreads {nthreads}" + (" --nworkers {n_workers}" if n_workers != 1 else "")
     )
 
     if not nohost:
@@ -292,7 +290,7 @@ def start_worker(
         scheduler_port=scheduler_port,
         worker_addr=worker_addr,
         nthreads=nthreads,
-        nprocs=nprocs,
+        n_workers=n_workers,
         memory_limit=memory_limit,
         worker_port=worker_port,
         nanny_port=nanny_port,
@@ -342,7 +340,7 @@ class SSHCluster:
         scheduler_port,
         worker_addrs,
         nthreads=0,
-        nprocs=1,
+        n_workers=None,
         ssh_username=None,
         ssh_port=22,
         ssh_private_key=None,
@@ -354,12 +352,32 @@ class SSHCluster:
         nanny_port=None,
         remote_dask_worker="distributed.cli.dask_worker",
         local_directory=None,
+        **kwargs,
     ):
 
         self.scheduler_addr = scheduler_addr
         self.scheduler_port = scheduler_port
         self.nthreads = nthreads
-        self.nprocs = nprocs
+        nprocs = kwargs.pop("nprocs", None)
+        if kwargs:
+            raise TypeError(
+                f"__init__() got an unexpected keyword argument {', '.join(kwargs.keys())}"
+            )
+        if nprocs is not None and n_workers is not None:
+            raise ValueError(
+                "Both nprocs and n_workers were specified. Use n_workers only."
+            )
+        elif nprocs is not None:
+            warnings.warn(
+                "The nprocs argument will be removed in a future release. It has been "
+                "renamed to n_workers.",
+                FutureWarning,
+            )
+            n_workers = nprocs
+        elif n_workers is None:
+            n_workers = 1
+
+        self.n_workers = n_workers
 
         self.ssh_username = ssh_username
         self.ssh_port = ssh_port
@@ -416,6 +434,24 @@ class SSHCluster:
         pass
 
     @property
+    def nprocs(self):
+        warnings.warn(
+            "The nprocs attribute will be removed in a future release. It has been "
+            "renamed to n_workers.",
+            FutureWarning,
+        )
+        return self.n_workers
+
+    @nprocs.setter
+    def nprocs(self, value):
+        warnings.warn(
+            "The nprocs attribute will be removed in a future release. It has been "
+            "renamed to n_workers.",
+            FutureWarning,
+        )
+        self.n_workers = value
+
+    @property
     def scheduler_address(self):
         return "%s:%d" % (self.scheduler_addr, self.scheduler_port)
 
@@ -432,7 +468,7 @@ class SSHCluster:
 
                 # Kill some time and free up CPU before starting the next sweep
                 # through the processes.
-                time.sleep(0.1)
+                sleep(0.1)
 
             # end while true
 
@@ -447,7 +483,7 @@ class SSHCluster:
                 self.scheduler_port,
                 address,
                 self.nthreads,
-                self.nprocs,
+                self.n_workers,
                 self.ssh_username,
                 self.ssh_port,
                 self.ssh_private_key,

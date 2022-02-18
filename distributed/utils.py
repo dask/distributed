@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import asyncio
+import contextvars
 import functools
-import html
 import importlib
 import inspect
 import json
@@ -9,7 +11,6 @@ import multiprocessing
 import os
 import pkgutil
 import re
-import shutil
 import socket
 import sys
 import tempfile
@@ -19,13 +20,15 @@ import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
 from collections import OrderedDict, UserDict, deque
+from collections.abc import Container, KeysView, ValuesView
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
 from typing import Any as AnyType
-from typing import Dict, List
+from typing import ClassVar
 
 import click
 import tblib.pickling_support
@@ -33,7 +36,7 @@ import tblib.pickling_support
 try:
     import resource
 except ImportError:
-    resource = None
+    resource = None  # type: ignore
 
 import tlz as toolz
 from tornado import gen
@@ -42,13 +45,9 @@ from tornado.ioloop import IOLoop
 import dask
 from dask import istask
 from dask.utils import parse_timedelta as _parse_timedelta
+from dask.widgets import get_template
 
-try:
-    from tornado.ioloop import PollIOLoop
-except ImportError:
-    PollIOLoop = None  # dropped in tornado 6.0
-
-from .compatibility import PYPY, WINDOWS
+from .compatibility import WINDOWS
 from .metrics import time
 
 try:
@@ -69,11 +68,9 @@ no_default = "__no_default__"
 
 
 def _initialize_mp_context():
-    if WINDOWS or PYPY:
-        return multiprocessing
-    else:
-        method = dask.config.get("distributed.worker.multiprocessing-method")
-        ctx = multiprocessing.get_context(method)
+    method = dask.config.get("distributed.worker.multiprocessing-method")
+    ctx = multiprocessing.get_context(method)
+    if method == "forkserver":
         # Makes the test suite much faster
         preload = ["distributed"]
         if "pkg_resources" in sys.modules:
@@ -89,7 +86,8 @@ def _initialize_mp_context():
             else:
                 preload.append(pkg)
         ctx.set_forkserver_preload(preload)
-        return ctx
+
+    return ctx
 
 
 mp_context = _initialize_mp_context()
@@ -270,35 +268,77 @@ async def Any(args, quiet_exceptions=()):
     return results
 
 
+class NoOpAwaitable:
+    """An awaitable object that always returns None.
+
+    Useful to return from a method that can be called in both asynchronous and
+    synchronous contexts"""
+
+    def __await__(self):
+        async def f():
+            return None
+
+        return f().__await__()
+
+
+class SyncMethodMixin:
+    """
+    A mixin for adding an `asynchronous` attribute and `sync` method to a class.
+
+    Subclasses must define a `loop` attribute for an associated
+    `tornado.IOLoop`, and may also add a `_asynchronous` attribute indicating
+    whether the class should default to asynchronous behavior.
+    """
+
+    @property
+    def asynchronous(self):
+        """Are we running in the event loop?"""
+        return in_async_call(self.loop, default=getattr(self, "_asynchronous", False))
+
+    def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
+        """Call `func` with `args` synchronously or asynchronously depending on
+        the calling context"""
+        callback_timeout = _parse_timedelta(callback_timeout)
+        if asynchronous is None:
+            asynchronous = self.asynchronous
+        if asynchronous:
+            future = func(*args, **kwargs)
+            if callback_timeout is not None:
+                future = asyncio.wait_for(future, callback_timeout)
+            return future
+        else:
+            return sync(
+                self.loop, func, *args, callback_timeout=callback_timeout, **kwargs
+            )
+
+
+def in_async_call(loop, default=False):
+    """Whether this call is currently within an async call"""
+    try:
+        return loop.asyncio_loop is asyncio.get_running_loop()
+    except RuntimeError:
+        # No *running* loop in thread. If the event loop isn't running, it
+        # _could_ be started later in this thread though. Return the default.
+        if not loop.asyncio_loop.is_running():
+            return default
+        return False
+
+
 def sync(loop, func, *args, callback_timeout=None, **kwargs):
     """
     Run coroutine in loop running in separate thread.
     """
     callback_timeout = _parse_timedelta(callback_timeout, "s")
-    # Tornado's PollIOLoop doesn't raise when using closed, do it ourselves
-    if PollIOLoop and (
-        (isinstance(loop, PollIOLoop) and getattr(loop, "_closing", False))
-        or (hasattr(loop, "asyncio_loop") and loop.asyncio_loop._closed)
-    ):
+    if loop.asyncio_loop.is_closed():
         raise RuntimeError("IOLoop is closed")
-    try:
-        if loop.asyncio_loop.is_closed():  # tornado 6
-            raise RuntimeError("IOLoop is closed")
-    except AttributeError:
-        pass
 
     e = threading.Event()
     main_tid = threading.get_ident()
-    result = [None]
-    error = [False]
+    result = error = future = None  # set up non-locals
 
     @gen.coroutine
     def f():
-        # We flag the thread state asynchronous, which will make sync() call
-        # within `func` use async semantic. In order to support concurrent
-        # calls to sync(), `asynchronous` is used as a ref counter.
-        thread_state.asynchronous = getattr(thread_state, "asynchronous", 0)
-        thread_state.asynchronous += 1
+        nonlocal result, error, future
         try:
             if main_tid == threading.get_ident():
                 raise RuntimeError("sync() called from thread of running loop")
@@ -306,26 +346,37 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             future = func(*args, **kwargs)
             if callback_timeout is not None:
                 future = asyncio.wait_for(future, callback_timeout)
-            result[0] = yield future
+            future = asyncio.ensure_future(future)
+            result = yield future
         except Exception:
-            error[0] = sys.exc_info()
+            error = sys.exc_info()
         finally:
-            assert thread_state.asynchronous > 0
-            thread_state.asynchronous -= 1
             e.set()
+
+    def cancel():
+        if future is not None:
+            future.cancel()
+
+    def wait(timeout):
+        try:
+            return e.wait(timeout)
+        except KeyboardInterrupt:
+            loop.add_callback(cancel)
+            raise
 
     loop.add_callback(f)
     if callback_timeout is not None:
-        if not e.wait(callback_timeout):
+        if not wait(callback_timeout):
             raise TimeoutError(f"timed out after {callback_timeout} s.")
     else:
         while not e.is_set():
-            e.wait(10)
-    if error[0]:
-        typ, exc, tb = error[0]
+            wait(10)
+
+    if error:
+        typ, exc, tb = error
         raise exc.with_traceback(tb)
     else:
-        return result[0]
+        return result
 
 
 class LoopRunner:
@@ -346,14 +397,15 @@ class LoopRunner:
     """
 
     # All loops currently associated to loop runners
-    _all_loops = weakref.WeakKeyDictionary()
+    _all_loops: ClassVar[
+        weakref.WeakKeyDictionary[IOLoop, tuple[int, LoopRunner | None]]
+    ] = weakref.WeakKeyDictionary()
     _lock = threading.Lock()
 
     def __init__(self, loop=None, asynchronous=False):
-        current = IOLoop.current()
         if loop is None:
             if asynchronous:
-                self._loop = current
+                self._loop = IOLoop.current()
             else:
                 # We're expecting the loop to run in another thread,
                 # avoid re-using this thread's assigned loop
@@ -399,8 +451,10 @@ class LoopRunner:
 
         def run_loop(loop=self._loop):
             loop.add_callback(loop_cb)
+            # run loop forever if it's not running already
             try:
-                loop.start()
+                if not loop.asyncio_loop.is_running():
+                    loop.start()
             except Exception as e:
                 start_exc[0] = e
             finally:
@@ -417,11 +471,13 @@ class LoopRunner:
         if actual_thread is not thread:
             # Loop already running in other thread (user-launched)
             done_evt.wait(5)
-            if not isinstance(start_exc[0], RuntimeError):
+            if start_exc[0] is not None and not isinstance(start_exc[0], RuntimeError):
                 if not isinstance(
                     start_exc[0], Exception
                 ):  # track down infrequent error
-                    raise TypeError("not an exception", start_exc[0])
+                    raise TypeError(
+                        f"not an exception: {start_exc[0]!r}",
+                    )
                 raise start_exc[0]
             self._all_loops[self._loop] = count + 1, None
         else:
@@ -596,7 +652,7 @@ def key_split(s):
         return "Other"
 
 
-def key_split_group(x):
+def key_split_group(x) -> str:
     """A more fine-grained version of key_split
 
     >>> key_split_group(('x-2', 1))
@@ -627,7 +683,7 @@ def key_split_group(x):
     elif typ is bytes:
         return key_split_group(x.decode())
     else:
-        return key_split(x)
+        return "Other"
 
 
 @contextmanager
@@ -675,9 +731,14 @@ def ensure_ip(hostname):
     --------
     >>> ensure_ip('localhost')
     '127.0.0.1'
+    >>> ensure_ip('')  # Maps as localhost for binding e.g. 'tcp://:8811'
+    '127.0.0.1'
     >>> ensure_ip('123.123.123.123')  # pass through IP addresses
     '123.123.123.123'
     """
+    if not hostname:
+        hostname = "localhost"
+
     # Prefer IPv4 over IPv6, for compatibility
     families = [socket.AF_INET, socket.AF_INET6]
     for fam in families:
@@ -809,12 +870,12 @@ def read_block(f, offset, length, delimiter=None):
     """
     if delimiter:
         f.seek(offset)
-        seek_delimiter(f, delimiter, 2 ** 16)
+        seek_delimiter(f, delimiter, 2**16)
         start = f.tell()
         length -= start - offset
 
         f.seek(start + length)
-        seek_delimiter(f, delimiter, 2 ** 16)
+        seek_delimiter(f, delimiter, 2**16)
         end = f.tell()
 
         offset = start
@@ -823,25 +884,6 @@ def read_block(f, offset, length, delimiter=None):
     f.seek(offset)
     bytes = f.read(length)
     return bytes
-
-
-@contextmanager
-def tmpfile(extension=""):
-    extension = "." + extension.lstrip(".")
-    handle, filename = tempfile.mkstemp(extension)
-    os.close(handle)
-    os.remove(filename)
-
-    yield filename
-
-    if os.path.exists(filename):
-        try:
-            if os.path.isdir(filename):
-                shutil.rmtree(filename)
-            else:
-                os.remove(filename)
-        except OSError:  # sometimes we can't remove a generated temp file
-            pass
 
 
 def ensure_bytes(s):
@@ -988,7 +1030,7 @@ def json_load_robust(fn, load=json.load):
 class DequeHandler(logging.Handler):
     """A logging.Handler that records records into a deque"""
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[DequeHandler]] = weakref.WeakSet()
 
     def __init__(self, *args, n=10000, **kwargs):
         self.deque = deque(maxlen=n)
@@ -1021,49 +1063,6 @@ def reset_logger_locks():
     for name in logging.Logger.manager.loggerDict.keys():
         for handler in logging.getLogger(name).handlers:
             handler.createLock()
-
-
-is_server_extension = False
-
-if "notebook" in sys.modules:
-    import traitlets
-    from notebook.notebookapp import NotebookApp
-
-    is_server_extension = traitlets.config.Application.initialized() and isinstance(
-        traitlets.config.Application.instance(), NotebookApp
-    )
-
-if not is_server_extension:
-    is_kernel_and_no_running_loop = False
-
-    if is_kernel():
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            is_kernel_and_no_running_loop = True
-
-    if not is_kernel_and_no_running_loop:
-
-        # TODO: Use tornado's AnyThreadEventLoopPolicy, instead of class below,
-        # once tornado > 6.0.3 is available.
-        if WINDOWS and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
-            # WindowsProactorEventLoopPolicy is not compatible with tornado 6
-            # fallback to the pre-3.8 default of Selector
-            # https://github.com/tornadoweb/tornado/issues/2608
-            BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy
-        else:
-            BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
-
-        class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):
-            def get_event_loop(self):
-                try:
-                    return super().get_event_loop()
-                except (RuntimeError, AssertionError):
-                    loop = self.new_event_loop()
-                    self.set_event_loop(loop)
-                    return loop
-
-        asyncio.set_event_loop_policy(AnyThreadEventLoopPolicy())
 
 
 @functools.lru_cache(1000)
@@ -1152,21 +1151,6 @@ def warn_on_duration(duration, msg):
         warnings.warn(msg, stacklevel=2)
 
 
-def typename(typ):
-    """Return name of type
-
-    Examples
-    --------
-    >>> from distributed import Scheduler
-    >>> typename(Scheduler)
-    'distributed.scheduler.Scheduler'
-    """
-    try:
-        return typ.__module__ + "." + typ.__name__
-    except AttributeError:
-        return str(typ)
-
-
 def format_dashboard_link(host, port):
     template = dask.config.get("distributed.dashboard.link")
     if dask.config.get("distributed.scheduler.dashboard.tls.cert"):
@@ -1229,7 +1213,7 @@ def parse_ports(port):
             raise ValueError(
                 "When specifying a range of ports like port_start:port_stop, "
                 "port_stop must be greater than port_start, but got "
-                f"port_start={port_start} and port_stop={port_stop}"
+                f"{port_start=} and {port_stop=}"
             )
         ports = list(range(port_start, port_stop + 1))
 
@@ -1242,43 +1226,15 @@ is_coroutine_function = iscoroutinefunction
 class Log(str):
     """A container for newline-delimited string of log entries"""
 
-    level_styles = {
-        "WARNING": "font-weight: bold; color: orange;",
-        "CRITICAL": "font-weight: bold; color: orangered;",
-        "ERROR": "font-weight: bold; color: crimson;",
-    }
-
     def _repr_html_(self):
-        logs_html = []
-        for message in self.split("\n"):
-            style = "font-family: monospace; margin: 0;"
-            for level in self.level_styles:
-                if level in message:
-                    style += self.level_styles[level]
-                    break
-
-            logs_html.append(
-                '<p style="{style}">{message}</p>'.format(
-                    style=html.escape(style),
-                    message=html.escape(message),
-                )
-            )
-
-        return "\n".join(logs_html)
+        return get_template("log.html.j2").render(log=self)
 
 
 class Logs(dict):
     """A container for a dict mapping names to strings of log entries"""
 
     def _repr_html_(self):
-        summaries = [
-            "<details>\n"
-            "<summary style='display:list-item'>{title}</summary>\n"
-            "{log}\n"
-            "</details>".format(title=title, log=log._repr_html_())
-            for title, log in sorted(self.items())
-        ]
-        return "\n".join(summaries)
+        return get_template("logs.html.j2").render(logs=self)
 
 
 def cli_keywords(d: dict, cls=None, cmd=None):
@@ -1293,8 +1249,8 @@ def cli_keywords(d: dict, cls=None, cmd=None):
     cmd : string or object
         A string with the name of a module, or the module containing a
         click-generated command with a "main" function, or the function itself.
-        It may be used to parse a module's custom arguments (i.e., arguments that
-        are not part of Worker class), such as nprocs from dask-worker CLI or
+        It may be used to parse a module's custom arguments (that is, arguments that
+        are not part of Worker class), such as nworkers from dask-worker CLI or
         enable_nvlink from dask-cuda-worker CLI.
 
     Examples
@@ -1308,6 +1264,8 @@ def cli_keywords(d: dict, cls=None, cmd=None):
     ...
     ValueError: Class distributed.worker.Worker does not support keyword x
     """
+    from dask.utils import typename
+
     if cls or cmd:
         for k in d:
             if not has_keyword(cls, k) and not command_has_keyword(cmd, k):
@@ -1332,7 +1290,7 @@ def cli_keywords(d: dict, cls=None, cmd=None):
         return out
 
     return sum(
-        [["--" + k.replace("_", "-"), convert_value(v)] for k, v in d.items()], []
+        (["--" + k.replace("_", "-"), convert_value(v)] for k, v in d.items()), []
     )
 
 
@@ -1363,7 +1321,11 @@ def import_term(name: str):
 
 async def offload(fn, *args, **kwargs):
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_offload_executor, lambda: fn(*args, **kwargs))
+    # Retain context vars while deserializing; see https://bugs.python.org/issue34014
+    context = contextvars.copy_context()
+    return await loop.run_in_executor(
+        _offload_executor, lambda: context.run(fn, *args, **kwargs)
+    )
 
 
 class EmptyContext:
@@ -1402,7 +1364,7 @@ class LRU(UserDict):
         super().__setitem__(key, value)
 
 
-def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> List[Dict]:
+def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list[dict]:
     """
     Examples
     --------
@@ -1463,6 +1425,8 @@ _deprecations = {
     "funcname": "dask.utils.funcname",
     "parse_bytes": "dask.utils.parse_bytes",
     "parse_timedelta": "dask.utils.parse_timedelta",
+    "typename": "dask.utils.typename",
+    "tmpfile": "dask.utils.tmpfile",
 }
 
 
@@ -1479,3 +1443,176 @@ def __getattr__(name):
         return import_term(use_instead)
     else:
         raise AttributeError(f"module {__name__} has no attribute {name}")
+
+
+# Used internally by recursive_to_dict to stop infinite recursion. If an object has
+# already been encountered, a string representation will be returned instead. This is
+# necessary since we have multiple cyclic referencing data structures.
+_recursive_to_dict_seen: ContextVar[set[int]] = ContextVar("_recursive_to_dict_seen")
+_to_dict_no_nest_flag = False
+
+
+def recursive_to_dict(
+    obj: AnyType, *, exclude: Container[str] = (), members: bool = False
+) -> AnyType:
+    """Recursively convert arbitrary Python objects to a JSON-serializable
+    representation. This is intended for debugging purposes only.
+
+    The following objects are supported:
+
+    list, tuple, set, frozenset, deque, dict, dict_keys, dict_values
+        Descended into these objects recursively. Python-specific collections are
+        converted to JSON-friendly variants.
+    Classes that define ``_to_dict(self, *, exclude: Container[str] = ())``:
+        Call the method and dump its output
+    Classes that define ``_to_dict_no_nest(self, *, exclude: Container[str] = ())``:
+        Like above, but prevents nested calls (see below)
+    Other Python objects
+        Dump the output of ``repr()``
+    Objects already encountered before, regardless of type
+        Dump the output of ``repr()``. This breaks circular references and shortens the
+        output.
+
+    Parameters
+    ----------
+    exclude:
+        A list of attribute names to be excluded from the dump.
+        This will be forwarded to the objects ``_to_dict`` methods and these methods
+        are required to accept this parameter.
+    members:
+        If True, convert the top-level Python object to a dict of its public members
+
+    **``_to_dict_no_nest`` vs. ``_to_dict``**
+
+    The presence of the ``_to_dict_no_nest`` method signals ``recursive_to_dict`` to
+    have a mutually exclusive full dict representation with other objects that also have
+    the ``_to_dict_no_nest``, regardless of their class. Only the outermost object in a
+    nested structure has the method invoked; all others are
+    dumped as their string repr instead, even if they were not encountered before.
+
+    Example:
+
+    .. code-block:: python
+
+        >>> class Person:
+        ...     def __init__(self, name):
+        ...         self.name = name
+        ...         self.children = []
+        ...         self.pets = []
+        ...
+        ...     def _to_dict_no_nest(self, exclude=()):
+        ...         return recursive_to_dict(self.__dict__, exclude=exclude)
+        ...
+        ...     def __repr__(self):
+        ...         return self.name
+
+        >>> class Pet:
+        ...     def __init__(self, name):
+        ...         self.name = name
+        ...         self.owners = []
+        ...
+        ...     def _to_dict_no_nest(self, exclude=()):
+        ...         return recursive_to_dict(self.__dict__, exclude=exclude)
+        ...
+        ...     def __repr__(self):
+        ...         return self.name
+
+        >>> alice = Person("Alice")
+        >>> bob = Person("Bob")
+        >>> charlie = Pet("Charlie")
+        >>> alice.children.append(bob)
+        >>> alice.pets.append(charlie)
+        >>> bob.pets.append(charlie)
+        >>> charlie.owners[:] = [alice, bob]
+        >>> recursive_to_dict({"people": [alice, bob], "pets": [charlie]})
+        {
+            "people": [
+                {"name": "Alice", "children": ["Bob"], "pets": ["Charlie"]},
+                {"name": "Bob", "children": [], "pets": ["Charlie"]},
+            ],
+            "pets": [
+                {"name": "Charlie", "owners": ["Alice", "Bob"]},
+            ],
+        }
+
+    If we changed the methods to ``_to_dict``, the output would instead be:
+
+    .. code-block:: python
+
+        {
+            "people": [
+                {
+                    "name": "Alice",
+                    "children": [
+                        {
+                            "name": "Bob",
+                            "children": [],
+                            "pets": [{"name": "Charlie", "owners": ["Alice", "Bob"]}],
+                        },
+                    ],
+                    pets: ["Charlie"],
+                ],
+                "Bob",
+            ],
+            "pets": ["Charlie"],
+        }
+
+    Also notice that, if in the future someone will swap the creation of the
+    ``children`` and ``pets`` attributes inside ``Person.__init__``, the output with
+    ``_to_dict`` will change completely whereas the one with ``_to_dict_no_nest`` won't!
+    """
+    if isinstance(obj, (int, float, bool, str)) or obj is None:
+        return obj
+    if isinstance(obj, (type, bytes)):
+        return repr(obj)
+
+    if members:
+        obj = {
+            k: v
+            for k, v in inspect.getmembers(obj)
+            if not k.startswith("_") and k not in exclude and not callable(v)
+        }
+
+    # Prevent infinite recursion
+    try:
+        seen = _recursive_to_dict_seen.get()
+    except LookupError:
+        seen = set()
+    seen = seen.copy()
+    tok = _recursive_to_dict_seen.set(seen)
+    try:
+        if id(obj) in seen:
+            return repr(obj)
+
+        if hasattr(obj, "_to_dict_no_nest"):
+            global _to_dict_no_nest_flag
+            if _to_dict_no_nest_flag:
+                return repr(obj)
+
+            seen.add(id(obj))
+            _to_dict_no_nest_flag = True
+            try:
+                return obj._to_dict_no_nest(exclude=exclude)
+            finally:
+                _to_dict_no_nest_flag = False
+
+        seen.add(id(obj))
+
+        if hasattr(obj, "_to_dict"):
+            return obj._to_dict(exclude=exclude)
+        if isinstance(obj, (list, tuple, set, frozenset, deque, KeysView, ValuesView)):
+            return [recursive_to_dict(el, exclude=exclude) for el in obj]
+        if isinstance(obj, dict):
+            res = {}
+            for k, v in obj.items():
+                k = recursive_to_dict(k, exclude=exclude)
+                v = recursive_to_dict(v, exclude=exclude)
+                try:
+                    res[k] = v
+                except TypeError:
+                    res[str(k)] = v
+            return res
+
+        return repr(obj)
+    finally:
+        tok.var.reset(tok)

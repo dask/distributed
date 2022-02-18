@@ -42,13 +42,13 @@ async def test_startup(cleanup):
         scheduler=scheduler,
         workers={
             0: {"cls": Worker, "options": {}},
-            1: {"cls": SlowWorker, "options": {"delay": 5}},
+            1: {"cls": SlowWorker, "options": {"delay": 120}},
             2: {"cls": SlowWorker, "options": {"delay": 0}},
         },
         asynchronous=True,
     ) as cluster:
         assert len(cluster.workers) == len(cluster.worker_spec) == 3
-        assert time() < start + 5
+        assert time() < start + 60
         assert 0 <= len(cluster.scheduler_info["workers"]) <= 2
 
         async with Client(cluster, asynchronous=True) as client:
@@ -56,6 +56,7 @@ async def test_startup(cleanup):
 
 
 @pytest.mark.asyncio
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 async def test_scale_up_down(cleanup):
     start = time()
     async with SpecCluster(

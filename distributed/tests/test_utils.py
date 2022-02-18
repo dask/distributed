@@ -1,10 +1,13 @@
 import array
 import asyncio
+import contextvars
+import functools
 import io
 import os
 import queue
 import socket
 import traceback
+from collections import deque
 from time import sleep
 
 import pytest
@@ -35,6 +38,7 @@ from distributed.utils import (
     open_port,
     parse_ports,
     read_block,
+    recursive_to_dict,
     seek_delimiter,
     set_thread_state,
     sync,
@@ -553,6 +557,18 @@ async def test_offload():
     assert (await offload(lambda x, y: x + y, 1, y=2)) == 3
 
 
+@pytest.mark.asyncio
+async def test_offload_preserves_contextvars():
+    var = contextvars.ContextVar("var")
+
+    async def set_var(v: str):
+        var.set(v)
+        r = await offload(var.get)
+        assert r == v
+
+    await asyncio.gather(set_var("foo"), set_var("bar"))
+
+
 def test_serialize_for_cli_deprecated():
     with pytest.warns(FutureWarning, match="serialize_for_cli is deprecated"):
         from distributed.utils import serialize_for_cli
@@ -595,6 +611,161 @@ def test_parse_timedelta_deprecated():
     assert parse_timedelta is dask.utils.parse_timedelta
 
 
+def test_typename_deprecated():
+    with pytest.warns(FutureWarning, match="typename is deprecated"):
+        from distributed.utils import typename
+    assert typename is dask.utils.typename
+
+
+def test_tmpfile_deprecated():
+    with pytest.warns(FutureWarning, match="tmpfile is deprecated"):
+        from distributed.utils import tmpfile
+    assert tmpfile is dask.utils.tmpfile
+
+
 def test_iscoroutinefunction_unhashable_input():
     # Ensure iscoroutinefunction can handle unhashable callables
     assert not iscoroutinefunction(_UnhashableCallable())
+
+
+def test_iscoroutinefunction_nested_partial():
+    async def my_async_callable(x, y, z):
+        pass
+
+    assert iscoroutinefunction(
+        functools.partial(functools.partial(my_async_callable, 1), 2)
+    )
+
+
+def test_recursive_to_dict():
+    class C:
+        def __init__(self, x):
+            self.x = x
+
+        def __repr__(self):
+            return "<C>"
+
+        def _to_dict(self, *, exclude):
+            assert exclude == ["foo"]
+            return ["C:", recursive_to_dict(self.x, exclude=exclude)]
+
+    class D:
+        def __repr__(self):
+            return "<D>"
+
+    class E:
+        def __init__(self):
+            self.x = 1  # Public attribute; dump
+            self._y = 2  # Private attribute; don't dump
+            self.foo = 3  # In exclude; don't dump
+
+        @property
+        def z(self):  # Public property; dump
+            return 4
+
+        def f(self):  # Callable; don't dump
+            return 5
+
+        def _to_dict(self, *, exclude):
+            # Output: {"x": 1, "z": 4}
+            return recursive_to_dict(self, exclude=exclude, members=True)
+
+    inp = [
+        1,
+        1.1,
+        True,
+        False,
+        None,
+        "foo",
+        b"bar",
+        C,
+        C(1),
+        D(),
+        (1, 2),
+        [3, 4],
+        {5, 6},
+        frozenset([7, 8]),
+        deque([9, 10]),
+        {3: 4, 1: 2}.keys(),
+        {3: 4, 1: 2}.values(),
+        E(),
+    ]
+    expect = [
+        1,
+        1.1,
+        True,
+        False,
+        None,
+        "foo",
+        "b'bar'",
+        "<class 'test_utils.test_recursive_to_dict.<locals>.C'>",
+        ["C:", 1],
+        "<D>",
+        [1, 2],
+        [3, 4],
+        list({5, 6}),
+        list(frozenset([7, 8])),
+        [9, 10],
+        [3, 1],
+        [4, 2],
+        {"x": 1, "z": 4},
+    ]
+    assert recursive_to_dict(inp, exclude=["foo"]) == expect
+
+    # Test recursion
+    a = []
+    c = C(a)
+    a += [c, c]
+    # The blocklist of already-seen objects is reentrant: a is converted to string when
+    # found inside itself; c must *not* be converted to string the second time it's
+    # found, because it's outside of itself.
+    assert recursive_to_dict(a, exclude=["foo"]) == [
+        ["C:", "[<C>, <C>]"],
+        ["C:", "[<C>, <C>]"],
+    ]
+
+
+def test_recursive_to_dict_no_nest():
+    class Person:
+        def __init__(self, name):
+            self.name = name
+            self.children = []
+            self.pets = []
+            ...
+
+        def _to_dict_no_nest(self, exclude=()):
+            return recursive_to_dict(self.__dict__, exclude=exclude)
+
+        def __repr__(self):
+            return self.name
+
+    class Pet:
+        def __init__(self, name):
+            self.name = name
+            self.owners = []
+            ...
+
+        def _to_dict_no_nest(self, exclude=()):
+            return recursive_to_dict(self.__dict__, exclude=exclude)
+
+        def __repr__(self):
+            return self.name
+
+    alice = Person("Alice")
+    bob = Person("Bob")
+    charlie = Pet("Charlie")
+    alice.children.append(bob)
+    alice.pets.append(charlie)
+    bob.pets.append(charlie)
+    charlie.owners[:] = [alice, bob]
+    info = {"people": [alice, bob], "pets": [charlie]}
+    expect = {
+        "people": [
+            {"name": "Alice", "children": ["Bob"], "pets": ["Charlie"]},
+            {"name": "Bob", "children": [], "pets": ["Charlie"]},
+        ],
+        "pets": [
+            {"name": "Charlie", "owners": ["Alice", "Bob"]},
+        ],
+    }
+    assert recursive_to_dict(info) == expect

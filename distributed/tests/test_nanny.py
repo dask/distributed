@@ -4,8 +4,10 @@ import logging
 import multiprocessing as mp
 import os
 import random
+import sys
 from contextlib import suppress
 from time import sleep
+from unittest import mock
 
 import psutil
 import pytest
@@ -16,6 +18,7 @@ from tlz import first, valmap
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.utils import tmpfile
 
 from distributed import Nanny, Scheduler, Worker, rpc, wait, worker
 from distributed.compatibility import LINUX, WINDOWS
@@ -23,7 +26,7 @@ from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.utils import TimeoutError, parse_ports, tmpfile
+from distributed.utils import TimeoutError, parse_ports
 from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
 pytestmark = pytest.mark.ci1
@@ -185,8 +188,8 @@ async def test_nanny_death_timeout(s):
 @gen_cluster(client=True, Worker=Nanny)
 async def test_random_seed(c, s, a, b):
     async def check_func(func):
-        x = c.submit(func, 0, 2 ** 31, pure=False, workers=a.worker_address)
-        y = c.submit(func, 0, 2 ** 31, pure=False, workers=b.worker_address)
+        x = c.submit(func, 0, 2**31, pure=False, workers=a.worker_address)
+        y = c.submit(func, 0, 2**31, pure=False, workers=b.worker_address)
         assert x.key != y.key
         x = await x
         y = await y
@@ -304,7 +307,7 @@ async def test_throttle_outgoing_connections(c, s, a, *workers):
         # This is is very fragile, since a refactor of memory_monitor to
         # remove _memory_monitoring will break this test.
         dask_worker._memory_monitoring = True
-        dask_worker.paused = True
+        dask_worker.status = Status.paused
         dask_worker.outgoing_current_count = 2
 
     await c.run(pause, workers=[a.address])
@@ -373,6 +376,34 @@ async def test_environment_variable(c, s):
     results = await c.run(lambda: os.environ["FOO"])
     assert results == {a.worker_address: "123", b.worker_address: "456"}
     await asyncio.gather(a.close(), b.close())
+
+
+@gen_cluster(nthreads=[], client=True)
+async def test_environment_variable_by_config(c, s, monkeypatch):
+
+    with dask.config.set({"distributed.nanny.environ": "456"}):
+        with pytest.raises(TypeError, match="configuration must be of type dict"):
+            Nanny(s.address, loop=s.loop, memory_limit=0)
+
+    with dask.config.set({"distributed.nanny.environ": {"FOO": "456"}}):
+
+        # precedence
+        # kwargs > env var > config
+
+        with mock.patch.dict(os.environ, {"FOO": "BAR"}, clear=True):
+            a = Nanny(s.address, loop=s.loop, memory_limit=0, env={"FOO": "123"})
+            x = Nanny(s.address, loop=s.loop, memory_limit=0)
+
+        b = Nanny(s.address, loop=s.loop, memory_limit=0)
+
+        await asyncio.gather(a, b, x)
+        results = await c.run(lambda: os.environ["FOO"])
+        assert results == {
+            a.worker_address: "123",
+            b.worker_address: "456",
+            x.worker_address: "BAR",
+        }
+        await asyncio.gather(a.close(), b.close(), x.close())
 
 
 @gen_cluster(
@@ -569,7 +600,7 @@ async def test_failure_during_worker_initialization(s):
     assert "Restarting worker" not in logs.getvalue()
 
 
-@gen_cluster(client=True, Worker=Nanny, timeout=10000000)
+@gen_cluster(client=True, Worker=Nanny)
 async def test_environ_plugin(c, s, a, b):
     from dask.distributed import Environ
 
@@ -580,3 +611,31 @@ async def test_environ_plugin(c, s, a, b):
         assert results[a.worker_address] == "123"
         assert results[b.worker_address] == "123"
         assert results[n.worker_address] == "123"
+
+
+@pytest.mark.parametrize(
+    "modname",
+    [
+        pytest.param(
+            "numpy",
+            marks=pytest.mark.xfail(reason="distributed#5723, distributed#5729"),
+        ),
+        "scipy",
+        pytest.param("pandas", marks=pytest.mark.xfail(reason="distributed#5723")),
+    ],
+)
+@gen_cluster(client=True, Worker=Nanny, nthreads=[("", 1)])
+async def test_no_unnecessary_imports_on_worker(c, s, a, modname):
+    """
+    Regression test against accidentally importing unnecessary modules at worker startup.
+
+    Importing modules like pandas slows down worker startup, especially if workers are
+    loading their software environment from NFS or other non-local filesystems.
+    It also slightly increases memory footprint.
+    """
+
+    def assert_no_import(dask_worker):
+        assert modname not in sys.modules
+
+    await c.wait_for_workers(1)
+    await c.run(assert_no_import)

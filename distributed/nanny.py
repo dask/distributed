@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import errno
 import logging
@@ -9,8 +11,9 @@ import warnings
 import weakref
 from contextlib import suppress
 from inspect import isawaitable
-from multiprocessing.queues import Empty
+from queue import Empty
 from time import sleep as sync_sleep
+from typing import ClassVar
 
 import psutil
 from tornado import gen
@@ -24,7 +27,8 @@ from . import preloading
 from .comm import get_address_host, unparse_host_port
 from .comm.addressing import address_from_user_args
 from .core import CommClosedError, RPCClosed, Status, coerce_to_address, error_message
-from .diagnostics.plugin import _get_worker_plugin_name
+from .diagnostics.plugin import _get_plugin_name
+from .metrics import time
 from .node import ServerNode
 from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
@@ -50,16 +54,30 @@ class Nanny(ServerNode):
     The nanny spins up Worker processes, watches then, and kills or restarts
     them as necessary. It is necessary if you want to use the
     ``Client.restart`` method, or to restart the worker automatically if
-    it gets to the terminate fractiom of its memory limit.
+    it gets to the terminate fraction of its memory limit.
 
-    The parameters for the Nanny are mostly the same as those for the Worker.
+    The parameters for the Nanny are mostly the same as those for the Worker
+    with exceptions listed below.
+
+    Parameters
+    ----------
+    env: dict, optional
+        Environment variables set at time of Nanny initialization will be
+        ensured to be set in the Worker process as well. This argument allows to
+        overwrite or otherwise set environment variables for the Worker. It is
+        also possible to set environment variables using the option
+        `distributed.nanny.environ`. Precedence as follows
+
+            1. Nanny arguments
+            2. Existing environment variables
+            3. Dask configuration
 
     See Also
     --------
     Worker
     """
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[Nanny]] = weakref.WeakSet()
     process = None
     status = Status.undefined
 
@@ -70,7 +88,6 @@ class Nanny(ServerNode):
         scheduler_file=None,
         worker_port=0,
         nthreads=None,
-        ncores=None,
         loop=None,
         local_dir=None,
         local_directory=None,
@@ -154,10 +171,6 @@ class Nanny(ServerNode):
             if len(protocol_address) == 2:
                 protocol = protocol_address[0]
 
-        if ncores is not None:
-            warnings.warn("the ncores= parameter has moved to nthreads=")
-            nthreads = ncores
-
         self._given_worker_port = worker_port
         self.nthreads = nthreads or CPU_COUNT
         self.reconnect = reconnect
@@ -166,7 +179,12 @@ class Nanny(ServerNode):
         self.death_timeout = parse_timedelta(death_timeout)
 
         self.Worker = Worker if worker_class is None else worker_class
-        self.env = dask.config.get("distributed.nanny.environ")
+        config_environ = dask.config.get("distributed.nanny.environ", {})
+        if not isinstance(config_environ, dict):
+            raise TypeError(
+                f"distributed.nanny.environ configuration must be of type dict. Instead got {type(config_environ)}"
+            )
+        self.env = config_environ.copy()
         for k in self.env:
             if k in os.environ:
                 self.env[k] = os.environ[k]
@@ -334,8 +352,8 @@ class Nanny(ServerNode):
         if self.process is None:
             return "OK"
 
-        deadline = self.loop.time() + timeout
-        await self.process.kill(timeout=0.8 * (deadline - self.loop.time()))
+        deadline = time() + timeout
+        await self.process.kill(timeout=0.8 * (deadline - time()))
 
     async def instantiate(self, comm=None) -> Status:
         """Start a local worker process
@@ -408,7 +426,7 @@ class Nanny(ServerNode):
                 plugin = pickle.loads(plugin)
 
             if name is None:
-                name = _get_worker_plugin_name(plugin)
+                name = _get_plugin_name(plugin)
 
             assert name
 
@@ -573,7 +591,7 @@ class Nanny(ServerNode):
             if hasattr(plugin, "teardown")
         ]
 
-        await asyncio.gather(*[td for td in teardowns if isawaitable(td)])
+        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
 
         self.stop()
         try:
@@ -588,8 +606,20 @@ class Nanny(ServerNode):
             await comm.write("OK")
         await super().close()
 
+    async def _log_event(self, topic, msg):
+        await self.scheduler.log_event(
+            topic=topic,
+            msg=msg,
+        )
+
+    def log_event(self, topic, msg):
+        self.loop.add_callback(self._log_event, topic, msg)
+
 
 class WorkerProcess:
+    running: asyncio.Event
+    stopped: asyncio.Event
+
     # The interval how often to check the msg queue for init
     _init_msg_interval = 0.05
 
@@ -722,13 +752,12 @@ class WorkerProcess:
             if self.on_exit is not None:
                 self.on_exit(r)
 
-    async def kill(self, timeout=2, executor_wait=True):
+    async def kill(self, timeout: float = 2, executor_wait: bool = True):
         """
         Ensure the worker process is stopped, waiting at most
         *timeout* seconds before terminating it abruptly.
         """
-        loop = IOLoop.current()
-        deadline = loop.time() + timeout
+        deadline = time() + timeout
 
         if self.status == Status.stopped:
             return
@@ -742,19 +771,19 @@ class WorkerProcess:
         self.child_stop_q.put(
             {
                 "op": "stop",
-                "timeout": max(0, deadline - loop.time()) * 0.8,
+                "timeout": max(0, deadline - time()) * 0.8,
                 "executor_wait": executor_wait,
             }
         )
         await asyncio.sleep(0)  # otherwise we get broken pipe errors
         self.child_stop_q.close()
 
-        while process.is_alive() and loop.time() < deadline:
+        while process.is_alive() and time() < deadline:
             await asyncio.sleep(0.05)
 
         if process.is_alive():
             logger.warning(
-                "Worker process still alive after %d seconds, killing", timeout
+                f"Worker process still alive after {timeout} seconds, killing"
             )
             try:
                 await process.terminate()
@@ -832,16 +861,10 @@ class WorkerProcess:
                 Wait for an incoming stop message and then stop the
                 worker cleanly.
                 """
-                while True:
-                    try:
-                        msg = child_stop_q.get(timeout=1000)
-                    except Empty:
-                        pass
-                    else:
-                        child_stop_q.close()
-                        assert msg.pop("op") == "stop"
-                        loop.add_callback(do_stop, **msg)
-                        break
+                msg = child_stop_q.get()
+                child_stop_q.close()
+                assert msg.pop("op") == "stop"
+                loop.add_callback(do_stop, **msg)
 
             t = threading.Thread(target=watch_stop_q, name="Nanny stop queue watch")
             t.daemon = True
