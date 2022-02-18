@@ -9,10 +9,11 @@ import traceback
 import uuid
 import weakref
 from collections import defaultdict
+from collections.abc import Container
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import ClassVar, Container
+from typing import ClassVar
 
 import tblib
 from tlz import merge
