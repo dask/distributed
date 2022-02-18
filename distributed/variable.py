@@ -204,8 +204,7 @@ class Variable:
         )
 
     def is_set(self, **kwargs):
-        """Check the variable has been set
-        """
+        """Check the variable has been set"""
         return self.client.sync(self._is_set, **kwargs)
 
     async def _get(self, timeout=None):
