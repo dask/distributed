@@ -9,10 +9,11 @@ import traceback
 import uuid
 import weakref
 from collections import defaultdict
+from collections.abc import Container
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import ClassVar, Container
+from typing import ClassVar
 
 import tblib
 from tlz import merge
@@ -384,20 +385,14 @@ class Server:
     def _to_dict(
         self, comm: Comm | None = None, *, exclude: Container[str] = ()
     ) -> dict:
-        """
-        A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
-
-        Parameters
-        ----------
-        comm:
-        exclude:
-            A list of attributes which must not be present in the output.
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
 
         See also
         --------
         Server.identity
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
         """
         info = self.identity()
         extra = {
@@ -406,6 +401,7 @@ class Server:
             "thread_id": self.thread_id,
         }
         info.update(extra)
+        info = {k: v for k, v in info.items() if k not in exclude}
         return recursive_to_dict(info, exclude=exclude)
 
     def echo(self, comm=None, data=None):

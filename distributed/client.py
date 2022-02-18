@@ -24,12 +24,9 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar, Literal
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
-
-if TYPE_CHECKING:
-    from typing_extensions import Literal
 
 import dask
 from dask.base import collections_to_dsk, normalize_token, tokenize
@@ -1299,6 +1296,7 @@ class Client(SyncMethodMixin):
 
     async def _wait_for_workers(self, n_workers=0, timeout=None):
         info = await self.scheduler.identity()
+        self._scheduler_identity = SchedulerInfo(info)
         if timeout:
             deadline = time() + parse_timedelta(timeout)
         else:
@@ -1311,6 +1309,7 @@ class Client(SyncMethodMixin):
                 )
             await asyncio.sleep(0.1)
             info = await self.scheduler.identity()
+            self._scheduler_identity = SchedulerInfo(info)
 
     def wait_for_workers(self, n_workers=0, timeout=None):
         """Blocking call to wait for n workers before continuing
@@ -3830,7 +3829,7 @@ class Client(SyncMethodMixin):
         format: Literal["msgpack", "yaml"],
     ) -> None:
 
-        scheduler_info = self.scheduler.dump_state()
+        scheduler_info = self.scheduler.dump_state(exclude=exclude)
 
         workers_info = self.scheduler.broadcast(
             msg={"op": "dump_state", "exclude": exclude},
@@ -3892,7 +3891,7 @@ class Client(SyncMethodMixin):
     def dump_cluster_state(
         self,
         filename: str = "dask-cluster-dump",
-        exclude: Collection[str] = (),
+        exclude: Collection[str] = ("run_spec",),
         format: Literal["msgpack", "yaml"] = "msgpack",
     ):
         """Extract a dump of the entire cluster state and persist to disk.
@@ -3918,6 +3917,10 @@ class Client(SyncMethodMixin):
         exclude:
             A collection of attribute names which are supposed to be excluded
             from the dump, e.g. to exclude code, tracebacks, logs, etc.
+
+            Defaults to exclude `run_spec` which is the serialized user code. This
+            is typically not required for debugging. To allow serialization of
+            this, pass an empty tuple.
         format:
             Either msgpack or yaml. If msgpack is used (default), the output
             will be stored in a gzipped file as msgpack.
@@ -4978,11 +4981,11 @@ class as_completed:
         """Add multiple futures to the collection.
 
         The added futures will emit from the iterator once they finish"""
-        from .actor import ActorFuture
+        from .actor import BaseActorFuture
 
         with self.lock:
             for f in futures:
-                if not isinstance(f, (Future, ActorFuture)):
+                if not isinstance(f, (Future, BaseActorFuture)):
                     raise TypeError("Input must be a future, got %s" % f)
                 self.futures[f] += 1
                 self.loop.add_callback(self._track_future, f)

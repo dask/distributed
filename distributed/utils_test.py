@@ -20,7 +20,6 @@ import sys
 import tempfile
 import threading
 import uuid
-import warnings
 import weakref
 from collections import defaultdict
 from collections.abc import Callable
@@ -28,10 +27,7 @@ from contextlib import contextmanager, nullcontext, suppress
 from glob import glob
 from itertools import count
 from time import sleep
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from typing_extensions import Literal
+from typing import Any, Literal
 
 from distributed.compatibility import MACOS
 from distributed.scheduler import Scheduler
@@ -55,6 +51,7 @@ from . import system
 from . import versions as version_module
 from .client import Client, _global_clients, default_client
 from .comm import Comm
+from .comm.tcp import BaseTCPConnector
 from .compatibility import WINDOWS
 from .config import initialize_logging
 from .core import CommClosedError, ConnectionPool, Status, connect, rpc
@@ -883,7 +880,6 @@ def gen_cluster(
         ("127.0.0.1", 1),
         ("127.0.0.1", 2),
     ],
-    ncores: None = None,  # deprecated
     scheduler="127.0.0.1",
     timeout: float = _TEST_TIMEOUT,
     security: Security | dict[str, Any] | None = None,
@@ -923,9 +919,6 @@ def gen_cluster(
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"
     )
-    if ncores is not None:
-        warnings.warn("ncores= has moved to nthreads=", stacklevel=2)
-        nthreads = ncores
 
     scheduler_kwargs = merge(
         {"dashboard": False, "dashboard_address": ":0"}, scheduler_kwargs
@@ -1249,7 +1242,6 @@ if has_ipv6():
     def requires_ipv6(test_func):
         return test_func
 
-
 else:
     requires_ipv6 = pytest.mark.skip("ipv6 required")
 
@@ -1563,6 +1555,9 @@ def save_sys_modules():
 @contextmanager
 def check_thread_leak():
     """Context manager to ensure we haven't leaked any threads"""
+    # "TCP-Executor" threads are never stopped once they are started
+    BaseTCPConnector.warmup()
+
     active_threads_start = threading.enumerate()
 
     yield
@@ -1573,15 +1568,8 @@ def check_thread_leak():
             thread
             for thread in threading.enumerate()
             if thread not in active_threads_start
-            and "Threaded" not in thread.name
-            and "watch message" not in thread.name
-            and "TCP-Executor" not in thread.name
-            # TODO: Make sure profile thread is cleaned up
-            # and remove the line below
-            and "Profile" not in thread.name
-            # asyncio default executor thread pool is not shut down until loop
-            # is shut down
-            and "asyncio_" not in thread.name
+            # FIXME this looks like a genuine leak that needs fixing
+            and "watch message queue" not in thread.name
         ]
         if not bad_threads:
             break
@@ -1912,7 +1900,7 @@ def assert_worker_story(
                     break
     except StopIteration:
         raise AssertionError(
-            f"assert_worker_story(strict={strict}) failed\n"
+            f"assert_worker_story({strict=}) failed\n"
             f"story:\n{_format_story(story)}\n"
             f"expect:\n{_format_story(expect)}"
         ) from None

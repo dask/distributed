@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import operator
+import pickle
 import re
 import sys
 from itertools import product
@@ -42,14 +43,6 @@ from distributed.utils_test import (
     varying,
 )
 from distributed.worker import dumps_function, dumps_task, get_worker
-
-if sys.version_info < (3, 8):
-    try:
-        import pickle5 as pickle
-    except ImportError:
-        import pickle
-else:
-    import pickle
 
 pytestmark = pytest.mark.ci1
 
@@ -2356,7 +2349,7 @@ async def test_unknown_task_duration_config_2(s, a, b):
 @gen_cluster(client=True)
 async def test_retire_state_change(c, s, a, b):
     np = pytest.importorskip("numpy")
-    y = c.map(lambda x: x ** 2, range(10))
+    y = c.map(lambda x: x**2, range(10))
     await c.scatter(y)
     coros = []
     for x in range(2):
@@ -2406,7 +2399,12 @@ async def test_quiet_cluster_round_robin(c, s, a, b):
 
 
 def test_memorystate():
-    m = MemoryState(process=100, unmanaged_old=15, managed=80, managed_spilled=12)
+    m = MemoryState(
+        process=100,
+        unmanaged_old=15,
+        managed_in_memory=68,
+        managed_spilled=12,
+    )
     assert m.process == 100
     assert m.managed == 80
     assert m.managed_in_memory == 68
@@ -2431,8 +2429,18 @@ def test_memorystate():
 
 
 def test_memorystate_sum():
-    m1 = MemoryState(process=100, unmanaged_old=15, managed=80, managed_spilled=12)
-    m2 = MemoryState(process=80, unmanaged_old=10, managed=60, managed_spilled=2)
+    m1 = MemoryState(
+        process=100,
+        unmanaged_old=15,
+        managed_in_memory=68,
+        managed_spilled=12,
+    )
+    m2 = MemoryState(
+        process=80,
+        unmanaged_old=10,
+        managed_in_memory=58,
+        managed_spilled=2,
+    )
     m3 = MemoryState.sum(m1, m2)
     assert m3.process == 180
     assert m3.unmanaged_old == 25
@@ -2441,14 +2449,17 @@ def test_memorystate_sum():
 
 
 @pytest.mark.parametrize(
-    "process,unmanaged_old,managed,managed_spilled", list(product(*[[0, 1, 2, 3]] * 4))
+    "process,unmanaged_old,managed_in_memory,managed_spilled",
+    list(product(*[[0, 1, 2, 3]] * 4)),
 )
-def test_memorystate_adds_up(process, unmanaged_old, managed, managed_spilled):
+def test_memorystate_adds_up(
+    process, unmanaged_old, managed_in_memory, managed_spilled
+):
     """Input data is massaged by __init__ so that everything adds up by construction"""
     m = MemoryState(
         process=process,
         unmanaged_old=unmanaged_old,
-        managed=managed,
+        managed_in_memory=managed_in_memory,
         managed_spilled=managed_spilled,
     )
     assert m.managed_in_memory + m.unmanaged == m.process
@@ -2461,8 +2472,8 @@ _test_leak = []
 
 
 def leaking(out_mib, leak_mib, sleep_time):
-    out = "x" * (out_mib * 2 ** 20)
-    _test_leak.append("x" * (leak_mib * 2 ** 20))
+    out = "x" * (out_mib * 2**20)
+    _test_leak.append("x" * (leak_mib * 2**20))
     sleep(sleep_time)
     return out
 
@@ -2482,7 +2493,7 @@ async def assert_memory(
     t0 = time()
     while True:
         minfo = scheduler_or_workerstate.memory
-        nmib = getattr(minfo, attr) / 2 ** 20
+        nmib = getattr(minfo, attr) / 2**20
         if min_mib <= nmib <= max_mib:
             return
         if time() - t0 > timeout:
@@ -2559,12 +2570,12 @@ async def test_memory(c, s, *nannies):
 
     # Force the output of f1 and f2 to spill to disk
     print_memory_info("Before spill")
-    a_leak = round(700 * 0.7 - a.memory.process / 2 ** 20)
-    b_leak = round(700 * 0.7 - b.memory.process / 2 ** 20)
+    a_leak = round(700 * 0.7 - a.memory.process / 2**20)
+    b_leak = round(700 * 0.7 - b.memory.process / 2**20)
     assert a_leak > 50 and b_leak > 50
     a_leak += 10
     b_leak += 10
-    print(f"Leaking additional memory: a_leak={a_leak}; b_leak={b_leak}")
+    print(f"Leaking additional memory: {a_leak=}; {b_leak=}")
     await wait(
         [
             c.submit(leaking, 0, a_leak, 0, pure=False, workers=[a.name]),
@@ -2572,12 +2583,28 @@ async def test_memory(c, s, *nannies):
         ]
     )
 
-    # Timeout needs to be enough to spill 100 MiB to disk
-    await asyncio.gather(
-        assert_memory(a, "managed_spilled", 50, 51, timeout=10),
-        assert_memory(b, "managed_spilled", 50, 51, timeout=10),
-        assert_memory(s, "managed_spilled", 100, 101, timeout=10.1),
-    )
+    # dask serialization compresses ("x" * 50 * 2**20) from 50 MiB to ~200 kiB.
+    # Test that managed_spilled reports the actual size on disk and not the output of
+    # sizeof().
+    # FIXME https://github.com/dask/distributed/issues/5807
+    #       This would be more robust if we could just enable zlib compression in
+    #       @gen_cluster
+    from distributed.protocol.compression import default_compression
+
+    if default_compression:
+        await asyncio.gather(
+            assert_memory(a, "managed_spilled", 0.1, 0.5, timeout=3),
+            assert_memory(b, "managed_spilled", 0.1, 0.5, timeout=3),
+            assert_memory(s, "managed_spilled", 0.2, 1.0, timeout=3.1),
+        )
+    else:
+        # Long timeout to allow spilling 100 MiB to disk
+        await asyncio.gather(
+            assert_memory(a, "managed_spilled", 50, 51, timeout=10),
+            assert_memory(b, "managed_spilled", 50, 51, timeout=10),
+            assert_memory(s, "managed_spilled", 100, 102, timeout=10.1),
+        )
+
     # FIXME on Windows and MacOS we occasionally observe managed_in_memory = 49 bytes
     await asyncio.gather(
         assert_memory(a, "managed_in_memory", 0, 0.1, timeout=0),
@@ -2615,8 +2642,8 @@ async def test_memory(c, s, *nannies):
 
     print_memory_info("Before clearing memory leak")
 
-    prev_unmanaged_a = a.memory.unmanaged / 2 ** 20
-    prev_unmanaged_b = b.memory.unmanaged / 2 ** 20
+    prev_unmanaged_a = a.memory.unmanaged / 2**20
+    prev_unmanaged_b = b.memory.unmanaged / 2**20
     await c.run(clear_leak)
 
     await asyncio.gather(
@@ -2639,7 +2666,7 @@ async def test_memory_no_zict(c, s, a, b):
     assert isinstance(b.data, dict)
     f = c.submit(leaking, 10, 0, 0)
     await f
-    assert 10 * 2 ** 20 < s.memory.managed_in_memory < 11 * 2 ** 20
+    assert 10 * 2**20 < s.memory.managed_in_memory < 11 * 2**20
     assert s.memory.managed_spilled == 0
 
 
@@ -2707,7 +2734,7 @@ async def assert_ndata(client, by_addr, total=None):
         if total is not None:
             assert sum(out.values()) == total
     except AssertionError:
-        raise AssertionError(f"Expected {by_addr}, total={total}; got {out}")
+        raise AssertionError(f"Expected {by_addr}; {total=}; got {out}")
 
 
 @gen_cluster(
@@ -2722,7 +2749,7 @@ async def test_rebalance(c, s, a, b):
     # utilisation slightly above 50% (after counting unmanaged) which is above the
     # distributed.worker.memory.rebalance.sender-min threshold.
     futures = c.map(
-        lambda _: "x" * (2 ** 29 // 500), range(500), workers=[a.worker_address]
+        lambda _: "x" * (2**29 // 500), range(500), workers=[a.worker_address]
     )
     await wait(futures)
     # Wait for heartbeats
@@ -2854,8 +2881,8 @@ async def test_rebalance_no_limit(c, s, a, b):
 async def test_rebalance_no_recipients(c, s, a, b):
     """There are sender workers, but no recipient workers"""
     # Fill 25% of the memory of a and 10% of the memory of b
-    fut_a = c.map(lambda _: "x" * (2 ** 20), range(250), workers=[a.worker_address])
-    fut_b = c.map(lambda _: "x" * (2 ** 20), range(100), workers=[b.worker_address])
+    fut_a = c.map(lambda _: "x" * (2**20), range(250), workers=[a.worker_address])
+    fut_b = c.map(lambda _: "x" * (2**20), range(100), workers=[b.worker_address])
     await wait(fut_a + fut_b)
     await assert_memory(s, "managed", 350, 351)
     await assert_ndata(c, {a.worker_address: 250, b.worker_address: 100})
@@ -2903,9 +2930,9 @@ async def test_rebalance_skip_all_recipients(c, s, a, b):
 async def test_rebalance_sender_below_mean(c, s, *_):
     """A task remains on the sender because moving it would send it below the mean"""
     a, b = s.workers
-    f1 = c.submit(lambda: "x" * (400 * 2 ** 20), workers=[a])
+    f1 = c.submit(lambda: "x" * (400 * 2**20), workers=[a])
     await wait([f1])
-    f2 = c.submit(lambda: "x" * (10 * 2 ** 20), workers=[a])
+    f2 = c.submit(lambda: "x" * (10 * 2**20), workers=[a])
     await wait([f2])
     await assert_memory(s, "managed", 410, 411)
     await assert_ndata(c, {a: 2, b: 0})
@@ -2934,7 +2961,7 @@ async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
     await s.rebalance()
     await assert_ndata(c, {a: 10, b: 0})
 
-    large_future = c.submit(lambda: "x" * (300 * 2 ** 20), workers=[a])
+    large_future = c.submit(lambda: "x" * (300 * 2**20), workers=[a])
     await wait([large_future])
     await assert_memory(s, "managed", 300, 301)
     await assert_ndata(c, {a: 11, b: 0})
@@ -3294,9 +3321,9 @@ async def test_unpause_schedules_unrannable_tasks(c, s, a):
     assert await fut == 2
 
 
-@gen_cluster(client=True)
-async def test_Scheduler__to_dict(c, s, a, b):
-    futs = c.map(inc, range(100))
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_Scheduler__to_dict(c, s, a):
+    futs = c.map(inc, range(2))
 
     await c.gather(futs)
     d = s._to_dict()
@@ -3312,10 +3339,46 @@ async def test_Scheduler__to_dict(c, s, a, b):
         "thread_id",
         "transition_log",
         "log",
+        "memory",
         "tasks",
+        "task_groups",
         "events",
+        "clients",
     }
-    assert d["tasks"][futs[0].key]
+    # TaskStates are serialized as dicts under tasks and as strings under
+    # workers.*.has_what and under clients.*.wants_what
+    # WorkerStates are serialized s dicts under workers and as
+    # strings under tasks.*.who_has
+    assert d["tasks"][futs[0].key]["who_has"] == [
+        f"<WorkerState '{a.address}', "
+        "name: 0, status: running, memory: 2, processing: 0>"
+    ]
+    assert sorted(d["workers"][a.address]["has_what"]) == sorted(
+        [
+            f"<TaskState '{futs[0].key}' memory>",
+            f"<TaskState '{futs[1].key}' memory>",
+        ]
+    )
+    assert sorted(d["clients"][c.id]["wants_what"]) == sorted(
+        [
+            f"<TaskState '{futs[0].key}' memory>",
+            f"<TaskState '{futs[1].key}' memory>",
+        ]
+    )
+
+    # TaskGroups are serialized as dicts under task_groups and as strings under
+    # tasks.*.group
+    assert d["tasks"][futs[0].key]["group"] == "<inc: memory: 2>"
+    assert d["task_groups"]["inc"]["prefix"] == "<inc: memory: 2>"
+
+    # ClientStates are serialized as dicts under clients and as strings under
+    # tasks.*.who_wants
+    assert d["clients"][c.id]["client_key"] == c.id
+    assert d["tasks"][futs[0].key]["who_wants"] == [f"<Client '{c.id}'>"]
+
+    # Test MemoryState dump
+    assert isinstance(d["memory"]["process"], int)
+    assert isinstance(d["workers"][a.address]["memory"]["process"], int)
 
 
 @gen_cluster(client=True, nthreads=[])

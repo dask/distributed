@@ -16,6 +16,7 @@ from collections import defaultdict, deque, namedtuple
 from collections.abc import (
     Callable,
     Collection,
+    Container,
     Iterable,
     Iterator,
     Mapping,
@@ -26,10 +27,9 @@ from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import TYPE_CHECKING, Any, ClassVar, Container
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 if TYPE_CHECKING:
-    from typing_extensions import Literal
     from .diagnostics.plugin import WorkerPlugin
     from .actor import Actor
     from .client import Client
@@ -131,8 +131,6 @@ DEFAULT_DATA_SIZE = parse_bytes(
 
 SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "task"])
 
-_taskstate_to_dict_guard = False
-
 
 class InvalidTransition(Exception):
     pass
@@ -187,7 +185,7 @@ class TaskState:
     Parameters
     ----------
     key: str
-    runspec: SerializedTask
+    run_spec: SerializedTask
         A named tuple containing the ``function``, ``args``, ``kwargs`` and
         ``task`` associated with this `TaskState` instance. This defaults to
         ``None`` and can remain empty if it is a dependency that this worker
@@ -195,12 +193,38 @@ class TaskState:
 
     """
 
+    key: str
+    run_spec: object
+    dependencies: set[TaskState]
+    dependents: set[TaskState]
+    duration: float | None
     priority: tuple[int, ...] | None
+    state: str
+    who_has: set[str]
+    coming_from: str
+    waiting_for_data: set[TaskState]
+    waiters: set[TaskState]
+    resource_restrictions: dict
+    exception: Exception | None
+    exception_text: str | None
+    traceback: object | None
+    traceback_text: str | None
+    type: type | None
+    suspicious_count: int
+    startstops: list[dict]
+    start_time: float | None
+    stop_time: float | None
+    metadata: dict
+    nbytes: float | None
+    annotations: dict | None
+    done: bool
+    _previous: str | None
+    _next: str | None
 
-    def __init__(self, key, runspec=None):
+    def __init__(self, key, run_spec=None):
         assert key is not None
         self.key = key
-        self.runspec = runspec
+        self.run_spec = run_spec
         self.dependencies = set()
         self.dependents = set()
         self.duration = None
@@ -234,36 +258,24 @@ class TaskState:
         nbytes = self.nbytes
         return nbytes if nbytes is not None else DEFAULT_DATA_SIZE
 
-    def _to_dict(self, *, exclude: Container[str] = ()) -> dict | str:
-        """
-        A very verbose dictionary representation for debugging purposes.
+    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict:
+        """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
-
-        Parameters
-        ----------
-        comm:
-        exclude:
-            A list of attributes which must not be present in the output.
 
         See also
         --------
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+
+        Notes
+        -----
+        This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
+        When a task references another task, just print the task repr. All tasks
+        should neatly appear under Worker.tasks. This also prevents a RecursionError
+        during particularly heavy loads, which have been observed to happen whenever
+        there's an acyclic dependency chain of ~200+ tasks.
         """
-        # When a task references another task, just print the task repr. All tasks
-        # should neatly appear under Worker.tasks. This also prevents a RecursionError
-        # during particularly heavy loads, which have been observed to happen whenever
-        # there's an acyclic dependency chain of ~200+ tasks.
-        global _taskstate_to_dict_guard
-        if _taskstate_to_dict_guard:
-            return repr(self)
-        _taskstate_to_dict_guard = True
-        try:
-            return recursive_to_dict(
-                {k: v for k, v in self.__dict__.items() if k not in exclude},
-                exclude=exclude,
-            )
-        finally:
-            _taskstate_to_dict_guard = False
+        return recursive_to_dict(self, exclude=exclude, members=True)
 
     def is_protected(self) -> bool:
         return self.state in PROCESSING or any(
@@ -459,6 +471,9 @@ class Worker(ServerNode):
     memory_pause_fraction: float or False
         Fraction of memory at which we stop running new tasks
         (default: read from config key distributed.worker.memory.pause)
+    max_spill: int, string or False
+        Limit of number of bytes to be spilled on disk.
+        (default: read from config key distributed.worker.memory.max-spill)
     executor: concurrent.futures.Executor, dict[str, concurrent.futures.Executor], "offload"
         The executor(s) to use. Depending on the type, it has the following meanings:
             - Executor instance: The default executor.
@@ -577,6 +592,7 @@ class Worker(ServerNode):
     memory_target_fraction: float | Literal[False]
     memory_spill_fraction: float | Literal[False]
     memory_pause_fraction: float | Literal[False]
+    max_spill: int | Literal[False]
     data: MutableMapping[str, Any]  # {task key: task payload}
     actors: dict[str, Actor | None]
     loop: IOLoop
@@ -608,7 +624,6 @@ class Worker(ServerNode):
         scheduler_port: int | None = None,
         *,
         scheduler_file: str | None = None,
-        ncores: None = None,  # Deprecated, use nthreads instead
         nthreads: int | None = None,
         loop: IOLoop | None = None,
         local_dir: None = None,  # Deprecated, use local_directory instead
@@ -630,6 +645,7 @@ class Worker(ServerNode):
         memory_target_fraction: float | Literal[False] | None = None,
         memory_spill_fraction: float | Literal[False] | None = None,
         memory_pause_fraction: float | Literal[False] | None = None,
+        max_spill: float | str | Literal[False] | None = None,
         extensions: list[type] | None = None,
         metrics: Mapping[str, Callable[[Worker], Any]] = DEFAULT_METRICS,
         startup_information: Mapping[
@@ -718,6 +734,7 @@ class Worker(ServerNode):
             ("resumed", "released"): self.transition_generic_released,
             ("resumed", "waiting"): self.transition_resumed_waiting,
             ("resumed", "fetch"): self.transition_resumed_fetch,
+            ("resumed", "missing"): self.transition_resumed_missing,
             ("constrained", "executing"): self.transition_constrained_executing,
             ("constrained", "released"): self.transition_generic_released,
             ("error", "released"): self.transition_generic_released,
@@ -837,10 +854,6 @@ class Worker(ServerNode):
         self._interface = interface
         self._protocol = protocol
 
-        if ncores is not None:
-            warnings.warn("the ncores= parameter has moved to nthreads=")
-            nthreads = ncores
-
         self.nthreads = nthreads or CPU_COUNT
         if resources is None:
             resources = dask.config.get("distributed.worker.resources", None)
@@ -878,6 +891,10 @@ class Worker(ServerNode):
             else dask.config.get("distributed.worker.memory.pause")
         )
 
+        if max_spill is None:
+            max_spill = dask.config.get("distributed.worker.memory.max-spill")
+        self.max_spill = False if max_spill is False else parse_bytes(max_spill)
+
         if isinstance(data, MutableMapping):
             self.data = data
         elif callable(data):
@@ -889,13 +906,17 @@ class Worker(ServerNode):
         ):
             from .spill import SpillBuffer
 
-            self.data = SpillBuffer(
-                os.path.join(self.local_directory, "storage"),
-                target=int(
+            if self.memory_target_fraction:
+                target = int(
                     self.memory_limit
                     * (self.memory_target_fraction or self.memory_spill_fraction)
                 )
-                or sys.maxsize,
+            else:
+                target = sys.maxsize
+            self.data = SpillBuffer(
+                os.path.join(self.local_directory, "storage"),
+                target=target,
+                max_spill=self.max_spill,
             )
         else:
             self.data = {}
@@ -1138,7 +1159,13 @@ class Worker(ServerNode):
         elif self._status != Status.closed:
             self.loop.call_later(0.05, self._send_worker_status_change)
 
-    async def get_metrics(self):
+    async def get_metrics(self) -> dict:
+        try:
+            spilled_memory, spilled_disk = self.data.spilled_total  # type: ignore
+        except AttributeError:
+            # spilling is disabled
+            spilled_memory, spilled_disk = 0, 0
+
         out = dict(
             executing=self.executing_count,
             in_memory=len(self.data),
@@ -1149,7 +1176,10 @@ class Worker(ServerNode):
                 "workers": dict(self.bandwidth_workers),
                 "types": keymap(typename, self.bandwidth_types),
             },
-            spilled_nbytes=getattr(self.data, "spilled_total", 0),
+            spilled_nbytes={
+                "memory": spilled_memory,
+                "disk": spilled_disk,
+            },
         )
         out.update(self.monitor.recent())
 
@@ -1184,27 +1214,20 @@ class Worker(ServerNode):
             "id": self.id,
             "scheduler": self.scheduler.address,
             "nthreads": self.nthreads,
-            "ncores": self.nthreads,  # backwards compatibility
             "memory_limit": self.memory_limit,
         }
 
     def _to_dict(
         self, comm: Comm | None = None, *, exclude: Container[str] = ()
     ) -> dict:
-        """
-        A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
-
-        Parameters
-        ----------
-        comm:
-        exclude:
-            A list of attributes which must not be present in the output.
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
 
         See also
         --------
         Worker.identity
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
         """
         info = super()._to_dict(exclude=exclude)
         extra = {
@@ -1231,6 +1254,7 @@ class Worker(ServerNode):
             "outgoing_transfer_log": self.outgoing_transfer_log,
         }
         info.update(extra)
+        info = {k: v for k, v in info.items() if k not in exclude}
         return recursive_to_dict(info, exclude=exclude)
 
     #####################
@@ -2051,7 +2075,7 @@ class Worker(ServerNode):
         except KeyError:
             self.tasks[key] = ts = TaskState(key)
 
-        ts.runspec = SerializedTask(function, args, kwargs, task)
+        ts.run_spec = SerializedTask(function, args, kwargs, task)
 
         assert isinstance(priority, tuple)
         priority = priority + (self.generation,)
@@ -2310,7 +2334,7 @@ class Worker(ServerNode):
             stimulus_id=stimulus_id,
         )
 
-    def transition_resumed_fetch(self, ts, *, stimulus_id):
+    def _transition_from_resumed(self, ts, finish, *, stimulus_id):
         """`resumed` is an intermediate degenerate state which splits further up
         into two states depending on what the last signal / next state is
         intended to be. There are only two viable choices depending on whether
@@ -2330,33 +2354,37 @@ class Worker(ServerNode):
 
         See also `transition_resumed_waiting`
         """
-        # if the next state is already intended to be fetch or if the
-        # coro/thread is still running (ts.done==False), this is a noop
-        if ts._next == "fetch":
-            return {}, []
-        ts._next = "fetch"
-
+        recs, smsgs = {}, []
         if ts.done:
             next_state = ts._next
-            recs, smsgs = self.transition_generic_released(ts, stimulus_id=stimulus_id)
+            # if the next state is already intended to be waiting or if the
+            # coro/thread is still running (ts.done==False), this is a noop
+            if ts._next != finish:
+                recs, smsgs = self.transition_generic_released(
+                    ts, stimulus_id=stimulus_id
+                )
             recs[ts] = next_state
-            return recs, smsgs
-        return {}, []
+        else:
+            ts._next = finish
+        return recs, smsgs
+
+    def transition_resumed_fetch(self, ts, *, stimulus_id):
+        """
+        See Worker._transition_from_resumed
+        """
+        return self._transition_from_resumed(ts, "fetch", stimulus_id=stimulus_id)
+
+    def transition_resumed_missing(self, ts, *, stimulus_id):
+        """
+        See Worker._transition_from_resumed
+        """
+        return self._transition_from_resumed(ts, "missing", stimulus_id=stimulus_id)
 
     def transition_resumed_waiting(self, ts, *, stimulus_id):
         """
-        See transition_resumed_fetch
+        See Worker._transition_from_resumed
         """
-        if ts._next == "waiting":
-            return {}, []
-        ts._next = "waiting"
-
-        if ts.done:
-            next_state = ts._next
-            recs, smsgs = self.transition_generic_released(ts, stimulus_id=stimulus_id)
-            recs[ts] = next_state
-            return recs, smsgs
-        return {}, []
+        return self._transition_from_resumed(ts, "waiting", stimulus_id=stimulus_id)
 
     def transition_cancelled_fetch(self, ts, *, stimulus_id):
         if ts.done:
@@ -2909,7 +2937,7 @@ class Worker(ServerNode):
         warnings.warn(
             "The attribute `Worker.total_comm_bytes` has been renamed to `comm_threshold_bytes`. "
             "Future versions will only support the new name.",
-            DeprecationWarning,
+            FutureWarning,
         )
         return self.comm_threshold_bytes
 
@@ -3146,7 +3174,7 @@ class Worker(ServerNode):
                 else:
                     # Exponential backoff to avoid hammering scheduler/worker
                     self.repetitively_busy += 1
-                    await asyncio.sleep(0.100 * 1.5 ** self.repetitively_busy)
+                    await asyncio.sleep(0.100 * 1.5**self.repetitively_busy)
 
                     await self.query_who_has(*to_gather_keys)
 
@@ -3431,15 +3459,15 @@ class Worker(ServerNode):
         return True
 
     async def _maybe_deserialize_task(self, ts, *, stimulus_id):
-        if not isinstance(ts.runspec, SerializedTask):
-            return ts.runspec
+        if not isinstance(ts.run_spec, SerializedTask):
+            return ts.run_spec
         try:
             start = time()
             # Offload deserializing large tasks
-            if sizeof(ts.runspec) > OFFLOAD_THRESHOLD:
-                function, args, kwargs = await offload(_deserialize, *ts.runspec)
+            if sizeof(ts.run_spec) > OFFLOAD_THRESHOLD:
+                function, args, kwargs = await offload(_deserialize, *ts.run_spec)
             else:
-                function, args, kwargs = _deserialize(*ts.runspec)
+                function, args, kwargs = _deserialize(*ts.run_spec)
             stop = time()
 
             if stop - start > 0.010:
@@ -3518,7 +3546,7 @@ class Worker(ServerNode):
             if self.validate:
                 assert not ts.waiting_for_data
                 assert ts.state == "executing"
-                assert ts.runspec is not None
+                assert ts.run_spec is not None
 
             function, args, kwargs = await self._maybe_deserialize_task(
                 ts, stimulus_id=stimulus_id
@@ -3705,6 +3733,7 @@ class Worker(ServerNode):
                 )
                 self.status = Status.running
                 self.ensure_computing()
+                self.ensure_communicating()
 
         check_pause(memory)
         # Dump data to disk if above 70%
@@ -3729,8 +3758,11 @@ class Worker(ServerNode):
                         format_bytes(self.memory_limit),
                     )
                     break
-                k, v, weight = self.data.fast.evict()
-                del k, v
+                weight = self.data.evict()
+                if weight == -1:
+                    # Failed to evict: disk full, spill size limit exceeded, or pickle error
+                    break
+
                 total += weight
                 count += 1
                 # If the current buffer is filled with a lot of small values,
@@ -3747,6 +3779,7 @@ class Worker(ServerNode):
                     # before trying to evict even more data.
                     self._throttled_gc.collect()
                     memory = proc.memory_info().rss
+
             check_pause(memory)
             if count:
                 logger.debug(
@@ -3880,11 +3913,11 @@ class Worker(ServerNode):
             if hasattr(plugin, method_name):
                 if method_name == "release_key":
                     warnings.warn(
-                        "The `WorkerPlugin.release_key` hook is depreacted and will be "
+                        "The `WorkerPlugin.release_key` hook is deprecated and will be "
                         "removed in a future version. A similar event can now be "
                         "caught by filtering for a `finish=='released'` event in the "
                         "`WorkerPlugin.transition` hook.",
-                        DeprecationWarning,
+                        FutureWarning,
                     )
 
                 try:
@@ -3907,7 +3940,7 @@ class Worker(ServerNode):
 
     def validate_task_executing(self, ts):
         assert ts.state == "executing"
-        assert ts.runspec is not None
+        assert ts.run_spec is not None
         assert ts.key not in self.data
         assert not ts.waiting_for_data
         for dep in ts.dependencies:
@@ -3928,7 +3961,7 @@ class Worker(ServerNode):
         assert ts.key not in self.data
         assert ts.state == "waiting"
         assert not ts.done
-        if ts.dependencies and ts.runspec:
+        if ts.dependencies and ts.run_spec:
             assert not all(dep.key in self.data for dep in ts.dependencies)
 
     def validate_task_flight(self, ts):

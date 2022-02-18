@@ -1,7 +1,7 @@
-{% set version = environ.get('GIT_DESCRIBE_TAG', '0.0.0.dev') + environ.get('VERSION_SUFFIX', '') %}
-{% set dask_version = environ.get('DASK_VERSION', '0.0.0.dev') %}
-{% set dask_build = environ.get('DASK_BUILD', '') %}
-{% set py_version=environ.get('CONDA_PY', 36) %}
+{% set major_minor_patch = environ.get('GIT_DESCRIBE_TAG', '0.0.0.dev').split('.') %}
+{% set new_patch = major_minor_patch[2] | int + 1 %}
+{% set version = (major_minor_patch[:2] + [new_patch]) | join('.') + environ.get('VERSION_SUFFIX', '') %}
+{% set dask_version = environ.get('DASK_CORE_VERSION', '0.0.0.dev') %}
 
 
 package:
@@ -13,16 +13,16 @@ source:
 
 build:
   number: {{ GIT_DESCRIBE_NUMBER }}
-  string: py{{ py_version }}_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
+  string: py_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
   noarch: python
 
 requirements:
   host:
-    - python >=3.7
+    - python >=3.8
   run:
-    - python >=3.7
-    - dask-core {{ dask_version }}={{ dask_build }}
-    - distributed {{ version }}=py{{ py_version }}_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
+    - python >=3.8
+    - dask-core >={{ dask_version }}
+    - distributed {{ version }}=*_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
     - cytoolz >=0.8.2
     - numpy >=1.18
     - pandas >=1.0

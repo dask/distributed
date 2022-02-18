@@ -297,12 +297,14 @@ async def connect(
         except (asyncio.TimeoutError, OSError) as exc:
             active_exception = exc
 
-            # The intermediate capping is mostly relevant for the initial
-            # connect. Afterwards we should be more forgiving
-            intermediate_cap = intermediate_cap * 1.5
+            # As descibed above, the intermediate timeout is used to distributed
+            # initial, bulk connect attempts homogeneously. In particular with
+            # the jitter upon retries we should not be worred about overloading
+            # any more DNS servers
+            intermediate_cap = timeout
             # FullJitter see https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
 
-            upper_cap = min(time_left(), backoff_base * (2 ** attempt))
+            upper_cap = min(time_left(), backoff_base * (2**attempt))
             backoff = random.uniform(0, upper_cap)
             attempt += 1
             logger.debug(

@@ -7,6 +7,7 @@ import struct
 import sys
 import weakref
 from ssl import SSLCertVerificationError, SSLError
+from typing import ClassVar
 
 from tornado import gen
 
@@ -268,7 +269,7 @@ class TCP(Comm):
         frames_nbytes = [nbytes(header), *frames_nbytes]
         frames_nbytes_total += frames_nbytes[0]
 
-        if frames_nbytes_total < 2 ** 17:  # 128kiB
+        if frames_nbytes_total < 2**17:  # 128kiB
             # small enough, send in one go
             frames = [b"".join(frames)]
             frames_nbytes = [frames_nbytes_total]
@@ -368,7 +369,7 @@ def _expect_tls_context(connection_args):
         raise TypeError(
             "TLS expects a `ssl_context` argument of type "
             "ssl.SSLContext (perhaps check your TLS configuration?)"
-            "  Instead got %s" % str(ctx)
+            f" Instead got {ctx!r}"
         )
     return ctx
 
@@ -384,7 +385,29 @@ class RequireEncryptionMixin:
 
 
 class BaseTCPConnector(Connector, RequireEncryptionMixin):
-    _executor = ThreadPoolExecutor(2, thread_name_prefix="TCP-Executor")
+    _executor: ClassVar[ThreadPoolExecutor] = ThreadPoolExecutor(
+        2, thread_name_prefix="TCP-Executor"
+    )
+    _client: ClassVar[TCPClient]
+
+    @classmethod
+    def warmup(cls) -> None:
+        """Pre-start threads and sockets to avoid catching them in checks for thread and
+        fd leaks
+        """
+        ex = cls._executor
+        while len(ex._threads) < ex._max_workers:
+            ex._adjust_thread_count()
+        cls._get_client()
+
+    @classmethod
+    def _get_client(cls):
+        if not hasattr(cls, "_client"):
+            resolver = netutil.ExecutorResolver(
+                close_executor=False, executor=cls._executor
+            )
+            cls._client = TCPClient(resolver=resolver)
+        return cls._client
 
     @property
     def client(self):
@@ -392,13 +415,7 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         # excess `ThreadPoolExecutor`s. We delay creation until inside an async
         # function to avoid accessing an IOLoop from a context where a backing
         # event loop doesn't exist.
-        cls = type(self)
-        if not hasattr(type(self), "_client"):
-            resolver = netutil.ExecutorResolver(
-                close_executor=False, executor=cls._executor
-            )
-            cls._client = TCPClient(resolver=resolver)
-        return cls._client
+        return self._get_client()
 
     async def connect(self, address, deserialize=True, **connection_args):
         self._check_encryption(address, connection_args)

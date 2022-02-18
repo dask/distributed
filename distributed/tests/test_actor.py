@@ -8,7 +8,7 @@ import dask
 
 from distributed import (
     Actor,
-    ActorFuture,
+    BaseActorFuture,
     Client,
     Future,
     Nanny,
@@ -16,6 +16,7 @@ from distributed import (
     get_client,
     wait,
 )
+from distributed.actor import _LateLoopEvent
 from distributed.metrics import time
 from distributed.utils_test import cluster, gen_cluster
 
@@ -37,16 +38,6 @@ class Counter:
     def add(self, x):
         self.n += x
         return self.n
-
-
-class UsesCounter:
-    # An actor whose method argument is another actor
-
-    def do_inc(self, ac):
-        return ac.increment().result()
-
-    async def ado_inc(self, ac):
-        return await ac.ainc()
 
 
 class List:
@@ -113,7 +104,7 @@ async def test_worker_actions(c, s, a, b, separate_thread):
         assert counter._address == a_address
 
         future = counter.increment(separate_thread=separate_thread)
-        assert isinstance(future, ActorFuture)
+        assert isinstance(future, BaseActorFuture)
         assert "Future" in type(future).__name__
         end = future.result(timeout=1)
         assert end > start
@@ -264,6 +255,27 @@ def test_sync(client):
 
     assert "ActorFuture" in repr(future)
     assert "distributed.actor" not in repr(future)
+
+
+def test_timeout(client):
+    class Waiter:
+        def __init__(self):
+            self.event = _LateLoopEvent()
+
+        async def set(self):
+            self.event.set()
+
+        async def wait(self):
+            return await self.event.wait()
+
+    event = client.submit(Waiter, actor=True).result()
+    future = event.wait()
+
+    with pytest.raises(asyncio.TimeoutError):
+        future.result(timeout="0.001s")
+
+    event.set().result()
+    assert future.result() is True
 
 
 @gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "1s"})
@@ -538,11 +550,9 @@ async def test_actors_in_profile(c, s, a):
 
 @gen_cluster(client=True)
 async def test_waiter(c, s, a, b):
-    from tornado.locks import Event
-
     class Waiter:
         def __init__(self):
-            self.event = Event()
+            self.event = _LateLoopEvent()
 
         async def set(self):
             self.event.set()
@@ -618,18 +628,62 @@ def test_worker_actor_handle_is_weakref_from_compute_sync(client):
 
 
 def test_one_thread_deadlock():
-    with cluster(nworkers=2) as (cl, w):
+    class UsesCounter:
+        # An actor whose method argument is another actor
+
+        def do_inc(self, ac):
+            return ac.increment().result()
+
+    with cluster(nworkers=1) as (cl, _):
         client = Client(cl["address"])
         ac = client.submit(Counter, actor=True).result()
-        ac2 = client.submit(UsesCounter, actor=True, workers=[ac._address]).result()
+        ac2 = client.submit(UsesCounter, actor=True).result()
 
         assert ac2.do_inc(ac).result() == 1
 
 
-@gen_cluster(client=True)
-async def test_async_deadlock(client, s, a, b):
+def test_one_thread_deadlock_timeout():
+    class UsesCounter:
+        # An actor whose method argument is another actor
+
+        def do_inc(self, ac):
+            # ac.increment() returns an EagerActorFuture and so the timeout
+            # cannot expire
+            return ac.increment().result(timeout=0.001)
+
+    with cluster(nworkers=1) as (cl, _):
+        client = Client(cl["address"])
+        ac = client.submit(Counter, actor=True).result()
+        ac2 = client.submit(UsesCounter, actor=True).result()
+
+        assert ac2.do_inc(ac).result() == 1
+
+
+def test_one_thread_deadlock_sync_client():
+    class UsesCounter:
+        # An actor whose method argument is another actor
+
+        def do_inc(self, ac):
+            return get_client().sync(ac.increment)
+
+    with cluster(nworkers=1) as (cl, _):
+        client = Client(cl["address"])
+        ac = client.submit(Counter, actor=True).result()
+        ac2 = client.submit(UsesCounter, actor=True).result()
+
+        assert ac2.do_inc(ac).result() == 1
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_async_deadlock(client, s, a):
+    class UsesCounter:
+        # An actor whose method argument is another actor
+
+        async def ado_inc(self, ac):
+            return await ac.ainc()
+
     ac = await client.submit(Counter, actor=True)
-    ac2 = await client.submit(UsesCounter, actor=True, workers=[ac._address])
+    ac2 = await client.submit(UsesCounter, actor=True)
 
     assert (await ac2.ado_inc(ac)) == 1
 
@@ -698,11 +752,22 @@ async def test_actor_future_awaitable(client, s, a, b):
     ac = await client.submit(Counter, actor=True)
     futures = [ac.increment() for _ in range(10)]
 
-    assert all([isinstance(future, ActorFuture) for future in futures])
+    assert all([isinstance(future, BaseActorFuture) for future in futures])
 
     out = await asyncio.gather(*futures)
     assert all([future.done() for future in futures])
     assert max(out) == 10
+
+
+@gen_cluster(client=True)
+async def test_actor_future_awaitable_deadlock(client, s, a, b):
+    ac = await client.submit(Counter, actor=True)
+    f = ac.increment()
+
+    async def coro():
+        return await f
+
+    assert await asyncio.gather(coro(), coro()) == [1, 1]
 
 
 @gen_cluster(client=True)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import io
 import os
 import re
@@ -51,7 +52,8 @@ def get_workflow_listing(repo="dask/distributed", branch="main", event="push"):
     """
     Get a list of workflow runs from GitHub actions.
     """
-    params = {"per_page": 100, "branch": branch, "event": event}
+    since = str((pandas.Timestamp.now(tz="UTC") - pandas.Timedelta(days=90)).date())
+    params = {"per_page": 100, "branch": branch, "event": event, "created": f">{since}"}
     r = get_from_github(
         f"https://api.github.com/repos/{repo}/actions/runs", params=params
     )
@@ -137,7 +139,7 @@ def dataframe_from_jxml(run):
             else:
                 s = "x"
             status.append(s)
-            message.append(m)
+            message.append(html.escape(m))
     df = pandas.DataFrame(
         {"file": fname, "test": tname, "status": status, "message": message}
     )
@@ -163,9 +165,11 @@ if __name__ == "__main__":
     if not TOKEN:
         raise RuntimeError("Failed to find a GitHub Token")
     print("Getting all recent workflows...")
-    workflows = get_workflow_listing()
+    workflows = get_workflow_listing(event="push") + get_workflow_listing(
+        event="schedule"
+    )
 
-    # Filter the workflows listing to be in the last month,
+    # Filter the workflows listing to be in the retention period,
     # and only be test runs (i.e., no linting) that completed.
     workflows = [
         w
@@ -177,6 +181,10 @@ if __name__ == "__main__":
             and w["name"].lower() == "tests"
         )
     ]
+    # Each workflow processed takes ~10-15 API requests. To avoid being
+    # rate limited by GitHub (1000 requests per hour) we choose just the
+    # most recent N runs. This also keeps the viz size from blowing up.
+    workflows = sorted(workflows, key=lambda w: w["created_at"])[-50:]
 
     print("Getting the artifact listing for each workflow...")
     for w in workflows:

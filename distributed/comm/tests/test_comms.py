@@ -769,10 +769,6 @@ async def test_tcp_comm_closed_explicit(tcp):
     await check_comm_closed_explicit("tcp://127.0.0.1")
 
 
-@pytest.mark.xfail(
-    sys.version_info[:2] == (3, 7),
-    reason="This test fails on python 3.7 with certain versions of openssl",
-)
 @pytest.mark.asyncio
 async def test_tls_comm_closed_explicit(tcp):
     await check_comm_closed_explicit("tls://127.0.0.1", **tls_kwargs)
@@ -1092,7 +1088,7 @@ async def check_deserialize(addr):
     # as a separate payload
     # TODO: currently bytestrings are not transferred as a separate payload
 
-    _uncompressible = os.urandom(1024 ** 2) * 4  # end size: 8 MB
+    _uncompressible = os.urandom(1024**2) * 4  # end size: 8 MB
 
     msg = {
         "op": "update",
@@ -1151,7 +1147,7 @@ async def check_deserialize_roundtrip(addr):
     """
     # Test with long bytestrings, large enough to be transferred
     # as a separate payload
-    _uncompressible = os.urandom(1024 ** 2) * 4  # end size: 4 MB
+    _uncompressible = os.urandom(1024**2) * 4  # end size: 4 MB
 
     msg = {
         "op": "update",

@@ -58,7 +58,7 @@ class _WorkItem:
         self.kwargs = kwargs
 
     def run(self):
-        if not self.future.set_running_or_notify_cancel():
+        if not self.future.set_running_or_notify_cancel():  # pragma: no cover
             return
 
         try:
@@ -123,7 +123,7 @@ class ThreadPoolExecutor(_base.Executor):
 
     def submit(self, fn, *args, **kwargs):
         with self._shutdown_lock:
-            if self._shutdown:
+            if self._shutdown:  # pragma: no cover
                 raise RuntimeError("cannot schedule new futures after shutdown")
 
             f = _base.Future()
