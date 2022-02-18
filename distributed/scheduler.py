@@ -64,7 +64,7 @@ from .comm import (
     unparse_host_port,
 )
 from .comm.addressing import addresses_from_user_args
-from .core import CommClosedError, Status, clean_exception, rpc, send_recv
+from .core import CommClosedError, Status, rpc, send_recv
 from .diagnostics.memory_sampler import MemorySamplerExtension
 from .diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from .event import EventExtension
@@ -4474,7 +4474,7 @@ class Scheduler(SchedulerState, ServerNode):
                     result = plugin.add_worker(scheduler=self, worker=address)
                     if inspect.isawaitable(result):
                         await result
-                except Exception as e:  # pragma: no cover
+                except Exception as e:
                     logger.exception(e)
 
             recommendations: dict = {}
@@ -4896,7 +4896,7 @@ class Scheduler(SchedulerState, ServerNode):
                     resources=resources,
                     annotations=annotations,
                 )
-            except Exception as e:  # pragma: no cover
+            except Exception as e:
                 logger.exception(e)
 
         self.transitions(recommendations)
@@ -5097,7 +5097,7 @@ class Scheduler(SchedulerState, ServerNode):
                     result = plugin.remove_worker(scheduler=self, worker=address)
                     if inspect.isawaitable(result):
                         await result
-                except Exception as e:  # pragma: no cover
+                except Exception as e:
                     logger.exception(e)
 
             if not parent._workers_dv:
@@ -5388,7 +5388,7 @@ class Scheduler(SchedulerState, ServerNode):
             try:
                 c.send(msg)
                 # logger.debug("Scheduler sends message to client %s", msg)
-            except CommClosedError:  # pragma: no cover
+            except CommClosedError:
                 if self.status == Status.running:
                     logger.critical(
                         "Closed comm %r while trying to write %s", c, msg, exc_info=True
@@ -5409,7 +5409,7 @@ class Scheduler(SchedulerState, ServerNode):
         for plugin in list(self.plugins.values()):
             try:
                 plugin.add_client(scheduler=self, client=client)
-            except Exception as e:  # pragma: no cover
+            except Exception as e:
                 logger.exception(e)
 
         try:
@@ -5464,7 +5464,7 @@ class Scheduler(SchedulerState, ServerNode):
             for plugin in list(self.plugins.values()):
                 try:
                     plugin.remove_client(scheduler=self, client=client)
-                except Exception as e:  # pragma: no cover
+                except Exception as e:
                     logger.exception(e)
 
         def remove_client_from_events():
@@ -5490,9 +5490,6 @@ class Scheduler(SchedulerState, ServerNode):
 
                 pdb.set_trace()
             raise
-
-    def handle_uncaught_error(self, **msg):  # pragma: no cover
-        logger.exception(clean_exception(**msg)[1])
 
     def handle_task_finished(self, key=None, worker=None, **msg):
         parent: SchedulerState = cast(SchedulerState, self)
@@ -5575,9 +5572,6 @@ class Scheduler(SchedulerState, ServerNode):
         duration accounting as if the task has stopped.
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        if key not in parent._tasks:  # pragma: no cover
-            logger.debug("Skipping long_running since key %s was already released", key)
-            return
         ts: TaskState = parent._tasks[key]
         steal = parent._extensions.get("stealing")
         if steal is not None:
@@ -5805,7 +5799,7 @@ class Scheduler(SchedulerState, ServerNode):
         stream_comms: dict = self.stream_comms
         try:
             stream_comms[worker].send(msg)
-        except (CommClosedError, AttributeError):  # pragma: no cover
+        except (CommClosedError, AttributeError):
             self.loop.add_callback(self.remove_worker, address=worker)
 
     def client_send(self, client, msg):
@@ -6015,7 +6009,7 @@ class Scheduler(SchedulerState, ServerNode):
             for plugin in list(self.plugins.values()):
                 try:
                     plugin.restart(self)
-                except Exception as e:  # pragma: no cover
+                except Exception as e:
                     logger.exception(e)
 
             logger.debug("Send kill signal to nannies: %s", nannies)
@@ -7130,7 +7124,7 @@ class Scheduler(SchedulerState, ServerNode):
         Caution: this runs arbitrary Python code on the scheduler.  This should
         eventually be phased out.  It is mostly used by diagnostics.
         """
-        if not dask.config.get("distributed.scheduler.pickle"):  # pragma: no cover
+        if not dask.config.get("distributed.scheduler.pickle"):
             logger.warn(
                 "Tried to call 'feed' route with custom functions, but "
                 "pickle is disallowed.  Set the 'distributed.scheduler.pickle'"

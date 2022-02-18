@@ -164,7 +164,7 @@ class ServerNode(Server):
                 except Exception:
                     change_port = True
                     retries_left = retries_left - 1
-                    if retries_left < 1:  # pragma: no cover
+                    if retries_left < 1:
                         raise
 
         bound_addresses = get_tcp_server_addresses(self.http_server)

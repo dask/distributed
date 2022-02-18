@@ -474,7 +474,7 @@ class Server:
 
                 try:
                     op = msg.pop("op")
-                except KeyError as e:  # pragma: no cover
+                except KeyError as e:
                     raise ValueError(
                         "Received unexpected message without 'op' key: " + str(msg)
                     ) from e
