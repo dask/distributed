@@ -2,9 +2,9 @@ name: Tests
 
 on:
   push:
-  pull_request:
-  schedule:
-    - cron: "0 6,18 * * *"
+  # pull_request:
+  # schedule:
+  #   - cron: "0 6,18 * * *"
 
 # When this workflow is queued, automatically cancel any previous running
 # or pending jobs from the same branch
