@@ -9,7 +9,7 @@
 
 
 package:
-  name: distributed-ext
+  name: distributed-split
   version: {{ version }}
 
 source:
@@ -40,8 +40,8 @@ outputs:
       number: {{ GIT_DESCRIBE_NUMBER }}
       string: py{{ python | replace(".", "") }}_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}_{{ build_ext }}
       script: python -m pip install . -vv                                           # [not cython_enabled]
-      script: python -m pip install . -vv --install-option="--with-cython=profile"  # [cython_enabled]
-      track_features: {{ "[cythonized-scheduler]" if cython_enabled else "" }}
+      script: python -m pip install . -vv --no-deps --install-option="--with-cython=profile"  # [cython_enabled]
+      track_features: {{ "cythonized-scheduler" if cython_enabled else "" }}
       entry_points:
         - dask-scheduler = distributed.cli.dask_scheduler:go
         - dask-ssh = distributed.cli.dask_ssh:go
@@ -50,7 +50,7 @@ outputs:
       build:
         - python                                 # [build_platform != target_platform]
         - cross-python_{{ target_platform }}     # [build_platform != target_platform]
-        - compilers                              # [cython_enabled]
+        - {{ compiler('c') }}                    # [cython_enabled]
         - cython >=0.29,<0.30                    # [cython_enabled]
       host:
         - python
@@ -69,11 +69,11 @@ outputs:
         - sortedcontainers !=2.0.0,!=2.0.1
         - tblib >=1.6.0
         - toolz >=0.8.2
-        - tornado >=5  # [py<38]
-        - tornado >=6.0.3  # [py>=38]
+        - tornado >=6.0.3
         - zict >=0.1.3
         - setuptools <60.0.0
       run_constrained:
+        - distributed-proc * {{ build_ext }}
         - openssl !=1.1.1e
     test:
       imports:
@@ -88,6 +88,7 @@ outputs:
         - dask-scheduler --help
         - dask-ssh --help
         - dask-worker --help
+        - python -c "from distributed.scheduler import COMPILED; assert COMPILED is {{ cython_enabled }}"
       requires:
         - pip
     about:
