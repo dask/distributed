@@ -130,19 +130,18 @@ def test_server(loop):
 
 def test_server_raises_on_blocked_handlers(loop):
     async def f():
-        server = Server({"ping": pingpong}, blocked_handlers=["ping"])
-        await server.listen(8881)
+        async with Server({"ping": pingpong}, blocked_handlers=["ping"]) as server:
+            await server.listen(8881)
 
-        comm = await connect(server.address)
-        await comm.write({"op": "ping"})
-        msg = await comm.read()
+            comm = await connect(server.address)
+            await comm.write({"op": "ping"})
+            msg = await comm.read()
 
-        _, exception, _ = clean_exception(msg["exception"])
-        assert isinstance(exception, ValueError)
-        assert "'ping' handler has been explicitly disallowed" in repr(exception)
+            _, exception, _ = clean_exception(msg["exception"])
+            assert isinstance(exception, ValueError)
+            assert "'ping' handler has been explicitly disallowed" in repr(exception)
 
-        await comm.close()
-        server.stop()
+            await comm.close()
 
     res = loop.run_sync(f)
 
@@ -794,15 +793,13 @@ def test_compression(compression, serialize, loop):
     with dask.config.set(compression=compression):
 
         async def f():
-            server = Server({"echo": serialize})
-            await server.listen("tcp://")
+            async with Server({"echo": serialize}) as server:
+                await server.listen("tcp://")
 
-            with rpc(server.address) as r:
-                data = b"1" * 1000000
-                result = await r.echo(x=to_serialize(data))
-                assert result == {"result": data}
-
-            server.stop()
+                with rpc(server.address) as r:
+                    data = b"1" * 1000000
+                    result = await r.echo(x=to_serialize(data))
+                    assert result == {"result": data}
 
         loop.run_sync(f)
 

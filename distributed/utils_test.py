@@ -1691,8 +1691,7 @@ def check_instances():
     else:
         L = [c for c in Comm._instances if not c.closed()]
         Comm._instances.clear()
-        print("Unclosed Comms", L)
-        # raise ValueError("Unclosed Comms", L)
+        raise ValueError("Unclosed Comms", L)
 
     assert all(
         n.status == Status.closed or n.status == Status.init for n in Nanny._instances
