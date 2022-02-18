@@ -922,8 +922,6 @@ class Client(SyncMethodMixin):
 
         preload = dask.config.get("distributed.client.preload")
         preload_argv = dask.config.get("distributed.client.preload-argv")
-
-        # These two asserts are for typing
         self.preloads = preloading.process_preloads(self, preload, preload_argv)
 
         self.start(timeout=timeout)
