@@ -208,8 +208,9 @@ class SemaphoreExtension:
                 self._release_value(name, lease_id)
             else:
                 logger.warning(
-                    f"Tried to release semaphore but it was already released: "
-                    f"name={name}, lease_id={lease_id}. This can happen if the semaphore timed out before."
+                    "Tried to release semaphore but it was already released: "
+                    f"{name=}, {lease_id=}. "
+                    "This can happen if the semaphore timed out before."
                 )
 
     def _release_value(self, name, lease_id):

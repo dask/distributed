@@ -17,6 +17,7 @@ from collections import defaultdict, deque
 from collections.abc import (
     Callable,
     Collection,
+    Container,
     Hashable,
     Iterable,
     Iterator,
@@ -27,7 +28,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import ClassVar, Container, Literal
+from typing import ClassVar, Literal
 from typing import cast as pep484_cast
 
 import psutil
@@ -3995,11 +3996,11 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
         if self.worker_ttl:
-            pc = PeriodicCallback(self.check_worker_ttl, self.worker_ttl)
+            pc = PeriodicCallback(self.check_worker_ttl, self.worker_ttl * 1000)
             self.periodic_callbacks["worker-ttl"] = pc
 
         if self.idle_timeout:
-            pc = PeriodicCallback(self.check_idle, self.idle_timeout / 4)
+            pc = PeriodicCallback(self.check_idle, self.idle_timeout * 1000 / 4)
             self.periodic_callbacks["idle-timeout"] = pc
 
         if extensions is None:

@@ -4,7 +4,7 @@ import dask
 from dask.config import config  # type: ignore
 
 from ._version import get_versions
-from .actor import Actor, ActorFuture
+from .actor import Actor, BaseActorFuture
 from .client import (
     Client,
     CompatibleExecutor,

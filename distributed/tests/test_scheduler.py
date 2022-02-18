@@ -2575,7 +2575,7 @@ async def test_memory(c, s, *nannies):
     assert a_leak > 50 and b_leak > 50
     a_leak += 10
     b_leak += 10
-    print(f"Leaking additional memory: a_leak={a_leak}; b_leak={b_leak}")
+    print(f"Leaking additional memory: {a_leak=}; {b_leak=}")
     await wait(
         [
             c.submit(leaking, 0, a_leak, 0, pure=False, workers=[a.name]),
@@ -2734,7 +2734,7 @@ async def assert_ndata(client, by_addr, total=None):
         if total is not None:
             assert sum(out.values()) == total
     except AssertionError:
-        raise AssertionError(f"Expected {by_addr}, total={total}; got {out}")
+        raise AssertionError(f"Expected {by_addr}; {total=}; got {out}")
 
 
 @gen_cluster(
