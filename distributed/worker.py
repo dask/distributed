@@ -1671,7 +1671,7 @@ class Worker(ServerNode):
                         c._asynchronous = True
                         if c.asynchronous:
                             await c.close()
-                        else:  # pragma: no cover
+                        else:
                             # There is still the chance that even with us
                             # telling the client to be async, itself will decide
                             # otherwise
@@ -1891,7 +1891,7 @@ class Worker(ServerNode):
 
                 try:
                     recs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
-                except Exception as e:  # pragma: no cover
+                except Exception as e:
                     msg = error_message(e)
                     recommendations = {ts: tuple(msg.values())}
                 else:
@@ -3339,7 +3339,7 @@ class Worker(ServerNode):
             self._notify_plugins(
                 "release_key", key, state_before, cause, reason, report
             )
-        except CommClosedError:  # pragma: no cover
+        except CommClosedError:
             # Batched stream send might raise if it was already closed
             pass
         except Exception as e:  # pragma: no cover
