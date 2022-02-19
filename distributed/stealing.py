@@ -301,8 +301,8 @@ class WorkStealing(SchedulerPlugin):
             _log_msg = [key, state, victim.address, thief.address, stimulus_id]
 
             if ts.state != "processing":
-                self.scheduler._reevaluate_occupancy_worker(thief)
-                self.scheduler._reevaluate_occupancy_worker(victim)
+                self.scheduler.state.reevaluate_occupancy_worker(thief)
+                self.scheduler.state.reevaluate_occupancy_worker(victim)
             elif (
                 state in _WORKER_STATE_UNDEFINED
                 or state in _WORKER_STATE_CONFIRM

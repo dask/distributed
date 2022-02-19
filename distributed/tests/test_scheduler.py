@@ -734,11 +734,11 @@ async def test_coerce_address(s):
     assert s.coerce_address(123) == b.address
     assert s.coerce_address("charlie") == c.address
 
-    assert s.coerce_hostname("127.0.0.1") == "127.0.0.1"
-    assert s.coerce_hostname("alice") == a.ip
-    assert s.coerce_hostname(123) == b.ip
-    assert s.coerce_hostname("charlie") == c.ip
-    assert s.coerce_hostname("jimmy") == "jimmy"
+    assert s.state.coerce_hostname("127.0.0.1") == "127.0.0.1"
+    assert s.state.coerce_hostname("alice") == a.ip
+    assert s.state.coerce_hostname(123) == b.ip
+    assert s.state.coerce_hostname("charlie") == c.ip
+    assert s.state.coerce_hostname("jimmy") == "jimmy"
 
     assert s.coerce_address("zzzt:8000", resolve=False) == "tcp://zzzt:8000"
     await asyncio.gather(a.close(), b.close(), c.close())
@@ -796,11 +796,11 @@ async def test_story(c, s, a, b):
     f = c.persist(y)
     await wait([f])
 
-    assert s.transition_log
+    assert s.state.transition_log
 
     story = s.story(x.key)
-    assert all(line in s.transition_log for line in story)
-    assert len(story) < len(s.transition_log)
+    assert all(line in s.state.transition_log for line in story)
+    assert len(story) < len(s.state.transition_log)
     assert all(x.key == line[0] or x.key in line[-2] for line in story)
 
     assert len(s.story(x.key, y.key)) > len(story)
@@ -1561,13 +1561,13 @@ async def test_dont_recompute_if_persisted(c, s, a, b):
     yy = y.persist()
     await wait(yy)
 
-    old = list(s.transition_log)
+    old = list(s.state.transition_log)
 
     yyy = y.persist()
     await wait(yyy)
 
     await asyncio.sleep(0.100)
-    assert list(s.transition_log) == old
+    assert list(s.state.transition_log) == old
 
 
 @gen_cluster(client=True)
@@ -1598,12 +1598,12 @@ async def test_dont_recompute_if_persisted_3(c, s, a, b):
     ww = w.persist()
     await wait(ww)
 
-    old = list(s.transition_log)
+    old = list(s.state.transition_log)
 
     www = w.persist()
     await wait(www)
     await asyncio.sleep(0.100)
-    assert list(s.transition_log) == old
+    assert list(s.state.transition_log) == old
 
 
 @gen_cluster(client=True)
@@ -1650,13 +1650,13 @@ async def test_dont_recompute_if_erred(c, s, a, b):
     yy = y.persist()
     await wait(yy)
 
-    old = list(s.transition_log)
+    old = list(s.state.transition_log)
 
     yyy = y.persist()
     await wait(yyy)
 
     await asyncio.sleep(0.100)
-    assert list(s.transition_log) == old
+    assert list(s.state.transition_log) == old
 
 
 @gen_cluster()
@@ -1918,7 +1918,7 @@ async def test_get_task_duration(c, s, a, b):
     await future
     assert 10 < s.task_prefixes["inc"].duration_average < 100
 
-    ts_pref1 = s.new_task("inc-abcdefab", None, "released")
+    ts_pref1 = s.state.new_task("inc-abcdefab", None, "released")
     assert 10 < s.get_task_duration(ts_pref1) < 100
 
     # make sure get_task_duration adds TaskStates to unknown dict
@@ -3172,16 +3172,16 @@ async def test_computations(c, s, a, b):
     z = (x - 2).persist()
     await z
 
-    assert len(s.computations) == 2
-    assert "add" in str(s.computations[0].groups)
-    assert "sub" in str(s.computations[1].groups)
-    assert "sub" not in str(s.computations[0].groups)
+    assert len(s.state.computations) == 2
+    assert "add" in str(s.state.computations[0].groups)
+    assert "sub" in str(s.state.computations[1].groups)
+    assert "sub" not in str(s.state.computations[0].groups)
 
-    assert isinstance(repr(s.computations[1]), str)
+    assert isinstance(repr(s.state.computations[1]), str)
 
-    assert s.computations[1].stop == max(tg.stop for tg in s.task_groups.values())
+    assert s.state.computations[1].stop == max(tg.stop for tg in s.task_groups.values())
 
-    assert s.computations[0].states["memory"] == y.npartitions
+    assert s.state.computations[0].states["memory"] == y.npartitions
 
 
 @gen_cluster(client=True)
@@ -3190,7 +3190,7 @@ async def test_computations_futures(c, s, a, b):
     total = c.submit(sum, futures)
     await total
 
-    [computation] = s.computations
+    [computation] = s.state.computations
     assert "sum" in str(computation.groups)
     assert "inc" in str(computation.groups)
 
@@ -3246,7 +3246,7 @@ async def test_worker_reconnect_task_memory(c, s, a):
 
     await res
     assert ("no-worker", "memory") in {
-        (start, finish) for (_, start, finish, _, _) in s.transition_log
+        (start, finish) for (_, start, finish, _, _) in s.state.transition_log
     }
 
 
@@ -3270,7 +3270,7 @@ async def test_worker_reconnect_task_memory_with_resources(c, s, a):
 
         await res
         assert ("no-worker", "memory") in {
-            (start, finish) for (_, start, finish, _, _) in s.transition_log
+            (start, finish) for (_, start, finish, _, _) in s.state.transition_log
         }
 
 

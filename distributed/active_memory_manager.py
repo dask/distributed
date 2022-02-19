@@ -222,10 +222,10 @@ class ActiveMemoryManagerExtension:
             return None
 
         if candidates is None:
-            candidates = self.scheduler.running.copy()
+            candidates = self.scheduler.state.running.copy()
         else:
             # Don't modify orig_candidates
-            candidates = candidates & self.scheduler.running
+            candidates = candidates & self.scheduler.state.running
         if not candidates:
             log_reject("no running candidates")
             return None
