@@ -24,13 +24,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.8", "3.9"]
-        # Cherry-pick test modules to split the overall runtime roughly in half
-        partition: [ci1, not ci1]
-        include:
-          - partition: "ci1"
-            partition-label: "ci1"
-          - partition: "not ci1"
-            partition-label: "notci1"
 
         # Uncomment to stress-test the test suite for random failures.
         # Must also change env.TEST_ID below.
@@ -41,7 +34,7 @@ jobs:
         # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
     env:
-      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}
+      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}
       # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}-${{ matrix.run }}
 
     steps:
@@ -109,8 +102,8 @@ jobs:
 
       - name: Reconfigure pytest-timeout
         shell: bash -l {0}
-        # No SIGALRM available on Windows. On MacOS, it kills the whole test suite.
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        # No SIGALRM available on Windows
+        if: ${{ matrix.os != 'windows-latest' }}
         run: sed -i.bak 's/timeout_method = thread/timeout_method = signal/' setup.cfg
 
       - name: Test
@@ -124,13 +117,28 @@ jobs:
               # https://github.com/dask/distributed/issues/4514
               export DISABLE_IPV6=1
           fi
-          source continuous_integration/scripts/set_ulimit.sh
 
-          pytest distributed \
-            -m "not avoid_ci and ${{ matrix.partition }}" --runslow \
+          source continuous_integration/scripts/set_ulimit.sh
+          set -o pipefail
+          mkdir reports
+
+          pytest distributed/tests/test_parse_stdout.py distributed/tests/test1.py \
             --leaks=fds,processes,threads \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \
-            --cov=distributed --cov-report=xml
+            --cov=distributed --cov-report=xml \
+          | tee reports/stdout
+
+      - name: Generate junit XML report in case of pytest-timeout
+        if: ${{ failure() }}
+        shell: bash -l {0}
+        run: |
+          if [ ! -e reports/pytest.xml ]
+          then
+            # This should only ever happen on Windows.
+            # On Linux and MacOS, pytest-timeout kills off the individual tests
+            # See (reconfigure pytest-timeout above)
+            python continuous_integration/scripts/parse_stdout.py < reports/stdout > reports/pytest.xml
+          fi
 
       # - name: Debug with tmate on failure
       #   if: ${{ failure() }}
