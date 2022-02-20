@@ -1381,8 +1381,8 @@ async def test_spill_no_target_threshold(c, s, a):
     await wait(f1)
     assert set(a.data.memory) == {"f1"}
 
-    # 500 MB. Use large chunks to stimulate timely release of process memory.
-    futures = c.map(OverReport, range(int(100e6), int(100e6) + 5))
+    # 800 MB. Use large chunks to stimulate timely release of process memory.
+    futures = c.map(OverReport, range(int(100e6), int(100e6) + 8))
 
     while not a.data.disk:
         await asyncio.sleep(0.01)
