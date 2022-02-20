@@ -1540,21 +1540,18 @@ async def test_deque_handler(s):
         assert any(msg.msg == "foo456" for msg in deque_handler.deque)
 
 
-@gen_cluster(nthreads=[], client=True)
-async def test_avoid_memory_monitor_if_zero_limit(c, s):
-    worker = await Worker(
-        s.address, loop=s.loop, memory_limit=0, memory_monitor_interval=10
-    )
-    assert type(worker.data) is dict
-    assert "memory" not in worker.periodic_callbacks
-
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    worker_kwargs={"memory_limit": 0, "memory_monitor_interval": "10ms"},
+)
+async def test_avoid_memory_monitor_if_zero_limit(c, s, a):
+    assert type(a.data) is dict
+    assert "memory" not in a.periodic_callbacks
     future = c.submit(inc, 1)
     assert (await future) == 2
-    await asyncio.sleep(worker.memory_monitor_interval / 1000)
-
+    await asyncio.sleep(0.05)
     await c.submit(inc, 2)  # worker doesn't pause
-
-    await worker.close()
 
 
 @gen_cluster(
