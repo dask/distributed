@@ -457,8 +457,10 @@ def test_assert_worker_story():
         [("foo",)],  # Missing (stimulus_id, ts)
         [("foo", "bar")],  # Missing ts
         [("foo", "bar", "baz")],  # ts is not a float
-        [("foo", "bar", time() + 3600)],  # ts is in the future
-        [("foo", "bar", time() - 7200)],  # ts is too old
+        # ts is in the future. As time() is sampled during test discovery, the offset
+        # must be safely longer than the duration of the whole test suite.
+        [("foo", "bar", time() + 10800)],
+        [("foo", "bar", time() - 3601)],  # ts is too old
         [("foo", 123, time())],  # stimulus_id is not a string
         [("foo", "", time())],  # stimulus_id is an empty string
         [("", time())],  # no payload
