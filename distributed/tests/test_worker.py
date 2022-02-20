@@ -1303,7 +1303,7 @@ async def test_spill_spill_threshold(c, s, a):
     # FIXME https://github.com/dask/distributed/issues/5367
     #       This works just by luck for the purpose of the spill and pause thresholds,
     #       and does NOT work for the target threshold.
-    memory = s.workers[a.address].memory.process
+    memory = psutil.Process().memory_info().rss
     a.memory_limit = (memory + 300e6) / 0.7
 
     class UnderReport:
@@ -1361,7 +1361,7 @@ async def test_spill_no_target_threshold(c, s, a):
     """Test that you can enable the spill threshold while leaving the target threshold
     to False
     """
-    memory = s.workers[a.address].memory.process
+    memory = psutil.Process().memory_info().rss
     a.memory_limit = (memory + 300e6) / 0.7  # 300 MB before we start spilling
 
     class OverReport:
@@ -1381,7 +1381,8 @@ async def test_spill_no_target_threshold(c, s, a):
     await wait(f1)
     assert set(a.data.memory) == {"f1"}
 
-    futures = c.map(OverReport, range(int(20e6), int(20e6) + 25))  # 500 MB
+    # 500 MB. Use large chunks to stimulate timely release of process memory.
+    futures = c.map(OverReport, range(int(100e6), int(100e6) + 5))
 
     while not a.data.disk:
         await asyncio.sleep(0.01)
@@ -1408,7 +1409,7 @@ async def test_spill_no_target_threshold(c, s, a):
     ),
 )
 async def test_spill_hysteresis(c, s, a):
-    memory = s.workers[a.address].memory.process
+    memory = psutil.Process().memory_info().rss
     a.memory_limit = memory + 2**30
 
     # Under-report managed memory, so that we reach the spill threshold for process
