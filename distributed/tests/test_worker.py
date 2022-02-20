@@ -35,7 +35,7 @@ from distributed import (
     wait,
 )
 from distributed.comm.registry import backends
-from distributed.compatibility import LINUX, MACOS, WINDOWS
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import PipInstall
@@ -1330,12 +1330,12 @@ async def assert_not_everything_is_spilled(w: Worker) -> None:
     while time() < start + 0.5:
         assert w.data
         if not w.data.memory:  # type: ignore
-            # The hysteresis system fails on MacOSX because process memory is very slow
-            # to shrink down after calls to PyFree. As a result, Worker.memory_monitor
-            # will continue spilling until there's nothing left. Nothing we can do about
-            # this short of finding either a way to change this behaviour at OS level or
-            # a better measure of allocated memory.
-            assert MACOS, "All data was spilled to disk"
+            # The hysteresis system fails on Windows and MacOSX because process memory
+            # is very slow to shrink down after calls to PyFree. As a result,
+            # Worker.memory_monitor will continue spilling until there's nothing left.
+            # Nothing we can do about this short of finding either a way to change this
+            # behaviour at OS level or a better measure of allocated memory.
+            assert not LINUX, "All data was spilled to disk"
             raise pytest.xfail("https://github.com/dask/distributed/issues/5840")
         await asyncio.sleep(0)
 
@@ -1476,7 +1476,7 @@ async def test_pause_executor(c, s, a):
         start = time()
         while a.status != Status.running:
             if time() > start + 10:
-                assert MACOS
+                assert not LINUX
                 raise pytest.xfail("https://github.com/dask/distributed/issues/5840")
             await asyncio.sleep(0.01)
 
