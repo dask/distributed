@@ -9,26 +9,30 @@ from collections import Counter, defaultdict
 from collections.abc import Iterable
 from datetime import datetime
 
-# If a test has multiple outcomes, report the leftmost one in this list
-OUTCOMES_PRIORITY = (
-    None,  # Test timeout. Marked as a variant of FAILED in the junit report
-    "FAILED",
-    "ERROR",  # teardown failed (it appears after another status) or setup failed
-    "SKIPPED",  # @pytest.mark.skip, @pytest.mark.skipif, or raise pytest.skip()
-    "XFAIL",  # Marked as a variant of SKIPPED in the junit report
+OUTCOMES = {
     "PASSED",
-    "LEAKED",  # this appears after another status
-    "RERUN",  # this appears before another status
-)
+    "FAILED",
+    # Test timeout. Marked as a variant of FAILED in the junit report
+    None,
+    # Setup failed or teardown failed.
+    # In the latter case, if the test also failed, show both a FAILED and an ERROR line.
+    "ERROR",
+    # @pytest.mark.skip, @pytest.mark.skipif, or raise pytest.skip()
+    "SKIPPED",
+    # Reported as a variant of SKIPPED in the junit report
+    "XFAIL",
+    # These appear respectively before and after another status. Ignore.
+    "RERUN",
+    "LEAKED",
+}
 
 
-def parse_rows(rows: Iterable[str]) -> list[tuple[str, str, str | None]]:
+def parse_rows(rows: Iterable[str]) -> list[tuple[str, str, set[str | None]]]:
     match = re.compile(
         r"(distributed/.*test.*)::([^ ]*)"
         r"( (.*)(PASSED|FAILED|ERROR|SKIPPED|XFAIL|RERUN|LEAKED).*| )$"
     )
 
-    outcomes_idx = dict(zip(OUTCOMES_PRIORITY, range(len(OUTCOMES_PRIORITY))))
     out: defaultdict[tuple[str, str], set[str | None]] = defaultdict(set)
 
     for row in rows:
@@ -44,18 +48,15 @@ def parse_rows(rows: Iterable[str]) -> list[tuple[str, str, str | None]]:
             tname += " " + m.group(4).split("]")[0] + "]"
 
         outcome = m.group(5)
-        assert outcome in outcomes_idx
+        assert outcome in OUTCOMES
+        if outcome not in {"RERUN", "LEAKED"}:
+            out[clsname, tname].add(outcome)
 
-        out[clsname, tname].add(m.group(5))
-
-    return [
-        (clsname, tname, sorted(outcomes, key=outcomes_idx.__getitem__)[0])
-        for (clsname, tname), outcomes in out.items()
-    ]
+    return [(clsname, tname, outcomes) for (clsname, tname), outcomes in out.items()]
 
 
-def build_xml(rows: list[tuple[str, str, str | None]]) -> None:
-    cnt = Counter(outcome for _, _, outcome in rows)
+def build_xml(rows: list[tuple[str, str, set[str | None]]]) -> None:
+    cnt = Counter(outcome for _, _, outcomes in rows for outcome in outcomes)
     timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
 
     # We could have used ElementTree but it feels like overkill here
@@ -68,23 +69,35 @@ def build_xml(rows: list[tuple[str, str, str | None]]) -> None:
         f'time="0.0" timestamp="{timestamp}" hostname="">'
     )
 
-    for clsname, tname, outcome in rows:
+    for clsname, tname, outcomes in rows:
         print(f'<testcase classname="{clsname}" name="{tname}" time="0.0"', end="")
-        if outcome == "PASSED":
+        if outcomes == {"PASSED"}:
             print(" />")
-        elif outcome == "FAILED":
+        elif outcomes == {"FAILED"}:
             print('><failure message=""></failure></testcase>')
-        elif outcome is None:
+        elif outcomes == {None}:
             print('><failure message="pytest-timeout exceeded"></failure></testcase>')
-        elif outcome == "ERROR":
-            print('><error message=""></error></testcase>')
-        elif outcome == "SKIPPED":
+        elif outcomes == {"ERROR"}:
+            print('><error message="failed on setup"></error></testcase>')
+        elif outcomes == {"PASSED", "ERROR"}:
+            print('><error message="failed on teardown"></error></testcase>')
+        elif outcomes == {"FAILED", "ERROR"}:
+            print(
+                '><failure message=""></failure></testcase>\n'
+                f'<testcase classname="{clsname}" name="{tname}" time="0.0">'
+                '<error message="failed on teardown"></error></testcase>'
+            )
+        elif outcomes == {"SKIPPED"}:
             print('><skipped type="pytest.skip" message="skip"></skipped></testcase>')
-        elif outcome == "XFAIL":
+        elif outcomes == {"XFAIL"}:
             print('><skipped type="pytest.xfail" message="xfail"></skipped></testcase>')
-        else:  # Unreachable
-            # We should never get LEAKED or RERUN rows alone
-            raise ValueError(outcome)  # pragma: nocover
+        else:  # pragma: nocover
+            # This should be unreachable. We would normally raise ValueError, except
+            # that a crash in this script would be pretty much invisible.
+            print(
+                f' />\n<testcase classname="parse_stdout" name="build_xml" time="0.0">'
+                f'><failure message="Unexpected {outcomes=}"></failure></testcase>'
+            )
 
     print("</testsuite>")
     print("</testsuites>")

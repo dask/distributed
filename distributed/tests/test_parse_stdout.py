@@ -39,18 +39,26 @@ def test_parse_rows():
     actual = parse_stdout.parse_rows(stdout.splitlines())
 
     expect = [
-        ("distributed.tests.test1", "test_fail", "FAILED"),
-        ("distributed.tests.test1", "test_error_in_setup", "ERROR"),
-        ("distributed.tests.test1", "test_pass_and_then_error_in_teardown", "ERROR"),
-        ("distributed.tests.test1", "test_fail_and_then_error_in_teardown", "FAILED"),
-        ("distributed.tests.test1", "test_skip", "SKIPPED"),
-        ("distributed.tests.test1", "test_xfail", "XFAIL"),
-        ("distributed.tests.test1", "test_flaky", "PASSED"),
-        ("distributed.tests.test1", "test_leaking", "PASSED"),
-        ("distributed.tests.test1", "test_pass", "PASSED"),
-        ("distributed.tests.test1", "test_params[a a]", "PASSED"),
-        ("distributed.tests.test1.MyTest", "test_unittest", "PASSED"),
-        ("distributed.tests.test1", "test_timeout", None),
+        ("distributed.tests.test1", "test_fail", {"FAILED"}),
+        ("distributed.tests.test1", "test_error_in_setup", {"ERROR"}),
+        (
+            "distributed.tests.test1",
+            "test_pass_and_then_error_in_teardown",
+            {"PASSED", "ERROR"},
+        ),
+        (
+            "distributed.tests.test1",
+            "test_fail_and_then_error_in_teardown",
+            {"FAILED", "ERROR"},
+        ),
+        ("distributed.tests.test1", "test_skip", {"SKIPPED"}),
+        ("distributed.tests.test1", "test_xfail", {"XFAIL"}),
+        ("distributed.tests.test1", "test_flaky", {"PASSED"}),
+        ("distributed.tests.test1", "test_leaking", {"PASSED"}),
+        ("distributed.tests.test1", "test_pass", {"PASSED"}),
+        ("distributed.tests.test1", "test_params[a a]", {"PASSED"}),
+        ("distributed.tests.test1.MyTest", "test_unittest", {"PASSED"}),
+        ("distributed.tests.test1", "test_timeout", {None}),
     ]
 
     assert actual == expect
@@ -66,11 +74,12 @@ def test_build_xml(capsys):
     expect = """
 <?xml version="1.0" encoding="utf-8"?>
 <testsuites>
-<testsuite name="distributed" errors="2" failures="3" skipped="2" tests="12" time="0.0" timestamp="snip" hostname="">
+<testsuite name="distributed" errors="3" failures="3" skipped="2" tests="14" time="0.0" timestamp="snip" hostname="">
 <testcase classname="distributed.tests.test1" name="test_fail" time="0.0"><failure message=""></failure></testcase>
-<testcase classname="distributed.tests.test1" name="test_error_in_setup" time="0.0"><error message=""></error></testcase>
-<testcase classname="distributed.tests.test1" name="test_pass_and_then_error_in_teardown" time="0.0"><error message=""></error></testcase>
+<testcase classname="distributed.tests.test1" name="test_error_in_setup" time="0.0"><error message="failed on setup"></error></testcase>
+<testcase classname="distributed.tests.test1" name="test_pass_and_then_error_in_teardown" time="0.0"><error message="failed on teardown"></error></testcase>
 <testcase classname="distributed.tests.test1" name="test_fail_and_then_error_in_teardown" time="0.0"><failure message=""></failure></testcase>
+<testcase classname="distributed.tests.test1" name="test_fail_and_then_error_in_teardown" time="0.0"><error message="failed on teardown"></error></testcase>
 <testcase classname="distributed.tests.test1" name="test_skip" time="0.0"><skipped type="pytest.skip" message="skip"></skipped></testcase>
 <testcase classname="distributed.tests.test1" name="test_xfail" time="0.0"><skipped type="pytest.xfail" message="xfail"></skipped></testcase>
 <testcase classname="distributed.tests.test1" name="test_flaky" time="0.0" />
