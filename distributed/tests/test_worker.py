@@ -1192,6 +1192,7 @@ async def test_statistical_profiling_2(c, s, a, b):
             break
 
 
+@requires_zict
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -1303,7 +1304,7 @@ async def test_spill_spill_threshold(c, s, a):
     #       This works just by luck for the purpose of the spill and pause thresholds,
     #       and does NOT work for the target threshold.
     memory = s.workers[a.address].memory.process
-    a.memory_limit = memory / 0.7 + 400e6
+    a.memory_limit = (memory + 300e6) / 0.7
 
     class UnderReport:
         """100 MB process memory, 10 bytes reported managed memory"""
@@ -1322,6 +1323,21 @@ async def test_spill_spill_threshold(c, s, a):
 
     while not a.data.disk:
         await asyncio.sleep(0.01)
+
+
+async def assert_not_everything_is_spilled(w: Worker) -> None:
+    start = time()
+    while time() < start + 0.5:
+        assert w.data
+        if not w.data.memory:  # type: ignore
+            # The hysteresis system fails on MacOSX because process memory is very slow
+            # to shrink down after calls to PyFree. As a result, Worker.memory_monitor
+            # will continue spilling until there's nothing left. Nothing we can do about
+            # this short of finding either a way to change this behaviour at OS level or
+            # a better measure of allocated memory.
+            assert MACOS, "All data was spilled to disk"
+            raise pytest.xfail("Process memory is slow to shrink down on MacOSX")
+        await asyncio.sleep(0)
 
 
 @requires_zict
@@ -1346,7 +1362,7 @@ async def test_spill_no_target_threshold(c, s, a):
     to False
     """
     memory = s.workers[a.address].memory.process
-    a.memory_limit = memory / 0.7 + 400e6
+    a.memory_limit = (memory + 300e6) / 0.7  # 300 MB before we start spilling
 
     class OverReport:
         """Configurable process memory, 10 GB reported managed memory"""
@@ -1365,7 +1381,7 @@ async def test_spill_no_target_threshold(c, s, a):
     await wait(f1)
     assert set(a.data.memory) == {"f1"}
 
-    futures = c.map(OverReport, range(int(100e6), int(100e6) + 8))
+    futures = c.map(OverReport, range(int(20e6), int(20e6) + 25))  # 500 MB
 
     while not a.data.disk:
         await asyncio.sleep(0.01)
@@ -1375,20 +1391,11 @@ async def test_spill_no_target_threshold(c, s, a):
     # In this special case, it stops as soon as the process memory goes below the spill
     # threshold, e.g. without a hysteresis cycle. Test that we didn't instead dump the
     # whole data to disk (memory_limit * target = 0)
-    start = time()
-    while time() < start + 0.5:
-        if not a.data.memory:
-            # The hysteresis system fails on MacOSX because process memory is very slow
-            # to shrink down after calls to PyFree. As a result, Worker.memory_monitor
-            # will continue spilling until there's nothing left. Nothing we can do about
-            # this short of finding either a way to change this behaviour at OS level or
-            # a better measure of allocated memory.
-            assert MACOS
-            raise pytest.xfail("Process memory is slow to shrink down on MacOSX")
-        await asyncio.sleep(0)
+    await assert_not_everything_is_spilled(a)
 
 
 @pytest.mark.slow
+@requires_zict
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
@@ -1433,6 +1440,7 @@ async def test_spill_hysteresis(c, s, a):
     # To verify that this test is useful, set target=spill and watch it fail.
     while len(a.data.memory) > max_in_memory - 3:
         await asyncio.sleep(0.01)
+    await assert_not_everything_is_spilled(a)
 
 
 @pytest.mark.slow
@@ -1449,7 +1457,7 @@ async def test_spill_hysteresis(c, s, a):
 async def test_pause_executor(c, s, a):
     # See notes in test_spill_spill_threshold
     memory = psutil.Process().memory_info().rss
-    a.memory_limit = memory / 0.8 + 200e6
+    a.memory_limit = (memory + 150e6) / 0.8
 
     def f():
         x = "x" * int(250e6)
