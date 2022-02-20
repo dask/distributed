@@ -1336,7 +1336,7 @@ async def assert_not_everything_is_spilled(w: Worker) -> None:
             # this short of finding either a way to change this behaviour at OS level or
             # a better measure of allocated memory.
             assert MACOS, "All data was spilled to disk"
-            raise pytest.xfail("Process memory is slow to shrink down on MacOSX")
+            raise pytest.xfail("https://github.com/dask/distributed/issues/5840")
         await asyncio.sleep(0)
 
 
@@ -1473,7 +1473,11 @@ async def test_pause_executor(c, s, a):
         assert "Pausing worker" in logger.getvalue()
         assert sum(f.status == "finished" for f in futures) < 4
 
+        start = time()
         while a.status != Status.running:
+            if time() > start + 10:
+                assert MACOS
+                raise pytest.xfail("https://github.com/dask/distributed/issues/5840")
             await asyncio.sleep(0.01)
 
         assert "Resuming worker" in logger.getvalue()
