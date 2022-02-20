@@ -1410,13 +1410,13 @@ async def test_spill_no_target_threshold(c, s, a):
 )
 async def test_spill_hysteresis(c, s, a):
     memory = psutil.Process().memory_info().rss
-    a.memory_limit = memory + 2**30
+    a.memory_limit = (memory + 1e9) / 0.7  # Start spilling after 1 GB
 
     # Under-report managed memory, so that we reach the spill threshold for process
-    # memory withouth first reaching the target threshold for managed memory
+    # memory without first reaching the target threshold for managed memory
     class UnderReport:
         def __init__(self):
-            self.data = "x" * (50 * 2**20)  # 50 MiB
+            self.data = "x" * int(100e6)  # 100 MB
 
         def __sizeof__(self):
             return 1
@@ -1431,7 +1431,7 @@ async def test_spill_hysteresis(c, s, a):
         futures.append(c.submit(UnderReport, pure=False))
         max_in_memory = max(max_in_memory, len(a.data.memory))
         await wait(futures)
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.05)
         max_in_memory = max(max_in_memory, len(a.data.memory))
 
     # If there were no hysteresis, we would lose exactly 1 key.
@@ -1458,11 +1458,17 @@ async def test_spill_hysteresis(c, s, a):
 async def test_pause_executor(c, s, a):
     # See notes in test_spill_spill_threshold
     memory = psutil.Process().memory_info().rss
-    a.memory_limit = (memory + 150e6) / 0.8
+    a.memory_limit = (memory + 160e6) / 0.8  # Pause after 200 MB
 
+    # Note: it's crucial to have a very large single chunk of memory that gets descoped
+    # all at once in order to instigate release of process memory.
+    # Read: https://github.com/dask/distributed/issues/5840
     def f():
-        x = "x" * int(250e6)
-        sleep(1)
+        # Add 400 MB unmanaged memory
+        x = "x" * int(400e6)
+        w = get_worker()
+        while w.status != Status.paused:
+            sleep(0.01)
 
     with captured_logger(logging.getLogger("distributed.worker")) as logger:
         future = c.submit(f, key="x")
@@ -1474,11 +1480,7 @@ async def test_pause_executor(c, s, a):
         assert "Pausing worker" in logger.getvalue()
         assert sum(f.status == "finished" for f in futures) < 4
 
-        start = time()
         while a.status != Status.running:
-            if time() > start + 10:
-                assert not LINUX
-                raise pytest.xfail("https://github.com/dask/distributed/issues/5840")
             await asyncio.sleep(0.01)
 
         assert "Resuming worker" in logger.getvalue()
