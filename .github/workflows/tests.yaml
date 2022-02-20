@@ -24,6 +24,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.8", "3.9"]
+        # Cherry-pick test modules to split the overall runtime roughly in half
+        partition: [ci1, not ci1]
+        include:
+          - partition: "ci1"
+            partition-label: "ci1"
+          - partition: "not ci1"
+            partition-label: "notci1"
 
         # Uncomment to stress-test the test suite for random failures.
         # Must also change env.TEST_ID below.
@@ -34,7 +41,7 @@ jobs:
         # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
     env:
-      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}
+      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}
       # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}-${{ matrix.run }}
 
     steps:
@@ -122,7 +129,7 @@ jobs:
           set -o pipefail
           mkdir reports
 
-          pytest distributed/tests/test_parse_stdout.py distributed/tests/test1.py \
+          pytest distributed \
             --leaks=fds,processes,threads \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \
             --cov=distributed --cov-report=xml \
