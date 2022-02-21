@@ -166,7 +166,7 @@ costs to keep in memory using the ``sizeof`` function.  This function defaults t
 :func:`sys.getsizeof` for arbitrary objects, which uses the standard Python
 ``__sizeof__`` protocol, but also has special-cased implementations for common data
 types like NumPy arrays and Pandas dataframes. The sum of the ``sizeof`` of all data
-tracked by Dask is called :ref:`managed memory <memtypes>`_.
+tracked by Dask is called :ref:`managed memory <memtypes>`.
 
 When the managed memory exceeds 60% of the memory limit (*target threshold*), the worker
 will begin to dump the least recently used data to disk. You can control this location
@@ -187,7 +187,7 @@ The approach above can fail for a few reasons:
 2.  User functions may take up more RAM than expected
 3.  Significant amounts of data may accumulate in network I/O buffers
 
-To address this, we periodically monitor the :ref:`process memory <memtypes>`_ of the
+To address this, we periodically monitor the :ref:`process memory <memtypes>` of the
 worker every 200 ms. If the system reported memory use is above 70% of the target memory
 usage (*spill threshold*), then the worker will start dumping unused data to disk, even
 if internal ``sizeof`` recording hasn't yet reached the normal 60% threshold. This
@@ -195,7 +195,7 @@ more aggressive spilling will continue until process memory falls below 60%.
 
 Pause worker
 ~~~~~~~~~~~~
-At 80% :ref:`process memory <memtypes>`_ load, the worker's thread pool will stop
+At 80% :ref:`process memory <memtypes>` load, the worker's thread pool will stop
 starting computation on additional tasks in the worker's queue. This gives time for the
 write-to-disk functionality to take effect even in the face of rapidly accumulating
 data. Currently executing tasks continue to run. Additionally, data transfers to/from
@@ -203,7 +203,7 @@ other workers are throttled to a bare minimum.
 
 Kill Worker
 ~~~~~~~~~~~
-At 95% :ref:`process memory <memtypes>`_ load (*terminate threshold*), a worker's nanny
+At 95% :ref:`process memory <memtypes>` load (*terminate threshold*), a worker's nanny
 process will terminate it. Tasks will be cancelled mid-execution and rescheduled
 elsewhere; all unique data on the worker will be lost and will need to be recomputed.
 This is to avoid having our worker job being terminated by an external watchdog (like
