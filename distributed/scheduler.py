@@ -7705,9 +7705,9 @@ class Scheduler(SchedulerState, ServerNode):
         # Task stream
         task_stream = self.get_task_stream(start=start)
         total_tasks = len(task_stream)
-        timespent: "defaultdict[int, float]" = defaultdict(float)
+        timespent: "defaultdict[str, float]" = defaultdict(float)
         for d in task_stream:
-            for x in d.get("startstops", []):
+            for x in d["startstops"]:
                 timespent[x["action"]] += x["stop"] - x["start"]
         tasks_timings = ""
         for k in sorted(timespent.keys()):
