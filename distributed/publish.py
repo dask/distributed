@@ -47,7 +47,7 @@ class PublishExtension:
         with log_errors():
             return list(sorted(self.datasets.keys(), key=str))
 
-    def get(self, stream, name=None, client=None):
+    def get(self, name=None, client=None):
         with log_errors():
             return self.datasets.get(name, None)
 

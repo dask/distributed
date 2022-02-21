@@ -3,6 +3,7 @@ import os
 import socket
 import threading
 import weakref
+from functools import partial
 
 import pytest
 
@@ -1029,13 +1030,30 @@ def test_expects_comm():
         def comm_kwarg_only(self, *, comm, other):
             ...
 
+        def comm_not_leading_position(self, *, other, comm):
+            ...
+
+        def stream_not_leading_position(self, *, other, stream):
+            ...
+
+    expected_warning = "first arugment of a RPC handler `stream` is deprecated"
+
     assert not _expects_comm(A.empty)
     assert not _expects_comm(A.one_arg)
     assert _expects_comm(A.comm_arg)
-    assert _expects_comm(A.stream_arg)
+    with pytest.warns(FutureWarning, match=expected_warning):
+        assert _expects_comm(A.stream_arg)
     assert not _expects_comm(A.two_arg)
     assert _expects_comm(A.comm_arg_other)
-    assert _expects_comm(A.stream_arg_other)
+    with pytest.warns(FutureWarning, match=expected_warning):
+        assert _expects_comm(A.stream_arg_other)
     assert not _expects_comm(A.arg_kwarg)
     assert _expects_comm(A.comm_posarg_only)
     assert _expects_comm(A.comm_kwarg_only)
+    assert not _expects_comm(A.comm_not_leading_position)
+
+    assert not _expects_comm(A.stream_not_leading_position)
+
+    assert _expects_comm(partial(A.comm_kwarg_only, other=1))
+    with pytest.warns(FutureWarning, match=expected_warning):
+        assert _expects_comm(partial(A.stream_arg_other, other=1))
