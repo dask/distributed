@@ -52,6 +52,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import PeriodicCallback
 
+from . import preloading
 from . import versions as version_module  # type: ignore
 from .batched import BatchedSend
 from .cfexecutor import ClientExecutor
@@ -751,6 +752,8 @@ class Client(SyncMethodMixin):
 
     _default_event_handlers = {"print": _handle_print, "warn": _handle_warn}
 
+    preloads: list[preloading.Preload]
+
     def __init__(
         self,
         address=None,
@@ -916,6 +919,10 @@ class Client(SyncMethodMixin):
 
         for ext in extensions:
             ext(self)
+
+        preload = dask.config.get("distributed.client.preload")
+        preload_argv = dask.config.get("distributed.client.preload-argv")
+        self.preloads = preloading.process_preloads(self, preload, preload_argv)
 
         self.start(timeout=timeout)
         Client._instances.add(self)
@@ -1177,6 +1184,9 @@ class Client(SyncMethodMixin):
 
         for topic, handler in Client._default_event_handlers.items():
             self.subscribe_topic(topic, handler)
+
+        for preload in self.preloads:
+            await preload.start()
 
         self._handle_report_task = asyncio.create_task(self._handle_report())
 
@@ -1458,6 +1468,9 @@ class Client(SyncMethodMixin):
             return
 
         self.status = "closing"
+
+        for preload in self.preloads:
+            await preload.teardown()
 
         with suppress(AttributeError):
             for pc in self._periodic_callbacks.values():

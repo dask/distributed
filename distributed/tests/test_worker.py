@@ -1662,7 +1662,7 @@ async def test_custom_metrics(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_register_worker_callbacks(c, s, a, b):
-    # preload function to run
+    # plugin function to run
     def mystartup(dask_worker):
         dask_worker.init_variable = 1
 
@@ -1672,7 +1672,7 @@ async def test_register_worker_callbacks(c, s, a, b):
         os.environ["MY_ENV_VALUE"] = "WORKER_ENV_VALUE"
         return "Env set."
 
-    # Check that preload function has been run
+    # Check that plugin function has been run
     def test_import(dask_worker):
         return hasattr(dask_worker, "init_variable")
         #       and dask_worker.init_variable == 1
@@ -1694,7 +1694,7 @@ async def test_register_worker_callbacks(c, s, a, b):
     assert list(result.values()) == [False]
     await worker.close()
 
-    # Add a preload function
+    # Add a plugin function
     response = await c.register_worker_callbacks(setup=mystartup)
     assert len(response) == 2
 
@@ -1708,7 +1708,7 @@ async def test_register_worker_callbacks(c, s, a, b):
     assert list(result.values()) == [True]
     await worker.close()
 
-    # Register another preload function
+    # Register another plugin function
     response = await c.register_worker_callbacks(setup=mystartup2)
     assert len(response) == 2
 
