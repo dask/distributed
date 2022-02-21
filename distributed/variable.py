@@ -203,9 +203,9 @@ class Variable:
             name=self.name, client=self.client.id
         )
 
-    def is_set(self, **kwargs):
+    def is_set(self):
         """Check the variable has been set"""
-        return self.client.sync(self._is_set, **kwargs)
+        return self.client.sync(self._is_set)
 
     async def _get(self, timeout=None):
         d = await self.client.scheduler.variable_get(
