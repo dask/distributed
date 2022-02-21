@@ -14,7 +14,7 @@ from collections.abc import Container
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import ClassVar
+from typing import Callable, ClassVar
 
 import tblib
 from tlz import merge
@@ -99,23 +99,19 @@ tick_maximum_delay = parse_timedelta(
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 
-def _expects_comm(func):
+def _expects_comm(func: Callable) -> bool:
     sig = inspect.signature(func)
-    if "comm" in sig.parameters or "stream" in sig.parameters:
-        params = list(sig.parameters)
-        if len(params) > 1 and params[1] in ["comm", "stream"]:
-            if "stream" in sig.parameters:
-                try:
-                    fname = func.__name__
-                except AttributeError:
-                    # e.g. partials don't have __name__ We don't want to crash
-                    # just because we're trying to raise a warning
-                    fname = "unknown"
-                warnings.warn(
-                    f"Calling the first arugment of a RPC handler `stream` is deprecated. Defining this argument is optional. Either remove the arugment or rename it to `comm`. Instead got {fname}{sig}",
-                    FutureWarning,
-                )
-            return True
+    params = list(sig.parameters)
+    if params and params[0] == "comm":
+        return True
+    if params and params[0] == "stream":
+        warnings.warn(
+            "Calling the first arugment of a RPC handler `stream` is "
+            "deprecated. Defining this argument is optional. Either remove the "
+            f"arugment or rename it to `comm` in {func}.",
+            FutureWarning,
+        )
+        return True
     return False
 
 

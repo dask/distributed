@@ -3,7 +3,6 @@ import os
 import socket
 import threading
 import weakref
-from functools import partial, partialmethod
 
 import pytest
 
@@ -1027,38 +1026,27 @@ def test_expects_comm():
         def comm_posarg_only(self, comm, /, other):
             ...
 
-        def comm_kwarg_only(self, *, comm, other):
+        def comm_not_leading_position(self, other, comm):
             ...
 
-        def comm_not_leading_position(self, *, other, comm):
+        def stream_not_leading_position(self, other, stream):
             ...
-
-        def stream_not_leading_position(self, *, other, stream):
-            ...
-
-        stream_not_leading_partialmethod = partialmethod(
-            stream_not_leading_position, other="foo"
-        )
 
     expected_warning = "first arugment of a RPC handler `stream` is deprecated"
 
-    assert not _expects_comm(A.empty)
-    assert not _expects_comm(A.one_arg)
-    assert _expects_comm(A.comm_arg)
-    with pytest.warns(FutureWarning, match=expected_warning):
-        assert _expects_comm(A.stream_arg)
-    assert not _expects_comm(A.two_arg)
-    assert _expects_comm(A.comm_arg_other)
-    with pytest.warns(FutureWarning, match=expected_warning):
-        assert _expects_comm(A.stream_arg_other)
-    assert not _expects_comm(A.arg_kwarg)
-    assert _expects_comm(A.comm_posarg_only)
-    assert _expects_comm(A.comm_kwarg_only)
-    assert not _expects_comm(A.comm_not_leading_position)
+    instance = A()
 
-    assert not _expects_comm(A.stream_not_leading_position)
-
-    assert _expects_comm(partial(A.comm_kwarg_only, other=1))
+    assert not _expects_comm(instance.empty)
+    assert not _expects_comm(instance.one_arg)
+    assert _expects_comm(instance.comm_arg)
     with pytest.warns(FutureWarning, match=expected_warning):
-        assert _expects_comm(partial(A.stream_arg_other, other=1))
-    assert not _expects_comm(A.stream_not_leading_partialmethod)
+        assert _expects_comm(instance.stream_arg)
+    assert not _expects_comm(instance.two_arg)
+    assert _expects_comm(instance.comm_arg_other)
+    with pytest.warns(FutureWarning, match=expected_warning):
+        assert _expects_comm(instance.stream_arg_other)
+    assert not _expects_comm(instance.arg_kwarg)
+    assert _expects_comm(instance.comm_posarg_only)
+    assert not _expects_comm(instance.comm_not_leading_position)
+
+    assert not _expects_comm(instance.stream_not_leading_position)
