@@ -3,7 +3,7 @@ import os
 import socket
 import threading
 import weakref
-from functools import partial
+from functools import partial, partialmethod
 
 import pytest
 
@@ -1036,6 +1036,10 @@ def test_expects_comm():
         def stream_not_leading_position(self, *, other, stream):
             ...
 
+        stream_not_leading_partialmethod = partialmethod(
+            stream_not_leading_position, other="foo"
+        )
+
     expected_warning = "first arugment of a RPC handler `stream` is deprecated"
 
     assert not _expects_comm(A.empty)
@@ -1057,3 +1061,4 @@ def test_expects_comm():
     assert _expects_comm(partial(A.comm_kwarg_only, other=1))
     with pytest.warns(FutureWarning, match=expected_warning):
         assert _expects_comm(partial(A.stream_arg_other, other=1))
+    assert not _expects_comm(A.stream_not_leading_partialmethod)
