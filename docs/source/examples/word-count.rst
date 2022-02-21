@@ -168,8 +168,8 @@ words, the results will exist on each worker. This operation required about
 and 16 GB RAM.
 
 Note that because the previous computation is bound by the GIL in Python, we
-can speed it up by starting the ``distributed`` workers with the ``--nprocs 4``
-option.
+can speed it up by starting the ``distributed`` workers with the
+``--nworkers 4`` option.
 
 To sum the word counts for all of the text files, we need to gather some
 information from the ``distributed`` workers. To reduce the amount of data

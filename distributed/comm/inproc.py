@@ -3,7 +3,6 @@ import itertools
 import logging
 import os
 import threading
-import warnings
 import weakref
 from collections import deque, namedtuple
 
@@ -30,15 +29,17 @@ class Manager:
     def __init__(self):
         self.listeners = weakref.WeakValueDictionary()
         self.addr_suffixes = itertools.count(1)
-        with warnings.catch_warnings():
-            # Avoid immediate warning for unreachable network
-            # (will still warn for other get_ip() calls when actually used)
-            warnings.simplefilter("ignore")
-            try:
-                self.ip = get_ip()
-            except OSError:
-                self.ip = "127.0.0.1"
+        self._ip = None
         self.lock = threading.Lock()
+
+    @property
+    def ip(self):
+        if not self._ip:
+            try:
+                self._ip = get_ip()
+            except OSError:
+                self._ip = "127.0.0.1"
+        return self._ip
 
     def add_listener(self, addr, listener):
         with self.lock:

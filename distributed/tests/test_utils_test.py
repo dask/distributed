@@ -1,6 +1,7 @@
 import asyncio
 import os
 import pathlib
+import signal
 import socket
 import threading
 from contextlib import contextmanager
@@ -10,14 +11,18 @@ import pytest
 import yaml
 from tornado import gen
 
+import dask.config
+
 from distributed import Client, Nanny, Scheduler, Worker, config, default_client
+from distributed.compatibility import WINDOWS
 from distributed.core import Server, rpc
 from distributed.metrics import time
-from distributed.utils import get_ip
+from distributed.utils import mp_context
 from distributed.utils_test import (
     _LockedCommPool,
     _UnhashableCallable,
     assert_worker_story,
+    check_process_leak,
     cluster,
     dump_cluster_state,
     gen_cluster,
@@ -25,7 +30,6 @@ from distributed.utils_test import (
     inc,
     new_config,
     tls_only_security,
-    wait_for_port,
 )
 
 
@@ -100,11 +104,8 @@ async def test_gen_cluster_parametrized_variadic_workers(c, s, *workers, foo):
 )
 async def test_gen_cluster_set_config_nanny(c, s, a, b):
     def assert_config():
-        import dask
-
         assert dask.config.get("distributed.comm.timeouts.connect") == "1s"
         assert dask.config.get("new.config.value") == "foo"
-        return dask.config
 
     await c.run(assert_config)
     await c.run_on_scheduler(assert_config)
@@ -231,26 +232,6 @@ def _listen(delay=0):
         yield serv
     finally:
         t.join(5.0)
-
-
-def test_wait_for_port():
-    t1 = time()
-    with pytest.raises(RuntimeError):
-        wait_for_port((get_ip(), 9999), 0.5)
-    t2 = time()
-    assert t2 - t1 >= 0.5
-
-    with _listen(0) as s1:
-        t1 = time()
-        wait_for_port(s1.getsockname())
-        t2 = time()
-        assert t2 - t1 <= 1.0
-
-    with _listen(1) as s1:
-        t1 = time()
-        wait_for_port(s1.getsockname())
-        t2 = time()
-        assert t2 - t1 <= 2.0
 
 
 def test_new_config():
@@ -535,12 +516,11 @@ async def test_dump_cluster_state_unresponsive_local_worker(s, a, b, tmpdir):
 @gen_cluster(
     client=True,
     Worker=Nanny,
-    config={"distributed.comm.timeouts.connect": "200ms"},
+    config={"distributed.comm.timeouts.connect": "600ms"},
 )
 async def test_dump_cluster_unresponsive_remote_worker(c, s, a, b, tmpdir):
-    addr1, addr2 = s.workers
     clog_fut = asyncio.create_task(
-        c.run(lambda dask_scheduler: dask_scheduler.stop(), workers=[addr1])
+        c.run(lambda dask_scheduler: dask_scheduler.stop(), workers=[a.worker_address])
     )
     await asyncio.sleep(0.2)
 
@@ -549,7 +529,64 @@ async def test_dump_cluster_unresponsive_remote_worker(c, s, a, b, tmpdir):
         out = yaml.safe_load(fh)
 
     assert out.keys() == {"scheduler", "workers", "versions"}
-    assert isinstance(out["workers"][addr2], dict)
-    assert out["workers"][addr1].startswith("OSError('Timed out trying to connect to")
+    assert isinstance(out["workers"][b.worker_address], dict)
+    assert out["workers"][a.worker_address].startswith(
+        "OSError('Timed out trying to connect to"
+    )
 
     clog_fut.cancel()
+
+
+def garbage_process(barrier, ignore_sigterm: bool = False, t: float = 3600) -> None:
+    if ignore_sigterm:
+        for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+            signal.signal(signum, signal.SIG_IGN)
+    barrier.wait()
+    sleep(t)
+
+
+def test_check_process_leak():
+    barrier = mp_context.Barrier(parties=2)
+    with pytest.raises(AssertionError):
+        with check_process_leak(check=True, check_timeout=0.01):
+            p = mp_context.Process(target=garbage_process, args=(barrier,))
+            p.start()
+            barrier.wait()
+    assert not p.is_alive()
+
+
+def test_check_process_leak_slow_cleanup():
+    """check_process_leak waits a bit for processes to terminate themselves"""
+    barrier = mp_context.Barrier(parties=2)
+    with check_process_leak(check=True):
+        p = mp_context.Process(target=garbage_process, args=(barrier, False, 0.2))
+        p.start()
+        barrier.wait()
+    assert not p.is_alive()
+
+
+@pytest.mark.parametrize(
+    "ignore_sigterm",
+    [False, pytest.param(True, marks=pytest.mark.skipif(WINDOWS, reason="no SIGKILL"))],
+)
+def test_check_process_leak_pre_cleanup(ignore_sigterm):
+    barrier = mp_context.Barrier(parties=2)
+    p = mp_context.Process(target=garbage_process, args=(barrier, ignore_sigterm))
+    p.start()
+    barrier.wait()
+
+    with check_process_leak(term_timeout=0.2):
+        assert not p.is_alive()
+
+
+@pytest.mark.parametrize(
+    "ignore_sigterm",
+    [False, pytest.param(True, marks=pytest.mark.skipif(WINDOWS, reason="no SIGKILL"))],
+)
+def test_check_process_leak_post_cleanup(ignore_sigterm):
+    barrier = mp_context.Barrier(parties=2)
+    with check_process_leak(check=False, term_timeout=0.2):
+        p = mp_context.Process(target=garbage_process, args=(barrier, ignore_sigterm))
+        p.start()
+        barrier.wait()
+    assert not p.is_alive()

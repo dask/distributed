@@ -4,6 +4,7 @@ import logging
 import multiprocessing as mp
 import os
 import random
+import sys
 from contextlib import suppress
 from time import sleep
 from unittest import mock
@@ -187,8 +188,8 @@ async def test_nanny_death_timeout(s):
 @gen_cluster(client=True, Worker=Nanny)
 async def test_random_seed(c, s, a, b):
     async def check_func(func):
-        x = c.submit(func, 0, 2 ** 31, pure=False, workers=a.worker_address)
-        y = c.submit(func, 0, 2 ** 31, pure=False, workers=b.worker_address)
+        x = c.submit(func, 0, 2**31, pure=False, workers=a.worker_address)
+        y = c.submit(func, 0, 2**31, pure=False, workers=b.worker_address)
         assert x.key != y.key
         x = await x
         y = await y
@@ -610,3 +611,31 @@ async def test_environ_plugin(c, s, a, b):
         assert results[a.worker_address] == "123"
         assert results[b.worker_address] == "123"
         assert results[n.worker_address] == "123"
+
+
+@pytest.mark.parametrize(
+    "modname",
+    [
+        pytest.param(
+            "numpy",
+            marks=pytest.mark.xfail(reason="distributed#5723, distributed#5729"),
+        ),
+        "scipy",
+        pytest.param("pandas", marks=pytest.mark.xfail(reason="distributed#5723")),
+    ],
+)
+@gen_cluster(client=True, Worker=Nanny, nthreads=[("", 1)])
+async def test_no_unnecessary_imports_on_worker(c, s, a, modname):
+    """
+    Regression test against accidentally importing unnecessary modules at worker startup.
+
+    Importing modules like pandas slows down worker startup, especially if workers are
+    loading their software environment from NFS or other non-local filesystems.
+    It also slightly increases memory footprint.
+    """
+
+    def assert_no_import(dask_worker):
+        assert modname not in sys.modules
+
+    await c.wait_for_workers(1)
+    await c.run(assert_no_import)

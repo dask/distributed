@@ -396,7 +396,7 @@ class UCXConnector(Connector):
             getattr(ucp.exceptions, "UCXConnectionReset", ()),
             getattr(ucp.exceptions, "UCXNotConnected", ()),
             getattr(ucp.exceptions, "UCXUnreachable", ()),
-        ):
+        ):  # type: ignore
             raise CommClosedError("Connection closed before handshake completed")
         return self.comm_class(
             ep,

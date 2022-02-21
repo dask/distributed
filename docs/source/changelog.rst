@@ -1,6 +1,118 @@
 Changelog
 =========
 
+.. _v2022.02.0:
+
+2022.02.0
+---------
+
+Released on February 11, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Update ``client.scheduler_info`` in ``wait_for_workers`` (:pr:`5785`) `Matthew Rocklin`_
+- Increase robustness to ``TimeoutError`` during connect (:pr:`5096`) `Florian Jetter`_
+- Respect ``KeyboardInterrupt`` in ``sync`` (:pr:`5758`) `Thomas Grainger`_
+- Add workflow / recipe to generate Dask/distributed pre-releases (:pr:`5636`) `Charles Blackmon-Luca`_
+- Review ``Scheduler`` / ``Worker`` display repr (:pr:`5746`) `crusaderky`_
+- AMM: Graceful Worker Retirement (:pr:`5381`) `crusaderky`_
+- AMM: tentatively stabilize flaky tests around worker pause (:pr:`5735`) `crusaderky`_
+- AMM: speed up and stabilize test_memory (:pr:`5737`) `crusaderky`_
+- Defer pandas import on worker in P2P shuffle (:pr:`5695`) `Gabe Joseph`_
+
+Bug Fixes
+^^^^^^^^^
+- Fix for ``distributed.worker.memory.target=False`` and ``spill=0.7`` (:pr:`5788`) `crusaderky`_
+- Transition ``flight`` to ``missing`` if no ``who_has`` (:pr:`5653`) `Florian Jetter`_
+
+Deprecations
+^^^^^^^^^^^^
+- Remove deprecated ``ncores`` (:pr:`5780`) `crusaderky`_
+- Deprecate registering plugins by class (:pr:`5699`) `Thomas Grainger`_
+- Deprecate ``--nprocs`` option for ``dask-worker`` CLI (:pr:`5641`) `Bryan W. Weber`_
+
+
+Documentation
+^^^^^^^^^^^^^
+- Fix imbalanced backticks (:pr:`5784`) `Matthias Bussonnier`_
+
+Maintenance
+^^^^^^^^^^^
+- xfail ``test_worker_reconnects_mid_compute`` (:pr:`5797`) `crusaderky`_
+- Fix linting CI build (:pr:`5794`) `James Bourbeau`_
+- Update ``pre-commit`` versions (:pr:`5782`) `James Bourbeau`_
+- Reactivate ``pytest_resourceleaks`` (:pr:`5771`) `crusaderky`_
+- Set test assumption for ``test_client_timeout`` (:pr:`5790`) `Florian Jetter`_
+- Remove client timeout from ``test_ucx_config_w_env_var`` (:pr:`5792`) `Florian Jetter`_
+- Remove ``test_failed_worker_without_warning`` (:pr:`5789`) `Florian Jetter`_
+- Fix longitudinal report (:pr:`5783`) `Ian Rose`_
+- Fix flaky ``test_robust_to_bad_sizeof_estimates`` (:pr:`5753`) `crusaderky`_
+- Revert "Pin coverage to 6.2 (:pr:`5716`)" (:pr:`5770`) `Thomas Grainger`_
+- Trigger test runs periodically to increases failure statistics (:pr:`5769`) `Florian Jetter`_
+- More fault tolerant test report (:pr:`5732`) `Ian Rose`_
+- Pin ``pillow<9`` to work around ``torch`` incompatability (:pr:`5755`) `Thomas Grainger`_
+- Overhaul ``check_process_leak`` (:pr:`5739`) `crusaderky`_
+- Fix flaky ``test_exit_callback test`` (:pr:`5713`) `Jim Crist-Harif`_
+- Generate tests summary (:pr:`5710`) `crusaderky`_
+- Upload different architectured pre-releases separately (:pr:`5741`) `Charles Blackmon-Luca`_
+- Ignore non-test directories (:pr:`5720`) `Gabe Joseph`_
+- Bump gpuCI ``PYTHON_VER`` to 3.9 (:pr:`5738`) `Charles Blackmon-Luca`_
+- Regression: threads noted down before they start (:pr:`5796`) `crusaderky`_
+
+
+.. _v2022.01.1:
+
+2022.01.1
+---------
+
+Released on January 28, 2022
+
+New Features
+^^^^^^^^^^^^
+- P2P shuffle skeleton (:pr:`5520`) `Gabe Joseph`_
+
+Enhancements
+^^^^^^^^^^^^
+- Fix ``<Task pending name='...' coro=<Client._handle_report()>`` (:pr:`5721`) `Thomas Grainger`_
+- Add ``distributed.client.security-loader`` config (:pr:`5693`) `Jim Crist-Harif`_
+- Avoid ``Client._handle_report`` cancelling itself on ``Client._close`` (:pr:`5672`) `Thomas Grainger`_
+- Paused workers shouldn't steal tasks (:pr:`5665`) `crusaderky`_
+- Add option for timestamps from output of ``Node.get_logs`` (:pr:`4932`) `Charles Blackmon-Luca`_
+- Don't use ``time.time()`` or ``IOLoop.time()`` (:pr:`5661`) `crusaderky`_
+
+Bug Fixes
+^^^^^^^^^
+- Raise plugin exceptions on ``Worker.start()`` (:pr:`4298`) `Peter Andreas Entschev`_
+
+Documentation
+^^^^^^^^^^^^^
+- Fixing docstrings (:pr:`5696`) `Julia Signell`_
+- Fix typo in ``Client.run`` docstring (:pr:`5687`) `Thomas Grainger`_
+- Update ``client.py`` docstrings (:pr:`5670`) `Tim Harris`_
+
+Maintenance
+^^^^^^^^^^^
+- Skip shuffle tests if ``pandas`` / ``dask.dataframe`` not installed (:pr:`5730`) `James Bourbeau`_
+- Improve test coverage (:pr:`5655`) `Sarah Charlotte Johnson`_
+- Test report improvements (:pr:`5714`) `Ian Rose`_
+- P2P shuffle: ignore row order in tests (:pr:`5706`) `Gabe Joseph`_
+- Fix flaky ``test_no_reconnect[--no-nanny]`` (:pr:`5686`) `Thomas Grainger`_
+- Pin coverage to 6.2 (:pr:`5716`) `Thomas Grainger`_
+- Check for new name of timeouts artifact and be more fault tolerant (:pr:`5707`) `Ian Rose`_
+- Revisit rebalance unit tests (:pr:`5697`) `crusaderky`_
+- Update comment in ``rearrange_by_column_p2p`` (:pr:`5701`) `James Bourbeau`_
+- Update gpuCI ``RAPIDS_VER`` to ``22.04`` (:pr:`5676`)
+- Fix groupby test after meta requirements got stricter in Dask PR#8563 (:pr:`5694`) `Julia Signell`_
+- Fix flaky ``test_close_gracefully`` and ``test_lifetime`` (:pr:`5677`) `crusaderky`_
+- Fix flaky ``test_workspace_concurrency`` (:pr:`5690`) `crusaderky`_
+- Fix flaky ``test_shuffle_extension.py::test_get_partition`` (:pr:`5689`) `Gabe Joseph`_
+- Fix flaky ``test_dump_cluster_unresponsive_remote_worker`` (:pr:`5679`) `crusaderky`_
+- Dump cluster state on all test failures (:pr:`5674`) `crusaderky`_
+- Update license format (:pr:`5652`) `James Bourbeau`_
+- Fix flaky ``test_drop_with_paused_workers_with_running_tasks_3_4`` (:pr:`5673`) `crusaderky`_
+- Do not raise an exception if the GitHub token cannot be found (:pr:`5668`) `Florian Jetter`_
+
+
 .. _v2022.01.0:
 
 2022.01.0
@@ -3152,3 +3264,7 @@ significantly without many new features.
 .. _`Aneesh Nema`: https://github.com/aneeshnema
 .. _`Deepyaman Datta`: https://github.com/deepyaman
 .. _`Garry O'Donnell`: https://github.com/garryod
+.. _`Thomas Grainger`: https://github.com/graingert
+.. _`Sarah Charlotte Johnson`: https://github.com/scharlottej13
+.. _`Tim Harris`: https://github.com/tharris72
+.. _`Bryan W. Weber`: https://github.com/bryanwweber

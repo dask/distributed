@@ -506,7 +506,7 @@ class Serialize:
         self.data = data
 
     def __repr__(self):
-        return "<Serialize: %s>" % str(self.data)
+        return f"<Serialize: {self.data}>"
 
     def __eq__(self, other):
         return isinstance(other, Serialize) and other.data == self.data

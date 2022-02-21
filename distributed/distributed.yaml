@@ -145,6 +145,10 @@ distributed:
       pause: 0.80  # fraction at which we pause worker threads
       terminate: 0.95  # fraction at which we terminate the worker
 
+      # Max size of the spill file on disk (e.g. "10 GB")
+      # Set to false for no maximum.
+      max-spill: false
+
     http:
       routes:
         - distributed.http.worker.prometheus
@@ -162,6 +166,7 @@ distributed:
   client:
     heartbeat: 5s  # Interval between client heartbeats
     scheduler-info-interval: 2s  # Interval between scheduler-info updates
+    security-loader: null  # A callable to load security credentials if none are provided explicitly
 
   deploy:
     lost-worker-timeout: 15s  # Interval after which to hard-close a lost worker job

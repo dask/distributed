@@ -4,9 +4,9 @@ import asyncio
 import logging
 import uuid
 from collections import defaultdict, deque
+from collections.abc import Container
 from math import log2
 from time import time
-from typing import Container
 
 from tlz import topk
 from tornado.ioloop import PeriodicCallback
@@ -15,7 +15,7 @@ import dask
 from dask.utils import parse_timedelta
 
 from .comm.addressing import get_address_host
-from .core import CommClosedError
+from .core import CommClosedError, Status
 from .diagnostics.plugin import SchedulerPlugin
 from .utils import log_errors, recursive_to_dict
 
@@ -108,31 +108,16 @@ class WorkStealing(SchedulerPlugin):
             pc.stop()
         await self._in_flight_event.wait()
 
-    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
-        """
-        A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
-
-        Parameters
-        ----------
-        comm:
-        exclude:
-            A list of attributes which must not be present in the output.
+    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict:
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
 
         See also
         --------
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
         """
-        return recursive_to_dict(
-            {
-                "stealable_all": self.stealable_all,
-                "stealable": self.stealable,
-                "key_stealable": self.key_stealable,
-                "in_flight": self.in_flight,
-                "in_flight_occupancy": self.in_flight_occupancy,
-            },
-            exclude=exclude,
-        )
+        return recursive_to_dict(self, exclude=exclude, members=True)
 
     def log(self, msg):
         return self.scheduler.log_event("stealing", msg)
@@ -393,22 +378,23 @@ class WorkStealing(SchedulerPlugin):
 
         with log_errors():
             i = 0
-            idle = s.idle.values()
-            saturated = s.saturated
+            # Paused and closing workers must never become thieves
+            idle = [ws for ws in s.idle.values() if ws.status == Status.running]
             if not idle or len(idle) == len(s.workers):
                 return
 
             log = []
             start = time()
 
-            if not s.saturated:
+            saturated = s.saturated
+            if not saturated:
                 saturated = topk(10, s.workers.values(), key=combined_occupancy)
                 saturated = [
                     ws
                     for ws in saturated
                     if combined_occupancy(ws) > 0.2 and len(ws.processing) > ws.nthreads
                 ]
-            elif len(s.saturated) < 20:
+            elif len(saturated) < 20:
                 saturated = sorted(saturated, key=combined_occupancy, reverse=True)
             if len(idle) < 20:
                 idle = sorted(idle, key=combined_occupancy)
