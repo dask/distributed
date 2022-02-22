@@ -2,9 +2,6 @@
 {% set new_patch = major_minor_patch[2] | int + 1 %}
 {% set version = (major_minor_patch[:2] + [new_patch]) | join('.') + environ.get('VERSION_SUFFIX', '') %}
 {% set dask_version = environ.get('DASK_CORE_VERSION', '0.0.0.dev') %}
-
-{% set proc_version = "1.0.0" %}
-{% set proc_build_number = "0" %}
 {% set cython_enabled = build_ext == "cython" %}
 
 
@@ -20,9 +17,9 @@ build:
 
 outputs:
   - name: distributed-proc
-    version: {{ proc_version }}
+    version: {{ version }}
     build:
-      number: {{ proc_build_number }}
+      number: {{ GIT_DESCRIBE_NUMBER }}
       string: {{ build_ext }}
     test:
       commands:
