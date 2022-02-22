@@ -42,7 +42,7 @@ class VariableExtension:
 
         self.scheduler.extensions["variables"] = self
 
-    async def set(self, comm=None, name=None, key=None, data=None, client=None):
+    async def set(self, name=None, key=None, data=None, client=None):
         if key is not None:
             record = {"type": "Future", "value": key}
             self.scheduler.client_desires_keys(keys=[key], client="variable-%s" % name)
@@ -74,7 +74,7 @@ class VariableExtension:
             async with self.waiting_conditions[name]:
                 self.waiting_conditions[name].notify_all()
 
-    async def get(self, comm=None, name=None, client=None, timeout=None):
+    async def get(self, name=None, client=None, timeout=None):
         start = time()
         while name not in self.variables:
             if timeout is not None:
@@ -107,7 +107,7 @@ class VariableExtension:
             self.waiting[key, name].add(token)
         return record
 
-    async def delete(self, comm=None, name=None, client=None):
+    async def delete(self, name=None, client=None):
         with log_errors():
             try:
                 old = self.variables[name]

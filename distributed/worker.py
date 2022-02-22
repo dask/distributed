@@ -1208,7 +1208,7 @@ class Worker(ServerNode):
 
         return result
 
-    def identity(self, comm=None):
+    def identity(self):
         return {
             "type": type(self).__name__,
             "id": self.id,
@@ -1452,10 +1452,10 @@ class Worker(ServerNode):
 
         return {"status": "OK", "nbytes": len(data)}
 
-    def keys(self, comm=None):
+    def keys(self):
         return list(self.data)
 
-    async def gather(self, comm=None, who_has=None):
+    async def gather(self, who_has: dict[str, list[str]]):
         who_has = {
             k: [coerce_to_address(addr) for addr in v]
             for k, v in who_has.items()
@@ -1476,7 +1476,7 @@ class Worker(ServerNode):
         else:
             return {"status": "OK"}
 
-    def get_monitor_info(self, comm=None, recent=False, start=0):
+    def get_monitor_info(self, recent=False, start=0):
         result = dict(
             range_query=(
                 self.monitor.recent()
@@ -1751,7 +1751,7 @@ class Worker(ServerNode):
         )
         await self.close(safe=True, nanny=not restart)
 
-    async def terminate(self, comm=None, report=True, **kwargs):
+    async def terminate(self, report: bool = True, **kwargs):
         await self.close(report=report, **kwargs)
         return "OK"
 
@@ -1877,11 +1877,14 @@ class Worker(ServerNode):
     ###################
 
     def update_data(
-        self, comm=None, data=None, report=True, serializers=None, stimulus_id=None
+        self,
+        data: dict[str, object],
+        report: bool = True,
+        stimulus_id: str = None,
     ):
         if stimulus_id is None:
             stimulus_id = f"update-data-{time()}"
-        recommendations = {}
+        recommendations: dict[TaskState, tuple] = {}
         scheduler_messages = []
         for key, value in data.items():
             try:
@@ -1910,7 +1913,7 @@ class Worker(ServerNode):
             self.batched_stream.send(msg)
         return {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
 
-    def handle_free_keys(self, comm=None, keys=None, stimulus_id=None):
+    def handle_free_keys(self, keys=None, stimulus_id=None):
         """
         Handler to be called by the scheduler.
 
@@ -2010,7 +2013,6 @@ class Worker(ServerNode):
 
     def handle_acquire_replicas(
         self,
-        comm=None,
         *,
         keys: Collection[str],
         who_has: dict[str, Collection[str]],
@@ -3361,7 +3363,7 @@ class Worker(ServerNode):
     def run_coroutine(self, comm, function, args=(), kwargs=None, wait=True):
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
-    async def plugin_add(self, comm=None, plugin=None, name=None, catch_errors=True):
+    async def plugin_add(self, plugin=None, name=None, catch_errors=True):
         with log_errors(pdb=False):
             if isinstance(plugin, bytes):
                 plugin = pickle.loads(plugin)
@@ -3372,7 +3374,7 @@ class Worker(ServerNode):
             assert name
 
             if name in self.plugins:
-                await self.plugin_remove(comm=comm, name=name)
+                await self.plugin_remove(name=name)
 
             self.plugins[name] = plugin
 
@@ -3390,7 +3392,7 @@ class Worker(ServerNode):
 
             return {"status": "OK"}
 
-    async def plugin_remove(self, comm=None, name=None):
+    async def plugin_remove(self, name=None):
         with log_errors(pdb=False):
             logger.info(f"Removing Worker plugin {name}")
             try:
@@ -3407,7 +3409,6 @@ class Worker(ServerNode):
 
     async def actor_execute(
         self,
-        comm=None,
         actor=None,
         function=None,
         args=(),
@@ -3441,7 +3442,7 @@ class Worker(ServerNode):
         except Exception as ex:
             return {"status": "error", "exception": to_serialize(ex)}
 
-    def actor_attribute(self, comm=None, actor=None, attribute=None):
+    def actor_attribute(self, actor=None, attribute=None):
         try:
             value = getattr(self.actors[actor], attribute)
             return {"status": "OK", "result": to_serialize(value)}
@@ -3839,9 +3840,7 @@ class Worker(ServerNode):
         if self.digests is not None:
             self.digests["profile-duration"].add(stop - start)
 
-    async def get_profile(
-        self, comm=None, start=None, stop=None, key=None, server=False
-    ):
+    async def get_profile(self, start=None, stop=None, key=None, server=False):
         now = time() + self.scheduler_delay
         if server:
             history = self.io_loop.profile
@@ -3882,7 +3881,7 @@ class Worker(ServerNode):
 
         return prof
 
-    async def get_profile_metadata(self, comm=None, start=0, stop=None):
+    async def get_profile_metadata(self, start=0, stop=None):
         add_recent = stop is None
         now = time() + self.scheduler_delay
         stop = stop or now
@@ -3904,7 +3903,7 @@ class Worker(ServerNode):
             )
         return result
 
-    def get_call_stack(self, comm=None, keys=None):
+    def get_call_stack(self, keys=None):
         with self.active_threads_lock:
             frames = sys._current_frames()
             active_threads = self.active_threads.copy()

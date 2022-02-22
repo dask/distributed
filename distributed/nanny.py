@@ -342,7 +342,7 @@ class Nanny(ServerNode):
 
         return self
 
-    async def kill(self, comm=None, timeout=2):
+    async def kill(self, timeout=2):
         """Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
@@ -355,7 +355,7 @@ class Nanny(ServerNode):
         deadline = time() + timeout
         await self.process.kill(timeout=0.8 * (deadline - time()))
 
-    async def instantiate(self, comm=None) -> Status:
+    async def instantiate(self) -> Status:
         """Start a local worker process
 
         Blocks until the process is up and the scheduler is properly informed
@@ -420,7 +420,7 @@ class Nanny(ServerNode):
                 raise
         return result
 
-    async def plugin_add(self, comm=None, plugin=None, name=None):
+    async def plugin_add(self, plugin=None, name=None):
         with log_errors(pdb=False):
             if isinstance(plugin, bytes):
                 plugin = pickle.loads(plugin)
@@ -446,7 +446,7 @@ class Nanny(ServerNode):
 
             return {"status": "OK"}
 
-    async def plugin_remove(self, comm=None, name=None):
+    async def plugin_remove(self, name=None):
         with log_errors(pdb=False):
             logger.info(f"Removing Nanny plugin {name}")
             try:
@@ -461,7 +461,7 @@ class Nanny(ServerNode):
 
             return {"status": "OK"}
 
-    async def restart(self, comm=None, timeout=30, executor_wait=True):
+    async def restart(self, timeout=30, executor_wait=True):
         async def _():
             if self.process is not None:
                 await self.kill()
@@ -515,8 +515,8 @@ class Nanny(ServerNode):
     def is_alive(self):
         return self.process is not None and self.process.is_alive()
 
-    def run(self, *args, **kwargs):
-        return run(self, *args, **kwargs)
+    def run(self, comm, *args, **kwargs):
+        return run(self, comm, *args, **kwargs)
 
     def _on_exit_sync(self, exitcode):
         self.loop.add_callback(self._on_exit, exitcode)
@@ -560,7 +560,7 @@ class Nanny(ServerNode):
         warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
         return self.close(*args, **kwargs)
 
-    def close_gracefully(self, comm=None):
+    def close_gracefully(self):
         """
         A signal that we shouldn't try to restart workers if they go away
 
