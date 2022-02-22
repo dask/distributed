@@ -7,7 +7,6 @@ dependencies:
   - packaging
   - pip
   - asyncssh
-  - bokeh
   - click
   - cloudpickle
   - coverage
@@ -46,4 +45,5 @@ dependencies:
   - pip:
       - git+https://github.com/dask/dask
       - git+https://github.com/jcrist/crick  # Only tested here
+      - git+https://github.com/graingert/bokeh@13edfabc315e1df4082c73d4a198b13880795764
       - keras
