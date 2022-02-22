@@ -37,10 +37,9 @@ outputs:
     build:
       number: {{ GIT_DESCRIBE_NUMBER }}
       string: py{{ python | replace(".", "") }}_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}_{{ build_ext }}
-      noarch: python                                                                          # [build_ext == "python"]
+      noarch: python                              # [build_ext == "python"]
       script: >
-        python -m pip install . -vv
-        --no-deps
+        python -m pip install . -vv --no-deps
         --install-option="--with-cython=profile"  # [build_ext == "cython"]
       track_features: {{ "cythonized-scheduler" if cython_enabled else "" }}
       entry_points:
@@ -49,11 +48,11 @@ outputs:
         - dask-worker = distributed.cli.dask_worker:go
     requirements:
       build:
-        - {{ compiler('c') }}                    # [build_ext == "cython"]
+        - {{ compiler('c') }}                     # [build_ext == "cython"]
       host:
         - python
         - pip
-        - cython                                 # [build_ext == "cython"]
+        - cython                                  # [build_ext == "cython"]
       run:
         - python
         - click >=6.6
