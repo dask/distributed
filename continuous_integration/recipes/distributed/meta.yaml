@@ -37,8 +37,8 @@ outputs:
     build:
       number: {{ GIT_DESCRIBE_NUMBER }}
       string: py{{ python | replace(".", "") }}_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}_{{ build_ext }}
-      noarch: python # [nocython]
-      script: python -m pip install . -vv                                           # [not cython_enabled]
+      noarch: python                                                                          # [not cython_enabled]
+      script: python -m pip install . -vv                                                     # [not cython_enabled]
       script: python -m pip install . -vv --no-deps --install-option="--with-cython=profile"  # [cython_enabled]
       track_features: {{ "cythonized-scheduler" if cython_enabled else "" }}
       entry_points:
