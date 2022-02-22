@@ -2,7 +2,8 @@
 {% set new_patch = major_minor_patch[2] | int + 1 %}
 {% set version = (major_minor_patch[:2] + [new_patch]) | join('.') + environ.get('VERSION_SUFFIX', '') %}
 {% set dask_version = environ.get('DASK_CORE_VERSION', '0.0.0.dev') %}
-{% set build_ext = "cython" if cython_enabled else "python" %}
+{% set build_ext = "cython" %}  # [cython_enabled]
+{% set build_ext = "python" %}  # [not cython_enabled]
 
 
 package:
