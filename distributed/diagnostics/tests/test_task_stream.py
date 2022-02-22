@@ -138,7 +138,7 @@ async def test_get_task_stream_plot(c, s, a, b):
     await wait(futures)
 
     data, figure = await c.get_task_stream(plot=True)
-    assert isinstance(figure, bokeh.plotting.Figure)
+    assert isinstance(figure, bokeh.plotting.figure)
 
 
 def test_get_task_stream_save(client, tmpdir):
@@ -153,4 +153,4 @@ def test_get_task_stream_save(client, tmpdir):
     assert "inc" in data
     assert "bokeh" in data
 
-    assert isinstance(ts.figure, bokeh.plotting.Figure)
+    assert isinstance(ts.figure, bokeh.plotting.figure)
