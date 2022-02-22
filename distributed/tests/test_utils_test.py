@@ -590,3 +590,16 @@ def test_check_process_leak_post_cleanup(ignore_sigterm):
         p.start()
         barrier.wait()
     assert not p.is_alive()
+
+
+@pytest.mark.parametrize("nanny", [True, False])
+def test_start_failure_worker(nanny):
+    with pytest.raises(TypeError):
+        with cluster(nanny=nanny, worker_kwargs={"foo": "bar"}):
+            return
+
+
+def test_start_failure_scheduler():
+    with pytest.raises(TypeError):
+        with cluster(scheduler_kwargs={"foo": "bar"}):
+            return

@@ -10,7 +10,6 @@ import logging
 import logging.config
 import multiprocessing
 import os
-import queue
 import re
 import shutil
 import signal
@@ -465,12 +464,17 @@ def run_scheduler(q, nputs, config, port=0, **kwargs):
         with pristine_loop() as loop:
 
             async def _():
-                scheduler = await Scheduler(
-                    validate=True, host="127.0.0.1", port=port, **kwargs
-                )
-                for i in range(nputs):
-                    q.put(scheduler.address)
-                await scheduler.finished()
+                try:
+                    scheduler = await Scheduler(
+                        validate=True, host="127.0.0.1", port=port, **kwargs
+                    )
+                except Exception as exc:
+                    for i in range(nputs):
+                        q.put(exc)
+                else:
+                    for i in range(nputs):
+                        q.put(scheduler.address)
+                    await scheduler.finished()
 
             try:
                 loop.run_sync(_)
@@ -488,14 +492,20 @@ def run_worker(q, scheduler_q, config, **kwargs):
                 scheduler_addr = scheduler_q.get()
 
                 async def _():
-                    worker = await Worker(scheduler_addr, validate=True, **kwargs)
-                    q.put(worker.address)
-                    await worker.finished()
+                    try:
+                        worker = await Worker(scheduler_addr, validate=True, **kwargs)
+                    except Exception as exc:
+                        q.put(exc)
+                    else:
+                        q.put(worker.address)
+                        await worker.finished()
 
-                try:
-                    loop.run_sync(_)
-                finally:
-                    loop.close(all_fds=True)
+                # Scheduler might've failed
+                if isinstance(scheduler_addr, str):
+                    try:
+                        loop.run_sync(_)
+                    finally:
+                        loop.close(all_fds=True)
 
 
 def run_nanny(q, scheduler_q, config, **kwargs):
@@ -505,14 +515,20 @@ def run_nanny(q, scheduler_q, config, **kwargs):
                 scheduler_addr = scheduler_q.get()
 
                 async def _():
-                    worker = await Nanny(scheduler_addr, validate=True, **kwargs)
-                    q.put(worker.address)
-                    await worker.finished()
+                    try:
+                        worker = await Nanny(scheduler_addr, validate=True, **kwargs)
+                    except Exception as exc:
+                        q.put(exc)
+                    else:
+                        q.put(worker.address)
+                        await worker.finished()
 
-                try:
-                    loop.run_sync(_)
-                finally:
-                    loop.close(all_fds=True)
+                # Scheduler might've failed
+                if isinstance(scheduler_addr, str):
+                    try:
+                        loop.run_sync(_)
+                    finally:
+                        loop.close(all_fds=True)
 
 
 @contextmanager
@@ -672,13 +688,16 @@ def cluster(
 
         for worker in workers:
             worker["proc"].start()
-        try:
-            for worker in workers:
-                worker["address"] = worker["queue"].get(timeout=5)
-        except queue.Empty:
-            pytest.xfail("Worker failed to start in test")
+        saddr_or_exception = scheduler_q.get()
+        if isinstance(saddr_or_exception, Exception):
+            raise saddr_or_exception
+        saddr = saddr_or_exception
 
-        saddr = scheduler_q.get()
+        for worker in workers:
+            addr_or_exception = worker["queue"].get()
+            if isinstance(addr_or_exception, Exception):
+                raise addr_or_exception
+            worker["address"] = addr_or_exception
 
         start = time()
         try:
