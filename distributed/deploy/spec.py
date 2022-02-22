@@ -258,7 +258,11 @@ class SpecCluster(Cluster):
         if not self.asynchronous:
             self._loop_runner.start()
             self.sync(self._start)
-            self.sync(self._correct_state)
+            try:
+                self.sync(self._correct_state)
+            except Exception:
+                self.sync(self.close)
+                raise
 
     async def _start(self):
         while self.status == Status.starting:
