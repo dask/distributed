@@ -16,7 +16,7 @@ build:
   number: {{ GIT_DESCRIBE_NUMBER }}
 
 outputs:
-  - name: distributed-proc
+  - name: distributed-impl
     version: {{ version }}
     build:
       number: {{ GIT_DESCRIBE_NUMBER }}
@@ -70,7 +70,7 @@ outputs:
         - zict >=0.1.3
         - setuptools <60.0.0
       run_constrained:
-        - distributed-proc * {{ build_ext }}
+        - distributed-impl * {{ build_ext }}
         - openssl !=1.1.1e
     test:
       imports:
