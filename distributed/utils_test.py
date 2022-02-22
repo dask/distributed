@@ -1710,8 +1710,7 @@ def check_instances():
     else:
         L = [c for c in Comm._instances if not c.closed()]
         Comm._instances.clear()
-        print("Unclosed Comms", L)
-        # raise ValueError("Unclosed Comms", L)
+        raise ValueError("Unclosed Comms", L)
 
     assert all(
         n.status == Status.closed or n.status == Status.init for n in Nanny._instances
@@ -1793,6 +1792,9 @@ class LockedComm(TCP):
             await self.read_event.wait()
         return msg
 
+    async def close(self):
+        await self.comm.close()
+
 
 class _LockedCommPool(ConnectionPool):
     """A ConnectionPool wrapper to intercept network traffic between servers
@@ -1838,6 +1840,9 @@ class _LockedCommPool(ConnectionPool):
         return LockedComm(
             comm, self.read_event, self.read_queue, self.write_event, self.write_queue
         )
+
+    async def close(self):
+        await self.pool.close()
 
 
 def xfail_ssl_issue5601():
