@@ -10,13 +10,7 @@ from collections.abc import Iterable
 from itertools import chain
 from typing import Any
 
-if sys.version_info >= (3, 8):
-    from importlib.metadata import version as _version
-else:
-    import pkg_resources
-
-    def _version(distribution_name: str) -> str:
-        return pkg_resources.get_distribution(distribution_name).version
+import importlib.metadata
 
 
 required_packages = [
@@ -80,7 +74,7 @@ def get_package_info(pkgs: Iterable[str]) -> dict[str, str | None]:
     pversions: dict[str, str | None] = {}
     for modname in pkgs:
         try:
-            pversions[modname] = _version(modname)
+            pversions[modname] = importlib.metadata.version(modname)
         except Exception:
             pversions[modname] = None
 
