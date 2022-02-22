@@ -1286,10 +1286,9 @@ class BadSizeof:
     """Configurable actual process memory and reported managed memory"""
 
     # dummy *args is to facilitate Client.map
-    def __init__(self, *args, process: float, managed: float, pickle_time: float = 0.5):
+    def __init__(self, *args, process: float, managed: float):
         self.process = int(process)
         self.managed = int(managed)
-        self.pickle_time = pickle_time
         self.data = "x" * self.process
 
     def __sizeof__(self) -> int:
@@ -1299,18 +1298,11 @@ class BadSizeof:
         """Do not rely on actual disk speed, which is sluggish and unpredictable on CI.
         Also remove the impact of installing lz4 or blosc, which would shrink down
         self.data to kilobytes.
-
-        Make sure that the time spent writing to disk a key exceeds the time needed by
-        the OS kernel to react to the free() from the previous spilled key and shrink
-        down the process memory.
-
-        In case of flakiness, read: https://github.com/dask/distributed/issues/5840
         """
-        sleep(self.pickle_time)
-        return self.process, self.managed, self.pickle_time
+        return self.process, self.managed
 
     def __setstate__(self, state) -> None:
-        self.process, self.managed, self.pickle_time = state
+        self.process, self.managed = state
         self.data = "x" * self.process
 
 
@@ -1338,7 +1330,7 @@ async def test_spill_spill_threshold(c, s, a):
     memory = psutil.Process().memory_info().rss
     a.memory_limit = (memory + 300e6) / 0.7
 
-    futures = c.map(BadSizeof, range(8), process=100e6, managed=10, pickle_time=0)
+    futures = c.map(BadSizeof, range(8), process=100e6, managed=10)
     while not a.data.disk:
         await asyncio.sleep(0.01)
 
@@ -1349,25 +1341,20 @@ async def assert_not_everything_is_spilled(dask_worker: Worker) -> None:
     assert isinstance(dask_worker.data, SpillBuffer)
     start = time()
     nspilled = 0
-    # This timeout must be longer than the 0.5s in BadSizeof.__reduce__
-    while time() < start + 1.0:
+    while time() < start + 0.5:
         assert dask_worker.data
-        assert dask_worker.data.memory
+        if not dask_worker.data.memory:
+            raise pytest.xfail("https://github.com/dask/distributed/issues/5840")
         if len(dask_worker.data.disk) != nspilled:
             nspilled = len(dask_worker.data.disk)
             start = time()  # We just spilled; reset timer
         await asyncio.sleep(0.01)
 
 
-@pytest.mark.slow
 @requires_zict
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
-    # Run the test in a freshly spawned interpreter to ensure a clear memory situation,
-    # as opposed to the potentially heavily fragmented and unpredictable condition of
-    # the process used to run all the tests so far
-    Worker=Nanny,
     worker_kwargs=dict(
         # FIXME https://github.com/dask/distributed/issues/5367
         #       Can't reconfigure the absolute target threshold after the worker
@@ -1381,56 +1368,38 @@ async def assert_not_everything_is_spilled(dask_worker: Worker) -> None:
         memory_pause_fraction=False,
     ),
 )
-async def test_spill_no_target_threshold(c, s, nanny):
+async def test_spill_no_target_threshold(c, s, a):
     """Test that you can enable the spill threshold while leaving the target threshold
     to False
     """
-
-    def change_memory_limit(dask_worker):
-        memory = psutil.Process().memory_info().rss
-        # 300 MB before we start spilling
-        dask_worker.memory_limit = (memory + 300e6) / 0.7
-
-    await c.run(change_memory_limit)
-
-    async def get_keys() -> tuple[set[str], set[str]]:
-        def _(dask_worker):
-            return set(dask_worker.data.memory), set(dask_worker.data.disk)
-
-        out = await c.run(_)
-        return out[nanny.worker_address]
+    memory = psutil.Process().memory_info().rss
+    # 300 MB before we start spilling
+    a.memory_limit = (memory + 300e6) / 0.7
 
     f1 = c.submit(inc, 0, key="f1")
     await wait(f1)
-    mem, spilled = await get_keys()
-    assert mem == {"f1"}
-    assert not spilled
+    assert set(a.data.memory) == {"f1"}
+    assert not a.data.disk
 
     # 800 MB process memory, 10 GB bogous managed memory.
     # Use large chunks to stimulate timely release of process memory.
     futures = c.map(BadSizeof, range(8), process=100e6, managed=10e9)
 
-    while not spilled:
-        mem, spilled = await get_keys()
+    while not a.data.disk:
         await asyncio.sleep(0.01)
-    assert "f1" in spilled
+    assert "f1" in a.data.disk
 
     # Spilling normally starts at the spill threshold and stops at the target threshold.
     # In this special case, it stops as soon as the process memory goes below the spill
     # threshold, e.g. without a hysteresis cycle. Test that we didn't instead dump the
     # whole data to disk (memory_limit * target = 0)
-    await c.run(assert_not_everything_is_spilled)
+    await assert_not_everything_is_spilled(a)
 
 
-@pytest.mark.slow
 @requires_zict
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
-    # Run the test in a freshly spawned interpreter to ensure a clear memory situation,
-    # as opposed to the potentially heavily fragmented and unpredictable condition of
-    # the process used to run all the tests so far
-    Worker=Nanny,
     worker_kwargs=dict(
         memory_limit="10 GiB",  # See FIXME note in previous test
         memory_monitor_interval="10ms",
@@ -1439,27 +1408,26 @@ async def test_spill_no_target_threshold(c, s, nanny):
         memory_pause_fraction=False,
     ),
 )
-async def test_spill_hysteresis(c, s, nanny):
-    def change_memory_limit(dask_worker):
-        memory = psutil.Process().memory_info().rss
-        dask_worker.memory_limit = (memory + 1e9) / 0.7  # Start spilling after 1 GB
-
-    await c.run(change_memory_limit)
+async def test_spill_hysteresis(c, s, a):
+    memory = psutil.Process().memory_info().rss
+    a.memory_limit = (memory + 1e9) / 0.7  # Start spilling after 1 GB
 
     # Under-report managed memory, so that we reach the spill threshold for process
     # memory without first reaching the target threshold for managed memory
     futures = c.map(BadSizeof, range(11), process=100e6, managed=1)
 
-    # Wait until spilling stops, but no less than 1s
-    await c.run(assert_not_everything_is_spilled)
+    while not a.data.disk:
+        await asyncio.sleep(0.01)
+
+    # Wait until spilling stops, but no less than 0.5s
+    await assert_not_everything_is_spilled(a)
 
     # If there were no hysteresis, we would lose 1-2 keys.
     # Note that, for this test to be meaningful, memory must shrink down readily when
     # we deallocate Python objects. This is not always the case on Windows and MacOSX;
     # on Linux we set MALLOC_TRIM to help in that regard.
     # To verify that this test is useful, set target=spill and watch it fail.
-    nspilled = await c.run(lambda dask_worker: len(dask_worker.data.disk))
-    assert 3 < nspilled[nanny.worker_address] < 11
+    assert 3 < len(a.data.disk) < 11
 
 
 @pytest.mark.slow
