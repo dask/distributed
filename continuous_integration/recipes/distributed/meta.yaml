@@ -38,8 +38,8 @@ outputs:
     build:
       number: {{ GIT_DESCRIBE_NUMBER }}
       string: >
-        py
-        {{ python | replace(".", "") }}           # [cython_enabled]
+        py                                        # [not cython_enabled]
+        py{{ python | replace(".", "") }}         # [cython_enabled]
         _{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}_{{ build_ext }}
       noarch: python                              # [not cython_enabled]
       skip: True                                  # [cython_enabled and py<38]
