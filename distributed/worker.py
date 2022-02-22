@@ -3743,7 +3743,6 @@ class Worker(ServerNode):
                 "Worker is at %.0f%% memory usage. Start spilling data to disk.",
                 frac * 100,
             )
-            start = time()
             # Implement hysteresis cycle where spilling starts at the spill threshold
             # and stops at the target threshold. Normally that here the target threshold
             # defines process memory, whereas normally it defines reported managed
@@ -3768,18 +3767,14 @@ class Worker(ServerNode):
                     break
                 weight = self.data.evict()
                 if weight == -1:
-                    # Failed to evict: disk full, spill size limit exceeded, or pickle error
+                    # Failed to evict:
+                    # disk full, spill size limit exceeded, or pickle error
                     break
 
                 total += weight
                 count += 1
-                # If the current buffer is filled with a lot of small values,
-                # evicting one at a time is very slow and the worker might
-                # generate new data faster than it is able to evict. Therefore,
-                # only pass on control if we spent at least 0.5s evicting
-                if time() - start > 0.5:
-                    await asyncio.sleep(0)
-                    start = time()
+                await asyncio.sleep(0)
+
                 memory = proc.memory_info().rss
                 if total > need and memory > target:
                     # Issue a GC to ensure that the evicted data is actually
