@@ -1,6 +1,7 @@
-{% set version = environ.get('GIT_DESCRIBE_TAG', '0.0.0.dev') + environ.get('VERSION_SUFFIX', '') %}
-{% set dask_version = environ.get('DASK_VERSION', '0.0.0.dev') %}
-{% set dask_build = environ.get('DASK_BUILD', '') %}
+{% set major_minor_patch = environ.get('GIT_DESCRIBE_TAG', '0.0.0.dev').split('.') %}
+{% set new_patch = major_minor_patch[2] | int + 1 %}
+{% set version = (major_minor_patch[:2] + [new_patch]) | join('.') + environ.get('VERSION_SUFFIX', '') %}
+{% set dask_version = environ.get('DASK_CORE_VERSION', '0.0.0.dev') %}
 
 
 package:
@@ -32,9 +33,10 @@ requirements:
     - click >=6.6
     - cloudpickle >=1.5.0
     - cytoolz >=0.8.2
-    - dask-core {{ dask_version }}={{ dask_build }}
+    - dask-core >={{ dask_version }}
     - jinja2
     - msgpack-python >=0.6.0
+    - packaging >=20.0
     - psutil >=5.0
     - pyyaml
     - sortedcontainers !=2.0.0,!=2.0.1
@@ -43,7 +45,7 @@ requirements:
     - tornado >=5  # [py<38]
     - tornado >=6.0.3  # [py>=38]
     - zict >=0.1.3
-    - setuptools
+    - setuptools <60.0.0
 
   run_constrained:
     - openssl !=1.1.1e

@@ -243,7 +243,7 @@ async def test_custom_key_with_batches(c, s, a, b):
     """Test of <https://github.com/dask/distributed/issues/4588>"""
 
     futs = c.map(
-        lambda x: x ** 2,
+        lambda x: x**2,
         range(10),
         batch_size=5,
         key=[str(x) for x in range(10)],
@@ -4364,7 +4364,7 @@ async def test_retire_workers_2(c, s, a, b):
     assert a.address not in s.workers
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10)
+@gen_cluster(client=True, nthreads=[("", 1)] * 10)
 async def test_retire_many_workers(c, s, *workers):
     futures = await c.scatter(list(range(100)))
 
@@ -4380,8 +4380,16 @@ async def test_retire_many_workers(c, s, *workers):
 
     assert all(future.done() for future in futures)
     assert all(s.tasks[future.key].state == "memory" for future in futures)
-    for w, keys in s.has_what.items():
-        assert 15 < len(keys) < 50
+    assert await c.gather(futures) == list(range(100))
+
+    # Don't count how many task landed on each worker.
+    # Normally, tasks would be distributed evenly over the surviving workers. However,
+    # here all workers share the same process memory, so you'll get an unintuitive
+    # distribution of tasks if for any reason one transfer take longer than 2 seconds
+    # and as a consequence the Active Memory Manager ends up running for two iterations.
+    # This is something that will happen more frequently on low-powered CI machines.
+    # See test_active_memory_manager.py for tests that robustly verify the statistical
+    # distribution of tasks after worker retirement.
 
 
 @gen_cluster(
@@ -4499,7 +4507,7 @@ async def test_normalize_collection_dask_array(c, s, a, b):
 def test_normalize_collection_with_released_futures(c):
     da = pytest.importorskip("dask.array")
 
-    x = da.arange(2 ** 20, chunks=2 ** 10)
+    x = da.arange(2**20, chunks=2**10)
     y = x.persist()
     wait(y)
     sol = y.sum().compute()
@@ -4634,13 +4642,14 @@ async def test_client_timeout():
     """`await Client(...)` keeps retrying for 10 seconds if it can't find the Scheduler
     straight away
     """
-    c = Client("127.0.0.1:57484", asynchronous=True)
-    client_start_fut = asyncio.ensure_future(c)
-    await asyncio.sleep(4)
-    async with Scheduler(port=57484, dashboard_address=":0"):
-        await client_start_fut
-        assert await c.run_on_scheduler(lambda: 123) == 123
-        await c.close()
+    with dask.config.set({"distributed.comm.timeouts.connect": "10s"}):
+        c = Client("127.0.0.1:57484", asynchronous=True)
+        client_start_fut = asyncio.ensure_future(c)
+        await asyncio.sleep(2)
+        async with Scheduler(port=57484, dashboard_address=":0"):
+            await client_start_fut
+            assert await c.run_on_scheduler(lambda: 123) == 123
+            await c.close()
 
 
 @gen_cluster(client=True)
@@ -5145,7 +5154,7 @@ def test_get_client_no_cluster():
     Worker._instances.clear()
 
     msg = "No global client found and no address provided"
-    with pytest.raises(ValueError, match=fr"^{msg}$"):
+    with pytest.raises(ValueError, match=rf"^{msg}$"):
         get_client()
 
 
@@ -5865,7 +5874,11 @@ async def test_scatter_error_cancel(c, s, a, b):
 @pytest.mark.parametrize("workers_arg", [False, True])
 @pytest.mark.parametrize("direct", [False, True])
 @pytest.mark.parametrize("broadcast", [False, True, 10])
-@gen_cluster(client=True, nthreads=[("", 1)] * 10)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 10,
+    worker_kwargs={"memory_monitor_interval": "20ms"},
+)
 async def test_scatter_and_replicate_avoid_paused_workers(
     c, s, *workers, workers_arg, direct, broadcast
 ):
@@ -7295,29 +7308,58 @@ async def test_dump_cluster_state_json(c, s, a, b, tmp_path):
 
 
 @gen_cluster(client=True)
-async def test_dump_cluster_state_exclude(c, s, a, b, tmp_path):
+async def test_dump_cluster_state_exclude_default(c, s, a, b, tmp_path):
     futs = c.map(inc, range(10))
     while len(s.tasks) != len(futs):
         await asyncio.sleep(0.01)
-    exclude = [
-        # these are TaskState attributes
-        "_runspec",
-        "runspec",
+    excluded_by_default = [
+        "run_spec",
     ]
+
     filename = tmp_path / "foo"
-    await c.dump_cluster_state(filename=filename, format="yaml")
+    await c.dump_cluster_state(
+        filename=filename,
+        format="yaml",
+    )
 
     with open(f"{filename}.yaml") as fd:
         state = yaml.safe_load(fd)
 
     assert "workers" in state
     assert len(state["workers"]) == len(s.workers)
+    for worker, worker_dump in state["workers"].items():
+        for k, task_dump in worker_dump["tasks"].items():
+            assert not any(blocked in task_dump for blocked in excluded_by_default)
+            assert k in s.tasks
     assert "scheduler" in state
     assert "tasks" in state["scheduler"]
     tasks = state["scheduler"]["tasks"]
     assert len(tasks) == len(futs)
     for k, task_dump in tasks.items():
-        assert not any(blocked in task_dump for blocked in exclude)
+        assert not any(blocked in task_dump for blocked in excluded_by_default)
+        assert k in s.tasks
+
+    await c.dump_cluster_state(
+        filename=filename,
+        format="yaml",
+        exclude=(),
+    )
+
+    with open(f"{filename}.yaml") as fd:
+        state = yaml.safe_load(fd)
+
+    assert "workers" in state
+    assert len(state["workers"]) == len(s.workers)
+    for worker, worker_dump in state["workers"].items():
+        for k, task_dump in worker_dump["tasks"].items():
+            assert all(blocked in task_dump for blocked in excluded_by_default)
+            assert k in s.tasks
+    assert "scheduler" in state
+    assert "tasks" in state["scheduler"]
+    tasks = state["scheduler"]["tasks"]
+    assert len(tasks) == len(futs)
+    for k, task_dump in tasks.items():
+        assert all(blocked in task_dump for blocked in excluded_by_default)
         assert k in s.tasks
 
 
@@ -7424,3 +7466,10 @@ class TestClientSecurityLoader:
             with pytest.raises(ImportError, match="totally_fake_module_name_2.loader"):
                 async with Client("tls://bad-address:8888", asynchronous=True):
                     pass
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_wait_for_workers_updates_info(c, s):
+    async with Worker(s.address):
+        await c.wait_for_workers(1)
+        assert c.scheduler_info()["workers"]

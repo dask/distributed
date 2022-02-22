@@ -9,8 +9,6 @@ from time import sleep
 from urllib.parse import urlparse
 
 import pytest
-import tornado
-from packaging.version import parse as parse_version
 from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
@@ -455,13 +453,6 @@ async def test_scale_up_and_down():
             assert len(cluster.workers) == 1
 
 
-@pytest.mark.xfail(
-    sys.version_info >= (3, 8)
-    and parse_version(tornado.version) < parse_version("6.0.3"),
-    reason="Known issue with Python 3.8 and Tornado < 6.0.3. "
-    "See https://github.com/tornadoweb/tornado/pull/2683.",
-    strict=True,
-)
 def test_silent_startup():
     code = """if 1:
         from time import sleep
@@ -539,7 +530,6 @@ def test_death_timeout_raises(loop):
             loop=loop,
         ) as cluster:
             pass
-    LocalCluster._instances.clear()  # ignore test hygiene checks
 
 
 @gen_test()

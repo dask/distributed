@@ -24,12 +24,9 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar, Literal
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
-
-if TYPE_CHECKING:
-    from typing_extensions import Literal
 
 import dask
 from dask.base import collections_to_dsk, normalize_token, tokenize
@@ -55,6 +52,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import PeriodicCallback
 
+from . import preloading
 from . import versions as version_module  # type: ignore
 from .batched import BatchedSend
 from .cfexecutor import ClientExecutor
@@ -754,6 +752,8 @@ class Client(SyncMethodMixin):
 
     _default_event_handlers = {"print": _handle_print, "warn": _handle_warn}
 
+    preloads: list[preloading.Preload]
+
     def __init__(
         self,
         address=None,
@@ -919,6 +919,10 @@ class Client(SyncMethodMixin):
 
         for ext in extensions:
             ext(self)
+
+        preload = dask.config.get("distributed.client.preload")
+        preload_argv = dask.config.get("distributed.client.preload-argv")
+        self.preloads = preloading.process_preloads(self, preload, preload_argv)
 
         self.start(timeout=timeout)
         Client._instances.add(self)
@@ -1181,6 +1185,9 @@ class Client(SyncMethodMixin):
         for topic, handler in Client._default_event_handlers.items():
             self.subscribe_topic(topic, handler)
 
+        for preload in self.preloads:
+            await preload.start()
+
         self._handle_report_task = asyncio.create_task(self._handle_report())
 
         return self
@@ -1287,6 +1294,7 @@ class Client(SyncMethodMixin):
 
     async def _wait_for_workers(self, n_workers=0, timeout=None):
         info = await self.scheduler.identity()
+        self._scheduler_identity = SchedulerInfo(info)
         if timeout:
             deadline = time() + parse_timedelta(timeout)
         else:
@@ -1299,6 +1307,7 @@ class Client(SyncMethodMixin):
                 )
             await asyncio.sleep(0.1)
             info = await self.scheduler.identity()
+            self._scheduler_identity = SchedulerInfo(info)
 
     def wait_for_workers(self, n_workers=0, timeout=None):
         """Blocking call to wait for n workers before continuing
@@ -1459,6 +1468,9 @@ class Client(SyncMethodMixin):
             return
 
         self.status = "closing"
+
+        for preload in self.preloads:
+            await preload.teardown()
 
         with suppress(AttributeError):
             for pc in self._periodic_callbacks.values():
@@ -3815,7 +3827,7 @@ class Client(SyncMethodMixin):
         format: Literal["msgpack", "yaml"],
     ) -> None:
 
-        scheduler_info = self.scheduler.dump_state()
+        scheduler_info = self.scheduler.dump_state(exclude=exclude)
 
         workers_info = self.scheduler.broadcast(
             msg={"op": "dump_state", "exclude": exclude},
@@ -3877,7 +3889,7 @@ class Client(SyncMethodMixin):
     def dump_cluster_state(
         self,
         filename: str = "dask-cluster-dump",
-        exclude: Collection[str] = (),
+        exclude: Collection[str] = ("run_spec",),
         format: Literal["msgpack", "yaml"] = "msgpack",
     ):
         """Extract a dump of the entire cluster state and persist to disk.
@@ -3903,6 +3915,10 @@ class Client(SyncMethodMixin):
         exclude:
             A collection of attribute names which are supposed to be excluded
             from the dump, e.g. to exclude code, tracebacks, logs, etc.
+
+            Defaults to exclude `run_spec` which is the serialized user code. This
+            is typically not required for debugging. To allow serialization of
+            this, pass an empty tuple.
         format:
             Either msgpack or yaml. If msgpack is used (default), the output
             will be stored in a gzipped file as msgpack.
@@ -4103,10 +4119,12 @@ class Client(SyncMethodMixin):
         else:
             raise ValueError(f"No event handler known for topic {topic}.")
 
-    def retire_workers(self, workers=None, close_workers=True, **kwargs):
+    def retire_workers(
+        self, workers: list[str] | None = None, close_workers: bool = True, **kwargs
+    ):
         """Retire certain workers on the scheduler
 
-        See dask.distributed.Scheduler.retire_workers for the full docstring.
+        See :meth:`distributed.Scheduler.retire_workers` for the full docstring.
 
         Parameters
         ----------
@@ -4531,15 +4549,25 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         plugin : SchedulerPlugin
-            Plugin class or object to pass to the scheduler.
+            SchedulerPlugin instance to pass to the scheduler.
         name : str
             Name for the plugin; if None, a name is taken from the
             plugin instance or automatically generated if not present.
         **kwargs : Any
-            Arguments passed to the Plugin class (if Plugin is an
+            deprecated; Arguments passed to the Plugin class (if Plugin is an
             instance kwargs are unused).
 
         """
+        if isinstance(plugin, type):
+            warnings.warn(
+                "Adding plugins by class is deprecated and will be disabled in a "
+                "future release. Please add plugins by instance instead.",
+                category=FutureWarning,
+            )
+            # note: plugin is constructed in async def _register_scheduler_plugin
+        elif kwargs:
+            raise ValueError("kwargs provided but plugin is already an instance")
+
         if name is None:
             name = _get_plugin_name(plugin)
 
@@ -4610,7 +4638,7 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         plugin : WorkerPlugin or NannyPlugin
-            The plugin object to register.
+            WorkerPlugin or NannyPlugin instance to register.
         name : str, optional
             A name for the plugin.
             Registering a plugin with the same name will have no effect.
@@ -4618,8 +4646,9 @@ class Client(SyncMethodMixin):
         nanny : bool, optional
             Whether to register the plugin with workers or nannies.
         **kwargs : optional
-            If you pass a class as the plugin, instead of a class instance, then the
-            class will be instantiated with any extra keyword arguments.
+            Deprecated; If you pass a class as the plugin, instead of a class
+            instance, then the class will be instantiated with any extra
+            keyword arguments.
 
         Examples
         --------
@@ -4655,7 +4684,14 @@ class Client(SyncMethodMixin):
         unregister_worker_plugin
         """
         if isinstance(plugin, type):
+            warnings.warn(
+                "Adding plugins by class is deprecated and will be disabled in a "
+                "future release. Please add plugins by instance instead.",
+                category=FutureWarning,
+            )
             plugin = plugin(**kwargs)
+        elif kwargs:
+            raise ValueError("kwargs provided but plugin is already an instance")
 
         if name is None:
             name = _get_plugin_name(plugin)
@@ -4943,11 +4979,11 @@ class as_completed:
         """Add multiple futures to the collection.
 
         The added futures will emit from the iterator once they finish"""
-        from .actor import ActorFuture
+        from .actor import BaseActorFuture
 
         with self.lock:
             for f in futures:
-                if not isinstance(f, (Future, ActorFuture)):
+                if not isinstance(f, (Future, BaseActorFuture)):
                     raise TypeError("Input must be a future, got %s" % f)
                 self.futures[f] += 1
                 self.loop.add_callback(self._track_future, f)
