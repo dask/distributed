@@ -3,4 +3,4 @@ python:
     - 3.9
 build_ext:
     - "cython"  # [linux]
-    - "nocython"
+    - "python"
