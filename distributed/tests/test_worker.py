@@ -1344,7 +1344,10 @@ async def assert_not_everything_is_spilled(dask_worker: Worker) -> None:
     while time() < start + 0.5:
         assert dask_worker.data
         if not dask_worker.data.memory:
-            raise pytest.xfail("https://github.com/dask/distributed/issues/5840")
+            raise pytest.xfail(
+                "The whole contents of the SpillBuffer was spilled to disk: "
+                "https://github.com/dask/distributed/issues/5840"
+            )
         if len(dask_worker.data.disk) != nspilled:
             nspilled = len(dask_worker.data.disk)
             start = time()  # We just spilled; reset timer
@@ -1361,7 +1364,7 @@ async def assert_not_everything_is_spilled(dask_worker: Worker) -> None:
         #       started, so we're setting it here to something extremely small and then
         #       increasing the memory_limit dynamically below in order to test the
         #       spill threshold.
-        memory_limit=1,
+        memory_limit="1 kb",
         memory_monitor_interval="10ms",
         memory_target_fraction=False,
         memory_spill_fraction=0.7,
@@ -1381,7 +1384,7 @@ async def test_spill_no_target_threshold(c, s, a):
     assert set(a.data.memory) == {"f1"}
     assert not a.data.disk
 
-    # 800 MB process memory, 10 GB bogous managed memory.
+    # 800 MB process memory, 80 GB bogus managed memory.
     # Use large chunks to stimulate timely release of process memory.
     futures = c.map(BadSizeof, range(8), process=100e6, managed=10e9)
 
@@ -1397,37 +1400,50 @@ async def test_spill_no_target_threshold(c, s, a):
 
 
 @requires_zict
+@pytest.mark.parametrize(
+    "memory_target_fraction,min_spill,max_spill",
+    [
+        (0.7, 1, 3),  # target=spill -> no hysteresis
+        (0.4, 4, 8),  # target<spill -> hysteresis
+    ],
+)
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
     worker_kwargs=dict(
         memory_limit="10 GiB",  # See FIXME note in previous test
         memory_monitor_interval="10ms",
-        memory_target_fraction=0.4,
         memory_spill_fraction=0.7,
         memory_pause_fraction=False,
     ),
 )
-async def test_spill_hysteresis(c, s, a):
+async def test_spill_hysteresis(c, s, a, memory_target_fraction, min_spill, max_spill):
     memory = psutil.Process().memory_info().rss
-    a.memory_limit = (memory + 1e9) / 0.7  # Start spilling after 1 GB
+    a.memory_limit = (memory + 950e6) / 0.7  # Start spilling after 950MB
+    a.memory_target_fraction = memory_target_fraction
 
     # Under-report managed memory, so that we reach the spill threshold for process
     # memory without first reaching the target threshold for managed memory
-    futures = c.map(BadSizeof, range(11), process=100e6, managed=1)
+    futures = c.map(BadSizeof, range(10), process=100e6, managed=1)
 
+    start = time()
     while not a.data.disk:
+        # Different OSs/test environments can get stuck because of slightly different
+        # memory management algorithms. Add an extra 100MB every 2s to compensate.
+        # Can't do this too fast otherwise a very slow CI will fail on the number of
+        # elements actually spilled later.
+        if time() > start + 2:  # pragma: nocover
+            print("Did not spill; adding a future")
+            futures.append(c.submit(BadSizeof, len(futures), process=100e6, managed=1))
+            start = time()
         await asyncio.sleep(0.01)
 
     # Wait until spilling stops, but no less than 0.5s
     await assert_not_everything_is_spilled(a)
 
-    # If there were no hysteresis, we would lose 1-2 keys.
-    # Note that, for this test to be meaningful, memory must shrink down readily when
-    # we deallocate Python objects. This is not always the case on Windows and MacOSX;
-    # on Linux we set MALLOC_TRIM to help in that regard.
-    # To verify that this test is useful, set target=spill and watch it fail.
-    assert 3 < len(a.data.disk) < 11
+    # Run this test twice, once with no hysteresis and another with hysteresis to show
+    # the different behaviour.
+    assert min_spill <= len(a.data.disk) <= max_spill
 
 
 @pytest.mark.slow
