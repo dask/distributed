@@ -618,7 +618,7 @@ async def test_environ_plugin(c, s, a, b):
     [
         pytest.param(
             "numpy",
-            marks=pytest.mark.xfail(reason="distributed#5723, distributed#5729"),
+            marks=pytest.mark.xfail(reason="distributed#5729"),
         ),
         "scipy",
         "pandas",
