@@ -26,9 +26,16 @@ try:
     # uses hugepages when available ( https://github.com/numpy/numpy/pull/14216 ).
     import numpy
 
-    host_array = lambda n: memoryview(numpy.empty((n,), dtype="u1"))  # type: ignore
+    def numpy_host_array(n: int) -> memoryview:
+        return memoryview(numpy.empty((n,), dtype="u1"))
+
+    host_array = numpy_host_array
 except ImportError:
-    host_array = lambda n: memoryview(bytearray(n))  # type: ignore
+
+    def builtin_host_array(n: int) -> memoryview:
+        return memoryview(bytearray(n))
+
+    host_array = builtin_host_array
 
 
 async def to_frames(
