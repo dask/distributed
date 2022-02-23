@@ -21,7 +21,7 @@ from ..utils import ensure_ip, get_ip, get_ipv6, log_errors, nbytes
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, Listener
 from .registry import Backend, backends
-from .utils import ensure_concrete_host, from_frames, to_frames
+from .utils import ensure_concrete_host, from_frames, host_array, to_frames
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,6 @@ else:
     ucx_create_endpoint = None  # type: ignore
     ucx_create_listener = None  # type: ignore
 
-host_array = None
 device_array = None
 pre_existing_cuda_context = False
 cuda_context_created = False
@@ -57,7 +56,7 @@ def synchronize_stream(stream=0):
 
 
 def init_once():
-    global ucp, host_array, device_array
+    global ucp, device_array
     global ucx_create_endpoint, ucx_create_listener
     global pre_existing_cuda_context, cuda_context_created
 
@@ -114,14 +113,6 @@ def init_once():
     ucp = _ucp
 
     ucp.init(options=ucx_config, env_takes_precedence=True)
-
-    # Find the function, `host_array()`, to use when allocating new host arrays
-    try:
-        import numpy
-
-        host_array = lambda n: numpy.empty((n,), dtype="u1")
-    except ImportError:
-        host_array = lambda n: bytearray(n)
 
     # Find the function, `cuda_array()`, to use when allocating new CUDA arrays
     try:

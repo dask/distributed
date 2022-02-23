@@ -32,7 +32,13 @@ from ..utils import ensure_ip, get_ip, get_ipv6, nbytes
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, FatalCommClosedError, Listener
 from .registry import Backend
-from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to_frames
+from .utils import (
+    ensure_concrete_host,
+    from_frames,
+    get_tcp_server_address,
+    host_array,
+    to_frames,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +211,7 @@ class TCP(Comm):
             frames_nbytes = await stream.read_bytes(fmt_size)
             (frames_nbytes,) = struct.unpack(fmt, frames_nbytes)
 
-            frames = memoryview(bytearray(frames_nbytes))
+            frames = host_array(frames_nbytes)
             # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
             for i, j in sliding_window(
                 2, range(0, frames_nbytes + C_INT_MAX, C_INT_MAX)

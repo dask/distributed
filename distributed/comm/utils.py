@@ -18,6 +18,16 @@ if isinstance(OFFLOAD_THRESHOLD, str):
     OFFLOAD_THRESHOLD = parse_bytes(OFFLOAD_THRESHOLD)
 
 
+# Find the function, `host_array()`, to use when allocating new host arrays
+try:
+    # Use NumPy, when available, to avoid memory initialization cost
+    import numpy
+
+    host_array = lambda n: memoryview(numpy.empty((n,), dtype="u1"))  # type: ignore
+except ImportError:
+    host_array = lambda n: memoryview(bytearray(n))  # type: ignore
+
+
 async def to_frames(
     msg,
     allow_offload=True,
