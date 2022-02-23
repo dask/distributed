@@ -10,9 +10,6 @@ from collections.abc import Iterable
 from itertools import chain
 from typing import Any
 
-import importlib.metadata
-
-
 required_packages = [
     "dask",
     "distributed",
