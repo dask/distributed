@@ -8533,7 +8533,7 @@ def validate_task_state(ts: TaskState):
         assert dts._state != "forgotten"
 
     assert (ts._processing_on is not None) == (ts._state == "processing")
-    assert (not not ts._who_has) == (ts._state == "memory"), (ts, ts._who_has)
+    assert bool(ts._who_has) == (ts._state == "memory"), (ts, ts._who_has)
 
     if ts._state == "processing":
         assert all([dts._who_has for dts in ts._dependencies]), (
