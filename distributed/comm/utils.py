@@ -20,7 +20,9 @@ if isinstance(OFFLOAD_THRESHOLD, str):
 
 # Find the function, `host_array()`, to use when allocating new host arrays
 try:
-    # Use NumPy, when available, to avoid memory initialization cost
+    # Use NumPy, when available, to avoid memory initialization cost.
+    # A `bytearray` is zero-initialized using `calloc`, which we don't need.
+    # `np.empty` both skips the zero-initialization, and uses hugepages when available (https://github.com/numpy/numpy/pull/14216).
     import numpy
 
     host_array = lambda n: memoryview(numpy.empty((n,), dtype="u1"))  # type: ignore
