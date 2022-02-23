@@ -468,6 +468,7 @@ def test_assert_worker_story():
     ],
 )
 def test_assert_worker_story_malformed_story(story_factory):
+    # defer the calls to time() to when the test runs rather than collection
     story = story_factory()
     with pytest.raises(AssertionError, match="Malformed story event"):
         assert_worker_story(story, [])
