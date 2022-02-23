@@ -1208,7 +1208,7 @@ class Worker(ServerNode):
 
         return result
 
-    def identity(self, comm=None):
+    def identity(self):
         return {
             "type": type(self).__name__,
             "id": self.id,
@@ -1320,7 +1320,7 @@ class Worker(ServerNode):
             except OSError:
                 logger.info("Waiting to connect to: %26s", self.scheduler.address)
                 await asyncio.sleep(0.1)
-            except TimeoutError:
+            except TimeoutError:  # pragma: no cover
                 logger.info("Timed out when connecting to scheduler")
         if response["status"] != "OK":
             raise ValueError(f"Unexpected response from register: {response!r}")
@@ -1452,10 +1452,10 @@ class Worker(ServerNode):
 
         return {"status": "OK", "nbytes": len(data)}
 
-    def keys(self, comm=None):
+    def keys(self):
         return list(self.data)
 
-    async def gather(self, comm=None, who_has=None):
+    async def gather(self, who_has: dict[str, list[str]]):
         who_has = {
             k: [coerce_to_address(addr) for addr in v]
             for k, v in who_has.items()
@@ -1476,7 +1476,7 @@ class Worker(ServerNode):
         else:
             return {"status": "OK"}
 
-    def get_monitor_info(self, comm=None, recent=False, start=0):
+    def get_monitor_info(self, recent=False, start=0):
         result = dict(
             range_query=(
                 self.monitor.recent()
@@ -1695,7 +1695,7 @@ class Worker(ServerNode):
             # before closing self.batched_stream, otherwise the local endpoint
             # may be closed too early and errors be raised on the scheduler when
             # trying to send closing message.
-            if self._protocol == "ucx":
+            if self._protocol == "ucx":  # pragma: no cover
                 await asyncio.sleep(0.2)
 
             if (
@@ -1751,7 +1751,7 @@ class Worker(ServerNode):
         )
         await self.close(safe=True, nanny=not restart)
 
-    async def terminate(self, comm=None, report=True, **kwargs):
+    async def terminate(self, report: bool = True, **kwargs):
         await self.close(report=report, **kwargs)
         return "OK"
 
@@ -1877,11 +1877,14 @@ class Worker(ServerNode):
     ###################
 
     def update_data(
-        self, comm=None, data=None, report=True, serializers=None, stimulus_id=None
+        self,
+        data: dict[str, object],
+        report: bool = True,
+        stimulus_id: str = None,
     ):
         if stimulus_id is None:
             stimulus_id = f"update-data-{time()}"
-        recommendations = {}
+        recommendations: dict[TaskState, tuple] = {}
         scheduler_messages = []
         for key, value in data.items():
             try:
@@ -1910,7 +1913,7 @@ class Worker(ServerNode):
             self.batched_stream.send(msg)
         return {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
 
-    def handle_free_keys(self, comm=None, keys=None, stimulus_id=None):
+    def handle_free_keys(self, keys=None, stimulus_id=None):
         """
         Handler to be called by the scheduler.
 
@@ -2010,7 +2013,6 @@ class Worker(ServerNode):
 
     def handle_acquire_replicas(
         self,
-        comm=None,
         *,
         keys: Collection[str],
         who_has: dict[str, Collection[str]],
@@ -2121,7 +2123,7 @@ class Worker(ServerNode):
             "error",
         }:
             recommendations[ts] = "waiting"
-        else:
+        else:  # pragma: no cover
             raise RuntimeError(f"Unexpected task state encountered {ts} {stimulus_id}")
 
         for msg in scheduler_msgs:
@@ -3237,7 +3239,7 @@ class Worker(ServerNode):
                     for worker in workers:
                         self.has_what[worker].add(dep)
                         self.pending_data_per_worker[worker].push(dep_ts)
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -3343,7 +3345,7 @@ class Worker(ServerNode):
         except CommClosedError:
             # Batched stream send might raise if it was already closed
             pass
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -3361,7 +3363,7 @@ class Worker(ServerNode):
     def run_coroutine(self, comm, function, args=(), kwargs=None, wait=True):
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
-    async def plugin_add(self, comm=None, plugin=None, name=None, catch_errors=True):
+    async def plugin_add(self, plugin=None, name=None, catch_errors=True):
         with log_errors(pdb=False):
             if isinstance(plugin, bytes):
                 plugin = pickle.loads(plugin)
@@ -3372,7 +3374,7 @@ class Worker(ServerNode):
             assert name
 
             if name in self.plugins:
-                await self.plugin_remove(comm=comm, name=name)
+                await self.plugin_remove(name=name)
 
             self.plugins[name] = plugin
 
@@ -3390,7 +3392,7 @@ class Worker(ServerNode):
 
             return {"status": "OK"}
 
-    async def plugin_remove(self, comm=None, name=None):
+    async def plugin_remove(self, name=None):
         with log_errors(pdb=False):
             logger.info(f"Removing Worker plugin {name}")
             try:
@@ -3407,7 +3409,6 @@ class Worker(ServerNode):
 
     async def actor_execute(
         self,
-        comm=None,
         actor=None,
         function=None,
         args=(),
@@ -3441,7 +3442,7 @@ class Worker(ServerNode):
         except Exception as ex:
             return {"status": "error", "exception": to_serialize(ex)}
 
-    def actor_attribute(self, comm=None, actor=None, attribute=None):
+    def actor_attribute(self, actor=None, attribute=None):
         try:
             value = getattr(self.actors[actor], attribute)
             return {"status": "OK", "result": to_serialize(value)}
@@ -3517,7 +3518,7 @@ class Worker(ServerNode):
                     self.transition(ts, "memory", stimulus_id=stimulus_id)
                 elif ts.state in READY:
                     self.transition(ts, "executing", stimulus_id=stimulus_id)
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -3743,7 +3744,14 @@ class Worker(ServerNode):
                 frac * 100,
             )
             start = time()
-            target = self.memory_limit * self.memory_target_fraction
+            # Implement hysteresis cycle where spilling starts at the spill threshold
+            # and stops at the target threshold. Normally that here the target threshold
+            # defines process memory, whereas normally it defines reported managed
+            # memory (e.g. output of sizeof() ).
+            # If target=False, disable hysteresis.
+            target = self.memory_limit * (
+                self.memory_target_fraction or self.memory_spill_fraction
+            )
             count = 0
             need = memory - target
             while memory > target:
@@ -3832,9 +3840,7 @@ class Worker(ServerNode):
         if self.digests is not None:
             self.digests["profile-duration"].add(stop - start)
 
-    async def get_profile(
-        self, comm=None, start=None, stop=None, key=None, server=False
-    ):
+    async def get_profile(self, start=None, stop=None, key=None, server=False):
         now = time() + self.scheduler_delay
         if server:
             history = self.io_loop.profile
@@ -3875,7 +3881,7 @@ class Worker(ServerNode):
 
         return prof
 
-    async def get_profile_metadata(self, comm=None, start=0, stop=None):
+    async def get_profile_metadata(self, start=0, stop=None):
         add_recent = stop is None
         now = time() + self.scheduler_delay
         stop = stop or now
@@ -3897,7 +3903,7 @@ class Worker(ServerNode):
             )
         return result
 
-    def get_call_stack(self, comm=None, keys=None):
+    def get_call_stack(self, keys=None):
         with self.active_threads_lock:
             frames = sys._current_frames()
             active_threads = self.active_threads.copy()
@@ -4397,7 +4403,7 @@ async def get_data_from_worker(
             )
             try:
                 status = response["status"]
-            except KeyError:
+            except KeyError:  # pragma: no cover
                 raise ValueError("Unexpected response", response)
             else:
                 if status == "OK":
@@ -4819,7 +4825,7 @@ def warn(*args, **kwargs):
     """
     try:
         worker = get_worker()
-    except ValueError:
+    except ValueError:  # pragma: no cover
         pass
     else:
         worker.log_event("warn", {"args": args, "kwargs": kwargs})
