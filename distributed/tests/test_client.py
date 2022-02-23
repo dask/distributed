@@ -5233,10 +5233,10 @@ async def test_long_running_not_in_occupancy(c, s, a):
 
     ts = s.tasks[f.key]
     ws = s.workers[a.address]
-    s.set_duration_estimate(ts, ws)
+    s.state.set_duration_estimate(ts, ws)
     assert s.workers[a.address].occupancy == 0
 
-    s.reevaluate_occupancy(0)
+    s.state.reevaluate_occupancy(0)
     assert s.workers[a.address].occupancy == 0
     await l.release()
 
@@ -6893,7 +6893,7 @@ def test_computation_object_code_not_available(client):
     result = np.where(ddf.a > 4)
 
     def fetch_comp_code(dask_scheduler):
-        computations = list(dask_scheduler.computations)
+        computations = list(dask_scheduler.state.computations)
         assert len(computations) == 1
         comp = computations[0]
         assert len(comp.code) == 1
