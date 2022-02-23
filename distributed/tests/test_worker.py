@@ -36,7 +36,7 @@ from distributed import (
     wait,
 )
 from distributed.comm.registry import backends
-from distributed.compatibility import LINUX, WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import PipInstall
@@ -1433,11 +1433,10 @@ async def test_spill_hysteresis(
         while prev_n == -1 or time() < start + 0.5:
             n = await nspilled()
             if n == len(futures):
-                # raise pytest.xfail(
-                raise AssertionError(
+                exc_cls = pytest.xfail if MACOS else AssertionError
+                raise exc_cls(
                     "The whole content of the SpillBuffer was spilled to disk; see "
-                    "https://github.com/dask/distributed/issues/5840. "
-                    "Consider converting this to xfail"
+                    "https://github.com/dask/distributed/issues/5840."
                 )
             if n != prev_n:
                 prev_n = n
