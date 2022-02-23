@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
+import math
 import os
 import sys
 import threading
@@ -1335,115 +1336,103 @@ async def test_spill_spill_threshold(c, s, a):
         await asyncio.sleep(0.01)
 
 
-async def assert_not_everything_is_spilled(dask_worker: Worker) -> None:
-    from distributed.spill import SpillBuffer
-
-    assert isinstance(dask_worker.data, SpillBuffer)
-    start = time()
-    nspilled = 0
-    while time() < start + 0.5:
-        assert dask_worker.data
-        if not dask_worker.data.memory:
-            raise pytest.xfail(
-                "The whole contents of the SpillBuffer was spilled to disk: "
-                "https://github.com/dask/distributed/issues/5840"
-            )
-        if len(dask_worker.data.disk) != nspilled:
-            nspilled = len(dask_worker.data.disk)
-            start = time()  # We just spilled; reset timer
-        await asyncio.sleep(0.01)
-
-
-@requires_zict
-@gen_cluster(
-    nthreads=[("", 1)],
-    client=True,
-    worker_kwargs=dict(
-        # FIXME https://github.com/dask/distributed/issues/5367
-        #       Can't reconfigure the absolute target threshold after the worker
-        #       started, so we're setting it here to something extremely small and then
-        #       increasing the memory_limit dynamically below in order to test the
-        #       spill threshold.
-        memory_limit="1 kb",
-        memory_monitor_interval="10ms",
-        memory_target_fraction=False,
-        memory_spill_fraction=0.7,
-        memory_pause_fraction=False,
-    ),
-)
-async def test_spill_no_target_threshold(c, s, a):
-    """Test that you can enable the spill threshold while leaving the target threshold
-    to False
-    """
-    memory = psutil.Process().memory_info().rss
-    # 300 MB before we start spilling
-    a.memory_limit = (memory + 300e6) / 0.7
-
-    f1 = c.submit(inc, 0, key="f1")
-    await wait(f1)
-    assert set(a.data.memory) == {"f1"}
-    assert not a.data.disk
-
-    # 800 MB process memory, 80 GB bogus managed memory.
-    # Use large chunks to stimulate timely release of process memory.
-    futures = c.map(BadSizeof, range(8), process=100e6, managed=10e9)
-
-    while not a.data.disk:
-        await asyncio.sleep(0.01)
-    assert "f1" in a.data.disk
-
-    # Spilling normally starts at the spill threshold and stops at the target threshold.
-    # In this special case, it stops as soon as the process memory goes below the spill
-    # threshold, e.g. without a hysteresis cycle. Test that we didn't instead dump the
-    # whole data to disk (memory_limit * target = 0)
-    await assert_not_everything_is_spilled(a)
-
-
+@pytest.mark.slow
 @requires_zict
 @pytest.mark.parametrize(
-    "memory_target_fraction,min_spill,max_spill",
+    "memory_target_fraction,managed,min_spill,max_spill",
     [
-        (0.7, 1, 3),  # target=spill -> no hysteresis
-        (0.4, 4, 8),  # target<spill -> hysteresis
+        # no target -> no hysteresis
+        # Over-report managed memory to test that the automated LRU eviction based on
+        # target is never triggered
+        (False, 10e9, 1, 3),
+        # Under-report managed memory, so that we reach the spill threshold for process
+        # memory without first reaching the target threshold for managed memory
+        # target == spill -> no hysteresis
+        (0.7, 1, 1, 3),
+        # target < spill -> hysteresis from spill to target
+        (0.4, 1, 4, 8),
     ],
 )
-@gen_cluster(
-    nthreads=[("", 1)],
-    client=True,
-    worker_kwargs=dict(
-        memory_limit="10 GiB",  # See FIXME note in previous test
+@gen_cluster(nthreads=[], client=True)
+async def test_spill_hysteresis(
+    c, s, memory_target_fraction, managed, min_spill, max_spill
+):
+    """
+    1. Test that you can enable the spill threshold while leaving the target threshold
+       to False
+    2. Test the hysteresis system where, once you reach the spill threshold, the worker
+       won't stop spilling until the target threshold is reached
+    """
+    # Run the test in a freshly spawned interpreter to ensure a clear memory situation,
+    # as opposed to the potentially heavily fragmented and unpredictable condition of
+    # the process used to run all the tests so far
+    async with Nanny(
+        s.address,
+        # Start spilling after ~950 MiB managed memory
+        # (assuming ~100 MiB unmanaged memory)
+        memory_limit="1500 MiB",
         memory_monitor_interval="10ms",
+        memory_target_fraction=memory_target_fraction,
         memory_spill_fraction=0.7,
         memory_pause_fraction=False,
-    ),
-)
-async def test_spill_hysteresis(c, s, a, memory_target_fraction, min_spill, max_spill):
-    memory = psutil.Process().memory_info().rss
-    a.memory_limit = (memory + 950e6) / 0.7  # Start spilling after 950MB
-    a.memory_target_fraction = memory_target_fraction
+        memory_terminate_fraction=False,
+    ) as nanny:
 
-    # Under-report managed memory, so that we reach the spill threshold for process
-    # memory without first reaching the target threshold for managed memory
-    futures = c.map(BadSizeof, range(10), process=100e6, managed=1)
+        async def nspilled() -> int:
+            out = await c.run(lambda dask_worker: len(dask_worker.data.disk))
+            return out[nanny.worker_address]
 
-    start = time()
-    while not a.data.disk:
-        # Different OSs/test environments can get stuck because of slightly different
-        # memory management algorithms. Add an extra 100MB every 2s to compensate.
-        # Can't do this too fast otherwise a very slow CI will fail on the number of
-        # elements actually spilled later.
-        if time() > start + 2:  # pragma: nocover
-            print("Did not spill; adding a future")
-            futures.append(c.submit(BadSizeof, len(futures), process=100e6, managed=1))
-            start = time()
-        await asyncio.sleep(0.01)
+        nfuts_for_spilling = math.ceil((1500 * 0.7 - s.memory.process / 2**20) / 100)
+        print(f"Process memory: {s.memory.process / 2**20:.0f} MiB")
+        print(f"Initial load: {nfuts_for_spilling} * 100 MiB")
+        assert nfuts_for_spilling > 6
 
-    # Wait until spilling stops, but no less than 0.5s
-    await assert_not_everything_is_spilled(a)
+        # Add 100 MiB process memory. Spilling must not happen, even when managed=10GB
+        futures = [
+            c.submit(BadSizeof, process=100 * 2**20, managed=managed, pure=False)
+        ]
+        await wait(futures)
+        await asyncio.sleep(0.2)
+        assert await nspilled() == 0
 
-    # Run this test twice, once with no hysteresis and another with hysteresis to show
-    # the different behaviour.
-    assert min_spill <= len(a.data.disk) <= max_spill
+        # Add another ~800MB process memory. This should start the spilling.
+        futures += c.map(
+            BadSizeof,
+            range(nfuts_for_spilling - 1),
+            process=100 * 2**20,
+            managed=managed,
+        )
+
+        # Wait until spilling starts
+        start = time()
+        while not await nspilled():
+            # Different OSs/test environments can get stuck because of slightly
+            # different memory management algorithms and base unmanaged memory. Add an
+            # extra 100MB every 0.5s to compensate. Can't do this too fast otherwise a
+            # very slow CI will fail on the number of elements actually spilled later.
+            if time() > start + 0.5:  # pragma: nocover
+                print("Did not spill; adding a future")
+                futures.append(
+                    c.submit(BadSizeof, process=100e6, managed=managed, pure=False)
+                )
+                start = time()
+            await asyncio.sleep(0.1)
+
+        # Wait until spilling stops
+        prev_n = -1
+        while prev_n == -1 or time() < start + 0.5:
+            n = await nspilled()
+            if n == len(futures):
+                raise pytest.xfail(
+                    "The whole contents of the SpillBuffer was spilled to disk; see "
+                    "https://github.com/dask/distributed/issues/5840"
+                )
+            if n != prev_n:
+                prev_n = n
+                start = time()  # We just spilled; reset timer
+            await asyncio.sleep(0.1)
+
+        assert min_spill <= await nspilled() <= max_spill
 
 
 @pytest.mark.slow

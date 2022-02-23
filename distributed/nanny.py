@@ -13,7 +13,7 @@ from contextlib import suppress
 from inspect import isawaitable
 from queue import Empty
 from time import sleep as sync_sleep
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 import psutil
 from tornado import gen
@@ -44,6 +44,9 @@ from .utils import (
     silence_logging,
 )
 from .worker import Worker, parse_memory_limit, run
+
+if TYPE_CHECKING:
+    from .diagnostics.plugin import NannyPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +97,7 @@ class Nanny(ServerNode):
         services=None,
         name=None,
         memory_limit="auto",
+        memory_terminate_fraction: float | Literal[False] | None = None,
         reconnect=True,
         validate=False,
         quiet=False,
@@ -203,8 +207,10 @@ class Nanny(ServerNode):
         self.worker_kwargs = worker_kwargs
 
         self.contact_address = contact_address
-        self.memory_terminate_fraction = dask.config.get(
-            "distributed.worker.memory.terminate"
+        self.memory_terminate_fraction = (
+            memory_terminate_fraction
+            if memory_terminate_fraction is not None
+            else dask.config.get("distributed.worker.memory.terminate")
         )
 
         self.services = services
@@ -231,7 +237,7 @@ class Nanny(ServerNode):
             "plugin_remove": self.plugin_remove,
         }
 
-        self.plugins = {}
+        self.plugins: dict[str, NannyPlugin] = {}
 
         super().__init__(
             handlers=handlers, io_loop=self.loop, connection_args=self.connection_args
