@@ -1389,7 +1389,12 @@ async def test_spill_hysteresis(
 
         # Add 100 MiB process memory. Spilling must not happen, even when managed=10GB
         futures = [
-            c.submit(BadSizeof, process=100 * 2**20, managed=managed, pure=False)
+            c.submit(
+                BadSizeof,
+                process=100 * 2**20,
+                managed=managed,
+                pure=False,
+            )
         ]
         await wait(futures)
         await asyncio.sleep(0.2)
@@ -1413,7 +1418,12 @@ async def test_spill_hysteresis(
             if time() > start + 0.5:  # pragma: nocover
                 print("Did not spill; adding a future")
                 futures.append(
-                    c.submit(BadSizeof, process=100e6, managed=managed, pure=False)
+                    c.submit(
+                        BadSizeof,
+                        process=100 * 2**20,
+                        managed=managed,
+                        pure=False,
+                    )
                 )
                 start = time()
             await asyncio.sleep(0.1)
@@ -1423,9 +1433,11 @@ async def test_spill_hysteresis(
         while prev_n == -1 or time() < start + 0.5:
             n = await nspilled()
             if n == len(futures):
-                raise pytest.xfail(
-                    "The whole contents of the SpillBuffer was spilled to disk; see "
-                    "https://github.com/dask/distributed/issues/5840"
+                # raise pytest.xfail(
+                raise AssertionError(
+                    "The whole content of the SpillBuffer was spilled to disk; see "
+                    "https://github.com/dask/distributed/issues/5840. "
+                    "Consider converting this to xfail"
                 )
             if n != prev_n:
                 prev_n = n
