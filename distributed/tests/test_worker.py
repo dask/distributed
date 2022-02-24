@@ -3263,11 +3263,11 @@ async def test_remove_replicas_while_computing(c, s, a, b):
     while not ws_has_futs(all):
         await asyncio.sleep(0.01)
 
-    # Wait for some dependent tasks to be done. Note that at most we'll get half
-    # of the dependents finished as the others are blocked on dependents_event.
-    while not any(fut.status == "finished" for fut in dependents):
-        await asyncio.sleep(0.01)
-    assert not all(fut.status == "finished" for fut in dependents)
+    # Wait for some dependent tasks to be done. Note that the Worker has 2 threads, so
+    # it will block when it reaches the dependents[2]. This relies on the tasks
+    # scheduled by Client.map to be computed strictly from left to right.
+    await wait(dependents[1])
+    assert not any(fut.status == "finished" for fut in dependents[2:])
 
     # Try removing the initial keys
     s.request_remove_replicas(
