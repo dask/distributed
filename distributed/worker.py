@@ -1051,6 +1051,7 @@ class Worker(ServerNode):
         )
         self.periodic_callbacks["keep-alive"] = pc
 
+        # FIXME annotations: https://github.com/tornadoweb/tornado/issues/3117
         pc = PeriodicCallback(self.find_missing, 1000)  # type: ignore
         self.periodic_callbacks["find-missing"] = pc
 
@@ -1472,10 +1473,10 @@ class Worker(ServerNode):
 
         return {"status": "OK", "nbytes": len(data)}
 
-    def keys(self, comm: Comm | None = None) -> list[str]:
+    def keys(self) -> list[str]:
         return list(self.data)
 
-    async def gather(self, comm: Comm | None = None, who_has=None) -> dict[str, Any]:
+    async def gather(self, who_has: dict[str, list[str]]) -> dict[str, Any]:
         who_has = {
             k: [coerce_to_address(addr) for addr in v]
             for k, v in who_has.items()
@@ -1497,7 +1498,7 @@ class Worker(ServerNode):
             return {"status": "OK"}
 
     def get_monitor_info(
-        self, comm: Comm | None = None, recent: bool = False, start: float = 0
+        self, recent: bool = False, start: float = 0
     ) -> dict[str, Any]:
         result = dict(
             range_query=(
@@ -1773,7 +1774,7 @@ class Worker(ServerNode):
         )
         await self.close(safe=True, nanny=not restart)
 
-    async def terminate(self, comm: Comm | None = None, report=True, **kwargs):
+    async def terminate(self, report: bool = True, **kwargs) -> str:
         await self.close(report=report, **kwargs)
         return "OK"
 
@@ -1903,7 +1904,7 @@ class Worker(ServerNode):
         data: dict[str, object],
         report: bool = True,
         stimulus_id: str = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         if stimulus_id is None:
             stimulus_id = f"update-data-{time()}"
         recommendations: Recs = {}
@@ -1935,9 +1936,7 @@ class Worker(ServerNode):
             self.batched_stream.send(msg)
         return {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
 
-    def handle_free_keys(
-        self, comm: Comm | None = None, *, keys: list[str], stimulus_id: str
-    ) -> None:
+    def handle_free_keys(self, keys: list[str], stimulus_id: str) -> None:
         """
         Handler to be called by the scheduler.
 
@@ -2319,7 +2318,7 @@ class Worker(ServerNode):
 
     def transition_cancelled_error(
         self,
-        ts,
+        ts: TaskState,
         exception,
         traceback,
         exception_text,
@@ -2384,7 +2383,7 @@ class Worker(ServerNode):
 
     def transition_executing_error(
         self,
-        ts,
+        ts: TaskState,
         exception,
         traceback,
         exception_text,
@@ -2477,7 +2476,7 @@ class Worker(ServerNode):
             return {ts: ("resumed", "fetch")}, []
 
     def transition_cancelled_resumed(
-        self, ts: TaskState, next, *, stimulus_id: str
+        self, ts: TaskState, next: str, *, stimulus_id: str
     ) -> tuple[Recs, Smsgs]:
         ts._next = next
         ts.state = "resumed"
@@ -3494,11 +3493,16 @@ class Worker(ServerNode):
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
     async def plugin_add(
-        self, comm: Comm | None = None, plugin=None, name=None, catch_errors=True
+        self,
+        plugin: WorkerPlugin | bytes,
+        name: str | None = None,
+        catch_errors: bool = True,
     ) -> dict[str, Any]:
         with log_errors(pdb=False):
             if isinstance(plugin, bytes):
-                plugin = pickle.loads(plugin)
+                # Note: historically we have accepted duck-typed classes that don't
+                # inherit from WorkerPlugin. Don't do `assert isinstance`.
+                plugin = cast(WorkerPlugin, pickle.loads(plugin))
 
             if name is None:
                 name = _get_plugin_name(plugin)
@@ -3524,9 +3528,7 @@ class Worker(ServerNode):
 
             return {"status": "OK"}
 
-    async def plugin_remove(
-        self, comm: Comm | None = None, name=None
-    ) -> dict[str, Any]:
+    async def plugin_remove(self, name: str) -> dict[str, Any]:
         with log_errors(pdb=False):
             logger.info(f"Removing Worker plugin {name}")
             try:
@@ -3576,9 +3578,7 @@ class Worker(ServerNode):
         except Exception as ex:
             return {"status": "error", "exception": to_serialize(ex)}
 
-    def actor_attribute(
-        self, comm: Comm | None = None, actor=None, attribute=None
-    ) -> dict[str, Any]:
+    def actor_attribute(self, actor=None, attribute=None) -> dict[str, Any]:
         try:
             value = getattr(self.actors[actor], attribute)
             return {"status": "OK", "result": to_serialize(value)}
@@ -3913,7 +3913,8 @@ class Worker(ServerNode):
                     break
                 weight = self.data.evict()
                 if weight == -1:
-                    # Failed to evict: disk full, spill size limit exceeded, or pickle error
+                    # Failed to evict: disk full, spill size limit exceeded, or pickle
+                    # error
                     break
 
                 total += weight
@@ -3986,7 +3987,6 @@ class Worker(ServerNode):
 
     async def get_profile(
         self,
-        comm: Comm | None = None,
         start=None,
         stop=None,
         key=None,
@@ -4033,15 +4033,11 @@ class Worker(ServerNode):
         return prof
 
     async def get_profile_metadata(
-        self,
-        comm: Comm | None = None,
-        start: float | None = 0,
-        stop: float | None = None,
+        self, start: float = 0, stop: float | None = None
     ) -> dict[str, Any]:
         add_recent = stop is None
         now = time() + self.scheduler_delay
         stop = stop or now
-        start = start or 0
         result = {
             "counts": [
                 (t, d["count"]) for t, d in self.profile_history if start < t < stop
@@ -4059,9 +4055,7 @@ class Worker(ServerNode):
             )
         return result
 
-    def get_call_stack(
-        self, comm: Comm | None = None, *, keys: Collection[str]
-    ) -> dict[str, Any]:
+    def get_call_stack(self, keys: Collection[str]) -> dict[str, Any]:
         with self.active_threads_lock:
             sys_frames = sys._current_frames()
             frames = {key: sys_frames[tid] for tid, key in self.active_threads.items()}

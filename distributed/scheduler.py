@@ -7629,12 +7629,10 @@ class Scheduler(SchedulerState, ServerNode):
 
     async def get_profile_metadata(
         self,
-        comm=None,
-        workers=None,
-        merge_workers=True,
-        start=None,
-        stop=None,
-        profile_cycle_interval=None,
+        workers: Iterable[str] | None = None,
+        start: float = 0,
+        stop: float | None = None,
+        profile_cycle_interval: str | float | None = None,
     ):
         parent: SchedulerState = cast(SchedulerState, self)
         dt = profile_cycle_interval or dask.config.get(
@@ -7652,16 +7650,19 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
         results = [r for r in results if not isinstance(r, Exception)]
-        counts = [v["counts"] for v in results]
-        counts = itertools.groupby(merge_sorted(*counts), lambda t: t[0] // dt * dt)
-        counts = [(time, sum(pluck(1, group))) for time, group in counts]
+        counts = [
+            (time, sum(pluck(1, group)))
+            for time, group in itertools.groupby(
+                merge_sorted(
+                    *(v["counts"] for v in results),
+                ),
+                lambda t: t[0] // dt * dt,
+            )
+        ]
 
-        keys = set()
-        for v in results:
-            for t, d in v["keys"]:
-                for k in d:
-                    keys.add(k)
-        keys = {k: [] for k in keys}
+        keys: dict[str, list[list]] = {
+            k: [] for v in results for t, d in v["keys"] for k in d
+        }
 
         groups1 = [v["keys"] for v in results]
         groups2 = list(merge_sorted(*groups1, key=first))
