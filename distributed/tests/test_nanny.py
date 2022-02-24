@@ -616,10 +616,8 @@ async def test_environ_plugin(c, s, a, b):
 @pytest.mark.parametrize(
     "modname",
     [
-        pytest.param(
-            "numpy",
-            marks=pytest.mark.xfail(reason="distributed#5723, distributed#5729"),
-        ),
+        # numpy is always imported, and for a good reason:
+        # https://github.com/dask/distributed/issues/5729
         "scipy",
         pytest.param("pandas", marks=pytest.mark.xfail(reason="distributed#5723")),
     ],
