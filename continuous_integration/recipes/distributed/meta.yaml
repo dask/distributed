@@ -18,7 +18,7 @@ build:
 
 outputs:
   - name: distributed-impl
-    version: {{ version }}
+    version: {{ version }}+{{ GIT_DESCRIBE_HASH }}
     build:
       number: {{ GIT_DESCRIBE_NUMBER }}
       string: {{ build_ext }}
