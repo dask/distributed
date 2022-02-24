@@ -3970,8 +3970,8 @@ class Scheduler(SchedulerState, ServerNode):
             "subscribe_worker_status": self.subscribe_worker_status,
             "start_task_metadata": self.start_task_metadata,
             "stop_task_metadata": self.stop_task_metadata,
-            "dump_state": self.get_cluster_state,
-            "dump_state_to_url": self.dump_cluster_state_to_url,
+            "get_cluster_state": self.get_cluster_state,
+            "dump_cluster_state_to_url": self.dump_cluster_state_to_url,
         }
 
         connection_limit = get_fileno_limit() / 2
@@ -4089,7 +4089,7 @@ class Scheduler(SchedulerState, ServerNode):
         exclude: Collection[str],
     ) -> dict:
         "Produce the state dict used in a cluster state dump"
-        # Kick off state-dumping on workers before we block the event loop dumping scheduler state.
+        # Kick off state-dumping on workers before we block the event loop in `self._to_dict`.
         workers_future = asyncio.gather(
             self.broadcast(
                 msg={"op": "dump_state", "exclude": exclude},
@@ -4143,35 +4143,32 @@ class Scheduler(SchedulerState, ServerNode):
             import msgpack
 
             # NOTE: `compression="infer"` will automatically use gzip via the `.gz` suffix
+            mode = "wb"
             suffix = ".msgpack.gz"
             if not url.endswith(suffix):
                 url += suffix
             writer = msgpack.pack
-            mode = "wb"
         elif format == "yaml":
             import yaml
 
+            mode = "w"
             suffix = ".yaml"
             if not url.endswith(suffix):
                 url += suffix
 
             def writer(state: dict, f):
                 # YAML adds unnecessary `!!python/tuple` tags; convert tuples to lists to avoid them.
-                def tuple_to_list_inplace(node):
+                def tuple_to_list(node):
                     if isinstance(node, (list, tuple)):
-                        return [tuple_to_list_inplace(el) for el in node]
+                        return [tuple_to_list(el) for el in node]
                     elif isinstance(node, dict):
-                        for k, v in node.items():
-                            node[k] = tuple_to_list_inplace(v)
-                        return node
+                        return {k: tuple_to_list(v) for k, v in node.items()}
                     else:
                         return node
 
-                state = tuple_to_list_inplace(state)
-
+                state = tuple_to_list(state)
                 yaml.dump(state, f)
 
-            mode = "w"
         else:
             raise ValueError(
                 f"Unsupported format {format!r}. Possible values are 'msgpack' or 'yaml'."

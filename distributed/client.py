@@ -3827,7 +3827,7 @@ class Client(SyncMethodMixin):
         format: Literal["msgpack", "yaml"],
         storage_options: dict | None = None,
     ) -> None:
-        state = await self.scheduler.dump_state(exclude=exclude)
+        state = await self.scheduler.get_cluster_state(exclude=exclude)
 
         def tuple_to_list(node):
             if isinstance(node, (list, tuple)):
@@ -3874,7 +3874,7 @@ class Client(SyncMethodMixin):
         storage_options: dict | None = None,
     ) -> None:
         "Tell the scheduler to dump cluster state to a URL"
-        await self.scheduler.dump_state_to_url(
+        await self.scheduler.dump_cluster_state_to_url(
             url=filename,
             exclude=exclude,
             format=format,
