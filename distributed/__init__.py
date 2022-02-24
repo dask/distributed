@@ -1,10 +1,12 @@
 from . import config  # isort:skip; load distributed configuration first
 from . import widgets  # isort:skip; load distributed widgets second
+
+
 import dask
 from dask.config import config  # type: ignore
 
 from ._version import get_versions
-from .actor import Actor, BaseActorFuture
+from .actor import Actor, ActorFuture, BaseActorFuture
 from .client import (
     Client,
     CompatibleExecutor,
@@ -46,7 +48,20 @@ from .variable import Variable
 from .worker import Reschedule, Worker, get_client, get_worker, print, secede, warn
 from .worker_client import local_client, worker_client
 
-versions = get_versions()
-__version__ = versions["version"]
-__git_revision__ = versions["full-revisionid"]
-del get_versions, versions
+
+def __getattr__(name):
+    global __version__, __git_revision__
+
+    if name == "__version__":
+        from importlib.metadata import version
+
+        __version__ = version("distributed")
+        return __version__
+
+    if name == "__git_revision__":
+        from ._version import get_versions
+
+        __git_revision__ = get_versions()["full-revisionid"]
+        return __git_revision__
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

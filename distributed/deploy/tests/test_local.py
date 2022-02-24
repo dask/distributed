@@ -530,7 +530,6 @@ def test_death_timeout_raises(loop):
             loop=loop,
         ) as cluster:
             pass
-    LocalCluster._instances.clear()  # ignore test hygiene checks
 
 
 @gen_test()
@@ -1150,3 +1149,18 @@ async def test_cluster_host_used_throughout_cluster(host, use_nanny):
             if use_nanny:
                 url = urlparse(worker.process.worker_address)
                 assert url.hostname == "127.0.0.1"
+
+
+@gen_test()
+async def test_connect_to_closed_cluster(cleanup):
+    async with LocalCluster(processes=False, asynchronous=True) as cluster:
+        async with Client(cluster, asynchronous=True) as c1:
+            assert await c1.submit(inc, 1) == 2
+
+    with pytest.raises(
+        RuntimeError,
+        match="Trying to connect to an already closed or closing Cluster",
+    ):
+        # Raises during init without actually connecting since we're not
+        # awaiting anything
+        Client(cluster, asynchronous=True)

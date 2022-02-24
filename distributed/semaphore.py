@@ -92,11 +92,11 @@ class SemaphoreExtension:
             dask.config.get("distributed.scheduler.locks.lease-timeout"), default="s"
         )
 
-    async def get_value(self, comm=None, name=None):
+    async def get_value(self, name=None):
         return len(self.leases[name])
 
     # `comm` here is required by the handler interface
-    def create(self, comm=None, name=None, max_leases=None):
+    def create(self, name=None, max_leases=None):
         # We use `self.max_leases` as the point of truth to find out if a semaphore with a specific
         # `name` has been created.
         if name not in self.max_leases:
@@ -109,7 +109,7 @@ class SemaphoreExtension:
                     % (max_leases, self.max_leases[name])
                 )
 
-    def refresh_leases(self, comm=None, name=None, lease_ids=None):
+    def refresh_leases(self, name=None, lease_ids=None):
         with log_errors():
             now = time()
             logger.debug(
@@ -145,7 +145,7 @@ class SemaphoreExtension:
             return False
         return True
 
-    async def acquire(self, comm=None, name=None, timeout=None, lease_id=None):
+    async def acquire(self, name=None, timeout=None, lease_id=None):
         with log_errors():
             if not self._semaphore_exists(name):
                 raise RuntimeError(f"Semaphore `{name}` not known or already closed.")
@@ -195,7 +195,7 @@ class SemaphoreExtension:
 
                 return result
 
-    def release(self, comm=None, name=None, lease_id=None):
+    def release(self, name=None, lease_id=None):
         with log_errors():
             if not self._semaphore_exists(name):
                 logger.warning(
@@ -242,7 +242,7 @@ class SemaphoreExtension:
                     )
                     self._release_value(name=name, lease_id=_id)
 
-    def close(self, comm=None, name=None):
+    def close(self, name=None):
         """Hard close the semaphore without warning clients which still hold a lease."""
         with log_errors():
             if not self._semaphore_exists(name):

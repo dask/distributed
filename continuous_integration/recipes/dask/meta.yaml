@@ -22,7 +22,7 @@ requirements:
   run:
     - python >=3.8
     - dask-core >={{ dask_version }}
-    - distributed {{ version }}=*_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
+    - distributed {{ version }}=*{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}*
     - cytoolz >=0.8.2
     - numpy >=1.18
     - pandas >=1.0

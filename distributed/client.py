@@ -52,6 +52,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import PeriodicCallback
 
+from . import preloading
 from . import versions as version_module  # type: ignore
 from .batched import BatchedSend
 from .cfexecutor import ClientExecutor
@@ -59,6 +60,7 @@ from .core import (
     CommClosedError,
     ConnectionPool,
     PooledRPCCall,
+    Status,
     clean_exception,
     connect,
     rpc,
@@ -135,7 +137,7 @@ def _del_global_client(c: Client) -> None:
         try:
             if _global_clients[k] is c:
                 del _global_clients[k]
-        except KeyError:
+        except KeyError:  # pragma: no cover
             pass
 
 
@@ -443,7 +445,7 @@ class Future(WrappedKey):
             self._cleared = True
             try:
                 self.client.loop.add_callback(self.client._dec_ref, stringify(self.key))
-            except TypeError:
+            except TypeError:  # pragma: no cover
                 pass  # Shutting down, add_callback may be None
 
     def __getstate__(self):
@@ -751,6 +753,8 @@ class Client(SyncMethodMixin):
 
     _default_event_handlers = {"print": _handle_print, "warn": _handle_warn}
 
+    preloads: list[preloading.Preload]
+
     def __init__(
         self,
         address=None,
@@ -822,6 +826,11 @@ class Client(SyncMethodMixin):
         elif isinstance(getattr(address, "scheduler_address", None), str):
             # It's a LocalCluster or LocalCluster-compatible object
             self.cluster = address
+            status = getattr(self.cluster, "status")
+            if status and status in [Status.closed, Status.closing]:
+                raise RuntimeError(
+                    f"Trying to connect to an already closed or closing Cluster {self.cluster}."
+                )
             with suppress(AttributeError):
                 loop = address.loop
             if security is None:
@@ -845,7 +854,7 @@ class Client(SyncMethodMixin):
         elif security is True:
             security = Security.temporary()
             self._startup_kwargs["security"] = security
-        elif not isinstance(security, Security):
+        elif not isinstance(security, Security):  # pragma: no cover
             raise TypeError("security must be a Security object")
 
         self.security = security
@@ -916,6 +925,10 @@ class Client(SyncMethodMixin):
 
         for ext in extensions:
             ext(self)
+
+        preload = dask.config.get("distributed.client.preload")
+        preload_argv = dask.config.get("distributed.client.preload-argv")
+        self.preloads = preloading.process_preloads(self, preload, preload_argv)
 
         self.start(timeout=timeout)
         Client._instances.add(self)
@@ -1177,6 +1190,9 @@ class Client(SyncMethodMixin):
 
         for topic, handler in Client._default_event_handlers.items():
             self.subscribe_topic(topic, handler)
+
+        for preload in self.preloads:
+            await preload.start()
 
         self._handle_report_task = asyncio.create_task(self._handle_report())
 
@@ -1458,6 +1474,9 @@ class Client(SyncMethodMixin):
             return
 
         self.status = "closing"
+
+        for preload in self.preloads:
+            await preload.teardown()
 
         with suppress(AttributeError):
             for pc in self._periodic_callbacks.values():
@@ -2008,7 +2027,7 @@ class Client(SyncMethodMixin):
                     if errors == "skip":
                         bad_keys.add(key)
                         bad_data[key] = None
-                    else:
+                    else:  # pragma: no cover
                         raise ValueError("Bad value, `errors=%s`" % errors)
 
             keys = [k for k in keys if k not in bad_keys and k not in data]
@@ -2048,7 +2067,7 @@ class Client(SyncMethodMixin):
                         self.futures[key].reset()
                     except KeyError:  # TODO: verify that this is safe
                         pass
-            else:
+            else:  # pragma: no cover
                 break
 
         if bad_data and errors == "skip" and isinstance(unpacked, list):
@@ -2224,7 +2243,7 @@ class Client(SyncMethodMixin):
                         raise TimeoutError("No valid workers found")
                     # Exclude paused and closing_gracefully workers
                     nthreads = await self.scheduler.ncores_running(workers=workers)
-                if not nthreads:
+                if not nthreads:  # pragma: no cover
                     raise ValueError("No valid workers found")
 
                 _, who_has, nbytes = await scatter_to_workers(
