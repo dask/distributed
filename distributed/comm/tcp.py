@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 
 # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
+# ref: https://bugs.python.org/issue42853
 OPENSSL_MAX_CHUNKSIZE = 256 ** ctypes.sizeof(ctypes.c_int) // 2 - 1
 
 MAX_BUFFER_SIZE = MEMORY_LIMIT / 2
