@@ -3486,10 +3486,6 @@ async def test_dump_cluster_state(s: Scheduler, *workers: Worker, format):
         fs = fsspec.filesystem("memory")
         fs.rm("state-dumps", recursive=True)
 
-    # TODO test:
-    # - [ ] that storage options are actually passed into fsspec
-    # - [ ] that the writer doesn't block the event loop
-
 
 @gen_cluster(nthreads=[])
 async def test_idempotent_plugins(s):
