@@ -3820,13 +3820,13 @@ class Client(SyncMethodMixin):
             self.sync(self._update_scheduler_info)
         return self._scheduler_identity
 
-    async def _dump_cluster_state(
+    async def _dump_cluster_state_local(
         self,
         filename: str,
         exclude: Collection[str],
         format: Literal["msgpack", "yaml"],
+        storage_options: dict | None = None,
     ) -> None:
-
         state = await self.scheduler.dump_state(exclude=exclude)
 
         def tuple_to_list(node):
@@ -3866,42 +3866,76 @@ class Client(SyncMethodMixin):
                 f"Unsupported format {format}. Possible values are `msgpack` or `yaml`"
             )
 
+    async def _dump_cluster_state_remote(
+        self,
+        filename: str,
+        exclude: Collection[str],
+        format: Literal["msgpack", "yaml"],
+        storage_options: dict | None = None,
+    ) -> None:
+        "Tell the scheduler to dump cluster state to a URL"
+        await self.scheduler.dump_state_to_url(
+            url=filename,
+            exclude=exclude,
+            format=format,
+            storage_options=storage_options,
+        )
+
     def dump_cluster_state(
         self,
         filename: str = "dask-cluster-dump",
         exclude: Collection[str] = ("run_spec",),
         format: Literal["msgpack", "yaml"] = "msgpack",
+        **kwargs,
     ):
-        """Extract a dump of the entire cluster state and persist to disk.
+        """Extract a dump of the entire cluster state and persist to disk or a URL.
         This is intended for debugging purposes only.
 
-        Warning: Memory usage on client and scheduler side can be large.
+        Warning: Memory usage on the scheduler (and client, if writing the dump locally)
+        can be large. On a large or long-running cluster, this can take several minutes.
+        The scheduler may be unresponsive while the dump is processed.
 
         Results will be stored in a dict::
 
             {
-                "scheduler_info": {...},
-                "worker_info": {
-                    worker_addr: {...},  # worker attributes
+                "scheduler": {...},  # scheduler state
+                "workers": {
+                    worker_addr: {...},  # worker state
                     ...
+                }
+                "versions": {
+                    "scheduler": {...},
+                    "workers": {
+                        worker_addr: {...},
+                        ...
+                    }
                 }
             }
 
         Parameters
         ----------
         filename:
-            The output filename. The appropriate file suffix (`.msgpack.gz` or
-            `.yaml`) will be appended automatically.
+            The output filename. The appropriate file suffix (``.msgpack.gz`` or
+            ``.yaml``) will be appended automatically.
+
+            If the filename is a URL supported by :func:`fsspec.open` (like
+            ``s3://my-bucket/cluster-dump``, or any URL containing ``://``), the
+            dump will be written directly to that URL from the scheduler.
+            Any additional keyword arguments will be passed to :func:`fsspec.open`.
+
+            Otherwise, the filename is interpreted as a path on the local
+            filesystem. The cluster state will be sent from the scheduler back
+            to the client, then written to disk.
         exclude:
             A collection of attribute names which are supposed to be excluded
             from the dump, e.g. to exclude code, tracebacks, logs, etc.
 
-            Defaults to exclude `run_spec` which is the serialized user code. This
-            is typically not required for debugging. To allow serialization of
-            this, pass an empty tuple.
+            Defaults to exclude ``run_spec``, which is the serialized user code.
+            This is typically not required for debugging. To allow serialization
+            of this, pass an empty tuple.
         format:
-            Either msgpack or yaml. If msgpack is used (default), the output
-            will be stored in a gzipped file as msgpack.
+            Either ``"msgpack"`` or ``"yaml"``. If msgpack is used (default),
+            the output will be stored in a gzipped file as msgpack.
 
             To read::
 
@@ -3918,13 +3952,23 @@ class Client(SyncMethodMixin):
                     from yaml import Loader
                 with open("filename") as fd:
                     state = yaml.load(fd, Loader=Loader)
+        **kwargs:
+            Any additional arguments to :func:`fsspec.open` when writing to a URL.
+            Ignored when writing to a local file.
 
         """
+        filename = str(filename)
+        method = (
+            self._dump_cluster_state_remote
+            if "://" in filename
+            else self._dump_cluster_state_local
+        )
         return self.sync(
-            self._dump_cluster_state,
+            method,
             filename=filename,
-            format=format,
             exclude=exclude,
+            format=format,
+            storage_options=kwargs,
         )
 
     def write_scheduler_file(self, scheduler_file):

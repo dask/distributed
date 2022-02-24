@@ -3971,6 +3971,7 @@ class Scheduler(SchedulerState, ServerNode):
             "start_task_metadata": self.start_task_metadata,
             "stop_task_metadata": self.stop_task_metadata,
             "dump_state": self.get_cluster_state,
+            "dump_state_to_url": self.dump_cluster_state_to_url,
         }
 
         connection_limit = get_fileno_limit() / 2
@@ -4120,7 +4121,7 @@ class Scheduler(SchedulerState, ServerNode):
             "versions": {"scheduler": self.versions(), "workers": worker_versions},
         }
 
-    async def dump_cluster_state(
+    async def dump_cluster_state_to_url(
         self,
         url: str,
         exclude: Collection[str],
@@ -4178,7 +4179,6 @@ class Scheduler(SchedulerState, ServerNode):
 
         # Eagerly open the file to catch any errors before doing the full dump
         with fsspec.open(url, mode, compression="infer", **storage_options) as f:
-
             state = await self.get_cluster_state(exclude)
 
             # Write from a thread so we don't block the event loop quite as badly

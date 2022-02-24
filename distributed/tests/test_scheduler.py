@@ -3458,39 +3458,33 @@ def _verify_cluster_dump(url, format: str, workers: Collection[Worker]) -> dict:
         url += ".yaml"
         loader = yaml.safe_load
 
-    with fsspec.open(url, compression="infer") as f:
+    with fsspec.open(url, mode="rb", compression="infer") as f:
         state = loader(f)
 
     _verify_cluster_state(state, workers)
     return state
 
 
-@pytest.fixture
-def cleanup_dumps():
-    try:
-        yield
-    finally:
-        import fsspec
-
-        fs = fsspec.filesystem("memory")
-        fs.rm("state-dumps", recursive=True)
-
-
 @pytest.mark.parametrize("format", ["msgpack", "yaml"])
 @gen_cluster(nthreads=[("", 1)] * 2)
-async def test_dump_cluster_state(
-    s: Scheduler, *workers: Worker, format, cleanup_dumps
-):
-    await s.dump_cluster_state("memory://state-dumps/two-workers", [], format)
-    _verify_cluster_dump("memory://state-dumps/two-workers", format, workers)
+async def test_dump_cluster_state(s: Scheduler, *workers: Worker, format):
+    fsspec = pytest.importorskip("fsspec")
+    try:
+        await s.dump_cluster_state_to_url(
+            "memory://state-dumps/two-workers", [], format
+        )
+        _verify_cluster_dump("memory://state-dumps/two-workers", format, workers)
 
-    await asyncio.gather(*(w.close() for w in workers))
+        await asyncio.gather(*(w.close() for w in workers))
 
-    while s.workers:
-        await asyncio.sleep(0.01)
+        while s.workers:
+            await asyncio.sleep(0.01)
 
-    await s.dump_cluster_state("memory://state-dumps/no-workers", [], format)
-    _verify_cluster_dump("memory://state-dumps/no-workers", format, [])
+        await s.dump_cluster_state_to_url("memory://state-dumps/no-workers", [], format)
+        _verify_cluster_dump("memory://state-dumps/no-workers", format, [])
+    finally:
+        fs = fsspec.filesystem("memory")
+        fs.rm("state-dumps", recursive=True)
 
     # TODO test:
     # - [ ] that storage options are actually passed into fsspec
