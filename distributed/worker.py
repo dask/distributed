@@ -3502,7 +3502,7 @@ class Worker(ServerNode):
             if isinstance(plugin, bytes):
                 # Note: historically we have accepted duck-typed classes that don't
                 # inherit from WorkerPlugin. Don't do `assert isinstance`.
-                plugin = cast(WorkerPlugin, pickle.loads(plugin))
+                plugin = cast("WorkerPlugin", pickle.loads(plugin))
 
             if name is None:
                 name = _get_plugin_name(plugin)

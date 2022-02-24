@@ -7629,10 +7629,10 @@ class Scheduler(SchedulerState, ServerNode):
 
     async def get_profile_metadata(
         self,
-        workers: Iterable[str] | None = None,
+        workers: "Iterable[str] | None" = None,
         start: float = 0,
-        stop: float | None = None,
-        profile_cycle_interval: str | float | None = None,
+        stop: "float | None" = None,
+        profile_cycle_interval: "str | float | None" = None,
     ):
         parent: SchedulerState = cast(SchedulerState, self)
         dt = profile_cycle_interval or dask.config.get(
