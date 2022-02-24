@@ -2,6 +2,9 @@ name: Tests
 
 on:
   push:
+  pull_request:
+  schedule:
+    - cron: "0 6,18 * * *"
 
 # When this workflow is queued, automatically cancel any previous running
 # or pending jobs from the same branch
@@ -21,6 +24,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.8", "3.9"]
+        # Cherry-pick test modules to split the overall runtime roughly in half
+        partition: [ci1, not ci1]
+        include:
+          - partition: "ci1"
+            partition-label: "ci1"
+          - partition: "not ci1"
+            partition-label: "notci1"
 
         # Uncomment to stress-test the test suite for random failures.
         # Must also change env.TEST_ID below.
@@ -28,10 +38,11 @@ jobs:
         # To avoid hamstringing other people, change 'on: [push, pull_request]' above
         # to just 'on: [push]'; this way the stress test will run exclusively in your
         # branch (https://github.com/<your name>/distributed/actions).
-        run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
     env:
-      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.run }}
+      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}
+      # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}-${{ matrix.run }}
 
     steps:
       - name: Checkout source
@@ -118,8 +129,8 @@ jobs:
           set -o pipefail
           mkdir reports
 
-          pytest distributed/tests/test_worker.py \
-            -m "not avoid_ci" --runslow \
+          pytest distributed \
+            -m "not avoid_ci and ${{ matrix.partition }}" --runslow \
             --leaks=fds,processes,threads \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \
             --cov=distributed --cov-report=xml \
