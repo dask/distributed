@@ -3280,7 +3280,7 @@ async def test_remove_replicas_while_computing(c, s, a, b):
     while not ws_has_futs(any):
         await asyncio.sleep(0.01)
 
-    # Let the other half of the dependent tasks complete
+    # Let the remaining dependent tasks complete
     await dependents_event.set()
     await wait(dependents)
     assert ws_has_futs(any) and not ws_has_futs(all)
