@@ -3231,24 +3231,23 @@ async def test_remove_replicas_simple(c, s, a, b):
     assert all(s.tasks[f.key].who_has == {s.workers[a.address]} for f in futs)
 
 
-@pytest.mark.slow
 @gen_cluster(
     client=True,
-    nthreads=[("", 1), ("", 1)],
     config={"distributed.comm.recent-messages-log-length": 1_000},
 )
 async def test_remove_replicas_while_computing(c, s, a, b):
     futs = c.map(inc, range(10), workers=[a.address])
+    dependents_event = distributed.Event()
+
+    def some_slow(x, event):
+        if x % 2:
+            event.wait()
+        return x + 1
 
     # All interesting things will happen on b
-    intermediate = c.map(slowinc, futs, delay=0.05, workers=[b.address])
+    dependents = c.map(some_slow, futs, event=dependents_event, workers=[b.address])
 
-    def reduce(*args, **kwargs):
-        sleep(0.5)
-
-    final = c.submit(reduce, intermediate, workers=[b.address], key="final")
-
-    while not any(f.key in b.tasks for f in intermediate):
+    while not any(f.key in b.tasks for f in dependents):
         await asyncio.sleep(0.01)
 
     # The scheduler removes keys from who_has/has_what immediately
@@ -3264,12 +3263,11 @@ async def test_remove_replicas_while_computing(c, s, a, b):
     while not ws_has_futs(all):
         await asyncio.sleep(0.01)
 
-    # Wait for some, but not all, intermediate tasks to be done.
-    while not any(fut.status == "finished" for fut in intermediate):
+    # Wait for some dependent tasks to be done. Note that at most we'll get half
+    # of the dependents finished as the others are blocked on dependents_event.
+    while not any(fut.status == "finished" for fut in dependents):
         await asyncio.sleep(0.01)
-    # This assertion relies on the data transfer between workers to
-    # complete before 10x the slowinc delay
-    assert not all(fut.status == "finished" for fut in intermediate)
+    assert not all(fut.status == "finished" for fut in dependents)
 
     # Try removing the initial keys
     s.request_remove_replicas(
@@ -3277,12 +3275,14 @@ async def test_remove_replicas_while_computing(c, s, a, b):
     )
     # Scheduler removed all keys immediately...
     assert not ws_has_futs(any)
-    # ... but the state is properly restored for all tasks for which the intermediate
+    # ... but the state is properly restored for all tasks for which the dependent task
     # isn't done yet
     while not ws_has_futs(any):
         await asyncio.sleep(0.01)
 
-    await wait(intermediate)
+    # Let the other half of the dependent tasks complete
+    await dependents_event.set()
+    await wait(dependents)
     assert ws_has_futs(any) and not ws_has_futs(all)
 
     # If a request is rejected, the worker responds with an add-keys message to
@@ -3304,7 +3304,7 @@ async def test_remove_replicas_while_computing(c, s, a, b):
     for rejected_key in rejections:
         assert answer_sent(rejected_key)
 
-    # Since intermediate is done, futs replicas may be removed.
+    # Now that all dependent tasks are done, futs replicas may be removed.
     # They might be already gone due to the above remove replica calls
     s.request_remove_replicas(
         b.address,
@@ -3321,8 +3321,7 @@ async def test_remove_replicas_while_computing(c, s, a, b):
     # A replica is still on workers[0]
     assert all(len(s.tasks[f.key].who_has) == 1 for f in futs)
 
-    await final
-    del final, intermediate, futs
+    del dependents, futs
 
     while any(w.tasks for w in (a, b)):
         await asyncio.sleep(0.01)
