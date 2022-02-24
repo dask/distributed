@@ -5071,9 +5071,7 @@ class Scheduler(SchedulerState, ServerNode):
                     ts._prefix._suspicious += 1
                     if ts._suspicious > self.allowed_failures:
                         del recommendations[k]
-                        e = pickle.dumps(
-                            KilledWorker(task=k, last_worker=ws.clean()), protocol=4
-                        )
+                        e = pickle.dumps(KilledWorker(task=k, last_worker=ws.clean()))
                         r = self.transition(k, "erred", exception=e, cause=k)
                         recommendations.update(r)
                         logger.info(
@@ -6117,7 +6115,7 @@ class Scheduler(SchedulerState, ServerNode):
                 elif on_error == "return":
                     return e
                 elif on_error == "return_pickle":
-                    return dumps(e, protocol=4)
+                    return dumps(e)
                 elif on_error == "ignore":
                     return ERROR
                 else:

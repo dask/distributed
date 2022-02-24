@@ -2849,7 +2849,7 @@ class Worker(ServerNode):
         except PicklingError:
             # Some types fail pickling (example: _thread.lock objects),
             # send their name as a best effort.
-            typ_serialized = pickle.dumps(typ.__name__, protocol=4)
+            typ_serialized = pickle.dumps(typ.__name__)
         d = {
             "op": "task-finished",
             "status": "OK",
@@ -4479,12 +4479,12 @@ def dumps_function(func) -> bytes:
         with _cache_lock:
             result = cache_dumps[func]
     except KeyError:
-        result = pickle.dumps(func, protocol=4)
+        result = pickle.dumps(func)
         if len(result) < 100000:
             with _cache_lock:
                 cache_dumps[func] = result
     except TypeError:  # Unhashable function
-        result = pickle.dumps(func, protocol=4)
+        result = pickle.dumps(func)
     return result
 
 
@@ -4524,7 +4524,7 @@ _warn_dumps_warned = [False]
 
 def warn_dumps(obj, dumps=pickle.dumps, limit=1e6):
     """Dump an object to bytes, warn if those bytes are large"""
-    b = dumps(obj, protocol=4)
+    b = dumps(obj)
     if not _warn_dumps_warned[0] and len(b) > limit:
         _warn_dumps_warned[0] = True
         s = str(obj)
