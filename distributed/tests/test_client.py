@@ -7363,19 +7363,6 @@ async def test_dump_cluster_state_exclude_default(c, s, a, b, tmp_path):
         assert k in s.tasks
 
 
-@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "200ms"})
-async def test_dump_cluster_state_error(c, s, a, b, tmp_path):
-    a.stop()
-    filename = tmp_path / "foo"
-    await c.dump_cluster_state(filename, format="yaml")
-    state = _verify_cluster_dump(filename, "yaml", {a.address, b.address})
-    assert state["workers"][a.address] == (
-        f"OSError('Timed out trying to connect to {a.address} after 0.2 s')"
-    )
-    assert isinstance(state["workers"][b.address], dict)
-    assert state["versions"]["workers"].keys() == {b.address}
-
-
 class TestClientSecurityLoader:
     @contextmanager
     def config_loader(self, monkeypatch, loader):

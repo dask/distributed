@@ -3827,27 +3827,7 @@ class Client(SyncMethodMixin):
         format: Literal["msgpack", "yaml"],
     ) -> None:
 
-        scheduler_info = self.scheduler.dump_state(exclude=exclude)
-
-        workers_info = self.scheduler.broadcast(
-            msg={"op": "dump_state", "exclude": exclude},
-            on_error="return_pickle",
-        )
-        versions_info = self._get_versions()
-        scheduler_info, workers_info, versions_info = await asyncio.gather(
-            scheduler_info, workers_info, versions_info
-        )
-        # Unpickle RPC errors and convert them to string
-        workers_info = {
-            k: repr(loads(v)) if isinstance(v, bytes) else v
-            for k, v in workers_info.items()
-        }
-
-        state = {
-            "scheduler": scheduler_info,
-            "workers": workers_info,
-            "versions": versions_info,
-        }
+        state = await self.scheduler.dump_state(exclude=exclude)
 
         def tuple_to_list(node):
             if isinstance(node, (list, tuple)):
@@ -3895,7 +3875,7 @@ class Client(SyncMethodMixin):
         """Extract a dump of the entire cluster state and persist to disk.
         This is intended for debugging purposes only.
 
-        Warning: Memory usage on client side can be large.
+        Warning: Memory usage on client and scheduler side can be large.
 
         Results will be stored in a dict::
 

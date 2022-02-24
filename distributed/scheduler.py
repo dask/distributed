@@ -28,7 +28,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Dict, Literal, Optional
 from typing import cast as pep484_cast
 
 import psutil
@@ -3970,6 +3970,7 @@ class Scheduler(SchedulerState, ServerNode):
             "subscribe_worker_status": self.subscribe_worker_status,
             "start_task_metadata": self.start_task_metadata,
             "stop_task_metadata": self.stop_task_metadata,
+            "dump_state": self.get_cluster_state,
         }
 
         connection_limit = get_fileno_limit() / 2
@@ -4081,6 +4082,109 @@ class Scheduler(SchedulerState, ServerNode):
         extra = {k: v for k, v in extra.items() if k not in exclude}
         info.update(recursive_to_dict(extra, exclude=exclude))
         return info
+
+    async def get_cluster_state(
+        self,
+        exclude: Collection[str],
+    ) -> dict:
+        "Produce the state dict used in a cluster state dump"
+        # Kick off state-dumping on workers before we block the event loop dumping scheduler state.
+        workers_future = asyncio.gather(
+            self.broadcast(
+                msg={"op": "dump_state", "exclude": exclude},
+                on_error="return",
+            ),
+            self.broadcast(
+                msg={"op": "versions"},
+                on_error="ignore",
+            ),
+        )
+        try:
+            scheduler_state = self._to_dict(exclude=exclude)
+
+            worker_states, worker_versions = await workers_future
+        finally:
+            # Ensure the tasks aren't left running if anything fails.
+            # Someday (py3.11), use a trio-style TaskGroup for this.
+            workers_future.cancel()
+
+        # Convert any RPC errors to strings
+        worker_states = {
+            k: repr(v) if isinstance(v, Exception) else v
+            for k, v in worker_states.items()
+        }
+
+        return {
+            "scheduler": scheduler_state,
+            "workers": worker_states,
+            "versions": {"scheduler": self.versions(), "workers": worker_versions},
+        }
+
+    async def dump_cluster_state(
+        self,
+        url: str,
+        exclude: Collection[str],
+        format: Literal["msgpack", "yaml"],
+        storage_options: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        "Write a cluster state dump to an fsspec-compatible URL. Requires fsspec."
+        try:
+            import fsspec
+        except ImportError:
+            raise ImportError(
+                "fsspec must be installed to dump cluster state directly to a URL"
+            )
+
+        if storage_options is None:
+            storage_options = {}
+
+        if format == "msgpack":
+            import msgpack
+
+            # NOTE: `compression="infer"` will automatically use gzip via the `.gz` suffix
+            suffix = ".msgpack.gz"
+            if not url.endswith(suffix):
+                url += suffix
+            writer = msgpack.pack
+            mode = "wb"
+        elif format == "yaml":
+            import yaml
+
+            suffix = ".yaml"
+            if not url.endswith(suffix):
+                url += suffix
+
+            def writer(state: dict, f):
+                # YAML adds unnecessary `!!python/tuple` tags; convert tuples to lists to avoid them.
+                def tuple_to_list_inplace(node):
+                    if isinstance(node, (list, tuple)):
+                        return [tuple_to_list_inplace(el) for el in node]
+                    elif isinstance(node, dict):
+                        for k, v in node.items():
+                            node[k] = tuple_to_list_inplace(v)
+                        return node
+                    else:
+                        return node
+
+                state = tuple_to_list_inplace(state)
+
+                yaml.dump(state, f)
+
+            mode = "w"
+        else:
+            raise ValueError(
+                f"Unsupported format {format!r}. Possible values are 'msgpack' or 'yaml'."
+            )
+
+        # Eagerly open the file to catch any errors before doing the full dump
+        with fsspec.open(url, mode, compression="infer", **storage_options) as f:
+
+            state = await self.get_cluster_state(exclude)
+
+            # Write from a thread so we don't block the event loop quite as badly
+            # (the writer will still hold the GIL a lot though).
+            # TODO use `asyncio.to_thread` once <3.9 support is dropped.
+            await self.loop.run_in_executor(None, writer, state, f)
 
     def get_worker_service_addr(self, worker, service_name, protocol=False):
         """
