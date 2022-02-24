@@ -3233,6 +3233,7 @@ async def test_remove_replicas_simple(c, s, a, b):
 
 @gen_cluster(
     client=True,
+    nthreads=[("", 1), ("", 6)],  # Up to 5 threads of b will get stuck; read below
     config={"distributed.comm.recent-messages-log-length": 1_000},
 )
 async def test_remove_replicas_while_computing(c, s, a, b):
@@ -3263,11 +3264,15 @@ async def test_remove_replicas_while_computing(c, s, a, b):
     while not ws_has_futs(all):
         await asyncio.sleep(0.01)
 
-    # Wait for some dependent tasks to be done. Note that the Worker has 2 threads, so
-    # it will block when it reaches the dependents[2]. This relies on the tasks
-    # scheduled by Client.map to be computed strictly from left to right.
-    await wait(dependents[1])
-    assert not any(fut.status == "finished" for fut in dependents[2:])
+    # Wait for some dependent tasks to be done. No more than half of the dependents can
+    # finish, as the others are blocked on dependents_event.
+    # Note: for this to work reliably regardless of scheduling order, we need to have 6+
+    # threads. At the moment of writing it works with 2 because futures of Client.map
+    # are always scheduled from left to right, but we'd rather not rely on this
+    # assumption.
+    while not any(fut.status == "finished" for fut in dependents):
+        await asyncio.sleep(0.01)
+    assert not all(fut.status == "finished" for fut in dependents)
 
     # Try removing the initial keys
     s.request_remove_replicas(
