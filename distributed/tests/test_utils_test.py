@@ -450,21 +450,26 @@ def test_assert_worker_story():
 
 
 @pytest.mark.parametrize(
-    "story",
+    "story_factory",
     [
-        [()],  # Missing payload, stimulus_id, ts
-        [("foo",)],  # Missing (stimulus_id, ts)
-        [("foo", "bar")],  # Missing ts
-        [("foo", "bar", "baz")],  # ts is not a float
-        [("foo", "bar", time() + 3600)],  # ts is in the future
-        [("foo", "bar", time() - 7200)],  # ts is too old
-        [("foo", 123, time())],  # stimulus_id is not a string
-        [("foo", "", time())],  # stimulus_id is an empty string
-        [("", time())],  # no payload
-        [("foo", "id", time()), ("foo", "id", time() - 10)],  # timestamps out of order
+        pytest.param(lambda: [()], id="Missing payload, stimulus_id, ts"),
+        pytest.param(lambda: [("foo",)], id="Missing (stimulus_id, ts)"),
+        pytest.param(lambda: [("foo", "bar")], id="Missing ts"),
+        pytest.param(lambda: [("foo", "bar", "baz")], id="ts is not a float"),
+        pytest.param(lambda: [("foo", "bar", time() + 3600)], id="ts is in the future"),
+        pytest.param(lambda: [("foo", "bar", time() - 7200)], id="ts is too old"),
+        pytest.param(lambda: [("foo", 123, time())], id="stimulus_id is not a str"),
+        pytest.param(lambda: [("foo", "", time())], id="stimulus_id is an empty str"),
+        pytest.param(lambda: [("", time())], id="no payload"),
+        pytest.param(
+            lambda: [("foo", "id", time()), ("foo", "id", time() - 10)],
+            id="timestamps out of order",
+        ),
     ],
 )
-def test_assert_worker_story_malformed_story(story):
+def test_assert_worker_story_malformed_story(story_factory):
+    # defer the calls to time() to when the test runs rather than collection
+    story = story_factory()
     with pytest.raises(AssertionError, match="Malformed story event"):
         assert_worker_story(story, [])
 
