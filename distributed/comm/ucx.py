@@ -32,14 +32,10 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     try:
         import ucp
-        from ucp import create_endpoint as ucx_create_endpoint
-        from ucp import create_listener as ucx_create_listener
     except ImportError:
         pass
 else:
     ucp = None  # type: ignore
-    ucx_create_endpoint = None  # type: ignore
-    ucx_create_listener = None  # type: ignore
 
 host_array = None
 device_array = None
@@ -58,7 +54,6 @@ def synchronize_stream(stream=0):
 
 def init_once():
     global ucp, host_array, device_array
-    global ucx_create_endpoint, ucx_create_listener
     global pre_existing_cuda_context, cuda_context_created
 
     if ucp is not None:
@@ -151,22 +146,6 @@ def init_once():
         rmm.reinitialize(
             pool_allocator=True, managed_memory=False, initial_pool_size=pool_size
         )
-
-    try:
-        from ucp.endpoint_reuse import EndpointReuse
-    except ImportError:
-        ucx_create_endpoint = ucp.create_endpoint
-        ucx_create_listener = ucp.create_listener
-    else:
-        reuse_endpoints = dask.config.get("distributed.comm.ucx.reuse-endpoints")
-        if (
-            reuse_endpoints is None and ucp.get_ucx_version() >= (1, 11, 0)
-        ) or reuse_endpoints is False:
-            ucx_create_endpoint = ucp.create_endpoint
-            ucx_create_listener = ucp.create_listener
-        else:
-            ucx_create_endpoint = EndpointReuse.create_endpoint
-            ucx_create_listener = EndpointReuse.create_listener
 
 
 def _close_comm(ref):
@@ -412,7 +391,7 @@ class UCXConnector(Connector):
         ip, port = parse_host_port(address)
         init_once()
         try:
-            ep = await ucx_create_endpoint(ip, port)
+            ep = await ucp.create_endpoint(ip, port)
         except (ucp.exceptions.UCXCloseError, ucp.exceptions.UCXCanceled,) + (
             getattr(ucp.exceptions, "UCXConnectionReset", ()),
             getattr(ucp.exceptions, "UCXNotConnected", ()),
@@ -476,7 +455,7 @@ class UCXListener(Listener):
                 await self.comm_handler(ucx)
 
         init_once()
-        self.ucp_server = ucx_create_listener(serve_forever, port=self._input_port)
+        self.ucp_server = ucp.create_listener(serve_forever, port=self._input_port)
 
     def stop(self):
         self.ucp_server = None
@@ -545,9 +524,7 @@ def _scrub_ucx_config():
     # 2) explicitly defined UCX configuration flags
 
     # import does not initialize ucp -- this will occur outside this function
-    from ucp import get_config, get_ucx_version
-
-    ucx_110 = get_ucx_version() >= (1, 10, 0)
+    from ucp import get_config
 
     options = {}
 
@@ -562,11 +539,11 @@ def _scrub_ucx_config():
         ]
     ):
         if dask.config.get("distributed.comm.ucx.rdmacm"):
-            tls = "tcp" if ucx_110 else "tcp,rdmacm"
+            tls = "tcp"
             tls_priority = "rdmacm"
         else:
-            tls = "tcp" if ucx_110 else "tcp,sockcm"
-            tls_priority = "tcp" if ucx_110 else "sockcm"
+            tls = "tcp"
+            tls_priority = "tcp"
 
         # CUDA COPY can optionally be used with ucx -- we rely on the user
         # to define when messages will include CUDA objects.  Note:
@@ -585,10 +562,6 @@ def _scrub_ucx_config():
             tls = tls + ",cuda_ipc"
 
         options = {"TLS": tls, "SOCKADDR_TLS_PRIORITY": tls_priority}
-
-        net_devices = dask.config.get("distributed.comm.ucx.net-devices")
-        if net_devices is not None and net_devices != "":
-            options["NET_DEVICES"] = net_devices
 
     # ANY UCX options defined in config will overwrite high level dask.ucx flags
     valid_ucx_vars = list(get_config().keys())

@@ -863,24 +863,6 @@ properties:
                 description: |
                   Set environment variables to enable UCX RDMA connection manager support,
                   requires ``distributed.comm.ucx.infiniband=True``.
-              net-devices:
-                type: [string, 'null']
-                description: |
-                  Interface(s) used by workers for UCX communication. Can be a string (like
-                  ``"eth0"`` for NVLink or ``"mlx5_0:1"``/``"ib0"`` for InfiniBand), ``"auto"``
-                  (requires ``distributed.comm.ucx.infiniband=True``) to pick the optimal interface per-worker based on
-                  the system's topology, or ``None`` to stay with the default value of ``"all"`` (use
-                  all available interfaces). Setting to ``"auto"`` requires UCX-Py to be installed
-                  and compiled with hwloc support. Unexpected errors can occur when using
-                  ``"auto"`` if any interfaces are disconnected or improperly configured.
-              reuse-endpoints:
-                type: [boolean, 'null']
-                description: |
-                  Enable UCX-Py reuse endpoints mechanism if ``True`` or if it's not specified and
-                  UCX < 1.11 is installed, otherwise disable reuse endpoints. This was primarily
-                  introduced to resolve an issue with CUDA IPC that has been fixed in UCX 1.10, but
-                  can cause establishing endpoints to be very slow, this is particularly noticeable in
-                  clusters of more than a few dozen workers.
               create-cuda-context:
                 type: [boolean, 'null']
                 description: |
