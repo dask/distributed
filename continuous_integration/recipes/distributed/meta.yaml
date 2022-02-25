@@ -21,7 +21,7 @@ outputs:
     version: {{ version }}
     build:
       number: {{ GIT_DESCRIBE_NUMBER }}
-      string: {{ build_ext }}
+      string: {{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}_{{ build_ext }}
       noarch: generic
     test:
       commands:
