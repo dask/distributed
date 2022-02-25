@@ -15,7 +15,7 @@ import dask.config
 
 from distributed import Client, Nanny, Scheduler, Worker, config, default_client
 from distributed.compatibility import WINDOWS
-from distributed.core import Server, rpc
+from distributed.core import Server, Status, rpc
 from distributed.metrics import time
 from distributed.utils import mp_context
 from distributed.utils_test import (
@@ -28,6 +28,7 @@ from distributed.utils_test import (
     gen_cluster,
     gen_test,
     inc,
+    mock_rss,
     new_config,
     tls_only_security,
 )
@@ -607,3 +608,27 @@ def test_start_failure_scheduler():
     with pytest.raises(TypeError):
         with cluster(scheduler_kwargs={"foo": "bar"}):
             return
+
+
+@gen_cluster(
+    client=True,
+    worker_kwargs={"heartbeat_interval": "10ms", "memory_monitor_interval": "10ms"},
+)
+async def test_mock_rss(c, s, a, b):
+    # Test that it affects the readings sent to the Scheduler
+    mock_rss(a, 2e6)
+    while s.workers[a.address].memory.process != 2_000_000:
+        await asyncio.sleep(0.01)
+
+    # Test that the instance has been mocked, not the class
+    assert s.workers[b.address].memory.process > 10e6
+
+    # Test that it's compatible with Client.run and can be used with Nannies
+    await c.run(mock_rss, nbytes=3e6, workers=[b.address])
+    while s.workers[b.address].memory.process != 3_000_000:
+        await asyncio.sleep(0.01)
+
+    # Test that it affects Worker.memory_monitor
+    mock_rss(a, 100e9)
+    while s.workers[a.address].status != Status.paused:
+        await asyncio.sleep(0.01)
