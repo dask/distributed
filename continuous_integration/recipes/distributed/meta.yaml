@@ -92,6 +92,7 @@ outputs:
         - python -c "from distributed.scheduler import COMPILED; assert COMPILED is {{ cython_enabled }}"
       requires:
         - pip
+        - distributed-impl * {{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}_{{ build_ext }}
     about:
       home: https://distributed.dask.org
       summary: Distributed scheduler for Dask
