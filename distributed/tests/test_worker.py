@@ -3233,80 +3233,103 @@ async def test_remove_replicas_simple(c, s, a, b):
 
 @gen_cluster(
     client=True,
+    nthreads=[("", 1), ("", 6)],  # Up to 5 threads of b will get stuck; read below
     config={"distributed.comm.recent-messages-log-length": 1_000},
 )
-async def test_remove_replicas_while_computing(c, s, *workers):
-    futs = c.map(inc, range(10), workers=[workers[0].address])
+async def test_remove_replicas_while_computing(c, s, a, b):
+    futs = c.map(inc, range(10), workers=[a.address])
+    dependents_event = distributed.Event()
 
-    # All interesting things will happen on that worker
-    w = workers[1]
-    intermediate = c.map(slowinc, futs, delay=0.05, workers=[w.address])
+    def some_slow(x, event):
+        if x % 2:
+            event.wait()
+        return x + 1
 
-    def reduce(*args, **kwargs):
-        import time
+    # All interesting things will happen on b
+    dependents = c.map(some_slow, futs, event=dependents_event, workers=[b.address])
 
-        time.sleep(0.5)
-        return
-
-    final = c.submit(reduce, intermediate, workers=[w.address], key="final")
-
-    while not any(f.key in w.tasks for f in intermediate):
-        await asyncio.sleep(0.001)
+    while not any(f.key in b.tasks for f in dependents):
+        await asyncio.sleep(0.01)
 
     # The scheduler removes keys from who_has/has_what immediately
     # Make sure the worker responds to the rejection and the scheduler corrects
     # the state
-    ws = s.workers[w.address]
-    while not all(s.tasks[fut.key] in ws.has_what for fut in futs):
-        await asyncio.sleep(0.001)
+    ws = s.workers[b.address]
 
-    s.request_remove_replicas(
-        w.address, [fut.key for fut in futs], stimulus_id=f"test-{time()}"
-    )
-    # Scheduler removed keys immediately...
-    assert not any(s.tasks[fut.key] in ws.has_what for fut in futs)
-    # ... but the state is properly restored
-    while not any(s.tasks[fut.key] in ws.has_what for fut in futs):
+    def ws_has_futs(aggr_func):
+        nonlocal futs
+        return aggr_func(s.tasks[fut.key] in ws.has_what for fut in futs)
+
+    # Wait for all futs to transfer over
+    while not ws_has_futs(all):
         await asyncio.sleep(0.01)
 
-    await wait(intermediate)
+    # Wait for some dependent tasks to be done. No more than half of the dependents can
+    # finish, as the others are blocked on dependents_event.
+    # Note: for this to work reliably regardless of scheduling order, we need to have 6+
+    # threads. At the moment of writing it works with 2 because futures of Client.map
+    # are always scheduled from left to right, but we'd rather not rely on this
+    # assumption.
+    while not any(fut.status == "finished" for fut in dependents):
+        await asyncio.sleep(0.01)
+    assert not all(fut.status == "finished" for fut in dependents)
+
+    # Try removing the initial keys
+    s.request_remove_replicas(
+        b.address, [fut.key for fut in futs], stimulus_id=f"test-{time()}"
+    )
+    # Scheduler removed all keys immediately...
+    assert not ws_has_futs(any)
+    # ... but the state is properly restored for all tasks for which the dependent task
+    # isn't done yet
+    while not ws_has_futs(any):
+        await asyncio.sleep(0.01)
+
+    # Let the remaining dependent tasks complete
+    await dependents_event.set()
+    await wait(dependents)
+    assert ws_has_futs(any) and not ws_has_futs(all)
 
     # If a request is rejected, the worker responds with an add-keys message to
     # reenlist the key in the schedulers state system to avoid race conditions,
     # see also https://github.com/dask/distributed/issues/5265
     rejections = set()
-    for msg in w.log:
+    for msg in b.log:
         if msg[0] == "remove-replica-rejected":
             rejections.update(msg[1])
+    assert rejections
+
+    def answer_sent(key):
+        for batch in b.batched_stream.recent_message_log:
+            for msg in batch:
+                if "op" in msg and msg["op"] == "add-keys" and key in msg["keys"]:
+                    return True
+        return False
+
     for rejected_key in rejections:
-
-        def answer_sent(key):
-            for batch in w.batched_stream.recent_message_log:
-                for msg in batch:
-                    if "op" in msg and msg["op"] == "add-keys" and key in msg["keys"]:
-                        return True
-            return False
-
         assert answer_sent(rejected_key)
 
-    # Since intermediate is done, futs replicas may be removed.
+    # Now that all dependent tasks are done, futs replicas may be removed.
     # They might be already gone due to the above remove replica calls
     s.request_remove_replicas(
-        w.address, [fut.key for fut in futs], stimulus_id=f"test-{time()}"
+        b.address,
+        [fut.key for fut in futs if ws in s.tasks[fut.key].who_has],
+        stimulus_id=f"test-{time()}",
     )
 
-    while any(w.tasks[f.key].state != "released" for f in futs if f.key in w.tasks):
-        await asyncio.sleep(0.001)
+    while any(b.tasks[f.key].state != "released" for f in futs if f.key in b.tasks):
+        await asyncio.sleep(0.01)
 
     # The scheduler actually gets notified about the removed replica
-    while not all(len(s.tasks[f.key].who_has) == 1 for f in futs):
-        await asyncio.sleep(0.001)
+    while ws_has_futs(any):
+        await asyncio.sleep(0.01)
+    # A replica is still on workers[0]
+    assert all(len(s.tasks[f.key].who_has) == 1 for f in futs)
 
-    await final
-    del final, intermediate, futs
+    del dependents, futs
 
-    while any(w.tasks for w in workers):
-        await asyncio.sleep(0.001)
+    while any(w.tasks for w in (a, b)):
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
