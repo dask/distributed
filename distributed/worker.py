@@ -4055,12 +4055,12 @@ class Worker(ServerNode):
             )
         return result
 
-    def get_call_stack(self, keys: Collection[str]) -> dict[str, Any]:
+    def get_call_stack(self, keys: Collection[str] | None = None) -> dict[str, Any]:
         with self.active_threads_lock:
             sys_frames = sys._current_frames()
             frames = {key: sys_frames[tid] for tid, key in self.active_threads.items()}
         if keys is not None:
-            frames = {key: frame for key, frame in frames.items() if key in keys}
+            frames = {key: frames[key] for key in keys if key in frames}
 
         return {key: profile.call_stack(frame) for key, frame in frames.items()}
 
