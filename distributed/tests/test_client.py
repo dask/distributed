@@ -5236,7 +5236,7 @@ async def test_long_running_not_in_occupancy(c, s, a):
     s.state.set_duration_estimate(ts, ws)
     assert s.workers[a.address].occupancy == 0
 
-    s.state.reevaluate_occupancy(0)
+    s.reevaluate_occupancy(0)
     assert s.workers[a.address].occupancy == 0
     await l.release()
 
