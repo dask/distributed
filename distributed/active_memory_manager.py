@@ -591,7 +591,7 @@ class RetireWorker(ActiveMemoryManagerPolicy):
                 drop_ws = (yield "drop", ts, {ws})
                 if drop_ws:
                     continue  # Use case 1 or 2
-                if ts.who_has & self.manager.scheduler.running:
+                if ts.who_has & self.manager.scheduler.state.running:
                     continue  # Use case 3 or 4
                 # Use case 5
 
