@@ -4589,7 +4589,9 @@ class Scheduler(ServerNode):
         ws._last_seen = local_now
         if executing is not None:
             ws._executing = {
-                self.state.tasks[key]: duration for key, duration in executing.items()
+                self.state.tasks[key]: duration
+                for key, duration in executing.items()
+                if key in self.state.tasks
             }
 
         ws._metrics = metrics
