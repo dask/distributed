@@ -3689,14 +3689,6 @@ class Worker(ServerNode):
     # Administrative #
     ##################
 
-    def get_process_memory(self) -> int:
-        """Sample process memory, as reported by the OS.
-        This one-liner function exists so that it can be easily mocked in unit tests,
-        as the OS allocating and releasing memory is highly volatile and a constant
-        source of flakiness.
-        """
-        return self.monitor.proc.memory_info().rss
-
     async def memory_monitor(self):
         """Track this process's memory usage and act accordingly
 
