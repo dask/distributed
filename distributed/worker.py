@@ -3689,6 +3689,14 @@ class Worker(ServerNode):
     # Administrative #
     ##################
 
+    def get_process_memory(self) -> int:
+        """Sample process memory, as reported by the OS.
+        This one-liner function exists so that it can be easily mocked in unit tests,
+        as the OS allocating and releasing memory is highly volatile and a constant
+        source of flakiness.
+        """
+        return self.monitor.proc.memory_info().rss
+
     async def memory_monitor(self):
         """Track this process's memory usage and act accordingly
 
@@ -3701,8 +3709,7 @@ class Worker(ServerNode):
         self._memory_monitoring = True
         total = 0
 
-        proc = self.monitor.proc
-        memory = proc.memory_info().rss
+        memory = self.get_process_memory()
         frac = memory / self.memory_limit
 
         def check_pause(memory):
@@ -3775,13 +3782,13 @@ class Worker(ServerNode):
                 count += 1
                 await asyncio.sleep(0)
 
-                memory = proc.memory_info().rss
+                memory = self.get_process_memory()
                 if total > need and memory > target:
                     # Issue a GC to ensure that the evicted data is actually
                     # freed from memory and taken into account by the monitor
                     # before trying to evict even more data.
                     self._throttled_gc.collect()
-                    memory = proc.memory_info().rss
+                    memory = self.get_process_memory()
 
             check_pause(memory)
             if count:

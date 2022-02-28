@@ -54,7 +54,6 @@ from distributed.utils_test import (
     gen_cluster,
     gen_test,
     inc,
-    mock_rss,
     mul,
     nodebug,
     slowinc,
@@ -1301,8 +1300,8 @@ async def test_spill_spill_threshold(c, s, a):
     Test that the spill threshold uses the process memory and not the managed memory
     reported by sizeof(), which may be inaccurate.
     """
+    a.get_process_memory = lambda: 800_000_000 if a.data.fast else 0
     x = c.submit(inc, 0, key="x")
-    mock_rss(a, 800e6)
     while not a.data.disk:
         await asyncio.sleep(0.01)
     assert await x == 1
@@ -1315,7 +1314,7 @@ async def test_spill_spill_threshold(c, s, a):
         # no target -> no hysteresis
         # Over-report managed memory to test that the automated LRU eviction based on
         # target is never triggered
-        (False, 10e9, 1),
+        (False, int(10e9), 1),
         # Under-report managed memory, so that we reach the spill threshold for process
         # memory without first reaching the target threshold for managed memory
         # target == spill -> no hysteresis
@@ -1345,27 +1344,29 @@ async def test_spill_hysteresis(c, s, memory_target_fraction, managed, expect_sp
         memory_spill_fraction=0.7,
         memory_pause_fraction=False,
     ) as a:
+        a.get_process_memory = lambda: 50_000_000 * len(a.data.fast)
+
         # Add 500MB (reported) process memory. Spilling must not happen.
         futures = [c.submit(C, pure=False) for _ in range(10)]
-        mock_rss(a, 500e6)
         await wait(futures)
         await asyncio.sleep(0.1)
         assert not a.data.disk
 
-        # Add another 250MB unamanaged memory. This must trigger the spilling.
-        mock_rss(a, 750e6)
+        # Add another 250MB unmanaged memory. This must trigger the spilling.
+        futures += [c.submit(C, pure=False) for _ in range(5)]
+        await wait(futures)
+
         # Wait until spilling starts. Then, wait until it stops.
         prev_n = 0
         while not a.data.disk or len(a.data.disk) > prev_n:
             prev_n = len(a.data.disk)
-            mock_rss(a, 250e6 + 50e6 * len(a.data.memory))
             await asyncio.sleep(0)
 
         assert len(a.data.disk) == expect_spilled
 
 
 @gen_cluster(
-    nthreads=[("", 2)],
+    nthreads=[("", 1)],
     client=True,
     worker_kwargs=dict(
         memory_limit="1000 MB",
@@ -1376,59 +1377,56 @@ async def test_spill_hysteresis(c, s, memory_target_fraction, managed, expect_sp
     ),
 )
 async def test_pause_executor(c, s, a):
-    def f(ev_f):
-        ev_f.wait()
+    mocked_rss = 0
+    a.get_process_memory = lambda: mocked_rss
 
-    def g(ev_g1, ev_g2):
-        ev_g1.wait()
-        # Add 900 MB unmanaged memory
-        w = get_worker()
-        mock_rss(w, 900e6)
-        ev_g2.wait()
-        mock_rss(w, 0)
+    # Task that is running when the worker pauses
+    ev_x = Event()
 
-    ev_f = Event()
-    ev_g1 = Event()
-    ev_g2 = Event()
+    def f(ev):
+        ev.wait()
+        return 1
 
-    # Tasks that are running when the worker pauses
-    x = c.submit(f, ev_f, key="x")
-    y = c.submit(g, ev_g1, ev_g2, key="y")
-    while a.executing_count != 2:
-        await asyncio.sleep(0.01)
-
-    # Task that is queued on the worker when the worker pauses
-    z = c.submit(inc, 0, key="z")
-    while "z" not in a.tasks:
+    x = c.submit(f, ev_x, key="x")
+    while a.executing_count != 1:
         await asyncio.sleep(0.01)
 
     with captured_logger(logging.getLogger("distributed.worker")) as logger:
-        # Hog the worker with 900MB memory
-        await ev_g1.set()
+        # Task that is queued on the worker when the worker pauses
+        y = c.submit(inc, 1, key="y")
+        while "y" not in a.tasks:
+            await asyncio.sleep(0.01)
+
+        # Hog the worker with 900MB unmanaged memory
+        mocked_rss = 900_000_000
         while s.workers[a.address].status != Status.paused:
             await asyncio.sleep(0.01)
 
         assert "Pausing worker" in logger.getvalue()
 
         # Task that is queued on the scheduler when the worker pauses.
-        # It is not sent to the worker
-        w = c.submit(inc, 0, key="w")
-        while "w" not in s.tasks or s.tasks["w"].state != "no-worker":
+        # It is not sent to the worker.
+        z = c.submit(inc, 2, key="z")
+        while "z" not in s.tasks or s.tasks["z"].state != "no-worker":
             await asyncio.sleep(0.01)
 
-        # Unlock a slot on the worker. It won't be used.
-        await ev_f.set()
-        await x
+        # Test that a task that already started when the worker paused can complete
+        # and its output can be retrieved. Also test that the now free slot won't be
+        # used by other tasks.
+        await ev_x.set()
+        assert await x == 1
         await asyncio.sleep(0.05)
 
-        assert a.executing_count == 1
+        assert a.executing_count == 0
         assert len(a.ready) == 1
-        assert a.tasks["z"].state == "ready"
-        assert "w" not in a.tasks
+        assert a.tasks["y"].state == "ready"
+        assert "z" not in a.tasks
 
-        # Release the memory
-        await ev_g2.set()
-        await wait([y, z, w])
+        # Release the memory. Tasks that were queued on the worker are executed.
+        # Tasks that were stuck on the scheduler are sent to the worker and executed.
+        mocked_rss = 0
+        assert await y == 2
+        assert await z == 3
 
         assert a.status == Status.running
         assert "Resuming worker" in logger.getvalue()

@@ -20,14 +20,13 @@ import tempfile
 import threading
 import uuid
 import weakref
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 from collections.abc import Callable
 from contextlib import contextmanager, nullcontext, suppress
 from glob import glob
 from itertools import count
 from time import sleep
 from typing import Any, Literal
-from unittest.mock import MagicMock
 
 from distributed.compatibility import MACOS
 from distributed.scheduler import Scheduler
@@ -1966,20 +1965,3 @@ def has_pytestmark(test_func: Callable, name: str) -> bool:
     """
     marks = getattr(test_func, "pytestmark", [])
     return any(mark.name == name for mark in marks)
-
-
-# Variant of psutil._pslinux.pmem, psutil._psosx.pmem, psutil._pswindows.pmem
-pmem = namedtuple("pmem", "rss")
-
-
-def mock_rss(dask_worker: Worker, nbytes: float) -> None:
-    """Mock all the process memory readings on a worker. Does not impact other workers.
-
-    Usage:
-
-    When using Workers:
-    >>> mock_rss(a, 100e6)
-    When using Nannies:
-    >>> await client.run(mock_rss, nbytes=100e6, workers=[a.worker_address])
-    """
-    dask_worker.monitor.proc.memory_info = MagicMock(return_value=pmem(int(nbytes)))
