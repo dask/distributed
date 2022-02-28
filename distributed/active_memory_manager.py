@@ -467,7 +467,7 @@ class ReduceReplicas(ActiveMemoryManagerPolicy):
         nkeys = 0
         ndrop = 0
 
-        for ts in self.manager.scheduler.replicated_tasks:
+        for ts in self.manager.scheduler.state.replicated_tasks:
             desired_replicas = 1  # TODO have a marker on TaskState
 
             # If a dependent task has not been assigned to a worker yet, err on the side
