@@ -37,7 +37,7 @@ async def test_submit_from_worker(c, s, a, b):
     assert xx == 10 + 1 + (10 + 1) * 2
     assert yy == 20 + 1 + (20 + 1) * 2
 
-    assert len(s.transition_log) > 10
+    assert len(s.state.transition_log) > 10
     assert len([id for id in s.wants_what if id.lower().startswith("client")]) == 1
 
 
