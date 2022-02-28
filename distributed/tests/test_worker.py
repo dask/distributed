@@ -1300,7 +1300,7 @@ async def test_spill_spill_threshold(c, s, a):
     Test that the spill threshold uses the process memory and not the managed memory
     reported by sizeof(), which may be inaccurate.
     """
-    a.get_process_memory = lambda: 800_000_000 if a.data.fast else 0
+    a.monitor.get_process_memory = lambda: 800_000_000 if a.data.fast else 0
     x = c.submit(inc, 0, key="x")
     while not a.data.disk:
         await asyncio.sleep(0.01)
@@ -1344,7 +1344,7 @@ async def test_spill_hysteresis(c, s, memory_target_fraction, managed, expect_sp
         memory_spill_fraction=0.7,
         memory_pause_fraction=False,
     ) as a:
-        a.get_process_memory = lambda: 50_000_000 * len(a.data.fast)
+        a.monitor.get_process_memory = lambda: 50_000_000 * len(a.data.fast)
 
         # Add 500MB (reported) process memory. Spilling must not happen.
         futures = [c.submit(C, pure=False) for _ in range(10)]
@@ -1378,7 +1378,7 @@ async def test_spill_hysteresis(c, s, memory_target_fraction, managed, expect_sp
 )
 async def test_pause_executor(c, s, a):
     mocked_rss = 0
-    a.get_process_memory = lambda: mocked_rss
+    a.monitor.get_process_memory = lambda: mocked_rss
 
     # Task that is running when the worker pauses
     ev_x = Event()

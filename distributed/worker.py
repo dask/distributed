@@ -3709,7 +3709,7 @@ class Worker(ServerNode):
         self._memory_monitoring = True
         total = 0
 
-        memory = self.get_process_memory()
+        memory = self.monitor.get_process_memory()
         frac = memory / self.memory_limit
 
         def check_pause(memory):
@@ -3782,13 +3782,13 @@ class Worker(ServerNode):
                 count += 1
                 await asyncio.sleep(0)
 
-                memory = self.get_process_memory()
+                memory = self.monitor.get_process_memory()
                 if total > need and memory > target:
                     # Issue a GC to ensure that the evicted data is actually
                     # freed from memory and taken into account by the monitor
                     # before trying to evict even more data.
                     self._throttled_gc.collect()
-                    memory = self.get_process_memory()
+                    memory = self.monitor.get_process_memory()
 
             check_pause(memory)
             if count:
