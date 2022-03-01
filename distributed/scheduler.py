@@ -2572,8 +2572,8 @@ class SchedulerState:
 
             self.check_idle_saturated(ws)
 
-            _add_to_memory(
-                self, ts, ws, recommendations, client_msgs, type=type, typename=typename
+            self._add_to_memory(
+                ts, ws, recommendations, client_msgs, type=type, typename=typename
             )
             ts.state = "memory"
 
@@ -2585,6 +2585,235 @@ class SchedulerState:
 
                 pdb.set_trace()
             raise
+
+    # Utility methods related to transitions
+
+    @cfunc
+    @exceptval(check=False)
+    def _remove_from_processing(self, ts: TaskState) -> str:  # -> str | None
+        """
+        Remove *ts* from the set of processing tasks.
+
+        See also ``Scheduler.set_duration_estimate``
+        """
+        ws: WorkerState = ts._processing_on
+        ts._processing_on = None  # type: ignore
+        w: str = ws._address
+
+        if w not in self._workers_dv:  # may have been removed
+            return None  # type: ignore
+
+        duration: double = ws._processing.pop(ts)
+        if not ws._processing:
+            self._total_occupancy -= ws._occupancy
+            ws._occupancy = 0
+        else:
+            self._total_occupancy -= duration
+            ws._occupancy -= duration
+
+        self.check_idle_saturated(ws)
+        self.release_resources(ts, ws)
+
+        return w
+
+    @cfunc
+    @exceptval(check=False)
+    def _add_to_memory(
+        self,
+        ts: TaskState,
+        ws: WorkerState,
+        recommendations: dict,
+        client_msgs: dict,
+        type=None,
+        typename: str = None,
+    ):
+        """
+        Add *ts* to the set of in-memory tasks.
+        """
+        if self._validate:
+            assert ts not in ws._has_what
+
+        self.add_replica(ts, ws)
+
+        deps: list = list(ts._dependents)
+        if len(deps) > 1:
+            deps.sort(key=operator.attrgetter("priority"), reverse=True)
+
+        dts: TaskState
+        s: set
+        for dts in deps:
+            s = dts._waiting_on
+            if ts in s:
+                s.discard(ts)
+                if not s:  # new task ready to run
+                    recommendations[dts._key] = "processing"
+
+        for dts in ts._dependencies:
+            s = dts._waiters
+            s.discard(ts)
+            if not s and not dts._who_wants:
+                recommendations[dts._key] = "released"
+
+        report_msg: dict = {}
+        cs: ClientState
+        if not ts._waiters and not ts._who_wants:
+            recommendations[ts._key] = "released"
+        else:
+            report_msg["op"] = "key-in-memory"
+            report_msg["key"] = ts._key
+            if type is not None:
+                report_msg["type"] = type
+
+            for cs in ts._who_wants:
+                client_msgs[cs._client_key] = [report_msg]
+
+        ts.state = "memory"
+        ts._type = typename  # type: ignore
+        ts._group._types.add(typename)
+
+        cs = self._clients["fire-and-forget"]
+        if ts in cs._wants_what:
+            self._client_releases_keys(
+                cs=cs,
+                keys=[ts._key],
+                recommendations=recommendations,
+            )
+
+    @cfunc
+    @exceptval(check=False)
+    def _propagate_forgotten(
+        self, ts: TaskState, recommendations: dict, worker_msgs: dict
+    ):
+        ts.state = "forgotten"
+        key: str = ts._key
+        dts: TaskState
+        for dts in ts._dependents:
+            dts._has_lost_dependencies = True
+            dts._dependencies.remove(ts)
+            dts._waiting_on.discard(ts)
+            if dts._state not in ("memory", "erred"):
+                # Cannot compute task anymore
+                recommendations[dts._key] = "forgotten"
+        ts._dependents.clear()
+        ts._waiters.clear()
+
+        for dts in ts._dependencies:
+            dts._dependents.remove(ts)
+            dts._waiters.discard(ts)
+            if not dts._dependents and not dts._who_wants:
+                # Task not needed anymore
+                assert dts is not ts
+                recommendations[dts._key] = "forgotten"
+        ts._dependencies.clear()
+        ts._waiting_on.clear()
+
+        ws: WorkerState
+        for ws in ts._who_has:
+            w: str = ws._address
+            if w in self._workers_dv:  # in case worker has died
+                worker_msgs[w] = [
+                    {
+                        "op": "free-keys",
+                        "keys": [key],
+                        "stimulus_id": f"propagate-forgotten-{time()}",
+                    }
+                ]
+        self.remove_all_replicas(ts)
+
+    @ccall
+    @exceptval(check=False)
+    def _client_releases_keys(self, keys: list, cs: ClientState, recommendations: dict):
+        """Remove keys from client desired list"""
+        logger.debug("Client %s releases keys: %s", cs._client_key, keys)
+        ts: TaskState
+        for key in keys:
+            ts = self._tasks.get(key)  # type: ignore
+            if ts is not None and ts in cs._wants_what:
+                cs._wants_what.remove(ts)
+                ts._who_wants.remove(cs)
+                if not ts._who_wants:
+                    if not ts._dependents:
+                        # No live dependents, can forget
+                        recommendations[ts._key] = "forgotten"
+                    elif ts._state != "erred" and not ts._waiters:
+                        recommendations[ts._key] = "released"
+
+    # Message building functions for communication
+
+    @ccall
+    @exceptval(check=False)
+    def _task_to_msg(self, ts: TaskState, duration: double = -1) -> dict:
+        """Convert a single computational task to a message"""
+        ws: WorkerState
+        dts: TaskState
+
+        # FIXME: The duration attribute is not used on worker. We could safe ourselves the time to compute and submit this
+        if duration < 0:
+            duration = self.get_task_duration(ts)
+
+        msg: dict = {
+            "op": "compute-task",
+            "key": ts._key,
+            "priority": ts._priority,
+            "duration": duration,
+            "stimulus_id": f"compute-task-{time()}",
+            "who_has": {},
+        }
+        if ts._resource_restrictions:
+            msg["resource_restrictions"] = ts._resource_restrictions
+        if ts._actor:
+            msg["actor"] = True
+
+        deps: set = ts._dependencies
+        if deps:
+            msg["who_has"] = {
+                dts._key: [ws._address for ws in dts._who_has] for dts in deps
+            }
+            msg["nbytes"] = {dts._key: dts._nbytes for dts in deps}
+
+            if self._validate:
+                assert all(msg["who_has"].values())
+
+        task = ts._run_spec
+        if type(task) is dict:
+            msg.update(task)
+        else:
+            msg["task"] = task
+
+        if ts._annotations:
+            msg["annotations"] = ts._annotations
+
+        return msg
+
+    @ccall
+    @exceptval(check=False)
+    def _task_to_report_msg(self, ts: TaskState) -> dict:  # -> dict | None
+        if ts._state == "forgotten":
+            return {"op": "cancelled-key", "key": ts._key}
+        elif ts._state == "memory":
+            return {"op": "key-in-memory", "key": ts._key}
+        elif ts._state == "erred":
+            failing_ts: TaskState = ts._exception_blame
+            return {
+                "op": "task-erred",
+                "key": ts._key,
+                "exception": failing_ts._exception,
+                "traceback": failing_ts._traceback,
+            }
+        else:
+            return None  # type: ignore
+
+    @cfunc
+    @exceptval(check=False)
+    def _task_to_client_msgs(self, ts: TaskState) -> dict:
+        if ts._who_wants:
+            report_msg: dict = self._task_to_report_msg(ts)
+            if report_msg is not None:
+                cs: ClientState
+                return {cs._client_key: [report_msg] for cs in ts._who_wants}
+        return {}
+
+    # Other transition related functions
 
     @ccall
     @exceptval(check=False)
@@ -2747,7 +2976,7 @@ class SchedulerState:
 
             # logger.debug("Send job to worker: %s, %s", worker, key)
 
-            worker_msgs[worker] = [_task_to_msg(self, ts)]
+            worker_msgs[worker] = [self._task_to_msg(ts)]
 
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
@@ -2780,8 +3009,8 @@ class SchedulerState:
 
             self.check_idle_saturated(ws)
 
-            _add_to_memory(
-                self, ts, ws, recommendations, client_msgs, type=type, typename=typename
+            self._add_to_memory(
+                ts, ws, recommendations, client_msgs, type=type, typename=typename
             )
 
             if self._validate:
@@ -2875,10 +3104,10 @@ class SchedulerState:
             if nbytes is not None:
                 ts.set_nbytes(nbytes)
 
-            _remove_from_processing(self, ts)
+            self._remove_from_processing(ts)
 
-            _add_to_memory(
-                self, ts, ws, recommendations, client_msgs, type=type, typename=typename
+            self._add_to_memory(
+                ts, ws, recommendations, client_msgs, type=type, typename=typename
             )
 
             if self._validate:
@@ -3108,7 +3337,7 @@ class SchedulerState:
                 assert not ts._waiting_on
                 assert self._tasks[key].state == "processing"
 
-            w: str = _remove_from_processing(self, ts)
+            w: str = self._remove_from_processing(ts)
             if w:
                 worker_msgs[w] = [
                     {
@@ -3175,7 +3404,7 @@ class SchedulerState:
                 ws = ts._processing_on
                 ws._actors.remove(ts)
 
-            w = _remove_from_processing(self, ts)
+            w = self._remove_from_processing(ts)
 
             ts._erred_on.add(w or worker)
             if exception is not None:
@@ -3215,8 +3444,7 @@ class SchedulerState:
 
             cs = self._clients["fire-and-forget"]
             if ts in cs._wants_what:
-                _client_releases_keys(
-                    self,
+                self._client_releases_keys(
                     cs=cs,
                     keys=[key],
                     recommendations=recommendations,
@@ -3305,9 +3533,9 @@ class SchedulerState:
                 for ws in ts._who_has:
                     ws._actors.discard(ts)
 
-            _propagate_forgotten(self, ts, recommendations, worker_msgs)
+            self._propagate_forgotten(ts, recommendations, worker_msgs)
 
-            client_msgs = _task_to_client_msgs(self, ts)
+            client_msgs = self._task_to_client_msgs(ts)
             self.remove_key(key)
 
             return recommendations, client_msgs, worker_msgs
@@ -3343,9 +3571,9 @@ class SchedulerState:
                 else:
                     assert 0, (ts,)
 
-            _propagate_forgotten(self, ts, recommendations, worker_msgs)
+            self._propagate_forgotten(ts, recommendations, worker_msgs)
 
-            client_msgs = _task_to_client_msgs(self, ts)
+            client_msgs = self._task_to_client_msgs(ts)
             self.remove_key(key)
 
             return recommendations, client_msgs, worker_msgs
@@ -5444,8 +5672,8 @@ class Scheduler(ServerNode):
         cs: ClientState = self.state.clients[client]
         recommendations: dict = {}
 
-        _client_releases_keys(
-            self.state, keys=keys, cs=cs, recommendations=recommendations
+        self.state._client_releases_keys(
+            keys=keys, cs=cs, recommendations=recommendations
         )
         self.transitions(recommendations)
 
@@ -5588,7 +5816,7 @@ class Scheduler(ServerNode):
     def send_task_to_worker(self, worker, ts: TaskState, duration: double = -1):
         """Send a single computational task to a worker"""
         try:
-            msg: dict = _task_to_msg(self.state, ts, duration)
+            msg: dict = self.state._task_to_msg(ts, duration)
             self.worker_send(worker, msg)
         except Exception as e:
             logger.exception(e)
@@ -7196,7 +7424,7 @@ class Scheduler(ServerNode):
         if ts is None:
             report_msg = {"op": "cancelled-key", "key": key}
         else:
-            report_msg = _task_to_report_msg(self.state, ts)
+            report_msg = self.state._task_to_report_msg(ts)
         if report_msg is not None:
             self.report(report_msg, ts=ts, client=client)
 
@@ -8156,241 +8384,6 @@ class Scheduler(ServerNode):
                 "stimulus_id": stimulus_id,
             }
         )
-
-
-@cfunc
-@exceptval(check=False)
-def _remove_from_processing(
-    state: SchedulerState, ts: TaskState
-) -> str:  # -> str | None
-    """
-    Remove *ts* from the set of processing tasks.
-
-    See also ``Scheduler.set_duration_estimate``
-    """
-    ws: WorkerState = ts._processing_on
-    ts._processing_on = None  # type: ignore
-    w: str = ws._address
-
-    if w not in state._workers_dv:  # may have been removed
-        return None  # type: ignore
-
-    duration: double = ws._processing.pop(ts)
-    if not ws._processing:
-        state._total_occupancy -= ws._occupancy
-        ws._occupancy = 0
-    else:
-        state._total_occupancy -= duration
-        ws._occupancy -= duration
-
-    state.check_idle_saturated(ws)
-    state.release_resources(ts, ws)
-
-    return w
-
-
-@cfunc
-@exceptval(check=False)
-def _add_to_memory(
-    state: SchedulerState,
-    ts: TaskState,
-    ws: WorkerState,
-    recommendations: dict,
-    client_msgs: dict,
-    type=None,
-    typename: str = None,
-):
-    """
-    Add *ts* to the set of in-memory tasks.
-    """
-    if state._validate:
-        assert ts not in ws._has_what
-
-    state.add_replica(ts, ws)
-
-    deps: list = list(ts._dependents)
-    if len(deps) > 1:
-        deps.sort(key=operator.attrgetter("priority"), reverse=True)
-
-    dts: TaskState
-    s: set
-    for dts in deps:
-        s = dts._waiting_on
-        if ts in s:
-            s.discard(ts)
-            if not s:  # new task ready to run
-                recommendations[dts._key] = "processing"
-
-    for dts in ts._dependencies:
-        s = dts._waiters
-        s.discard(ts)
-        if not s and not dts._who_wants:
-            recommendations[dts._key] = "released"
-
-    report_msg: dict = {}
-    cs: ClientState
-    if not ts._waiters and not ts._who_wants:
-        recommendations[ts._key] = "released"
-    else:
-        report_msg["op"] = "key-in-memory"
-        report_msg["key"] = ts._key
-        if type is not None:
-            report_msg["type"] = type
-
-        for cs in ts._who_wants:
-            client_msgs[cs._client_key] = [report_msg]
-
-    ts.state = "memory"
-    ts._type = typename  # type: ignore
-    ts._group._types.add(typename)
-
-    cs = state._clients["fire-and-forget"]
-    if ts in cs._wants_what:
-        _client_releases_keys(
-            state,
-            cs=cs,
-            keys=[ts._key],
-            recommendations=recommendations,
-        )
-
-
-@cfunc
-@exceptval(check=False)
-def _propagate_forgotten(
-    state: SchedulerState, ts: TaskState, recommendations: dict, worker_msgs: dict
-):
-    ts.state = "forgotten"
-    key: str = ts._key
-    dts: TaskState
-    for dts in ts._dependents:
-        dts._has_lost_dependencies = True
-        dts._dependencies.remove(ts)
-        dts._waiting_on.discard(ts)
-        if dts._state not in ("memory", "erred"):
-            # Cannot compute task anymore
-            recommendations[dts._key] = "forgotten"
-    ts._dependents.clear()
-    ts._waiters.clear()
-
-    for dts in ts._dependencies:
-        dts._dependents.remove(ts)
-        dts._waiters.discard(ts)
-        if not dts._dependents and not dts._who_wants:
-            # Task not needed anymore
-            assert dts is not ts
-            recommendations[dts._key] = "forgotten"
-    ts._dependencies.clear()
-    ts._waiting_on.clear()
-
-    ws: WorkerState
-    for ws in ts._who_has:
-        w: str = ws._address
-        if w in state._workers_dv:  # in case worker has died
-            worker_msgs[w] = [
-                {
-                    "op": "free-keys",
-                    "keys": [key],
-                    "stimulus_id": f"propagate-forgotten-{time()}",
-                }
-            ]
-    state.remove_all_replicas(ts)
-
-
-@cfunc
-@exceptval(check=False)
-def _client_releases_keys(
-    state: SchedulerState, keys: list, cs: ClientState, recommendations: dict
-):
-    """Remove keys from client desired list"""
-    logger.debug("Client %s releases keys: %s", cs._client_key, keys)
-    ts: TaskState
-    for key in keys:
-        ts = state._tasks.get(key)  # type: ignore
-        if ts is not None and ts in cs._wants_what:
-            cs._wants_what.remove(ts)
-            ts._who_wants.remove(cs)
-            if not ts._who_wants:
-                if not ts._dependents:
-                    # No live dependents, can forget
-                    recommendations[ts._key] = "forgotten"
-                elif ts._state != "erred" and not ts._waiters:
-                    recommendations[ts._key] = "released"
-
-
-@cfunc
-@exceptval(check=False)
-def _task_to_msg(state: SchedulerState, ts: TaskState, duration: double = -1) -> dict:
-    """Convert a single computational task to a message"""
-    ws: WorkerState
-    dts: TaskState
-
-    # FIXME: The duration attribute is not used on worker. We could safe ourselves the time to compute and submit this
-    if duration < 0:
-        duration = state.get_task_duration(ts)
-
-    msg: dict = {
-        "op": "compute-task",
-        "key": ts._key,
-        "priority": ts._priority,
-        "duration": duration,
-        "stimulus_id": f"compute-task-{time()}",
-        "who_has": {},
-    }
-    if ts._resource_restrictions:
-        msg["resource_restrictions"] = ts._resource_restrictions
-    if ts._actor:
-        msg["actor"] = True
-
-    deps: set = ts._dependencies
-    if deps:
-        msg["who_has"] = {
-            dts._key: [ws._address for ws in dts._who_has] for dts in deps
-        }
-        msg["nbytes"] = {dts._key: dts._nbytes for dts in deps}
-
-        if state._validate:
-            assert all(msg["who_has"].values())
-
-    task = ts._run_spec
-    if type(task) is dict:
-        msg.update(task)
-    else:
-        msg["task"] = task
-
-    if ts._annotations:
-        msg["annotations"] = ts._annotations
-
-    return msg
-
-
-@cfunc
-@exceptval(check=False)
-def _task_to_report_msg(state: SchedulerState, ts: TaskState) -> dict:  # -> dict | None
-    if ts._state == "forgotten":
-        return {"op": "cancelled-key", "key": ts._key}
-    elif ts._state == "memory":
-        return {"op": "key-in-memory", "key": ts._key}
-    elif ts._state == "erred":
-        failing_ts: TaskState = ts._exception_blame
-        return {
-            "op": "task-erred",
-            "key": ts._key,
-            "exception": failing_ts._exception,
-            "traceback": failing_ts._traceback,
-        }
-    else:
-        return None  # type: ignore
-
-
-@cfunc
-@exceptval(check=False)
-def _task_to_client_msgs(state: SchedulerState, ts: TaskState) -> dict:
-    if ts._who_wants:
-        report_msg: dict = _task_to_report_msg(state, ts)
-        if report_msg is not None:
-            cs: ClientState
-            return {cs._client_key: [report_msg] for cs in ts._who_wants}
-    return {}
 
 
 @cfunc
