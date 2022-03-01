@@ -1,19 +1,22 @@
 import logging
 from inspect import isawaitable
+from typing import TYPE_CHECKING
 
 from tornado.ioloop import IOLoop
 
 import dask.config
-from dask.utils import parse_timedelta
 
 from ..protocol import pickle
-from ..utils import log_errors
+from ..utils import log_errors, parse_timedelta
 from .adaptive_core import AdaptiveCore
+
+if TYPE_CHECKING:
+    from ..scheduler import WorkerState
 
 logger = logging.getLogger(__name__)
 
 
-class Adaptive(AdaptiveCore):
+class OccupancyAdaptive(AdaptiveCore):
     '''
     Adaptively allocate workers based on scheduler load.  A superclass.
 
@@ -212,3 +215,197 @@ class Adaptive(AdaptiveCore):
             return self.cluster.loop
         else:
             return IOLoop.current()
+
+
+class TaskAdaptive(AdaptiveCore):
+    """
+    In contrast with ``OccupancyAdaptive`` which allocates workers based
+    on estimated task durations, ``TaskAdaptive`` allocates workers based
+    on the number of unblocked tasks.
+
+    Use this class when running tasks that are labelled "unknown" or if
+    they have highly variable durations.
+
+    """
+
+    def __init__(
+        self,
+        cluster=None,
+        interval=None,
+        minimum=None,
+        maximum=None,
+        wait_count=None,
+        worker_key=None,
+        **kwargs,
+    ):
+        """
+
+        Parameters
+        ----------
+        cluster: object
+            Must have scale and scale_down methods/coroutines
+        interval : timedelta or str, default "1000 ms"
+            Milliseconds between checks
+        wait_count: int, default 3
+            Number of consecutive times that a worker should be suggested for
+            removal before we remove it.
+        worker_key: Callable[WorkerState]
+            Function to group workers together when scaling down
+            See Scheduler.workers_to_close for more information
+        minimum: int
+            Minimum number of workers to keep around
+        maximum: int
+            Maximum number of workers to keep around
+        **kwargs:
+            Extra parameters to pass to Scheduler.workers_to_close
+        """
+        self.cluster = cluster
+        self.worker_key = worker_key
+        self._workers_to_close_kwargs = kwargs
+
+        if interval is None:
+            interval = dask.config.get("distributed.adaptive.interval")
+        if minimum is None:
+            minimum = dask.config.get("distributed.adaptive.minimum")
+        if maximum is None:
+            maximum = dask.config.get("distributed.adaptive.maximum")
+        if wait_count is None:
+            wait_count = dask.config.get("distributed.adaptive.wait-count")
+
+        logger.info("Adaptive scaling started: minimum=%s maximum=%s", minimum, maximum)
+
+        super().__init__(
+            minimum=minimum, maximum=maximum, wait_count=wait_count, interval=interval
+        )
+
+    @property
+    def scheduler(self):
+        return self.cluster.scheduler_comm
+
+    @property
+    def plan(self):
+        return self.cluster.plan
+
+    @property
+    def requested(self):
+        return self.cluster.requested
+
+    @property
+    def observed(self):
+        return self.cluster.observed
+
+    async def recommendations(self, target: int) -> dict:
+        """
+        Make scale up/down recommendations based on current state and target
+        """
+        plan = self.plan
+
+        if target == len(plan):
+            self.close_counts.clear()
+            return {"status": "same"}
+
+        elif target > len(plan):
+            self.close_counts.clear()
+            return {"status": "up", "n": target}
+
+        else:
+            to_close: set[WorkerState] = set()
+            if target < len(plan) - len(to_close):
+                L = await self.workers_to_close(target=target)
+                to_close.update(L)
+
+            firmly_close = set()
+            for w in to_close:
+                self.close_counts[w] += 1
+                if self.close_counts[w] >= self.wait_count:
+                    firmly_close.add(w)
+
+            for k in list(self.close_counts):  # clear out unseen keys
+                if k in firmly_close or k not in to_close:
+                    del self.close_counts[k]
+
+            if firmly_close:
+                return {"status": "down", "workers": list(firmly_close)}
+            else:
+                return {"status": "same"}
+
+    async def target(self):
+        """
+        Determine target number of workers that should exist.
+
+        Notes
+        -----
+        ``Adaptive.target`` dispatches to Scheduler.adaptive_target(),
+        but may be overridden in subclasses.
+
+        Returns
+        -------
+        Target number of workers
+        """
+        # The target number of workers is the number of unblocked tasks
+        unblocked_tasks = [
+            task
+            for task in self.cluster.scheduler.tasks.values()
+            if (
+                task.state == "no-worker"
+                or task.state == "waiting"
+                or task.state == "processing"
+            )
+        ]
+        target = len(unblocked_tasks)
+
+        # Look ahead at future tasks in the DAG
+        future_pending_tasks = []
+        for task in unblocked_tasks:
+            future_pending_tasks.extend(task.dependents)
+
+        if len(future_pending_tasks) > 2 * len(self.cluster.scheduler.workers):
+            target *= 2
+
+        # Check if workers have enough memory to run tasks
+        limit_bytes = {
+            addr: ws.memory_limit for addr, ws in self.cluster.scheduler.workers.items()
+        }
+        worker_bytes = [ws.nbytes for ws in self.cluster.scheduler.workers.values()]
+        limit = sum(limit_bytes.values())
+        used = sum(worker_bytes)
+        memory = 0
+        if used > 0.6 * limit and limit > 0:
+            memory = 2 * len(self.cluster.workers)
+
+        target = max(memory, target)
+
+        if target != len(self.cluster.scheduler.workers):
+            logger.debug(f"Target number of workers: {target}")
+
+        return target
+
+    async def scale_down(self, workers):
+        if not workers:
+            return
+        with log_errors():
+            logger.info("Retiring workers %s", workers)
+            # Ask scheduler to cleanly retire workers
+            await self.scheduler.retire_workers(
+                names=workers,
+                remove=True,
+                close_workers=True,
+            )
+
+            # close workers more forcefully
+            f = self.cluster.scale_down(workers)
+            if isawaitable(f):
+                await f
+
+    async def scale_up(self, n):
+        f = self.cluster.scale(n)
+        if isawaitable(f):
+            await f
+
+    @property
+    def loop(self):
+        return self.cluster.loop
+
+
+# Default / Backwards compat
+Adaptive = OccupancyAdaptive

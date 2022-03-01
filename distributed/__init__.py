@@ -22,7 +22,7 @@ from .client import (
     wait,
 )
 from .core import Status, connect, rpc
-from .deploy import Adaptive, LocalCluster, SpecCluster, SSHCluster
+from .deploy import Adaptive, LocalCluster, SpecCluster, SSHCluster, TaskAdaptive
 from .diagnostics.plugin import (
     Environ,
     NannyPlugin,
