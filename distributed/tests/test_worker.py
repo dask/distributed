@@ -37,7 +37,7 @@ from distributed import (
 )
 from distributed.comm.registry import backends
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import CommClosedError, Status, rpc
+from distributed.core import CommClosedError, ConnectionPool, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
@@ -3805,3 +3805,56 @@ def test_unique_task_heap():
     assert heap.pop() == ts
 
     assert repr(heap) == "<UniqueTaskHeap: 0 items>"
+
+
+@gen_test(
+    # The timeout value here must be strictly larger than the default value for
+    # the timeout in `Worker.close`. The entire test should finish in <1s if
+    # everything works as intended but we want to make sure to not obfuscate
+    # another timeout therefore we increase this number.
+    timeout=60,
+)
+async def test_do_not_block_event_loop_during_shutdown():
+    async with Scheduler() as s:
+        async with Client(s.address, asynchronous=True) as c:
+            block_handler = asyncio.Event()
+            block_handler.clear()
+            called_handler = asyncio.Event()
+            called_handler.clear()
+            timeout_hit = False
+
+            async def block_echo(x):
+                nonlocal timeout_hit
+                called_handler.set()
+                try:
+                    await asyncio.wait_for(block_handler.wait(), 0.1)
+                except TimeoutError:
+                    timeout_hit = True
+                    x = False
+                return x
+
+            s.handlers["block_echo"] = block_echo
+            w = await Worker(s.address)
+            addr = s.address
+
+            def f(x):
+                # This function calls into a handler on the remote which is
+                # blocked. This test eventually times out and the function
+                # should return and finish successfully, unblocking the
+                # ThreadPool
+                loop = get_worker().loop
+                from distributed.utils import sync
+
+                async def _():
+                    pool = await ConnectionPool()
+                    scheduler_rpc = pool(addr)
+                    assert not await scheduler_rpc.block_echo(x=x)
+
+                return sync(loop, _)
+
+            fut = c.submit(f, True)
+            await called_handler.wait()
+            # executor_wait is True by default but we want to be explicit here
+            await w.close(executor_wait=True)
+
+            assert timeout_hit

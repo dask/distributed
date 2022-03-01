@@ -45,6 +45,8 @@ from dask.utils import (
     typename,
 )
 
+from distributed.compatibility import to_thread
+
 from . import comm, preloading, profile, system, utils
 from .batched import BatchedSend
 from .comm import Comm, connect, get_address_host
@@ -1735,11 +1737,19 @@ class Worker(ServerNode):
             for executor in self.executors.values():
                 if executor is utils._offload_executor:
                     continue  # Never shutdown the offload executor
-                if isinstance(executor, ThreadPoolExecutor):
-                    executor._work_queue.queue.clear()
-                    executor.shutdown(wait=executor_wait, timeout=timeout)
-                else:
-                    executor.shutdown(wait=executor_wait)
+
+                def _close():
+                    if isinstance(executor, ThreadPoolExecutor):
+                        executor._work_queue.queue.clear()
+                        executor.shutdown(wait=executor_wait, timeout=timeout)
+                    else:
+                        executor.shutdown(wait=executor_wait)
+
+                # Waiting for the shutdown can block the event loop causing
+                # weird deadlocks particularly if the task that is executing in
+                # the thread is waiting for a server reply, e.g. when using
+                # worker clients, semaphores, etc.
+                await to_thread(_close)
 
             self.stop()
             await self.rpc.close()
