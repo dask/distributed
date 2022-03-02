@@ -8527,9 +8527,6 @@ def validate_state(tasks, workers, clients):
             )
 
 
-_round_robin = [0]
-
-
 def heartbeat_interval(n):
     """
     Interval in seconds that we desire heartbeats based on number of workers
