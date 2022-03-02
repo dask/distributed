@@ -3807,8 +3807,8 @@ def test_unique_task_heap():
     assert repr(heap) == "<UniqueTaskHeap: 0 items>"
 
 
-@gen_cluster(client=True, nthreads=[])
-async def test_do_not_block_event_loop_during_shutdown(c, s):
+@gen_cluster(nthreads=[])
+async def test_do_not_block_event_loop_during_shutdown(s):
     loop = asyncio.get_running_loop()
     called_handler = threading.Event()
     block_handler = threading.Event()
