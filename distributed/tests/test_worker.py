@@ -43,7 +43,7 @@ from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
-from distributed.utils import TimeoutError
+from distributed.utils import TimeoutError, sync
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _LockedCommPool,
@@ -3821,16 +3821,15 @@ async def test_do_not_block_event_loop_during_shutdown():
             block_handler.clear()
             called_handler = asyncio.Event()
             called_handler.clear()
-            timeout_hit = False
+            handler_continued = False
 
             async def block_echo(x):
-                nonlocal timeout_hit
+                nonlocal handler_continued
                 called_handler.set()
-                try:
-                    await asyncio.wait_for(block_handler.wait(), 0.1)
-                except TimeoutError:
-                    timeout_hit = True
-                    x = False
+                await asyncio.sleep(0.1)
+                # If the event loop is blocked, we'll never hit this before the
+                # scheduler is closed
+                handler_continued = True
                 return x
 
             s.handlers["block_echo"] = block_echo
@@ -3843,18 +3842,20 @@ async def test_do_not_block_event_loop_during_shutdown():
                 # should return and finish successfully, unblocking the
                 # ThreadPool
                 loop = get_worker().loop
-                from distributed.utils import sync
 
                 async def _():
                     pool = await ConnectionPool()
                     scheduler_rpc = pool(addr)
-                    assert not await scheduler_rpc.block_echo(x=x)
+                    assert await scheduler_rpc.block_echo(x=x)
 
-                return sync(loop, _)
+                sync(loop, _)
 
+            # We can never receive the result of the future after the worker
+            # closes but we'll need to keep a ref to the future to not have it
+            # cancelled immediately
             fut = c.submit(f, True)
             await called_handler.wait()
             # executor_wait is True by default but we want to be explicit here
             await w.close(executor_wait=True)
-
-            assert timeout_hit
+            del fut
+            assert handler_continued

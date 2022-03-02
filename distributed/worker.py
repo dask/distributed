@@ -45,13 +45,12 @@ from dask.utils import (
     typename,
 )
 
-from distributed.compatibility import to_thread
-
 from . import comm, preloading, profile, system, utils
 from .batched import BatchedSend
 from .comm import Comm, connect, get_address_host
 from .comm.addressing import address_from_user_args, parse_address
 from .comm.utils import OFFLOAD_THRESHOLD
+from .compatibility import to_thread
 from .core import (
     CommClosedError,
     Status,
