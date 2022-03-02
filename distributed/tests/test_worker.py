@@ -37,13 +37,13 @@ from distributed import (
 )
 from distributed.comm.registry import backends
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import CommClosedError, ConnectionPool, Status, rpc
+from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
-from distributed.utils import TimeoutError, sync
+from distributed.utils import TimeoutError
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _LockedCommPool,
@@ -3807,55 +3807,35 @@ def test_unique_task_heap():
     assert repr(heap) == "<UniqueTaskHeap: 0 items>"
 
 
-@gen_test(
-    # The timeout value here must be strictly larger than the default value for
-    # the timeout in `Worker.close`. The entire test should finish in <1s if
-    # everything works as intended but we want to make sure to not obfuscate
-    # another timeout therefore we increase this number.
-    timeout=60,
-)
-async def test_do_not_block_event_loop_during_shutdown():
-    async with Scheduler() as s:
-        async with Client(s.address, asynchronous=True) as c:
-            block_handler = asyncio.Event()
-            block_handler.clear()
-            called_handler = asyncio.Event()
-            called_handler.clear()
-            handler_continued = False
+@gen_cluster(client=True, nthreads=[])
+async def test_do_not_block_event_loop_during_shutdown(c, s):
+    loop = asyncio.get_running_loop()
+    called_handler = threading.Event()
+    block_handler = threading.Event()
 
-            async def block_echo(x):
-                nonlocal handler_continued
-                called_handler.set()
-                await asyncio.sleep(0.1)
-                # If the event loop is blocked, we'll never hit this before the
-                # scheduler is closed
-                handler_continued = True
-                return x
+    w = await Worker(s.address)
+    executor = w.executors["default"]
 
-            s.handlers["block_echo"] = block_echo
-            w = await Worker(s.address)
-            addr = s.address
+    # The block wait must be smaller than the test timeout and smaller than the
+    # default value for timeout in `Worker.close``
+    async def block():
+        def fn():
+            called_handler.set()
+            assert block_handler.wait(20)
 
-            def f(x):
-                # This function calls into a handler on the remote which is
-                # blocked. This test eventually times out and the function
-                # should return and finish successfully, unblocking the
-                # ThreadPool
-                loop = get_worker().loop
+        await loop.run_in_executor(executor, fn)
 
-                async def _():
-                    pool = await ConnectionPool()
-                    scheduler_rpc = pool(addr)
-                    assert await scheduler_rpc.block_echo(x=x)
+    async def set_future():
+        while True:
+            try:
+                await loop.run_in_executor(executor, sleep, 0.1)
+            except RuntimeError:  # executor has started shutting down
+                block_handler.set()
+                return
 
-                sync(loop, _)
+    async def close():
+        called_handler.wait()
+        # executor_wait is True by default but we want to be explicit here
+        await w.close(executor_wait=True)
 
-            # We can never receive the result of the future after the worker
-            # closes but we'll need to keep a ref to the future to not have it
-            # cancelled immediately
-            fut = c.submit(f, True)
-            await called_handler.wait()
-            # executor_wait is True by default but we want to be explicit here
-            await w.close(executor_wait=True)
-            del fut
-            assert handler_continued
+    await asyncio.gather(block(), close(), set_future())
