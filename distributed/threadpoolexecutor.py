@@ -20,44 +20,75 @@ which is included as a comment at the end of this file:
 
    Copyright 2001-2016 Python Software Foundation; All Rights Reserved
 """
-import itertools
 import logging
-import os
 import queue
 import threading
+import weakref
 
 from . import _concurrent_futures_thread as thread
-from .metrics import time
 
 logger = logging.getLogger(__name__)
 
 thread_state = threading.local()
 
 
-def _worker(executor, work_queue):
+def _worker_secedable(executor_reference, work_queue, initializer, initargs):
+    if initializer is not None:
+        try:
+            initializer(*initargs)
+        except BaseException:
+            logger.critical("Exception in initializer:", exc_info=True)
+            executor = executor_reference()
+            if executor is not None:
+                executor._initializer_failed()
+            return
     thread_state.proceed = True
-    thread_state.executor = executor
-
+    thread_state.executor = executor_reference()
     try:
         while thread_state.proceed:
+            executor = executor_reference()
+            if not executor:
+                return
             with executor._rejoin_lock:
                 if executor._rejoin_list:
                     rejoin_thread, rejoin_event = executor._rejoin_list.pop()
                     executor._threads.add(rejoin_thread)
-                    executor._threads.remove(threading.current_thread())
+                    executor._threads.discard(threading.current_thread())
                     rejoin_event.set()
+                    executor._idle_semaphore.acquire(timeout=0)
                     break
+
             try:
-                task = work_queue.get(timeout=1)
+                work_item = work_queue.get(timeout=1)
             except queue.Empty:
                 continue
-            if task is not None:  # sentinel
-                task.run()
-                del task
-            elif thread._shutdown or executor is None or executor._shutdown:
+
+            if work_item is not None:
+                work_item.run()
+                # Delete references to object. See issue16284
+                del work_item
+
+                executor = executor_reference()
+                # attempt to increment idle count
+                if executor is not None:
+                    executor._idle_semaphore.release()
+                del executor
+                continue
+
+            executor = executor_reference()
+            # Exit if:
+            #   - The interpreter is shutting down OR
+            #   - The executor that owns the worker has been collected OR
+            #   - The executor that owns the worker has been shutdown.
+            if thread._shutdown or executor is None or executor._shutdown:
+                # Flag the executor as shutting down as early as possible if it
+                # is not gc-ed yet.
+                if executor is not None:
+                    executor._shutdown = True
+                # Notice other workers
                 work_queue.put(None)
                 return
-        del executor
+            del executor
     except BaseException:
         logger.critical("Exception in worker", exc_info=True)
     finally:
@@ -66,9 +97,6 @@ def _worker(executor, work_queue):
 
 
 class ThreadPoolExecutor(thread.ThreadPoolExecutor):
-    # Used to assign unique thread names
-    _counter = itertools.count()
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._rejoin_list = []
@@ -78,31 +106,33 @@ class ThreadPoolExecutor(thread.ThreadPoolExecutor):
         )
 
     def _adjust_thread_count(self):
-        if len(self._threads) < self._max_workers:
+        # Identical to original but is using _worker_secedable
+        # if idle threads are available, don't spin new threads
+        if self._idle_semaphore.acquire(timeout=0):
+            return
+
+        # When the executor gets lost, the weakref callback will wake up
+        # the worker threads.
+        def weakref_cb(_, q=self._work_queue):
+            q.put(None)
+
+        num_threads = len(self._threads)
+        if num_threads < self._max_workers:
+            thread_name = "%s_%d" % (self._thread_name_prefix, self._counter())
             t = threading.Thread(
-                target=_worker,
-                name=self._thread_name_prefix
-                + "-%d-%d" % (os.getpid(), next(self._counter)),
-                args=(self, self._work_queue),
+                name=thread_name,
+                target=_worker_secedable,
+                args=(
+                    weakref.ref(self, weakref_cb),
+                    self._work_queue,
+                    self._initializer,
+                    self._initargs,
+                ),
             )
-            t.daemon = True
+
             self._threads.add(t)
             t.start()
-
-    def shutdown(self, wait=True, timeout=None):
-        with threads_lock:
-            with self._shutdown_lock:
-                self._shutdown = True
-                self._work_queue.put(None)
-            if timeout is not None:
-                deadline = time() + timeout
-            if wait:
-                for t in self._threads:
-                    if timeout is not None:
-                        timeout2 = max(deadline - time(), 0)
-                    else:
-                        timeout2 = None
-                    t.join(timeout=timeout2)
+            thread._threads_queues[t] = self._work_queue
 
 
 def secede(adjust=True):
@@ -134,9 +164,9 @@ def rejoin():
     e = thread_state.executor
     with e._rejoin_lock:
         e._rejoin_list.append((thread, event))
+    thread_state.proceed = True
     e.submit(lambda: None)
     event.wait()
-    thread_state.proceed = True
 
 
 threads_lock = threading.Lock()

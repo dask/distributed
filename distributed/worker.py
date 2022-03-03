@@ -1735,10 +1735,9 @@ class Worker(ServerNode):
             for executor in self.executors.values():
                 if executor is utils._offload_executor:
                     continue  # Never shutdown the offload executor
-                if isinstance(executor, ThreadPoolExecutor):
-                    executor._work_queue.queue.clear()
-                    executor.shutdown(wait=executor_wait, timeout=timeout)
-                else:
+                try:
+                    executor.shutdown(wait=executor_wait, cancel_futures=True)
+                except TypeError:
                     executor.shutdown(wait=executor_wait)
 
             self.stop()

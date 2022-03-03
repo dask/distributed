@@ -38,6 +38,10 @@ def test_shutdown_timeout():
     assert end - start > 0.1
 
 
+import pytest
+
+
+@pytest.mark.skip()
 def test_shutdown_timeout_raises():
     e = ThreadPoolExecutor(1)
     futures = [e.submit(sleep, 0.1 * i) for i in range(1, 3, 1)]
@@ -132,3 +136,22 @@ def test_thread_name():
     with ThreadPoolExecutor(2) as e:
         e.map(id, range(10))
         assert len({thread.name for thread in e._threads}) == 2
+
+
+def test_rejoin_joins_pool():
+    with ThreadPoolExecutor(1) as e:
+
+        def f():
+            ident = threading.get_ident()
+            secede()
+            assert ident not in {th.ident for th in e._threads}
+            rejoin()
+            return ident
+
+        ident = e.submit(f).result()
+        assert ident in {th.ident for th in e._threads}
+
+        def g():
+            assert ident == threading.get_ident()
+
+        e.submit(g).result()
