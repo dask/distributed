@@ -859,10 +859,10 @@ async def test_missing_data_heals(c, s, a, b):
     # Secretly delete y's key
     if y.key in a.data:
         del a.data[y.key]
-        a.release_key(y.key)
+        a.release_key(y.key, stimulus_id="test")
     if y.key in b.data:
         del b.data[y.key]
-        b.release_key(y.key)
+        b.release_key(y.key, stimulus_id="test")
     await asyncio.sleep(0)
 
     w = c.submit(add, y, z)
@@ -884,7 +884,7 @@ async def test_gather_robust_to_missing_data(c, s, a, b):
             if f.key in w.data:
                 del w.data[f.key]
                 await asyncio.sleep(0)
-                w.release_key(f.key)
+                w.release_key(f.key, stimulus_id="test")
 
     xx, yy, zz = await c.gather([x, y, z])
     assert (xx, yy, zz) == (1, 2, 3)
@@ -907,7 +907,7 @@ async def test_gather_robust_to_nested_missing_data(c, s, a, b):
             if datum.key in worker.data:
                 del worker.data[datum.key]
                 await asyncio.sleep(0)
-                worker.release_key(datum.key)
+                worker.release_key(datum.key, stimulus_id="test")
 
     result = await c.gather([z])
 
