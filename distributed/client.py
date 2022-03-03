@@ -24,7 +24,7 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import ClassVar, Literal
+from typing import IO, Callable, ClassVar, Literal
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
@@ -52,7 +52,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import PeriodicCallback
 
-from . import preloading
+from . import cluster_dump, preloading
 from . import versions as version_module  # type: ignore
 from .batched import BatchedSend
 from .cfexecutor import ClientExecutor
@@ -3829,42 +3829,19 @@ class Client(SyncMethodMixin):
     ) -> None:
         state = await self.scheduler.get_cluster_state(exclude=exclude)
 
-        def tuple_to_list(node):
-            if isinstance(node, (list, tuple)):
-                return [tuple_to_list(el) for el in node]
-            elif isinstance(node, dict):
-                return {k: tuple_to_list(v) for k, v in node.items()}
-            else:
-                return node
+        filename, mode, write = cluster_dump.url_and_writer(filename, format)
 
-        # lists are converted to tuples by the RPC
-        state = tuple_to_list(state)
-
-        filename = str(filename)
+        opener: Callable[[str, str], IO]
         if format == "msgpack":
             import gzip
 
-            import msgpack
-
-            suffix = ".msgpack.gz"
-            if not filename.endswith(suffix):
-                filename += suffix
-
-            with gzip.open(filename, "wb") as fdg:
-                msgpack.pack(state, fdg)
-        elif format == "yaml":
-            import yaml
-
-            suffix = ".yaml"
-            if not filename.endswith(suffix):
-                filename += suffix
-
-            with open(filename, "w") as fd:
-                yaml.dump(state, fd)
+            opener = gzip.open  # type: ignore
+            # NOTE: `GzipFile` isn't recognized as `IO`
         else:
-            raise ValueError(
-                f"Unsupported format {format}. Possible values are `msgpack` or `yaml`"
-            )
+            opener = open
+
+        with opener(filename, mode) as f:
+            write(state, f)
 
     async def _dump_cluster_state_remote(
         self,
@@ -3922,6 +3899,8 @@ class Client(SyncMethodMixin):
             ``s3://my-bucket/cluster-dump``, or any URL containing ``://``), the
             dump will be written directly to that URL from the scheduler.
             Any additional keyword arguments will be passed to :func:`fsspec.open`.
+            Note that this requires having ``fsspec`` (and any implementation like
+            ``s3fs`` or ``gcsfs``) installed on the scheduler.
 
             Otherwise, the filename is interpreted as a path on the local
             filesystem. The cluster state will be sent from the scheduler back

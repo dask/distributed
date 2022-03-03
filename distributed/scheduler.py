@@ -51,6 +51,7 @@ from dask.highlevelgraph import HighLevelGraph
 from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta, tmpfile
 from dask.widgets import get_template
 
+from distributed import cluster_dump
 from distributed.compatibility import to_thread
 from distributed.utils import recursive_to_dict
 
@@ -4140,42 +4141,9 @@ class Scheduler(SchedulerState, ServerNode):
         if storage_options is None:
             storage_options = {}
 
-        if format == "msgpack":
-            import msgpack
-
-            # NOTE: `compression="infer"` will automatically use gzip via the `.gz` suffix
-            mode = "wb"
-            suffix = ".msgpack.gz"
-            if not url.endswith(suffix):
-                url += suffix
-            writer = msgpack.pack
-        elif format == "yaml":
-            import yaml
-
-            mode = "w"
-            suffix = ".yaml"
-            if not url.endswith(suffix):
-                url += suffix
-
-            def writer(state: dict, f):
-                # YAML adds unnecessary `!!python/tuple` tags; convert tuples to lists to avoid them.
-                def tuple_to_list(node):
-                    if isinstance(node, (list, tuple)):
-                        return [tuple_to_list(el) for el in node]
-                    elif isinstance(node, dict):
-                        return {k: tuple_to_list(v) for k, v in node.items()}
-                    else:
-                        return node
-
-                state = tuple_to_list(state)
-                yaml.dump(state, f)
-
-        else:
-            raise ValueError(
-                f"Unsupported format {format!r}. Possible values are 'msgpack' or 'yaml'."
-            )
-
+        url, mode, writer = cluster_dump.url_and_writer(url, format)
         # Eagerly open the file to catch any errors before doing the full dump
+        # NOTE: `compression="infer"` will automatically use gzip via the `.gz` suffix
         with fsspec.open(url, mode, compression="infer", **storage_options) as f:
             state = await self.get_cluster_state(exclude)
 
