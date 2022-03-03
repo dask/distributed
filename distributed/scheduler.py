@@ -4088,7 +4088,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     async def get_cluster_state(
         self,
-        exclude: Collection[str],
+        exclude: "Collection[str]",
     ) -> dict:
         "Produce the state dict used in a cluster state dump"
         # Kick off state-dumping on workers before we block the event loop in `self._to_dict`.
