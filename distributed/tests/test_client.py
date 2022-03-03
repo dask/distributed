@@ -7261,7 +7261,7 @@ def test_print_simple(capsys):
 
 
 def _verify_cluster_dump(url, format: str, addresses: set[str]) -> dict:
-    import fsspec
+    fsspec = pytest.importorskip("fsspec")
 
     url = str(url)
     if format == "msgpack":
