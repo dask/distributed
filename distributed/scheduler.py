@@ -4126,7 +4126,7 @@ class Scheduler(SchedulerState, ServerNode):
     async def dump_cluster_state_to_url(
         self,
         url: str,
-        exclude: Collection[str],
+        exclude: "Collection[str]",
         format: Literal["msgpack", "yaml"],
         storage_options: Optional[Dict[str, Any]] = None,
     ) -> None:
