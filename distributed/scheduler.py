@@ -51,6 +51,7 @@ from dask.highlevelgraph import HighLevelGraph
 from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta, tmpfile
 from dask.widgets import get_template
 
+from distributed.compatibility import to_thread
 from distributed.utils import recursive_to_dict
 
 from . import preloading, profile
@@ -4180,8 +4181,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             # Write from a thread so we don't block the event loop quite as badly
             # (the writer will still hold the GIL a lot though).
-            # TODO use `asyncio.to_thread` once <3.9 support is dropped.
-            await self.loop.run_in_executor(None, writer, state, f)
+            await to_thread(writer, state, f)
 
     def get_worker_service_addr(self, worker, service_name, protocol=False):
         """
