@@ -227,6 +227,7 @@ class ThreadPoolExecutor(_base.Executor):
                     self._initargs,
                 ),
             )
+            t.daemon = True
             t.start()
             self._threads.add(t)
             _threads_queues[t] = self._work_queue
