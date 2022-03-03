@@ -37,7 +37,7 @@ def _python_exit():
 # non-daemon threads. This is used instead of `atexit.register()` for
 # compatibility with subinterpreters, which no longer support daemon threads.
 # See bpo-39812 for context.
-if sys.version_info >= (3, 9):
+if sys.version_info >= (3, 10):
     threading._register_atexit(_python_exit)
     _after_in_child = _global_shutdown_lock._at_fork_reinit
     from types import GenericAlias
