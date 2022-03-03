@@ -27,32 +27,6 @@ def test_tpe():
             assert time() < start + 1
 
 
-def test_shutdown_timeout():
-    e = ThreadPoolExecutor(1)
-    futures = [e.submit(sleep, 0.1 * i) for i in range(1, 3, 1)]
-    sleep(0.01)
-
-    start = time()
-    e.shutdown()
-    end = time()
-    assert end - start > 0.1
-
-
-import pytest
-
-
-@pytest.mark.skip()
-def test_shutdown_timeout_raises():
-    e = ThreadPoolExecutor(1)
-    futures = [e.submit(sleep, 0.1 * i) for i in range(1, 3, 1)]
-    sleep(0.05)
-
-    start = time()
-    e.shutdown(timeout=0.1)
-    end = time()
-    assert end - start > 0.05
-
-
 def test_shutdown_wait():
     e = ThreadPoolExecutor(1)
     future = e.submit(sleep, 1)
