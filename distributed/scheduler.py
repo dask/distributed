@@ -582,6 +582,7 @@ class WorkerState:
             "last_seen": self.last_seen,
             "services": self.services,
             "metrics": self.metrics,
+            "status": self.status.name,
             "nanny": self.nanny,
             **self.extra,
         }
@@ -3233,7 +3234,6 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle("dask-scheduler [not started]")
         Scheduler._instances.add(self)
         self.rpc.allow_offload = False
-        self.status = Status.undefined
 
     ##################
     # Administration #
@@ -3241,7 +3241,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def __repr__(self):
         return (
-            f"<Scheduler {self.address!r}, "
+            f"<Scheduler {self.address_safe!r}, "
             f"workers: {len(self.workers)}, "
             f"cores: {self.total_nthreads}, "
             f"tasks: {len(self.tasks)}>"
@@ -3374,10 +3374,9 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             return ws.host, port
 
-    async def start(self):
+    async def start_unsafe(self):
         """Clear out old state and restart all running coroutines"""
-        await super().start()
-        assert self.status != Status.running
+        await super().start_unsafe()
 
         enable_gc_diagnosis()
 

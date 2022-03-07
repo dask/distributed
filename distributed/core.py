@@ -38,7 +38,6 @@ from distributed.comm import (
 from distributed.metrics import time
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
-    TimeoutError,
     get_traceback,
     has_keyword,
     is_coroutine_function,
@@ -71,11 +70,6 @@ class Status(Enum):
 
 
 Status.lookup = {s.name: s for s in Status}  # type: ignore
-Status.ANY_RUNNING = {  # type: ignore
-    Status.running,
-    Status.paused,
-    Status.closing_gracefully,
-}
 
 
 class RPCClosed(IOError):
@@ -168,6 +162,7 @@ class Server:
         timeout=None,
         io_loop=None,
     ):
+        self.status = Status.init
         self.handlers = {
             "identity": self.identity,
             "echo": self.echo,
@@ -257,7 +252,8 @@ class Server:
 
         self.io_loop.add_callback(set_thread_ident)
         self._startup_lock = asyncio.Lock()
-        self.status = Status.undefined
+        self.__startup_exc: Exception | None = None
+        self.__started = asyncio.Event()
 
         self.rpc = ConnectionPool(
             limit=connection_limit,
@@ -289,31 +285,57 @@ class Server:
         await self._event_finished.wait()
 
     def __await__(self):
-        async def _():
-            timeout = getattr(self, "death_timeout", 0)
-            async with self._startup_lock:
-                if self.status in Status.ANY_RUNNING:
-                    return self
-                if timeout:
-                    try:
-                        await asyncio.wait_for(self.start(), timeout=timeout)
-                        self.status = Status.running
-                    except Exception:
-                        await self.close(timeout=1)
-                        raise TimeoutError(
-                            "{} failed to start in {} seconds".format(
-                                type(self).__name__, timeout
-                            )
-                        )
-                else:
-                    await self.start()
-                    self.status = Status.running
-            return self
+        return self.start().__await__()
 
-        return _().__await__()
+    async def start_unsafe(self):
+        """Attempt to start the server. This is not idempotent and not protected against concurrent startup attempts.
+
+        This is intended to be overwritten or called by subclasses. For a safe
+        startup, please use ``Server.start`` instead.
+
+        If ``death_timeout`` is configured, we will require this coroutine to
+        finish before this timeout is reached. If the timeout is reached we will
+        close the instance and raise an ``asyncio.TimeoutError``
+        """
+        await self.rpc.start()
+        return self
 
     async def start(self):
-        await self.rpc.start()
+        async with self._startup_lock:
+            if self._status in [
+                Status.running,
+                Status.closed,
+                Status.closing,
+                Status.closing_gracefully,
+                Status.stopped,
+                Status.stopping,
+            ]:
+                return self
+            elif self._status == Status.failed:
+                assert self.__startup_exc is not None
+                raise self.__startup_exc
+            elif self._status != Status.init:
+                raise RuntimeError(f"Unknown status encountered {self._status=}")
+            timeout = getattr(self, "death_timeout", None)
+
+            async def _close_on_failure(exc: Exception):
+                await self.close()
+                self._status = Status.failed
+                self.__startup_exc = exc
+
+            try:
+                await asyncio.wait_for(self.start_unsafe(), timeout=timeout)
+            except asyncio.TimeoutError as exc:
+                await _close_on_failure(exc)
+                raise asyncio.TimeoutError(
+                    f"{type(self).__name__} start timed out after {timeout}s."
+                ) from exc
+            except Exception as exc:
+                await _close_on_failure(exc)
+                raise RuntimeError(f"{type(self).__name__} failed to start.") from exc
+            self._status = Status.running
+            self.__started.set()
+        return self
 
     async def __aenter__(self):
         await self
@@ -382,15 +404,27 @@ class Server:
         self._tick_interval_observed = (time() - last) / (count or 1)
 
     @property
-    def address(self):
+    def address(self) -> str:
         """
         The address this Server can be contacted on.
+        If the server is not up, yet, this raises a ValueError.
         """
         if not self._address:
             if self.listener is None:
                 raise ValueError("cannot get address of non-running Server")
             self._address = self.listener.contact_address
         return self._address
+
+    @property
+    def address_safe(self) -> str:
+        """
+        The address this Server can be contacted on.
+        If the server is not up, yet, this returns a ``"not-running"``.
+        """
+        try:
+            return self.address
+        except ValueError:
+            return "not-running"
 
     @property
     def listen_address(self):
@@ -480,7 +514,7 @@ class Server:
 
         logger.debug("Connection from %r to %s", address, type(self).__name__)
         self._comms[comm] = op
-        await self
+        await self.__started.wait()
         try:
             while True:
                 try:
@@ -650,11 +684,13 @@ class Server:
     def close(self):
         for pc in self.periodic_callbacks.values():
             pc.stop()
-        self.__stopped = True
-        for listener in self.listeners:
-            future = listener.stop()
-            if inspect.isawaitable(future):
-                yield future
+
+        if not self.__stopped:
+            self.__stopped = True
+            for listener in self.listeners:
+                future = listener.stop()
+                if inspect.isawaitable(future):
+                    yield future
         for i in range(20):
             # If there are still handlers running at this point, give them a
             # second to finish gracefully themselves, otherwise...

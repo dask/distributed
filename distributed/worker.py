@@ -156,6 +156,12 @@ DEFAULT_METRICS: dict[str, Callable[[Worker], Any]] = {}
 
 DEFAULT_STARTUP_INFORMATION: dict[str, Callable[[Worker], Any]] = {}
 
+WORKER_ANY_RUNNING = {
+    Status.running,
+    Status.paused,
+    Status.closing_gracefully,
+}
+
 
 def fail_hard(method):
     """
@@ -950,9 +956,9 @@ class Worker(ServerNode):
     ##################
 
     def __repr__(self):
-        name = f", name: {self.name}" if self.name != self.address else ""
+        name = f", name: {self.name}" if self.name != self.address_safe else ""
         return (
-            f"<{self.__class__.__name__} {self.address!r}{name}, "
+            f"<{self.__class__.__name__} {self.address_safe!r}{name}, "
             f"status: {self.status.name}, "
             f"stored: {len(self.data)}, "
             f"running: {self.executing_count}/{self.nthreads}, "
@@ -1239,9 +1245,9 @@ class Worker(ServerNode):
                 # If running, wait up to 0.5s and then re-register self.
                 # Otherwise just exit.
                 start = time()
-                while self.status in Status.ANY_RUNNING and time() < start + 0.5:
+                while self.status in WORKER_ANY_RUNNING and time() < start + 0.5:
                     await asyncio.sleep(0.01)
-                if self.status in Status.ANY_RUNNING:
+                if self.status in WORKER_ANY_RUNNING:
                     await self._register_with_scheduler()
                 return
 
@@ -1270,7 +1276,7 @@ class Worker(ServerNode):
     async def handle_scheduler(self, comm):
         await self.handle_stream(comm, every_cycle=[self.ensure_communicating])
 
-        if self.reconnect and self.status in Status.ANY_RUNNING:
+        if self.reconnect and self.status in WORKER_ANY_RUNNING:
             logger.info("Connection to scheduler broken.  Reconnecting...")
             self.loop.add_callback(self.heartbeat)
         else:
@@ -1352,16 +1358,9 @@ class Worker(ServerNode):
     # Lifecycle #
     #############
 
-    async def start(self):
-        if self.status and self.status in (
-            Status.closed,
-            Status.closing,
-            Status.closing_gracefully,
-        ):
-            return
-        assert self.status is Status.undefined, self.status
+    async def start_unsafe(self):
 
-        await super().start()
+        await super().start_unsafe()
 
         enable_gc_diagnosis()
 
@@ -1392,7 +1391,7 @@ class Worker(ServerNode):
                 break
         else:
             raise ValueError(
-                f"Could not start Worker on host {self._start_host}"
+                f"Could not start Worker on host {self._start_host} "
                 f"with port {self._start_port}"
             )
 
@@ -1488,7 +1487,7 @@ class Worker(ServerNode):
             logger.info("Stopping worker at %s", self.address)
         except ValueError:  # address not available if already closed
             logger.info("Stopping worker")
-        if self.status not in Status.ANY_RUNNING:
+        if self.status not in WORKER_ANY_RUNNING:
             logger.info("Closed worker has not yet started: %s", self.status)
         if not report:
             logger.info("Not reporting worker closure to scheduler")
@@ -1537,7 +1536,7 @@ class Worker(ServerNode):
             if not any(
                 w
                 for w in Worker._instances
-                if w != self and w.status in Status.ANY_RUNNING
+                if w != self and w.status in WORKER_ANY_RUNNING
             ):
                 for c in Worker._initialized_clients:
                     # Regardless of what the client was initialized with
@@ -3122,7 +3121,7 @@ class Worker(ServerNode):
         total_nbytes : int
             Total number of bytes for all the dependencies in to_gather combined
         """
-        if self.status not in Status.ANY_RUNNING:  # type: ignore
+        if self.status not in WORKER_ANY_RUNNING:  # type: ignore
             return
 
         recommendations: Recs = {}
@@ -3349,7 +3348,7 @@ class Worker(ServerNode):
 
         if (
             new_status == Status.closing_gracefully
-            and self._status not in Status.ANY_RUNNING  # type: ignore
+            and self._status not in WORKER_ANY_RUNNING  # type: ignore
         ):
             logger.error(
                 "Invalid Worker.status transition: %s -> %s", self._status, new_status
@@ -4145,7 +4144,7 @@ class Worker(ServerNode):
             ) from e
 
     def validate_state(self):
-        if self.status not in Status.ANY_RUNNING:
+        if self.status not in WORKER_ANY_RUNNING:
             return
         try:
             assert self.executing_count >= 0
@@ -4311,7 +4310,7 @@ def get_worker() -> Worker:
             return first(
                 w
                 for w in Worker._instances
-                if w.status in Status.ANY_RUNNING  # type: ignore
+                if w.status in WORKER_ANY_RUNNING  # type: ignore
             )
         except StopIteration:
             raise ValueError("No workers found")

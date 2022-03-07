@@ -148,7 +148,7 @@ async def test_fail_to_pickle_target_2(c, s, a):
     config={
         "distributed.worker.memory.target": False,
         "distributed.worker.memory.spill": 0.7,
-        "distributed.worker.memory.monitor-interval": "10ms",
+        "distributed.worker.memory.monitor-interval": "100ms",
     },
 )
 async def test_fail_to_pickle_spill(c, s, a):
