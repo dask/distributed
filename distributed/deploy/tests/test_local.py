@@ -770,7 +770,7 @@ async def test_scale_retires_workers():
     await cluster.close()
 
 
-@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
+@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 def test_local_tls_restart(loop):
     from distributed.utils_test import tls_only_security
 

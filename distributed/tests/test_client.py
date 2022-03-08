@@ -5327,7 +5327,7 @@ def test_dynamic_workloads_sync_random(c):
     assert future.result(timeout=20) == 52
 
 
-@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
+@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(client=True)
 async def test_bytes_keys(c, s, a, b):
     key = b"inc-123"

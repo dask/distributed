@@ -3805,3 +3805,37 @@ def test_unique_task_heap():
     assert heap.pop() == ts
 
     assert repr(heap) == "<UniqueTaskHeap: 0 items>"
+
+
+@gen_cluster(nthreads=[])
+async def test_do_not_block_event_loop_during_shutdown(s):
+    loop = asyncio.get_running_loop()
+    called_handler = threading.Event()
+    block_handler = threading.Event()
+
+    w = await Worker(s.address)
+    executor = w.executors["default"]
+
+    # The block wait must be smaller than the test timeout and smaller than the
+    # default value for timeout in `Worker.close``
+    async def block():
+        def fn():
+            called_handler.set()
+            assert block_handler.wait(20)
+
+        await loop.run_in_executor(executor, fn)
+
+    async def set_future():
+        while True:
+            try:
+                await loop.run_in_executor(executor, sleep, 0.1)
+            except RuntimeError:  # executor has started shutting down
+                block_handler.set()
+                return
+
+    async def close():
+        called_handler.wait()
+        # executor_wait is True by default but we want to be explicit here
+        await w.close(executor_wait=True)
+
+    await asyncio.gather(block(), close(), set_future())
