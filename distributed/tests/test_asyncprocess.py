@@ -243,7 +243,7 @@ async def test_exit_callback():
     assert not evt.is_set()
 
     to_child.put(None)
-    await evt.wait(timedelta(seconds=3))
+    await evt.wait(timedelta(seconds=5))
     assert evt.is_set()
     assert not proc.is_alive()
 
@@ -259,7 +259,7 @@ async def test_exit_callback():
     assert not evt.is_set()
 
     await proc.terminate()
-    await evt.wait(timedelta(seconds=3))
+    await evt.wait(timedelta(seconds=5))
     assert evt.is_set()
 
 

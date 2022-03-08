@@ -25,7 +25,7 @@ class ServerNode(Server):
     # XXX avoid inheriting from Server? there is some large potential for confusion
     # between base and derived attribute namespaces...
 
-    def versions(self, comm=None, packages=None):
+    def versions(self, packages=None):
         return get_versions(packages=packages)
 
     def start_services(self, default_listen_ip):
@@ -87,14 +87,34 @@ class ServerNode(Server):
         logger.addHandler(self._deque_handler)
         weakref.finalize(self, logger.removeHandler, self._deque_handler)
 
-    def get_logs(self, comm=None, n=None):
+    def get_logs(self, start=0, n=None, timestamps=False):
+        """
+        Fetch log entries for this node
+
+        Parameters
+        ----------
+        start : float, optional
+            A time (in seconds) to begin filtering log entries from
+        n : int, optional
+            Maximum number of log entries to return from filtered results
+        timestamps : bool, default False
+            Do we want log entries to include the time they were generated?
+
+        Returns
+        -------
+        List of tuples containing the log level, message, and (optional) timestamp for each filtered entry
+        """
         deque_handler = self._deque_handler
-        if n is None:
-            L = list(deque_handler.deque)
-        else:
-            L = deque_handler.deque
-            L = [L[-i] for i in range(min(n, len(L)))]
-        return [(msg.levelname, deque_handler.format(msg)) for msg in L]
+
+        L = []
+        for count, msg in enumerate(deque_handler.deque):
+            if n and count >= n or msg.created < start:
+                break
+            if timestamps:
+                L.append((msg.created, msg.levelname, deque_handler.format(msg)))
+            else:
+                L.append((msg.levelname, deque_handler.format(msg)))
+        return L
 
     def start_http_server(
         self, routes, dashboard_address, default_port=0, ssl_options=None

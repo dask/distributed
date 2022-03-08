@@ -20,14 +20,16 @@ import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
 from collections import OrderedDict, UserDict, deque
+from collections.abc import Container, KeysView, ValuesView
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
+from types import ModuleType
 from typing import Any as AnyType
-from typing import ClassVar, Container
+from typing import ClassVar
 
 import click
 import tblib.pickling_support
@@ -46,7 +48,7 @@ from dask import istask
 from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
-from .compatibility import PYPY, WINDOWS
+from .compatibility import WINDOWS
 from .metrics import time
 
 try:
@@ -67,11 +69,9 @@ no_default = "__no_default__"
 
 
 def _initialize_mp_context():
-    if WINDOWS or PYPY:
-        return multiprocessing
-    else:
-        method = dask.config.get("distributed.worker.multiprocessing-method")
-        ctx = multiprocessing.get_context(method)
+    method = dask.config.get("distributed.worker.multiprocessing-method")
+    ctx = multiprocessing.get_context(method)
+    if method == "forkserver":
         # Makes the test suite much faster
         preload = ["distributed"]
         if "pkg_resources" in sys.modules:
@@ -87,7 +87,8 @@ def _initialize_mp_context():
             else:
                 preload.append(pkg)
         ctx.set_forkserver_preload(preload)
-        return ctx
+
+    return ctx
 
 
 mp_context = _initialize_mp_context()
@@ -334,11 +335,11 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
 
     e = threading.Event()
     main_tid = threading.get_ident()
-    result = [None]
-    error = [False]
+    result = error = future = None  # set up non-locals
 
     @gen.coroutine
     def f():
+        nonlocal result, error, future
         try:
             if main_tid == threading.get_ident():
                 raise RuntimeError("sync() called from thread of running loop")
@@ -346,24 +347,37 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             future = func(*args, **kwargs)
             if callback_timeout is not None:
                 future = asyncio.wait_for(future, callback_timeout)
-            result[0] = yield future
+            future = asyncio.ensure_future(future)
+            result = yield future
         except Exception:
-            error[0] = sys.exc_info()
+            error = sys.exc_info()
         finally:
             e.set()
 
+    def cancel():
+        if future is not None:
+            future.cancel()
+
+    def wait(timeout):
+        try:
+            return e.wait(timeout)
+        except KeyboardInterrupt:
+            loop.add_callback(cancel)
+            raise
+
     loop.add_callback(f)
     if callback_timeout is not None:
-        if not e.wait(callback_timeout):
+        if not wait(callback_timeout):
             raise TimeoutError(f"timed out after {callback_timeout} s.")
     else:
         while not e.is_set():
-            e.wait(10)
-    if error[0]:
-        typ, exc, tb = error[0]
+            wait(10)
+
+    if error:
+        typ, exc, tb = error
         raise exc.with_traceback(tb)
     else:
-        return result[0]
+        return result
 
 
 class LoopRunner:
@@ -857,12 +871,12 @@ def read_block(f, offset, length, delimiter=None):
     """
     if delimiter:
         f.seek(offset)
-        seek_delimiter(f, delimiter, 2 ** 16)
+        seek_delimiter(f, delimiter, 2**16)
         start = f.tell()
         length -= start - offset
 
         f.seek(start + length)
-        seek_delimiter(f, delimiter, 2 ** 16)
+        seek_delimiter(f, delimiter, 2**16)
         end = f.tell()
 
         offset = start
@@ -929,12 +943,12 @@ def open_port(host=""):
     return port
 
 
-def import_file(path):
+def import_file(path: str):
     """Loads modules for a file (.py, .zip, .egg)"""
     directory, filename = os.path.split(path)
     name, ext = os.path.splitext(filename)
-    names_to_import = []
-    tmp_python_path = None
+    names_to_import: list[str] = []
+    tmp_python_path: str | None = None
 
     if ext in (".py",):  # , '.pyc'):
         if directory not in sys.path:
@@ -950,7 +964,7 @@ def import_file(path):
         names = (mod_info.name for mod_info in pkgutil.iter_modules([path]))
         names_to_import.extend(names)
 
-    loaded = []
+    loaded: list[ModuleType] = []
     if not names_to_import:
         logger.warning("Found nothing to import from %s", filename)
     else:
@@ -1113,10 +1127,6 @@ def color_of(x, palette=palette):
 
 
 def _iscoroutinefunction(f):
-    # Python < 3.8 does not support determining if `partial` objects wrap async funcs
-    if sys.version_info < (3, 8):
-        while isinstance(f, functools.partial):
-            f = f.func
     return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
 
 
@@ -1204,7 +1214,7 @@ def parse_ports(port):
             raise ValueError(
                 "When specifying a range of ports like port_start:port_stop, "
                 "port_stop must be greater than port_start, but got "
-                f"port_start={port_start} and port_stop={port_stop}"
+                f"{port_start=} and {port_stop=}"
             )
         ports = list(range(port_start, port_stop + 1))
 
@@ -1240,8 +1250,8 @@ def cli_keywords(d: dict, cls=None, cmd=None):
     cmd : string or object
         A string with the name of a module, or the module containing a
         click-generated command with a "main" function, or the function itself.
-        It may be used to parse a module's custom arguments (i.e., arguments that
-        are not part of Worker class), such as nprocs from dask-worker CLI or
+        It may be used to parse a module's custom arguments (that is, arguments that
+        are not part of Worker class), such as nworkers from dask-worker CLI or
         enable_nvlink from dask-cuda-worker CLI.
 
     Examples
@@ -1440,12 +1450,29 @@ def __getattr__(name):
 # already been encountered, a string representation will be returned instead. This is
 # necessary since we have multiple cyclic referencing data structures.
 _recursive_to_dict_seen: ContextVar[set[int]] = ContextVar("_recursive_to_dict_seen")
+_to_dict_no_nest_flag = False
 
 
-def recursive_to_dict(obj: AnyType, *, exclude: Container[str] = ()) -> AnyType:
+def recursive_to_dict(
+    obj: AnyType, *, exclude: Container[str] = (), members: bool = False
+) -> AnyType:
     """Recursively convert arbitrary Python objects to a JSON-serializable
-    representation. This is intended for debugging purposes only and calls ``_to_dict``
-    methods on encountered objects, if available.
+    representation. This is intended for debugging purposes only.
+
+    The following objects are supported:
+
+    list, tuple, set, frozenset, deque, dict, dict_keys, dict_values
+        Descended into these objects recursively. Python-specific collections are
+        converted to JSON-friendly variants.
+    Classes that define ``_to_dict(self, *, exclude: Container[str] = ())``:
+        Call the method and dump its output
+    Classes that define ``_to_dict_no_nest(self, *, exclude: Container[str] = ())``:
+        Like above, but prevents nested calls (see below)
+    Other Python objects
+        Dump the output of ``repr()``
+    Objects already encountered before, regardless of type
+        Dump the output of ``repr()``. This breaks circular references and shortens the
+        output.
 
     Parameters
     ----------
@@ -1453,11 +1480,99 @@ def recursive_to_dict(obj: AnyType, *, exclude: Container[str] = ()) -> AnyType:
         A list of attribute names to be excluded from the dump.
         This will be forwarded to the objects ``_to_dict`` methods and these methods
         are required to accept this parameter.
+    members:
+        If True, convert the top-level Python object to a dict of its public members
+
+    **``_to_dict_no_nest`` vs. ``_to_dict``**
+
+    The presence of the ``_to_dict_no_nest`` method signals ``recursive_to_dict`` to
+    have a mutually exclusive full dict representation with other objects that also have
+    the ``_to_dict_no_nest``, regardless of their class. Only the outermost object in a
+    nested structure has the method invoked; all others are
+    dumped as their string repr instead, even if they were not encountered before.
+
+    Example:
+
+    .. code-block:: python
+
+        >>> class Person:
+        ...     def __init__(self, name):
+        ...         self.name = name
+        ...         self.children = []
+        ...         self.pets = []
+        ...
+        ...     def _to_dict_no_nest(self, exclude=()):
+        ...         return recursive_to_dict(self.__dict__, exclude=exclude)
+        ...
+        ...     def __repr__(self):
+        ...         return self.name
+
+        >>> class Pet:
+        ...     def __init__(self, name):
+        ...         self.name = name
+        ...         self.owners = []
+        ...
+        ...     def _to_dict_no_nest(self, exclude=()):
+        ...         return recursive_to_dict(self.__dict__, exclude=exclude)
+        ...
+        ...     def __repr__(self):
+        ...         return self.name
+
+        >>> alice = Person("Alice")
+        >>> bob = Person("Bob")
+        >>> charlie = Pet("Charlie")
+        >>> alice.children.append(bob)
+        >>> alice.pets.append(charlie)
+        >>> bob.pets.append(charlie)
+        >>> charlie.owners[:] = [alice, bob]
+        >>> recursive_to_dict({"people": [alice, bob], "pets": [charlie]})
+        {
+            "people": [
+                {"name": "Alice", "children": ["Bob"], "pets": ["Charlie"]},
+                {"name": "Bob", "children": [], "pets": ["Charlie"]},
+            ],
+            "pets": [
+                {"name": "Charlie", "owners": ["Alice", "Bob"]},
+            ],
+        }
+
+    If we changed the methods to ``_to_dict``, the output would instead be:
+
+    .. code-block:: python
+
+        {
+            "people": [
+                {
+                    "name": "Alice",
+                    "children": [
+                        {
+                            "name": "Bob",
+                            "children": [],
+                            "pets": [{"name": "Charlie", "owners": ["Alice", "Bob"]}],
+                        },
+                    ],
+                    pets: ["Charlie"],
+                ],
+                "Bob",
+            ],
+            "pets": ["Charlie"],
+        }
+
+    Also notice that, if in the future someone will swap the creation of the
+    ``children`` and ``pets`` attributes inside ``Person.__init__``, the output with
+    ``_to_dict`` will change completely whereas the one with ``_to_dict_no_nest`` won't!
     """
     if isinstance(obj, (int, float, bool, str)) or obj is None:
         return obj
     if isinstance(obj, (type, bytes)):
         return repr(obj)
+
+    if members:
+        obj = {
+            k: v
+            for k, v in inspect.getmembers(obj)
+            if not k.startswith("_") and k not in exclude and not callable(v)
+        }
 
     # Prevent infinite recursion
     try:
@@ -1469,11 +1584,24 @@ def recursive_to_dict(obj: AnyType, *, exclude: Container[str] = ()) -> AnyType:
     try:
         if id(obj) in seen:
             return repr(obj)
+
+        if hasattr(obj, "_to_dict_no_nest"):
+            global _to_dict_no_nest_flag
+            if _to_dict_no_nest_flag:
+                return repr(obj)
+
+            seen.add(id(obj))
+            _to_dict_no_nest_flag = True
+            try:
+                return obj._to_dict_no_nest(exclude=exclude)
+            finally:
+                _to_dict_no_nest_flag = False
+
         seen.add(id(obj))
 
         if hasattr(obj, "_to_dict"):
             return obj._to_dict(exclude=exclude)
-        if isinstance(obj, (list, tuple, set, frozenset, deque)):
+        if isinstance(obj, (list, tuple, set, frozenset, deque, KeysView, ValuesView)):
             return [recursive_to_dict(el, exclude=exclude) for el in obj]
         if isinstance(obj, dict):
             res = {}

@@ -71,9 +71,12 @@ setup(
     cmdclass=versioneer.get_cmdclass(),
     description="Distributed scheduler for Dask",
     url="https://distributed.dask.org",
+    project_urls={
+        "Source": "https://github.com/dask/distributed",
+    },
     maintainer="Matthew Rocklin",
     maintainer_email="mrocklin@gmail.com",
-    python_requires=">=3.7",
+    python_requires=">=3.8",
     license="BSD",
     package_data={
         "": ["templates/index.html", "template.html"],
@@ -95,7 +98,6 @@ setup(
         "License :: OSI Approved :: BSD License",
         "Operating System :: OS Independent",
         "Programming Language :: Python",
-        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Topic :: Scientific/Engineering",

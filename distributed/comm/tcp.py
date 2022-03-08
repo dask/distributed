@@ -7,6 +7,7 @@ import struct
 import sys
 import weakref
 from ssl import SSLCertVerificationError, SSLError
+from typing import ClassVar
 
 from tornado import gen
 
@@ -31,7 +32,13 @@ from ..utils import ensure_ip, get_ip, get_ipv6, nbytes
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, FatalCommClosedError, Listener
 from .registry import Backend
-from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to_frames
+from .utils import (
+    ensure_concrete_host,
+    from_frames,
+    get_tcp_server_address,
+    host_array,
+    to_frames,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -155,11 +162,10 @@ class TCP(Comm):
         deserialize: bool = True,
     ):
         self._closed = False
-        super().__init__()
+        super().__init__(deserialize=deserialize)
         self._local_addr = local_addr
         self._peer_addr = peer_addr
         self.stream = stream
-        self.deserialize = deserialize
         self._finalizer = weakref.finalize(self, self._get_finalizer())
         self._finalizer.atexit = False
         self._extra: dict = {}
@@ -205,7 +211,7 @@ class TCP(Comm):
             frames_nbytes = await stream.read_bytes(fmt_size)
             (frames_nbytes,) = struct.unpack(fmt, frames_nbytes)
 
-            frames = memoryview(bytearray(frames_nbytes))
+            frames = host_array(frames_nbytes)
             # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
             for i, j in sliding_window(
                 2, range(0, frames_nbytes + C_INT_MAX, C_INT_MAX)
@@ -269,7 +275,7 @@ class TCP(Comm):
         frames_nbytes = [nbytes(header), *frames_nbytes]
         frames_nbytes_total += frames_nbytes[0]
 
-        if frames_nbytes_total < 2 ** 17:  # 128kiB
+        if frames_nbytes_total < 2**17:  # 128kiB
             # small enough, send in one go
             frames = [b"".join(frames)]
             frames_nbytes = [frames_nbytes_total]
@@ -369,7 +375,7 @@ def _expect_tls_context(connection_args):
         raise TypeError(
             "TLS expects a `ssl_context` argument of type "
             "ssl.SSLContext (perhaps check your TLS configuration?)"
-            "  Instead got %s" % str(ctx)
+            f" Instead got {ctx!r}"
         )
     return ctx
 
@@ -385,7 +391,29 @@ class RequireEncryptionMixin:
 
 
 class BaseTCPConnector(Connector, RequireEncryptionMixin):
-    _executor = ThreadPoolExecutor(2, thread_name_prefix="TCP-Executor")
+    _executor: ClassVar[ThreadPoolExecutor] = ThreadPoolExecutor(
+        2, thread_name_prefix="TCP-Executor"
+    )
+    _client: ClassVar[TCPClient]
+
+    @classmethod
+    def warmup(cls) -> None:
+        """Pre-start threads and sockets to avoid catching them in checks for thread and
+        fd leaks
+        """
+        ex = cls._executor
+        while len(ex._threads) < ex._max_workers:
+            ex._adjust_thread_count()
+        cls._get_client()
+
+    @classmethod
+    def _get_client(cls):
+        if not hasattr(cls, "_client"):
+            resolver = netutil.ExecutorResolver(
+                close_executor=False, executor=cls._executor
+            )
+            cls._client = TCPClient(resolver=resolver)
+        return cls._client
 
     @property
     def client(self):
@@ -393,13 +421,7 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         # excess `ThreadPoolExecutor`s. We delay creation until inside an async
         # function to avoid accessing an IOLoop from a context where a backing
         # event loop doesn't exist.
-        cls = type(self)
-        if not hasattr(type(self), "_client"):
-            resolver = netutil.ExecutorResolver(
-                close_executor=False, executor=cls._executor
-            )
-            cls._client = TCPClient(resolver=resolver)
-        return cls._client
+        return self._get_client()
 
     async def connect(self, address, deserialize=True, **connection_args):
         self._check_encryption(address, connection_args)

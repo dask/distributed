@@ -13,6 +13,7 @@ from distributed.core import (
     ConnectionPool,
     Server,
     Status,
+    _expects_comm,
     clean_exception,
     coerce_to_address,
     connect,
@@ -35,6 +36,7 @@ from distributed.utils_test import (
     async_wait_for,
     captured_logger,
     gen_cluster,
+    gen_test,
     has_ipv6,
     inc,
     throws,
@@ -129,19 +131,18 @@ def test_server(loop):
 
 def test_server_raises_on_blocked_handlers(loop):
     async def f():
-        server = Server({"ping": pingpong}, blocked_handlers=["ping"])
-        await server.listen(8881)
+        async with Server({"ping": pingpong}, blocked_handlers=["ping"]) as server:
+            await server.listen(8881)
 
-        comm = await connect(server.address)
-        await comm.write({"op": "ping"})
-        msg = await comm.read()
+            comm = await connect(server.address)
+            await comm.write({"op": "ping"})
+            msg = await comm.read()
 
-        _, exception, _ = clean_exception(msg["exception"])
-        assert isinstance(exception, ValueError)
-        assert "'ping' handler has been explicitly disallowed" in repr(exception)
+            _, exception, _ = clean_exception(msg["exception"])
+            assert isinstance(exception, ValueError)
+            assert "'ping' handler has been explicitly disallowed" in repr(exception)
 
-        await comm.close()
-        server.stop()
+            await comm.close()
 
     res = loop.run_sync(f)
 
@@ -531,6 +532,28 @@ async def test_send_recv_args():
     server.stop()
 
 
+@gen_test(timeout=5)
+async def test_send_recv_cancelled():
+    """Test that the comm channel is closed on CancelledError"""
+
+    async def get_stuck(comm):
+        await asyncio.Future()
+
+    server = Server({"get_stuck": get_stuck})
+    await server.listen(0)
+
+    client_comm = await connect(server.address, deserialize=False)
+    while not server._comms:
+        await asyncio.sleep(0.01)
+    server_comm = next(iter(server._comms))
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(send_recv(client_comm, op="get_stuck"), timeout=0.1)
+    assert client_comm.closed()
+    while not server_comm.closed():
+        await asyncio.sleep(0.01)
+
+
 def test_coerce_to_address():
     for arg in ["127.0.0.1:8786", ("127.0.0.1", 8786), ("127.0.0.1", "8786")]:
         assert coerce_to_address(arg) == "tcp://127.0.0.1:8786"
@@ -771,35 +794,31 @@ def test_compression(compression, serialize, loop):
     with dask.config.set(compression=compression):
 
         async def f():
-            server = Server({"echo": serialize})
-            await server.listen("tcp://")
+            async with Server({"echo": serialize}) as server:
+                await server.listen("tcp://")
 
-            with rpc(server.address) as r:
-                data = b"1" * 1000000
-                result = await r.echo(x=to_serialize(data))
-                assert result == {"result": data}
-
-            server.stop()
+                with rpc(server.address) as r:
+                    data = b"1" * 1000000
+                    result = await r.echo(x=to_serialize(data))
+                    assert result == {"result": data}
 
         loop.run_sync(f)
 
 
-def test_rpc_serialization(loop):
-    async def f():
-        server = Server({"echo": echo_serialize})
-        await server.listen("tcp://")
+@pytest.mark.asyncio
+async def test_rpc_serialization():
+    server = Server({"echo": echo_serialize})
+    await server.listen("tcp://")
 
-        async with rpc(server.address, serializers=["msgpack"]) as r:
-            with pytest.raises(TypeError):
-                await r.echo(x=to_serialize(inc))
+    async with rpc(server.address, serializers=["msgpack"]) as r:
+        with pytest.raises(TypeError):
+            await r.echo(x=to_serialize(inc))
 
-        async with rpc(server.address, serializers=["msgpack", "pickle"]) as r:
-            result = await r.echo(x=to_serialize(inc))
-            assert result == {"result": inc}
+    async with rpc(server.address, serializers=["msgpack", "pickle"]) as r:
+        result = await r.echo(x=to_serialize(inc))
+        assert result == {"result": inc}
 
-        server.stop()
-
-    loop.run_sync(f)
+    server.stop()
 
 
 @gen_cluster()
@@ -814,7 +833,7 @@ async def test_deserialize_error():
 
     comm = await connect(server.address, deserialize=False)
     with pytest.raises(Exception) as info:
-        await send_recv(comm, op="throws")
+        await send_recv(comm, op="throws", x="foo")
 
     assert type(info.value) == Exception
     for c in str(info.value):
@@ -973,3 +992,58 @@ async def test_close_grace_period_for_handlers():
         await asyncio.wait_for(fut, 0.5)
     await comm.close()
     await server.close()
+
+
+def test_expects_comm():
+    class A:
+        def empty(self):
+            ...
+
+        def one_arg(self, arg):
+            ...
+
+        def comm_arg(self, comm):
+            ...
+
+        def stream_arg(self, stream):
+            ...
+
+        def two_arg(self, arg, other):
+            ...
+
+        def comm_arg_other(self, comm, other):
+            ...
+
+        def stream_arg_other(self, stream, other):
+            ...
+
+        def arg_kwarg(self, arg, other=None):
+            ...
+
+        def comm_posarg_only(self, comm, /, other):
+            ...
+
+        def comm_not_leading_position(self, other, comm):
+            ...
+
+        def stream_not_leading_position(self, other, stream):
+            ...
+
+    expected_warning = "first arugment of a RPC handler `stream` is deprecated"
+
+    instance = A()
+
+    assert not _expects_comm(instance.empty)
+    assert not _expects_comm(instance.one_arg)
+    assert _expects_comm(instance.comm_arg)
+    with pytest.warns(FutureWarning, match=expected_warning):
+        assert _expects_comm(instance.stream_arg)
+    assert not _expects_comm(instance.two_arg)
+    assert _expects_comm(instance.comm_arg_other)
+    with pytest.warns(FutureWarning, match=expected_warning):
+        assert _expects_comm(instance.stream_arg_other)
+    assert not _expects_comm(instance.arg_kwarg)
+    assert _expects_comm(instance.comm_posarg_only)
+    assert not _expects_comm(instance.comm_not_leading_position)
+
+    assert not _expects_comm(instance.stream_not_leading_position)
