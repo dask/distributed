@@ -93,13 +93,14 @@ First, we identify the pool of viable workers:
     of the task.
 
 From among this pool of workers, we then determine the worker where we think the task will start
-running the soonest, using :method:`Scheduler.worker_objective`. For each worker:
+running the soonest, using :meth:`Scheduler.worker_objective`. For each worker:
 
 1.  We consider the estimated runtime of other tasks already queued on that worker.
     Then, we add how long it will take to transfer any dependencies to that worker that
     it doesn't already have, based on their size, in bytes, and the measured network
-    bandwith between workers. (This does *not* consider serialization time, nor whether
-    the data is spilled to disk versus in memory on the worker.) In practice, the
+    bandwith between workers. Note that this does *not* consider (de)serialization
+    time, time to retrieve the data from disk if it was spilled, or potential differences
+    between size in memory and serialized size. In practice, the
     queue-wait-time (known as *occupancy*) usually dominates, so data will usually be
     transferred to a different worker if it means the task can start any sooner.
 2.  It's possible for ties to occur with the "start soonest" metric, though uncommon
@@ -146,7 +147,7 @@ Last in, first out
 
 When a worker finishes a task, the immediate dependencies of that task get top
 priority.  This encourages a behavior of finishing ongoing work immediately
-before starting new work.  This often conflicts with the
+before starting new work (depth-first graph traversal). This often conflicts with the
 first-come-first-served objective, but often results in shorter total runtimes
 and significantly reduced memory footprints.
 
