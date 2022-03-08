@@ -93,15 +93,15 @@ First, we identify the pool of viable workers:
     of the task.
 
 From among this pool of workers, we then determine the worker where we think the task will start
-running the soonest, using :method:`Scheduler.worker_objective`.
+running the soonest, using :method:`Scheduler.worker_objective`. For each worker:
 
 1.  We consider the estimated runtime of other tasks already queued on that worker.
-    Then, we add how long it will take to transfer any dependencies to that worker,
-    based on the size of the dependencies, in bytes, and the measured network bandwith
-    between workers. (This does *not* consider serialization time, nor whether the data
-    is spilled to disk versus in memory on the worker.) In practice, the queue-wait-time
-    (known as *occupancy*) usually dominates, so data will usually be transferred to a
-    different worker if it means the task can start any sooner.
+    Then, we add how long it will take to transfer any dependencies to that worker that
+    it doesn't already have, based on their size, in bytes, and the measured network
+    bandwith between workers. (This does *not* consider serialization time, nor whether
+    the data is spilled to disk versus in memory on the worker.) In practice, the
+    queue-wait-time (known as *occupancy*) usually dominates, so data will usually be
+    transferred to a different worker if it means the task can start any sooner.
 2.  It's possible for ties to occur with the "start soonest" metric, though uncommon
     when all workers are busy. We break ties by choosing the worker that has the
     fewest number of bytes of Dask data stored (including spilled data). Note that
