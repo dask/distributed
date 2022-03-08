@@ -92,8 +92,8 @@ First, we identify the pool of viable workers:
 3.  We restrict the above set to just workers that hold at least one dependency
     of the task.
 
-From among this pool of workers, we then determine the worker where we think the task will start
-running the soonest, using :meth:`Scheduler.worker_objective`. For each worker:
+From among this pool of workers, we then determine the worker where we think the task will
+start running the soonest, using :meth:`Scheduler.worker_objective`. For each worker:
 
 1.  We consider the estimated runtime of other tasks already queued on that worker.
     Then, we add how long it will take to transfer any dependencies to that worker that
@@ -147,8 +147,8 @@ Last in, first out
 
 When a worker finishes a task, the immediate dependencies of that task get top
 priority.  This encourages a behavior of finishing ongoing work immediately
-before starting new work (depth-first graph traversal). This often conflicts with the
-first-come-first-served objective, but often results in shorter total runtimes
+before starting new work (depth-first graph traversal). This often conflicts with
+the first-come-first-served objective, but often results in shorter total runtimes
 and significantly reduced memory footprints.
 
 .. _priority-break-ties:
