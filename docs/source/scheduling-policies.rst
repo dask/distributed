@@ -50,7 +50,7 @@ would all belong to the TaskGroup ``random-a1b2c3``.)
 To identify the root(ish) tasks, we use this heuristic:
 
 1.  The TaskGroup has 2x more tasks than there are threads in the cluster
-2.  The TaskGroup has fewer than 5 dependencies across *all* tasks in the group.
+2.  The TaskGroup has fewer than 5 unique dependencies across *all* tasks in the group.
 
     We don't just say "The task has no dependencies", because real-world cases like
     :obj:`dask.array.from_zarr` and :obj:`dask.array.from_array` produce graphs like the one
