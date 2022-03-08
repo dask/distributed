@@ -210,7 +210,7 @@ scheduler, and workers at various points in the computation.
     submit, persist, map, or any operation that generates futures).
 3.  Whenever a task is ready to run (its dependencies, if any, are complete),
     the scheduler assigns it to a worker. When multiple tasks are ready at once,
-    the order in which they are scheduled is undefined, not based on priority.
+    they are all submitted to workers, in priority order.
 4.  However, when the worker receives these tasks, it considers their priorities
     when determining which tasks to prioritize for fetching data or for
     computation.  The worker maintains a heap of all ready-to-run tasks ordered
