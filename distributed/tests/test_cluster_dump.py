@@ -44,6 +44,6 @@ def test_url_and_writer_yaml(tmp_path):
     buffer = io.StringIO()
     write(state, buffer)
     buffer.seek(0)
-    readback = yaml.load(buffer)
+    readback = yaml.safe_load(buffer)
     assert readback == _tuple_to_list(state)
     assert "!!python/tuple" not in buffer.getvalue()
