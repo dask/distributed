@@ -51,8 +51,6 @@ from dask.highlevelgraph import HighLevelGraph
 from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta, tmpfile
 from dask.widgets import get_template
 
-from distributed.utils import recursive_to_dict
-
 from . import preloading, profile
 from . import versions as version_module
 from .active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
@@ -92,6 +90,7 @@ from .utils import (
     key_split_group,
     log_errors,
     no_default,
+    recursive_to_dict,
     validate_key,
 )
 from .utils_comm import gather_from_workers, retry_operation, scatter_to_workers
@@ -7371,7 +7370,7 @@ class Scheduler(SchedulerState, ServerNode):
         }
 
     def get_task_stream(self, start=None, stop=None, count=None):
-        from distributed.diagnostics.task_stream import TaskStreamPlugin
+        from .diagnostics.task_stream import TaskStreamPlugin
 
         if TaskStreamPlugin.name not in self.plugins:
             self.add_plugin(TaskStreamPlugin(self))
@@ -7722,10 +7721,7 @@ class Scheduler(SchedulerState, ServerNode):
         source.data.update(rects)
 
         # Bandwidth
-        from distributed.dashboard.components.scheduler import (
-            BandwidthTypes,
-            BandwidthWorkers,
-        )
+        from .dashboard.components.scheduler import BandwidthTypes, BandwidthWorkers
 
         bandwidth_workers = BandwidthWorkers(self, sizing_mode="stretch_both")
         bandwidth_workers.update()
@@ -7733,13 +7729,13 @@ class Scheduler(SchedulerState, ServerNode):
         bandwidth_types.update()
 
         # System monitor
-        from distributed.dashboard.components.shared import SystemMonitor
+        from .dashboard.components.shared import SystemMonitor
 
         sysmon = SystemMonitor(self, last_count=last_count, sizing_mode="stretch_both")
         sysmon.update()
 
         # Scheduler logs
-        from distributed.dashboard.components.scheduler import SchedulerLogs
+        from .dashboard.components.scheduler import SchedulerLogs
 
         logs = SchedulerLogs(self, start=start)
 

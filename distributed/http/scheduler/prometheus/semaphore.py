@@ -1,4 +1,4 @@
-from distributed.http.prometheus import PrometheusCollector
+from ...prometheus import PrometheusCollector
 
 
 class SemaphoreMetricCollector(PrometheusCollector):

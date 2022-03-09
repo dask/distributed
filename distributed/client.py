@@ -933,7 +933,7 @@ class Client(SyncMethodMixin):
         self.start(timeout=timeout)
         Client._instances.add(self)
 
-        from distributed.recreate_tasks import ReplayTaskClient
+        from .recreate_tasks import ReplayTaskClient
 
         ReplayTaskClient(self)
 

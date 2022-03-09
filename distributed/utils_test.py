@@ -28,8 +28,8 @@ from itertools import count
 from time import sleep
 from typing import Any, Literal
 
-from distributed.compatibility import MACOS
-from distributed.scheduler import Scheduler
+from .compatibility import MACOS
+from .scheduler import Scheduler
 
 try:
     import ssl
@@ -44,13 +44,11 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from distributed.comm.tcp import TCP
-
 from . import system
 from . import versions as version_module
 from .client import Client, _global_clients, default_client
 from .comm import Comm
-from .comm.tcp import BaseTCPConnector
+from .comm.tcp import TCP, BaseTCPConnector
 from .compatibility import WINDOWS
 from .config import initialize_logging
 from .core import CommClosedError, ConnectionPool, Status, connect, rpc
@@ -203,7 +201,7 @@ def pristine_loop():
 def mock_ipython():
     from unittest import mock
 
-    from distributed._ipython_utils import remote_magic
+    from ._ipython_utils import remote_magic
 
     ip = mock.Mock()
     ip.user_ns = {}
@@ -457,7 +455,7 @@ async def readone(comm):
 
 def run_scheduler(q, nputs, config, port=0, **kwargs):
     with dask.config.set(config):
-        from distributed import Scheduler
+        from . import Scheduler
 
         # On Python 2.7 and Unix, fork() is used to spawn child processes,
         # so avoid inheriting the parent's IO loop.
@@ -484,7 +482,7 @@ def run_scheduler(q, nputs, config, port=0, **kwargs):
 
 def run_worker(q, scheduler_q, config, **kwargs):
     with dask.config.set(config):
-        from distributed import Worker
+        from . import Worker
 
         reset_logger_locks()
         with log_errors():
@@ -913,7 +911,7 @@ def gen_cluster(
     allow_unclosed: bool = False,
     cluster_dump_directory: str | Literal[False] = "test_cluster_dump",
 ) -> Callable[[Callable], Callable]:
-    from distributed import Client
+    from . import Client
 
     """ Coroutine test with small cluster
 
@@ -1596,7 +1594,7 @@ def check_thread_leak():
             sleep(0.01)
         if time() > start + 5:
             # Raise an error with information about leaked threads
-            from distributed import profile
+            from . import profile
 
             bad_thread = bad_threads[0]
             call_stacks = profile.call_stack(sys._current_frames()[bad_thread.ident])

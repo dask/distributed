@@ -9,13 +9,10 @@ import warnings
 import click
 from tornado.ioloop import IOLoop
 
-from distributed import Scheduler
-from distributed.cli.utils import check_python_3, install_signal_handlers
-from distributed.preloading import validate_preload_argv
-from distributed.proctitle import (
-    enable_proctitle_on_children,
-    enable_proctitle_on_current,
-)
+from .. import Scheduler
+from ..preloading import validate_preload_argv
+from ..proctitle import enable_proctitle_on_children, enable_proctitle_on_current
+from .utils import check_python_3, install_signal_handlers
 
 logger = logging.getLogger("distributed.scheduler")
 

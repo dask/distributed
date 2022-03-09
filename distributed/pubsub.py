@@ -285,7 +285,7 @@ class Pub:
 
     def __init__(self, name, worker=None, client=None):
         if worker is None and client is None:
-            from distributed import get_client, get_worker
+            from . import get_client, get_worker
 
             try:
                 worker = get_worker()
@@ -365,7 +365,7 @@ class Sub:
 
     def __init__(self, name, worker=None, client=None):
         if worker is None and client is None:
-            from distributed.worker import get_client, get_worker
+            from .worker import get_client, get_worker
 
             try:
                 worker = get_worker()

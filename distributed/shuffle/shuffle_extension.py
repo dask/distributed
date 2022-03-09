@@ -6,13 +6,13 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NewType
 
-from distributed.protocol import to_serialize
-from distributed.utils import sync
+from ..protocol import to_serialize
+from ..utils import sync
 
 if TYPE_CHECKING:
     import pandas as pd
 
-    from distributed.worker import Worker
+    from ..worker import Worker
 
 ShuffleId = NewType("ShuffleId", str)
 

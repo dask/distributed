@@ -15,16 +15,13 @@ from tornado.ioloop import IOLoop, TimeoutError
 import dask
 from dask.system import CPU_COUNT
 
-from distributed import Nanny
-from distributed.cli.utils import check_python_3, install_signal_handlers
-from distributed.comm import get_address_host_port
-from distributed.deploy.utils import nprocesses_nthreads
-from distributed.preloading import validate_preload_argv
-from distributed.proctitle import (
-    enable_proctitle_on_children,
-    enable_proctitle_on_current,
-)
-from distributed.utils import import_term
+from .. import Nanny
+from ..comm import get_address_host_port
+from ..deploy.utils import nprocesses_nthreads
+from ..preloading import validate_preload_argv
+from ..proctitle import enable_proctitle_on_children, enable_proctitle_on_current
+from ..utils import import_term
+from .utils import check_python_3, install_signal_handlers
 
 logger = logging.getLogger("distributed.dask_worker")
 

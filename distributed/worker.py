@@ -4290,7 +4290,7 @@ class Worker(ServerNode):
             pass
         else:
             # must be lazy import otherwise cyclic import
-            from distributed.deploy.cluster import Cluster
+            from .deploy.cluster import Cluster
 
             if (
                 client.scheduler

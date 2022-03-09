@@ -3,8 +3,7 @@ from contextlib import contextmanager
 
 import dask
 
-from distributed.metrics import time
-
+from .metrics import time
 from .threadpoolexecutor import rejoin, secede
 from .worker import get_client, get_worker, thread_state
 

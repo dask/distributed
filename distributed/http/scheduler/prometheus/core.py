@@ -1,9 +1,8 @@
 import toolz
 
-from distributed.http.prometheus import PrometheusCollector
-from distributed.http.utils import RequestHandler
-from distributed.scheduler import ALL_TASK_STATES
-
+from ....scheduler import ALL_TASK_STATES
+from ...prometheus import PrometheusCollector
+from ...utils import RequestHandler
 from .semaphore import SemaphoreMetricCollector
 
 

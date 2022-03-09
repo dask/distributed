@@ -5,7 +5,7 @@ import sys
 import click
 import yaml
 
-from distributed.deploy.spec import run_spec
+from ..deploy.spec import run_spec
 
 
 @click.command(context_settings=dict(ignore_unknown_options=True))

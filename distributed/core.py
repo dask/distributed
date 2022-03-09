@@ -24,8 +24,6 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
-from distributed.utils import recursive_to_dict
-
 from . import profile, protocol
 from .comm import (
     Comm,
@@ -43,6 +41,7 @@ from .utils import (
     get_traceback,
     has_keyword,
     is_coroutine_function,
+    recursive_to_dict,
     truncate_exception,
 )
 

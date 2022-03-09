@@ -14,11 +14,11 @@ from tornado import escape
 
 from dask.utils import format_bytes
 
-from distributed.dashboard.components import DashboardComponent, add_periodic_callback
-from distributed.dashboard.components.scheduler import BOKEH_THEME, TICKS_1024, env
-from distributed.dashboard.utils import update
-from distributed.diagnostics import nvml
-from distributed.utils import log_errors
+from ...diagnostics import nvml
+from ...utils import log_errors
+from ..utils import update
+from . import DashboardComponent, add_periodic_callback
+from .scheduler import BOKEH_THEME, TICKS_1024, env
 
 NVML_ENABLED = nvml.device_get_count() > 0
 

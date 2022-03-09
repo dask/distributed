@@ -10,10 +10,9 @@ from tornado.ioloop import PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
-from distributed.utils_comm import retry_operation
-
 from .metrics import time
 from .utils import SyncMethodMixin, log_errors
+from .utils_comm import retry_operation
 from .worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)

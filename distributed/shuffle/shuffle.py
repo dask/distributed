@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 def get_ext() -> ShuffleWorkerExtension:
-    from distributed import get_worker
+    from .. import get_worker
 
     try:
         worker = get_worker()

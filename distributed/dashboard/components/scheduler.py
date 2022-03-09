@@ -51,25 +51,20 @@ import dask
 from dask import config
 from dask.utils import format_bytes, format_time, key_split, parse_timedelta
 
-from distributed.dashboard.components import add_periodic_callback
-from distributed.dashboard.components.shared import (
-    DashboardComponent,
-    ProfileServer,
-    ProfileTimePlot,
-    SystemMonitor,
-)
-from distributed.dashboard.utils import BOKEH_VERSION, PROFILING, transpose, update
-from distributed.diagnostics.graph_layout import GraphLayout
-from distributed.diagnostics.progress import GroupTiming
-from distributed.diagnostics.progress_stream import color_of, progress_quads
-from distributed.diagnostics.task_stream import TaskStreamPlugin
-from distributed.diagnostics.task_stream import color_of as ts_color_of
-from distributed.diagnostics.task_stream import colors as ts_color_lookup
-from distributed.metrics import time
-from distributed.utils import Log, log_errors
+from ...diagnostics.graph_layout import GraphLayout
+from ...diagnostics.progress import GroupTiming
+from ...diagnostics.progress_stream import color_of, progress_quads
+from ...diagnostics.task_stream import TaskStreamPlugin
+from ...diagnostics.task_stream import color_of as ts_color_of
+from ...diagnostics.task_stream import colors as ts_color_lookup
+from ...metrics import time
+from ...utils import Log, log_errors
+from ..utils import BOKEH_VERSION, PROFILING, transpose, update
+from . import add_periodic_callback
+from .shared import DashboardComponent, ProfileServer, ProfileTimePlot, SystemMonitor
 
 if dask.config.get("distributed.dashboard.export-tool"):
-    from distributed.dashboard.export_tool import ExportTool
+    from ..export_tool import ExportTool
 else:
     ExportTool = None  # type: ignore
 

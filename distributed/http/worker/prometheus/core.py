@@ -1,7 +1,7 @@
 import logging
 
-from distributed.http.prometheus import PrometheusCollector
-from distributed.http.utils import RequestHandler
+from ...prometheus import PrometheusCollector
+from ...utils import RequestHandler
 
 
 class WorkerMetricCollector(PrometheusCollector):

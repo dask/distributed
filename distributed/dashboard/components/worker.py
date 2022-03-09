@@ -23,17 +23,12 @@ from tlz import merge, partition_all
 
 from dask.utils import format_bytes, format_time
 
-from distributed.dashboard.components import add_periodic_callback
-from distributed.dashboard.components.shared import (
-    DashboardComponent,
-    ProfileServer,
-    ProfileTimePlot,
-    SystemMonitor,
-)
-from distributed.dashboard.utils import transpose, update
-from distributed.diagnostics.progress_stream import color_of
-from distributed.metrics import time
-from distributed.utils import key_split, log_errors
+from ...diagnostics.progress_stream import color_of
+from ...metrics import time
+from ...utils import key_split, log_errors
+from ..utils import transpose, update
+from . import add_periodic_callback
+from .shared import DashboardComponent, ProfileServer, ProfileTimePlot, SystemMonitor
 
 logger = logging.getLogger(__name__)
 

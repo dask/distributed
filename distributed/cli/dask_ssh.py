@@ -5,8 +5,8 @@ from textwrap import dedent
 
 import click
 
-from distributed.cli.utils import check_python_3
-from distributed.deploy.old_ssh import SSHCluster
+from ..deploy.old_ssh import SSHCluster
+from .utils import check_python_3
 
 logger = logging.getLogger("distributed.dask_ssh")
 

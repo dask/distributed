@@ -21,14 +21,14 @@ from tornado import gen
 
 import dask
 
-from distributed import profile
-from distributed.compatibility import WINDOWS
-from distributed.dashboard.components import DashboardComponent
-from distributed.dashboard.utils import update
-from distributed.utils import log_errors
+from ... import profile
+from ...compatibility import WINDOWS
+from ...utils import log_errors
+from ..utils import update
+from . import DashboardComponent
 
 if dask.config.get("distributed.dashboard.export-tool"):
-    from distributed.dashboard.export_tool import ExportTool
+    from ..export_tool import ExportTool
 else:
     ExportTool = None  # type: ignore
 
