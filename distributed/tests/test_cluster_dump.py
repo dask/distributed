@@ -27,7 +27,7 @@ async def get_state():
 @gen_test()
 async def test_write_state_msgpack(tmp_path):
     path = str(tmp_path / "bar")
-    await write_state(get_state(), path, "msgpack")
+    await write_state(get_state, path, "msgpack")
 
     with fsspec.open(f"{path}.msgpack.gz", "rb", compression="gzip") as f:
         readback = msgpack.load(f)
@@ -37,7 +37,7 @@ async def test_write_state_msgpack(tmp_path):
 @gen_test()
 async def test_write_state_yaml(tmp_path):
     path = str(tmp_path / "bar")
-    await write_state(get_state(), path, "yaml")
+    await write_state(get_state, path, "yaml")
 
     with open(f"{path}.yaml") as f:
         readback = yaml.safe_load(f)
