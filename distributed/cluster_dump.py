@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import IO, Any, Awaitable, Literal
+from typing import IO, Any, Awaitable, Callable, Literal
 
 import fsspec
 import msgpack
@@ -20,7 +20,7 @@ def _tuple_to_list(node):
 
 
 async def write_state(
-    get_state: Awaitable[dict],
+    get_state: Callable[[], Awaitable[Any]],
     url: str,
     format: Literal["msgpack", "yaml"],
     **storage_options: dict[str, Any],
@@ -53,7 +53,7 @@ async def write_state(
     # Eagerly open the file to catch any errors before doing the full dump
     # NOTE: `compression="infer"` will automatically use gzip via the `.gz` suffix
     with fsspec.open(url, mode, compression="infer", **storage_options) as f:
-        state = await get_state
+        state = await get_state()
         # Write from a thread so we don't block the event loop quite as badly
         # (the writer will still hold the GIL a lot though).
         await to_thread(writer, state, f)

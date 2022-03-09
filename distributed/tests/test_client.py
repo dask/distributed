@@ -7286,6 +7286,28 @@ def _verify_cluster_dump(url, format: str, addresses: set[str]) -> dict:
     return state
 
 
+def test_dump_cluster_state_write_from_scheduler(
+    c, s, a, b, tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.chdir(tmp_path)
+
+    scheduler_dir = tmp_path / "scheduler"
+    scheduler_dir.mkdir()
+    c.run_on_scheduler(os.chdir, str(scheduler_dir))
+
+    c.dump_cluster_state("not-url")
+    assert (tmp_path / "not-url.msgpack.gz").is_file()
+
+    c.dump_cluster_state("file://is-url")
+    assert (scheduler_dir / "is-url.msgpack.gz").is_file()
+
+    c.dump_cluster_state("file://local-explicit", write_from_scheduler=False)
+    assert (tmp_path / "local-explicit.msgpack.gz").is_file()
+
+    c.dump_cluster_state("scheduler-explicit", write_from_scheduler=True)
+    assert (scheduler_dir / "scheduler-explicit.msgpack.gz").is_file()
+
+
 @pytest.mark.parametrize("local", [True, False])
 @pytest.mark.parametrize("_format", ["msgpack", "yaml"])
 def test_dump_cluster_state_sync(c, s, a, b, tmp_path, _format, local):

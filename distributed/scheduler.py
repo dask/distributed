@@ -4131,7 +4131,7 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> None:
         "Write a cluster state dump to an fsspec-compatible URL."
         await cluster_dump.write_state(
-            self.get_cluster_state(exclude), url, format, **storage_options
+            partial(self.get_cluster_state, exclude), url, format, **storage_options
         )
 
     def get_worker_service_addr(self, worker, service_name, protocol=False):

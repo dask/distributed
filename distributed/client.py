@@ -3829,6 +3829,7 @@ class Client(SyncMethodMixin):
     def dump_cluster_state(
         self,
         filename: str = "dask-cluster-dump",
+        write_from_scheduler: bool | None = None,
         exclude: Collection[str] = ("run_spec",),
         format: Literal["msgpack", "yaml"] = "msgpack",
         **storage_options,
@@ -3860,19 +3861,28 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         filename:
-            The output filename. The appropriate file suffix (``.msgpack.gz`` or
+            The path or URL to write to. The appropriate file suffix (``.msgpack.gz`` or
             ``.yaml``) will be appended automatically.
 
-            If the filename is a URL supported by :func:`fsspec.open` (like
-            ``s3://my-bucket/cluster-dump``, or any URL containing ``://``), the
-            dump will be written directly to that URL from the scheduler.
-            Any additional keyword arguments will be passed to :func:`fsspec.open`.
-            Note that writing to buckets requires libraries like ``s3fs`` or ``gcsfs``
-            to be installed on the scheduler.
+            Must be a path supported by :func:`fsspec.open` (like ``s3://my-bucket/cluster-dump``,
+            or ``cluster-dumps/dump``). See ``write_from_scheduler`` to control whether
+            the dump is written directly to ``filename`` from the scheduler, or sent
+            back to the client over the network, then written locally.
+        write_from_scheduler:
+            If None (default), infer based on whether ``filename`` looks like a URL
+            or a local path: True if the filename contains ``://`` (like
+            ``s3://my-bucket/cluster-dump``), False otherwise (like ``local_dir/cluster-dump``).
 
-            Otherwise, the filename is interpreted as a path on the local
-            filesystem. The cluster state will be sent from the scheduler back
-            to the client, then written to disk.
+            If True, write cluster state directly to ``filename`` from the scheduler.
+            If ``filename`` is a local path, the dump will be written to that
+            path on the *scheduler's* filesystem, so be careful if the scheduler is running
+            on ephemeral hardware. Useful when the scheduler is attached to a network
+            filesystem or persistent disk, or for writing to buckets.
+
+            If False, transfer cluster state from the scheduler back to the client
+            over the network, then write it to ``filename``. This is much less
+            efficient for large dumps, but useful when the scheduler doesn't have
+            access to any persistent storage.
         exclude:
             A collection of attribute names which are supposed to be excluded
             from the dump, e.g. to exclude code, tracebacks, logs, etc.
@@ -3901,12 +3911,11 @@ class Client(SyncMethodMixin):
                     state = yaml.load(fd, Loader=Loader)
         **storage_options:
             Any additional arguments to :func:`fsspec.open` when writing to a URL.
-            Ignored when writing to a local file.
-
         """
         return self.sync(
             self._dump_cluster_state,
             filename=filename,
+            write_from_scheduler=write_from_scheduler,
             exclude=exclude,
             format=format,
             **storage_options,
@@ -3915,12 +3924,16 @@ class Client(SyncMethodMixin):
     async def _dump_cluster_state(
         self,
         filename: str = "dask-cluster-dump",
+        write_from_scheduler: bool | None = None,
         exclude: Collection[str] = ("run_spec",),
         format: Literal["msgpack", "yaml"] = "msgpack",
         **storage_options,
     ):
         filename = str(filename)
-        if "://" in filename:
+        if write_from_scheduler is None:
+            write_from_scheduler = "://" in filename
+
+        if write_from_scheduler:
             await self.scheduler.dump_cluster_state_to_url(
                 url=filename,
                 exclude=exclude,
@@ -3929,7 +3942,7 @@ class Client(SyncMethodMixin):
             )
         else:
             await cluster_dump.write_state(
-                self.scheduler.get_cluster_state(exclude=exclude),
+                partial(self.scheduler.get_cluster_state, exclude=exclude),
                 filename,
                 format,
                 **storage_options,
