@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from typing import IO, Any, Callable, Literal
+from typing import IO, Any, Awaitable, Literal
+
+import fsspec
+import msgpack
+
+from distributed.compatibility import to_thread
 
 
 def _tuple_to_list(node):
@@ -14,15 +19,17 @@ def _tuple_to_list(node):
         return node
 
 
-def url_and_writer(
-    url: str, format: Literal["msgpack", "yaml"]
-) -> tuple[str, Literal["w", "wb"], Callable[[Any, IO], None]]:
-    "Get the URL/path and a serialization function for a cluster dump format"
-    mode: Literal["w", "wb"]
-    writer: Callable[[Any, IO], None]
-    if format == "msgpack":
-        import msgpack
+async def write_state(
+    get_state: Awaitable[dict],
+    url: str,
+    format: Literal["msgpack", "yaml"],
+    storage_options: dict[str, Any] | None = None,
+) -> None:
+    "Await a cluster dump, then serialize and write it to a path"
+    if storage_options is None:
+        storage_options = {}
 
+    if format == "msgpack":
         mode = "wb"
         suffix = ".msgpack.gz"
         if not url.endswith(suffix):
@@ -46,4 +53,10 @@ def url_and_writer(
             f"Unsupported format {format!r}. Possible values are 'msgpack' or 'yaml'."
         )
 
-    return url, mode, writer
+    # Eagerly open the file to catch any errors before doing the full dump
+    # NOTE: `compression="infer"` will automatically use gzip via the `.gz` suffix
+    with fsspec.open(url, mode, compression="infer", **storage_options) as f:
+        state = await get_state
+        # Write from a thread so we don't block the event loop quite as badly
+        # (the writer will still hold the GIL a lot though).
+        await to_thread(writer, state, f)

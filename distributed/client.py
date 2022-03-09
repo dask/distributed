@@ -24,7 +24,7 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import IO, Callable, ClassVar, Literal
+from typing import ClassVar, Literal
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
@@ -3826,44 +3826,6 @@ class Client(SyncMethodMixin):
             self.sync(self._update_scheduler_info)
         return self._scheduler_identity
 
-    async def _dump_cluster_state_local(
-        self,
-        filename: str,
-        exclude: Collection[str],
-        format: Literal["msgpack", "yaml"],
-        storage_options: dict | None = None,
-    ) -> None:
-        state = await self.scheduler.get_cluster_state(exclude=exclude)
-
-        filename, mode, write = cluster_dump.url_and_writer(filename, format)
-
-        opener: Callable[[str, str], IO]
-        if format == "msgpack":
-            import gzip
-
-            opener = gzip.open  # type: ignore
-            # NOTE: `GzipFile` isn't recognized as `IO`
-        else:
-            opener = open
-
-        with opener(filename, mode) as f:
-            write(state, f)
-
-    async def _dump_cluster_state_remote(
-        self,
-        filename: str,
-        exclude: Collection[str],
-        format: Literal["msgpack", "yaml"],
-        storage_options: dict | None = None,
-    ) -> None:
-        "Tell the scheduler to dump cluster state to a URL"
-        await self.scheduler.dump_cluster_state_to_url(
-            url=filename,
-            exclude=exclude,
-            format=format,
-            storage_options=storage_options,
-        )
-
     def dump_cluster_state(
         self,
         filename: str = "dask-cluster-dump",
@@ -3905,8 +3867,8 @@ class Client(SyncMethodMixin):
             ``s3://my-bucket/cluster-dump``, or any URL containing ``://``), the
             dump will be written directly to that URL from the scheduler.
             Any additional keyword arguments will be passed to :func:`fsspec.open`.
-            Note that this requires having ``fsspec`` (and any implementation like
-            ``s3fs`` or ``gcsfs``) installed on the scheduler.
+            Note that writing to buckets requires libraries like ``s3fs`` or ``gcsfs``
+            to be installed on the scheduler.
 
             Otherwise, the filename is interpreted as a path on the local
             filesystem. The cluster state will be sent from the scheduler back
@@ -3942,19 +3904,36 @@ class Client(SyncMethodMixin):
             Ignored when writing to a local file.
 
         """
-        filename = str(filename)
-        method = (
-            self._dump_cluster_state_remote
-            if "://" in filename
-            else self._dump_cluster_state_local
-        )
         return self.sync(
-            method,
+            self._dump_cluster_state,
             filename=filename,
             exclude=exclude,
             format=format,
-            storage_options=kwargs,
+            **kwargs,
         )
+
+    async def _dump_cluster_state(
+        self,
+        filename: str = "dask-cluster-dump",
+        exclude: Collection[str] = ("run_spec",),
+        format: Literal["msgpack", "yaml"] = "msgpack",
+        **kwargs,
+    ):
+        filename = str(filename)
+        if "://" in filename:
+            await self.scheduler.dump_cluster_state_to_url(
+                url=filename,
+                exclude=exclude,
+                format=format,
+                storage_options=kwargs,
+            )
+        else:
+            await cluster_dump.write_state(
+                self.scheduler.get_cluster_state(exclude=exclude),
+                filename,
+                format,
+                kwargs,
+            )
 
     def write_scheduler_file(self, scheduler_file):
         """Write the scheduler information to a json file.

@@ -52,7 +52,6 @@ from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta, 
 from dask.widgets import get_template
 
 from distributed import cluster_dump
-from distributed.compatibility import to_thread
 from distributed.utils import recursive_to_dict
 
 from . import preloading, profile
@@ -4130,26 +4129,10 @@ class Scheduler(SchedulerState, ServerNode):
         format: Literal["msgpack", "yaml"],
         storage_options: Optional[Dict[str, Any]] = None,
     ) -> None:
-        "Write a cluster state dump to an fsspec-compatible URL. Requires fsspec."
-        try:
-            import fsspec
-        except ImportError:
-            raise ImportError(
-                "fsspec must be installed to dump cluster state directly to a URL"
-            )
-
-        if storage_options is None:
-            storage_options = {}
-
-        url, mode, writer = cluster_dump.url_and_writer(url, format)
-        # Eagerly open the file to catch any errors before doing the full dump
-        # NOTE: `compression="infer"` will automatically use gzip via the `.gz` suffix
-        with fsspec.open(url, mode, compression="infer", **storage_options) as f:
-            state = await self.get_cluster_state(exclude)
-
-            # Write from a thread so we don't block the event loop quite as badly
-            # (the writer will still hold the GIL a lot though).
-            await to_thread(writer, state, f)
+        "Write a cluster state dump to an fsspec-compatible URL."
+        await cluster_dump.write_state(
+            self.get_cluster_state(exclude), url, format, storage_options
+        )
 
     def get_worker_service_addr(self, worker, service_name, protocol=False):
         """

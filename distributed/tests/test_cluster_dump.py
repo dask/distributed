@@ -1,10 +1,10 @@
-import io
-
+import fsspec
 import msgpack
 import pytest
 import yaml
 
-from distributed.cluster_dump import _tuple_to_list, url_and_writer
+from distributed.cluster_dump import _tuple_to_list, write_state
+from distributed.utils_test import gen_test
 
 
 @pytest.mark.parametrize(
@@ -20,30 +20,27 @@ def test_tuple_to_list(input, expected):
     assert _tuple_to_list(input) == expected
 
 
-def test_url_and_writer_msgpack(tmp_path):
+async def get_state():
+    return {"foo": "bar", "list": ["a"], "tuple": (1, "two", 3)}
+
+
+@gen_test()
+async def test_write_state_msgpack(tmp_path):
     path = str(tmp_path / "bar")
-    url, mode, write = url_and_writer(path, "msgpack")
-    assert url == f"{path}.msgpack.gz"
-    assert mode == "wb"
+    await write_state(get_state(), path, "msgpack")
 
-    state = {"foo": "bar", "list": ["a"], "tuple": (1, "two", 3)}
-    buffer = io.BytesIO()
-    write(state, buffer)
-    buffer.seek(0)
-    readback = msgpack.load(buffer)
-    assert readback == _tuple_to_list(state)
+    with fsspec.open(f"{path}.msgpack.gz", "rb", compression="gzip") as f:
+        readback = msgpack.load(f)
+        assert readback == _tuple_to_list(await get_state())
 
 
-def test_url_and_writer_yaml(tmp_path):
+@gen_test()
+async def test_write_state_yaml(tmp_path):
     path = str(tmp_path / "bar")
-    url, mode, write = url_and_writer(path, "yaml")
-    assert url == f"{path}.yaml"
-    assert mode == "w"
+    await write_state(get_state(), path, "yaml")
 
-    state = {"foo": "bar", "list": ["a"], "tuple": (1, "two", 3)}
-    buffer = io.StringIO()
-    write(state, buffer)
-    buffer.seek(0)
-    readback = yaml.safe_load(buffer)
-    assert readback == _tuple_to_list(state)
-    assert "!!python/tuple" not in buffer.getvalue()
+    with open(f"{path}.yaml") as f:
+        readback = yaml.safe_load(f)
+        assert readback == _tuple_to_list(await get_state())
+        f.seek(0)
+        assert "!!python/tuple" not in f.read()
