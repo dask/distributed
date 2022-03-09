@@ -83,7 +83,9 @@ def get_tasks_in_state(
     try:
         context = dump[context_str]
     except KeyError:
-        raise ValueError(f"The '{context_str}' was not present in the dumped state")
+        raise ValueError(
+            f"The '{context_str}' context was not present in the dumped state"
+        )
 
     try:
         tasks = context["tasks"]
