@@ -301,6 +301,9 @@ async def test_worker_client_rejoins(c, s, a, b):
     assert result
 
 
+@pytest.mark.xfail(
+    reason="Flaky due to https://github.com/dask/distributed/issues/5915"
+)
 @gen_cluster()
 async def test_submit_different_names(s, a, b):
     # https://github.com/dask/distributed/issues/2058
