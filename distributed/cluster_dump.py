@@ -23,12 +23,9 @@ async def write_state(
     get_state: Awaitable[dict],
     url: str,
     format: Literal["msgpack", "yaml"],
-    storage_options: dict[str, Any] | None = None,
+    **storage_options: dict[str, Any],
 ) -> None:
     "Await a cluster dump, then serialize and write it to a path"
-    if storage_options is None:
-        storage_options = {}
-
     if format == "msgpack":
         mode = "wb"
         suffix = ".msgpack.gz"

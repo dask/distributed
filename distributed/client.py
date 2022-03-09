@@ -3831,7 +3831,7 @@ class Client(SyncMethodMixin):
         filename: str = "dask-cluster-dump",
         exclude: Collection[str] = ("run_spec",),
         format: Literal["msgpack", "yaml"] = "msgpack",
-        **kwargs,
+        **storage_options,
     ):
         """Extract a dump of the entire cluster state and persist to disk or a URL.
         This is intended for debugging purposes only.
@@ -3899,7 +3899,7 @@ class Client(SyncMethodMixin):
                     from yaml import Loader
                 with open("filename") as fd:
                     state = yaml.load(fd, Loader=Loader)
-        **kwargs:
+        **storage_options:
             Any additional arguments to :func:`fsspec.open` when writing to a URL.
             Ignored when writing to a local file.
 
@@ -3909,7 +3909,7 @@ class Client(SyncMethodMixin):
             filename=filename,
             exclude=exclude,
             format=format,
-            **kwargs,
+            **storage_options,
         )
 
     async def _dump_cluster_state(
@@ -3917,7 +3917,7 @@ class Client(SyncMethodMixin):
         filename: str = "dask-cluster-dump",
         exclude: Collection[str] = ("run_spec",),
         format: Literal["msgpack", "yaml"] = "msgpack",
-        **kwargs,
+        **storage_options,
     ):
         filename = str(filename)
         if "://" in filename:
@@ -3925,14 +3925,14 @@ class Client(SyncMethodMixin):
                 url=filename,
                 exclude=exclude,
                 format=format,
-                storage_options=kwargs,
+                **storage_options,
             )
         else:
             await cluster_dump.write_state(
                 self.scheduler.get_cluster_state(exclude=exclude),
                 filename,
                 format,
-                kwargs,
+                **storage_options,
             )
 
     def write_scheduler_file(self, scheduler_file):

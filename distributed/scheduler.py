@@ -28,7 +28,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import Any, ClassVar, Dict, Literal, Optional
+from typing import Any, ClassVar, Dict, Literal
 from typing import cast as pep484_cast
 
 import psutil
@@ -4127,11 +4127,11 @@ class Scheduler(SchedulerState, ServerNode):
         url: str,
         exclude: "Collection[str]",
         format: Literal["msgpack", "yaml"],
-        storage_options: Optional[Dict[str, Any]] = None,
+        **storage_options: Dict[str, Any],
     ) -> None:
         "Write a cluster state dump to an fsspec-compatible URL."
         await cluster_dump.write_state(
-            self.get_cluster_state(exclude), url, format, storage_options
+            self.get_cluster_state(exclude), url, format, **storage_options
         )
 
     def get_worker_service_addr(self, worker, service_name, protocol=False):
