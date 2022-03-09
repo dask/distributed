@@ -13,7 +13,7 @@ from contextlib import suppress
 from inspect import isawaitable
 from queue import Empty
 from time import sleep as sync_sleep
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 import psutil
 from tornado import gen
@@ -44,6 +44,9 @@ from .utils import (
     silence_logging,
 )
 from .worker import Worker, parse_memory_limit, run
+
+if TYPE_CHECKING:
+    from .diagnostics.plugin import NannyPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -88,13 +91,13 @@ class Nanny(ServerNode):
         scheduler_file=None,
         worker_port=0,
         nthreads=None,
-        ncores=None,
         loop=None,
         local_dir=None,
         local_directory=None,
         services=None,
         name=None,
         memory_limit="auto",
+        memory_terminate_fraction: float | Literal[False] | None = None,
         reconnect=True,
         validate=False,
         quiet=False,
@@ -172,10 +175,6 @@ class Nanny(ServerNode):
             if len(protocol_address) == 2:
                 protocol = protocol_address[0]
 
-        if ncores is not None:
-            warnings.warn("the ncores= parameter has moved to nthreads=")
-            nthreads = ncores
-
         self._given_worker_port = worker_port
         self.nthreads = nthreads or CPU_COUNT
         self.reconnect = reconnect
@@ -208,8 +207,10 @@ class Nanny(ServerNode):
         self.worker_kwargs = worker_kwargs
 
         self.contact_address = contact_address
-        self.memory_terminate_fraction = dask.config.get(
-            "distributed.worker.memory.terminate"
+        self.memory_terminate_fraction = (
+            memory_terminate_fraction
+            if memory_terminate_fraction is not None
+            else dask.config.get("distributed.worker.memory.terminate")
         )
 
         self.services = services
@@ -236,7 +237,7 @@ class Nanny(ServerNode):
             "plugin_remove": self.plugin_remove,
         }
 
-        self.plugins = {}
+        self.plugins: dict[str, NannyPlugin] = {}
 
         super().__init__(
             handlers=handlers, io_loop=self.loop, connection_args=self.connection_args
@@ -347,7 +348,7 @@ class Nanny(ServerNode):
 
         return self
 
-    async def kill(self, comm=None, timeout=2):
+    async def kill(self, timeout=2):
         """Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
@@ -360,7 +361,7 @@ class Nanny(ServerNode):
         deadline = time() + timeout
         await self.process.kill(timeout=0.8 * (deadline - time()))
 
-    async def instantiate(self, comm=None) -> Status:
+    async def instantiate(self) -> Status:
         """Start a local worker process
 
         Blocks until the process is up and the scheduler is properly informed
@@ -425,7 +426,7 @@ class Nanny(ServerNode):
                 raise
         return result
 
-    async def plugin_add(self, comm=None, plugin=None, name=None):
+    async def plugin_add(self, plugin=None, name=None):
         with log_errors(pdb=False):
             if isinstance(plugin, bytes):
                 plugin = pickle.loads(plugin)
@@ -451,7 +452,7 @@ class Nanny(ServerNode):
 
             return {"status": "OK"}
 
-    async def plugin_remove(self, comm=None, name=None):
+    async def plugin_remove(self, name=None):
         with log_errors(pdb=False):
             logger.info(f"Removing Nanny plugin {name}")
             try:
@@ -466,7 +467,7 @@ class Nanny(ServerNode):
 
             return {"status": "OK"}
 
-    async def restart(self, comm=None, timeout=30, executor_wait=True):
+    async def restart(self, timeout=30, executor_wait=True):
         async def _():
             if self.process is not None:
                 await self.kill()
@@ -520,8 +521,8 @@ class Nanny(ServerNode):
     def is_alive(self):
         return self.process is not None and self.process.is_alive()
 
-    def run(self, *args, **kwargs):
-        return run(self, *args, **kwargs)
+    def run(self, comm, *args, **kwargs):
+        return run(self, comm, *args, **kwargs)
 
     def _on_exit_sync(self, exitcode):
         self.loop.add_callback(self._on_exit, exitcode)
@@ -565,7 +566,7 @@ class Nanny(ServerNode):
         warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
         return self.close(*args, **kwargs)
 
-    def close_gracefully(self, comm=None):
+    def close_gracefully(self):
         """
         A signal that we shouldn't try to restart workers if they go away
 
@@ -866,16 +867,10 @@ class WorkerProcess:
                 Wait for an incoming stop message and then stop the
                 worker cleanly.
                 """
-                while True:
-                    try:
-                        msg = child_stop_q.get(timeout=1000)
-                    except Empty:
-                        pass
-                    else:
-                        child_stop_q.close()
-                        assert msg.pop("op") == "stop"
-                        loop.add_callback(do_stop, **msg)
-                        break
+                msg = child_stop_q.get()
+                child_stop_q.close()
+                assert msg.pop("op") == "stop"
+                loop.add_callback(do_stop, **msg)
 
             t = threading.Thread(target=watch_stop_q, name="Nanny stop queue watch")
             t.daemon = True

@@ -293,85 +293,84 @@ class MyServer(Server):
 @pytest.mark.asyncio
 async def test_locked_comm_drop_in_replacement(loop):
 
-    a = await MyServer({})
-    await a.listen(0)
+    async with MyServer({}) as a, await MyServer({}) as b:
+        await a.listen(0)
 
-    read_event = asyncio.Event()
-    read_event.set()
-    read_queue = asyncio.Queue()
-    original_pool = a.rpc
-    a.rpc = _LockedCommPool(original_pool, read_event=read_event, read_queue=read_queue)
+        read_event = asyncio.Event()
+        read_event.set()
+        read_queue = asyncio.Queue()
+        original_pool = a.rpc
+        a.rpc = _LockedCommPool(
+            original_pool, read_event=read_event, read_queue=read_queue
+        )
 
-    b = await MyServer({})
-    await b.listen(0)
-    # Event is set, the pool works like an ordinary pool
-    res = await a.rpc(b.address).ping()
-    assert await read_queue.get() == (b.address, "pong")
-    assert res == "pong"
-    assert b.counter == 1
+        await b.listen(0)
+        # Event is set, the pool works like an ordinary pool
+        res = await a.rpc(b.address).ping()
+        assert await read_queue.get() == (b.address, "pong")
+        assert res == "pong"
+        assert b.counter == 1
 
-    read_event.clear()
-    # Can also be used without a lock to intercept network traffic
-    a.rpc = _LockedCommPool(original_pool, read_queue=read_queue)
-    a.rpc.remove(b.address)
-    res = await a.rpc(b.address).ping()
-    assert await read_queue.get() == (b.address, "pong")
+        read_event.clear()
+        # Can also be used without a lock to intercept network traffic
+        a.rpc = _LockedCommPool(original_pool, read_queue=read_queue)
+        a.rpc.remove(b.address)
+        res = await a.rpc(b.address).ping()
+        assert await read_queue.get() == (b.address, "pong")
 
 
 @pytest.mark.asyncio
 async def test_locked_comm_intercept_read(loop):
 
-    a = await MyServer({})
-    await a.listen(0)
-    b = await MyServer({})
-    await b.listen(0)
+    async with MyServer({}) as a, MyServer({}) as b:
+        await a.listen(0)
+        await b.listen(0)
 
-    read_event = asyncio.Event()
-    read_queue = asyncio.Queue()
-    a.rpc = _LockedCommPool(a.rpc, read_event=read_event, read_queue=read_queue)
+        read_event = asyncio.Event()
+        read_queue = asyncio.Queue()
+        a.rpc = _LockedCommPool(a.rpc, read_event=read_event, read_queue=read_queue)
 
-    async def ping_pong():
-        return await a.rpc(b.address).ping()
+        async def ping_pong():
+            return await a.rpc(b.address).ping()
 
-    fut = asyncio.create_task(ping_pong())
+        fut = asyncio.create_task(ping_pong())
 
-    # We didn't block the write but merely the read. The remove should have
-    # received the message and responded already
-    while not b.counter:
-        await asyncio.sleep(0.001)
+        # We didn't block the write but merely the read. The remove should have
+        # received the message and responded already
+        while not b.counter:
+            await asyncio.sleep(0.001)
 
-    with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(asyncio.shield(fut), 0.01)
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.shield(fut), 0.01)
 
-    assert await read_queue.get() == (b.address, "pong")
-    read_event.set()
-    assert await fut == "pong"
+        assert await read_queue.get() == (b.address, "pong")
+        read_event.set()
+        assert await fut == "pong"
 
 
 @pytest.mark.asyncio
 async def test_locked_comm_intercept_write(loop):
 
-    a = await MyServer({})
-    await a.listen(0)
-    b = await MyServer({})
-    await b.listen(0)
+    async with MyServer({}) as a, MyServer({}) as b:
+        await a.listen(0)
+        await b.listen(0)
 
-    write_event = asyncio.Event()
-    write_queue = asyncio.Queue()
-    a.rpc = _LockedCommPool(a.rpc, write_event=write_event, write_queue=write_queue)
+        write_event = asyncio.Event()
+        write_queue = asyncio.Queue()
+        a.rpc = _LockedCommPool(a.rpc, write_event=write_event, write_queue=write_queue)
 
-    async def ping_pong():
-        return await a.rpc(b.address).ping()
+        async def ping_pong():
+            return await a.rpc(b.address).ping()
 
-    fut = asyncio.create_task(ping_pong())
+        fut = asyncio.create_task(ping_pong())
 
-    with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(asyncio.shield(fut), 0.01)
-    # Write was blocked. The remote hasn't received the message, yet
-    assert b.counter == 0
-    assert await write_queue.get() == (b.address, {"op": "ping", "reply": True})
-    write_event.set()
-    assert await fut == "pong"
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.shield(fut), 0.01)
+        # Write was blocked. The remote hasn't received the message, yet
+        assert b.counter == 0
+        assert await write_queue.get() == (b.address, {"op": "ping", "reply": True})
+        write_event.set()
+        assert await fut == "pong"
 
 
 @pytest.mark.slow()
@@ -451,21 +450,26 @@ def test_assert_worker_story():
 
 
 @pytest.mark.parametrize(
-    "story",
+    "story_factory",
     [
-        [()],  # Missing payload, stimulus_id, ts
-        [("foo",)],  # Missing (stimulus_id, ts)
-        [("foo", "bar")],  # Missing ts
-        [("foo", "bar", "baz")],  # ts is not a float
-        [("foo", "bar", time() + 3600)],  # ts is in the future
-        [("foo", "bar", time() - 7200)],  # ts is too old
-        [("foo", 123, time())],  # stimulus_id is not a string
-        [("foo", "", time())],  # stimulus_id is an empty string
-        [("", time())],  # no payload
-        [("foo", "id", time()), ("foo", "id", time() - 10)],  # timestamps out of order
+        pytest.param(lambda: [()], id="Missing payload, stimulus_id, ts"),
+        pytest.param(lambda: [("foo",)], id="Missing (stimulus_id, ts)"),
+        pytest.param(lambda: [("foo", "bar")], id="Missing ts"),
+        pytest.param(lambda: [("foo", "bar", "baz")], id="ts is not a float"),
+        pytest.param(lambda: [("foo", "bar", time() + 3600)], id="ts is in the future"),
+        pytest.param(lambda: [("foo", "bar", time() - 7200)], id="ts is too old"),
+        pytest.param(lambda: [("foo", 123, time())], id="stimulus_id is not a str"),
+        pytest.param(lambda: [("foo", "", time())], id="stimulus_id is an empty str"),
+        pytest.param(lambda: [("", time())], id="no payload"),
+        pytest.param(
+            lambda: [("foo", "id", time()), ("foo", "id", time() - 10)],
+            id="timestamps out of order",
+        ),
     ],
 )
-def test_assert_worker_story_malformed_story(story):
+def test_assert_worker_story_malformed_story(story_factory):
+    # defer the calls to time() to when the test runs rather than collection
+    story = story_factory()
     with pytest.raises(AssertionError, match="Malformed story event"):
         assert_worker_story(story, [])
 
@@ -590,3 +594,16 @@ def test_check_process_leak_post_cleanup(ignore_sigterm):
         p.start()
         barrier.wait()
     assert not p.is_alive()
+
+
+@pytest.mark.parametrize("nanny", [True, False])
+def test_start_failure_worker(nanny):
+    with pytest.raises(TypeError):
+        with cluster(nanny=nanny, worker_kwargs={"foo": "bar"}):
+            return
+
+
+def test_start_failure_scheduler():
+    with pytest.raises(TypeError):
+        with cluster(scheduler_kwargs={"foo": "bar"}):
+            return

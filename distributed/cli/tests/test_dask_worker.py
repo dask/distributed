@@ -1,7 +1,4 @@
 import asyncio
-import contextvars
-import functools
-import sys
 
 import pytest
 from click.testing import CliRunner
@@ -17,33 +14,12 @@ import requests
 from dask.utils import tmpfile
 
 import distributed.cli.dask_worker
-from distributed import Client, Scheduler
-from distributed.compatibility import LINUX
+from distributed import Client
+from distributed.compatibility import LINUX, to_thread
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils import parse_ports, sync
 from distributed.utils_test import gen_cluster, popen, requires_ipv6
-
-if sys.version_info >= (3, 9):
-    from asyncio import to_thread
-else:
-
-    async def to_thread(*func_args, **kwargs):
-        """Asynchronously run function *func* in a separate thread.
-        Any *args and **kwargs supplied for this function are directly passed
-        to *func*. Also, the current :class:`contextvars.Context` is propagated,
-        allowing context variables from the main thread to be accessed in the
-        separate thread.
-        Return a coroutine that can be awaited to get the eventual result of *func*.
-
-        backport from
-        https://github.com/python/cpython/blob/3f1ea163ea54513e00e0e9d5442fee1b639825cc/Lib/asyncio/threads.py#L12-L25
-        """
-        func, *args = func_args
-        loop = asyncio.get_running_loop()
-        ctx = contextvars.copy_context()
-        func_call = functools.partial(ctx.run, func, *args, **kwargs)
-        return await loop.run_in_executor(None, func_call)
 
 
 def test_nanny_worker_ports(loop):
@@ -167,60 +143,54 @@ def test_no_nanny(loop):
 
 @pytest.mark.slow
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
-@pytest.mark.asyncio
-async def test_no_reconnect(nanny):
-    async with Scheduler(dashboard_address=":0") as s, Client(
-        s.address, asynchronous=True
-    ) as c:
-        with popen(
-            [
-                "dask-worker",
-                s.address,
-                "--no-reconnect",
-                nanny,
-                "--no-dashboard",
-            ]
-        ) as worker:
-            # roundtrip works
-            assert await c.submit(lambda x: x + 1, 10) == 11
+@gen_cluster(client=True, nthreads=[])
+async def test_no_reconnect(c, s, nanny):
+    with popen(
+        [
+            "dask-worker",
+            s.address,
+            "--no-reconnect",
+            nanny,
+            "--no-dashboard",
+        ]
+    ) as worker:
+        # roundtrip works
+        assert await c.submit(lambda x: x + 1, 10) == 11
 
-            (comm,) = s.stream_comms.values()
-            comm.abort()
+        (comm,) = s.stream_comms.values()
+        comm.abort()
 
-            # worker terminates as soon as the connection is aborted
-            await to_thread(worker.communicate, timeout=5)
-            assert worker.returncode == 0
+        # worker terminates as soon as the connection is aborted
+        await to_thread(worker.communicate, timeout=5)
+        assert worker.returncode == 0
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
-@pytest.mark.asyncio
-async def test_reconnect(nanny):
-    async with Scheduler(dashboard_address=":0") as s, Client(
-        s.address, asynchronous=True
-    ) as c:
-        with popen(
-            [
-                "dask-worker",
-                s.address,
-                "--reconnect",
-                nanny,
-                "--no-dashboard",
-            ]
-        ) as worker:
-            # roundtrip works
-            await c.submit(lambda x: x + 1, 10) == 11
+@gen_cluster(client=True, nthreads=[])
+async def test_reconnect(c, s, nanny):
+    with popen(
+        [
+            "dask-worker",
+            s.address,
+            "--reconnect",
+            nanny,
+            "--no-dashboard",
+        ]
+    ) as worker:
+        # roundtrip works
+        await c.submit(lambda x: x + 1, 10) == 11
 
-            (comm,) = s.stream_comms.values()
-            comm.abort()
+        (comm,) = s.stream_comms.values()
+        comm.abort()
 
-            # roundtrip still works, which means the worker reconnected
-            assert await c.submit(lambda x: x + 1, 11) == 12
+        # roundtrip still works, which means the worker reconnected
+        assert await c.submit(lambda x: x + 1, 11) == 12
 
-            # closing the scheduler cleanly does terminate the worker
-            await s.close()
-            await to_thread(worker.communicate, timeout=5)
-            assert worker.returncode == 0
+        # closing the scheduler cleanly does terminate the worker
+        await s.close()
+        await to_thread(worker.communicate, timeout=5)
+        assert worker.returncode == 0
 
 
 def test_resources(loop):
@@ -532,9 +502,9 @@ async def test_integer_names(s):
         assert ws.name == 123
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
-async def test_worker_class(cleanup, tmp_path, nanny):
+@gen_cluster(client=True, nthreads=[])
+async def test_worker_class(c, s, tmp_path, nanny):
     # Create module with custom worker class
     WORKER_CLASS_TEXT = """
 from distributed.worker import Worker
@@ -554,25 +524,23 @@ class MyWorker(Worker):
     else:
         env["PYTHONPATH"] = tmpdir
 
-    async with Scheduler(dashboard_address=":0") as s:
-        async with Client(s.address, asynchronous=True) as c:
-            with popen(
-                [
-                    "dask-worker",
-                    s.address,
-                    nanny,
-                    "--worker-class",
-                    "myworker.MyWorker",
-                ],
-                env=env,
-            ):
-                await c.wait_for_workers(1)
+    with popen(
+        [
+            "dask-worker",
+            s.address,
+            nanny,
+            "--worker-class",
+            "myworker.MyWorker",
+        ],
+        env=env,
+    ):
+        await c.wait_for_workers(1)
 
-                def worker_type(dask_worker):
-                    return type(dask_worker).__name__
+        def worker_type(dask_worker):
+            return type(dask_worker).__name__
 
-                worker_types = await c.run(worker_type)
-                assert all(name == "MyWorker" for name in worker_types.values())
+        worker_types = await c.run(worker_type)
+        assert all(name == "MyWorker" for name in worker_types.values())
 
 
 @gen_cluster(nthreads=[], client=True)

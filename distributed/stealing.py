@@ -4,9 +4,9 @@ import asyncio
 import logging
 import uuid
 from collections import defaultdict, deque
+from collections.abc import Container
 from math import log2
 from time import time
-from typing import Container
 
 from tlz import topk
 from tornado.ioloop import PeriodicCallback
@@ -108,31 +108,16 @@ class WorkStealing(SchedulerPlugin):
             pc.stop()
         await self._in_flight_event.wait()
 
-    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
-        """
-        A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
-
-        Parameters
-        ----------
-        comm:
-        exclude:
-            A list of attributes which must not be present in the output.
+    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict:
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
 
         See also
         --------
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
         """
-        return recursive_to_dict(
-            {
-                "stealable_all": self.stealable_all,
-                "stealable": self.stealable,
-                "key_stealable": self.key_stealable,
-                "in_flight": self.in_flight,
-                "in_flight_occupancy": self.in_flight_occupancy,
-            },
-            exclude=exclude,
-        )
+        return recursive_to_dict(self, exclude=exclude, members=True)
 
     def log(self, msg):
         return self.scheduler.log_event("stealing", msg)
@@ -273,7 +258,7 @@ class WorkStealing(SchedulerPlugin):
         except CommClosedError:
             logger.info("Worker comm %r closed while stealing: %r", victim, ts)
             return "comm-closed"
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -353,7 +338,7 @@ class WorkStealing(SchedulerPlugin):
                 self.log(("confirm", *_log_msg))
             else:
                 raise ValueError(f"Unexpected task state: {state}")
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb

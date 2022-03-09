@@ -131,14 +131,14 @@ properties:
               Run custom modules during the lifetime of the scheduler
 
               You can run custom modules when the scheduler starts up and closes down.
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           preload-argv:
             type: array
             description: |
               Arguments to pass into the preload scripts described above
 
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           unknown-task-duration:
             type: string
@@ -226,7 +226,7 @@ properties:
 
           http:
             type: object
-            decription: Settings for Dask's embedded HTTP Server
+            description: Settings for Dask's embedded HTTP Server
             properties:
               routes:
                 type: array
@@ -324,14 +324,14 @@ properties:
               Run custom modules during the lifetime of the worker
 
               You can run custom modules when the worker starts up and closes down.
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           preload-argv:
             type: array
             description: |
               Arguments to pass into the preload scripts described above
 
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           daemon:
             type: boolean
@@ -504,9 +504,17 @@ properties:
                   When the process memory reaches this level the nanny process will kill
                   the worker (if a nanny is present)
 
+              max-spill:
+                oneOf:
+                  - type: string
+                  - {type: number, minimum: 0}
+                  - enum: [false]
+                description: >-
+                  Limit of number of bytes to be spilled on disk. 
+
           http:
             type: object
-            decription: Settings for Dask's embedded HTTP Server
+            description: Settings for Dask's embedded HTTP Server
             properties:
               routes:
                 type: array
@@ -525,17 +533,17 @@ properties:
           preload:
             type: array
             description: |
-              Run custom modules during the lifetime of the scheduler
+              Run custom modules during the lifetime of the nanny
 
-              You can run custom modules when the scheduler starts up and closes down.
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              You can run custom modules when the nanny starts up and closes down.
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           preload-argv:
             type: array
             description: |
               Arguments to pass into the preload scripts described above
 
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           environ:
             type: object
@@ -570,6 +578,21 @@ properties:
               client information (currently just ``address``), and should
               return a ``Security`` object to use for this client, or ``None``
               to fallback to the default security configuration.
+          preload:
+            type: array
+            description: |
+              Run custom modules during the lifetime of the client
+
+              You can run custom modules when the client starts up and closes down.
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
+
+          preload-argv:
+            type: array
+            description: |
+              Arguments to pass into the preload scripts described above
+
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
+
 
       deploy:
         type: object
@@ -840,24 +863,6 @@ properties:
                 description: |
                   Set environment variables to enable UCX RDMA connection manager support,
                   requires ``distributed.comm.ucx.infiniband=True``.
-              net-devices:
-                type: [string, 'null']
-                description: |
-                  Interface(s) used by workers for UCX communication. Can be a string (like
-                  ``"eth0"`` for NVLink or ``"mlx5_0:1"``/``"ib0"`` for InfiniBand), ``"auto"``
-                  (requires ``distributed.comm.ucx.infiniband=True``) to pick the optimal interface per-worker based on
-                  the system's topology, or ``None`` to stay with the default value of ``"all"`` (use
-                  all available interfaces). Setting to ``"auto"`` requires UCX-Py to be installed
-                  and compiled with hwloc support. Unexpected errors can occur when using
-                  ``"auto"`` if any interfaces are disconnected or improperly configured.
-              reuse-endpoints:
-                type: [boolean, 'null']
-                description: |
-                  Enable UCX-Py reuse endpoints mechanism if ``True`` or if it's not specified and
-                  UCX < 1.11 is installed, otherwise disable reuse endpoints. This was primarily
-                  introduced to resolve an issue with CUDA IPC that has been fixed in UCX 1.10, but
-                  can cause establishing endpoints to be very slow, this is particularly noticeable in
-                  clusters of more than a few dozen workers.
               create-cuda-context:
                 type: [boolean, 'null']
                 description: |

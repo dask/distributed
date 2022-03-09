@@ -10,7 +10,6 @@ import logging
 import logging.config
 import multiprocessing
 import os
-import queue
 import re
 import shutil
 import signal
@@ -20,7 +19,6 @@ import sys
 import tempfile
 import threading
 import uuid
-import warnings
 import weakref
 from collections import defaultdict
 from collections.abc import Callable
@@ -28,10 +26,7 @@ from contextlib import contextmanager, nullcontext, suppress
 from glob import glob
 from itertools import count
 from time import sleep
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from typing_extensions import Literal
+from typing import Any, Literal
 
 from distributed.compatibility import MACOS
 from distributed.scheduler import Scheduler
@@ -55,6 +50,7 @@ from . import system
 from . import versions as version_module
 from .client import Client, _global_clients, default_client
 from .comm import Comm
+from .comm.tcp import BaseTCPConnector
 from .compatibility import WINDOWS
 from .config import initialize_logging
 from .core import CommClosedError, ConnectionPool, Status, connect, rpc
@@ -468,12 +464,17 @@ def run_scheduler(q, nputs, config, port=0, **kwargs):
         with pristine_loop() as loop:
 
             async def _():
-                scheduler = await Scheduler(
-                    validate=True, host="127.0.0.1", port=port, **kwargs
-                )
-                for i in range(nputs):
-                    q.put(scheduler.address)
-                await scheduler.finished()
+                try:
+                    scheduler = await Scheduler(
+                        validate=True, host="127.0.0.1", port=port, **kwargs
+                    )
+                except Exception as exc:
+                    for i in range(nputs):
+                        q.put(exc)
+                else:
+                    for i in range(nputs):
+                        q.put(scheduler.address)
+                    await scheduler.finished()
 
             try:
                 loop.run_sync(_)
@@ -491,14 +492,20 @@ def run_worker(q, scheduler_q, config, **kwargs):
                 scheduler_addr = scheduler_q.get()
 
                 async def _():
-                    worker = await Worker(scheduler_addr, validate=True, **kwargs)
-                    q.put(worker.address)
-                    await worker.finished()
+                    try:
+                        worker = await Worker(scheduler_addr, validate=True, **kwargs)
+                    except Exception as exc:
+                        q.put(exc)
+                    else:
+                        q.put(worker.address)
+                        await worker.finished()
 
-                try:
-                    loop.run_sync(_)
-                finally:
-                    loop.close(all_fds=True)
+                # Scheduler might've failed
+                if isinstance(scheduler_addr, str):
+                    try:
+                        loop.run_sync(_)
+                    finally:
+                        loop.close(all_fds=True)
 
 
 def run_nanny(q, scheduler_q, config, **kwargs):
@@ -508,14 +515,20 @@ def run_nanny(q, scheduler_q, config, **kwargs):
                 scheduler_addr = scheduler_q.get()
 
                 async def _():
-                    worker = await Nanny(scheduler_addr, validate=True, **kwargs)
-                    q.put(worker.address)
-                    await worker.finished()
+                    try:
+                        worker = await Nanny(scheduler_addr, validate=True, **kwargs)
+                    except Exception as exc:
+                        q.put(exc)
+                    else:
+                        q.put(worker.address)
+                        await worker.finished()
 
-                try:
-                    loop.run_sync(_)
-                finally:
-                    loop.close(all_fds=True)
+                # Scheduler might've failed
+                if isinstance(scheduler_addr, str):
+                    try:
+                        loop.run_sync(_)
+                    finally:
+                        loop.close(all_fds=True)
 
 
 @contextmanager
@@ -675,13 +688,16 @@ def cluster(
 
         for worker in workers:
             worker["proc"].start()
-        try:
-            for worker in workers:
-                worker["address"] = worker["queue"].get(timeout=5)
-        except queue.Empty:
-            pytest.xfail("Worker failed to start in test")
+        saddr_or_exception = scheduler_q.get()
+        if isinstance(saddr_or_exception, Exception):
+            raise saddr_or_exception
+        saddr = saddr_or_exception
 
-        saddr = scheduler_q.get()
+        for worker in workers:
+            addr_or_exception = worker["queue"].get()
+            if isinstance(addr_or_exception, Exception):
+                raise addr_or_exception
+            worker["address"] = addr_or_exception
 
         start = time()
         try:
@@ -883,7 +899,6 @@ def gen_cluster(
         ("127.0.0.1", 1),
         ("127.0.0.1", 2),
     ],
-    ncores: None = None,  # deprecated
     scheduler="127.0.0.1",
     timeout: float = _TEST_TIMEOUT,
     security: Security | dict[str, Any] | None = None,
@@ -923,9 +938,6 @@ def gen_cluster(
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"
     )
-    if ncores is not None:
-        warnings.warn("ncores= has moved to nthreads=", stacklevel=2)
-        nthreads = ncores
 
     scheduler_kwargs = merge(
         {"dashboard": False, "dashboard_address": ":0"}, scheduler_kwargs
@@ -1249,7 +1261,6 @@ if has_ipv6():
     def requires_ipv6(test_func):
         return test_func
 
-
 else:
     requires_ipv6 = pytest.mark.skip("ipv6 required")
 
@@ -1563,6 +1574,9 @@ def save_sys_modules():
 @contextmanager
 def check_thread_leak():
     """Context manager to ensure we haven't leaked any threads"""
+    # "TCP-Executor" threads are never stopped once they are started
+    BaseTCPConnector.warmup()
+
     active_threads_start = threading.enumerate()
 
     yield
@@ -1573,15 +1587,8 @@ def check_thread_leak():
             thread
             for thread in threading.enumerate()
             if thread not in active_threads_start
-            and "Threaded" not in thread.name
-            and "watch message" not in thread.name
-            and "TCP-Executor" not in thread.name
-            # TODO: Make sure profile thread is cleaned up
-            # and remove the line below
-            and "Profile" not in thread.name
-            # asyncio default executor thread pool is not shut down until loop
-            # is shut down
-            and "asyncio_" not in thread.name
+            # FIXME this looks like a genuine leak that needs fixing
+            and "watch message queue" not in thread.name
         ]
         if not bad_threads:
             break
@@ -1703,8 +1710,7 @@ def check_instances():
     else:
         L = [c for c in Comm._instances if not c.closed()]
         Comm._instances.clear()
-        print("Unclosed Comms", L)
-        # raise ValueError("Unclosed Comms", L)
+        raise ValueError("Unclosed Comms", L)
 
     assert all(
         n.status == Status.closed or n.status == Status.init for n in Nanny._instances
@@ -1786,6 +1792,9 @@ class LockedComm(TCP):
             await self.read_event.wait()
         return msg
 
+    async def close(self):
+        await self.comm.close()
+
 
 class _LockedCommPool(ConnectionPool):
     """A ConnectionPool wrapper to intercept network traffic between servers
@@ -1831,6 +1840,9 @@ class _LockedCommPool(ConnectionPool):
         return LockedComm(
             comm, self.read_event, self.read_queue, self.write_event, self.write_queue
         )
+
+    async def close(self):
+        await self.pool.close()
 
 
 def xfail_ssl_issue5601():
@@ -1912,7 +1924,7 @@ def assert_worker_story(
                     break
     except StopIteration:
         raise AssertionError(
-            f"assert_worker_story(strict={strict}) failed\n"
+            f"assert_worker_story({strict=}) failed\n"
             f"story:\n{_format_story(story)}\n"
             f"expect:\n{_format_story(expect)}"
         ) from None

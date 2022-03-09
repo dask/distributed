@@ -247,8 +247,8 @@ async def test_release_key_deprecated(c, s, a):
 
     await c.register_worker_plugin(ReleaseKeyDeprecated())
 
-    with pytest.deprecated_call(
-        match="The `WorkerPlugin.release_key` hook is depreacted"
+    with pytest.warns(
+        FutureWarning, match="The `WorkerPlugin.release_key` hook is deprecated"
     ):
         assert await c.submit(inc, 1, key="x") == 2
         while "x" in a.tasks:

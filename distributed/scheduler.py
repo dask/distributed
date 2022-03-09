@@ -7,6 +7,7 @@ import logging
 import math
 import operator
 import os
+import pickle
 import random
 import sys
 import uuid
@@ -16,6 +17,7 @@ from collections import defaultdict, deque
 from collections.abc import (
     Callable,
     Collection,
+    Container,
     Hashable,
     Iterable,
     Iterator,
@@ -26,11 +28,8 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import TYPE_CHECKING, ClassVar, Container
+from typing import ClassVar, Literal
 from typing import cast as pep484_cast
-
-if TYPE_CHECKING:
-    from typing_extensions import Literal
 
 import psutil
 from sortedcontainers import SortedDict, SortedSet
@@ -161,15 +160,6 @@ else:
         return func
 
 
-if sys.version_info < (3, 8):
-    try:
-        import pickle5 as pickle
-    except ImportError:
-        import pickle
-else:
-    import pickle
-
-
 logger = logging.getLogger(__name__)
 
 
@@ -198,8 +188,6 @@ ALL_TASK_STATES = declare(
 globals()["ALL_TASK_STATES"] = ALL_TASK_STATES
 COMPILED = declare(bint, compiled)
 globals()["COMPILED"] = COMPILED
-
-_taskstate_to_dict_guard: bool = False
 
 
 @final
@@ -274,6 +262,22 @@ class ClientState:
     def versions(self):
         return self._versions
 
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+        TaskState._to_dict
+        """
+        return recursive_to_dict(
+            self,
+            exclude=set(exclude) | {"versions"},  # type: ignore
+            members=True,
+        )
+
 
 @final
 @cclass
@@ -281,13 +285,16 @@ class MemoryState:
     """Memory readings on a worker or on the whole cluster.
 
     managed
-        Sum of the output of sizeof() for all dask keys held by the worker, both in
-        memory and spilled to disk
+        Sum of the output of sizeof() for all dask keys held by the worker in memory,
+        plus number of bytes spilled to disk
     managed_in_memory
-        Sum of the output of sizeof() for the dask keys held in RAM
+        Sum of the output of sizeof() for the dask keys held in RAM. Note that this may
+        be inaccurate, which may cause inaccurate unmanaged memory (see below).
     managed_spilled
-        Sum of the output of sizeof() for the dask keys spilled to the hard drive.
-        Note that this is the size in memory; serialized size may be different.
+        Number of bytes  for the dask keys spilled to the hard drive.
+        Note that this is the size on disk; size in memory may be different due to
+        compression and inaccuracies in sizeof(). In other words, given the same keys,
+        'managed' will change depending if the keys are in memory or spilled.
     process
         Total RSS memory measured by the OS on the worker process.
         This is always exactly equal to managed_in_memory + unmanaged.
@@ -327,7 +334,7 @@ class MemoryState:
         *,
         process: Py_ssize_t,
         unmanaged_old: Py_ssize_t,
-        managed: Py_ssize_t,
+        managed_in_memory: Py_ssize_t,
         managed_spilled: Py_ssize_t,
     ):
         # Some data arrives with the heartbeat, some other arrives in realtime as the
@@ -335,9 +342,9 @@ class MemoryState:
         # This can cause glitches where a partial measure is larger than the whole, so
         # we need to force all numbers to add up exactly by definition.
         self._process = process
-        self._managed_spilled = min(managed_spilled, managed)
+        self._managed_in_memory = min(self._process, managed_in_memory)
+        self._managed_spilled = managed_spilled
         # Subtractions between unsigned ints guaranteed by construction to be >= 0
-        self._managed_in_memory = min(managed - self._managed_spilled, process)
         self._unmanaged_old = min(unmanaged_old, process - self._managed_in_memory)
 
     @property
@@ -358,14 +365,22 @@ class MemoryState:
 
     @classmethod
     def sum(cls, *infos: "MemoryState") -> "MemoryState":
-        out = MemoryState(process=0, unmanaged_old=0, managed=0, managed_spilled=0)
+        process = 0
+        unmanaged_old = 0
+        managed_in_memory = 0
+        managed_spilled = 0
         ms: MemoryState
         for ms in infos:
-            out._process += ms._process
-            out._managed_spilled += ms._managed_spilled
-            out._managed_in_memory += ms._managed_in_memory
-            out._unmanaged_old += ms._unmanaged_old
-        return out
+            process += ms._process
+            unmanaged_old += ms._unmanaged_old
+            managed_spilled += ms._managed_spilled
+            managed_in_memory += ms._managed_in_memory
+        return MemoryState(
+            process=process,
+            unmanaged_old=unmanaged_old,
+            managed_in_memory=managed_in_memory,
+            managed_spilled=managed_spilled,
+        )
 
     @property
     def managed(self) -> Py_ssize_t:
@@ -393,6 +408,17 @@ class MemoryState:
             f"  - unmanaged (recent): {format_bytes(self.unmanaged_recent)}\n"
             f"Spilled to disk       : {format_bytes(self._managed_spilled)}\n"
         )
+
+    def _to_dict(self, *, exclude: "Container[str]" = ()) -> dict:
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+        """
+        return recursive_to_dict(self, exclude=exclude, members=True)
 
 
 @final
@@ -659,8 +685,11 @@ class WorkerState:
             # metrics["memory"] is None if the worker sent a heartbeat before its
             # SystemMonitor ever had a chance to run
             process=self._metrics["memory"] or 0,
-            managed=self._nbytes,
-            managed_spilled=self._metrics["spilled_nbytes"],
+            # self._nbytes is instantaneous; metrics may lag behind by a heartbeat
+            managed_in_memory=max(
+                0, self._nbytes - self._metrics["spilled_nbytes"]["memory"]
+            ),
+            managed_spilled=self._metrics["spilled_nbytes"]["disk"],
             unmanaged_old=self._memory_unmanaged_old,
         )
 
@@ -787,10 +816,21 @@ class WorkerState:
             **self._extra,
         }
 
-    @property
-    def ncores(self):
-        warnings.warn("WorkerState.ncores has moved to WorkerState.nthreads")
-        return self._nthreads
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+        TaskState._to_dict
+        """
+        return recursive_to_dict(
+            self,
+            exclude=set(exclude) | {"versions"},  # type: ignore
+            members=True,
+        )
 
 
 @final
@@ -1150,6 +1190,18 @@ class TaskGroup:
 
     def __len__(self):
         return sum(self._states.values())
+
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
+
+        See also
+        --------
+        Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+        TaskState._to_dict
+        """
+        return recursive_to_dict(self, exclude=exclude, members=True)
 
 
 @final
@@ -1739,41 +1791,26 @@ class TaskState:
             nbytes += ts.get_nbytes()
         return nbytes
 
-    @ccall
-    def _to_dict(self, *, exclude: "Container[str]" = ()):  # -> dict | str
-        """
-        A very verbose dictionary representation for debugging purposes.
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
+        """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
-
-        Parameters
-        ----------
-        exclude:
-            A list of attributes which must not be present in the output.
 
         See also
         --------
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
+
+        Notes
+        -----
+        This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
+        When a task references another task, or when a WorkerState.tasks contains tasks,
+        this method is not executed for the inner task, even if the inner task was never
+        seen before; you get a repr instead. All tasks should neatly appear under
+        Scheduler.tasks. This also prevents a RecursionError during particularly heavy
+        loads, which have been observed to happen whenever there's an acyclic dependency
+        chain of ~200+ tasks.
         """
-        # When a task references another task, just print the task repr. All tasks
-        # should neatly appear under Scheduler.tasks. This also prevents a
-        # RecursionError during particularly heavy loads, which have been observed to
-        # happen whenever there's an acyclic dependency chain of ~200+ tasks.
-        global _taskstate_to_dict_guard
-        if _taskstate_to_dict_guard:
-            return repr(self)
-        _taskstate_to_dict_guard = True
-        try:
-            members = inspect.getmembers(self)
-            return recursive_to_dict(
-                {
-                    k: v
-                    for k, v in members
-                    if not k.startswith("_") and k not in exclude and not callable(v)
-                },
-                exclude=exclude,
-            )
-        finally:
-            _taskstate_to_dict_guard = False
+        return recursive_to_dict(self, exclude=exclude, members=True)
 
 
 class _StateLegacyMapping(Mapping):
@@ -2811,7 +2848,7 @@ class SchedulerState:
                     {
                         "op": "cancel-compute",
                         "key": key,
-                        "reason": "Finished on different worker",
+                        "stimulus_id": f"processing-memory-{time()}",
                     }
                 ]
 
@@ -3959,11 +3996,11 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
         if self.worker_ttl:
-            pc = PeriodicCallback(self.check_worker_ttl, self.worker_ttl)
+            pc = PeriodicCallback(self.check_worker_ttl, self.worker_ttl * 1000)
             self.periodic_callbacks["worker-ttl"] = pc
 
         if self.idle_timeout:
-            pc = PeriodicCallback(self.check_idle, self.idle_timeout / 4)
+            pc = PeriodicCallback(self.check_idle, self.idle_timeout * 1000 / 4)
             self.periodic_callbacks["idle-timeout"] = pc
 
         if extensions is None:
@@ -4000,7 +4037,7 @@ class Scheduler(SchedulerState, ServerNode):
             tasks=parent._tasks,
         )
 
-    def identity(self, comm=None):
+    def identity(self):
         """Basic information about ourselves and our cluster"""
         parent: SchedulerState = cast(SchedulerState, self)
         d = {
@@ -4019,29 +4056,29 @@ class Scheduler(SchedulerState, ServerNode):
     def _to_dict(
         self, comm: "Comm | None" = None, *, exclude: "Container[str]" = ()
     ) -> dict:
-        """
-        A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
-
-        Parameters
-        ----------
-        comm:
-        exclude:
-            A list of attributes which must not be present in the output.
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
 
         See also
         --------
         Server.identity
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
         """
         info = super()._to_dict(exclude=exclude)
         extra = {
             "transition_log": self.transition_log,
             "log": self.log,
             "tasks": self.tasks,
+            "task_groups": self.task_groups,
+            # Overwrite dict of WorkerState.identity from info
+            "workers": self.workers,
+            "clients": self.clients,
+            "memory": self.memory,
             "events": self.events,
             "extensions": self.extensions,
         }
+        extra = {k: v for k, v in extra.items() if k not in exclude}
         info.update(recursive_to_dict(extra, exclude=exclude))
         return info
 
@@ -4136,7 +4173,7 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle(f"dask-scheduler [{self.address}]")
         return self
 
-    async def close(self, comm=None, fast=False, close_workers=False):
+    async def close(self, fast=False, close_workers=False):
         """Send cleanup signal to all coroutines then wait until finished
 
         See Also
@@ -4206,7 +4243,7 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle("dask-scheduler [closed]")
         disable_gc_diagnosis()
 
-    async def close_worker(self, comm=None, worker=None, safe=None):
+    async def close_worker(self, worker: str, safe: bool = False):
         """Remove a worker from the cluster
 
         This both removes the worker from our local state and also sends a
@@ -4297,7 +4334,10 @@ class Scheduler(SchedulerState, ServerNode):
         # SystemMonitor ever had a chance to run.
         # ws._nbytes is updated at a different time and sizeof() may not be accurate,
         # so size may be (temporarily) negative; floor it to zero.
-        size = max(0, (metrics["memory"] or 0) - ws._nbytes + metrics["spilled_nbytes"])
+        size = max(
+            0,
+            (metrics["memory"] or 0) - ws._nbytes + metrics["spilled_nbytes"]["memory"],
+        )
 
         ws._memory_other_history.append((local_now, size))
         if not memory_unmanaged_old:
@@ -4373,6 +4413,9 @@ class Scheduler(SchedulerState, ServerNode):
                 if comm:
                     await comm.write(msg)
                 return
+
+            self.log_event(address, {"action": "add-worker"})
+            self.log_event("all", {"action": "add-worker", "worker": address})
 
             ws: WorkerState
             parent._workers[address] = ws = WorkerState(
@@ -4483,8 +4526,6 @@ class Scheduler(SchedulerState, ServerNode):
 
             self.send_all(client_msgs, worker_msgs)
 
-            self.log_event(address, {"action": "add-worker"})
-            self.log_event("all", {"action": "add-worker", "worker": address})
             logger.info("Register worker %s", ws)
 
             msg = {
@@ -4934,7 +4975,7 @@ class Scheduler(SchedulerState, ServerNode):
                 **kwargs,
             )
 
-    def stimulus_retry(self, comm=None, keys=None, client=None):
+    def stimulus_retry(self, keys, client=None):
         parent: SchedulerState = cast(SchedulerState, self)
         logger.info("Client %s requests to retry %d keys", client, len(keys))
         if client:
@@ -4964,7 +5005,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return tuple(seen)
 
-    async def remove_worker(self, comm=None, address=None, safe=False, close=True):
+    async def remove_worker(self, address, safe=False, close=True):
         """
         Remove worker from cluster
 
@@ -4986,13 +5027,14 @@ class Scheduler(SchedulerState, ServerNode):
 
             ws: WorkerState = parent._workers_dv[address]
 
-            self.log_event(
-                ["all", address],
-                {
-                    "action": "remove-worker",
-                    "processing-tasks": dict(ws._processing),
-                },
-            )
+            event_msg = {
+                "action": "remove-worker",
+                "processing-tasks": dict(ws._processing),
+            }
+            self.log_event(address, event_msg.copy())
+            event_msg["worker"] = address
+            self.log_event("all", event_msg)
+
             logger.info("Remove worker %s", ws)
             if close:
                 with suppress(AttributeError, CommClosedError):
@@ -5481,6 +5523,22 @@ class Scheduler(SchedulerState, ServerNode):
         self.send_all(client_msgs, worker_msgs)
 
     def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
+        """Signal that `errant_worker` does not hold `key`
+
+        This may either indicate that `errant_worker` is dead or that we may be
+        working with stale data and need to remove `key` from the workers
+        `has_what`.
+
+        If no replica of a task is available anymore, the task is transitioned
+        back to released and rescheduled, if possible.
+
+        Parameters
+        ----------
+        key : str, optional
+            Task key that could not be found, by default None
+        errant_worker : str, optional
+            Address of the worker supposed to hold a replica, by default None
+        """
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("handle missing data key=%s worker=%s", key, errant_worker)
         self.log_event(errant_worker, {"action": "missing-data", "key": key})
@@ -5488,15 +5546,16 @@ class Scheduler(SchedulerState, ServerNode):
         if ts is None:
             return
         ws: WorkerState = parent._workers_dv.get(errant_worker)
+
         if ws is not None and ws in ts._who_has:
             parent.remove_replica(ts, ws)
-        if not ts._who_has:
+        if ts.state == "memory" and not ts._who_has:
             if ts._run_spec:
                 self.transitions({key: "released"})
             else:
                 self.transitions({key: "forgotten"})
 
-    def release_worker_data(self, comm=None, key=None, worker=None):
+    def release_worker_data(self, key, worker):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState = parent._workers_dv.get(worker)
         ts: TaskState = parent._tasks.get(key)
@@ -5712,9 +5771,7 @@ class Scheduler(SchedulerState, ServerNode):
                 f"Could not find plugin {name!r} among the current scheduler plugins"
             )
 
-    async def register_scheduler_plugin(
-        self, comm=None, plugin=None, name=None, idempotent=None
-    ):
+    async def register_scheduler_plugin(self, plugin, name=None, idempotent=None):
         """Register a plugin on the scheduler."""
         if not dask.config.get("distributed.scheduler.pickle"):
             raise ValueError(
@@ -5851,7 +5908,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return keys
 
-    async def gather(self, comm=None, keys=None, serializers=None):
+    async def gather(self, keys, serializers=None):
         """Collect data from workers to the scheduler"""
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState
@@ -6968,7 +7025,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Retired worker %s", ws._address)
         return ws._address, ws.identity()
 
-    def add_keys(self, comm=None, worker=None, keys=(), stimulus_id=None):
+    def add_keys(self, worker=None, keys=(), stimulus_id=None):
         """
         Learn that a worker has certain keys
 
@@ -7004,12 +7061,10 @@ class Scheduler(SchedulerState, ServerNode):
 
     def update_data(
         self,
-        comm=None,
         *,
         who_has: dict,
         nbytes: dict,
         client=None,
-        serializers=None,
     ):
         """
         Learn that new data has entered the network from an external source
@@ -7117,7 +7172,7 @@ class Scheduler(SchedulerState, ServerNode):
             del v["last_seen"]
         return ident
 
-    def get_processing(self, comm=None, workers=None):
+    def get_processing(self, workers=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState
         ts: TaskState
@@ -7132,7 +7187,7 @@ class Scheduler(SchedulerState, ServerNode):
                 for w, ws in parent._workers_dv.items()
             }
 
-    def get_who_has(self, comm=None, keys=None):
+    def get_who_has(self, keys=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState
         ts: TaskState
@@ -7149,7 +7204,7 @@ class Scheduler(SchedulerState, ServerNode):
                 for key, ts in parent._tasks.items()
             }
 
-    def get_has_what(self, comm=None, workers=None):
+    def get_has_what(self, workers=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState
         ts: TaskState
@@ -7167,7 +7222,7 @@ class Scheduler(SchedulerState, ServerNode):
                 for w, ws in parent._workers_dv.items()
             }
 
-    def get_ncores(self, comm=None, workers=None):
+    def get_ncores(self, workers=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState
         if workers is not None:
@@ -7180,7 +7235,7 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             return {w: ws._nthreads for w, ws in parent._workers_dv.items()}
 
-    def get_ncores_running(self, comm=None, workers=None):
+    def get_ncores_running(self, workers=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ncores = self.get_ncores(workers=workers)
         return {
@@ -7189,7 +7244,7 @@ class Scheduler(SchedulerState, ServerNode):
             if parent._workers_dv[w].status == Status.running
         }
 
-    async def get_call_stack(self, comm=None, keys=None):
+    async def get_call_stack(self, keys=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState
         dts: TaskState
@@ -7220,7 +7275,7 @@ class Scheduler(SchedulerState, ServerNode):
         response = {w: r for w, r in zip(workers, results) if r}
         return response
 
-    def get_nbytes(self, comm=None, keys=None, summary=True):
+    def get_nbytes(self, keys=None, summary=True):
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState
         with log_errors():
@@ -7239,7 +7294,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             return result
 
-    def run_function(self, stream, function, args=(), kwargs={}, wait=True):
+    def run_function(self, comm, function, args=(), kwargs=None, wait=True):
         """Run a function within this process
 
         See Also
@@ -7254,11 +7309,11 @@ class Scheduler(SchedulerState, ServerNode):
                 "deserializing arbitrary bytestrings using pickle via the "
                 "'distributed.scheduler.pickle' configuration setting."
             )
-
+        kwargs = kwargs or {}
         self.log_event("all", {"action": "run-function", "function": function})
-        return run(self, stream, function=function, args=args, kwargs=kwargs, wait=wait)
+        return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
-    def set_metadata(self, comm=None, keys=None, value=None):
+    def set_metadata(self, keys=None, value=None):
         parent: SchedulerState = cast(SchedulerState, self)
         metadata = parent._task_metadata
         for key in keys[:-1]:
@@ -7267,7 +7322,7 @@ class Scheduler(SchedulerState, ServerNode):
             metadata = metadata[key]
         metadata[keys[-1]] = value
 
-    def get_metadata(self, comm=None, keys=None, default=no_default):
+    def get_metadata(self, keys, default=no_default):
         parent: SchedulerState = cast(SchedulerState, self)
         metadata = parent._task_metadata
         for key in keys[:-1]:
@@ -7280,7 +7335,7 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 raise
 
-    def set_restrictions(self, comm=None, worker=None):
+    def set_restrictions(self, worker: "dict[str, Collection[str] | str]"):
         ts: TaskState
         for key, restrictions in worker.items():
             ts = self.tasks[key]
@@ -7288,7 +7343,7 @@ class Scheduler(SchedulerState, ServerNode):
                 restrictions = {restrictions}
             ts._worker_restrictions = set(restrictions)
 
-    def get_task_prefix_states(self, comm=None):
+    def get_task_prefix_states(self):
         with log_errors():
             state = {}
 
@@ -7308,14 +7363,14 @@ class Scheduler(SchedulerState, ServerNode):
 
         return state
 
-    def get_task_status(self, comm=None, keys=None):
+    def get_task_status(self, keys=None):
         parent: SchedulerState = cast(SchedulerState, self)
         return {
             key: (parent._tasks[key].state if key in parent._tasks else None)
             for key in keys
         }
 
-    def get_task_stream(self, comm=None, start=None, stop=None, count=None):
+    def get_task_stream(self, start=None, stop=None, count=None):
         from distributed.diagnostics.task_stream import TaskStreamPlugin
 
         if TaskStreamPlugin.name not in self.plugins:
@@ -7325,11 +7380,11 @@ class Scheduler(SchedulerState, ServerNode):
 
         return plugin.collect(start=start, stop=stop, count=count)
 
-    def start_task_metadata(self, comm=None, name=None):
+    def start_task_metadata(self, name=None):
         plugin = CollectTaskMetaDataPlugin(scheduler=self, name=name)
         self.add_plugin(plugin)
 
-    def stop_task_metadata(self, comm=None, name=None):
+    def stop_task_metadata(self, name=None):
         plugins = [
             p
             for p in list(self.plugins.values())
@@ -7458,7 +7513,7 @@ class Scheduler(SchedulerState, ServerNode):
     # Utility functions #
     #####################
 
-    def add_resources(self, comm=None, worker=None, resources=None):
+    def add_resources(self, worker: str, resources=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState = parent._workers_dv[worker]
         if resources:
@@ -7523,7 +7578,7 @@ class Scheduler(SchedulerState, ServerNode):
                 out.update({ww for ww in parent._workers if w in ww})  # TODO: quadratic
         return list(out)
 
-    def start_ipython(self, comm=None):
+    def start_ipython(self):
         """Start an IPython kernel
 
         Returns Jupyter connection info dictionary.
@@ -7574,12 +7629,10 @@ class Scheduler(SchedulerState, ServerNode):
 
     async def get_profile_metadata(
         self,
-        comm=None,
-        workers=None,
-        merge_workers=True,
-        start=None,
-        stop=None,
-        profile_cycle_interval=None,
+        workers: "Iterable[str] | None" = None,
+        start: float = 0,
+        stop: "float | None" = None,
+        profile_cycle_interval: "str | float | None" = None,
     ):
         parent: SchedulerState = cast(SchedulerState, self)
         dt = profile_cycle_interval or dask.config.get(
@@ -7597,16 +7650,19 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
         results = [r for r in results if not isinstance(r, Exception)]
-        counts = [v["counts"] for v in results]
-        counts = itertools.groupby(merge_sorted(*counts), lambda t: t[0] // dt * dt)
-        counts = [(time, sum(pluck(1, group))) for time, group in counts]
+        counts = [
+            (time, sum(pluck(1, group)))
+            for time, group in itertools.groupby(
+                merge_sorted(
+                    *(v["counts"] for v in results),
+                ),
+                lambda t: t[0] // dt * dt,
+            )
+        ]
 
-        keys = set()
-        for v in results:
-            for t, d in v["keys"]:
-                for k in d:
-                    keys.add(k)
-        keys = {k: [] for k in keys}
+        keys: dict[str, list[list]] = {
+            k: [] for v in results for t, d in v["keys"] for k in d
+        }
 
         groups1 = [v["keys"] for v in results]
         groups2 = list(merge_sorted(*groups1, key=first))
@@ -7624,7 +7680,7 @@ class Scheduler(SchedulerState, ServerNode):
         return {"counts": counts, "keys": keys}
 
     async def performance_report(
-        self, comm=None, start=None, last_count=None, code="", mode=None
+        self, start: float, last_count: int, code="", mode=None
     ):
         parent: SchedulerState = cast(SchedulerState, self)
         stop = time()
@@ -7650,9 +7706,9 @@ class Scheduler(SchedulerState, ServerNode):
         # Task stream
         task_stream = self.get_task_stream(start=start)
         total_tasks = len(task_stream)
-        timespent = defaultdict(int)
+        timespent: "defaultdict[str, float]" = defaultdict(float)
         for d in task_stream:
-            for x in d.get("startstops", []):
+            for x in d["startstops"]:
                 timespent[x["action"]] += x["stop"] - x["start"]
         tasks_timings = ""
         for k in sorted(timespent.keys()):
@@ -7791,7 +7847,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return data
 
-    async def get_worker_logs(self, comm=None, n=None, workers=None, nanny=False):
+    async def get_worker_logs(self, n=None, workers=None, nanny=False):
         results = await self.broadcast(
             msg={"op": "get_logs", "n": n}, workers=workers, nanny=nanny
         )
@@ -7826,7 +7882,7 @@ class Scheduler(SchedulerState, ServerNode):
     def unsubscribe_topic(self, topic, client):
         self.event_subscriber[topic].discard(client)
 
-    def get_events(self, comm=None, topic=None):
+    def get_events(self, topic=None):
         if topic is not None:
             return tuple(self.events[topic])
         else:
@@ -7931,7 +7987,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
             self.loop.add_callback(self.close)
 
-    def adaptive_target(self, comm=None, target_duration=None):
+    def adaptive_target(self, target_duration=None):
         """Desired number of workers based on the current workload
 
         This looks at the current running tasks and memory use, and returns a
@@ -8469,9 +8525,6 @@ def validate_state(tasks, workers, clients):
                 str(ts),
                 str(ts._who_wants),
             )
-
-
-_round_robin = [0]
 
 
 def heartbeat_interval(n):

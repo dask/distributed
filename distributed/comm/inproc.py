@@ -3,7 +3,6 @@ import itertools
 import logging
 import os
 import threading
-import warnings
 import weakref
 from collections import deque, namedtuple
 
@@ -30,15 +29,17 @@ class Manager:
     def __init__(self):
         self.listeners = weakref.WeakValueDictionary()
         self.addr_suffixes = itertools.count(1)
-        with warnings.catch_warnings():
-            # Avoid immediate warning for unreachable network
-            # (will still warn for other get_ip() calls when actually used)
-            warnings.simplefilter("ignore")
-            try:
-                self.ip = get_ip()
-            except OSError:
-                self.ip = "127.0.0.1"
+        self._ip = None
         self.lock = threading.Lock()
+
+    @property
+    def ip(self):
+        if not self._ip:
+            try:
+                self._ip = get_ip()
+            except OSError:
+                self._ip = "127.0.0.1"
+        return self._ip
 
     def add_listener(self, addr, listener):
         with self.lock:
@@ -251,6 +252,14 @@ class InProcListener(Listener):
         self.deserialize = deserialize
         self.listen_q = Queue()
 
+    async def _handle_stream(self, comm):
+        try:
+            await self.on_connection(comm)
+        except CommClosedError:
+            logger.debug("Connection closed before handshake completed")
+            return
+        await self.comm_handler(comm)
+
     async def _listen(self):
         while True:
             conn_req = await self.listen_q.get()
@@ -266,12 +275,7 @@ class InProcListener(Listener):
             )
             # Notify connector
             conn_req.c_loop.add_callback(conn_req.conn_event.set)
-            try:
-                await self.on_connection(comm)
-            except CommClosedError:
-                logger.debug("Connection closed before handshake completed")
-                return
-            IOLoop.current().add_callback(self.comm_handler, comm)
+            IOLoop.current().add_callback(self._handle_stream, comm)
 
     def connect_threadsafe(self, conn_req):
         self.loop.add_callback(self.listen_q.put_nowait, conn_req)

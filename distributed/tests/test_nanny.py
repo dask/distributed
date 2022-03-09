@@ -188,8 +188,8 @@ async def test_nanny_death_timeout(s):
 @gen_cluster(client=True, Worker=Nanny)
 async def test_random_seed(c, s, a, b):
     async def check_func(func):
-        x = c.submit(func, 0, 2 ** 31, pure=False, workers=a.worker_address)
-        y = c.submit(func, 0, 2 ** 31, pure=False, workers=b.worker_address)
+        x = c.submit(func, 0, 2**31, pure=False, workers=a.worker_address)
+        y = c.submit(func, 0, 2**31, pure=False, workers=b.worker_address)
         assert x.key != y.key
         x = await x
         y = await y
@@ -616,10 +616,8 @@ async def test_environ_plugin(c, s, a, b):
 @pytest.mark.parametrize(
     "modname",
     [
-        pytest.param(
-            "numpy",
-            marks=pytest.mark.xfail(reason="distributed#5723, distributed#5729"),
-        ),
+        # numpy is always imported, and for a good reason:
+        # https://github.com/dask/distributed/issues/5729
         "scipy",
         pytest.param("pandas", marks=pytest.mark.xfail(reason="distributed#5723")),
     ],

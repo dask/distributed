@@ -28,7 +28,7 @@ def test_safe_sizeof_logs_on_failure():
 
     # Can provide custom `default_size`
     with captured_logger(logging.getLogger("distributed.sizeof")) as logs:
-        default_size = 2 * (1024 ** 2)  # 2 MiB
+        default_size = 2 * (1024**2)  # 2 MiB
         assert safe_sizeof(foo, default_size=default_size) == default_size
 
     assert "Defaulting to 2.00 MiB" in logs.getvalue()

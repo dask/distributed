@@ -161,7 +161,7 @@ class MemorySampler:
         kwargs
             Passed verbatim to :meth:`pandas.DataFrame.plot`
         """
-        df = self.to_pandas(align=align) / 2 ** 30
+        df = self.to_pandas(align=align) / 2**30
         return df.plot(
             xlabel="time",
             ylabel="Cluster memory (GiB)",
