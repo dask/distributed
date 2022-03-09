@@ -31,6 +31,7 @@ import yaml
 from tlz import concat, first, identity, isdistinct, merge, pluck, valmap
 
 import dask
+import dask.array as da
 import dask.bag as db
 from dask import delayed
 from dask.optimization import SubgraphCallable
@@ -63,6 +64,7 @@ from distributed.client import (
     tokenize,
     wait,
 )
+from distributed.cluster_dump import get_tasks_in_state
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import Status
@@ -7343,6 +7345,28 @@ async def test_dump_cluster_state_json(c, s, a, b, tmp_path, local):
         filename = f"file://{filename}"
     with pytest.raises(ValueError, match="Unsupported format"):
         await c.dump_cluster_state(filename, format="json")
+
+
+@pytest.mark.parametrize("local", [True, False])
+@pytest.mark.parametrize("_format", ["msgpack", "yaml"])
+@gen_cluster(client=True)
+async def test_get_cluster_state(c, s, a, b, tmp_path, _format, local):
+    filename = tmp_path / "foo"
+    if not local:
+        pytest.importorskip("fsspec")
+        # Make it look like an fsspec path
+        filename = f"file://{filename}"
+
+    A = da.ones(100, chunks=25)
+    B = A.persist()
+
+    await c.persist(A)
+    await c.dump_cluster_state(filename, format=_format)
+
+    suffix = ".gz" if _format == "msgpack" else ""
+    outfile = f"{filename}.{_format}{suffix}"
+    tasks = get_tasks_in_state(outfile, "")
+    assert set(tasks.keys()) == set(map(str, A.__dask_keys__()))
 
 
 @gen_cluster(client=True)

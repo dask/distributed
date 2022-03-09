@@ -57,3 +57,43 @@ async def write_state(
         # Write from a thread so we don't block the event loop quite as badly
         # (the writer will still hold the GIL a lot though).
         await to_thread(writer, state, f)
+
+
+def get_tasks_in_state(
+    url: str,
+    state: str,
+    worker: bool = False,
+) -> dict:
+    if url.endswith(".msgpack.gz"):
+        mode = "rb"
+        reader = msgpack.unpack
+    elif url.endswith(".yaml"):
+        import yaml
+
+        mode = "r"
+        reader = yaml.safe_load
+    else:
+        raise ValueError(f"url ({url}) must have a .msgpack.gz or .yaml suffix")
+
+    with fsspec.open(url, mode, compression="infer") as f:
+        dump = reader(f)
+
+    context_str = "workers" if worker else "scheduler"
+
+    try:
+        context = dump[context_str]
+    except KeyError:
+        raise ValueError(f"The '{context_str}' was not present in the dumped state")
+
+    try:
+        tasks = context["tasks"]
+    except KeyError:
+        raise ValueError(
+            f"'tasks' was not present within the '{context_str}' "
+            f"context of the dumped state"
+        )
+
+    if state:
+        return {k: v for k, v in tasks.items() if v["state"] == state}
+
+    return tasks
