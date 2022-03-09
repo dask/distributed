@@ -7358,8 +7358,6 @@ async def test_get_cluster_state(c, s, a, b, tmp_path, _format, local):
         filename = f"file://{filename}"
 
     A = da.ones(100, chunks=25)
-    B = A.persist()
-
     await c.persist(A)
     await c.dump_cluster_state(filename, format=_format)
 
