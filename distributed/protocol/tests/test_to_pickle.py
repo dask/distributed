@@ -14,7 +14,7 @@ class NonMsgPackSerializableLayer(MaterializedLayer):
     def __dask_distributed_pack__(self, *args, **kwargs):
         ret = super().__dask_distributed_pack__(*args, **kwargs)
         # Some info that contains a `list`, which msgpack will convert to
-        #  a tuple if getting the chance.
+        # a tuple if getting the chance.
         ret["myinfo"] = ["myinfo"]
         return ToPickle(ret)
 
