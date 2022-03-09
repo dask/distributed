@@ -7365,7 +7365,7 @@ async def test_get_cluster_state(c, s, a, b, tmp_path, _format, local):
 
     suffix = ".gz" if _format == "msgpack" else ""
     outfile = f"{filename}.{_format}{suffix}"
-    tasks = get_tasks_in_state(outfile, "")
+    tasks = get_tasks_in_state(outfile, "memory")
     assert set(tasks.keys()) == set(map(str, A.__dask_keys__()))
 
 
