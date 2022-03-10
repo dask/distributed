@@ -5,7 +5,7 @@ import time
 from collections.abc import Mapping
 from contextlib import contextmanager
 from functools import partial
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, cast
 
 import zict
 from packaging.version import parse as parse_version
@@ -32,6 +32,7 @@ class SpilledSize(NamedTuple):
         return SpilledSize(self.memory - other.memory, self.disk - other.disk)
 
 
+# zict.Buffer[str, Any] requires zict >= 2.2.0
 class SpillBuffer(zict.Buffer):
     """MutableMapping that automatically spills out dask key/value pairs to disk when
     the total size of the stored data exceeds the target. If max_spill is provided the
@@ -171,7 +172,7 @@ class SpillBuffer(zict.Buffer):
         try:
             with self.handle_errors(None):
                 _, _, weight = self.fast.evict()
-                return weight
+                return cast(int, weight)
         except HandledError:
             return -1
 
@@ -203,7 +204,7 @@ class SpillBuffer(zict.Buffer):
         The two may differ substantially, e.g. if sizeof() is inaccurate or in case of
         compression.
         """
-        return self.slow.total_weight
+        return cast(Slow, self.slow).total_weight
 
 
 def _in_memory_weight(key: str, value: Any) -> int:
@@ -240,7 +241,8 @@ class Slow(zict.Func):
 
     def __setitem__(self, key: str, value: Any) -> None:
         try:
-            pickled = self.dump(value)
+            # FIXME https://github.com/python/mypy/issues/708
+            pickled = self.dump(value)  # type: ignore
         except Exception as e:
             # zict.LRU ensures that the key remains in fast if we raise.
             # Wrap the exception so that it's recognizable by SpillBuffer,
