@@ -6,9 +6,9 @@ from tornado.ioloop import IOLoop
 import dask.config
 from dask.utils import parse_timedelta
 
-from ..protocol import pickle
-from ..utils import log_errors
-from .adaptive_core import AdaptiveCore
+from distributed.deploy.adaptive_core import AdaptiveCore
+from distributed.protocol import pickle
+from distributed.utils import log_errors
 
 logger = logging.getLogger(__name__)
 

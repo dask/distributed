@@ -10,8 +10,8 @@ from typing import Any, Literal, NamedTuple
 import zict
 from packaging.version import parse as parse_version
 
-from .protocol import deserialize_bytes, serialize_bytelist
-from .sizeof import safe_sizeof
+from distributed.protocol import deserialize_bytes, serialize_bytelist
+from distributed.sizeof import safe_sizeof
 
 logger = logging.getLogger(__name__)
 has_zict_210 = parse_version(zict.__version__) > parse_version("2.0.0")

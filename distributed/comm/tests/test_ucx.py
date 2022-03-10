@@ -174,7 +174,7 @@ async def test_ucx_deserialize():
     # Note we see this error on some systems with this test:
     # `socket.gaierror: [Errno -5] No address associated with hostname`
     # This may be due to a system configuration issue.
-    from .test_comms import check_deserialize
+    from distributed.comm.tests.test_comms import check_deserialize
 
     await check_deserialize("tcp://")
 

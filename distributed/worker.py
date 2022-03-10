@@ -45,13 +45,13 @@ from dask.utils import (
     typename,
 )
 
-from . import comm, preloading, profile, system, utils
-from .batched import BatchedSend
-from .comm import Comm, connect, get_address_host
-from .comm.addressing import address_from_user_args, parse_address
-from .comm.utils import OFFLOAD_THRESHOLD
-from .compatibility import to_thread
-from .core import (
+from distributed import comm, preloading, profile, system, utils
+from distributed.batched import BatchedSend
+from distributed.comm import Comm, connect, get_address_host
+from distributed.comm.addressing import address_from_user_args, parse_address
+from distributed.comm.utils import OFFLOAD_THRESHOLD
+from distributed.compatibility import to_thread
+from distributed.core import (
     CommClosedError,
     Status,
     coerce_to_address,
@@ -59,21 +59,21 @@ from .core import (
     pingpong,
     send_recv,
 )
-from .diagnostics import nvml
-from .diagnostics.plugin import _get_plugin_name
-from .diskutils import WorkDir, WorkSpace
-from .http import get_handlers
-from .metrics import time
-from .node import ServerNode
-from .proctitle import setproctitle
-from .protocol import pickle, to_serialize
-from .pubsub import PubSubWorkerExtension
-from .security import Security
-from .shuffle import ShuffleWorkerExtension
-from .sizeof import safe_sizeof as sizeof
-from .threadpoolexecutor import ThreadPoolExecutor
-from .threadpoolexecutor import secede as tpe_secede
-from .utils import (
+from distributed.diagnostics import nvml
+from distributed.diagnostics.plugin import _get_plugin_name
+from distributed.diskutils import WorkDir, WorkSpace
+from distributed.http import get_handlers
+from distributed.metrics import time
+from distributed.node import ServerNode
+from distributed.proctitle import setproctitle
+from distributed.protocol import pickle, to_serialize
+from distributed.pubsub import PubSubWorkerExtension
+from distributed.security import Security
+from distributed.shuffle import ShuffleWorkerExtension
+from distributed.sizeof import safe_sizeof as sizeof
+from distributed.threadpoolexecutor import ThreadPoolExecutor
+from distributed.threadpoolexecutor import secede as tpe_secede
+from distributed.utils import (
     LRU,
     TimeoutError,
     _maybe_complex,
@@ -92,17 +92,21 @@ from .utils import (
     thread_state,
     warn_on_duration,
 )
-from .utils_comm import gather_from_workers, pack_data, retry_operation
-from .utils_perf import ThrottledGC, disable_gc_diagnosis, enable_gc_diagnosis
-from .versions import get_versions
+from distributed.utils_comm import gather_from_workers, pack_data, retry_operation
+from distributed.utils_perf import (
+    ThrottledGC,
+    disable_gc_diagnosis,
+    enable_gc_diagnosis,
+)
+from distributed.versions import get_versions
 
 if TYPE_CHECKING:
     from typing_extensions import TypeAlias
 
-    from .actor import Actor
-    from .client import Client
-    from .diagnostics.plugin import WorkerPlugin
-    from .nanny import Nanny
+    from distributed.actor import Actor
+    from distributed.client import Client
+    from distributed.diagnostics.plugin import WorkerPlugin
+    from distributed.nanny import Nanny
 
     # {TaskState -> finish: str | (finish: str, *args)}
     Recs: TypeAlias = "dict[TaskState, str | tuple]"
@@ -924,7 +928,7 @@ class Worker(ServerNode):
         elif self.memory_limit and (
             self.memory_target_fraction or self.memory_spill_fraction
         ):
-            from .spill import SpillBuffer
+            from distributed.spill import SpillBuffer
 
             if self.memory_target_fraction:
                 target = int(
@@ -1440,7 +1444,7 @@ class Worker(ServerNode):
 
         Returns Jupyter connection info dictionary.
         """
-        from ._ipython_utils import start_ipython
+        from distributed._ipython_utils import start_ipython
 
         if self._ipython_kernel is None:
             self._ipython_kernel = start_ipython(
@@ -1857,7 +1861,7 @@ class Worker(ServerNode):
         if len(data) < len(keys):
             for k in set(keys) - set(data):
                 if k in self.actors:
-                    from .actor import Actor
+                    from distributed.actor import Actor
 
                     data[k] = Actor(type(self.actors[k]), self.address, k, worker=self)
 
@@ -3822,7 +3826,7 @@ class Worker(ServerNode):
             try:
                 data[k] = self.data[k]
             except KeyError:
-                from .actor import Actor  # TODO: create local actor
+                from distributed.actor import Actor  # TODO: create local actor
 
                 data[k] = Actor(type(self.actors[k]), self.address, k, self)
         args2 = pack_data(args, data, key_types=(bytes, str))
@@ -3888,7 +3892,7 @@ class Worker(ServerNode):
         check_pause(memory)
         # Dump data to disk if above 70%
         if self.memory_spill_fraction and frac > self.memory_spill_fraction:
-            from .spill import SpillBuffer
+            from distributed.spill import SpillBuffer
 
             assert isinstance(self.data, SpillBuffer)
 
@@ -4283,7 +4287,7 @@ class Worker(ServerNode):
         timeout = parse_timedelta(timeout, "s")
 
         try:
-            from .client import default_client
+            from distributed.client import default_client
 
             client = default_client()
         except ValueError:  # no clients found, need to make a new one
@@ -4308,7 +4312,7 @@ class Worker(ServerNode):
                 self._client = client
 
         if not self._client:
-            from .client import Client
+            from distributed.client import Client
 
             asynchronous = in_async_call(self.loop)
             self._client = Client(
@@ -4434,7 +4438,7 @@ def get_client(address=None, timeout=None, resolve_address=True) -> Client:
         if not address or worker.scheduler.address == address:
             return worker._get_client(timeout=timeout)
 
-    from .client import Client
+    from distributed.client import Client
 
     try:
         client = Client.current()  # TODO: assumes the same scheduler

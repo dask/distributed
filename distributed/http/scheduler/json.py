@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ...utils import log_errors
-from ..utils import RequestHandler
+from distributed.http.utils import RequestHandler
+from distributed.utils import log_errors
 
 
 class CountsJSON(RequestHandler):

@@ -12,10 +12,10 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 
 from dask.utils import parse_timedelta
 
-from ..metrics import time
+from distributed.metrics import time
 
 if TYPE_CHECKING:
-    from ..scheduler import WorkerState
+    from distributed.scheduler import WorkerState
 
 
 logger = logging.getLogger(__name__)
