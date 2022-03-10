@@ -66,7 +66,7 @@ pytestmark = pytest.mark.ci1
 try:
     import zict
 except ImportError:
-    zict = None
+    zict = None  # type: ignore
 
 requires_zict = pytest.mark.skipif(not zict, reason="requires zict")
 requires_zict_210 = pytest.mark.skipif(
