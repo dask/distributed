@@ -1,8 +1,11 @@
-def scheduler_story(keys: set, transition_log: list):
+from typing import Iterable
+
+
+def scheduler_story(keys: set, transition_log: Iterable):
     return [t for t in transition_log if t[0] in keys or keys.intersection(t[3])]
 
 
-def worker_story(keys: set, log: list):
+def worker_story(keys: set, log: Iterable):
     return [
         msg
         for msg in log

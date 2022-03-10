@@ -64,7 +64,7 @@ from distributed.client import (
     tokenize,
     wait,
 )
-from distributed.cluster_dump import get_tasks_in_state
+from distributed.cluster_dump import DumpInspector, load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import Status
@@ -7263,22 +7263,9 @@ def test_print_simple(capsys):
 
 
 def _verify_cluster_dump(url, format: str, addresses: set[str]) -> dict:
-    fsspec = pytest.importorskip("fsspec")
-
-    url = str(url)
-    if format == "msgpack":
-        import msgpack
-
-        url += ".msgpack.gz"
-        loader = msgpack.unpack
-    else:
-        import yaml
-
-        url += ".yaml"
-        loader = yaml.safe_load
-
-    with fsspec.open(url, mode="rb", compression="infer") as f:
-        state = loader(f)
+    fsspec = pytest.importorskip("fsspec")  # for load_cluster_dump
+    url = str(url) + (".msgpack.gz" if format == "msgpack" else ".yaml")
+    state = load_cluster_dump(url)
 
     assert isinstance(state, dict)
     assert "scheduler" in state
@@ -7349,8 +7336,9 @@ async def test_dump_cluster_state_json(c, s, a, b, tmp_path, local):
 
 @pytest.mark.parametrize("local", [True, False])
 @pytest.mark.parametrize("_format", ["msgpack", "yaml"])
+@pytest.mark.parametrize("workers", [True, False])
 @gen_cluster(client=True)
-async def test_get_cluster_state(c, s, a, b, tmp_path, _format, local):
+async def test_inspect_cluster_dump(c, s, a, b, tmp_path, _format, local, workers):
     filename = tmp_path / "foo"
     if not local:
         pytest.importorskip("fsspec")
@@ -7362,9 +7350,13 @@ async def test_get_cluster_state(c, s, a, b, tmp_path, _format, local):
     await c.dump_cluster_state(filename, format=_format)
 
     suffix = ".gz" if _format == "msgpack" else ""
-    outfile = f"{filename}.{_format}{suffix}"
-    tasks = get_tasks_in_state(outfile, "memory")
+    inspector = DumpInspector(f"{filename}.{_format}{suffix}")
+    tasks = inspector.tasks_in_state("memory", workers=workers)
     assert set(tasks.keys()) == set(map(str, A.__dask_keys__()))
+    it = iter(tasks.keys())
+    stories = inspector.story(next(it), workers=workers)
+    stories = inspector.story(next(it), next(it), workers=workers)
+    missing = inspector.missing_workers()
 
 
 @gen_cluster(client=True)

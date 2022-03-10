@@ -8,6 +8,7 @@ import fsspec
 import msgpack
 
 from distributed.compatibility import to_thread
+from distributed.stories import scheduler_story, worker_story
 
 
 def _tuple_to_list(node):
@@ -75,44 +76,82 @@ def load_cluster_dump(url: str):
         return reader(f)
 
 
-class ClusterInspector:
-    def __init__(
-        self, url_or_state: str | dict, context: Literal["scheduler" | "workers"]
-    ):
+class DumpInspector:
+    """
+    Utility class for inspecting the state of a cluster dump
+
+    .. code-block:: python
+
+        inspector = DumpInspect("dump.msgpack.gz")
+        memory_tasks = inspector.tasks_in_state("memory")
+        released_tasks = inspector.tasks_in_state("released)
+    """
+
+    def __init__(self, url_or_state: str | dict):
         if isinstance(url_or_state, str):
             self.dump = load_cluster_dump(url_or_state)
         elif isinstance(url_or_state, dict):
             self.dump = url_or_state
         else:
-            raise TypeError(f"'url_or_state' must be a str or dict")
+            raise TypeError("'url_or_state' must be a str or dict")
 
-        self.context = context
+    def tasks_in_state(self, state: str = "", workers: bool = False) -> dict:
+        """
+        Returns
+        -------
+        tasks : dict
+            A dictionary of scheduler tasks with state `state`.
+            worker tasks are included if `workers=True`
+        """
+        stasks = self.dump["scheduler"]["tasks"]
 
+        if state:
+            tasks = {k: v for k, v in stasks.items() if v["state"] == state}
+        else:
+            tasks = stasks.copy()
 
-def get_tasks_in_state(
-    url: str,
-    state: str,
-    worker: bool = False,
-) -> dict:
-    dump = load_cluster_dump(url)
-    context_str = "workers" if worker else "scheduler"
+        if not workers:
+            return tasks
 
-    try:
-        context = dump[context_str]
-    except KeyError:
-        raise ValueError(
-            f"The '{context_str}' context was not present in the dumped state"
-        )
+        for worker_dump in self.dump["workers"].values():
+            if state:
+                tasks.update(
+                    (k, v)
+                    for k, v in worker_dump["tasks"].items()
+                    if v["state"] == state
+                )
+            else:
+                tasks.update(worker_dump["tasks"])
 
-    try:
-        tasks = context["tasks"]
-    except KeyError:
-        raise ValueError(
-            f"'tasks' was not present within the '{context_str}' "
-            f"context of the dumped state"
-        )
+        return tasks
 
-    if state:
-        return {k: v for k, v in tasks.items() if v["state"] == state}
+    def story(self, *key_or_stimulus_id: str, workers: bool = False) -> list:
+        """
+        Returns
+        -------
+        stories : list
+            A list of stories for the keys/stimulus ID's in `*key_or_stimulus_id`.
+            worker stories are included if `workers=True`
+        """
+        keys = set(key_or_stimulus_id)
+        story = scheduler_story(keys, self.dump["scheduler"]["transition_log"])
 
-    return tasks
+        if not workers:
+            return story
+
+        for wdump in self.dump["workers"].values():
+            story.extend(worker_story(keys, wdump["log"]))
+
+        return story
+
+    def missing_workers(self) -> list:
+        """
+        Returns
+        -------
+        missing : list
+            A list of workers connected to the scheduler, but which
+            did not respond to requests for a state dump.
+        """
+        scheduler_workers = self.dump["scheduler"]["workers"]
+        responsive_workers = set(self.dump["workers"].keys())
+        return [w for w in scheduler_workers.keys() if w not in responsive_workers]

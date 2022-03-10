@@ -71,6 +71,7 @@ from .pubsub import PubSubWorkerExtension
 from .security import Security
 from .shuffle import ShuffleWorkerExtension
 from .sizeof import safe_sizeof as sizeof
+from .stories import worker_story
 from .threadpoolexecutor import ThreadPoolExecutor
 from .threadpoolexecutor import secede as tpe_secede
 from .utils import (
@@ -2895,8 +2896,6 @@ class Worker(ServerNode):
 
     def story(self, *keys_or_tasks: str | TaskState) -> list[tuple]:
         keys = {e.key if isinstance(e, TaskState) else e for e in keys_or_tasks}
-        from .stories import worker_story
-
         return worker_story(keys, self.log)
 
     def ensure_communicating(self) -> None:
