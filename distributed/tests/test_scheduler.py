@@ -1094,9 +1094,6 @@ async def test_worker_arrives_with_processing_data(c, s, a, b):
     w.update_data(data={y.key: 3})
 
     await w
-
-    start = time()
-
     while len(s.workers) < 3:
         await asyncio.sleep(0.01)
 

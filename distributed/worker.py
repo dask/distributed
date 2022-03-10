@@ -4741,6 +4741,7 @@ def apply_function_simple(
     else:
         msg = {
             "op": "task-finished",
+            "status": "OK",
             "result": result,
             "nbytes": sizeof(result),
             "type": type(result) if result is not None else None,
@@ -4776,6 +4777,7 @@ async def apply_function_async(
     else:
         msg = {
             "op": "task-finished",
+            "status": "OK",
             "result": result,
             "nbytes": sizeof(result),
             "type": type(result) if result is not None else None,
