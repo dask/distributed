@@ -73,18 +73,11 @@ class Backend(ABC):
 backends: dict[str, Backend] = {}
 
 
-def get_backend(scheme: str, require: object = None) -> Backend:
+def get_backend(scheme: str) -> Backend:
     """
     Get the Backend instance for the given *scheme*.
     It looks for matching scheme in dask's internal cache, and falls-back to
     package metadata for the group name ``distributed.comm.backends``
-
-    Parameters
-    ----------
-
-    require : object
-        Deprecated, previously verified that the backends requirements are
-        properly installed.
     """
 
     backend = backends.get(scheme)
