@@ -32,7 +32,7 @@ class SpilledSize(NamedTuple):
         return SpilledSize(self.memory - other.memory, self.disk - other.disk)
 
 
-# zict.buffer[str, Any] requires zict >= 2.2.0
+# zict.Buffer[str, Any] requires zict >= 2.2.0
 class SpillBuffer(zict.Buffer):
     """MutableMapping that automatically spills out dask key/value pairs to disk when
     the total size of the stored data exceeds the target. If max_spill is provided the

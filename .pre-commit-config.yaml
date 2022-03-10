@@ -42,6 +42,4 @@ repos:
           - numpy
           - dask
           - tornado
-          # TODO replace before merging
-          #- zict
-          - git+https://github.com/crusaderky/zict@annotations
+          - zict

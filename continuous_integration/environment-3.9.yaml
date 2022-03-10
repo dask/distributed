@@ -52,9 +52,7 @@ dependencies:
   - pip:
       - git+https://github.com/dask/dask
       - git+https://github.com/dask/s3fs
-      # TODO revert before merging
-      # - git+https://github.com/dask/zict
-      - git+https://github.com/crusaderky/zict@annotations
+      - git+https://github.com/dask/zict
       # FIXME https://github.com/dask/distributed/issues/5345
       # - git+https://github.com/intake/filesystem_spec
       - git+https://github.com/joblib/joblib
