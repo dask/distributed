@@ -2817,7 +2817,7 @@ class SchedulerState:
         nbytes: "int | None",
         type: bytes,
         typename: str,
-        startstops: list,  # list[distributed.worker_state_machine.StartStop]
+        startstops: list,
         worker: str,
     ):
         ws: WorkerState
