@@ -59,11 +59,7 @@ async def write_state(
         await to_thread(writer, state, f)
 
 
-def get_tasks_in_state(
-    url: str,
-    state: str,
-    worker: bool = False,
-) -> dict:
+def load_cluster_dump(url: str):
     if url.endswith(".msgpack.gz"):
         mode = "rb"
         reader = msgpack.unpack
@@ -76,8 +72,29 @@ def get_tasks_in_state(
         raise ValueError(f"url ({url}) must have a .msgpack.gz or .yaml suffix")
 
     with fsspec.open(url, mode, compression="infer") as f:
-        dump = reader(f)
+        return reader(f)
 
+
+class ClusterInspector:
+    def __init__(
+        self, url_or_state: str | dict, context: Literal["scheduler" | "workers"]
+    ):
+        if isinstance(url_or_state, str):
+            self.dump = load_cluster_dump(url_or_state)
+        elif isinstance(url_or_state, dict):
+            self.dump = url_or_state
+        else:
+            raise TypeError(f"'url_or_state' must be a str or dict")
+
+        self.context = context
+
+
+def get_tasks_in_state(
+    url: str,
+    state: str,
+    worker: bool = False,
+) -> dict:
+    dump = load_cluster_dump(url)
     context_str = "workers" if worker else "scheduler"
 
     try:

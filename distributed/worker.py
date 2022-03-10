@@ -2894,18 +2894,10 @@ class Worker(ServerNode):
         }
 
     def story(self, *keys_or_tasks: str | TaskState) -> list[tuple]:
-        keys = [e.key if isinstance(e, TaskState) else e for e in keys_or_tasks]
-        return [
-            msg
-            for msg in self.log
-            if any(key in msg for key in keys)
-            or any(
-                key in c
-                for key in keys
-                for c in msg
-                if isinstance(c, (tuple, list, set))
-            )
-        ]
+        keys = {e.key if isinstance(e, TaskState) else e for e in keys_or_tasks}
+        from .stories import worker_story
+
+        return worker_story(keys, self.log)
 
     def ensure_communicating(self) -> None:
         stimulus_id = f"ensure-communicating-{time()}"

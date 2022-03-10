@@ -7533,9 +7533,10 @@ class Scheduler(SchedulerState, ServerNode):
     def story(self, *keys):
         """Get all transitions that touch one of the input keys"""
         keys = {key.key if isinstance(key, TaskState) else key for key in keys}
-        return [
-            t for t in self.transition_log if t[0] in keys or keys.intersection(t[3])
-        ]
+
+        from .stories import scheduler_story
+
+        return scheduler_story(keys, self.transition_log)
 
     transition_story = story
 
