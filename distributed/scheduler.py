@@ -1209,6 +1209,8 @@ class TaskGroup:
 class TaskState:
     """
     A simple object holding information about a task.
+    Not to be confused with :class:`distributed.worker_state_machine.TaskState`, which
+    holds similar information on the Worker side.
 
     .. attribute:: key: str
 
@@ -5505,7 +5507,9 @@ class Scheduler(SchedulerState, ServerNode):
         client_msgs: dict
         worker_msgs: dict
 
-        r: tuple = self.stimulus_task_finished(key=key, worker=worker, **msg)
+        r: tuple = self.stimulus_task_finished(
+            key=key, worker=worker, status="OK", **msg
+        )
         recommendations, client_msgs, worker_msgs = r
         parent._transitions(recommendations, client_msgs, worker_msgs)
 
@@ -5516,7 +5520,7 @@ class Scheduler(SchedulerState, ServerNode):
         recommendations: dict
         client_msgs: dict
         worker_msgs: dict
-        r: tuple = self.stimulus_task_erred(key=key, **msg)
+        r: tuple = self.stimulus_task_erred(key=key, status="error", **msg)
         recommendations, client_msgs, worker_msgs = r
         parent._transitions(recommendations, client_msgs, worker_msgs)
 
@@ -7025,7 +7029,9 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Retired worker %s", ws._address)
         return ws._address, ws.identity()
 
-    def add_keys(self, worker=None, keys=(), stimulus_id=None):
+    def add_keys(
+        self, worker: str, keys: "Iterable[str]" = (), stimulus_id: "str | None" = None
+    ) -> str:
         """
         Learn that a worker has certain keys
 
@@ -7038,7 +7044,7 @@ class Scheduler(SchedulerState, ServerNode):
         ws: WorkerState = parent._workers_dv[worker]
         redundant_replicas = []
         for key in keys:
-            ts: TaskState = parent._tasks.get(key)
+            ts: TaskState = parent._tasks.get(key)  # type: ignore
             if ts is not None and ts._state == "memory":
                 if ws not in ts._who_has:
                     parent.add_replica(ts, ws)

@@ -14,7 +14,7 @@ from .core import Status
 from .metrics import time
 from .utils import import_term, log_errors
 
-if TYPE_CHECKING:  # pragma: nocover
+if TYPE_CHECKING:
     from .client import Client
     from .scheduler import Scheduler, TaskState, WorkerState
 

@@ -415,13 +415,20 @@ Dask workers are by default launched, monitored, and managed by a small Nanny
 process.
 
 .. autoclass:: distributed.nanny.Nanny
+   :members:
 
 
 API Documentation
 -----------------
 
-.. autoclass:: distributed.worker.TaskState
+.. autoclass:: distributed.worker_state_machine.TaskState
+   :members:
+
+.. autoclass:: distributed.worker_state_machine.UniqueTaskHeap
+   :members:
+
 .. autoclass:: distributed.worker.Worker
+   :members:
 
 
 .. _malloc: https://www.man7.org/linux/man-pages/man3/malloc.3.html
