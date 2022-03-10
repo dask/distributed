@@ -2162,12 +2162,10 @@ class Worker(ServerNode):
         ts.state = "error"
         smsg = TaskErredMsg(
             key=ts.key,
-            thread=self.threads.get(ts.key),
             exception=ts.exception,
             traceback=ts.traceback,
             exception_text=ts.exception_text,
             traceback_text=ts.traceback_text,
-            startstops=ts.startstops,
         )
 
         return {}, [smsg]
@@ -2763,7 +2761,6 @@ class Worker(ServerNode):
         return TaskFinishedMsg(
             key=ts.key,
             nbytes=ts.nbytes,
-            thread=self.threads.get(ts.key),
             type=typ_serialized,
             typename=typename(typ),
             metadata=ts.metadata,

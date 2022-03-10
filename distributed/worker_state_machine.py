@@ -284,8 +284,7 @@ class SendMessageToScheduler(Instruction):
 class TaskFinishedMsg(SendMessageToScheduler, op="task-finished"):
     key: str
     nbytes: int | None
-    thread: int | None
-    type: bytes
+    type: bytes  # serialized class
     typename: str
     metadata: dict
     startstops: list[StartStop]
@@ -295,12 +294,10 @@ class TaskFinishedMsg(SendMessageToScheduler, op="task-finished"):
 @dataclass
 class TaskErredMsg(SendMessageToScheduler, op="task-erred"):
     key: str
-    thread: int | None
     exception: Exception
     exception_text: str
     traceback: object
     traceback_text: str
-    startstops: list[StartStop]
     __slots__ = tuple(__annotations__)  # type: ignore
 
 
