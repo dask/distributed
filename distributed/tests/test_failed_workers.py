@@ -25,6 +25,7 @@ from distributed.utils_test import (
     slowadd,
     slowinc,
 )
+from distributed.worker_state_machine import TaskState
 
 pytestmark = pytest.mark.ci1
 
@@ -494,19 +495,13 @@ async def test_worker_time_to_live(c, s, a, b):
 
 @gen_cluster()
 async def test_forget_data_not_supposed_to_have(s, a, b):
-    """
-    If a depednecy fetch finishes on a worker after the scheduler already
-    released everything, the worker might be stuck with a redundant replica
-    which is never cleaned up.
+    """If a dependency fetch finishes on a worker after the scheduler already released
+    everything, the worker might be stuck with a redundant replica which is never
+    cleaned up.
     """
     # FIXME: Replace with "blackbox test" which shows an actual example where
-    # this situation is provoked if this is even possible.
-    # If this cannot be constructed, the entire superfuous_data handler and its
-    # corresponding pieces on the scheduler side may be removed
-    from distributed.worker import TaskState
-
-    ts = TaskState("key")
-    ts.state = "flight"
+    #        this situation is provoked if this is even possible.
+    ts = TaskState("key", state="flight")
     a.tasks["key"] = ts
     recommendations = {ts: ("memory", 123)}
     a.transitions(recommendations, stimulus_id="test")
