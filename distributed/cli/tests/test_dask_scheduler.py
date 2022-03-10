@@ -218,13 +218,11 @@ def test_scheduler_port_zero(loop):
 def test_dashboard_port_zero(loop):
     pytest.importorskip("bokeh")
     with popen(["dask-scheduler", "--dashboard-address", ":0"]) as proc:
-        count = 0
-        while count < 1:
-            line = proc.stderr.readline()
-            if b"dashboard" in line.lower():
-                sleep(0.01)
-                count += 1
-                assert b":0" not in line
+        for line in proc.stderr:
+            if b"dashboard at" in line:
+                dashboard_port = int(line.decode().split(":")[-1].strip())
+                assert dashboard_port != 0
+                break
 
 
 PRELOAD_TEXT = """
