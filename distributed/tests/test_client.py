@@ -5501,6 +5501,30 @@ async def test_profile_keys(c, s, a, b):
     assert not out
 
 
+@gen_cluster(client=True)
+async def test_cleaned_filenames_in_profile(c, s, a, b):
+    # do some work with the client
+    x = await c.submit(sleep, 1)
+    profile = await c.profile()
+
+    # check that profile is non-empty profile
+    assert profile["children"]
+
+    children = profile["children"]
+    children_vals = list(children.values())[0]
+    assert sys.exec_prefix not in children_vals["description"]["filename"]
+    assert os.path.expanduser("~") not in children_vals["description"]["filename"]
+    assert "site-packages" not in children_vals["description"]["filename"]
+
+
+@gen_cluster(client=True)
+async def test_cleaned_filenames_in_profile_raises(c, s, a, b):
+    # no work done by the client, should give empty profile
+    profile = await c.profile()
+
+    assert not profile["children"]
+
+
 @gen_cluster()
 async def test_client_with_name(s, a, b):
     with captured_logger("distributed.scheduler") as sio:

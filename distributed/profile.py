@@ -39,7 +39,7 @@ import tlz as toolz
 from dask.utils import format_time, parse_timedelta
 
 from .metrics import time
-from .utils import color_of
+from .utils import _clean_filename, color_of
 
 
 def identifier(frame):
@@ -71,7 +71,7 @@ def info_frame(frame):
     co = frame.f_code
     line = linecache.getline(co.co_filename, frame.f_lineno, frame.f_globals).lstrip()
     return {
-        "filename": co.co_filename,
+        "filename": _clean_filename(co.co_filename),
         "name": co.co_name,
         "line_number": frame.f_lineno,
         "line": line,

@@ -6,11 +6,13 @@ import io
 import os
 import queue
 import socket
+import sys
 import traceback
 from collections import deque
 from time import sleep
 
 import pytest
+import toolz
 from tornado.ioloop import IOLoop
 
 import dask
@@ -24,6 +26,7 @@ from distributed.utils import (
     Logs,
     LoopRunner,
     TimeoutError,
+    _clean_filename,
     _maybe_complex,
     ensure_bytes,
     ensure_ip,
@@ -603,6 +606,29 @@ def test_funcname_deprecated():
     with pytest.warns(FutureWarning, match="funcname is deprecated"):
         from distributed.utils import funcname
     assert funcname is dask.utils.funcname
+
+
+def test__clean_filename():
+    # python standard library case
+    # path with sys.exec_prefix and no site-packages
+    filename = os.path.join.__code__.co_filename
+    result = _clean_filename(filename)
+    assert sys.exec_prefix not in result
+    assert result.startswith(os.path.join("...", "lib"))
+    if os.sep != "\\":
+        assert f"python{sys.version_info[0]}.{sys.version_info[1]}" in result
+
+    # Third-party package - site-packages
+    filename = toolz.merge.__code__.co_filename
+    result = _clean_filename(filename)
+    assert sys.exec_prefix not in result
+    assert result.startswith(os.path.join("...", "toolz"))
+    assert "site-packages" not in result
+
+    # Other case where esername in path
+    filename = os.path.join(os.path.expanduser("~"), "dir", "filename.py")
+    result = _clean_filename(filename)
+    assert result == filename.replace(os.path.expanduser("~"), "...")
 
 
 def test_parse_timedelta_deprecated():

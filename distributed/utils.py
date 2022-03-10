@@ -1418,6 +1418,45 @@ def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list
     return addresses
 
 
+@functools.lru_cache(maxsize=256)
+def _clean_filename(filename):
+    """Removes potentially sensitive information from a Python module file path"""
+
+    if filename.startswith(sys.exec_prefix):
+        filename = filename.replace(sys.exec_prefix, "...")
+        if "site-packages" not in filename:
+            # Python standard library module
+            return filename
+        else:
+            # TODO: Use `sys.platlibdir` once Python 3.9 is the minimum supported python version
+            if filename.startswith(os.path.join("...", "lib64")):
+                platlibdir = "lib64"
+            else:
+                platlibdir = "lib"
+            if os.sep == "\\":
+                return filename.replace(
+                    os.path.join(
+                        os.sep + platlibdir,
+                        "site-packages",
+                    ),
+                    "",
+                )
+            else:
+                return filename.replace(
+                    os.path.join(
+                        os.sep + platlibdir,
+                        f"python{sys.version_info[0]}.{sys.version_info[1]}",
+                        "site-packages",
+                    ),
+                    "",
+                )
+
+    elif filename.startswith(os.path.expanduser("~")):
+        return filename.replace(os.path.expanduser("~"), "...")
+    else:
+        return filename
+
+
 _deprecations = {
     "deserialize_for_cli": "dask.config.deserialize",
     "serialize_for_cli": "dask.config.serialize",
