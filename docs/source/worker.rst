@@ -92,19 +92,19 @@ more details on the command line options, please have a look at the
 Internal Scheduling
 -------------------
 
-Internally tasks that come to the scheduler proceed through the following
-pipeline as :py:class:`distributed.worker.TaskState` objects.  Tasks which
-follow this path have a :py:attr:`distributed.worker.TaskState.runspec` defined
-which instructs the worker how to execute them.
+Internally tasks that come to the scheduler proceed through the following pipeline as
+:class:`distributed.worker_state_machine.TaskState` objects. Tasks which follow this
+path have a :attr:`~distributed.worker_state_machine.TaskState.runspec` defined which
+instructs the worker how to execute them.
 
 .. image:: images/worker-task-state.svg
     :alt: Dask worker task states
 
 Data dependencies are also represented as
-:py:class:`distributed.worker.TaskState` objects and follow a simpler path
-through the execution pipeline.  These tasks do not have a
-:py:attr:`distributed.worker.TaskState.runspec` defined and instead contain a
-listing of workers to collect their result from.
+:class:`~distributed.worker_state_machine.TaskState` objects and follow a simpler path
+through the execution pipeline. These tasks do not have a
+:attr:`~distributed.worker_state_machine.TaskState.runspec` defined and instead contain
+a listing of workers to collect their result from.
 
 
 .. image:: images/worker-dep-state.svg
