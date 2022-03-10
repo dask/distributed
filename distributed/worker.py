@@ -2376,18 +2376,12 @@ class Worker(ServerNode):
         ts.state = "error"
         smsg = {
             "op": "task-erred",
-            "status": "error",
             "key": ts.key,
-            "thread": self.threads.get(ts.key),
             "exception": ts.exception,
             "traceback": ts.traceback,
             "exception_text": ts.exception_text,
             "traceback_text": ts.traceback_text,
         }
-
-        if ts.startstops:
-            smsg["startstops"] = ts.startstops
-
         return {}, [smsg]
 
     def transition_executing_error(
@@ -2985,10 +2979,8 @@ class Worker(ServerNode):
             typ_serialized = pickle.dumps(typ.__name__, protocol=4)
         d = {
             "op": "task-finished",
-            "status": "OK",
             "key": ts.key,
             "nbytes": ts.nbytes,
-            "thread": self.threads.get(ts.key),
             "type": typ_serialized,
             "typename": typename(typ),
             "metadata": ts.metadata,
@@ -4749,7 +4741,6 @@ def apply_function_simple(
     else:
         msg = {
             "op": "task-finished",
-            "status": "OK",
             "result": result,
             "nbytes": sizeof(result),
             "type": type(result) if result is not None else None,
@@ -4785,7 +4776,6 @@ async def apply_function_async(
     else:
         msg = {
             "op": "task-finished",
-            "status": "OK",
             "result": result,
             "nbytes": sizeof(result),
             "type": type(result) if result is not None else None,

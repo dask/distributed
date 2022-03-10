@@ -2556,7 +2556,7 @@ class SchedulerState:
             raise
 
     def transition_no_worker_memory(
-        self, key, nbytes=None, type=None, typename: str = None, worker=None
+        self, key: str, nbytes: "int | None", typename: str, worker: str
     ):
         try:
             ws: WorkerState = self._workers_dv[worker]
@@ -2578,7 +2578,7 @@ class SchedulerState:
             self.check_idle_saturated(ws)
 
             _add_to_memory(
-                self, ts, ws, recommendations, client_msgs, type=type, typename=typename
+                self, ts, ws, recommendations, client_msgs, typename=typename
             )
             ts.state = "memory"
 
@@ -2763,8 +2763,15 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    # This method must have the same signature as transition_processing_memory
     def transition_waiting_memory(
-        self, key, nbytes=None, type=None, typename: str = None, worker=None, **kwargs
+        self,
+        key: str,
+        nbytes: "int | None",
+        type: bytes,
+        typename: str,
+        startstops: list,
+        worker: str,
     ):
         try:
             ws: WorkerState = self._workers_dv[worker]
@@ -2803,15 +2810,15 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    # This method must have the same signature as transition_waiting_memory
     def transition_processing_memory(
         self,
-        key,
-        nbytes=None,
-        type=None,
-        typename: str = None,
-        worker=None,
-        startstops=None,
-        **kwargs,
+        key: str,
+        nbytes: "int | None",
+        type: bytes,
+        typename: str,
+        startstops: list,  # list[distributed.worker_state_machine.StartStop]
+        worker: str,
     ):
         ws: WorkerState
         wws: WorkerState
@@ -2856,14 +2863,13 @@ class SchedulerState:
             #############################
             # Update Timing Information #
             #############################
-            if startstops:
-                startstop: dict
-                for startstop in startstops:
-                    ts._group.add_duration(
-                        stop=startstop["stop"],
-                        start=startstop["start"],
-                        action=startstop["action"],
-                    )
+            startstop: dict
+            for startstop in startstops:
+                ts._group.add_duration(
+                    stop=startstop["stop"],
+                    start=startstop["start"],
+                    action=startstop["action"],
+                )
 
             s: set = self._unknown_durations.pop(ts._prefix._name, set())
             tts: TaskState
@@ -3159,7 +3165,6 @@ class SchedulerState:
         exception_text: str = None,
         traceback_text: str = None,
         worker: str = None,
-        **kwargs,
     ):
         ws: WorkerState
         try:
@@ -4542,6 +4547,7 @@ class Scheduler(SchedulerState, ServerNode):
                         if ts.state == "memory":
                             self.add_keys(worker=address, keys=[key])
                         else:
+                            # Call transition_no_worker_memory
                             t: tuple = parent._transition(
                                 key,
                                 "memory",
@@ -4964,7 +4970,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         # TODO: balance workers
 
-    def stimulus_task_finished(self, key=None, worker=None, **kwargs):
+    def stimulus_task_finished(self, key: str, worker: str, metadata: dict, **kwargs):
         """Mark that a task has finished execution on a particular worker"""
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("Stimulus task finished %s, %s", key, worker)
@@ -4974,7 +4980,7 @@ class Scheduler(SchedulerState, ServerNode):
         worker_msgs: dict = {}
 
         ws: WorkerState = parent._workers_dv[worker]
-        ts: TaskState = parent._tasks.get(key)
+        ts: TaskState = parent._tasks.get(key)  # type: ignore
         if ts is None or ts._state == "released":
             logger.debug(
                 "Received already computed task, worker: %s, state: %s"
@@ -4994,7 +5000,7 @@ class Scheduler(SchedulerState, ServerNode):
         elif ts._state == "memory":
             self.add_keys(worker=worker, keys=[key])
         else:
-            ts._metadata.update(kwargs["metadata"])
+            ts._metadata.update(metadata)
             r: tuple = parent._transition(key, "memory", worker=worker, **kwargs)
             recommendations, client_msgs, worker_msgs = r
 
@@ -5003,13 +5009,19 @@ class Scheduler(SchedulerState, ServerNode):
         return recommendations, client_msgs, worker_msgs
 
     def stimulus_task_erred(
-        self, key=None, worker=None, exception=None, traceback=None, **kwargs
+        self,
+        key: str,
+        worker: str,
+        exception: Exception,
+        traceback: object,
+        exception_text: str,
+        traceback_text: str,
     ):
         """Mark that a task has erred on a particular worker"""
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("Stimulus task erred %s, %s", key, worker)
 
-        ts: TaskState = parent._tasks.get(key)
+        ts: TaskState = parent._tasks.get(key)  # type: ignore
         if ts is None or ts._state != "processing":
             return {}, {}, {}
 
@@ -5020,11 +5032,13 @@ class Scheduler(SchedulerState, ServerNode):
             return parent._transition(
                 key,
                 "erred",
+                # kwargs to transition_processing_erred
                 cause=key,
                 exception=exception,
                 traceback=traceback,
                 worker=worker,
-                **kwargs,
+                exception_text=exception_text,
+                traceback_text=traceback_text,
             )
 
     def stimulus_retry(self, keys, client=None):
@@ -5547,7 +5561,7 @@ class Scheduler(SchedulerState, ServerNode):
     def handle_uncaught_error(self, **msg):
         logger.exception(clean_exception(**msg)[1])
 
-    def handle_task_finished(self, key=None, worker=None, **msg):
+    def handle_task_finished(self, key: str, worker: str, **msg):
         parent: SchedulerState = cast(SchedulerState, self)
         if worker not in parent._workers_dv:
             return
@@ -5563,15 +5577,14 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.send_all(client_msgs, worker_msgs)
 
-    def handle_task_erred(self, key=None, **msg):
+    def handle_task_erred(self, **msg):
         parent: SchedulerState = cast(SchedulerState, self)
         recommendations: dict
         client_msgs: dict
         worker_msgs: dict
-        r: tuple = self.stimulus_task_erred(key=key, **msg)
+        r: tuple = self.stimulus_task_erred(**msg)
         recommendations, client_msgs, worker_msgs = r
         parent._transitions(recommendations, client_msgs, worker_msgs)
-
         self.send_all(client_msgs, worker_msgs)
 
     def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
@@ -7077,7 +7090,9 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Retired worker %s", ws._address)
         return ws._address, ws.identity()
 
-    def add_keys(self, worker=None, keys=(), stimulus_id=None):
+    def add_keys(
+        self, worker: str, keys: "Iterable[str]" = (), stimulus_id: "str | None" = None
+    ) -> str:
         """
         Learn that a worker has certain keys
 
@@ -7090,7 +7105,7 @@ class Scheduler(SchedulerState, ServerNode):
         ws: WorkerState = parent._workers_dv[worker]
         redundant_replicas = []
         for key in keys:
-            ts: TaskState = parent._tasks.get(key)
+            ts: TaskState = parent._tasks.get(key)  # type: ignore
             if ts is not None and ts._state == "memory":
                 if ws not in ts._who_has:
                     parent.add_replica(ts, ws)
@@ -8189,8 +8204,9 @@ def _add_to_memory(
     ws: WorkerState,
     recommendations: dict,
     client_msgs: dict,
-    type=None,
-    typename: str = None,
+    *,
+    typename: str,
+    type: "bytes | None" = None,
 ):
     """
     Add *ts* to the set of in-memory tasks.
