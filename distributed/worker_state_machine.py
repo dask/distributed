@@ -327,6 +327,6 @@ class LongRunningMsg(SendMessageToScheduler, op="long-running"):
 
 @dataclass
 class AddKeysMsg(SendMessageToScheduler, op="add-keys"):
-    __slots__ = ("key", "stimulus_id")
+    __slots__ = ("keys", "stimulus_id")
     keys: list[str]
     stimulus_id: str

@@ -1,6 +1,9 @@
+import pytest
+
 from distributed.utils import recursive_to_dict
 from distributed.worker_state_machine import (
     ReleaseWorkerDataMsg,
+    SendMessageToScheduler,
     TaskState,
     UniqueTaskHeap,
 )
@@ -79,12 +82,13 @@ def test_unique_task_heap():
     assert repr(heap) == "<UniqueTaskHeap: 0 items>"
 
 
-def test_sendmsg_slots():
-    # Sample test on one of the subclasses
-    smsg = ReleaseWorkerDataMsg(key="x")
+@pytest.mark.parametrize("cls", SendMessageToScheduler.__subclasses__())
+def test_sendmsg_slots(cls):
+    smsg = cls(**dict.fromkeys(cls.__annotations__))
     assert not hasattr(smsg, "__dict__")
 
 
 def test_sendmsg_to_dict():
+    # Arbitrary sample class
     smsg = ReleaseWorkerDataMsg(key="x")
     assert smsg.to_dict() == {"op": "release-worker-data", "key": "x"}
