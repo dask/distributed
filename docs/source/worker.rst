@@ -424,9 +424,6 @@ API Documentation
 .. autoclass:: distributed.worker_state_machine.TaskState
    :members:
 
-.. autoclass:: distributed.worker_state_machine.UniqueTaskHeap
-   :members:
-
 .. autoclass:: distributed.worker.Worker
    :members:
 
