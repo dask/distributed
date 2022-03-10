@@ -28,7 +28,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Dict, Literal
 from typing import cast as pep484_cast
 
 import psutil
@@ -51,6 +51,7 @@ from dask.highlevelgraph import HighLevelGraph
 from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta, tmpfile
 from dask.widgets import get_template
 
+from distributed import cluster_dump
 from distributed.utils import recursive_to_dict
 
 from . import preloading, profile
@@ -3970,6 +3971,8 @@ class Scheduler(SchedulerState, ServerNode):
             "subscribe_worker_status": self.subscribe_worker_status,
             "start_task_metadata": self.start_task_metadata,
             "stop_task_metadata": self.stop_task_metadata,
+            "get_cluster_state": self.get_cluster_state,
+            "dump_cluster_state_to_url": self.dump_cluster_state_to_url,
         }
 
         connection_limit = get_fileno_limit() / 2
@@ -4081,6 +4084,55 @@ class Scheduler(SchedulerState, ServerNode):
         extra = {k: v for k, v in extra.items() if k not in exclude}
         info.update(recursive_to_dict(extra, exclude=exclude))
         return info
+
+    async def get_cluster_state(
+        self,
+        exclude: "Collection[str]",
+    ) -> dict:
+        "Produce the state dict used in a cluster state dump"
+        # Kick off state-dumping on workers before we block the event loop in `self._to_dict`.
+        workers_future = asyncio.gather(
+            self.broadcast(
+                msg={"op": "dump_state", "exclude": exclude},
+                on_error="return",
+            ),
+            self.broadcast(
+                msg={"op": "versions"},
+                on_error="ignore",
+            ),
+        )
+        try:
+            scheduler_state = self._to_dict(exclude=exclude)
+
+            worker_states, worker_versions = await workers_future
+        finally:
+            # Ensure the tasks aren't left running if anything fails.
+            # Someday (py3.11), use a trio-style TaskGroup for this.
+            workers_future.cancel()
+
+        # Convert any RPC errors to strings
+        worker_states = {
+            k: repr(v) if isinstance(v, Exception) else v
+            for k, v in worker_states.items()
+        }
+
+        return {
+            "scheduler": scheduler_state,
+            "workers": worker_states,
+            "versions": {"scheduler": self.versions(), "workers": worker_versions},
+        }
+
+    async def dump_cluster_state_to_url(
+        self,
+        url: str,
+        exclude: "Collection[str]",
+        format: Literal["msgpack", "yaml"],
+        **storage_options: Dict[str, Any],
+    ) -> None:
+        "Write a cluster state dump to an fsspec-compatible URL."
+        await cluster_dump.write_state(
+            partial(self.get_cluster_state, exclude), url, format, **storage_options
+        )
 
     def get_worker_service_addr(self, worker, service_name, protocol=False):
         """

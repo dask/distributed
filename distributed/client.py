@@ -52,7 +52,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import PeriodicCallback
 
-from . import preloading
+from . import cluster_dump, preloading
 from . import versions as version_module  # type: ignore
 from .batched import BatchedSend
 from .cfexecutor import ClientExecutor
@@ -3826,108 +3826,73 @@ class Client(SyncMethodMixin):
             self.sync(self._update_scheduler_info)
         return self._scheduler_identity
 
-    async def _dump_cluster_state(
-        self,
-        filename: str,
-        exclude: Collection[str],
-        format: Literal["msgpack", "yaml"],
-    ) -> None:
-
-        scheduler_info = self.scheduler.dump_state(exclude=exclude)
-
-        workers_info = self.scheduler.broadcast(
-            msg={"op": "dump_state", "exclude": exclude},
-            on_error="return_pickle",
-        )
-        versions_info = self._get_versions()
-        scheduler_info, workers_info, versions_info = await asyncio.gather(
-            scheduler_info, workers_info, versions_info
-        )
-        # Unpickle RPC errors and convert them to string
-        workers_info = {
-            k: repr(loads(v)) if isinstance(v, bytes) else v
-            for k, v in workers_info.items()
-        }
-
-        state = {
-            "scheduler": scheduler_info,
-            "workers": workers_info,
-            "versions": versions_info,
-        }
-
-        def tuple_to_list(node):
-            if isinstance(node, (list, tuple)):
-                return [tuple_to_list(el) for el in node]
-            elif isinstance(node, dict):
-                return {k: tuple_to_list(v) for k, v in node.items()}
-            else:
-                return node
-
-        # lists are converted to tuples by the RPC
-        state = tuple_to_list(state)
-
-        filename = str(filename)
-        if format == "msgpack":
-            import gzip
-
-            import msgpack
-
-            suffix = ".msgpack.gz"
-            if not filename.endswith(suffix):
-                filename += suffix
-
-            with gzip.open(filename, "wb") as fdg:
-                msgpack.pack(state, fdg)
-        elif format == "yaml":
-            import yaml
-
-            suffix = ".yaml"
-            if not filename.endswith(suffix):
-                filename += suffix
-
-            with open(filename, "w") as fd:
-                yaml.dump(state, fd)
-        else:
-            raise ValueError(
-                f"Unsupported format {format}. Possible values are `msgpack` or `yaml`"
-            )
-
     def dump_cluster_state(
         self,
         filename: str = "dask-cluster-dump",
+        write_from_scheduler: bool | None = None,
         exclude: Collection[str] = ("run_spec",),
         format: Literal["msgpack", "yaml"] = "msgpack",
+        **storage_options,
     ):
-        """Extract a dump of the entire cluster state and persist to disk.
+        """Extract a dump of the entire cluster state and persist to disk or a URL.
         This is intended for debugging purposes only.
 
-        Warning: Memory usage on client side can be large.
+        Warning: Memory usage on the scheduler (and client, if writing the dump locally)
+        can be large. On a large or long-running cluster, this can take several minutes.
+        The scheduler may be unresponsive while the dump is processed.
 
         Results will be stored in a dict::
 
             {
-                "scheduler_info": {...},
-                "worker_info": {
-                    worker_addr: {...},  # worker attributes
+                "scheduler": {...},  # scheduler state
+                "workers": {
+                    worker_addr: {...},  # worker state
                     ...
+                }
+                "versions": {
+                    "scheduler": {...},
+                    "workers": {
+                        worker_addr: {...},
+                        ...
+                    }
                 }
             }
 
         Parameters
         ----------
         filename:
-            The output filename. The appropriate file suffix (`.msgpack.gz` or
-            `.yaml`) will be appended automatically.
+            The path or URL to write to. The appropriate file suffix (``.msgpack.gz`` or
+            ``.yaml``) will be appended automatically.
+
+            Must be a path supported by :func:`fsspec.open` (like ``s3://my-bucket/cluster-dump``,
+            or ``cluster-dumps/dump``). See ``write_from_scheduler`` to control whether
+            the dump is written directly to ``filename`` from the scheduler, or sent
+            back to the client over the network, then written locally.
+        write_from_scheduler:
+            If None (default), infer based on whether ``filename`` looks like a URL
+            or a local path: True if the filename contains ``://`` (like
+            ``s3://my-bucket/cluster-dump``), False otherwise (like ``local_dir/cluster-dump``).
+
+            If True, write cluster state directly to ``filename`` from the scheduler.
+            If ``filename`` is a local path, the dump will be written to that
+            path on the *scheduler's* filesystem, so be careful if the scheduler is running
+            on ephemeral hardware. Useful when the scheduler is attached to a network
+            filesystem or persistent disk, or for writing to buckets.
+
+            If False, transfer cluster state from the scheduler back to the client
+            over the network, then write it to ``filename``. This is much less
+            efficient for large dumps, but useful when the scheduler doesn't have
+            access to any persistent storage.
         exclude:
             A collection of attribute names which are supposed to be excluded
             from the dump, e.g. to exclude code, tracebacks, logs, etc.
 
-            Defaults to exclude `run_spec` which is the serialized user code. This
-            is typically not required for debugging. To allow serialization of
-            this, pass an empty tuple.
+            Defaults to exclude ``run_spec``, which is the serialized user code.
+            This is typically not required for debugging. To allow serialization
+            of this, pass an empty tuple.
         format:
-            Either msgpack or yaml. If msgpack is used (default), the output
-            will be stored in a gzipped file as msgpack.
+            Either ``"msgpack"`` or ``"yaml"``. If msgpack is used (default),
+            the output will be stored in a gzipped file as msgpack.
 
             To read::
 
@@ -3944,14 +3909,44 @@ class Client(SyncMethodMixin):
                     from yaml import Loader
                 with open("filename") as fd:
                     state = yaml.load(fd, Loader=Loader)
-
+        **storage_options:
+            Any additional arguments to :func:`fsspec.open` when writing to a URL.
         """
         return self.sync(
             self._dump_cluster_state,
             filename=filename,
-            format=format,
+            write_from_scheduler=write_from_scheduler,
             exclude=exclude,
+            format=format,
+            **storage_options,
         )
+
+    async def _dump_cluster_state(
+        self,
+        filename: str = "dask-cluster-dump",
+        write_from_scheduler: bool | None = None,
+        exclude: Collection[str] = ("run_spec",),
+        format: Literal["msgpack", "yaml"] = "msgpack",
+        **storage_options,
+    ):
+        filename = str(filename)
+        if write_from_scheduler is None:
+            write_from_scheduler = "://" in filename
+
+        if write_from_scheduler:
+            await self.scheduler.dump_cluster_state_to_url(
+                url=filename,
+                exclude=exclude,
+                format=format,
+                **storage_options,
+            )
+        else:
+            await cluster_dump.write_state(
+                partial(self.scheduler.get_cluster_state, exclude=exclude),
+                filename,
+                format,
+                **storage_options,
+            )
 
     def write_scheduler_file(self, scheduler_file):
         """Write the scheduler information to a json file.
