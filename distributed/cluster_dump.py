@@ -114,16 +114,22 @@ class DumpInspector:
             return tasks
 
         for worker_dump in self.dump["workers"].values():
-            if state:
-                tasks.update(
-                    (k, v)
-                    for k, v in worker_dump["tasks"].items()
-                    if v["state"] == state
-                )
-            else:
-                tasks.update(worker_dump["tasks"])
+            if self._valid_worker_dump(worker_dump):
+                if state:
+                    tasks.update(
+                        (k, v)
+                        for k, v in worker_dump["tasks"].items()
+                        if v["state"] == state
+                    )
+                else:
+                    tasks.update(worker_dump["tasks"])
 
         return tasks
+
+    def _valid_worker_dump(self, worker_dump):
+        # Worker dumps should be a dictionaries but can also be
+        # strings describing comm Failures
+        return isinstance(worker_dump, dict)
 
     def story(self, *key_or_stimulus_id: str, workers: bool = False) -> list:
         """
@@ -140,7 +146,8 @@ class DumpInspector:
             return story
 
         for wdump in self.dump["workers"].values():
-            story.extend(worker_story(keys, wdump["log"]))
+            if self._valid_worker_dump(wdump):
+                story.extend(worker_story(keys, wdump["log"]))
 
         return story
 
@@ -153,5 +160,10 @@ class DumpInspector:
             did not respond to requests for a state dump.
         """
         scheduler_workers = self.dump["scheduler"]["workers"]
-        responsive_workers = set(self.dump["workers"].keys())
-        return [w for w in scheduler_workers.keys() if w not in responsive_workers]
+        responsive_workers = self.dump["workers"]
+        return [
+            w
+            for w in scheduler_workers.keys()
+            if w not in responsive_workers
+            or not self._valid_worker_dump(responsive_workers[w])
+        ]
