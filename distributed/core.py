@@ -1256,14 +1256,14 @@ def clean_exception(exception, traceback=None, **kwargs):
     if isinstance(exception, bytes) or isinstance(exception, bytearray):
         try:
             exception = protocol.pickle.loads(exception)
-        except Exception:
+        except Exception:  # pragma: no cover
             exception = Exception(exception)
     elif isinstance(exception, str):
         exception = Exception(exception)
     if isinstance(traceback, bytes):
         try:
             traceback = protocol.pickle.loads(traceback)
-        except (TypeError, AttributeError):
+        except (TypeError, AttributeError):  # pragma: no cover
             traceback = None
     elif isinstance(traceback, str):
         traceback = None  # happens if the traceback failed serializing
