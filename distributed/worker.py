@@ -3770,10 +3770,12 @@ class Worker(ServerNode):
             else:
                 logger.warning(
                     "Compute Failed\n"
+                    "Key:       %s\n"
                     "Function:  %s\n"
                     "args:      %s\n"
                     "kwargs:    %s\n"
                     "Exception: %r\n",
+                    ts.key,
                     str(funcname(function))[:1000],
                     convert_args_to_str(args2, max_len=1000),
                     convert_kwargs_to_str(kwargs2, max_len=1000),
