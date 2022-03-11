@@ -9,7 +9,7 @@ from distributed.utils_test import gen_cluster
 
 
 class NonMsgPackSerializableLayer(MaterializedLayer):
-    """Layer that use non-msgpack-serializable data"""
+    """Layer that uses non-msgpack-serializable data"""
 
     def __dask_distributed_pack__(self, *args, **kwargs):
         ret = super().__dask_distributed_pack__(*args, **kwargs)
