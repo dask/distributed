@@ -59,7 +59,7 @@ def dumps(
 
             header["compression"] = tuple(compression)
 
-        def create_sub_frames(obj) -> list:
+        def create_serialized_sub_frames(obj) -> list:
             typ = type(obj)
             if typ is Serialized:
                 sub_header, sub_frames = obj.header, obj.frames
@@ -78,7 +78,7 @@ def dumps(
             )
             return [sub_header] + sub_frames
 
-        def create_pickle_sub_frames(obj) -> list:
+        def create_pickled_sub_frames(obj) -> list:
             typ = type(obj)
             if typ is Pickled:
                 sub_header, sub_frames = obj.header, obj.frames
@@ -106,11 +106,11 @@ def dumps(
             typ = type(obj)
             if typ is Serialize or typ is Serialized:
                 offset = len(frames)
-                frames.extend(create_sub_frames(obj))
+                frames.extend(create_serialized_sub_frames(obj))
                 return {"__Serialized__": offset}
             elif typ is ToPickle or typ is Pickled:
                 offset = len(frames)
-                frames.extend(create_pickle_sub_frames(obj))
+                frames.extend(create_pickled_sub_frames(obj))
                 return {"__Pickled__": offset}
             else:
                 return msgpack_encode_default(obj)
