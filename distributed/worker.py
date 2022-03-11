@@ -2166,6 +2166,8 @@ class Worker(ServerNode):
             traceback=ts.traceback,
             exception_text=ts.exception_text,
             traceback_text=ts.traceback_text,
+            thread=self.threads.get(ts.key),
+            startstops=ts.startstops,
         )
 
         return {}, [smsg]
@@ -2764,6 +2766,7 @@ class Worker(ServerNode):
             type=typ_serialized,
             typename=typename(typ),
             metadata=ts.metadata,
+            thread=self.threads.get(ts.key),
             startstops=ts.startstops,
         )
 

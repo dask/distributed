@@ -287,8 +287,14 @@ class TaskFinishedMsg(SendMessageToScheduler, op="task-finished"):
     type: bytes  # serialized class
     typename: str
     metadata: dict
+    thread: int | None
     startstops: list[StartStop]
     __slots__ = tuple(__annotations__)  # type: ignore
+
+    def to_dict(self) -> dict[str, Any]:
+        d = super().to_dict()
+        d["status"] = "OK"
+        return d
 
 
 @dataclass
@@ -298,7 +304,14 @@ class TaskErredMsg(SendMessageToScheduler, op="task-erred"):
     exception_text: str
     traceback: object
     traceback_text: str
+    thread: int | None
+    startstops: list[StartStop]
     __slots__ = tuple(__annotations__)  # type: ignore
+
+    def to_dict(self) -> dict[str, Any]:
+        d = super().to_dict()
+        d["status"] = "error"
+        return d
 
 
 @dataclass
