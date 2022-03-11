@@ -127,7 +127,8 @@ class WorkerPlugin:
     ...                 exc_info=exc_info
     ...             )
 
-    >>> plugin = ErrorLogger()
+    >>> import logger
+    >>> plugin = ErrorLogger(logger)
     >>> client.register_worker_plugin(plugin)  # doctest: +SKIP
     """
 
