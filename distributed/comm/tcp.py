@@ -43,7 +43,14 @@ from .utils import (
 logger = logging.getLogger(__name__)
 
 
-C_INT_MAX = 256 ** ctypes.sizeof(ctypes.c_int) // 2 - 1
+# Workaround for OpenSSL 1.0.2.
+# Can drop with OpenSSL 1.1.1 used by Python 3.10+.
+# ref: https://bugs.python.org/issue42853
+if sys.version_info < (3, 10):
+    OPENSSL_MAX_CHUNKSIZE = 256 ** ctypes.sizeof(ctypes.c_int) // 2 - 1
+else:
+    OPENSSL_MAX_CHUNKSIZE = 256 ** ctypes.sizeof(ctypes.c_size_t) - 1
+
 MAX_BUFFER_SIZE = MEMORY_LIMIT / 2
 
 
@@ -212,9 +219,9 @@ class TCP(Comm):
             (frames_nbytes,) = struct.unpack(fmt, frames_nbytes)
 
             frames = host_array(frames_nbytes)
-            # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
             for i, j in sliding_window(
-                2, range(0, frames_nbytes + C_INT_MAX, C_INT_MAX)
+                2,
+                range(0, frames_nbytes + OPENSSL_MAX_CHUNKSIZE, OPENSSL_MAX_CHUNKSIZE),
             ):
                 chunk = frames[i:j]
                 chunk_nbytes = len(chunk)
@@ -351,8 +358,7 @@ class TLS(TCP):
     A TLS-specific version of TCP.
     """
 
-    # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
-    max_shard_size = min(C_INT_MAX, TCP.max_shard_size)
+    max_shard_size = min(OPENSSL_MAX_CHUNKSIZE, TCP.max_shard_size)
 
     def _read_extra(self):
         TCP._read_extra(self)
