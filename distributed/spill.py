@@ -228,16 +228,21 @@ class Slow(zict.Func):
     max_weight: int | Literal[False]
     weight_by_key: dict[str, SpilledSize]
     total_weight: SpilledSize
+    memmap: bool
 
-    def __init__(self, spill_directory: str, max_weight: int | Literal[False] = False):
+    def __init__(self, spill_directory: str, max_weight: int | Literal[False] = False, memmap: bool = False):
+        file_kwargs = {}
+        if memmap:
+            file_kwargs["memmap"] = memmap
         super().__init__(
             partial(serialize_bytelist, on_error="raise"),
             deserialize_bytes,
-            zict.File(spill_directory),
+            zict.File(spill_directory, **file_kwargs),
         )
         self.max_weight = max_weight
         self.weight_by_key = {}
         self.total_weight = SpilledSize(0, 0)
+        self.memmap = memmap
 
     def __setitem__(self, key: str, value: Any) -> None:
         try:
