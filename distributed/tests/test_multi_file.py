@@ -37,15 +37,15 @@ def test_many(tmp_path, count):
 
         random.shuffle(L)
         for i in L:
-            mf.write(df + i, str(i))
+            mf.write(df + i, i)
 
         random.shuffle(L)
         for i in L:
-            mf.write(df * i, str(i))
+            mf.write(df * i, i)
 
         random.shuffle(L)
         for i in L:
-            out = mf.read(str(i))
+            out = mf.read(i)
 
             assert (pd.concat([df + i, df * i]) == out).all().all()
 

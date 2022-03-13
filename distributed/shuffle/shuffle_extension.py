@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections import defaultdict
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NewType
 
+import zict
+
+from distributed.multi_file import MultiFile
 from distributed.protocol import to_serialize
 from distributed.utils import sync
 
@@ -68,16 +71,25 @@ class ShuffleMetadata(NewShuffleMetadata):
 class Shuffle:
     "State for a single active shuffle"
 
-    def __init__(self, metadata: ShuffleMetadata, worker: Worker) -> None:
+    def __init__(
+        self, metadata: ShuffleMetadata, worker: Worker, file_cache=None
+    ) -> None:
         self.metadata = metadata
         self.worker = worker
-        self.output_partitions: defaultdict[int, list[pd.DataFrame]] = defaultdict(list)
+
+        self.multi_file = MultiFile(
+            directory=os.path.join(self.worker.local_directory, str(self.metadata.id)),
+            memory_limit="1 GiB",  # TODO: lift this up to the global ShuffleExtension
+            file_cache=file_cache,
+            n_files=min(256, metadata.npartitions),
+        )
+
         self.output_partitions_left = metadata.npartitions_for(worker.address)
         self.transferred = False
 
     def receive(self, output_partition: int, data: pd.DataFrame) -> None:
         assert not self.transferred, "`receive` called after barrier task"
-        self.output_partitions[output_partition].append(data)
+        self.multi_file.write(data, output_partition)
 
     async def add_partition(self, data: pd.DataFrame, groups: list) -> None:
         assert not self.transferred, "`add_partition` called after barrier task"
@@ -103,8 +115,6 @@ class Shuffle:
         await asyncio.gather(*tasks)
 
     def get_output_partition(self, i: int) -> pd.DataFrame:
-        import pandas as pd
-
         assert self.transferred, "`get_output_partition` called before barrier task"
 
         assert self.metadata.worker_for(i) == self.worker.address, (
@@ -120,12 +130,9 @@ class Shuffle:
         self.output_partitions_left -= 1
 
         try:
-            parts = self.output_partitions.pop(i)
+            return self.multi_file.read(i)
         except KeyError:
             return self.metadata.empty
-
-        assert parts, f"Empty entry for output partition {i}"
-        return pd.concat(parts, copy=False)
 
     def inputs_done(self) -> None:
         assert not self.transferred, "`inputs_done` called multiple times"
@@ -148,6 +155,7 @@ class ShuffleWorkerExtension:
         # Initialize
         self.worker: Worker = worker
         self.shuffles: dict[ShuffleId, Shuffle] = {}
+        self.file_cache = zict.LRU(256, dict(), on_evict=lambda k, v: v.close())
 
     # Handlers
     ##########
@@ -162,7 +170,9 @@ class ShuffleWorkerExtension:
             raise ValueError(
                 f"Shuffle {metadata.id!r} is already registered on worker {self.worker.address}"
             )
-        self.shuffles[metadata.id] = Shuffle(metadata, self.worker)
+        self.shuffles[metadata.id] = Shuffle(
+            metadata, self.worker, file_cache=self.file_cache
+        )
 
     def shuffle_receive(
         self,
