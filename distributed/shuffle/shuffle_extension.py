@@ -79,12 +79,12 @@ class Shuffle:
         assert not self.transferred, "`receive` called after barrier task"
         self.output_partitions[output_partition].append(data)
 
-    async def add_partition(self, data: pd.DataFrame) -> None:
+    async def add_partition(self, data: pd.DataFrame, groups: list) -> None:
         assert not self.transferred, "`add_partition` called after barrier task"
         tasks = []
         # NOTE: `groupby` blocks the event loop, but it also holds the GIL,
         # so we don't bother offloading to a thread. See bpo-7946.
-        for output_partition, data in data.groupby(self.metadata.column):
+        for output_partition, data in groups:
             # NOTE: `column` must refer to an integer column, which is the output partition number for the row.
             # This is always `_partitions`, added by `dask/dataframe/shuffle.py::shuffle`.
             addr = self.metadata.worker_for(int(output_partition))
@@ -241,9 +241,13 @@ class ShuffleWorkerExtension:
         return metadata  # NOTE: unused in tasks, just handy for tests
 
     def add_partition(self, data: pd.DataFrame, shuffle_id: ShuffleId) -> None:
-        sync(self.worker.loop, self._add_partition, data, shuffle_id)
+        column = self._get_shuffle(shuffle_id).metadata.column
+        groups = list(data.groupby(column))
+        sync(self.worker.loop, self._add_partition, data, shuffle_id, groups)
 
-    async def _add_partition(self, data: pd.DataFrame, shuffle_id: ShuffleId) -> None:
+    async def _add_partition(
+        self, data: pd.DataFrame, shuffle_id: ShuffleId, groups: list
+    ) -> None:
         """
         Task: Hand off an input partition to the ShuffleExtension.
 
@@ -251,7 +255,7 @@ class ShuffleWorkerExtension:
 
         Using an unknown ``shuffle_id`` is an error.
         """
-        await self._get_shuffle(shuffle_id).add_partition(data)
+        await self._get_shuffle(shuffle_id).add_partition(data, groups)
 
     def barrier(self, shuffle_id: ShuffleId) -> None:
         sync(self.worker.loop, self._barrier, shuffle_id)
