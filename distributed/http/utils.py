@@ -6,7 +6,7 @@ import os
 import toolz
 from tornado import web
 
-from ..utils import has_keyword
+from distributed.utils import has_keyword
 
 dirname = os.path.dirname(__file__)
 

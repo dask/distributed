@@ -6,8 +6,8 @@ from tornado import gen
 
 from dask.utils import parse_timedelta
 
-from .metrics import time
-from .utils import TimeoutError, sync
+from distributed.metrics import time
+from distributed.utils import TimeoutError, sync
 
 
 @gen.coroutine

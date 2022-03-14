@@ -7,8 +7,8 @@ from tornado.ioloop import IOLoop
 import dask
 from dask.utils import parse_timedelta
 
-from .core import CommClosedError
-from .metrics import time
+from distributed.core import CommClosedError
+from distributed.metrics import time
 
 logger = logging.getLogger(__name__)
 

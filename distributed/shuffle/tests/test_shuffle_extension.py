@@ -10,14 +10,13 @@ import pytest
 pd = pytest.importorskip("pandas")
 dd = pytest.importorskip("dask.dataframe")
 
-from distributed.utils_test import gen_cluster
-
-from ..shuffle_extension import (
+from distributed.shuffle.shuffle_extension import (
     NewShuffleMetadata,
     ShuffleId,
     ShuffleMetadata,
     ShuffleWorkerExtension,
 )
+from distributed.utils_test import gen_cluster
 
 if TYPE_CHECKING:
     from distributed import Client, Future, Scheduler, Worker

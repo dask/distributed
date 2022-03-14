@@ -9,8 +9,8 @@ from tornado.ioloop import PeriodicCallback
 
 if TYPE_CHECKING:
     # circular dependencies
-    from ..client import Client
-    from ..scheduler import Scheduler
+    from distributed.client import Client
+    from distributed.scheduler import Scheduler
 
 
 class MemorySampler:
@@ -80,7 +80,7 @@ class MemorySampler:
             Default: 0.5
         """
         if not client:
-            from ..client import get_client
+            from distributed.client import get_client
 
             client = get_client()
 

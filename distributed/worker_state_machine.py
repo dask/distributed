@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict
 import dask
 from dask.utils import parse_bytes
 
-from .utils import recursive_to_dict
+from distributed.utils import recursive_to_dict
 
 if TYPE_CHECKING:
     # TODO move to typing (requires Python >=3.10)

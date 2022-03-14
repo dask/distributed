@@ -57,9 +57,9 @@ from typing import Any, ClassVar
 import psutil
 import pytest
 
-from .comm.tcp import BaseTCPConnector
-from .compatibility import WINDOWS
-from .metrics import time
+from distributed.comm.tcp import BaseTCPConnector
+from distributed.compatibility import WINDOWS
+from distributed.metrics import time
 
 
 def pytest_addoption(parser):

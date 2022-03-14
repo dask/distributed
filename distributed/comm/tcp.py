@@ -25,20 +25,26 @@ from tornado.tcpserver import TCPServer
 import dask
 from dask.utils import parse_timedelta
 
-from ..protocol.utils import pack_frames_prelude, unpack_frames
-from ..system import MEMORY_LIMIT
-from ..threadpoolexecutor import ThreadPoolExecutor
-from ..utils import ensure_ip, get_ip, get_ipv6, nbytes
-from .addressing import parse_host_port, unparse_host_port
-from .core import Comm, CommClosedError, Connector, FatalCommClosedError, Listener
-from .registry import Backend
-from .utils import (
+from distributed.comm.addressing import parse_host_port, unparse_host_port
+from distributed.comm.core import (
+    Comm,
+    CommClosedError,
+    Connector,
+    FatalCommClosedError,
+    Listener,
+)
+from distributed.comm.registry import Backend
+from distributed.comm.utils import (
     ensure_concrete_host,
     from_frames,
     get_tcp_server_address,
     host_array,
     to_frames,
 )
+from distributed.protocol.utils import pack_frames_prelude, unpack_frames
+from distributed.system import MEMORY_LIMIT
+from distributed.threadpoolexecutor import ThreadPoolExecutor
+from distributed.utils import ensure_ip, get_ip, get_ipv6, nbytes
 
 logger = logging.getLogger(__name__)
 

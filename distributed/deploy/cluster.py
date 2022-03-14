@@ -11,9 +11,10 @@ import dask.config
 from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
 from dask.widgets import get_template
 
-from ..core import Status
-from ..objects import SchedulerInfo
-from ..utils import (
+from distributed.core import Status
+from distributed.deploy.adaptive import Adaptive
+from distributed.objects import SchedulerInfo
+from distributed.utils import (
     Log,
     Logs,
     LoopRunner,
@@ -22,7 +23,6 @@ from ..utils import (
     format_dashboard_link,
     log_errors,
 )
-from .adaptive import Adaptive
 
 logger = logging.getLogger(__name__)
 
