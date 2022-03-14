@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import IO, Any, Awaitable, Callable, Literal
 
 import fsspec
@@ -110,6 +111,16 @@ class DumpInspector:
 
     def tasks_in_state(self, state: str = "", workers: bool = False) -> dict:
         """
+        .. code-block:: python
+
+            inc = lambda x: x + 1
+            client = LocalCluster()
+            f = client.submit(inc, x, 1)
+
+            inspector = DumpInspector("dump.msgpack.gz")
+
+
+
         Returns
         -------
         tasks : dict
@@ -117,27 +128,28 @@ class DumpInspector:
             worker tasks are included if `workers=True`
         """
         stasks = self.dump["scheduler"]["tasks"]
+        tasks = defaultdict(list)
 
         if state:
-            tasks = {k: v for k, v in stasks.items() if v["state"] == state}
+            for k, v in stasks.items():
+                if state == v["state"]:
+                    tasks[k].append(v)
         else:
-            tasks = stasks.copy()
+            for k, v in stasks.items():
+                tasks[k].append(v)
 
-        if not workers:
-            return tasks
+        if workers:
+            for worker_dump in self.dump["workers"].values():
+                if self._valid_worker_dump(worker_dump):
+                    if state:
+                        for k, v in worker_dump["tasks"].items():
+                            if v["state"] == state:
+                                tasks[k].append(v)
+                    else:
+                        for k, v in worker_dump["tasks"].items():
+                            tasks[k].append(v)
 
-        for worker_dump in self.dump["workers"].values():
-            if self._valid_worker_dump(worker_dump):
-                if state:
-                    tasks.update(
-                        (k, v)
-                        for k, v in worker_dump["tasks"].items()
-                        if v["state"] == state
-                    )
-                else:
-                    tasks.update(worker_dump["tasks"])
-
-        return tasks
+        return dict(tasks)
 
     def _valid_worker_dump(self, worker_dump):
         # Worker dumps should be a dictionaries but can also be
