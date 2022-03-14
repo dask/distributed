@@ -31,12 +31,12 @@ import yaml
 from tlz import concat, first, identity, isdistinct, merge, pluck, valmap
 
 import dask
-import dask.array as da
 import dask.bag as db
 from dask import delayed
 from dask.optimization import SubgraphCallable
 from dask.utils import parse_timedelta, stringify, tmpfile
 
+import distributed
 from distributed import (
     CancelledError,
     Executor,
@@ -7334,6 +7334,11 @@ async def test_dump_cluster_state_json(c, s, a, b, tmp_path, local):
         await c.dump_cluster_state(filename, format="json")
 
 
+def blocked_inc(x, event):
+    event.wait()
+    return x + 1
+
+
 @pytest.mark.parametrize("local", [True, False])
 @pytest.mark.parametrize("_format", ["msgpack", "yaml"])
 @pytest.mark.parametrize("workers", [True, False])
@@ -7345,14 +7350,23 @@ async def test_inspect_cluster_dump(c, s, a, b, tmp_path, _format, local, worker
         # Make it look like an fsspec path
         filename = f"file://{filename}"
 
-    A = da.ones(100, chunks=25)
-    await c.persist(A)
+    futs = c.map(inc, range(10))
+    fut_keys = {f.key for f in futs}
+    await c.gather(futs)
+
+    event = distributed.Event()
+    inc_blocked = c.submit(blocked_inc, 1, event=event)
+
     await c.dump_cluster_state(filename, format=_format)
+
+    event.set()
 
     suffix = ".gz" if _format == "msgpack" else ""
     inspector = DumpInspector(f"{filename}.{_format}{suffix}")
     tasks = inspector.tasks_in_state("memory", workers=workers)
-    assert set(tasks.keys()) == set(map(str, A.__dask_keys__()))
+    assert fut_keys.issubset(tasks.keys())
+    assert inc_blocked.key in inspector.tasks_in_state("executing", workers=True)
+
     it = iter(tasks.keys())
     stories = inspector.story(next(it), workers=workers)
     stories = inspector.story(next(it), next(it), workers=workers)
