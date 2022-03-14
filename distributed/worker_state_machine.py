@@ -268,9 +268,6 @@ class SendMessageToScheduler(Instruction):
     #: Matches a key in Scheduler.stream_handlers
     op: ClassVar[str]
 
-    def __init_subclass__(cls, op: str):
-        cls.op = op
-
     def to_dict(self) -> dict[str, Any]:
         """Convert object to dict so that it can be serialized with msgpack"""
         d = {k: getattr(self, k) for k in self.__annotations__}
@@ -278,10 +275,10 @@ class SendMessageToScheduler(Instruction):
         return d
 
 
-# Note: as of Python 3.10.2, @dataclass(slots=True) doesn't work with __init__subclass__
-# https://bugs.python.org/issue46970
 @dataclass
-class TaskFinishedMsg(SendMessageToScheduler, op="task-finished"):
+class TaskFinishedMsg(SendMessageToScheduler):
+    op = "task-finished"
+
     key: str
     nbytes: int | None
     type: bytes  # serialized class
@@ -298,7 +295,9 @@ class TaskFinishedMsg(SendMessageToScheduler, op="task-finished"):
 
 
 @dataclass
-class TaskErredMsg(SendMessageToScheduler, op="task-erred"):
+class TaskErredMsg(SendMessageToScheduler):
+    op = "task-erred"
+
     key: str
     exception: Exception
     exception_text: str
@@ -315,13 +314,17 @@ class TaskErredMsg(SendMessageToScheduler, op="task-erred"):
 
 
 @dataclass
-class ReleaseWorkerDataMsg(SendMessageToScheduler, op="release-worker-data"):
+class ReleaseWorkerDataMsg(SendMessageToScheduler):
+    op = "release-worker-data"
+
     __slots__ = ("key",)
     key: str
 
 
 @dataclass
-class RescheduleMsg(SendMessageToScheduler, op="reschedule"):
+class RescheduleMsg(SendMessageToScheduler):
+    op = "reschedule"
+
     # Not to be confused with the distributed.Reschedule Exception
     __slots__ = ("key", "worker")
     key: str
@@ -329,14 +332,18 @@ class RescheduleMsg(SendMessageToScheduler, op="reschedule"):
 
 
 @dataclass
-class LongRunningMsg(SendMessageToScheduler, op="long-running"):
+class LongRunningMsg(SendMessageToScheduler):
+    op = "long-running"
+
     __slots__ = ("key", "compute_duration")
     key: str
     compute_duration: float
 
 
 @dataclass
-class AddKeysMsg(SendMessageToScheduler, op="add-keys"):
+class AddKeysMsg(SendMessageToScheduler):
+    op = "add-keys"
+
     __slots__ = ("keys", "stimulus_id")
     keys: list[str]
     stimulus_id: str
