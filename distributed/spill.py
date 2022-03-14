@@ -2,19 +2,20 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sized
 from contextlib import contextmanager
 from functools import partial
-from typing import Any, Literal, NamedTuple, cast
+from typing import Any, Literal, NamedTuple, Protocol, cast
+
+from packaging.version import parse as parse_version
 
 import zict
-from packaging.version import parse as parse_version
 
 from distributed.protocol import deserialize_bytes, serialize_bytelist
 from distributed.sizeof import safe_sizeof
 
 logger = logging.getLogger(__name__)
-has_zict_210 = parse_version(zict.__version__) > parse_version("2.0.0")
+has_zict_210 = parse_version(zict.__version__) >= parse_version("2.1.0")
 
 
 class SpilledSize(NamedTuple):
@@ -30,6 +31,36 @@ class SpilledSize(NamedTuple):
 
     def __sub__(self, other: SpilledSize) -> SpilledSize:  # type: ignore
         return SpilledSize(self.memory - other.memory, self.disk - other.disk)
+
+
+class ManualEvictProto(Protocol):
+    """Duck-type API that a third-party alternative to SpillBuffer must respect (in
+    addition to MutableMapping) if it wishes to support spilling when the
+    ``distributed.worker.memory.spill`` threshold is surpassed.
+
+    This is public API. At the moment of writing, Dask-CUDA implements this protocol in
+    the ProxifyHostFile class.
+    """
+
+    @property
+    def fast(self) -> Sized | bool:
+        """Access to fast memory. This is normally a MutableMapping, but for the purpose
+        of the manual eviction API it is just tested for emptiness to know if there is
+        anything to evict.
+        """
+        ...  # pragma: nocover
+
+    def evict(self) -> int:
+        """Manually evict a key/value pair from fast to slow memory.
+        Return size of the evicted value in fast memory.
+
+        If the eviction failed for whatever reason, return -1. This method must
+        guarantee that the key/value pair that caused the issue has been retained in
+        fast memory and that the problem has been logged internally.
+
+        This method never raises.
+        """
+        ...  # pragma: nocover
 
 
 # zict.Buffer[str, Any] requires zict >= 2.2.0
@@ -63,7 +94,7 @@ class SpillBuffer(zict.Buffer):
     ):
 
         if max_spill is not False and not has_zict_210:
-            raise ValueError("zict > 2.0.0 required to set max_weight")
+            raise ValueError("zict >= 2.1.0 required to set max-spill")
 
         super().__init__(
             fast={},
@@ -163,11 +194,14 @@ class SpillBuffer(zict.Buffer):
             assert key not in self.slow
 
     def evict(self) -> int:
-        """Manually evict the oldest key/value pair, even if target has not been reached.
-        Returns sizeof(value).
+        """Implementation of :meth:`ManualEvictProto.evict`.
+
+        Manually evict the oldest key/value pair, even if target has not been
+        reached. Returns sizeof(value).
         If the eviction failed (value failed to pickle, disk full, or max_spill
         exceeded), return -1; the key/value pair that caused the issue will remain in
-        fast. This method never raises.
+        fast. The exception has been logged internally.
+        This method never raises.
         """
         try:
             with self.handle_errors(None):

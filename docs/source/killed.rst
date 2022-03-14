@@ -102,7 +102,7 @@ interrupting any work in progress. The log will show a message like
     Worker exceeded X memory budget. Restarting
 
 Where X is the memory fraction. You can set this critical fraction using
-the configuration, see :ref:`memman`. If you have an external system for
+the configuration, see :doc:`worker-memory`. If you have an external system for
 watching memory usage provided by your cluster infrastructure (HPC,
 kubernetes, etc.), then it may be reasonable to turn off this memory
 limit. Indeed, in these cases, restarts might be handled for you too, so

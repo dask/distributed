@@ -44,9 +44,9 @@ from dask.utils import (
     typename,
 )
 
-from distributed import comm, preloading, profile, system, utils
+from distributed import comm, preloading, profile, utils
 from distributed.batched import BatchedSend
-from distributed.comm import Comm, connect, get_address_host
+from distributed.comm import connect, get_address_host
 from distributed.comm.addressing import address_from_user_args, parse_address
 from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import to_thread
@@ -92,12 +92,13 @@ from distributed.utils import (
     warn_on_duration,
 )
 from distributed.utils_comm import gather_from_workers, pack_data, retry_operation
-from distributed.utils_perf import (
-    ThrottledGC,
-    disable_gc_diagnosis,
-    enable_gc_diagnosis,
-)
+from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.versions import get_versions
+from distributed.worker_memory import (
+    DeprecatedMemoryManagerAttribute,
+    DeprecatedMemoryMonitor,
+    WorkerMemoryManager,
+)
 from distributed.worker_state_machine import Instruction  # noqa: F401
 from distributed.worker_state_machine import (
     PROCESSING,
@@ -207,17 +208,6 @@ class Worker(ServerNode):
 
     * **tasks**: ``{key: TaskState}``
         The tasks currently executing on this worker (and any dependencies of those tasks)
-    * **data:** ``{key: object}``:
-        Prefer using the **host** attribute instead of this, unless
-        memory_limit and at least one of memory_target_fraction or
-        memory_spill_fraction values are defined, in that case, this attribute
-        is a zict.Buffer, from which information on LRU cache can be queried.
-    * **data.memory:** ``{key: object}``:
-        Dictionary mapping keys to actual values stored in memory. Only
-        available if condition for **data** being a zict.Buffer is met.
-    * **data.disk:** ``{key: object}``:
-        Dictionary mapping keys to actual values stored on disk. Only
-        available if condition for **data** being a zict.Buffer is met.
     * **data_needed**: UniqueTaskHeap
         The tasks which still require data in order to execute, prioritized as a heap
     * **ready**: [keys]
@@ -400,12 +390,6 @@ class Worker(ServerNode):
     extensions: dict
     security: Security
     connection_args: dict[str, Any]
-    memory_limit: int | None
-    memory_target_fraction: float | Literal[False]
-    memory_spill_fraction: float | Literal[False]
-    memory_pause_fraction: float | Literal[False]
-    max_spill: int | Literal[False]
-    data: MutableMapping[str, Any]  # {task key: task payload}
     actors: dict[str, Actor | None]
     loop: IOLoop
     reconnect: bool
@@ -424,9 +408,6 @@ class Worker(ServerNode):
     low_level_profiler: bool
     scheduler: Any
     execution_state: dict[str, Any]
-    memory_monitor_interval: float | None
-    _memory_monitoring: bool
-    _throttled_gc: ThrottledGC
     plugins: dict[str, WorkerPlugin]
     _pending_plugins: tuple[WorkerPlugin, ...]
 
@@ -443,7 +424,6 @@ class Worker(ServerNode):
         services: dict | None = None,
         name: Any | None = None,
         reconnect: bool = True,
-        memory_limit: str | float = "auto",
         executor: Executor | dict[str, Executor] | Literal["offload"] | None = None,
         resources: dict[str, float] | None = None,
         silence_logs: int | None = None,
@@ -453,24 +433,11 @@ class Worker(ServerNode):
         security: Security | dict[str, Any] | None = None,
         contact_address: str | None = None,
         heartbeat_interval: Any = "1s",
-        memory_monitor_interval: Any = "200ms",
-        memory_target_fraction: float | Literal[False] | None = None,
-        memory_spill_fraction: float | Literal[False] | None = None,
-        memory_pause_fraction: float | Literal[False] | None = None,
-        max_spill: float | str | Literal[False] | None = None,
         extensions: list[type] | None = None,
         metrics: Mapping[str, Callable[[Worker], Any]] = DEFAULT_METRICS,
         startup_information: Mapping[
             str, Callable[[Worker], Any]
         ] = DEFAULT_STARTUP_INFORMATION,
-        data: (
-            MutableMapping[str, Any]  # pre-initialised
-            | Callable[[], MutableMapping[str, Any]]  # constructor
-            | tuple[
-                Callable[..., MutableMapping[str, Any]], dict[str, Any]
-            ]  # (constructor, kwargs to constructor)
-            | None  # create internatlly
-        ) = None,
         interface: str | None = None,
         host: str | None = None,
         port: int | None = None,
@@ -486,6 +453,18 @@ class Worker(ServerNode):
         lifetime: Any | None = None,
         lifetime_stagger: Any | None = None,
         lifetime_restart: bool | None = None,
+        ###################################
+        # Parameters to WorkerMemoryManager
+        memory_limit: str | float = "auto",
+        # Allow overriding the dict-like that stores the task outputs.
+        # This is meant for power users only. See WorkerMemoryManager for details.
+        data=None,
+        # Deprecated parameters; please use dask config instead.
+        memory_target_fraction: float | Literal[False] | None = None,
+        memory_spill_fraction: float | Literal[False] | None = None,
+        memory_pause_fraction: float | Literal[False] | None = None,
+        ###################################
+        # Parameters to Server
         **kwargs,
     ):
         self.tasks = {}
@@ -685,54 +664,6 @@ class Worker(ServerNode):
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
 
-        self.memory_limit = parse_memory_limit(memory_limit, self.nthreads)
-
-        self.memory_target_fraction = (
-            memory_target_fraction
-            if memory_target_fraction is not None
-            else dask.config.get("distributed.worker.memory.target")
-        )
-        self.memory_spill_fraction = (
-            memory_spill_fraction
-            if memory_spill_fraction is not None
-            else dask.config.get("distributed.worker.memory.spill")
-        )
-        self.memory_pause_fraction = (
-            memory_pause_fraction
-            if memory_pause_fraction is not None
-            else dask.config.get("distributed.worker.memory.pause")
-        )
-
-        if max_spill is None:
-            max_spill = dask.config.get("distributed.worker.memory.max-spill")
-        self.max_spill = False if max_spill is False else parse_bytes(max_spill)
-
-        if isinstance(data, MutableMapping):
-            self.data = data
-        elif callable(data):
-            self.data = data()
-        elif isinstance(data, tuple):
-            self.data = data[0](**data[1])
-        elif self.memory_limit and (
-            self.memory_target_fraction or self.memory_spill_fraction
-        ):
-            from distributed.spill import SpillBuffer
-
-            if self.memory_target_fraction:
-                target = int(
-                    self.memory_limit
-                    * (self.memory_target_fraction or self.memory_spill_fraction)
-                )
-            else:
-                target = sys.maxsize
-            self.data = SpillBuffer(
-                os.path.join(self.local_directory, "storage"),
-                target=target,
-                max_spill=self.max_spill,
-            )
-        else:
-            self.data = {}
-
         self.actors = {}
         self.loop = loop or IOLoop.current()
         self.reconnect = reconnect
@@ -850,24 +781,19 @@ class Worker(ServerNode):
 
         self._address = contact_address
 
-        self.memory_monitor_interval = parse_timedelta(
-            memory_monitor_interval, default="ms"
-        )
-        self._memory_monitoring = False
-        if self.memory_limit:
-            assert self.memory_monitor_interval is not None
-            pc = PeriodicCallback(
-                self.memory_monitor,  # type: ignore
-                self.memory_monitor_interval * 1000,
-            )
-            self.periodic_callbacks["memory"] = pc
-
         if extensions is None:
             extensions = DEFAULT_EXTENSIONS
         for ext in extensions:
             ext(self)
 
-        self._throttled_gc = ThrottledGC(logger=logger)
+        self.memory_manager = WorkerMemoryManager(
+            self,
+            data=data,
+            memory_limit=memory_limit,
+            memory_target_fraction=memory_target_fraction,
+            memory_spill_fraction=memory_spill_fraction,
+            memory_pause_fraction=memory_pause_fraction,
+        )
 
         setproctitle("dask-worker [not started]")
 
@@ -900,6 +826,33 @@ class Worker(ServerNode):
             self.io_loop.call_later(self.lifetime, self.close_gracefully)
 
         Worker._instances.add(self)
+
+    ################
+    # Memory manager
+    ################
+    memory_manager: WorkerMemoryManager
+
+    @property
+    def data(self) -> MutableMapping[str, Any]:
+        """{task key: task payload} of all completed tasks, whether they were computed on
+        this Worker or computed somewhere else and then transferred here over the
+        network.
+
+        When using the default configuration, this is a zict buffer that automatically
+        spills to disk whenever the target threshold is exceeded.
+        If spilling is disabled, it is a plain dict instead.
+        It could also be a user-defined arbitrary dict-like passed when initialising
+        the Worker or the Nanny.
+        Worker logic should treat this opaquely and stick to the MutableMapping API.
+        """
+        return self.memory_manager.data
+
+    # Deprecated attributes moved to self.memory_manager.<name>
+    memory_limit = DeprecatedMemoryManagerAttribute()
+    memory_target_fraction = DeprecatedMemoryManagerAttribute()
+    memory_spill_fraction = DeprecatedMemoryManagerAttribute()
+    memory_pause_fraction = DeprecatedMemoryManagerAttribute()
+    memory_monitor = DeprecatedMemoryMonitor()
 
     ##################
     # Administrative #
@@ -944,22 +897,20 @@ class Worker(ServerNode):
         return self.address
 
     @property
-    def local_dir(self):
-        """For API compatibility with Nanny"""
-        warnings.warn(
-            "The local_dir attribute has moved to local_directory", stacklevel=2
-        )
-        return self.local_directory
-
-    @property
     def executor(self):
         return self.executors["default"]
 
     @ServerNode.status.setter  # type: ignore
     def status(self, value):
-        """Override Server.status to notify the Scheduler of status changes"""
+        """Override Server.status to notify the Scheduler of status changes.
+        Also handles unpausing.
+        """
+        prev_status = self.status
         ServerNode.status.__set__(self, value)
         self._send_worker_status_change()
+        if prev_status == Status.paused and value == Status.running:
+            self.ensure_computing()
+            self.ensure_communicating()
 
     def _send_worker_status_change(self) -> None:
         if (
@@ -1028,12 +979,10 @@ class Worker(ServerNode):
             "id": self.id,
             "scheduler": self.scheduler.address,
             "nthreads": self.nthreads,
-            "memory_limit": self.memory_limit,
+            "memory_limit": self.memory_manager.memory_limit,
         }
 
-    def _to_dict(
-        self, comm: Comm | None = None, *, exclude: Container[str] = ()
-    ) -> dict:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -1058,16 +1007,13 @@ class Worker(ServerNode):
             "in_flight_workers": self.in_flight_workers,
             "log": self.log,
             "tasks": self.tasks,
-            "memory_limit": self.memory_limit,
-            "memory_target_fraction": self.memory_target_fraction,
-            "memory_spill_fraction": self.memory_spill_fraction,
-            "memory_pause_fraction": self.memory_pause_fraction,
             "logs": self.get_logs(),
             "config": dask.config.config,
             "incoming_transfer_log": self.incoming_transfer_log,
             "outgoing_transfer_log": self.outgoing_transfer_log,
         }
         info.update(extra)
+        info.update(self.memory_manager._to_dict(exclude=exclude))
         info = {k: v for k, v in info.items() if k not in exclude}
         return recursive_to_dict(info, exclude=exclude)
 
@@ -1108,7 +1054,7 @@ class Worker(ServerNode):
                         types={k: typename(v) for k, v in self.data.items()},
                         now=time(),
                         resources=self.total_resources,
-                        memory_limit=self.memory_limit,
+                        memory_limit=self.memory_manager.memory_limit,
                         local_directory=self.local_directory,
                         services=self.service_ports,
                         nanny=self.nanny,
@@ -1399,8 +1345,11 @@ class Worker(ServerNode):
         logger.info("Waiting to connect to: %26s", self.scheduler.address)
         logger.info("-" * 49)
         logger.info("              Threads: %26d", self.nthreads)
-        if self.memory_limit:
-            logger.info("               Memory: %26s", format_bytes(self.memory_limit))
+        if self.memory_manager.memory_limit:
+            logger.info(
+                "               Memory: %26s",
+                format_bytes(self.memory_manager.memory_limit),
+            )
         logger.info("      Local Directory: %26s", self.local_directory)
 
         setproctitle("dask-worker [%s]" % self.address)
@@ -3617,115 +3566,6 @@ class Worker(ServerNode):
     ##################
     # Administrative #
     ##################
-
-    async def memory_monitor(self) -> None:
-        """Track this process's memory usage and act accordingly
-
-        If we rise above 70% memory use, start dumping data to disk.
-
-        If we rise above 80% memory use, stop execution of new tasks
-        """
-        if self._memory_monitoring:
-            return
-        self._memory_monitoring = True
-        assert self.memory_limit
-        total = 0
-
-        memory = self.monitor.get_process_memory()
-        frac = memory / self.memory_limit
-
-        def check_pause(memory):
-            frac = memory / self.memory_limit
-            # Pause worker threads if above 80% memory use
-            if self.memory_pause_fraction and frac > self.memory_pause_fraction:
-                # Try to free some memory while in paused state
-                self._throttled_gc.collect()
-                if self.status == Status.running:
-                    logger.warning(
-                        "Worker is at %d%% memory usage. Pausing worker.  "
-                        "Process memory: %s -- Worker memory limit: %s",
-                        int(frac * 100),
-                        format_bytes(memory),
-                        format_bytes(self.memory_limit)
-                        if self.memory_limit is not None
-                        else "None",
-                    )
-                    self.status = Status.paused
-            elif self.status == Status.paused:
-                logger.warning(
-                    "Worker is at %d%% memory usage. Resuming worker. "
-                    "Process memory: %s -- Worker memory limit: %s",
-                    int(frac * 100),
-                    format_bytes(memory),
-                    format_bytes(self.memory_limit)
-                    if self.memory_limit is not None
-                    else "None",
-                )
-                self.status = Status.running
-                self.ensure_computing()
-                self.ensure_communicating()
-
-        check_pause(memory)
-        # Dump data to disk if above 70%
-        if self.memory_spill_fraction and frac > self.memory_spill_fraction:
-            from distributed.spill import SpillBuffer
-
-            assert isinstance(self.data, SpillBuffer)
-
-            logger.debug(
-                "Worker is at %.0f%% memory usage. Start spilling data to disk.",
-                frac * 100,
-            )
-            # Implement hysteresis cycle where spilling starts at the spill threshold
-            # and stops at the target threshold. Normally that here the target threshold
-            # defines process memory, whereas normally it defines reported managed
-            # memory (e.g. output of sizeof() ).
-            # If target=False, disable hysteresis.
-            target = self.memory_limit * (
-                self.memory_target_fraction or self.memory_spill_fraction
-            )
-            count = 0
-            need = memory - target
-            while memory > target:
-                if not self.data.fast:
-                    logger.warning(
-                        "Unmanaged memory use is high. This may indicate a memory leak "
-                        "or the memory may not be released to the OS; see "
-                        "https://distributed.dask.org/en/latest/worker.html#memtrim "
-                        "for more information. "
-                        "-- Unmanaged memory: %s -- Worker memory limit: %s",
-                        format_bytes(memory),
-                        format_bytes(self.memory_limit),
-                    )
-                    break
-                weight = self.data.evict()
-                if weight == -1:
-                    # Failed to evict:
-                    # disk full, spill size limit exceeded, or pickle error
-                    break
-
-                total += weight
-                count += 1
-                await asyncio.sleep(0)
-
-                memory = self.monitor.get_process_memory()
-                if total > need and memory > target:
-                    # Issue a GC to ensure that the evicted data is actually
-                    # freed from memory and taken into account by the monitor
-                    # before trying to evict even more data.
-                    self._throttled_gc.collect()
-                    memory = self.monitor.get_process_memory()
-
-            check_pause(memory)
-            if count:
-                logger.debug(
-                    "Moved %d tasks worth %s to disk",
-                    count,
-                    format_bytes(total),
-                )
-
-        self._memory_monitoring = False
-
     def cycle_profile(self) -> None:
         now = time() + self.scheduler_delay
         prof, self.profile_recent = self.profile_recent, profile.create()
@@ -4274,25 +4114,6 @@ class Reschedule(Exception):
     load across the cluster has significantly changed since first scheduling
     the task.
     """
-
-
-def parse_memory_limit(memory_limit, nthreads, total_cores=CPU_COUNT) -> int | None:
-    if memory_limit is None:
-        return None
-
-    if memory_limit == "auto":
-        memory_limit = int(system.MEMORY_LIMIT * min(1, nthreads / total_cores))
-    with suppress(ValueError, TypeError):
-        memory_limit = float(memory_limit)
-        if isinstance(memory_limit, float) and memory_limit <= 1:
-            memory_limit = int(memory_limit * system.MEMORY_LIMIT)
-
-    if isinstance(memory_limit, str):
-        memory_limit = parse_bytes(memory_limit)
-    else:
-        memory_limit = int(memory_limit)
-
-    return min(memory_limit, system.MEMORY_LIMIT)
 
 
 async def get_data_from_worker(

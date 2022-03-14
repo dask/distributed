@@ -149,6 +149,12 @@ distributed:
       # Set to false for no maximum.
       max-spill: false
 
+      monitor-interval:
+        # Interval between checks for the spill, pause, and terminate thresholds.
+        # The target threshold is checked every time new data is inserted.
+        spill-pause: 200ms  # memory monitor on the Worker
+        terminate: 100ms  # memory monitor on the Nanny
+
     http:
       routes:
         - distributed.http.worker.prometheus

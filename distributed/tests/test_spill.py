@@ -5,15 +5,17 @@ import os
 
 import pytest
 
-zict = pytest.importorskip("zict")
-from packaging.version import parse as parse_version
-
 from dask.sizeof import sizeof
 
 from distributed.compatibility import WINDOWS
 from distributed.protocol import serialize_bytelist
-from distributed.spill import SpillBuffer
+from distributed.spill import SpillBuffer, has_zict_210
 from distributed.utils_test import captured_logger
+
+requires_zict_210 = pytest.mark.skipif(
+    not has_zict_210,
+    reason="requires zict version >= 2.1.0",
+)
 
 
 def psize(*objs) -> tuple[int, int]:
@@ -103,12 +105,6 @@ def test_spillbuffer(tmpdir):
     assert set(buf.slow) == {"d", "e"}
     assert buf.slow.weight_by_key == {"d": psize(d), "e": psize(e)}
     assert buf.slow.total_weight == psize(d, e)
-
-
-requires_zict_210 = pytest.mark.skipif(
-    parse_version(zict.__version__) <= parse_version("2.0.0"),
-    reason="requires zict version > 2.0.0",
-)
 
 
 @requires_zict_210
