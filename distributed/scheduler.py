@@ -1212,6 +1212,8 @@ class TaskGroup:
 class TaskState:
     """
     A simple object holding information about a task.
+    Not to be confused with :class:`distributed.worker_state_machine.TaskState`, which
+    holds similar information on the Worker side.
 
     .. attribute:: key: str
 

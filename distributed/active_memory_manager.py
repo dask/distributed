@@ -14,7 +14,7 @@ from distributed.core import Status
 from distributed.metrics import time
 from distributed.utils import import_term, log_errors
 
-if TYPE_CHECKING:  # pragma: nocover
+if TYPE_CHECKING:
     from distributed.client import Client
     from distributed.scheduler import Scheduler, TaskState, WorkerState
 

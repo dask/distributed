@@ -128,7 +128,7 @@ class BatchedSend:
         self.stopped.set()
         self.abort()
 
-    def send(self, *msgs):
+    def send(self, *msgs: dict) -> None:
         """Schedule a message for sending to the other side
 
         This completes quickly and synchronously
