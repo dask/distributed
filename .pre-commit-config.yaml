@@ -49,4 +49,4 @@ repos:
           - tornado
           # TEMP revert before merging
           # - zict
-          - git+https://github.com/crusaderky/zict@cache
+          - git+https://github.com/crusaderky/zict@9d28c23080e2cf8eab8087cc330f5198d292cfaf
