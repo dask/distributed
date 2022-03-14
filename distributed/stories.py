@@ -1,7 +1,7 @@
 from typing import Iterable
 
 
-def scheduler_story(keys: set, transition_log: Iterable):
+def scheduler_story(keys: set, transition_log: Iterable) -> list:
     """Creates a story from the scheduler transition log given a set of keys
     describing tasks or stimuli.
 
@@ -19,7 +19,7 @@ def scheduler_story(keys: set, transition_log: Iterable):
     return [t for t in transition_log if t[0] in keys or keys.intersection(t[3])]
 
 
-def worker_story(keys: set, log: Iterable):
+def worker_story(keys: set, log: Iterable) -> list:
     """Creates a story from the worker log given a set of keys
     describing tasks or stimuli.
 
