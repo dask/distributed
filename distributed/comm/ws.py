@@ -16,12 +16,27 @@ from tornado.websocket import WebSocketClosedError, WebSocketHandler, websocket_
 
 import dask
 
-from ..utils import ensure_bytes, nbytes
-from .addressing import parse_host_port, unparse_host_port
-from .core import Comm, CommClosedError, Connector, FatalCommClosedError, Listener
-from .registry import backends
-from .tcp import BaseTCPBackend, _expect_tls_context, convert_stream_closed_error
-from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to_frames
+from distributed.comm.addressing import parse_host_port, unparse_host_port
+from distributed.comm.core import (
+    Comm,
+    CommClosedError,
+    Connector,
+    FatalCommClosedError,
+    Listener,
+)
+from distributed.comm.registry import backends
+from distributed.comm.tcp import (
+    BaseTCPBackend,
+    _expect_tls_context,
+    convert_stream_closed_error,
+)
+from distributed.comm.utils import (
+    ensure_concrete_host,
+    from_frames,
+    get_tcp_server_address,
+    to_frames,
+)
+from distributed.utils import ensure_bytes, nbytes
 
 logger = logging.getLogger(__name__)
 

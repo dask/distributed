@@ -1,6 +1,6 @@
 import uuid
 
-from .plugin import SchedulerPlugin
+from distributed.diagnostics.plugin import SchedulerPlugin
 
 
 class GraphLayout(SchedulerPlugin):

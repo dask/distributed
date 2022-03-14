@@ -16,12 +16,12 @@ import dask
 from dask.utils import parse_bytes, parse_timedelta
 from dask.widgets import get_template
 
-from ..core import CommClosedError, Status, rpc
-from ..scheduler import Scheduler
-from ..security import Security
-from ..utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
-from .adaptive import Adaptive
-from .cluster import Cluster
+from distributed.core import CommClosedError, Status, rpc
+from distributed.deploy.adaptive import Adaptive
+from distributed.deploy.cluster import Cluster
+from distributed.scheduler import Scheduler
+from distributed.security import Security
+from distributed.utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
 
 logger = logging.getLogger(__name__)
 

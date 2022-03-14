@@ -16,12 +16,12 @@ import click
 
 from dask.utils import tmpfile
 
-from .core import Server
-from .utils import import_file
+from distributed.core import Server
+from distributed.utils import import_file
 
 if TYPE_CHECKING:
     # This has to be inside this guard to avoid a circular import
-    from .client import Client
+    from distributed.client import Client
 
 logger = logging.getLogger(__name__)
 

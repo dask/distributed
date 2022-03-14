@@ -107,7 +107,7 @@ def get_package_info(
 
 
 def error_message(scheduler, workers, client, client_name="client"):
-    from .utils import asciitable
+    from distributed.utils import asciitable
 
     client = client.get("packages") if client else "UNKNOWN"
     scheduler = scheduler.get("packages") if scheduler else "UNKNOWN"

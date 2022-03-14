@@ -11,7 +11,7 @@ from typing import ClassVar
 
 import dask
 
-from . import locket
+from distributed import locket
 
 logger = logging.getLogger(__name__)
 

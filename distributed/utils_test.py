@@ -44,24 +44,22 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from distributed.comm.tcp import TCP
-
-from . import system
-from . import versions as version_module
-from .client import Client, _global_clients, default_client
-from .comm import Comm
-from .comm.tcp import BaseTCPConnector
-from .compatibility import WINDOWS
-from .config import initialize_logging
-from .core import CommClosedError, ConnectionPool, Status, connect, rpc
-from .deploy import SpecCluster
-from .diagnostics.plugin import WorkerPlugin
-from .metrics import time
-from .nanny import Nanny
-from .node import ServerNode
-from .proctitle import enable_proctitle_on_children
-from .security import Security
-from .utils import (
+from distributed import system
+from distributed import versions as version_module
+from distributed.client import Client, _global_clients, default_client
+from distributed.comm import Comm
+from distributed.comm.tcp import TCP, BaseTCPConnector
+from distributed.compatibility import WINDOWS
+from distributed.config import initialize_logging
+from distributed.core import CommClosedError, ConnectionPool, Status, connect, rpc
+from distributed.deploy import SpecCluster
+from distributed.diagnostics.plugin import WorkerPlugin
+from distributed.metrics import time
+from distributed.nanny import Nanny
+from distributed.node import ServerNode
+from distributed.proctitle import enable_proctitle_on_children
+from distributed.security import Security
+from distributed.utils import (
     DequeHandler,
     TimeoutError,
     _offload_executor,
@@ -73,7 +71,7 @@ from .utils import (
     reset_logger_locks,
     sync,
 )
-from .worker import Worker
+from distributed.worker import Worker
 
 try:
     import dask.array  # register config
@@ -1405,7 +1403,7 @@ def new_config(new_config):
     """
     Temporarily change configuration dictionary.
     """
-    from .config import defaults
+    from distributed.config import defaults
 
     config = dask.config.config
     orig_config = copy.deepcopy(config)
