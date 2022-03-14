@@ -47,4 +47,6 @@ repos:
           - numpy
           - dask
           - tornado
-          - zict
+          # TEMP revert before merging
+          # - zict
+          - git+https://github.com/crusaderky/zict@cache
