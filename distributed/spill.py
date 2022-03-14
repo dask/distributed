@@ -71,7 +71,7 @@ class SpillBuffer(zict.Buffer):
         if has_zict_220:
             # If a value is still in use somewhere on the worker since the last time it
             # was unspilled, don't duplicate it
-            slow = zict.Cache(slow, zict.WeakRefCache())
+            slow = zict.Cache(slow, zict.WeakValueMapping())
 
         super().__init__(fast={}, slow=slow, n=target, weight=_in_memory_weight)
         self.last_logged = 0
