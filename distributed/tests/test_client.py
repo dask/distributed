@@ -7363,11 +7363,40 @@ async def test_inspect_cluster_dump(c, s, a, b, tmp_path, _format, local, worker
 
     suffix = ".gz" if _format == "msgpack" else ""
     inspector = DumpInspector(f"{filename}.{_format}{suffix}")
-    tasks = inspector.tasks_in_state("memory", workers=workers)
-    assert fut_keys.issubset(tasks.keys())
-    assert inc_blocked.key in inspector.tasks_in_state("executing", workers=True)
+    memory_tasks = inspector.tasks_in_state("memory", workers=workers)
+    ex_tasks = inspector.tasks_in_state("executing", workers=True)
+    assert fut_keys.issubset(memory_tasks.keys())
+    assert ex_tasks == {
+        inc_blocked.key: {
+            "annotations": None,
+            "coming_from": None,
+            "dependencies": [],
+            "dependents": [],
+            "done": False,
+            "duration": 0.5,
+            "exception": None,
+            "exception_text": "",
+            "key": inc_blocked.key,
+            "metadata": {},
+            "nbytes": None,
+            "resource_restrictions": {},
+            "startstops": [],
+            "state": "executing",
+            "stop_time": None,
+            "suspicious_count": 0,
+            "traceback": None,
+            "traceback_text": "",
+            "type": None,
+            "waiters": [],
+            "waiting_for_data": [],
+            "who_has": [],
+            # Set non-deterministic values
+            "priority": ex_tasks[inc_blocked.key]["priority"],
+            "start_time": ex_tasks[inc_blocked.key]["start_time"],
+        }
+    }
 
-    it = iter(tasks.keys())
+    it = iter(memory_tasks.keys())
     stories = inspector.story(next(it), workers=workers)
     stories = inspector.story(next(it), next(it), workers=workers)
     missing = inspector.missing_workers()
