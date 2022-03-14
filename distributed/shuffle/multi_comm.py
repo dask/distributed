@@ -4,11 +4,11 @@ from collections import defaultdict
 
 from dask.utils import parse_bytes
 
-from .core import rpc
-from .protocol import to_serialize
-from .sizeof import sizeof
-from .system import MEMORY_LIMIT
-from .utils import log_errors, offload
+from ..core import rpc
+from ..protocol import to_serialize
+from ..sizeof import sizeof
+from ..system import MEMORY_LIMIT
+from ..utils import log_errors, offload
 
 
 class MultiComm:

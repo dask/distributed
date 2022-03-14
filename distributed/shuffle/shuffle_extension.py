@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING, NewType
 
 import zict
 
-from distributed.multi_comm import MultiComm
-from distributed.multi_file import MultiFile
 from distributed.protocol import to_serialize
+from distributed.shuffle.multi_comm import MultiComm
+from distributed.shuffle.multi_file import MultiFile
 from distributed.utils import offload, sync
 
 if TYPE_CHECKING:

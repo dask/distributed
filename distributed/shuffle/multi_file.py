@@ -8,8 +8,8 @@ import zict
 
 from dask.utils import parse_bytes
 
-from .system import MEMORY_LIMIT
-from .utils import offload
+from ..system import MEMORY_LIMIT
+from ..utils import offload
 
 
 class MultiFile:
