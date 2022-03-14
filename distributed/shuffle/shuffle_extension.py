@@ -8,9 +8,10 @@ from typing import TYPE_CHECKING, NewType
 
 import zict
 
+from distributed.multi_comm import MultiComm
 from distributed.multi_file import MultiFile
 from distributed.protocol import to_serialize
-from distributed.utils import sync
+from distributed.utils import offload, sync
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -79,40 +80,39 @@ class Shuffle:
 
         self.multi_file = MultiFile(
             directory=os.path.join(self.worker.local_directory, str(self.metadata.id)),
-            memory_limit="1 GiB",  # TODO: lift this up to the global ShuffleExtension
+            memory_limit="200 MiB",  # TODO: lift this up to the global ShuffleExtension
             file_cache=file_cache,
             n_files=min(256, metadata.npartitions),
         )
+        self.multi_comm = MultiComm(
+            memory_limit="200 MiB",  # TODO
+            rpc=worker.rpc,
+            shuffle_id=self.metadata.id,
+            # sizeof=  # TODO, something smarter
+        )
+        self.worker.loop.add_callback(self.multi_comm.communicate)
 
         self.output_partitions_left = metadata.npartitions_for(worker.address)
         self.transferred = False
 
-    def receive(self, output_partition: int, data: pd.DataFrame) -> None:
+    async def receive(self, data: pd.DataFrame) -> None:
         assert not self.transferred, "`receive` called after barrier task"
-        self.multi_file.write(data, output_partition)
+        groups = await offload(lambda: list(data.groupby(self.metadata.column)))
+        for output_partition, shard in groups:
+            await self.multi_file.write(shard, output_partition)
 
-    async def add_partition(self, data: pd.DataFrame, groups: list) -> None:
-        assert not self.transferred, "`add_partition` called after barrier task"
-        tasks = []
-        # NOTE: `groupby` blocks the event loop, but it also holds the GIL,
-        # so we don't bother offloading to a thread. See bpo-7946.
-        for output_partition, data in groups:
-            # NOTE: `column` must refer to an integer column, which is the output partition number for the row.
-            # This is always `_partitions`, added by `dask/dataframe/shuffle.py::shuffle`.
-            addr = self.metadata.worker_for(int(output_partition))
-            task = asyncio.create_task(
-                self.worker.rpc(addr).shuffle_receive(
-                    shuffle_id=self.metadata.id,
-                    output_partition=output_partition,
-                    data=to_serialize(data),
-                )
-            )
-            tasks.append(task)
+    def add_partition(self, data: pd.DataFrame) -> None:
 
-        # TODO Once RerunGroup logic exists (https://github.com/dask/distributed/issues/5403),
-        # handle errors and cancellation here in a way that lets other workers cancel & clean up their shuffles.
-        # Without it, letting errors kill the task is all we can do.
-        await asyncio.gather(*tasks)
+        grouper = (
+            len(self.metadata.workers)
+            * data[self.metadata.column]
+            // self.metadata.npartitions
+        )  # .astype(data[self.metadata.column].dtype)
+
+        groups = list(data.groupby(grouper))
+        out = {self.metadata.workers[int(i)]: shard for i, shard in groups}
+        assert len(data) == sum(len(df) for _, df in out.items())
+        self.multi_comm.put(out)
 
     def get_output_partition(self, i: int) -> pd.DataFrame:
         assert self.transferred, "`get_output_partition` called before barrier task"
@@ -130,7 +130,8 @@ class Shuffle:
         self.output_partitions_left -= 1
 
         try:
-            return self.multi_file.read(i)
+            df = self.multi_file.read(i)
+            return df
         except KeyError:
             return self.metadata.empty
 
@@ -174,25 +175,26 @@ class ShuffleWorkerExtension:
             metadata, self.worker, file_cache=self.file_cache
         )
 
-    def shuffle_receive(
+    async def shuffle_receive(
         self,
         comm: object,
         shuffle_id: ShuffleId,
-        output_partition: int,
         data: pd.DataFrame,
     ) -> None:
         """
         Hander: Receive an incoming shard of data from a peer worker.
         Using an unknown ``shuffle_id`` is an error.
         """
-        self._get_shuffle(shuffle_id).receive(output_partition, data)
+        await self._get_shuffle(shuffle_id).receive(data)
 
-    def shuffle_inputs_done(self, comm: object, shuffle_id: ShuffleId) -> None:
+    async def shuffle_inputs_done(self, comm: object, shuffle_id: ShuffleId) -> None:
         """
         Hander: Inform the extension that all input partitions have been handed off to extensions.
         Using an unknown ``shuffle_id`` is an error.
         """
         shuffle = self._get_shuffle(shuffle_id)
+        await shuffle.multi_comm.flush()
+        await asyncio.sleep(1)  # TODO
         shuffle.inputs_done()
         if shuffle.done():
             # If the shuffle has no output partitions, remove it now;
@@ -251,21 +253,7 @@ class ShuffleWorkerExtension:
         return metadata  # NOTE: unused in tasks, just handy for tests
 
     def add_partition(self, data: pd.DataFrame, shuffle_id: ShuffleId) -> None:
-        column = self._get_shuffle(shuffle_id).metadata.column
-        groups = list(data.groupby(column))
-        sync(self.worker.loop, self._add_partition, data, shuffle_id, groups)
-
-    async def _add_partition(
-        self, data: pd.DataFrame, shuffle_id: ShuffleId, groups: list
-    ) -> None:
-        """
-        Task: Hand off an input partition to the ShuffleExtension.
-
-        This will block until the extension is ready to receive another input partition.
-
-        Using an unknown ``shuffle_id`` is an error.
-        """
-        await self._get_shuffle(shuffle_id).add_partition(data, groups)
+        self._get_shuffle(shuffle_id).add_partition(data=data)
 
     def barrier(self, shuffle_id: ShuffleId) -> None:
         sync(self.worker.loop, self._barrier, shuffle_id)

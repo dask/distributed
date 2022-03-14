@@ -9,6 +9,7 @@ import zict
 from dask.utils import parse_bytes
 
 from .system import MEMORY_LIMIT
+from .utils import offload
 
 
 class MultiFile:
@@ -64,12 +65,15 @@ class MultiFile:
             except EOFError:
                 break
         # TODO: We could consider deleting the file at this point
-        return self.join(parts)
+        if parts:
+            return self.join(parts)
+        else:
+            raise KeyError(id)
 
-    def write(self, part, id):
-        file = self.open_file(id)
+    async def write(self, part, id):
+        file = await offload(self.open_file, id)
         # TODO: We should consider offloading this to a separate thread
-        self.dump(part, file)
+        await offload(self.dump, part, file)
 
     def close(self):
         shutil.rmtree(self.directory)
