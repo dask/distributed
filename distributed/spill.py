@@ -14,7 +14,7 @@ from distributed.protocol import deserialize_bytes, serialize_bytelist
 from distributed.sizeof import safe_sizeof
 
 logger = logging.getLogger(__name__)
-has_zict_210 = parse_version(zict.__version__) > parse_version("2.0.0")
+has_zict_210 = parse_version(zict.__version__) >= parse_version("2.1.0")
 
 
 class SpilledSize(NamedTuple):
@@ -63,7 +63,7 @@ class SpillBuffer(zict.Buffer):
     ):
 
         if max_spill is not False and not has_zict_210:
-            raise ValueError("zict > 2.0.0 required to set max_weight")
+            raise ValueError("zict >= 2.1.0 required to set max-spill")
 
         super().__init__(
             fast={},

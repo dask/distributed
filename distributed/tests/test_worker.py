@@ -16,7 +16,6 @@ from unittest import mock
 
 import psutil
 import pytest
-from packaging.version import parse as parse_version
 from tlz import first, pluck, sliding_window
 
 import dask
@@ -43,6 +42,7 @@ from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
+from distributed.spill import has_zict_210
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
@@ -63,15 +63,9 @@ from distributed.worker import Worker, error_message, logger, parse_memory_limit
 
 pytestmark = pytest.mark.ci1
 
-try:
-    import zict
-except ImportError:
-    zict = None  # type: ignore
-
-requires_zict = pytest.mark.skipif(not zict, reason="requires zict")
 requires_zict_210 = pytest.mark.skipif(
-    not zict or parse_version(zict.__version__) <= parse_version("2.0.0"),
-    reason="requires zict version > 2.0.0",
+    not has_zict_210,
+    reason="requires zict version >= 2.1.0",
 )
 
 
@@ -924,7 +918,6 @@ async def assert_basic_futures(c: Client) -> None:
     assert results == list(map(inc, range(10)))
 
 
-@requires_zict
 @gen_cluster(client=True)
 async def test_fail_write_to_disk_target_1(c, s, a, b):
     """Test failure to spill triggered by key which is individually larger
@@ -942,7 +935,6 @@ async def test_fail_write_to_disk_target_1(c, s, a, b):
     await assert_basic_futures(c)
 
 
-@requires_zict
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -965,10 +957,8 @@ async def test_fail_write_to_disk_target_2(c, s, a):
 
     y = c.submit(lambda: "y" * 256, key="y")
     await wait(y)
-    if parse_version(zict.__version__) <= parse_version("2.0.0"):
-        assert set(a.data.memory) == {"y"}
-    else:
-        assert set(a.data.memory) == {"x", "y"}
+
+    assert set(a.data.memory) == {"x", "y"} if has_zict_210 else {"y"}
     assert not a.data.disk
 
     await assert_basic_futures(c)
@@ -1187,7 +1177,6 @@ async def test_statistical_profiling_2(c, s, a, b):
             break
 
 
-@requires_zict
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -1277,7 +1266,6 @@ async def test_spill_constrained(c, s, w):
     assert set(w.data.disk) == {x.key}
 
 
-@requires_zict
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
@@ -1301,7 +1289,6 @@ async def test_spill_spill_threshold(c, s, a):
     assert await x == 1
 
 
-@requires_zict
 @pytest.mark.parametrize(
     "memory_target_fraction,managed,expect_spilled",
     [
