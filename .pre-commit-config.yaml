@@ -42,3 +42,4 @@ repos:
           - numpy
           - dask
           - tornado
+          - zict

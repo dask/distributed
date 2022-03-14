@@ -73,7 +73,7 @@ pytestmark = pytest.mark.ci1
 try:
     import zict
 except ImportError:
-    zict = None
+    zict = None  # type: ignore
 
 requires_zict = pytest.mark.skipif(not zict, reason="requires zict")
 requires_zict_210 = pytest.mark.skipif(
@@ -162,6 +162,7 @@ async def test_worker_bad_args(c, s, a, b):
     tb = await y._traceback()
     assert any("1 / 0" in line for line in pluck(3, traceback.extract_tb(tb)) if line)
     assert "Compute Failed" in hdlr.messages["warning"][0]
+    assert y.key in hdlr.messages["warning"][0]
     logger.setLevel(old_level)
 
     # Now we check that both workers are still alive.
