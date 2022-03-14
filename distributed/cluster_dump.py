@@ -95,7 +95,7 @@ class DumpInspector:
 
     .. code-block:: python
 
-        inspector = DumpInspect("dump.msgpack.gz")
+        inspector = DumpInspector("dump.msgpack.gz")
         memory_tasks = inspector.tasks_in_state("memory")
         released_tasks = inspector.tasks_in_state("released")
     """
