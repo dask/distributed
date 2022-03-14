@@ -60,7 +60,20 @@ async def write_state(
         await to_thread(writer, state, f)
 
 
-def load_cluster_dump(url: str):
+def load_cluster_dump(url: str) -> dict:
+    """Loads a cluster dump from a disk artefact
+
+    Parameters
+    ----------
+    url : str
+        Name of the dump artefact. This should have either a
+        `.msgpack.gz` or `yaml` suffix, depending on the dump format.
+
+    Returns
+    -------
+    state : dict
+        The cluster state at the time of the dump.
+    """
     if url.endswith(".msgpack.gz"):
         mode = "rb"
         reader = msgpack.unpack
@@ -84,7 +97,7 @@ class DumpInspector:
 
         inspector = DumpInspect("dump.msgpack.gz")
         memory_tasks = inspector.tasks_in_state("memory")
-        released_tasks = inspector.tasks_in_state("released)
+        released_tasks = inspector.tasks_in_state("released")
     """
 
     def __init__(self, url_or_state: str | dict):
