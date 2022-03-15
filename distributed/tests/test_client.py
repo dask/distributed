@@ -7355,8 +7355,7 @@ async def test_inspect_cluster_dump(c, s, a, b, tmp_path, _format, local):
     await c.gather(futs)
 
     event = distributed.Event()
-    with dask.annotate(values=1):
-        inc_blocked = c.submit(blocked_inc, 1, event=event)
+    blocked_fut = c.submit(blocked_inc, 1, event)
 
     await c.dump_cluster_state(filename, format=_format)
 
