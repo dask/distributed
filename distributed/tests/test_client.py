@@ -7407,60 +7407,32 @@ async def test_inspect_cluster_dump(c, s, a, b, tmp_path, _format, local):
     dump_path = Path(tmp_path / "dump")
     dump.split(dump_path)
     scheduler_files = {
-        "address.yaml",
-        "clients.yaml",
         "events.yaml",
         "extensions.yaml",
-        "id.yaml",
+        "general.yaml",
         "log.yaml",
-        "memory.yaml",
-        "services.yaml",
-        "started.yaml",
-        "status.yaml",
         "task_groups.yaml",
         "tasks.yaml",
-        "thread_id.yaml",
         "transition_log.yaml",
-        "type.yaml",
         "workers.yaml",
     }
 
     scheduler_dump_path = dump_path / "scheduler"
-    for file in scheduler_files:
-        assert (scheduler_dump_path / file).exists()
+    expected = {scheduler_dump_path / f for f in scheduler_files}
+    assert expected == set(scheduler_dump_path.iterdir())
 
     worker_files = {
-        "address.yaml",
         "config.yaml",
-        "constrained.yaml",
-        "data_needed.yaml",
-        "executing_count.yaml",
-        "id.yaml",
-        "in_flight_tasks.yaml",
-        "in_flight_workers.yaml",
-        "incoming_transfer_log.yaml",
+        "general.yaml",
         "log.yaml",
         "logs.yaml",
-        "long_running.yaml",
-        "memory_limit.yaml",
-        "memory_pause_fraction.yaml",
-        "memory_spill_fraction.yaml",
-        "memory_target_fraction.yaml",
-        "nthreads.yaml",
-        "outgoing_transfer_log.yaml",
-        "pending_data_per_worker.yaml",
-        "ready.yaml",
-        "scheduler.yaml",
-        "status.yaml",
         "tasks.yaml",
-        "thread_id.yaml",
-        "type.yaml",
     }
 
     for worker in (a, b):
         worker_dump_path = dump_path / worker.id
-        for file in worker_files:
-            assert (worker_dump_path / file).exists()
+        expected = {worker_dump_path / f for f in worker_files}
+        assert expected == set(worker_dump_path.iterdir())
 
     # TODO(sjperkins): Make a worker fail badly to make
     # this test more interesting

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import IO, Any, Awaitable, Callable, Literal
+from typing import IO, Any, Awaitable, Callable, Collection, Literal
 
 import fsspec
 import msgpack
@@ -191,23 +191,67 @@ class DumpArtefact:
             or not self._valid_worker_dump(responsive_workers[w])
         ]
 
-    def split(self, root_dir: str | Path | None = None):
+    def split(
+        self,
+        root_dir: str | Path | None = None,
+        worker_expand_keys: Collection[str] = ("config", "log", "logs", "tasks"),
+        scheduler_expand_keys: Collection[str] = (
+            "events",
+            "extensions",
+            "log",
+            "task_groups",
+            "tasks",
+            "transition_log",
+            "workers",
+        ),
+    ):
         """
         Splits the Dump Artefact into a tree of yaml files with
         `root_dir` as it's base.
 
+        The root level of the tree contains a directory for the scheduler
+        and directories for each individual worker.
+        Each directory contains yaml files describing the state of the scheduler
+        or worker when the artefact was created.
+
+        In general, keys associated with the state are compacted into a `general.yaml`
+        file, unless they are in `scheduler_expand_keys` and `worker_expand_keys`.
+
         Parameters
         ----------
         root_dir : str or Path
+            The root directory into which the tree is written.
+            Defaults to the current working directory if `None`.
+        worker_expand_keys : iterable of str
+            An iterable of artefact worker keys that will be expanded
+            into separate yaml files.
+            Keys that are not in this iterable are compacted into a
+            `general.yaml` file.
+        scheduler_expand_keys : iterable of str
+            An iterable of artefact scheduler keys that will be expanded
+            into separate yaml files.
+            Keys that are not in this iterable are compacted into a
+            `general.yaml` file.
         """
         import yaml
 
         root_dir = Path(root_dir) if root_dir else Path.cwd()
         dumper = yaml.CSafeDumper
+        scheduler_expand_keys = set(scheduler_expand_keys)
+        worker_expand_keys = set(worker_expand_keys)
 
         workers = self.dump["workers"]
         for info in workers.values():
-            log_dir = root_dir / info["id"]
+            worker_id = info["id"]
+            assert "general" not in info
+
+            # Compact smaller keys into a general dict
+            general = {
+                k: info.pop(k) for k in list(info.keys()) if k not in worker_expand_keys
+            }
+            info["general"] = general
+
+            log_dir = root_dir / worker_id
             log_dir.mkdir(parents=True, exist_ok=True)
 
             for name, _logs in info.items():
@@ -217,8 +261,15 @@ class DumpArtefact:
 
         context = "scheduler"
         info = self.dump[context]
+        assert "general" not in info
+        general = {
+            k: info.pop(k) for k in list(info.keys()) if k not in scheduler_expand_keys
+        }
+        info["general"] = general
+
         log_dir = root_dir / context
         log_dir.mkdir(parents=True, exist_ok=True)
+        # Compact smaller keys into a general dict
 
         for name, _logs in info.items():
             filename = str(log_dir / f"{name}.yaml")
