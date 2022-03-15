@@ -90,15 +90,15 @@ def load_cluster_dump(url: str) -> dict:
         return reader(f)
 
 
-class DumpInspector:
+class DumpArtefact:
     """
     Utility class for inspecting the state of a cluster dump
 
     .. code-block:: python
 
-        inspector = DumpInspector("dump.msgpack.gz")
-        memory_tasks = inspector.scheduler_tasks("memory")
-        executing_tasks = inspector.worker_tasks("executing")
+        dump = DumpArtefact("dump.msgpack.gz")
+        memory_tasks = dump.scheduler_tasks("memory")
+        executing_tasks = dump.worker_tasks("executing")
     """
 
     def __init__(self, url_or_state: str | dict):

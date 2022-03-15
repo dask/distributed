@@ -64,7 +64,7 @@ from distributed.client import (
     tokenize,
     wait,
 )
-from distributed.cluster_dump import DumpInspector, load_cluster_dump
+from distributed.cluster_dump import DumpArtefact, load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import Status
@@ -7366,10 +7366,10 @@ async def test_inspect_cluster_dump(c, s, a, b, tmp_path, _format, local):
     event.set()
 
     suffix = ".gz" if _format == "msgpack" else ""
-    inspector = DumpInspector(f"{filename}.{_format}{suffix}")
+    dump = DumpArtefact(f"{filename}.{_format}{suffix}")
 
-    smem_keys = {t["key"] for t in inspector.scheduler_tasks("memory")}
-    wmem_keys = {t["key"] for t in inspector.worker_tasks("memory")}
+    smem_keys = {t["key"] for t in dump.scheduler_tasks("memory")}
+    wmem_keys = {t["key"] for t in dump.worker_tasks("memory")}
 
     assert smem_keys == fut_keys
     assert smem_keys == {t.key for t in scheduler_tasks if t.state == "memory"}
@@ -7384,16 +7384,16 @@ async def test_inspect_cluster_dump(c, s, a, b, tmp_path, _format, local):
         (task_key, "processing", "memory", {}),
     ]
 
-    story = inspector.scheduler_story(task_key)
+    story = dump.scheduler_story(task_key)
     assert len(story) == len(expected)
 
     for event, expected_event in zip(story, expected):
         for e1, e2 in zip(event, expected_event):
             assert e1 == e2
 
-    assert len(inspector.scheduler_story(task_key)) == 3
+    assert len(dump.scheduler_story(task_key)) == 3
     assert_worker_story(
-        inspector.worker_story(task_key),
+        dump.worker_story(task_key),
         [
             (task_key, "compute-task"),
             (task_key, "released", "waiting", "waiting", {task_key: "ready"}),
@@ -7406,7 +7406,7 @@ async def test_inspect_cluster_dump(c, s, a, b, tmp_path, _format, local):
 
     # TODO(sjperkins): Make a worker fail badly to make
     # this test more interesting
-    assert len(inspector.missing_workers()) == 0
+    assert len(dump.missing_workers()) == 0
 
 
 @gen_cluster(client=True)
