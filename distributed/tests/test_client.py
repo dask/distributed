@@ -50,6 +50,7 @@ from distributed import (
     performance_report,
     profile,
     secede,
+    worker,
 )
 from distributed.client import (
     Client,
@@ -7339,66 +7340,57 @@ def blocked_inc(x, event):
     return x + 1
 
 
-@pytest.mark.parametrize("local", [True, False])
-@pytest.mark.parametrize("_format", ["msgpack", "yaml"])
-@pytest.mark.parametrize("workers", [True, False])
+# @pytest.mark.parametrize("local", [True, False])
+# @pytest.mark.parametrize("_format", ["msgpack", "yaml"])
+@pytest.mark.parametrize("local", [True])
+@pytest.mark.parametrize("_format", ["msgpack"])
 @gen_cluster(client=True)
-async def test_inspect_cluster_dump(c, s, a, b, tmp_path, _format, local, workers):
+async def test_inspect_cluster_dump(c, s, a, b, tmp_path, _format, local):
     filename = tmp_path / "foo"
     if not local:
         pytest.importorskip("fsspec")
         # Make it look like an fsspec path
         filename = f"file://{filename}"
 
-    futs = c.map(inc, range(10))
+    futs = c.map(inc, range(2))
     fut_keys = {f.key for f in futs}
     await c.gather(futs)
 
     event = distributed.Event()
-    inc_blocked = c.submit(blocked_inc, 1, event=event)
+    with dask.annotate(values=1):
+        inc_blocked = c.submit(blocked_inc, 1, event=event)
 
     await c.dump_cluster_state(filename, format=_format)
+
+    exclude = {"run_spec", "group"}
+
+    scheduler_tasks = [t._to_dict_no_nest(exclude=exclude) for t in s.tasks.values()]
+    worker_tasks = [
+        t._to_dict_no_nest(exclude=exclude) for w in (a, b) for t in w.tasks.values()
+    ]
 
     event.set()
 
     suffix = ".gz" if _format == "msgpack" else ""
     inspector = DumpInspector(f"{filename}.{_format}{suffix}")
-    memory_tasks = inspector.tasks_in_state("memory", workers=workers)
-    ex_tasks = inspector.tasks_in_state("executing", workers=True)
-    assert fut_keys.issubset(memory_tasks.keys())
-    assert ex_tasks == {
-        inc_blocked.key: {
-            "annotations": None,
-            "coming_from": None,
-            "dependencies": [],
-            "dependents": [],
-            "done": False,
-            "duration": 0.5,
-            "exception": None,
-            "exception_text": "",
-            "key": inc_blocked.key,
-            "metadata": {},
-            "nbytes": None,
-            "resource_restrictions": {},
-            "startstops": [],
-            "state": "executing",
-            "stop_time": None,
-            "suspicious_count": 0,
-            "traceback": None,
-            "traceback_text": "",
-            "type": None,
-            "waiters": [],
-            "waiting_for_data": [],
-            "who_has": [],
-            # Set non-deterministic values
-            "priority": ex_tasks[inc_blocked.key]["priority"],
-            "start_time": ex_tasks[inc_blocked.key]["start_time"],
-        }
-    }
 
-    it = iter(memory_tasks.keys())
-    stories = inspector.story(next(it), workers=workers)
-    stories = inspector.story(next(it), next(it), workers=workers)
+    smem_tasks = inspector.scheduler_tasks("memory")
+    wmem_tasks = inspector.worker_tasks("memory")
+
+    expected = list(sorted(smem_tasks, key=lambda t: t["key"]))
+    expected2 = list(
+        sorted(
+            [t for t in scheduler_tasks if t["state"] == "memory"],
+            key=lambda t: t["key"],
+        )
+    )
+    assert expected == expected2
+
+    task_key = next(iter(fut_keys))
+
+    sstory = inspector.scheduler_story(task_key)
+    wstory = inspector.worker_story(task_key)
+
     missing = inspector.missing_workers()
 
 
