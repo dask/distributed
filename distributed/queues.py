@@ -5,8 +5,8 @@ from collections import defaultdict
 
 from dask.utils import parse_timedelta, stringify
 
-from .client import Client, Future
-from .worker import get_client, get_worker
+from distributed.client import Client, Future
+from distributed.worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)
 

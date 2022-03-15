@@ -52,11 +52,11 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import PeriodicCallback
 
-from . import cluster_dump, preloading
-from . import versions as version_module  # type: ignore
-from .batched import BatchedSend
-from .cfexecutor import ClientExecutor
-from .core import (
+from distributed import cluster_dump, preloading
+from distributed import versions as version_module  # type: ignore
+from distributed.batched import BatchedSend
+from distributed.cfexecutor import ClientExecutor
+from distributed.core import (
     CommClosedError,
     ConnectionPool,
     PooledRPCCall,
@@ -65,17 +65,22 @@ from .core import (
     connect,
     rpc,
 )
-from .diagnostics.plugin import NannyPlugin, UploadFile, WorkerPlugin, _get_plugin_name
-from .metrics import time
-from .objects import HasWhat, SchedulerInfo, WhoHas
-from .protocol import to_serialize
-from .protocol.pickle import dumps, loads
-from .publish import Datasets
-from .pubsub import PubSubClientExtension
-from .security import Security
-from .sizeof import sizeof
-from .threadpoolexecutor import rejoin
-from .utils import (
+from distributed.diagnostics.plugin import (
+    NannyPlugin,
+    UploadFile,
+    WorkerPlugin,
+    _get_plugin_name,
+)
+from distributed.metrics import time
+from distributed.objects import HasWhat, SchedulerInfo, WhoHas
+from distributed.protocol import to_serialize
+from distributed.protocol.pickle import dumps, loads
+from distributed.publish import Datasets
+from distributed.pubsub import PubSubClientExtension
+from distributed.security import Security
+from distributed.sizeof import sizeof
+from distributed.threadpoolexecutor import rejoin
+from distributed.utils import (
     All,
     Any,
     CancelledError,
@@ -91,7 +96,7 @@ from .utils import (
     sync,
     thread_state,
 )
-from .utils_comm import (
+from distributed.utils_comm import (
     WrappedKey,
     gather_from_workers,
     pack_data,
@@ -99,7 +104,7 @@ from .utils_comm import (
     scatter_to_workers,
     unpack_remotedata,
 )
-from .worker import get_client, get_worker, secede
+from distributed.worker import get_client, get_worker, secede
 
 logger = logging.getLogger(__name__)
 
@@ -1016,7 +1021,7 @@ class Client(SyncMethodMixin):
             return format_dashboard_link(host, port)
 
     def _get_scheduler_info(self):
-        from .scheduler import Scheduler
+        from distributed.scheduler import Scheduler
 
         if (
             self.cluster
@@ -1152,7 +1157,7 @@ class Client(SyncMethodMixin):
                 except (ValueError, KeyError):  # JSON file not yet flushed
                     await asyncio.sleep(0.01)
         elif self._start_arg is None:
-            from .deploy import LocalCluster
+            from distributed.deploy import LocalCluster
 
             try:
                 self.cluster = await LocalCluster(
@@ -3783,7 +3788,7 @@ class Client(SyncMethodMixin):
             plot = True
 
         if plot:
-            from . import profile
+            from distributed import profile
 
             data = profile.plot_data(state)
             figure, source = profile.plot_figure(data, sizing_mode="stretch_both")
@@ -4332,17 +4337,17 @@ class Client(SyncMethodMixin):
                 magic_names = [magic_names]
 
         if "IPython" in sys.modules:
-            from ._ipython_utils import register_remote_magic
+            from distributed._ipython_utils import register_remote_magic
 
             register_remote_magic()
         if magic_names:
-            from ._ipython_utils import register_worker_magic
+            from distributed._ipython_utils import register_worker_magic
 
             for worker, magic_name in zip(workers, magic_names):
                 connection_info = info_dict[worker]
                 register_worker_magic(connection_info, magic_name)
         if qtconsole:
-            from ._ipython_utils import connect_qtconsole
+            from distributed._ipython_utils import connect_qtconsole
 
             for worker, connection_info in info_dict.items():
                 name = "dask-" + worker.replace(":", "-").replace("/", "-")
@@ -4397,11 +4402,11 @@ class Client(SyncMethodMixin):
             else:
                 magic_name = None
         if magic_name:
-            from ._ipython_utils import register_worker_magic
+            from distributed._ipython_utils import register_worker_magic
 
             register_worker_magic(info, magic_name)
         if qtconsole:
-            from ._ipython_utils import connect_qtconsole
+            from distributed._ipython_utils import connect_qtconsole
 
             connect_qtconsole(info, name="dask-scheduler", extra_args=qtconsole_args)
         return info
@@ -4517,10 +4522,10 @@ class Client(SyncMethodMixin):
     ):
         msgs = await self.scheduler.get_task_stream(start=start, stop=stop, count=count)
         if plot:
-            from .diagnostics.task_stream import rectangles
+            from distributed.diagnostics.task_stream import rectangles
 
             rects = rectangles(msgs)
-            from .dashboard.components.scheduler import task_stream_figure
+            from distributed.dashboard.components.scheduler import task_stream_figure
 
             source, figure = task_stream_figure(sizing_mode="stretch_both")
             source.data.update(rects)
@@ -4755,7 +4760,7 @@ class Client(SyncMethodMixin):
     @property
     def amm(self):
         """Convenience accessors for the :doc:`active_memory_manager`"""
-        from .active_memory_manager import AMMClientProxy
+        from distributed.active_memory_manager import AMMClientProxy
 
         return AMMClientProxy(self)
 
@@ -4980,7 +4985,7 @@ class as_completed:
         """Add multiple futures to the collection.
 
         The added futures will emit from the iterator once they finish"""
-        from .actor import BaseActorFuture
+        from distributed.actor import BaseActorFuture
 
         with self.lock:
             for f in futures:

@@ -5,8 +5,8 @@ from collections import deque
 
 from dask.utils import format_bytes
 
-from .compatibility import PYPY
-from .metrics import thread_time
+from distributed.compatibility import PYPY
+from distributed.metrics import thread_time
 
 logger = _logger = logging.getLogger(__name__)
 

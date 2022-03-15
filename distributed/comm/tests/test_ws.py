@@ -9,6 +9,7 @@ from distributed import Client, Scheduler, Worker
 from distributed.comm import connect, listen, ws
 from distributed.comm.core import FatalCommClosedError
 from distributed.comm.registry import backends, get_backend
+from distributed.comm.tests.test_comms import check_tls_extra
 from distributed.security import Security
 from distributed.utils_test import (
     gen_cluster,
@@ -18,8 +19,6 @@ from distributed.utils_test import (
     inc,
     xfail_ssl_issue5601,
 )
-
-from .test_comms import check_tls_extra
 
 
 def test_registered():

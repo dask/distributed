@@ -5,9 +5,9 @@ from collections import defaultdict, deque
 
 from dask.utils import parse_timedelta
 
-from .client import Client
-from .utils import TimeoutError, log_errors
-from .worker import get_worker
+from distributed.client import Client
+from distributed.utils import TimeoutError, log_errors
+from distributed.worker import get_worker
 
 logger = logging.getLogger(__name__)
 

@@ -9,10 +9,10 @@ from collections import deque, namedtuple
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
 
-from ..protocol import nested_deserialize
-from ..utils import get_ip
-from .core import Comm, CommClosedError, Connector, Listener
-from .registry import Backend, backends
+from distributed.comm.core import Comm, CommClosedError, Connector, Listener
+from distributed.comm.registry import Backend, backends
+from distributed.protocol import nested_deserialize
+from distributed.utils import get_ip
 
 logger = logging.getLogger(__name__)
 

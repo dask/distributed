@@ -59,14 +59,7 @@ from distributed.utils_test import (
     slowinc,
     slowsum,
 )
-from distributed.worker import (
-    TaskState,
-    UniqueTaskHeap,
-    Worker,
-    error_message,
-    logger,
-    parse_memory_limit,
-)
+from distributed.worker import Worker, error_message, logger, parse_memory_limit
 
 pytestmark = pytest.mark.ci1
 
@@ -3745,67 +3738,6 @@ async def test_Worker__to_dict(c, s, a):
         "pending_data_per_worker",
     }
     assert d["tasks"]["x"]["key"] == "x"
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_TaskState__to_dict(c, s, a):
-    """tasks that are listed as dependencies of other tasks are dumped as a short repr
-    and always appear in full under Worker.tasks
-    """
-    x = c.submit(inc, 1, key="x")
-    y = c.submit(inc, x, key="y")
-    z = c.submit(inc, 2, key="z")
-    await wait([x, y, z])
-
-    tasks = a._to_dict()["tasks"]
-
-    assert isinstance(tasks["x"], dict)
-    assert isinstance(tasks["y"], dict)
-    assert isinstance(tasks["z"], dict)
-    assert tasks["x"]["dependents"] == ["<TaskState 'y' memory>"]
-    assert tasks["y"]["dependencies"] == ["<TaskState 'x' memory>"]
-
-
-def test_unique_task_heap():
-    heap = UniqueTaskHeap()
-
-    for x in range(10):
-        ts = TaskState(f"f{x}")
-        ts.priority = (0, 0, 1, x % 3)
-        heap.push(ts)
-
-    heap_list = list(heap)
-    # iteration does not empty heap
-    assert len(heap) == 10
-    assert heap_list == sorted(heap_list, key=lambda ts: ts.priority)
-
-    seen = set()
-    last_prio = (0, 0, 0, 0)
-    while heap:
-        peeked = heap.peek()
-        ts = heap.pop()
-        assert peeked == ts
-        seen.add(ts.key)
-        assert ts.priority
-        assert last_prio <= ts.priority
-        last_prio = last_prio
-
-    ts = TaskState("foo")
-    heap.push(ts)
-    heap.push(ts)
-    assert len(heap) == 1
-
-    assert repr(heap) == "<UniqueTaskHeap: 1 items>"
-
-    assert heap.pop() == ts
-    assert not heap
-
-    # Test that we're cleaning the seen set on pop
-    heap.push(ts)
-    assert len(heap) == 1
-    assert heap.pop() == ts
-
-    assert repr(heap) == "<UniqueTaskHeap: 0 items>"
 
 
 @gen_cluster(nthreads=[])

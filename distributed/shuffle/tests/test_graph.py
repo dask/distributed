@@ -14,10 +14,9 @@ from dask.blockwise import Blockwise
 from dask.dataframe.shuffle import partitioning_index, rearrange_by_column_tasks
 from dask.utils_test import hlg_layer_topological
 
+from distributed.shuffle.shuffle import rearrange_by_column_p2p
+from distributed.shuffle.shuffle_extension import ShuffleWorkerExtension
 from distributed.utils_test import gen_cluster
-
-from ..shuffle import rearrange_by_column_p2p
-from ..shuffle_extension import ShuffleWorkerExtension
 
 if TYPE_CHECKING:
     from distributed import Client, Scheduler, Worker

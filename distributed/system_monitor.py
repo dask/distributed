@@ -2,11 +2,11 @@ from collections import deque
 
 import psutil
 
-from .compatibility import WINDOWS
-from .metrics import time
+from distributed.compatibility import WINDOWS
+from distributed.metrics import time
 
 try:
-    from .diagnostics import nvml
+    from distributed.diagnostics import nvml
 except Exception:
     nvml = None  # type: ignore
 

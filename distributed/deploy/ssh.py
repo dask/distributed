@@ -10,7 +10,7 @@ from json import dumps
 import dask
 import dask.config
 
-from .spec import ProcessInterface, SpecCluster
+from distributed.deploy.spec import ProcessInterface, SpecCluster
 
 logger = logging.getLogger(__name__)
 
@@ -396,7 +396,7 @@ def SSHCluster(
         )
 
     if set(kwargs) & old_cluster_kwargs:
-        from .old_ssh import SSHCluster as OldSSHCluster
+        from distributed.deploy.old_ssh import SSHCluster as OldSSHCluster
 
         warnings.warn(
             "Note that the SSHCluster API has been replaced.  "
