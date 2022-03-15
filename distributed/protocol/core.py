@@ -4,9 +4,9 @@ import msgpack
 
 import dask.config
 
-from . import pickle
-from .compression import decompress, maybe_compress
-from .serialize import (
+from distributed import pickle
+from distributed.protocol.compression import decompress, maybe_compress
+from distributed.protocol.serialize import (
     Pickled,
     Serialize,
     Serialized,
@@ -16,7 +16,7 @@ from .serialize import (
     msgpack_encode_default,
     serialize_and_split,
 )
-from .utils import msgpack_opts
+from distributed.protocol.utils import msgpack_opts
 
 logger = logging.getLogger(__name__)
 

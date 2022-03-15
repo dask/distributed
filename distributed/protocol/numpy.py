@@ -2,9 +2,9 @@ import math
 
 import numpy as np
 
-from ..utils import log_errors
-from . import pickle
-from .serialize import dask_deserialize, dask_serialize
+from distributed.protocol import pickle
+from distributed.protocol.serialize import dask_deserialize, dask_serialize
+from distributed.utils import log_errors
 
 
 def itemsize(dt):

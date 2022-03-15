@@ -6,10 +6,10 @@ from collections import defaultdict, deque
 
 from dask.utils import parse_timedelta
 
-from .core import CommClosedError
-from .metrics import time
-from .protocol.serialize import to_serialize
-from .utils import TimeoutError, sync
+from distributed.core import CommClosedError
+from distributed.metrics import time
+from distributed.protocol.serialize import to_serialize
+from distributed.utils import TimeoutError, sync
 
 logger = logging.getLogger(__name__)
 

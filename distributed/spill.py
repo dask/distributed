@@ -2,19 +2,21 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from contextlib import contextmanager
 from functools import partial
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, cast
 
 import zict
 from packaging.version import parse as parse_version
 
-from .protocol import deserialize_bytes, serialize_bytelist
-from .sizeof import safe_sizeof
+from distributed.protocol import deserialize_bytes, serialize_bytelist
+from distributed.sizeof import safe_sizeof
 
 logger = logging.getLogger(__name__)
-has_zict_210 = parse_version(zict.__version__) > parse_version("2.0.0")
+has_zict_210 = parse_version(zict.__version__) >= parse_version("2.1.0")
+# At the moment of writing, zict 2.2.0 has not been released yet. Support git tip.
+has_zict_220 = parse_version(zict.__version__) >= parse_version("2.2.0.dev2")
 
 
 class SpilledSize(NamedTuple):
@@ -32,12 +34,13 @@ class SpilledSize(NamedTuple):
         return SpilledSize(self.memory - other.memory, self.disk - other.disk)
 
 
+# zict.Buffer[str, Any] requires zict >= 2.2.0
 class SpillBuffer(zict.Buffer):
     """MutableMapping that automatically spills out dask key/value pairs to disk when
     the total size of the stored data exceeds the target. If max_spill is provided the
     key/value pairs won't be spilled once this threshold has been reached.
 
-    Paramaters
+    Parameters
     ----------
     spill_directory: str
         Location on disk to write the spill files to
@@ -62,14 +65,15 @@ class SpillBuffer(zict.Buffer):
     ):
 
         if max_spill is not False and not has_zict_210:
-            raise ValueError("zict > 2.0.0 required to set max_weight")
+            raise ValueError("zict >= 2.1.0 required to set max-spill")
 
-        super().__init__(
-            fast={},
-            slow=Slow(spill_directory, max_spill),
-            n=target,
-            weight=_in_memory_weight,
-        )
+        slow: MutableMapping[str, Any] = Slow(spill_directory, max_spill)
+        if has_zict_220:
+            # If a value is still in use somewhere on the worker since the last time it
+            # was unspilled, don't duplicate it
+            slow = zict.Cache(slow, zict.WeakValueMapping())
+
+        super().__init__(fast={}, slow=slow, n=target, weight=_in_memory_weight)
         self.last_logged = 0
         self.min_log_interval = min_log_interval
         self.logged_pickle_errors = set()  # keys logged with pickle error
@@ -171,7 +175,7 @@ class SpillBuffer(zict.Buffer):
         try:
             with self.handle_errors(None):
                 _, _, weight = self.fast.evict()
-                return weight
+                return cast(int, weight)
         except HandledError:
             return -1
 
@@ -203,7 +207,8 @@ class SpillBuffer(zict.Buffer):
         The two may differ substantially, e.g. if sizeof() is inaccurate or in case of
         compression.
         """
-        return self.slow.total_weight
+        slow = cast(zict.Cache, self.slow).data if has_zict_220 else self.slow
+        return cast(Slow, slow).total_weight
 
 
 def _in_memory_weight(key: str, value: Any) -> int:
@@ -223,6 +228,7 @@ class HandledError(Exception):
     pass
 
 
+# zict.Func[str, Any] requires zict >= 2.2.0
 class Slow(zict.Func):
     max_weight: int | Literal[False]
     weight_by_key: dict[str, SpilledSize]
@@ -240,7 +246,8 @@ class Slow(zict.Func):
 
     def __setitem__(self, key: str, value: Any) -> None:
         try:
-            pickled = self.dump(value)
+            # FIXME https://github.com/python/mypy/issues/708
+            pickled = self.dump(value)  # type: ignore
         except Exception as e:
             # zict.LRU ensures that the key remains in fast if we raise.
             # Wrap the exception so that it's recognizable by SpillBuffer,

@@ -3,9 +3,13 @@ from urllib.parse import urljoin
 from tornado import web
 from tornado.ioloop import IOLoop
 
-from .components.nvml import gpu_doc  # noqa: 1708
-from .components.nvml import NVML_ENABLED, gpu_memory_doc, gpu_utilization_doc
-from .components.scheduler import (
+from distributed.dashboard.components.nvml import gpu_doc  # noqa: 1708
+from distributed.dashboard.components.nvml import (
+    NVML_ENABLED,
+    gpu_memory_doc,
+    gpu_utilization_doc,
+)
+from distributed.dashboard.components.scheduler import (
     AggregateAction,
     BandwidthTypes,
     BandwidthWorkers,
@@ -38,8 +42,8 @@ from .components.scheduler import (
     tg_graph_doc,
     workers_doc,
 )
-from .core import BokehApplication
-from .worker import counters_doc
+from distributed.dashboard.core import BokehApplication
+from distributed.dashboard.worker import counters_doc
 
 applications = {
     "/system": systemmonitor_doc,

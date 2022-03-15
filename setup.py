@@ -71,6 +71,9 @@ setup(
     cmdclass=versioneer.get_cmdclass(),
     description="Distributed scheduler for Dask",
     url="https://distributed.dask.org",
+    project_urls={
+        "Source": "https://github.com/dask/distributed",
+    },
     maintainer="Matthew Rocklin",
     maintainer_email="mrocklin@gmail.com",
     python_requires=">=3.8",

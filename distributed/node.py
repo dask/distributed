@@ -8,11 +8,11 @@ from tornado.httpserver import HTTPServer
 
 import dask
 
-from .comm import get_address_host, get_tcp_server_addresses
-from .core import Server
-from .http.routing import RoutingApplication
-from .utils import DequeHandler, clean_dashboard_address
-from .versions import get_versions
+from distributed.comm import get_address_host, get_tcp_server_addresses
+from distributed.core import Server
+from distributed.http.routing import RoutingApplication
+from distributed.utils import DequeHandler, clean_dashboard_address
+from distributed.versions import get_versions
 
 
 class ServerNode(Server):

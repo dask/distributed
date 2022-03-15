@@ -1,7 +1,4 @@
 import asyncio
-import contextvars
-import functools
-import sys
 
 import pytest
 from click.testing import CliRunner
@@ -18,32 +15,11 @@ from dask.utils import tmpfile
 
 import distributed.cli.dask_worker
 from distributed import Client
-from distributed.compatibility import LINUX
+from distributed.compatibility import LINUX, to_thread
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils import parse_ports, sync
 from distributed.utils_test import gen_cluster, popen, requires_ipv6
-
-if sys.version_info >= (3, 9):
-    from asyncio import to_thread
-else:
-
-    async def to_thread(*func_args, **kwargs):
-        """Asynchronously run function *func* in a separate thread.
-        Any *args and **kwargs supplied for this function are directly passed
-        to *func*. Also, the current :class:`contextvars.Context` is propagated,
-        allowing context variables from the main thread to be accessed in the
-        separate thread.
-        Return a coroutine that can be awaited to get the eventual result of *func*.
-
-        backport from
-        https://github.com/python/cpython/blob/3f1ea163ea54513e00e0e9d5442fee1b639825cc/Lib/asyncio/threads.py#L12-L25
-        """
-        func, *args = func_args
-        loop = asyncio.get_running_loop()
-        ctx = contextvars.copy_context()
-        func_call = functools.partial(ctx.run, func, *args, **kwargs)
-        return await loop.run_in_executor(None, func_call)
 
 
 def test_nanny_worker_ports(loop):

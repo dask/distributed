@@ -86,16 +86,15 @@ tls_kwargs = dict(
 )
 
 
-@pytest.mark.asyncio
 async def get_comm_pair(listen_addr, listen_args={}, connect_args={}, **kwargs):
     q = asyncio.Queue()
 
     async def handle_comm(comm):
         await q.put(comm)
 
-    listener = await listen(listen_addr, handle_comm, **listen_args, **kwargs)
+    async with listen(listen_addr, handle_comm, **listen_args, **kwargs) as listener:
+        comm = await connect(listener.contact_address, **connect_args, **kwargs)
 
-    comm = await connect(listener.contact_address, **connect_args, **kwargs)
     serv_comm = await q.get()
     return (comm, serv_comm)
 
@@ -386,41 +385,41 @@ async def check_inproc_specific(run_client):
             await comm.write(msg)
         await comm.close()
 
-    listener = await inproc.InProcListener(listener_addr, handle_comm)
-    assert (
-        listener.listen_address
-        == listener.contact_address
-        == "inproc://" + listener_addr
-    )
+    async with inproc.InProcListener(listener_addr, handle_comm) as listener:
+        assert (
+            listener.listen_address
+            == listener.contact_address
+            == "inproc://" + listener_addr
+        )
 
-    l = []
+        l = []
 
-    async def client_communicate(key, delay=0):
-        comm = await connect(listener.contact_address)
-        assert comm.peer_address == "inproc://" + listener_addr
-        for i in range(N_MSGS):
-            await comm.write({"op": "ping", "data": key})
-            if delay:
-                await asyncio.sleep(delay)
-            msg = await comm.read()
-        assert msg == {"op": "pong", "data": key}
-        l.append(key)
-        with pytest.raises(CommClosedError):
-            await comm.read()
-        await comm.close()
+        async def client_communicate(key, delay=0):
+            comm = await connect(listener.contact_address)
+            assert comm.peer_address == "inproc://" + listener_addr
+            for i in range(N_MSGS):
+                await comm.write({"op": "ping", "data": key})
+                if delay:
+                    await asyncio.sleep(delay)
+                msg = await comm.read()
+            assert msg == {"op": "pong", "data": key}
+            l.append(key)
+            with pytest.raises(CommClosedError):
+                await comm.read()
+            await comm.close()
 
-    client_communicate = partial(run_client, client_communicate)
+        client_communicate = partial(run_client, client_communicate)
 
-    await client_communicate(key=1234)
+        await client_communicate(key=1234)
 
-    # Many clients at once
-    N = 20
-    futures = [client_communicate(key=i, delay=0.001) for i in range(N)]
-    await asyncio.gather(*futures)
-    assert set(l) == {1234} | set(range(N))
+        # Many clients at once
+        N = 20
+        futures = [client_communicate(key=i, delay=0.001) for i in range(N)]
+        await asyncio.gather(*futures)
+        assert set(l) == {1234} | set(range(N))
 
-    assert len(client_addresses) == N + 1
-    assert listener.contact_address not in client_addresses
+        assert len(client_addresses) == N + 1
+        assert listener.contact_address not in client_addresses
 
 
 def run_coro(func, *args, **kwargs):
@@ -455,6 +454,39 @@ async def test_inproc_specific_same_thread():
 @pytest.mark.asyncio
 async def test_inproc_specific_different_threads():
     await check_inproc_specific(run_coro_in_thread)
+
+
+@pytest.mark.asyncio
+async def test_inproc_continues_listening_after_handshake_error():
+    async def handle_comm():
+        pass
+
+    async with listen("inproc://", handle_comm) as listener:
+        addr = listener.listen_address
+        scheme, loc = parse_address(addr)
+        connector = get_backend(scheme).get_connector()
+
+        comm = await connector.connect(loc)
+        await comm.close()
+
+        comm = await connector.connect(loc)
+        await comm.close()
+
+
+@pytest.mark.asyncio
+async def test_inproc_handshakes_concurrently():
+    async def handle_comm():
+        pass
+
+    async with listen("inproc://", handle_comm) as listener:
+        addr = listener.listen_address
+        scheme, loc = parse_address(addr)
+        connector = get_backend(scheme).get_connector()
+
+        comm1 = await connector.connect(loc)
+        comm2 = await connector.connect(loc)
+        await comm1.close()
+        await comm2.close()
 
 
 #
@@ -714,16 +746,16 @@ async def check_comm_closed_implicit(addr, delay=None, listen_args={}, connect_a
     async def handle_comm(comm):
         await comm.close()
 
-    listener = await listen(addr, handle_comm, **listen_args)
+    async with listen(addr, handle_comm, **listen_args) as listener:
 
-    comm = await connect(listener.contact_address, **connect_args)
-    with pytest.raises(CommClosedError):
-        await comm.write({})
-        await comm.read()
+        comm = await connect(listener.contact_address, **connect_args)
+        with pytest.raises(CommClosedError):
+            await comm.write({})
+            await comm.read()
 
-    comm = await connect(listener.contact_address, **connect_args)
-    with pytest.raises(CommClosedError):
-        await comm.read()
+        comm = await connect(listener.contact_address, **connect_args)
+        with pytest.raises(CommClosedError):
+            await comm.read()
 
 
 @pytest.mark.asyncio

@@ -25,7 +25,7 @@ try:
 except ImportError:
     blosc = False
 
-from ..utils import ensure_bytes
+from distributed.utils import ensure_bytes
 
 compressions: dict[
     str | None | Literal[False],

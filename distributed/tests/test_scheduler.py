@@ -8,6 +8,7 @@ import sys
 from itertools import product
 from textwrap import dedent
 from time import sleep
+from typing import Collection
 from unittest import mock
 
 import cloudpickle
@@ -3399,6 +3400,91 @@ async def test_TaskState__to_dict(c, s):
     assert isinstance(tasks["z"], dict)
     assert tasks["x"]["dependents"] == ["<TaskState 'y' waiting>"]
     assert tasks["y"]["dependencies"] == ["<TaskState 'x' no-worker>"]
+
+
+def _verify_cluster_state(
+    state: dict, workers: Collection[Worker], allow_missing: bool = False
+) -> None:
+    addrs = {w.address for w in workers}
+    assert state.keys() == {"scheduler", "workers", "versions"}
+    assert state["workers"].keys() == addrs
+    if allow_missing:
+        assert state["versions"]["workers"].keys() <= addrs
+    else:
+        assert state["versions"]["workers"].keys() == addrs
+
+
+@gen_cluster(nthreads=[("", 1)] * 2)
+async def test_get_cluster_state(s: Scheduler, *workers: Worker):
+    state = await s.get_cluster_state([])
+    _verify_cluster_state(state, workers)
+
+    await asyncio.gather(*(w.close() for w in workers))
+
+    while s.workers:
+        await asyncio.sleep(0.01)
+
+    state_no_workers = await s.get_cluster_state([])
+    _verify_cluster_state(state_no_workers, [])
+
+
+@gen_cluster(
+    nthreads=[("", 1)] * 2,
+    config={"distributed.comm.timeouts.connect": "200ms"},
+)
+async def test_get_cluster_state_worker_error(s: Scheduler, a: Worker, b: Worker):
+    a.stop()
+    state = await s.get_cluster_state([])
+    _verify_cluster_state(state, [a, b], allow_missing=True)
+    assert state["workers"][a.address] == (
+        f"OSError('Timed out trying to connect to {a.address} after 0.2 s')"
+    )
+    assert isinstance(state["workers"][b.address], dict)
+    assert state["versions"]["workers"].keys() == {b.address}
+
+
+def _verify_cluster_dump(url, format: str, workers: Collection[Worker]) -> dict:
+    import fsspec
+
+    if format == "msgpack":
+        import msgpack
+
+        url += ".msgpack.gz"
+        loader = msgpack.unpack
+
+    else:
+        import yaml
+
+        url += ".yaml"
+        loader = yaml.safe_load
+
+    with fsspec.open(url, mode="rb", compression="infer") as f:
+        state = loader(f)
+
+    _verify_cluster_state(state, workers)
+    return state
+
+
+@pytest.mark.parametrize("format", ["msgpack", "yaml"])
+@gen_cluster(nthreads=[("", 1)] * 2)
+async def test_dump_cluster_state(s: Scheduler, *workers: Worker, format):
+    fsspec = pytest.importorskip("fsspec")
+    try:
+        await s.dump_cluster_state_to_url(
+            "memory://state-dumps/two-workers", [], format
+        )
+        _verify_cluster_dump("memory://state-dumps/two-workers", format, workers)
+
+        await asyncio.gather(*(w.close() for w in workers))
+
+        while s.workers:
+            await asyncio.sleep(0.01)
+
+        await s.dump_cluster_state_to_url("memory://state-dumps/no-workers", [], format)
+        _verify_cluster_dump("memory://state-dumps/no-workers", format, [])
+    finally:
+        fs = fsspec.filesystem("memory")
+        fs.rm("state-dumps", recursive=True)
 
 
 @gen_cluster(nthreads=[])

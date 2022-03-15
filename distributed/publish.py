@@ -2,7 +2,7 @@ from collections.abc import MutableMapping
 
 from dask.utils import stringify
 
-from .utils import log_errors
+from distributed.utils import log_errors
 
 
 class PublishExtension:

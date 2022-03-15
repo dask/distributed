@@ -13,7 +13,7 @@ from contextlib import suppress
 from inspect import isawaitable
 from queue import Empty
 from time import sleep as sync_sleep
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 import psutil
 from tornado import gen
@@ -23,18 +23,24 @@ import dask
 from dask.system import CPU_COUNT
 from dask.utils import parse_timedelta
 
-from . import preloading
-from .comm import get_address_host, unparse_host_port
-from .comm.addressing import address_from_user_args
-from .core import CommClosedError, RPCClosed, Status, coerce_to_address, error_message
-from .diagnostics.plugin import _get_plugin_name
-from .metrics import time
-from .node import ServerNode
-from .process import AsyncProcess
-from .proctitle import enable_proctitle_on_children
-from .protocol import pickle
-from .security import Security
-from .utils import (
+from distributed import preloading
+from distributed.comm import get_address_host, unparse_host_port
+from distributed.comm.addressing import address_from_user_args
+from distributed.core import (
+    CommClosedError,
+    RPCClosed,
+    Status,
+    coerce_to_address,
+    error_message,
+)
+from distributed.diagnostics.plugin import _get_plugin_name
+from distributed.metrics import time
+from distributed.node import ServerNode
+from distributed.process import AsyncProcess
+from distributed.proctitle import enable_proctitle_on_children
+from distributed.protocol import pickle
+from distributed.security import Security
+from distributed.utils import (
     TimeoutError,
     get_ip,
     json_load_robust,
@@ -43,7 +49,10 @@ from .utils import (
     parse_ports,
     silence_logging,
 )
-from .worker import Worker, parse_memory_limit, run
+from distributed.worker import Worker, parse_memory_limit, run
+
+if TYPE_CHECKING:
+    from distributed.diagnostics.plugin import NannyPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +103,7 @@ class Nanny(ServerNode):
         services=None,
         name=None,
         memory_limit="auto",
+        memory_terminate_fraction: float | Literal[False] | None = None,
         reconnect=True,
         validate=False,
         quiet=False,
@@ -203,8 +213,10 @@ class Nanny(ServerNode):
         self.worker_kwargs = worker_kwargs
 
         self.contact_address = contact_address
-        self.memory_terminate_fraction = dask.config.get(
-            "distributed.worker.memory.terminate"
+        self.memory_terminate_fraction = (
+            memory_terminate_fraction
+            if memory_terminate_fraction is not None
+            else dask.config.get("distributed.worker.memory.terminate")
         )
 
         self.services = services
@@ -231,7 +243,7 @@ class Nanny(ServerNode):
             "plugin_remove": self.plugin_remove,
         }
 
-        self.plugins = {}
+        self.plugins: dict[str, NannyPlugin] = {}
 
         super().__init__(
             handlers=handlers, io_loop=self.loop, connection_args=self.connection_args

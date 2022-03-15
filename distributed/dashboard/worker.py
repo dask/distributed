@@ -1,6 +1,6 @@
 from tornado.ioloop import IOLoop
 
-from .components.worker import (
+from distributed.dashboard.components.worker import (
     counters_doc,
     crossfilter_doc,
     profile_doc,
@@ -8,7 +8,7 @@ from .components.worker import (
     status_doc,
     systemmonitor_doc,
 )
-from .core import BokehApplication
+from distributed.dashboard.core import BokehApplication
 
 template_variables = {
     "pages": ["status", "system", "profile", "crossfilter", "profile-server"]

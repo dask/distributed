@@ -17,11 +17,16 @@ except ImportError:
 
 import dask
 
-from ..utils import ensure_ip, get_ip, get_ipv6
-from .addressing import parse_host_port, unparse_host_port
-from .core import Comm, CommClosedError, Connector, Listener
-from .registry import Backend
-from .utils import ensure_concrete_host, from_frames, host_array, to_frames
+from distributed.comm.addressing import parse_host_port, unparse_host_port
+from distributed.comm.core import Comm, CommClosedError, Connector, Listener
+from distributed.comm.registry import Backend
+from distributed.comm.utils import (
+    ensure_concrete_host,
+    from_frames,
+    host_array,
+    to_frames,
+)
+from distributed.utils import ensure_ip, get_ip, get_ipv6
 
 logger = logging.getLogger(__name__)
 
