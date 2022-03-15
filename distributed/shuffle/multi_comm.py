@@ -8,7 +8,7 @@ from ..core import rpc
 from ..protocol import to_serialize
 from ..sizeof import sizeof
 from ..system import MEMORY_LIMIT
-from ..utils import log_errors, offload
+from ..utils import log_errors
 
 
 class MultiComm:
@@ -25,12 +25,10 @@ class MultiComm:
         self.shards = defaultdict(list)
         self.sizes = defaultdict(int)
         self.total_size = 0
+        self.total_moved = 0
         self.memory_limit = parse_bytes(memory_limit)
         self.thread_condition = threading.Condition()
-        if join is None:
-            import pandas as pd
-
-            join = pd.concat
+        assert join
         self.join = join
         self.max_connections = max_connections
         self.sizeof = sizeof
@@ -46,12 +44,13 @@ class MultiComm:
                 self.shards[address].append(shard)
                 self.sizes[address] += size
                 self.total_size += size
+                self.total_moved += size
 
         del data
 
         while self.total_size > self.memory_limit:
             with self.thread_condition:
-                self.thread_condition.wait(0.500)  # Block until memory calms down
+                self.thread_condition.wait(0.100)  # Block until memory calms down
 
     async def communicate(self):
         self.comm_queue = asyncio.Queue(maxsize=self.max_connections)
@@ -78,7 +77,9 @@ class MultiComm:
 
     async def process(self, address: str, shards: list, size: int):
         with log_errors():
-            shards = await offload(self.join, shards)
+            shards = self.join(shards)
+            # shards = await offload(self.join, shards)
+
             # Consider boosting total_size a bit here to account for duplication
 
             try:
@@ -96,4 +97,7 @@ class MultiComm:
 
         await asyncio.gather(*self._futures)
         assert not self.total_size
+        from dask.utils import format_bytes
+
+        print("total moved", format_bytes(self.total_moved))
         self._done = True

@@ -6,6 +6,7 @@ import threading
 
 import zict
 
+from dask.sizeof import sizeof
 from dask.utils import parse_bytes
 
 from ..system import MEMORY_LIMIT
@@ -22,11 +23,9 @@ class MultiFile:
         n_files=256,
         memory_limit=MEMORY_LIMIT / 2,
         file_cache=None,
+        sizeof=sizeof,
     ):
-        if not join:
-            import pandas as pd
-
-            join = pd.concat
+        assert join
         self.directory = pathlib.Path(directory)
         if not os.path.exists(self.directory):
             os.mkdir(self.directory)
@@ -40,6 +39,8 @@ class MultiFile:
         if file_cache is None:
             file_cache = zict.LRU(n_files, dict(), on_evict=lambda k, v: v.close())
         self.file_cache = file_cache
+        self.bytes_written = 0
+        self.bytes_read = 0
 
     def open_file(self, id: str):
         with self.lock:
@@ -66,6 +67,8 @@ class MultiFile:
                 break
         # TODO: We could consider deleting the file at this point
         if parts:
+            for part in parts:
+                self.bytes_read += sizeof(part)
             return self.join(parts)
         else:
             raise KeyError(id)
@@ -73,6 +76,7 @@ class MultiFile:
     async def write(self, part, id):
         file = await offload(self.open_file, id)
         # TODO: We should consider offloading this to a separate thread
+        self.bytes_written += sizeof(part)
         await offload(self.dump, part, file)
 
     def close(self):

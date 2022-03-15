@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import math
 import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NewType
 
+import toolz
 import zict
 
 from distributed.protocol import to_serialize
@@ -15,6 +17,7 @@ from distributed.utils import offload, sync
 
 if TYPE_CHECKING:
     import pandas as pd
+    import pyarrow as pa
 
     from distributed.worker import Worker
 
@@ -53,8 +56,7 @@ class ShuffleMetadata(NewShuffleMetadata):
             raise IndexError(
                 f"Output partition {output_partition} does not exist in a shuffle producing {self.npartitions} partitions"
             )
-        i = len(self.workers) * output_partition // self.npartitions
-        return self.workers[i]
+        return worker_for(output_partition, self.workers, self.npartitions)
 
     def _partition_range(self, worker: str) -> tuple[int, int]:
         "Get the output partition numbers (inclusive) that a worker will hold"
@@ -78,40 +80,61 @@ class Shuffle:
         self.metadata = metadata
         self.worker = worker
 
+        import pyarrow as pa
+
         self.multi_file = MultiFile(
+            dump=dump_arrow,
+            load=load_arrow,
             directory=os.path.join(self.worker.local_directory, str(self.metadata.id)),
             memory_limit="200 MiB",  # TODO: lift this up to the global ShuffleExtension
             file_cache=file_cache,
             n_files=min(256, metadata.npartitions),
+            join=pa.concat_tables,  # pd.concat
         )
         self.multi_comm = MultiComm(
             memory_limit="200 MiB",  # TODO
             rpc=worker.rpc,
             shuffle_id=self.metadata.id,
-            # sizeof=  # TODO, something smarter
+            sizeof=lambda L: sum(map(len, L)),
+            join=functools.partial(sum, start=[]),
         )
         self.worker.loop.add_callback(self.multi_comm.communicate)
 
         self.output_partitions_left = metadata.npartitions_for(worker.address)
         self.transferred = False
+        self.total_recvd = 0
 
-    async def receive(self, data: pd.DataFrame) -> None:
+    async def receive(self, data: list[pa.Buffer]) -> None:
         assert not self.transferred, "`receive` called after barrier task"
-        groups = await offload(lambda: list(data.groupby(self.metadata.column)))
-        for output_partition, shard in groups:
+        self.total_recvd += sum(map(len, data))
+        # An ugly way of turning these batches back into an arrow table
+        import io
+
+        import pyarrow as pa
+
+        bio = io.BytesIO()
+        bio.write(pa.Schema.from_pandas(self.metadata.empty).serialize())
+        for batch in data:
+            bio.write(batch)
+        bio.seek(0)
+        sr = pa.RecordBatchStreamReader(bio)
+        data = sr.read_all()
+
+        groups = await offload(split_by_partition, data, self.metadata.column)
+
+        assert len(data) == sum(map(len, groups.values()))
+        for output_partition, shard in groups.items():
             await self.multi_file.write(shard, output_partition)
 
     def add_partition(self, data: pd.DataFrame) -> None:
-
-        grouper = (
-            len(self.metadata.workers)
-            * data[self.metadata.column]
-            // self.metadata.npartitions
-        )  # .astype(data[self.metadata.column].dtype)
-
-        groups = list(data.groupby(grouper))
-        out = {self.metadata.workers[int(i)]: shard for i, shard in groups}
-        assert len(data) == sum(len(df) for _, df in out.items())
+        out = split_by_worker(
+            data, self.metadata.column, self.metadata.npartitions, self.metadata.workers
+        )
+        assert len(data) == sum(map(len, out.values()))
+        out = {
+            k: [b.serialize().to_pybytes() for b in t.to_batches()]
+            for k, t in out.items()
+        }
         self.multi_comm.put(out)
 
     def get_output_partition(self, i: int) -> pd.DataFrame:
@@ -131,9 +154,9 @@ class Shuffle:
 
         try:
             df = self.multi_file.read(i)
-            return df
+            return df.to_pandas()
         except KeyError:
-            return self.metadata.empty
+            return self.metadata.empty.head(0)
 
     def inputs_done(self) -> None:
         assert not self.transferred, "`inputs_done` called multiple times"
@@ -319,8 +342,8 @@ class ShuffleWorkerExtension:
         shuffle = self._get_shuffle(shuffle_id)
         output = shuffle.get_output_partition(output_partition)
         if shuffle.done():
-            # key missing if another thread got to it first
             self.shuffles.pop(shuffle_id, None)
+            # key missing if another thread got to it first
         return output
 
     def _get_shuffle(self, shuffle_id: ShuffleId) -> Shuffle:
@@ -331,3 +354,84 @@ class ShuffleWorkerExtension:
             raise ValueError(
                 f"Shuffle {shuffle_id!r} is not registered on worker {self.worker.address}"
             ) from None
+
+
+def split_by_worker(
+    df: pd.DataFrame, column: str, npartitions: int, workers: list[str]
+) -> dict:
+    """
+    Split data into many arrow batches, partitioned by destination worker
+    """
+    import numpy as np
+    import pyarrow as pa
+
+    grouper = (len(workers) * df[column] // npartitions).astype(df[column].dtype).values
+
+    t = pa.Table.from_pandas(df)
+    del df
+    t = t.add_column(len(t.columns), "_worker", [grouper])
+    t = t.sort_by("_worker")
+
+    worker = np.asarray(t.select(["_worker"]))[0]
+    t = t.drop(["_worker"])
+    splits = np.where(worker[1:] != worker[:-1])[0] + 1
+    splits = np.concatenate([[0], splits])
+
+    shards = [
+        t.slice(offset=a, length=b - a) for a, b in toolz.sliding_window(2, splits)
+    ]
+    shards.append(t.slice(offset=splits[-1], length=None))
+
+    w = np.unique(grouper)
+    w.sort()
+
+    return {workers[w]: shard for w, shard in zip(w, shards)}
+
+
+def split_by_partition(
+    t: pa.Table,
+    column: str,
+) -> dict:
+    """
+    Split data into many arrow batches, partitioned by destination worker
+    """
+    import numpy as np
+
+    partitions = np.unique(np.asarray(t.select([column]))[0])
+    partitions.sort()
+    t = t.sort_by(column)
+
+    partition = np.asarray(t.select([column]))[0]
+    splits = np.where(partition[1:] != partition[:-1])[0] + 1
+    splits = np.concatenate([[0], splits])
+
+    shards = [
+        t.slice(offset=a, length=b - a) for a, b in toolz.sliding_window(2, splits)
+    ]
+    shards.append(t.slice(offset=splits[-1], length=None))
+    assert len(t) == sum(map(len, shards))
+    assert len(partitions) == len(shards)
+    return dict(zip(partitions, shards))
+
+
+def dump_arrow(t: pa.Table, file):
+    if file.tell() == 0:
+        file.write(t.schema.serialize())
+    for batch in t.to_batches():
+        file.write(batch.serialize())
+
+
+def load_arrow(file):
+    import pyarrow as pa
+
+    try:
+        sr = pa.RecordBatchStreamReader(file)
+        return sr.read_all()
+    except Exception:
+        raise EOFError
+
+
+def worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
+    "Get the address of the worker which should hold this output partition number"
+    i = len(workers) * output_partition // npartitions
+    return workers[i]
