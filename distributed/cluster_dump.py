@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import IO, Any, Awaitable, Callable, Literal
 
 import fsspec
@@ -189,3 +190,38 @@ class DumpArtefact:
             if w not in responsive_workers
             or not self._valid_worker_dump(responsive_workers[w])
         ]
+
+    def split(self, root_dir: str | Path | None = None):
+        """
+        Splits the Dump Artefact into a tree of yaml files with
+        `root_dir` as it's base.
+
+        Parameters
+        ----------
+        root_dir : str or Path
+        """
+        import yaml
+
+        root_dir = Path(root_dir) if root_dir else Path.cwd()
+        dumper = yaml.CSafeDumper
+
+        workers = self.dump["workers"]
+        for info in workers.values():
+            log_dir = root_dir / info["id"]
+            log_dir.mkdir(parents=True, exist_ok=True)
+
+            for name, _logs in info.items():
+                filename = str(log_dir / f"{name}.yaml")
+                with open(filename, "w") as fd:
+                    yaml.dump(_logs, fd, Dumper=dumper)
+
+        context = "scheduler"
+        info = self.dump[context]
+        log_dir = root_dir / context
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        for name, _logs in info.items():
+            filename = str(log_dir / f"{name}.yaml")
+
+            with open(filename, "w") as fd:
+                yaml.dump(_logs, fd, Dumper=dumper)
