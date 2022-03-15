@@ -50,7 +50,6 @@ from distributed import (
     performance_report,
     profile,
     secede,
-    worker,
 )
 from distributed.client import (
     Client,
@@ -82,6 +81,7 @@ from distributed.utils import is_valid_xml, mp_context, sync, tmp_text
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _UnhashableCallable,
+    assert_worker_story,
     async_wait_for,
     asyncinc,
     captured_logger,
@@ -7340,10 +7340,8 @@ def blocked_inc(x, event):
     return x + 1
 
 
-# @pytest.mark.parametrize("local", [True, False])
-# @pytest.mark.parametrize("_format", ["msgpack", "yaml"])
-@pytest.mark.parametrize("local", [True])
-@pytest.mark.parametrize("_format", ["msgpack"])
+@pytest.mark.parametrize("local", [True, False])
+@pytest.mark.parametrize("_format", ["msgpack", "yaml"])
 @gen_cluster(client=True)
 async def test_inspect_cluster_dump(c, s, a, b, tmp_path, _format, local):
     filename = tmp_path / "foo"
@@ -7362,36 +7360,53 @@ async def test_inspect_cluster_dump(c, s, a, b, tmp_path, _format, local):
 
     await c.dump_cluster_state(filename, format=_format)
 
-    exclude = {"run_spec", "group"}
-
-    scheduler_tasks = [t._to_dict_no_nest(exclude=exclude) for t in s.tasks.values()]
-    worker_tasks = [
-        t._to_dict_no_nest(exclude=exclude) for w in (a, b) for t in w.tasks.values()
-    ]
+    scheduler_tasks = list(s.tasks.values())
+    worker_tasks = [t for w in (a, b) for t in w.tasks.values()]
 
     event.set()
 
     suffix = ".gz" if _format == "msgpack" else ""
     inspector = DumpInspector(f"{filename}.{_format}{suffix}")
 
-    smem_tasks = inspector.scheduler_tasks("memory")
-    wmem_tasks = inspector.worker_tasks("memory")
+    smem_keys = {t["key"] for t in inspector.scheduler_tasks("memory")}
+    wmem_keys = {t["key"] for t in inspector.worker_tasks("memory")}
 
-    expected = list(sorted(smem_tasks, key=lambda t: t["key"]))
-    expected2 = list(
-        sorted(
-            [t for t in scheduler_tasks if t["state"] == "memory"],
-            key=lambda t: t["key"],
-        )
-    )
-    assert expected == expected2
+    assert smem_keys == fut_keys
+    assert smem_keys == {t.key for t in scheduler_tasks if t.state == "memory"}
+    assert wmem_keys == fut_keys
+    assert wmem_keys == {t.key for t in worker_tasks if t.state == "memory"}
 
     task_key = next(iter(fut_keys))
 
-    sstory = inspector.scheduler_story(task_key)
-    wstory = inspector.worker_story(task_key)
+    expected = [
+        (task_key, "released", "waiting", {task_key: "processing"}),
+        (task_key, "waiting", "processing", {}),
+        (task_key, "processing", "memory", {}),
+    ]
 
-    missing = inspector.missing_workers()
+    story = inspector.scheduler_story(task_key)
+    assert len(story) == len(expected)
+
+    for event, expected_event in zip(story, expected):
+        for e1, e2 in zip(event, expected_event):
+            assert e1 == e2
+
+    assert len(inspector.scheduler_story(task_key)) == 3
+    assert_worker_story(
+        inspector.worker_story(task_key),
+        [
+            (task_key, "compute-task"),
+            (task_key, "released", "waiting", "waiting", {task_key: "ready"}),
+            (task_key, "waiting", "ready", "ready", {}),
+            (task_key, "ready", "executing", "executing", {}),
+            (task_key, "put-in-memory"),
+            (task_key, "executing", "memory", "memory", {}),
+        ],
+    )
+
+    # TODO(sjperkins): Make a worker fail badly to make
+    # this test more interesting
+    assert len(inspector.missing_workers()) == 0
 
 
 @gen_cluster(client=True)

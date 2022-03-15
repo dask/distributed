@@ -152,7 +152,8 @@ class DumpInspector:
             A list of stories for the keys/stimulus ID's in `*key_or_stimulus_id`.
         """
         keys = set(key_or_stimulus_id)
-        return _scheduler_story(keys, self.dump["scheduler"]["transition_log"])
+        story = _scheduler_story(keys, self.dump["scheduler"]["transition_log"])
+        return list(map(tuple, story))
 
     def worker_story(self, *key_or_stimulus_id: str) -> list:
         """
@@ -162,11 +163,13 @@ class DumpInspector:
             A list of stories for the keys/stimulus ID's in `*key_or_stimulus_id`.
         """
         keys = set(key_or_stimulus_id)
-        stories = []
+        stories: list = []
 
         for worker_dump in self.dump["workers"].values():
             if self._valid_worker_dump(worker_dump):
-                stories.extend(_worker_story(keys, worker_dump["log"]))
+                # Stories are tuples, not lists
+                story = _worker_story(keys, worker_dump["log"])
+                stories.extend(map(tuple, story))
 
         return stories
 
