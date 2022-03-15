@@ -4,7 +4,7 @@ import msgpack
 
 import dask.config
 
-from distributed import pickle
+from distributed.protocol import pickle
 from distributed.protocol.compression import decompress, maybe_compress
 from distributed.protocol.serialize import (
     Pickled,
