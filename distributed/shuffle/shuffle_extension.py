@@ -88,7 +88,7 @@ class Shuffle:
             directory=os.path.join(self.worker.local_directory, str(self.metadata.id)),
             memory_limit="200 MiB",  # TODO: lift this up to the global ShuffleExtension
             file_cache=file_cache,
-            n_files=min(256, metadata.npartitions),
+            concurrent_files=1,
             join=pa.concat_tables,  # pd.concat
         )
         self.multi_comm = MultiComm(
@@ -99,6 +99,7 @@ class Shuffle:
             join=functools.partial(sum, start=[]),
         )
         self.worker.loop.add_callback(self.multi_comm.communicate)
+        self.worker.loop.add_callback(self.multi_file.communicate)
 
         self.output_partitions_left = metadata.npartitions_for(worker.address)
         self.transferred = False
@@ -106,6 +107,9 @@ class Shuffle:
 
     async def receive(self, data: list[pa.Buffer]) -> None:
         assert not self.transferred, "`receive` called after barrier task"
+        from dask.utils import format_bytes
+
+        print("recved", format_bytes(sum(map(len, data))))
         self.total_recvd += sum(map(len, data))
         # An ugly way of turning these batches back into an arrow table
         import io
@@ -123,8 +127,7 @@ class Shuffle:
         groups = await offload(split_by_partition, data, self.metadata.column)
 
         assert len(data) == sum(map(len, groups.values()))
-        for output_partition, shard in groups.items():
-            await self.multi_file.write(shard, output_partition)
+        await self.multi_file.put(groups)
 
     def add_partition(self, data: pd.DataFrame) -> None:
         out = split_by_worker(
@@ -218,6 +221,7 @@ class ShuffleWorkerExtension:
         shuffle = self._get_shuffle(shuffle_id)
         await shuffle.multi_comm.flush()
         await asyncio.sleep(1)  # TODO
+        await shuffle.multi_file.flush()
         shuffle.inputs_done()
         if shuffle.done():
             # If the shuffle has no output partitions, remove it now;

@@ -20,12 +20,14 @@ class MultiComm:
         sizeof=sizeof,
         max_connections=10,
         shuffle_id=None,
+        max_message_size="128 MiB",
     ):
         self.lock = threading.Lock()
         self.shards = defaultdict(list)
         self.sizes = defaultdict(int)
         self.total_size = 0
         self.total_moved = 0
+        self.max_message_size = parse_bytes(max_message_size)
         self.memory_limit = parse_bytes(memory_limit)
         self.thread_condition = threading.Condition()
         assert join
@@ -66,14 +68,25 @@ class MultiComm:
 
             with self.lock:
                 address = max(self.sizes, key=self.sizes.get)
-                shards = self.shards.pop(address)
-                size = self.sizes.pop(address)
+
+                size = 0
+                shards = []
+                while size < self.max_message_size:
+                    try:
+                        shard = self.shards[address].pop()
+                    except IndexError:
+                        del self.shards[address]
+                        del self.sizes[address]
+                        break
+                    else:
+                        shards.append(shard)
+                        s = self.sizeof(shard)
+                        size += s
+                        self.sizes[address] -= s
 
             future = asyncio.ensure_future(self.process(address, shards, size))
             del shards
             self._futures.add(future)
-            with self.thread_condition:
-                self.thread_condition.notify()
 
     async def process(self, address: str, shards: list, size: int):
         with log_errors():
@@ -89,6 +102,8 @@ class MultiComm:
                 )
             finally:
                 self.total_size -= size
+                with self.thread_condition:
+                    self.thread_condition.notify()
                 await self.comm_queue.put(None)
 
     async def flush(self):
