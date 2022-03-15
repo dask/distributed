@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from typing import IO, Any, Awaitable, Callable, Literal
 
 import fsspec
 import msgpack
 
 from distributed.compatibility import to_thread
-from distributed.stories import scheduler_story, worker_story
+from distributed.stories import scheduler_story as _scheduler_story
+from distributed.stories import worker_story as _worker_story
 
 
 def _tuple_to_list(node):
@@ -67,7 +67,7 @@ def load_cluster_dump(url: str) -> dict:
     Parameters
     ----------
     url : str
-        Name of the dump artefact. This should have either a
+        Name of the disk artefact. This should have either a
         `.msgpack.gz` or `yaml` suffix, depending on the dump format.
 
     Returns
@@ -97,8 +97,8 @@ class DumpInspector:
     .. code-block:: python
 
         inspector = DumpInspector("dump.msgpack.gz")
-        memory_tasks = inspector.tasks_in_state("memory")
-        released_tasks = inspector.tasks_in_state("released")
+        memory_tasks = inspector.scheduler_tasks("memory")
+        executing_tasks = inspector.worker_tasks("executing")
     """
 
     def __init__(self, url_or_state: str | dict):
@@ -109,72 +109,66 @@ class DumpInspector:
         else:
             raise TypeError("'url_or_state' must be a str or dict")
 
-    def tasks_in_state(self, state: str = "", workers: bool = False) -> dict:
+    def _extract_tasks(self, state: str, context: dict):
+        if state:
+            return [v for v in context.values() if v["state"] == state]
+        else:
+            return list(context.values())
+
+    def scheduler_tasks(self, state: str = "") -> list:
         """
-        .. code-block:: python
-
-            inc = lambda x: x + 1
-            client = LocalCluster()
-            f = client.submit(inc, x, 1)
-
-            inspector = DumpInspector("dump.msgpack.gz")
-
-
-
         Returns
         -------
-        tasks : dict
-            A dictionary of scheduler tasks with state `state`.
-            worker tasks are included if `workers=True`
+        tasks : list
+            The list of scheduler tasks in `state`.
         """
-        stasks = self.dump["scheduler"]["tasks"]
-        tasks = defaultdict(list)
+        return self._extract_tasks(state, self.dump["scheduler"]["tasks"])
 
-        if state:
-            for k, v in stasks.items():
-                if state == v["state"]:
-                    tasks[k].append(v)
-        else:
-            for k, v in stasks.items():
-                tasks[k].append(v)
+    def worker_tasks(self, state: str = "") -> list:
+        """
+        Returns
+        -------
+        tasks : list
+            The list of worker tasks in `state`
+        """
+        tasks = []
 
-        if workers:
-            for worker_dump in self.dump["workers"].values():
-                if self._valid_worker_dump(worker_dump):
-                    if state:
-                        for k, v in worker_dump["tasks"].items():
-                            if v["state"] == state:
-                                tasks[k].append(v)
-                    else:
-                        for k, v in worker_dump["tasks"].items():
-                            tasks[k].append(v)
+        for worker_dump in self.dump["workers"].values():
+            if self._valid_worker_dump(worker_dump):
+                tasks.extend(self._extract_tasks(state, worker_dump["tasks"]))
 
-        return dict(tasks)
+        return tasks
 
     def _valid_worker_dump(self, worker_dump):
         # Worker dumps should be a dictionaries but can also be
         # strings describing comm Failures
         return isinstance(worker_dump, dict)
 
-    def story(self, *key_or_stimulus_id: str, workers: bool = False) -> list:
+    def scheduler_story(self, *key_or_stimulus_id: str) -> list:
         """
         Returns
         -------
         stories : list
             A list of stories for the keys/stimulus ID's in `*key_or_stimulus_id`.
-            worker stories are included if `workers=True`
         """
         keys = set(key_or_stimulus_id)
-        story = scheduler_story(keys, self.dump["scheduler"]["transition_log"])
+        return _scheduler_story(keys, self.dump["scheduler"]["transition_log"])
 
-        if not workers:
-            return story
+    def worker_story(self, *key_or_stimulus_id: str) -> list:
+        """
+        Returns
+        -------
+        stories : list
+            A list of stories for the keys/stimulus ID's in `*key_or_stimulus_id`.
+        """
+        keys = set(key_or_stimulus_id)
+        stories = []
 
-        for wdump in self.dump["workers"].values():
-            if self._valid_worker_dump(wdump):
-                story.extend(worker_story(keys, wdump["log"]))
+        for worker_dump in self.dump["workers"].values():
+            if self._valid_worker_dump(worker_dump):
+                stories.extend(_worker_story(keys, worker_dump["log"]))
 
-        return story
+        return stories
 
     def missing_workers(self) -> list:
         """
