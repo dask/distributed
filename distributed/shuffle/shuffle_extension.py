@@ -83,16 +83,19 @@ class Shuffle:
         import pyarrow as pa
 
         self.multi_file = MultiFile(
-            dump=dump_arrow,
+            dump=functools.partial(
+                dump_batch, schema=pa.Schema.from_pandas(self.metadata.empty)
+            ),
             load=load_arrow,
             directory=os.path.join(self.worker.local_directory, str(self.metadata.id)),
-            memory_limit="200 MiB",  # TODO: lift this up to the global ShuffleExtension
+            memory_limit="900 MiB",  # TODO: lift this up to the global ShuffleExtension
             file_cache=file_cache,
             concurrent_files=1,
             join=pa.concat_tables,  # pd.concat
+            sizeof=lambda L: sum(map(len, L)),
         )
         self.multi_comm = MultiComm(
-            memory_limit="200 MiB",  # TODO
+            memory_limit="50 MiB",  # TODO
             rpc=worker.rpc,
             shuffle_id=self.metadata.id,
             sizeof=lambda L: sum(map(len, L)),
@@ -127,6 +130,13 @@ class Shuffle:
         groups = await offload(split_by_partition, data, self.metadata.column)
 
         assert len(data) == sum(map(len, groups.values()))
+
+        groups = await offload(
+            lambda: {
+                k: [batch.serialize() for batch in v.to_batches()]
+                for k, v in groups.items()
+            }
+        )  # TODO: consider offloading
         await self.multi_file.put(groups)
 
     def add_partition(self, data: pd.DataFrame) -> None:
@@ -416,6 +426,12 @@ def split_by_partition(
     assert len(t) == sum(map(len, shards))
     assert len(partitions) == len(shards)
     return dict(zip(partitions, shards))
+
+
+def dump_batch(batch, file, schema=None):
+    if file.tell() == 0:
+        file.write(schema.serialize())
+    file.write(batch)
 
 
 def dump_arrow(t: pa.Table, file):

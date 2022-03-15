@@ -52,7 +52,7 @@ class MultiFile:
         this_size = 0
         for id, shard in data.items():
             size = self.sizeof(shard)
-            self.shards[id].append(shard)
+            self.shards[id].extend(shard)
             self.sizes[id] += size
             self.total_size += size
             self.total_received += size
@@ -93,6 +93,9 @@ class MultiFile:
                 id = max(self.sizes, key=self.sizes.get)
                 shards = self.shards.pop(id)
                 size = self.sizes.pop(id)
+                from dask.utils import format_bytes
+
+                print("Writing", format_bytes(size), "to disk")
 
                 future = asyncio.ensure_future(self.process(id, shards, size))
                 del shards
@@ -122,12 +125,15 @@ class MultiFile:
     def read(self, id):
         parts = []
 
-        with open(self.directory / str(id), mode="rb", buffering=100_000_000) as f:
-            while True:
-                try:
-                    parts.append(self.load(f))
-                except EOFError:
-                    break
+        try:
+            with open(self.directory / str(id), mode="rb", buffering=100_000_000) as f:
+                while True:
+                    try:
+                        parts.append(self.load(f))
+                    except EOFError:
+                        break
+        except FileNotFoundError:
+            raise KeyError(id)
 
         # TODO: We could consider deleting the file at this point
         if parts:
