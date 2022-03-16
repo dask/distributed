@@ -348,6 +348,13 @@ class Service(ABC):
         """
         ...
 
+    @abstractmethod
+    async def please_evict(self, nbytes: int) -> int:
+        """
+        Called by the `Worker`, requesting that this `Service` reduce its memory usage by at least ``nbytes``.
+        """
+        ...
+
 
 P = ParamSpec("P")
 R = TypeVar("R")
