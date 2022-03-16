@@ -129,6 +129,7 @@ empty if `TaskState.service` is True. In other words, you can't compute a `Servi
 directly, only its output keys.
 """
 
+from abc import ABC, abstractmethod
 from typing import (
     Any,
     Awaitable,
@@ -175,10 +176,8 @@ T = TypeVar("T", bound="Service")
 # TODO: use pep-673 Self type https://peps.python.org/pep-0673/
 
 
-class Service:
-    def __init__(self) -> None:
-        ...
-
+class Service(ABC):
+    @abstractmethod
     async def start(
         self: T,
         *,
@@ -247,6 +246,7 @@ class Service:
     # `peer_joined` and `peer_left` are more powerful, because they allow for Service resizing,
     # but still allow services to restart when workers leave (and wait for all to arrive) if
     # they wish.
+    @abstractmethod
     async def all_started(self) -> None:
         """
         Called once all instances in the original ``peers`` list have started.
@@ -256,6 +256,7 @@ class Service:
         """
         ...
 
+    @abstractmethod
     async def add_key(self, key: str, data: Any) -> None:
         """
         Called by the `Worker` to "hand off" data to the `Service`.
@@ -298,6 +299,7 @@ class Service:
     # async def peer_left(self, id: ServiceId) -> None:
     #     ...
 
+    @abstractmethod
     async def stop(self) -> None:
         """
         Called by the `Worker` when this service task should stop.
@@ -318,6 +320,7 @@ class Service:
         """
         ...
 
+    @abstractmethod
     def __sizeof__(self) -> int:
         """
         Amount of memory this `Service` is using for internal state.
@@ -326,6 +329,7 @@ class Service:
         """
         ...
 
+    @abstractmethod
     def spilled_bytes(self) -> int:
         """
         Number of bytes on disk this `Service` is using for internal state.
