@@ -124,7 +124,7 @@ will raise an error when the graph is submitted to the scheduler:
      /\    /\
     i  i  i  i
 
-A `Future` cannot refer to a `Service` task; that is, `TaskState.who_wants` must be
+A `Future` cannot refer to a service task; that is, `TaskState.who_wants` must be
 empty if `TaskState.service` is True. In other words, you can't compute a `Service`
 directly, only its output keys.
 """
@@ -164,7 +164,7 @@ ServiceKey = NewType("ServiceKey", str)
 """
 The name of a single key in the graph that's computed using a `Service`.
 
-The term "ServiceTask" is used to refer to overall computation of this key,
+The term "service task" is used to refer to overall computation of this key,
 performed by many `Service` instances running on different workers.
 """
 Address = NewType("Address", str)
@@ -208,7 +208,7 @@ class Service:
             Multiple instances of the same type of `Service` can exist on a worker at
             once, but all are guaranteed to have a different ``key``.
         peers:
-            All the worker addresses (including this one) on which this ServiceTask is
+            All the worker addresses (including this one) on which this service task is
             simultaneously being started, and `ServiceHandles` to communicate with them.
 
             Note that peer services are not guaranteed to be running yet.
@@ -216,17 +216,17 @@ class Service:
             The order of ``peers`` is undefined, but it will be the same for every
             `Service` in ``peers``.
         input_keys:
-            The input keys this ServiceTask will receive, *across all workers*, in
+            The input keys this service task will receive, *across all workers*, in
             priority order.
         output_keys:
-            The output keys this ServiceTask must produce, *across all workers*, in
+            The output keys this service task must produce, *across all workers*, in
             priority order.
         concierge:
             A `Concierge` instance the `Service` can use to communicate with the
             `Worker`. Used to hand off output keys back to Dask, restart or fail the
-            ServiceTask, etc.
+            service task, etc.
         leader:
-            Whether this instance was chosen to be the "leader" of the ServiceTask. The
+            Whether this instance was chosen to be the "leader" of the service task. The
             scheduler will pick exactly one instance in ``peers`` to be the leader. The
             order in which `Service` instances start up on workers is of course
             undefined; the leader may not be the first instance to actually start.
@@ -242,7 +242,7 @@ class Service:
 
     # TODO: remove this in favor of `peer_joined` and `peer_left`.
     # Once those methods are supported, and workers joining/leaving doesn't automatically
-    # restart the ServiceTask, we can't support `all_started` anymore: what if one of the
+    # restart the service task, we can't support `all_started` anymore: what if one of the
     # original peers dies before it's started?
     # `peer_joined` and `peer_left` are more powerful, because they allow for Service resizing,
     # but still allow services to restart when workers leave (and wait for all to arrive) if
@@ -300,7 +300,7 @@ class Service:
 
     async def stop(self) -> None:
         """
-        Called by the `Worker` when this ServiceTask should stop.
+        Called by the `Worker` when this service task should stop.
 
         Cases in which `stop` is called:
         * Success: all ``output_keys`` have been produced.
@@ -313,7 +313,7 @@ class Service:
         The `Service` must clean up all state (files, connections, data, etc.)
         before `stop` returns.
 
-        After `stop` returns, a new `Service` instance with the same ServiceTask
+        After `stop` returns, a new `Service` instance with the same service task
         key may be created on the `Worker`.
         """
         ...
@@ -340,7 +340,7 @@ R = TypeVar("R")
 
 
 class Concierge:
-    "Interface for `Service` instances to update the progress of a ServiceTask"
+    "Interface for `Service` instances to update the progress of a service task"
     key: ServiceKey
 
     async def produce_key(self, key: str, data: Any) -> None:
@@ -358,28 +358,28 @@ class Concierge:
 
     async def restart(self) -> None:
         """
-        Request that the ServiceTask be restarted.
+        Request that the service task be restarted.
 
         `Service.stop` is guaranteed not to be called until after `restart` has
         returned.
 
         Once `restart` has returned, `Service.stop` will be called on all instances for
-        the ServiceTask, and workers will release their references those instances. Once
+        the service task, and workers will release their references those instances. Once
         `stop` has returned on all instances, the task will transition to ``waiting`` on
         the scheduler. Then, it will transition back to ``processing``, and new
-        `Service` instances (with the same ServiceTask key) will be started on all
+        `Service` instances (with the same service task key) will be started on all
         workers.
         """
         ...
 
     async def error(self, exc: Exception) -> None:
         """
-        Fail the ServiceTask with an error message.
+        Fail the service task with an error message.
 
         `Service.stop` is guaranteed not to be called until after `error` has returned.
 
         Once `error` has returned, `Service.stop` will be called on all instances for
-        the ServiceTask, and workers will release their references those instances. Once
+        the service task, and workers will release their references those instances. Once
         `stop` has returned on all instances, the task will transition to ``erred`` on
         the scheduler. The result of the task will be ``exc``.
 
