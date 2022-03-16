@@ -12,7 +12,7 @@ async def test_basic(c, s, a, b):
         freq="100ms",
         dtypes={"x": int, "y": float, "a": int, "b": float},
     )
-    # df = dask.datasets.timeseries()
+    df = dask.datasets.timeseries()
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     a, b = c.compute([df.x.size, out.x.size])
     a = await a

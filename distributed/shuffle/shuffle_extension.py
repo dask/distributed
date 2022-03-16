@@ -95,12 +95,12 @@ class Shuffle:
             sizeof=lambda L: sum(map(len, L)),
         )
         self.multi_comm = MultiComm(
-            memory_limit="50 MiB",  # TODO
+            memory_limit="200 MiB",  # TODO
             rpc=worker.rpc,
             shuffle_id=self.metadata.id,
             sizeof=lambda L: sum(map(len, L)),
             join=functools.partial(sum, start=[]),
-            max_connections=3,
+            max_connections=min((len(self.metadata.workers) - 1) or 1, 10),
         )
         self.worker.loop.add_callback(self.multi_comm.communicate)
         self.worker.loop.add_callback(self.multi_file.communicate)
