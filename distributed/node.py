@@ -8,11 +8,11 @@ from tornado.httpserver import HTTPServer
 
 import dask
 
-from .comm import get_address_host, get_tcp_server_addresses
-from .core import Server
-from .http.routing import RoutingApplication
-from .utils import DequeHandler, clean_dashboard_address
-from .versions import get_versions
+from distributed.comm import get_address_host, get_tcp_server_addresses
+from distributed.core import Server
+from distributed.http.routing import RoutingApplication
+from distributed.utils import DequeHandler, clean_dashboard_address
+from distributed.versions import get_versions
 
 
 class ServerNode(Server):
@@ -25,7 +25,7 @@ class ServerNode(Server):
     # XXX avoid inheriting from Server? there is some large potential for confusion
     # between base and derived attribute namespaces...
 
-    def versions(self, comm=None, packages=None):
+    def versions(self, packages=None):
         return get_versions(packages=packages)
 
     def start_services(self, default_listen_ip):
@@ -87,7 +87,7 @@ class ServerNode(Server):
         logger.addHandler(self._deque_handler)
         weakref.finalize(self, logger.removeHandler, self._deque_handler)
 
-    def get_logs(self, comm=None, start=None, n=None, timestamps=False):
+    def get_logs(self, start=0, n=None, timestamps=False):
         """
         Fetch log entries for this node
 
@@ -105,8 +105,7 @@ class ServerNode(Server):
         List of tuples containing the log level, message, and (optional) timestamp for each filtered entry
         """
         deque_handler = self._deque_handler
-        if start is None:
-            start = -1
+
         L = []
         for count, msg in enumerate(deque_handler.deque):
             if n and count >= n or msg.created < start:

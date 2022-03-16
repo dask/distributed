@@ -16,12 +16,12 @@ import dask
 from dask.utils import parse_bytes, parse_timedelta
 from dask.widgets import get_template
 
-from ..core import CommClosedError, Status, rpc
-from ..scheduler import Scheduler
-from ..security import Security
-from ..utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
-from .adaptive import Adaptive
-from .cluster import Cluster
+from distributed.core import CommClosedError, Status, rpc
+from distributed.deploy.adaptive import Adaptive
+from distributed.deploy.cluster import Cluster
+from distributed.scheduler import Scheduler
+from distributed.security import Security
+from distributed.utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +258,11 @@ class SpecCluster(Cluster):
         if not self.asynchronous:
             self._loop_runner.start()
             self.sync(self._start)
-            self.sync(self._correct_state)
+            try:
+                self.sync(self._correct_state)
+            except Exception:
+                self.sync(self.close)
+                raise
 
     async def _start(self):
         while self.status == Status.starting:
@@ -293,10 +297,10 @@ class SpecCluster(Cluster):
         )
         try:
             await super()._start()
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             self.status = Status.failed
             await self._close()
-            raise RuntimeError(f"Cluster failed to start. {str(e)}") from e
+            raise RuntimeError(f"Cluster failed to start: {e}") from e
 
     def _correct_state(self):
         if self._correct_state_waiting:
@@ -432,7 +436,7 @@ class SpecCluster(Cluster):
 
     def _threads_per_worker(self) -> int:
         """Return the number of threads per worker for new workers"""
-        if not self.new_spec:
+        if not self.new_spec:  # pragma: no cover
             raise ValueError("To scale by cores= you must specify cores per worker")
 
         for name in ["nthreads", "ncores", "threads", "cores"]:
@@ -442,7 +446,7 @@ class SpecCluster(Cluster):
 
     def _memory_per_worker(self) -> int:
         """Return the memory limit per worker for new workers"""
-        if not self.new_spec:
+        if not self.new_spec:  # pragma: no cover
             raise ValueError(
                 "to scale by memory= your worker definition must include a "
                 "memory_limit definition"

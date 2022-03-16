@@ -9,8 +9,6 @@ from time import sleep
 from urllib.parse import urlparse
 
 import pytest
-import tornado
-from packaging.version import parse as parse_version
 from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
@@ -455,13 +453,6 @@ async def test_scale_up_and_down():
             assert len(cluster.workers) == 1
 
 
-@pytest.mark.xfail(
-    sys.version_info >= (3, 8)
-    and parse_version(tornado.version) < parse_version("6.0.3"),
-    reason="Known issue with Python 3.8 and Tornado < 6.0.3. "
-    "See https://github.com/tornadoweb/tornado/pull/2683.",
-    strict=True,
-)
 def test_silent_startup():
     code = """if 1:
         from time import sleep
@@ -539,7 +530,6 @@ def test_death_timeout_raises(loop):
             loop=loop,
         ) as cluster:
             pass
-    LocalCluster._instances.clear()  # ignore test hygiene checks
 
 
 @gen_test()
@@ -780,7 +770,7 @@ async def test_scale_retires_workers():
     await cluster.close()
 
 
-@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
+@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 def test_local_tls_restart(loop):
     from distributed.utils_test import tls_only_security
 
@@ -1159,3 +1149,18 @@ async def test_cluster_host_used_throughout_cluster(host, use_nanny):
             if use_nanny:
                 url = urlparse(worker.process.worker_address)
                 assert url.hostname == "127.0.0.1"
+
+
+@gen_test()
+async def test_connect_to_closed_cluster(cleanup):
+    async with LocalCluster(processes=False, asynchronous=True) as cluster:
+        async with Client(cluster, asynchronous=True) as c1:
+            assert await c1.submit(inc, 1) == 2
+
+    with pytest.raises(
+        RuntimeError,
+        match="Trying to connect to an already closed or closing Cluster",
+    ):
+        # Raises during init without actually connecting since we're not
+        # awaiting anything
+        Client(cluster, asynchronous=True)

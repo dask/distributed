@@ -10,7 +10,7 @@ import random
 from collections.abc import Callable
 from contextlib import suppress
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import Literal
 
 from tlz import identity
 
@@ -25,10 +25,7 @@ try:
 except ImportError:
     blosc = False
 
-from ..utils import ensure_bytes
-
-if TYPE_CHECKING:
-    from typing_extensions import Literal
+from distributed.utils import ensure_bytes
 
 compressions: dict[
     str | None | Literal[False],
@@ -197,7 +194,7 @@ def maybe_compress(
         return None, payload
     if len(payload) < min_size:
         return None, payload
-    if len(payload) > 2 ** 31:  # Too large, compression libraries often fail
+    if len(payload) > 2**31:  # Too large, compression libraries often fail
         return None, payload
 
     min_size = int(min_size)

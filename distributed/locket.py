@@ -7,7 +7,7 @@ import threading
 import weakref
 from time import sleep
 
-from .metrics import time
+from distributed.metrics import time
 
 __all__ = ["lock_file"]
 
@@ -52,7 +52,6 @@ except ImportError:
 
         def _unlock_file(file_):
             _WinAPI_UnlockFile(msvcrt.get_osfhandle(file_.fileno()), 0, 0, 1, 0)
-
 
 else:
     _lock_file_blocking_available = True

@@ -242,8 +242,8 @@ def test_serialize_bytes(kwargs):
         "abc",
         np.arange(5),
         b"ab" * int(40e6),
-        int(2 ** 26) * b"ab",
-        (int(2 ** 25) * b"ab", int(2 ** 25) * b"ab"),
+        int(2**26) * b"ab",
+        (int(2**25) * b"ab", int(2**25) * b"ab"),
     ]:
         b = serialize_bytes(x, **kwargs)
         assert isinstance(b, bytes)
@@ -447,14 +447,14 @@ def test_different_compression_families():
         if not isinstance(obj, MyObjWithCompression):
             raise NotImplementedError()
         header = {"compression": [True]}
-        return header, [bytes(2 ** 20)]
+        return header, [bytes(2**20)]
 
     def my_dumps_no_compression(obj, context=None):
         if not isinstance(obj, MyObjWithNoCompression):
             raise NotImplementedError()
 
         header = {"compression": [False]}
-        return header, [bytes(2 ** 20)]
+        return header, [bytes(2**20)]
 
     def my_loads(header, frames):
         return pickle.loads(frames[0])
@@ -473,7 +473,7 @@ def test_different_compression_families():
 
 @gen_test()
 async def test_frame_split():
-    data = b"1234abcd" * (2 ** 20)  # 8 MiB
+    data = b"1234abcd" * (2**20)  # 8 MiB
     assert dask.sizeof.sizeof(data) == dask.utils.parse_bytes("8MiB")
 
     size = dask.utils.parse_bytes("3MiB")

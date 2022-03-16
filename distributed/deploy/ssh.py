@@ -10,7 +10,7 @@ from json import dumps
 import dask
 import dask.config
 
-from .spec import ProcessInterface, SpecCluster
+from distributed.deploy.spec import ProcessInterface, SpecCluster
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,37 @@ class Worker(Process):
         self.kwargs = copy.copy(kwargs)
         self.name = name
         self.remote_python = remote_python
-        self.nprocs = self.kwargs.pop("nprocs", 1)
+        if kwargs.get("nprocs") is not None and kwargs.get("n_workers") is not None:
+            raise ValueError(
+                "Both nprocs and n_workers were specified. Use n_workers only."
+            )
+        elif kwargs.get("nprocs") is not None:
+            warnings.warn(
+                "The nprocs argument will be removed in a future release. It has been "
+                "renamed to n_workers.",
+                FutureWarning,
+            )
+            self.n_workers = self.kwargs.pop("nprocs", 1)
+        else:
+            self.n_workers = self.kwargs.pop("n_workers", 1)
+
+    @property
+    def nprocs(self):
+        warnings.warn(
+            "The nprocs attribute will be removed in a future release. It has been "
+            "renamed to n_workers.",
+            FutureWarning,
+        )
+        return self.n_workers
+
+    @nprocs.setter
+    def nprocs(self, value):
+        warnings.warn(
+            "The nprocs attribute will be removed in a future release. It has been "
+            "renamed to n_workers.",
+            FutureWarning,
+        )
+        self.n_workers = value
 
     async def start(self):
         try:
@@ -138,7 +168,7 @@ class Worker(Process):
                                 **self.kwargs,
                             },
                         }
-                        for i in range(self.nprocs)
+                        for i in range(self.n_workers)
                     }
                 ),
             ]
@@ -148,7 +178,7 @@ class Worker(Process):
 
         # We watch stderr in order to get the address, then we return
         started_workers = 0
-        while started_workers < self.nprocs:
+        while started_workers < self.n_workers:
             line = await self.proc.stderr.readline()
             if not line.strip():
                 raise Exception("Worker failed to start")
@@ -248,6 +278,7 @@ old_cluster_kwargs = {
     "worker_addrs",
     "nthreads",
     "nprocs",
+    "n_workers",
     "ssh_username",
     "ssh_port",
     "ssh_private_key",
@@ -336,7 +367,7 @@ def SSHCluster(
     >>> cluster = SSHCluster(
     ...     ["localhost", "localhost", "localhost", "localhost"],
     ...     connect_options={"known_hosts": None},
-    ...     worker_options={"nthreads": 2, "nprocs": 2},
+    ...     worker_options={"nthreads": 2, "n_workers": 2},
     ...     scheduler_options={"port": 0, "dashboard_address": ":8797"}
     ... )
     >>> client = Client(cluster)
@@ -365,7 +396,7 @@ def SSHCluster(
         )
 
     if set(kwargs) & old_cluster_kwargs:
-        from .old_ssh import SSHCluster as OldSSHCluster
+        from distributed.deploy.old_ssh import SSHCluster as OldSSHCluster
 
         warnings.warn(
             "Note that the SSHCluster API has been replaced.  "

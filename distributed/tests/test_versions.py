@@ -123,8 +123,8 @@ def test_python_mismatch(kwargs_matching):
 async def test_version_warning_in_cluster(s, a, b):
     s.workers[a.address].versions["packages"]["dask"] = "0.0.0"
 
-    with pytest.warns(None) as record:
-        async with Client(s.address, asynchronous=True) as client:
+    with pytest.warns(Warning) as record:
+        async with Client(s.address, asynchronous=True):
             pass
 
     assert record

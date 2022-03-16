@@ -1,5 +1,5 @@
 from __future__ import annotations
 
-from .core import PrometheusHandler
+from distributed.http.scheduler.prometheus.core import PrometheusHandler
 
 routes: list[tuple] = [("/metrics", PrometheusHandler, {})]

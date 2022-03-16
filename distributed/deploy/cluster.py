@@ -11,9 +11,10 @@ import dask.config
 from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
 from dask.widgets import get_template
 
-from ..core import Status
-from ..objects import SchedulerInfo
-from ..utils import (
+from distributed.core import Status
+from distributed.deploy.adaptive import Adaptive
+from distributed.objects import SchedulerInfo
+from distributed.utils import (
     Log,
     Logs,
     LoopRunner,
@@ -22,7 +23,6 @@ from ..utils import (
     format_dashboard_link,
     log_errors,
 )
-from .adaptive import Adaptive
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +151,7 @@ class Cluster(SyncMethodMixin):
                         exc_info=True,
                     )
             # Sleep, with error backoff
-            interval = min(max_interval, self._sync_interval * 1.5 ** err_count)
+            interval = min(max_interval, self._sync_interval * 1.5**err_count)
             await asyncio.sleep(interval)
 
     async def _close(self):
@@ -218,7 +218,7 @@ class Cluster(SyncMethodMixin):
             self.scheduler_info.update(msg)
         elif op == "remove":
             del self.scheduler_info["workers"][msg]
-        else:
+        else:  # pragma: no cover
             raise ValueError("Invalid op", op, msg)
 
     def adapt(self, Adaptive=Adaptive, **kwargs) -> Adaptive:
@@ -407,7 +407,7 @@ class Cluster(SyncMethodMixin):
                     update()
 
             scale.on_click(scale_cb)
-        else:
+        else:  # pragma: no cover
             accordion = HTML("")
 
         scale_status = HTML(self._scaling_status())
