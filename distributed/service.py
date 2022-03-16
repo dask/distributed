@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """
-Stateful services that run on all all workers, for doing out-of-band operations in a controlled way.
+Stateful services that run on all workers, for doing out-of-band operations in a controlled way.
 """
 from typing import (
     Any,
@@ -15,7 +15,7 @@ from typing import (
     TypeVar,
 )
 
-ServiceId = NewType("ServiceId", str)
+ServiceGroup = NewType("ServiceGroup", str)
 # ^ TODO need a better term. This refers to a single key in the graph, which creates Service instances
 # across many workers to accomplish its task. `ServiceInvocation`? `ServiceTask`? `ServiceGroup`?
 # There can be multiple types of Services (`ShuffleService`, `RechunkService`, `XGBoostService`),
@@ -32,7 +32,7 @@ class Service:
     async def start(
         self: T,
         *,
-        id: ServiceId,
+        group: ServiceGroup,
         peers: Mapping[Address, ServiceHandle[T]],
         # ^ QUESTION: should peers be identified by address? Or should they get some opaque UUID?
         # Addresses aren't guaranteed to be unique. It might be helpful to guarantee that
@@ -54,32 +54,31 @@ class Service:
 
         Parameters
         ----------
-        id:
-            The ID of this Service. Corresponds to the key name in the graph that
-            created the Service. All instances created from that key (across all
-            workers) have the same ID.
+        group:
+            The key name in the graph that created the Service. All instances created
+            from that key (across all workers) have the same ServiceGroup.
 
             Multiple instances of the same type of Service can exist on a worker at
-            once, but all are guaranteed to have different IDs.
+            once, but all are guaranteed to have different ``groups``.
         peers:
-            All the worker addresses (including this one) on which this service ID is
+            All the worker addresses (including this one) on which this ServiceGroup is
             simultaneously being started, and `ServiceHandles` to communicate with them.
 
             Note that peer services are not guaranteed to be running yet.
         input_keys:
-            The input keys this Service ID will receive, *across all workers*, in
+            The input keys this ServiceGroup will receive, *across all workers*, in
             priority order.
         output_keys:
-            The output keys this Service ID is expected to produce, *across all
+            The output keys this ServiceGroup is expected to produce, *across all
             workers*, in priority order.
         concierge:
-            A `Concierge` instance the Service can use to communicate with the `Worker`.
-            Used to hand off output keys back to Dask, restart or fail the Service ID,
+            A `Concierge` instance the `Service` can use to communicate with the `Worker`.
+            Used to hand off output keys back to Dask, restart or fail the ServiceGroup,
             etc.
         leader:
-            Whether this instance was chosen to be the "leader" of this Service ID. The
+            Whether this instance was chosen to be the "leader" of the ServiceGroup. The
             scheduler will pick exactly one instance in ``peers`` to be the leader. The
-            order in which Service instances start up on workers is of course undefined;
+            order in which `Service` instances start up on workers is of course undefined;
             the leader may not be the first instance to actually start.
 
             The leader has no special treatment, and which instance is selected as the
@@ -144,7 +143,7 @@ class Service:
 
     async def stop(self) -> None:
         """
-        Called by the `Worker` when this Service ID should stop.
+        Called by the `Worker` when this ServiceGroup should stop.
 
         Cases in which `stop` is called:
         * Success: all ``output_keys`` have been produced.
@@ -157,8 +156,8 @@ class Service:
         The `Service` must clean up all state (files, connections, data, etc.)
         before `stop` returns.
 
-        After `stop` returns, a new `Service` instance with the same Service ID
-        may be created.
+        After `stop` returns, a new `Service` instance with the same ServiceGroup
+        may be created on the `Worker`.
         """
         ...
 
@@ -168,8 +167,8 @@ T = TypeVar("T", bound=Service)
 
 
 class Concierge:
-    "Interface for `Service` instances to update the progress of a Service ID"
-    id: ServiceId
+    "Interface for `Service` instances to update the progress of a ServiceGroup"
+    id: ServiceGroup
 
     async def produce_key(self, key: str, data: Any) -> None:
         """
@@ -180,37 +179,37 @@ class Concierge:
         to the data.
 
         If ``produce_key`` raises an error, the state of the data is undefined. In most
-        cases, the service should call `restart` if this happens.
+        cases, the `Service` should call `restart` if this happens.
         """
         ...
 
     async def restart(self) -> None:
         """
-        Request that the Service ID be restarted.
+        Request that the ServiceGroup be restarted.
 
         `Service.stop` is guaranteed not to be called until after `restart` has
         returned.
 
         Once `restart` has returned, `Service.stop` will be called on all instances for
-        this ID across all workers, and workers will release their references to their
-        `Service` instance for this ID. Once `stop` has returned on all instances, the
-        Service ID's task will transition to ``waiting`` on the scheduler. Then, it will
-        transition back to ``processing``, and new `Service` instances (with the same
-        Service ID) will be started on all workers.
+        the ServiceGroup, and workers will release their references those instances.
+        Once `stop` has returned on all instances, the ServiceGroup's task will
+        transition to ``waiting`` on the scheduler. Then, it will transition back to
+        ``processing``, and new `Service` instances (with the same ServiceGroup) will be
+        started on all workers.
         """
         ...
 
     async def error(self, exc: Exception) -> None:
         """
-        Fail the Service ID with an error message.
+        Fail the ServiceGroup with an error message.
 
         `Service.stop` is guaranteed not to be called until after `error` has returned.
 
-        Once `error` has returned, `Service.stop` will be called on all instances for
-        this ID across all workers, and workers will release their references to their
-        `Service` instance for this ID. Once `stop` has returned on all instances, the
-        Service ID's task will transition to ``erred`` on the scheduler. The result of
-        the task will be ``exc``.
+        Once `restart` has returned, `Service.stop` will be called on all instances for
+        the ServiceGroup, and workers will release their references those instances.
+        Once `stop` has returned on all instances, the ServiceGroup's task will
+        transition to ``erred`` on the scheduler. The result of the task will be
+        ``exc``.
 
         If multiple instances call `error`, only the first ``exc`` to reach the
         scheduler will become the result; all others will be dropped (though all calls
