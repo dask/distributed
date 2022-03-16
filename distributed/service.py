@@ -167,29 +167,27 @@ The name of a single key in the graph that's computed using a `Service`.
 The term "service task" is used to refer to overall computation of this key,
 performed by many `Service` instances running on different workers.
 """
-Address = NewType("Address", str)
+
+ServiceId = NewType("ServiceId", str)
+"Opaque ID of a `Service` instance"
+
 T = TypeVar("T", bound="Service")
 # TODO: use pep-673 Self type https://peps.python.org/pep-0673/
 
 
 class Service:
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self) -> None:
         ...
 
     async def start(
         self: T,
         *,
+        id: ServiceId,
         key: ServiceKey,
-        peers: Mapping[Address, ServiceHandle[T]],
-        # ^ QUESTION: should peers be identified by address? Or should they get some opaque UUID?
-        # Addresses aren't guaranteed to be unique. It might be helpful to guarantee that
-        # the identifier for a peer always corresponds to a unique Service _instance_
-        # (if a worker restarts, the same address could correspond to multiple different instances
-        # of the Service).
+        peers: Mapping[ServiceId, ServiceHandle[T]],
         input_keys: Sequence[str],
         output_keys: Sequence[str],
         concierge: Concierge,
-        produce_key_callback: Callable[[str, Any], Awaitable[None]],
         leader: bool,
         **kwargs,
     ) -> None:
@@ -201,6 +199,8 @@ class Service:
 
         Parameters
         ----------
+        id:
+            Opaque identifier for this instance.
         key:
             The key in the graph that created the `Service`. All instances created from
             that key (across all workers) receive the same ``key``.
@@ -208,8 +208,8 @@ class Service:
             Multiple instances of the same type of `Service` can exist on a worker at
             once, but all are guaranteed to have a different ``key``.
         peers:
-            All the worker addresses (including this one) on which this service task is
-            simultaneously being started, and `ServiceHandles` to communicate with them.
+            The IDs of all `Service` (including this one) currently being started to
+            handle this service task, and ServiceHandles to communicate with them.
 
             Note that peer services are not guaranteed to be running yet.
 
@@ -292,10 +292,10 @@ class Service:
     # restart, then the scheduler will be bombarded by restart messages from (N-1) workers
     # when one worker leaves.
 
-    # async def peer_joined(self: T, addr: Address, handle: ServiceHandle[T]) -> None:
+    # async def peer_joined(self: T, id: ServiceId, handle: ServiceHandle[T]) -> None:
     #     ...
 
-    # async def peer_left(self, addr: Address) -> None:
+    # async def peer_left(self, id: ServiceId) -> None:
     #     ...
 
     async def stop(self) -> None:
