@@ -161,6 +161,7 @@ class Shuffle:
         ), f"No outputs remaining, but requested output partition {i} on {self.worker.address}."
         self.output_partitions_left -= 1
 
+        sync(self.worker.loop, self.multi_file.flush)  # type: ignore
         try:
             df = self.multi_file.read(i)
             return df.to_pandas()
@@ -238,8 +239,6 @@ class ShuffleWorkerExtension:
         """
         shuffle = self._get_shuffle(shuffle_id)
         await shuffle.multi_comm.flush()
-        await asyncio.sleep(1)  # TODO
-        await shuffle.multi_file.flush()
         shuffle.inputs_done()
         if shuffle.done():
             # If the shuffle has no output partitions, remove it now;

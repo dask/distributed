@@ -119,8 +119,11 @@ class MultiComm:
             await asyncio.sleep(0.05)
 
         await asyncio.gather(*self._futures)
+        self._futures.clear()
+
         assert not self.total_size
         from dask.utils import format_bytes
 
         print("total moved", format_bytes(self.total_moved))
+
         self._done = True

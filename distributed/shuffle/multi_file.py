@@ -154,7 +154,11 @@ class MultiFile:
             await asyncio.sleep(0.05)
 
         await asyncio.gather(*self._futures)
+        if all(future.done() for future in self._futures):
+            self._futures.clear()
+
         assert not self.total_size
+
         self._done = True
 
     def close(self):
