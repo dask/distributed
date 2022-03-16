@@ -131,10 +131,13 @@ directly, only its output keys.
 
 from abc import ABC, abstractmethod
 from typing import (
+    AbstractSet,
     Any,
     Awaitable,
     Callable,
     Generic,
+    Hashable,
+    Iterable,
     Mapping,
     NewType,
     NoReturn,
@@ -144,6 +147,10 @@ from typing import (
 )
 
 from typing_extensions import ParamSpec
+
+from dask import config
+from dask.base import tokenize
+from dask.highlevelgraph import Layer
 
 
 def service_result(service: Service) -> NoReturn:
@@ -424,3 +431,64 @@ class ServiceHandle(Generic[T]):
 class _RPC(Protocol):
     def __call__(self, *args, **kwargs) -> Awaitable:
         ...
+
+
+# TODO this is certainly incorrect/incomplete, the `Layer` interface is quite hard to follow.
+class SimpleServiceLayer(Layer):
+    def __init__(
+        self,
+        name: str,
+        service: Service,
+        inputs: Sequence[str],
+        outputs: Sequence[str],
+    ):
+        self.name = name
+        self.key = f"({name}, {tokenize(outputs)})"
+        # ^ NOTE: tokenize the actual key based on which outputs are produced, so the culled
+        # version of the Service has a different key from the un-culled version.
+        self.service = service
+        self.inputs = inputs
+        self.outputs = outputs
+        super().__init__(
+            annotations={**config.get("annotations", {}), self.key: {"service": True}}
+        )
+
+    def get_output_keys(self) -> AbstractSet:
+        return set(self.outputs)
+
+    def cull(
+        self, keys: set, all_hlg_keys: Iterable
+    ) -> tuple[Layer, Mapping[Hashable, set]]:
+        # FIXME I have no idea what "external key dependencies" means in `Layer.cull`,
+        # not sure if an empty dict is correct here or not.
+        if keys == set(self.outputs):
+            return self, {}
+        return type(self)(self.name, self.service, self.inputs, list(keys)), {}
+
+    def _construct_graph(self) -> dict[str, Any]:
+        dsk: dict[str, Any] = {o: (service_result, self.key) for o in self.outputs}
+        dsk[self.key] = (self.service, self.inputs)
+        return dsk
+
+    @property
+    def _dict(self):
+        """Materialize full dict representation"""
+        if hasattr(self, "_cached_dict"):
+            return self._cached_dict
+        else:
+            dsk = self._construct_graph()
+            self._cached_dict = dsk
+        return self._cached_dict
+
+    def __getitem__(self, key):
+        return self._dict[key]
+
+    def __iter__(self):
+        yield self.key
+        yield from iter(self.outputs)
+
+    def __len__(self):
+        return len(self.outputs) + 1
+
+    def is_materialized(self):
+        return hasattr(self, "_cached_dict")
