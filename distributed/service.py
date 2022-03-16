@@ -160,7 +160,7 @@ def service_result(service: Service) -> NoReturn:
     )
 
 
-ServiceTask = NewType("ServiceTask", str)
+ServiceKey = NewType("ServiceKey", str)
 """
 The name of a single key in the graph that's computed using a `Service`.
 
@@ -179,7 +179,7 @@ class Service:
     async def start(
         self: T,
         *,
-        key: ServiceTask,
+        key: ServiceKey,
         peers: Mapping[Address, ServiceHandle[T]],
         # ^ QUESTION: should peers be identified by address? Or should they get some opaque UUID?
         # Addresses aren't guaranteed to be unique. It might be helpful to guarantee that
@@ -341,7 +341,7 @@ R = TypeVar("R")
 
 class Concierge:
     "Interface for `Service` instances to update the progress of a ServiceTask"
-    key: ServiceTask
+    key: ServiceKey
 
     async def produce_key(self, key: str, data: Any) -> None:
         """
