@@ -6471,13 +6471,12 @@ async def test_client_gather_semaphore_loop(s):
         assert c._gather_semaphore._loop is c.loop.asyncio_loop
 
 
-@pytest.mark.skipif(
-    sys.version_info >= (3, 10), reason="No internal loop in Python 3.10"
-)
 @gen_cluster(client=True)
 async def test_as_completed_condition_loop(c, s, a, b):
     seq = c.map(inc, range(5))
     ac = as_completed(seq)
+    async for _ in ac:
+        pass
     assert ac.condition._loop == c.loop.asyncio_loop
 
 
