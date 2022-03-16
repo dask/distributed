@@ -86,13 +86,13 @@ class MultiComm:
                 while size < self.max_message_size:
                     try:
                         shard = self.shards[address].pop()
-                    except IndexError:
-                        break
-                    finally:
                         shards.append(shard)
                         s = self.sizeof(shard)
                         size += s
                         self.sizes[address] -= s
+                    except IndexError:
+                        break
+                    finally:
                         if not self.shards[address]:
                             del self.shards[address]
                             assert not self.sizes[address]
