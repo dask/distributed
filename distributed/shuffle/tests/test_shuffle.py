@@ -4,7 +4,7 @@ import dask.dataframe as dd
 from distributed.utils_test import gen_cluster
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, timeout=1000000)
 async def test_basic(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -12,7 +12,7 @@ async def test_basic(c, s, a, b):
         freq="100ms",
         dtypes={"x": int, "y": float, "a": int, "b": float},
     )
-    df = dask.datasets.timeseries()
+    # df = dask.datasets.timeseries()
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     a, b = c.compute([df.x.size, out.x.size])
     a = await a

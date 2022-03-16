@@ -20,7 +20,7 @@ class MultiComm:
         sizeof=sizeof,
         max_connections=10,
         shuffle_id=None,
-        max_message_size="128 MiB",
+        max_message_size="10 MiB",
     ):
         self.lock = threading.Lock()
         self.shards = defaultdict(list)
@@ -87,27 +87,31 @@ class MultiComm:
                     try:
                         shard = self.shards[address].pop()
                     except IndexError:
-                        del self.shards[address]
-                        del self.sizes[address]
                         break
-                    else:
+                    finally:
                         shards.append(shard)
                         s = self.sizeof(shard)
                         size += s
                         self.sizes[address] -= s
+                        if not self.shards[address]:
+                            del self.shards[address]
+                            assert not self.sizes[address]
+                            del self.sizes[address]
 
-            print(
-                "Sending",
-                format_bytes(size),
-                "to comm",
-                format_bytes(self.total_size),
-                "left in ",
-                len(self.shards),
-                "buckets",
-            )
-            future = asyncio.ensure_future(self.process(address, shards, size))
-            del shards
-            self._futures.add(future)
+                assert set(self.sizes) == set(self.shards)
+                assert shards
+                print(
+                    "Sending",
+                    format_bytes(size),
+                    "to comm",
+                    format_bytes(self.total_size),
+                    "left in ",
+                    len(self.shards),
+                    "buckets",
+                )
+                future = asyncio.ensure_future(self.process(address, shards, size))
+                del shards
+                self._futures.add(future)
 
     async def process(self, address: str, shards: list, size: int):
         with log_errors():
@@ -134,6 +138,8 @@ class MultiComm:
         await asyncio.gather(*self._futures)
         self._futures.clear()
 
+        if self.total_size:
+            breakpoint()
         assert not self.total_size
         from dask.utils import format_bytes
 

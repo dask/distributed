@@ -90,7 +90,7 @@ class Shuffle:
             directory=os.path.join(self.worker.local_directory, str(self.metadata.id)),
             memory_limit="900 MiB",  # TODO: lift this up to the global ShuffleExtension
             file_cache=file_cache,
-            concurrent_files=3,
+            concurrent_files=2,
             join=pa.concat_tables,  # pd.concat
             sizeof=lambda L: sum(map(len, L)),
         )
@@ -110,7 +110,10 @@ class Shuffle:
         self.total_recvd = 0
 
     async def receive(self, data: list[pa.Buffer]) -> None:
-        assert not self.transferred, "`receive` called after barrier task"
+        # This is actually ok.  Our local barrier might have finished,
+        # but barriers on other workers might still be running and sending us
+        # data
+        # assert not self.transferred, "`receive` called after barrier task"
         import pyarrow as pa
 
         from dask.utils import format_bytes
@@ -432,6 +435,8 @@ def split_by_partition(
     ]
     shards.append(t.slice(offset=splits[-1], length=None))
     assert len(t) == sum(map(len, shards))
+    if len(partitions) != len(shards):
+        breakpoint()
     assert len(partitions) == len(shards)
     return dict(zip(partitions, shards))
 
