@@ -63,7 +63,7 @@ async def write_state(
         await to_thread(writer, state, f)
 
 
-def load_cluster_dump(url: str | Path, **kwargs) -> dict:
+def load_cluster_dump(url: str, **kwargs) -> dict:
     """Loads a cluster dump from a disk artefact
 
     Parameters
@@ -79,13 +79,10 @@ def load_cluster_dump(url: str | Path, **kwargs) -> dict:
     state : dict
         The cluster state at the time of the dump.
     """
-    if isinstance(url, str):
-        url = Path(url)
-
-    if url.name.endswith(".msgpack.gz"):
+    if url.endswith(".msgpack.gz"):
         mode = "rb"
         reader = msgpack.unpack
-    elif url.name.endswith(".yaml"):
+    elif url.endswith(".yaml"):
         import yaml
 
         mode = "r"
