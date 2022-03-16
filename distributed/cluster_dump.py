@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Mapping
 from pathlib import Path
 from typing import IO, Any, Awaitable, Callable, Collection, Literal
@@ -180,34 +181,39 @@ class DumpArtefact(Mapping):
 
         return tasks
 
-    def scheduler_story(self, *key_or_stimulus_id: str) -> list:
+    def scheduler_story(self, *key_or_stimulus_id: str) -> dict:
         """
         Returns
         -------
-        stories : list
+        stories : dict
             A list of stories for the keys/stimulus ID's in ``*key_or_stimulus_id``.
         """
-        keys = set(key_or_stimulus_id)
-        story = _scheduler_story(keys, self.dump["scheduler"]["transition_log"])
-        return list(map(tuple, story))
+        stories = defaultdict(list)
 
-    def worker_story(self, *key_or_stimulus_id: str) -> list:
+        log = self.dump["scheduler"]["transition_log"]
+        keys = set(key_or_stimulus_id)
+
+        for story in _scheduler_story(keys, log):
+            stories[story[0]].append(tuple(story))
+
+        return dict(stories)
+
+    def worker_story(self, *key_or_stimulus_id: str) -> dict:
         """
         Returns
         -------
-        stories : list
-            A list of stories for the keys/stimulus ID's in ``*key_or_stimulus_id`.`
+        stories : dict
+            A dict of stories for the keys/stimulus ID's in ``*key_or_stimulus_id`.`
         """
         keys = set(key_or_stimulus_id)
-        stories: list = []
+        stories = defaultdict(list)
 
         for worker_dump in self.dump["workers"].values():
             if isinstance(worker_dump, dict) and "log" in worker_dump:
-                # Stories are tuples, not lists
-                story = _worker_story(keys, worker_dump["log"])
-                stories.extend(map(tuple, story))
+                for story in _worker_story(keys, worker_dump["log"]):
+                    stories[story[0]].append(tuple(story))
 
-        return stories
+        return dict(stories)
 
     def missing_workers(self) -> list:
         """

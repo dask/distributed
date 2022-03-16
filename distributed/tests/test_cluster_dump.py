@@ -117,31 +117,38 @@ async def test_cluster_dump_story(c, s, a, b, tmp_path):
     dump = DumpArtefact.from_url(f"{filename}.msgpack.gz")
     task_key = next(iter(fut_keys))
 
-    expected = [
-        (task_key, "released", "waiting", {task_key: "processing"}),
-        (task_key, "waiting", "processing", {}),
-        (task_key, "processing", "memory", {}),
-    ]
+    def _expected_story(task_key):
+        return
 
-    story = dump.scheduler_story(task_key)
-    assert len(story) == len(expected)
+    story = dump.scheduler_story(*fut_keys)
+    assert len(story) == len(fut_keys)
 
-    for event, expected_event in zip(story, expected):
-        for e1, e2 in zip(event, expected_event):
-            assert e1 == e2
+    for k, task_story in story.items():
+        expected = [
+            (k, "released", "waiting", {k: "processing"}),
+            (k, "waiting", "processing", {}),
+            (k, "processing", "memory", {}),
+        ]
 
-    assert len(dump.scheduler_story(task_key)) == 3
-    assert_worker_story(
-        dump.worker_story(task_key),
-        [
-            (task_key, "compute-task"),
-            (task_key, "released", "waiting", "waiting", {task_key: "ready"}),
-            (task_key, "waiting", "ready", "ready", {}),
-            (task_key, "ready", "executing", "executing", {}),
-            (task_key, "put-in-memory"),
-            (task_key, "executing", "memory", "memory", {}),
-        ],
-    )
+        for event, expected_event in zip(task_story, expected):
+            for e1, e2 in zip(event, expected_event):
+                assert e1 == e2
+
+    story = dump.worker_story(*fut_keys)
+    assert len(story) == len(fut_keys)
+
+    for k, task_story in story.items():
+        assert_worker_story(
+            task_story,
+            [
+                (k, "compute-task"),
+                (k, "released", "waiting", "waiting", {k: "ready"}),
+                (k, "waiting", "ready", "ready", {}),
+                (k, "ready", "executing", "executing", {}),
+                (k, "put-in-memory"),
+                (k, "executing", "memory", "memory", {}),
+            ],
+        )
 
 
 @gen_cluster(client=True)
