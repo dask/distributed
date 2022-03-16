@@ -285,6 +285,16 @@ class Service(ABC):
         """
         ...
 
+    @abstractmethod
+    async def all_inputs_done(self) -> None:
+        """
+        Called when, across all workers, `add_key` has returned for every key in ``input_keys``.
+
+        Broadcast by the scheduler to all instances of this service task,
+        to help Services coordinate.
+        """
+        ...
+
     # Peers joining and leaving won't be supported in the first iteration.
     # For now, new workers will be ignored, and any worker leaving will trigger
     # a restart of the whole service group? (Don't want to have this be released behavior
