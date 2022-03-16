@@ -146,7 +146,7 @@ async def test_fail_to_pickle_target_2(c, s, a):
     config={
         "distributed.worker.memory.target": False,
         "distributed.worker.memory.spill": 0.7,
-        "distributed.worker.memory.monitor-interval.spill-pause": "10ms",
+        "distributed.worker.memory.monitor-interval": "10ms",
     },
 )
 async def test_fail_to_pickle_spill(c, s, a):
@@ -273,7 +273,7 @@ async def test_spill_constrained(c, s, w):
         "distributed.worker.memory.target": False,
         "distributed.worker.memory.spill": 0.7,
         "distributed.worker.memory.pause": False,
-        "distributed.worker.memory.monitor-interval.spill-pause": "10ms",
+        "distributed.worker.memory.monitor-interval": "10ms",
     },
 )
 async def test_spill_spill_threshold(c, s, a):
@@ -310,7 +310,7 @@ async def test_spill_spill_threshold(c, s, a):
     config={
         "distributed.worker.memory.spill": 0.7,
         "distributed.worker.memory.pause": False,
-        "distributed.worker.memory.monitor-interval.spill-pause": "10ms",
+        "distributed.worker.memory.monitor-interval": "10ms",
     },
 )
 async def test_spill_hysteresis(c, s, target, managed, expect_spilled):
@@ -416,7 +416,7 @@ async def test_pause_executor_manual(c, s, a):
         "distributed.worker.memory.target": False,
         "distributed.worker.memory.spill": False,
         "distributed.worker.memory.pause": 0.8,
-        "distributed.worker.memory.monitor-interval.spill-pause": "10ms",
+        "distributed.worker.memory.monitor-interval": "10ms",
     },
 )
 async def test_pause_executor_with_memory_monitor(c, s, a):
@@ -482,7 +482,7 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
     client=True,
     nthreads=[("", 1)],
     worker_kwargs={"memory_limit": 0},
-    config={"distributed.worker.memory.monitor-interval.spill-pause": "10ms"},
+    config={"distributed.worker.memory.monitor-interval": "10ms"},
 )
 async def test_avoid_memory_monitor_if_zero_limit_worker(c, s, a):
     assert type(a.data) is dict
@@ -499,10 +499,7 @@ async def test_avoid_memory_monitor_if_zero_limit_worker(c, s, a):
     nthreads=[("", 1)],
     Worker=Nanny,
     worker_kwargs={"memory_limit": 0},
-    config={
-        "distributed.worker.memory.monitor-interval.spill-pause": "10ms",
-        "distributed.worker.memory.monitor-interval.terminate": "10ms",
-    },
+    config={"distributed.worker.memory.monitor-interval": "10ms"},
 )
 async def test_avoid_memory_monitor_if_zero_limit_nanny(c, s, nanny):
     typ = await c.run(lambda dask_worker: type(dask_worker.data))
@@ -543,7 +540,7 @@ async def test_override_data_nanny(c, s, n):
     client=True,
     nthreads=[("", 1)],
     worker_kwargs={"memory_limit": "1 GB", "data": UserDict},
-    config={"distributed.worker.memory.monitor-interval.spill-pause": "10ms"},
+    config={"distributed.worker.memory.monitor-interval": "10ms"},
 )
 async def test_override_data_vs_memory_monitor(c, s, a):
     a.monitor.get_process_memory = lambda: 801_000_000 if a.data else 0
@@ -597,7 +594,7 @@ class ManualEvictDict(UserDict):
     worker_kwargs={"memory_limit": "1 GB", "data": ManualEvictDict},
     config={
         "distributed.worker.memory.pause": False,
-        "distributed.worker.memory.monitor-interval.spill-pause": "10ms",
+        "distributed.worker.memory.monitor-interval": "10ms",
     },
 )
 async def test_manual_evict_proto(c, s, a):
@@ -619,7 +616,7 @@ async def test_manual_evict_proto(c, s, a):
     client=True,
     Worker=Nanny,
     worker_kwargs={"memory_limit": "400 MiB"},
-    config={"distributed.worker.memory.monitor-interval.terminate": "10ms"},
+    config={"distributed.worker.memory.monitor-interval": "10ms"},
 )
 async def test_nanny_terminate(c, s, a):
     def leak():

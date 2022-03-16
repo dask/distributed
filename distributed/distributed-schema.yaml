@@ -513,10 +513,9 @@ properties:
                   Limit of number of bytes to be spilled on disk. 
 
               monitor-interval:
-                type: object
-                properties:
-                  spill-pause: {type: string}
-                  terminate: {type: string}
+                type: string
+                description: >-
+                  Interval between checks for the spill, pause, and terminate thresholds
 
           http:
             type: object

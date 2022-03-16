@@ -130,7 +130,7 @@ class WorkerMemoryManager:
         self._memory_monitoring = False
 
         self.memory_monitor_interval = parse_timedelta(
-            dask.config.get("distributed.worker.memory.monitor-interval.spill-pause"),
+            dask.config.get("distributed.worker.memory.monitor-interval"),
             default=None,
         )
         assert isinstance(self.memory_monitor_interval, (int, float))
@@ -299,7 +299,7 @@ class NannyMemoryManager:
             "distributed.worker.memory.terminate"
         )
         self.memory_monitor_interval = parse_timedelta(
-            dask.config.get("distributed.worker.memory.monitor-interval.terminate"),
+            dask.config.get("distributed.worker.memory.monitor-interval"),
             default=None,
         )
         assert isinstance(self.memory_monitor_interval, (int, float))
