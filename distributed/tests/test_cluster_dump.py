@@ -100,6 +100,12 @@ async def test_cluster_dump_state(c, s, a, b, tmp_path):
     assert sproc_keys == {t.key for t in sproc_tasks}
     assert wproc_keys == {t.key for t in wproc_tasks}
 
+    sall_keys = {t["key"] for t in dump.scheduler_tasks_in_state()}
+    wall_keys = {t["key"] for t in dump.worker_tasks_in_state()}
+
+    assert fut_keys | {blocked_fut.key} == sall_keys
+    assert fut_keys | {blocked_fut.key} == wall_keys
+
     # Mapping API works
     assert "transition_log" in dump["scheduler"]
     assert "log" in dump["workers"][a.address]
@@ -195,3 +201,8 @@ async def test_cluster_dump_to_yaml(c, s, a, b, tmp_path):
         worker_yaml_path = yaml_path / worker.id
         expected = {worker_yaml_path / f for f in worker_files}
         assert expected == set(worker_yaml_path.iterdir())
+
+    # Internal dictionary state compaction
+    # has not been destructive of the original dictionary
+    assert "id" in dump["scheduler"]
+    assert "address" in dump["scheduler"]
