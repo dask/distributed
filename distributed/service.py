@@ -20,9 +20,9 @@ In a graph like::
         ("input", 1): 1,
         ("input", 2): 2,
         "foo-service": (FooService, [("input", 1), ("input", 2)]),  # annotated as a service
-        ("output", 1): (service_result, "foo-service", ("output", 1)),
-        ("output", 2): (service_result, "foo-service", ("output", 2)),
-        ("output", 3): (service_result, "foo-service", ("output", 3)),
+        ("output", 1): (service_result, "foo-service"),             # never actually runs
+        ("output", 2): (service_result, "foo-service"),             # never actually runs
+        ("output", 3): (service_result, "foo-service"),             # never actually runs
         ("downstream", 1): (use, ("output", 1)),
         ("downstream", 2): (use, ("output", 2)),
         ("downstream", 3): (use, ("output", 3)),
@@ -42,9 +42,8 @@ If the single ``foo-service`` task is annotated as a service, it'll actually be 
 by launching ``FooService`` instances on every worker, passing the inputs into them,
 letting them do whatever out-of-band operations they wish (including communicating with
 each other or external systems), and waiting for them to produce the output keys. Once
-an output task is marked as ready, it'll be scheduled on the worker that marked it as
-ready, and `service_result` will pull the output data out of the `FooService` instance,
-bringing it back into the normal task-scheduling system.
+each output key is produced (the `service_result` functions never actually run), any
+tasks downstream of it can run.
 
 ---------------------------------------------------------------------------------------
 
@@ -93,12 +92,12 @@ Composition
 
 One Service's outputs can be another Service's inputs.
 
-A `Service` can depend on the outputs of multiple Services, or both normal tasks and
-Service outputs, or have no dependencies at all. Note, though, that input keys are
-always treated as a flat structure (`Service.add_key` is called, one key at a time, from
-whatever worker already holds the key). Therefore, if particular inputs need to be
-co-located, the `Service` is responsible for transferring them around internally. (Doing
-just that in clever ways is often the whole point of a `Service`.)
+A `Service` can depend on multiple input Services, or both normal tasks and Services, or
+have no dependencies at all. Note, though, that input keys are always treated as a flat
+structure (`Service.add_key` is called, one key at a time, from whatever worker already
+holds the key). Therefore, if particular inputs need to be co-located, the `Service` is
+responsible for transferring them around internally. (Doing just that in clever ways is
+often the whole point of a `Service`.)
 
                  o   o   o
                   \  |  /
@@ -112,50 +111,18 @@ just that in clever ways is often the whole point of a `Service`.)
       \  |   /          \  \  /  /
      foo-service       normal-tasks
 
-Siblings
-~~~~~~~~
-
-A *service family* is a group of service tasks that all have the same ``output_keys``.
-Since they produce the same keys, Dask assumes that they need to run on the same set of peers
-(so each service's contribution to an output key can end up on the same worker).
-
-Service families are determined at graph-submission time.
-
-     o     o
-     | \ / |
-     | / \ |
-    s-1   s-2  <-- "service family": s-1 and s-2 have same outputs
-     /\    /\
-    i  i  i  i
-
-Services in a family will all receive the same list of ``peers`` in `Service.start`,
-even if new workers are available when a later service task starts. (Of course, if any
-of those workers leave, all service tasks would be restarted and ``peers`` would be
-recomputed anyway.) This means that, if all services distribute their outputs across
-workers in the same way (using `peer_for`, for example), then all outputs that need to
-be used together should end up on the same worker.
-
 Restrictions
 ~~~~~~~~~~~~
 
-A service task cannot depend directly on another service task. This is because the input
-to a `Service` is "handed off" to it, and no longer Dask's responsibility. A `Service` itself
-cannot be made the responsibility of another `Service`. Instead, a `Service` can depend on the
-*outputs* of another `Service`.
+If a task depends on a `Service`, that must be its only dependency. For example, this
+will raise an error when the graph is submitted to the scheduler:
 
-For example::
-
-    Invalid:     Valid:
-
-     o  o  o     o  o  o
-      \ | /       \ | /
-    service-2    service-2
-       |           / \
-    service-1     o   o
-      /\           \ /
-     i  i       service-1
-                   /\
-                  i  i
+     o     o   <-- tasks that depend on a Service cannot have >1 dependency
+     | \ / |
+     | / \ |
+    s-1   s-2
+     /\    /\
+    i  i  i  i
 
 A `Future` cannot refer to a service task; that is, `TaskState.who_wants` must be
 empty if `TaskState.service` is True. In other words, you can't compute a `Service`
@@ -173,6 +140,7 @@ from typing import (
     Iterable,
     Mapping,
     NewType,
+    NoReturn,
     Protocol,
     Sequence,
     TypeVar,
@@ -185,9 +153,19 @@ from dask.base import tokenize
 from dask.highlevelgraph import Layer
 
 
-def service_result(service: Service, key: str) -> Any:
-    "Retrieve an output key from a `Service`"
-    return service.get_output(key)
+def service_result(service: Service) -> NoReturn:
+    """
+    Placeholder function used in output tasks for a `Service`.
+
+    The scheduler will not actually run tasks that depend on a `Service`;
+    they are just added to the graph to create dependency structure.
+    Instead, Services use `Concierge.produce_key` to mark their output keys
+    as complete. Then, normal tasks that depend on those output keys can run.
+    """
+    raise RuntimeError(
+        f"`service_result` should not actually be called on {service!r}."
+        "Are you sure you're running on a distributed cluster?"
+    )
 
 
 ServiceKey = NewType("ServiceKey", str)
@@ -212,7 +190,7 @@ class Service(ABC):
         *,
         id: ServiceId,
         key: ServiceKey,
-        peers: dict[ServiceId, ServiceHandle[T]],
+        peers: Mapping[ServiceId, ServiceHandle[T]],
         input_keys: Sequence[str],
         output_keys: Sequence[str],
         concierge: Concierge,
@@ -332,29 +310,6 @@ class Service(ABC):
     #     ...
 
     @abstractmethod
-    async def get_output(self, key: str) -> Any:
-        """
-        Called by tasks to hand off output data from the `Service` back to Dask.
-
-        Once `get_output` has returned, the data is owned by the worker and tracked by
-        the scheduler. The `Service` should release all references to the data.
-
-        Dask will never call `get_output` directly; it's expected to be called by
-        code in tasks (such as `service_result`). Dask will not schedule the task
-        ``key`` to run until `Concierge.key_ready` has been called for that key. That
-        task will then run on the `Worker` holding the `Service` instance that called
-        `Concierge.key_ready`. Thefore, you can generally expect that, for a given key,
-        `get_output` won't be called on an instance until that instance calls
-        `Concierge.key_ready`, and it will be called exactly once for that key across
-        all workers (though there is nothing stopping badly-behaved task code from
-        violating these expectations).
-
-        If `get_output` raises an error, it's equivalent to calling `Concierge.error`
-        with that exception: the entire service task will be erred, and all instances
-        stopped.
-        """
-
-    @abstractmethod
     async def stop(self) -> None:
         """
         Called by the `Worker` when this service task should stop.
@@ -402,27 +357,16 @@ class Concierge:
     "Interface for `Service` instances to update the progress of a service task"
     key: ServiceKey
 
-    async def output_ready(self, key: str) -> None:
+    async def produce_key(self, key: str, data: Any) -> None:
         """
-        Inform the Scheduler that an output task is ready to run on this `Worker`.
+        Hand off output data from a `Service` back to Dask.
 
-        After ``await output_ready(key)`` has returned, the scheduler will schedule
-        ``key`` to run on the same worker where `output_ready` was just called (with
-        worker restrictions so ``key`` can run nowhere else).
+        Once ``await produce_key(key, data)`` has returned, the data is owned by the
+        worker and tracked by the scheduler. The `Service` should release all references
+        to the data.
 
-        If `output_ready` is passed a ``key`` that wasn't part of ``output_keys``, it
-        raises `KeyError`.
-
-        If `output_ready` has already been called for ``key`` from a different `Worker`,
-        it raises `ValueError`, and the call is ignored.
-
-        It is idempotent to call `output_ready` multiple times with the same ``key``
-        from the same `Worker` (including different `Service` instances).
-
-        If the service task is stopped (due to error, restart, etc.) after
-        ``output_ready(key)`` has returned, but before the ``key`` task has executed,
-        the task will transition back to ``waiting`` and worker restrictions will be
-        removed.
+        If ``produce_key`` raises an error, the state of the data is undefined. In most
+        cases, the `Service` should call `restart` if this happens.
         """
         ...
 
@@ -490,17 +434,6 @@ class ServiceHandle(Generic[T]):
 class _RPC(Protocol):
     def __call__(self, *args, **kwargs) -> Awaitable:
         ...
-
-
-def peer_for(output_i: int, n_outputs: int, peers: Sequence[ServiceId]) -> ServiceId:
-    "Equally distributing outputs to peers, which peer would be responsible for ``output_i``?"
-    assert output_i >= 0, f"Negative output index: {output_i}"
-    if output_i >= n_outputs:
-        raise IndexError(
-            f"Output index {output_i} does not exist for a Service producing {n_outputs} outputs"
-        )
-    i = len(peers) * output_i // n_outputs
-    return peers[i]
 
 
 # TODO this is certainly incorrect/incomplete, the `Layer` interface is quite hard to follow.
