@@ -115,18 +115,16 @@ just that in clever ways is often the whole point of a `Service`.)
 Siblings
 ~~~~~~~~
 
-A *service family* is a group of service tasks that need to run on the same workers. The
-family of service task ``T`` is defined as the set of service tasks that T's dependents
-depend upon::
-
-    set(dep for dts in ts.dependents for dep in dts.dependencies if dep.service)
+A *service family* is a group of service tasks that all have the same ``output_keys``.
+Since they produce the same keys, Dask assumes that they need to run on the same set of peers
+(so each service's contribution to an output key can end up on the same worker).
 
 Service families are determined at graph-submission time.
 
-     o     o   <-- each output task depends on 2 services
+     o     o
      | \ / |
      | / \ |
-    s-1   s-2  <-- "service family": s-1 and s-2
+    s-1   s-2  <-- "service family": s-1 and s-2 have same outputs
      /\    /\
     i  i  i  i
 
