@@ -268,17 +268,20 @@ class Service(ABC):
         """
         Called by the `Worker` to "hand off" data to the `Service`.
 
-        Once ``add_key`` returns, this `Service` instance owns ``data``, and the
+        Once `add_key` returns, this `Service` instance owns ``data``, and the
         `Worker` will release all references to the data once no other tasks or clients
         are also waiting on ``key``.
 
-        ``add_key`` can be called as soon as ``start`` has returned. It will only be
+        `add_key` can be called as soon as ``start`` has returned. It will only be
         called with keys in ``input_keys``.
 
-        For a given input key, ``add_key`` will be called exactly once *across all workers*.
-        ``add_key`` is always called from a worker that already holds ``key`` (data is
-        not transferred just for ``add_key``). If multiple workers hold replicas of the key,
-        the worker on which ``add_key`` is called is undefined.
+        For a given input key, `add_key` will be called exactly once *across all workers*.
+        `add_key` is always called from a worker that already holds ``key`` (data is
+        not transferred just for ``add_key`). If multiple workers hold replicas of the key,
+        the worker on which `add_key` is called is undefined.
+
+        If `add_key` raises an error, it's equivalent to calling `Concierge.error` with that
+        exception: the entire service task will be erred, and all instances stopped.
         """
         ...
 
