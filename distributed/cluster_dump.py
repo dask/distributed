@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import IO, Any, Awaitable, Callable, Collection, Literal
 
@@ -62,24 +63,29 @@ async def write_state(
         await to_thread(writer, state, f)
 
 
-def load_cluster_dump(url: str) -> dict:
+def load_cluster_dump(url: str | Path, **kwargs) -> dict:
     """Loads a cluster dump from a disk artefact
 
     Parameters
     ----------
     url : str
         Name of the disk artefact. This should have either a
-        `.msgpack.gz` or `yaml` suffix, depending on the dump format.
+        ``.msgpack.gz`` or ``yaml`` suffix, depending on the dump format.
+    **kwargs :
+        Extra arguments passed to :func:`fsspec.open`.
 
     Returns
     -------
     state : dict
         The cluster state at the time of the dump.
     """
-    if url.endswith(".msgpack.gz"):
+    if isinstance(url, str):
+        url = Path(url)
+
+    if url.name.endswith(".msgpack.gz"):
         mode = "rb"
         reader = msgpack.unpack
-    elif url.endswith(".yaml"):
+    elif url.name.endswith(".yaml"):
         import yaml
 
         mode = "r"
@@ -87,70 +93,102 @@ def load_cluster_dump(url: str) -> dict:
     else:
         raise ValueError(f"url ({url}) must have a .msgpack.gz or .yaml suffix")
 
-    with fsspec.open(url, mode, compression="infer") as f:
+    kwargs.setdefault("compression", "infer")
+
+    with fsspec.open(url, mode, **kwargs) as f:
         return reader(f)
 
 
-class DumpArtefact:
+class DumpArtefact(Mapping):
     """
     Utility class for inspecting the state of a cluster dump
 
     .. code-block:: python
 
-        dump = DumpArtefact("dump.msgpack.gz")
+        dump = DumpArtefact.from_url("dump.msgpack.gz")
         memory_tasks = dump.scheduler_tasks("memory")
         executing_tasks = dump.worker_tasks("executing")
     """
 
-    def __init__(self, url_or_state: str | dict):
-        if isinstance(url_or_state, str):
-            self.dump = load_cluster_dump(url_or_state)
-        elif isinstance(url_or_state, dict):
-            self.dump = url_or_state
-        else:
-            raise TypeError("'url_or_state' must be a str or dict")
+    def __init__(self, state: dict):
+        self.dump = state
 
-    def _extract_tasks(self, state: str, context: dict):
+    @classmethod
+    def from_url(cls, url: str, **kwargs) -> DumpArtefact:
+        """Loads a cluster dump from a disk artefact
+
+        Parameters
+        ----------
+        url : str
+            Name of the disk artefact. This should have either a
+            ``.msgpack.gz`` or ``yaml`` suffix, depending on the dump format.
+        **kwargs :
+            Extra arguments passed to :func:`fsspec.open`.
+
+        Returns
+        -------
+        state : dict
+            The cluster state at the time of the dump.
+        """
+        return DumpArtefact(load_cluster_dump(url, **kwargs))
+
+    def __getitem__(self, key):
+        return self.dump[key]
+
+    def __iter__(self):
+        return iter(self.dump)
+
+    def __len__(self):
+        return len(self.dump)
+
+    def _extract_tasks(self, state: str | None, context: dict):
         if state:
             return [v for v in context.values() if v["state"] == state]
         else:
             return list(context.values())
 
-    def scheduler_tasks(self, state: str = "") -> list:
+    def scheduler_tasks_in_state(self, state: str | None = None) -> list:
         """
+        Parameters
+        ----------
+        state : optional, str
+            If provided, only tasks in the given state are returned.
+            Otherwise, all tasks are returned.
+
         Returns
         -------
         tasks : list
-            The list of scheduler tasks in `state`.
+            The list of scheduler tasks in ``state``.
         """
         return self._extract_tasks(state, self.dump["scheduler"]["tasks"])
 
-    def worker_tasks(self, state: str = "") -> list:
+    def worker_tasks_in_state(self, state: str | None = None) -> list:
         """
+        Parameters
+        ----------
+        state : optional, str
+            If provided, only tasks in the given state are returned.
+            Otherwise, all tasks are returned.
+
         Returns
         -------
         tasks : list
-            The list of worker tasks in `state`
+            The list of worker tasks in ``state``
         """
         tasks = []
 
         for worker_dump in self.dump["workers"].values():
-            if self._valid_worker_dump(worker_dump):
+            if isinstance(worker_dump, dict) and "tasks" in worker_dump:
                 tasks.extend(self._extract_tasks(state, worker_dump["tasks"]))
 
         return tasks
-
-    def _valid_worker_dump(self, worker_dump):
-        # Worker dumps should be a dictionaries but can also be
-        # strings describing comm Failures
-        return isinstance(worker_dump, dict)
 
     def scheduler_story(self, *key_or_stimulus_id: str) -> list:
         """
         Returns
         -------
         stories : list
-            A list of stories for the keys/stimulus ID's in `*key_or_stimulus_id`.
+            A list of stories for the keys/stimulus ID's in ``*key_or_stimulus_id``.
         """
         keys = set(key_or_stimulus_id)
         story = _scheduler_story(keys, self.dump["scheduler"]["transition_log"])
@@ -161,13 +199,13 @@ class DumpArtefact:
         Returns
         -------
         stories : list
-            A list of stories for the keys/stimulus ID's in `*key_or_stimulus_id`.
+            A list of stories for the keys/stimulus ID's in ``*key_or_stimulus_id`.`
         """
         keys = set(key_or_stimulus_id)
         stories: list = []
 
         for worker_dump in self.dump["workers"].values():
-            if self._valid_worker_dump(worker_dump):
+            if isinstance(worker_dump, dict) and "log" in worker_dump:
                 # Stories are tuples, not lists
                 story = _worker_story(keys, worker_dump["log"])
                 stories.extend(map(tuple, story))
@@ -186,12 +224,28 @@ class DumpArtefact:
         responsive_workers = self.dump["workers"]
         return [
             w
-            for w in scheduler_workers.keys()
+            for w in scheduler_workers
             if w not in responsive_workers
-            or not self._valid_worker_dump(responsive_workers[w])
+            or not isinstance(responsive_workers[w], dict)
         ]
 
-    def split(
+    def _compact_state(self, state: dict, expand_keys: set[str]):
+        """Compacts ``state`` keys into a general key,
+        unless the key is in ``expand_keys``"""
+        assert "general" not in state
+        result = {}
+        general = {}
+
+        for k, v in state.items():
+            if k in expand_keys:
+                result[k] = v
+            else:
+                general[k] = v
+
+        result["general"] = general
+        return result
+
+    def to_yaml(
         self,
         root_dir: str | Path | None = None,
         worker_expand_keys: Collection[str] = ("config", "log", "logs", "tasks"),
@@ -207,21 +261,21 @@ class DumpArtefact:
     ):
         """
         Splits the Dump Artefact into a tree of yaml files with
-        `root_dir` as it's base.
+        ``root_dir`` as it's base.
 
         The root level of the tree contains a directory for the scheduler
         and directories for each individual worker.
         Each directory contains yaml files describing the state of the scheduler
         or worker when the artefact was created.
 
-        In general, keys associated with the state are compacted into a `general.yaml`
-        file, unless they are in `scheduler_expand_keys` and `worker_expand_keys`.
+        In general, keys associated with the state are compacted into a ``general.yaml``
+        file, unless they are in ``scheduler_expand_keys`` and ``worker_expand_keys``.
 
         Parameters
         ----------
         root_dir : str or Path
             The root directory into which the tree is written.
-            Defaults to the current working directory if `None`.
+            Defaults to the current working directory if ``None``.
         worker_expand_keys : iterable of str
             An iterable of artefact worker keys that will be expanded
             into separate yaml files.
@@ -231,7 +285,7 @@ class DumpArtefact:
             An iterable of artefact scheduler keys that will be expanded
             into separate yaml files.
             Keys that are not in this iterable are compacted into a
-            `general.yaml` file.
+            ``general.yaml`` file.
         """
         import yaml
 
@@ -242,36 +296,29 @@ class DumpArtefact:
 
         workers = self.dump["workers"]
         for info in workers.values():
-            worker_id = info["id"]
-            assert "general" not in info
+            try:
+                worker_id = info["id"]
+            except KeyError:
+                continue
 
-            # Compact smaller keys into a general dict
-            general = {
-                k: info.pop(k) for k in list(info.keys()) if k not in worker_expand_keys
-            }
-            info["general"] = general
+            worker_state = self._compact_state(info, worker_expand_keys)
 
             log_dir = root_dir / worker_id
             log_dir.mkdir(parents=True, exist_ok=True)
 
-            for name, _logs in info.items():
+            for name, _logs in worker_state.items():
                 filename = str(log_dir / f"{name}.yaml")
                 with open(filename, "w") as fd:
                     yaml.dump(_logs, fd, Dumper=dumper)
 
         context = "scheduler"
-        info = self.dump[context]
-        assert "general" not in info
-        general = {
-            k: info.pop(k) for k in list(info.keys()) if k not in scheduler_expand_keys
-        }
-        info["general"] = general
+        scheduler_state = self._compact_state(self.dump[context], scheduler_expand_keys)
 
         log_dir = root_dir / context
         log_dir.mkdir(parents=True, exist_ok=True)
         # Compact smaller keys into a general dict
 
-        for name, _logs in info.items():
+        for name, _logs in scheduler_state.items():
             filename = str(log_dir / f"{name}.yaml")
 
             with open(filename, "w") as fd:

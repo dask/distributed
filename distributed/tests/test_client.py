@@ -21,7 +21,6 @@ from collections.abc import Generator
 from contextlib import contextmanager, suppress
 from functools import partial
 from operator import add
-from pathlib import Path
 from threading import Semaphore
 from time import sleep
 from typing import Any
@@ -37,7 +36,6 @@ from dask import delayed
 from dask.optimization import SubgraphCallable
 from dask.utils import parse_timedelta, stringify, tmpfile
 
-import distributed
 from distributed import (
     CancelledError,
     Executor,
@@ -65,7 +63,7 @@ from distributed.client import (
     tokenize,
     wait,
 )
-from distributed.cluster_dump import DumpArtefact, load_cluster_dump
+from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import Status
@@ -82,7 +80,6 @@ from distributed.utils import is_valid_xml, mp_context, sync, tmp_text
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _UnhashableCallable,
-    assert_worker_story,
     async_wait_for,
     asyncinc,
     captured_logger,
@@ -7334,109 +7331,6 @@ async def test_dump_cluster_state_json(c, s, a, b, tmp_path, local):
         filename = f"file://{filename}"
     with pytest.raises(ValueError, match="Unsupported format"):
         await c.dump_cluster_state(filename, format="json")
-
-
-def blocked_inc(x, event):
-    event.wait()
-    return x + 1
-
-
-@pytest.mark.parametrize("local", [True, False])
-@pytest.mark.parametrize("_format", ["msgpack", "yaml"])
-@gen_cluster(client=True)
-async def test_inspect_cluster_dump(c, s, a, b, tmp_path, _format, local):
-    filename = tmp_path / "foo"
-    if not local:
-        pytest.importorskip("fsspec")
-        # Make it look like an fsspec path
-        filename = f"file://{filename}"
-
-    futs = c.map(inc, range(2))
-    fut_keys = {f.key for f in futs}
-    await c.gather(futs)
-
-    event = distributed.Event()
-    blocked_fut = c.submit(blocked_inc, 1, event)
-
-    await c.dump_cluster_state(filename, format=_format)
-
-    scheduler_tasks = list(s.tasks.values())
-    worker_tasks = [t for w in (a, b) for t in w.tasks.values()]
-
-    event.set()
-
-    suffix = ".gz" if _format == "msgpack" else ""
-    dump = DumpArtefact(f"{filename}.{_format}{suffix}")
-
-    smem_keys = {t["key"] for t in dump.scheduler_tasks("memory")}
-    wmem_keys = {t["key"] for t in dump.worker_tasks("memory")}
-
-    assert smem_keys == fut_keys
-    assert smem_keys == {t.key for t in scheduler_tasks if t.state == "memory"}
-    assert wmem_keys == fut_keys
-    assert wmem_keys == {t.key for t in worker_tasks if t.state == "memory"}
-
-    task_key = next(iter(fut_keys))
-
-    expected = [
-        (task_key, "released", "waiting", {task_key: "processing"}),
-        (task_key, "waiting", "processing", {}),
-        (task_key, "processing", "memory", {}),
-    ]
-
-    story = dump.scheduler_story(task_key)
-    assert len(story) == len(expected)
-
-    for event, expected_event in zip(story, expected):
-        for e1, e2 in zip(event, expected_event):
-            assert e1 == e2
-
-    assert len(dump.scheduler_story(task_key)) == 3
-    assert_worker_story(
-        dump.worker_story(task_key),
-        [
-            (task_key, "compute-task"),
-            (task_key, "released", "waiting", "waiting", {task_key: "ready"}),
-            (task_key, "waiting", "ready", "ready", {}),
-            (task_key, "ready", "executing", "executing", {}),
-            (task_key, "put-in-memory"),
-            (task_key, "executing", "memory", "memory", {}),
-        ],
-    )
-
-    dump_path = Path(tmp_path / "dump")
-    dump.split(dump_path)
-    scheduler_files = {
-        "events.yaml",
-        "extensions.yaml",
-        "general.yaml",
-        "log.yaml",
-        "task_groups.yaml",
-        "tasks.yaml",
-        "transition_log.yaml",
-        "workers.yaml",
-    }
-
-    scheduler_dump_path = dump_path / "scheduler"
-    expected = {scheduler_dump_path / f for f in scheduler_files}
-    assert expected == set(scheduler_dump_path.iterdir())
-
-    worker_files = {
-        "config.yaml",
-        "general.yaml",
-        "log.yaml",
-        "logs.yaml",
-        "tasks.yaml",
-    }
-
-    for worker in (a, b):
-        worker_dump_path = dump_path / worker.id
-        expected = {worker_dump_path / f for f in worker_files}
-        assert expected == set(worker_dump_path.iterdir())
-
-    # TODO(sjperkins): Make a worker fail badly to make
-    # this test more interesting
-    assert len(dump.missing_workers()) == 0
 
 
 @gen_cluster(client=True)
