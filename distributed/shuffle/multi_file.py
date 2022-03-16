@@ -47,6 +47,7 @@ class MultiFile:
 
         self._done = False
         self._futures = set()
+        self.active = set()
 
     async def put(self, data: dict):
         this_size = 0
@@ -112,6 +113,10 @@ class MultiFile:
     async def process(self, id: str, shards: list, size: int):
         with log_errors():
             # Consider boosting total_size a bit here to account for duplication
+            while id in self.active:
+                await asyncio.sleep(0.01)
+
+            self.active.add(id)
 
             def _():
                 # TODO: offload
@@ -123,6 +128,7 @@ class MultiFile:
 
             await offload(_)
 
+            self.active.remove(id)
             self.total_size -= size
             async with self.condition:
                 self.condition.notify()
