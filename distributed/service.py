@@ -194,7 +194,7 @@ class Service(ABC):
         input_keys: Sequence[str],
         output_keys: Sequence[str],
         concierge: Concierge,
-        leader: bool,
+        leader: ServiceId,
         **kwargs,
     ) -> None:
         """
@@ -232,7 +232,7 @@ class Service(ABC):
             `Worker`. Used to hand off output keys back to Dask, restart or fail the
             service task, etc.
         leader:
-            Whether this instance was chosen to be the "leader" of the service task. The
+            The ID of the instance chosen to be the "leader" of the service task. The
             scheduler will pick exactly one instance in ``peers`` to be the leader. The
             order in which `Service` instances start up on workers is of course
             undefined; the leader may not be the first instance to actually start.
