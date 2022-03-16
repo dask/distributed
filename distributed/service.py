@@ -93,12 +93,12 @@ Composition
 
 One Service's outputs can be another Service's inputs.
 
-A `Service` can depend on multiple input Services, or both normal tasks and Services, or
-have no dependencies at all. Note, though, that input keys are always treated as a flat
-structure (`Service.add_key` is called, one key at a time, from whatever worker already
-holds the key). Therefore, if particular inputs need to be co-located, the `Service` is
-responsible for transferring them around internally. (Doing just that in clever ways is
-often the whole point of a `Service`.)
+A `Service` can depend on the outputs of multiple Services, or both normal tasks and
+Service outputs, or have no dependencies at all. Note, though, that input keys are
+always treated as a flat structure (`Service.add_key` is called, one key at a time, from
+whatever worker already holds the key). Therefore, if particular inputs need to be
+co-located, the `Service` is responsible for transferring them around internally. (Doing
+just that in clever ways is often the whole point of a `Service`.)
 
                  o   o   o
                   \  |  /
@@ -112,18 +112,52 @@ often the whole point of a `Service`.)
       \  |   /          \  \  /  /
      foo-service       normal-tasks
 
+Siblings
+~~~~~~~~
+
+A *service family* is a group of service tasks that need to run on the same workers. The
+family of service task ``T`` is defined as the set of service tasks that T's dependents
+depend upon::
+
+    set(dep for dts in ts.dependents for dep in dts.dependencies if dep.service)
+
+Service families are determined at graph-submission time.
+
+     o     o   <-- each output task depends on 2 services
+     | \ / |
+     | / \ |
+    s-1   s-2  <-- "service family": s-1 and s-2
+     /\    /\
+    i  i  i  i
+
+Services in a family will all receive the same list of ``peers`` in `Service.start`,
+even if new workers are available when a later service task starts. (Of course, if any
+of those workers leave, all service tasks would be restarted and ``peers`` would be
+recomputed anyway.) This means that, if all services distribute their outputs across
+workers in the same way (using `peer_for`, for example), then all outputs that need to
+be used together should end up on the same worker.
+
 Restrictions
 ~~~~~~~~~~~~
 
-If a task depends on a `Service`, that must be its only dependency. For example, this
-will raise an error when the graph is submitted to the scheduler:
+A service task cannot depend directly on another service task. This is because the input
+to a `Service` is "handed off" to it, and no longer Dask's responsibility. A `Service` itself
+cannot be made the responsibility of another `Service`. Instead, a `Service` can depend on the
+*outputs* of another `Service`.
 
-     o     o   <-- tasks that depend on a Service cannot have >1 dependency
-     | \ / |
-     | / \ |
-    s-1   s-2
-     /\    /\
-    i  i  i  i
+For example::
+
+    Invalid:     Valid:
+
+     o  o  o     o  o  o
+      \ | /       \ | /
+    service-2    service-2
+       |           / \
+    service-1     o   o
+      /\           \ /
+     i  i       service-1
+                   /\
+                  i  i
 
 A `Future` cannot refer to a service task; that is, `TaskState.who_wants` must be
 empty if `TaskState.service` is True. In other words, you can't compute a `Service`
@@ -180,7 +214,7 @@ class Service(ABC):
         *,
         id: ServiceId,
         key: ServiceKey,
-        peers: Mapping[ServiceId, ServiceHandle[T]],
+        peers: dict[ServiceId, ServiceHandle[T]],
         input_keys: Sequence[str],
         output_keys: Sequence[str],
         concierge: Concierge,
@@ -381,11 +415,11 @@ class Concierge:
         If `output_ready` is passed a ``key`` that wasn't part of ``output_keys``, it
         raises `KeyError`.
 
-        If `output_ready` has already been called for ``key`` from a different `Service`
-        instance, it raises `ValueError`, and the call is ignored.
+        If `output_ready` has already been called for ``key`` from a different `Worker`,
+        it raises `ValueError`, and the call is ignored.
 
         It is idempotent to call `output_ready` multiple times with the same ``key``
-        from the same `Service` instance.
+        from the same `Worker` (including different `Service` instances).
 
         If the service task is stopped (due to error, restart, etc.) after
         ``output_ready(key)`` has returned, but before the ``key`` task has executed,
@@ -458,6 +492,17 @@ class ServiceHandle(Generic[T]):
 class _RPC(Protocol):
     def __call__(self, *args, **kwargs) -> Awaitable:
         ...
+
+
+def peer_for(output_i: int, n_outputs: int, peers: Sequence[ServiceId]) -> ServiceId:
+    "Equally distributing outputs to peers, which peer would be responsible for ``output_i``?"
+    assert output_i >= 0, f"Negative output index: {output_i}"
+    if output_i >= n_outputs:
+        raise IndexError(
+            f"Output index {output_i} does not exist for a Service producing {n_outputs} outputs"
+        )
+    i = len(peers) * output_i // n_outputs
+    return peers[i]
 
 
 # TODO this is certainly incorrect/incomplete, the `Layer` interface is quite hard to follow.
