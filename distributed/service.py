@@ -69,7 +69,7 @@ Resilience
   all workers. TODO change once `peer_joined`/`peer_left` are added.
 * If keys downstream of a service need to be recomputed, the service will be rerun, just
   like regular tasks are.
-* The service is informed at runtime which inputs to expect and which outputs to
+* The service instances are informed at runtime which inputs to expect and which outputs to
   produce, so partial recomputation (some outputs already in memory, some not) can be
   handled correctly.
 
