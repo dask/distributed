@@ -40,7 +40,7 @@
                     <ul>
                         {% for plot in plots %}
                         <li><a href="{{ plot }}">
-                                {{ " ".join(plot.split("-")[1:]).title().replace("Cpu", "CPU").replace("Gpu", "GPU") }}
+                                {{ " ".join(plot.split("-")[1:]).title().replace("Cpu", "CPU").replace("Gpu", "GPU").replace("Rmm", "RMM") }}
                             </a></li>
                         {% endfor %}
                     </ul>
