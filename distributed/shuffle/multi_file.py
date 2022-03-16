@@ -61,16 +61,19 @@ class MultiFile:
 
         del data, shard
 
+        from dask.utils import format_bytes
+
+        if self.total_size > self.memory_limit:
+            print(
+                "waiting disk",
+                format_bytes(self.total_size),
+                "this",
+                format_bytes(this_size),
+            )
+
         while self.total_size > self.memory_limit:
             async with self.condition:
-                from dask.utils import format_bytes
 
-                print(
-                    "waiting disk",
-                    format_bytes(self.total_size),
-                    "this",
-                    format_bytes(this_size),
-                )
                 try:
                     await asyncio.wait_for(
                         self.condition.wait(), 1
@@ -101,7 +104,9 @@ class MultiFile:
                     format_bytes(size),
                     "to disk",
                     format_bytes(self.total_size),
-                    "left",
+                    "left in",
+                    len(self.shards),
+                    "buckets",
                 )
 
                 future = asyncio.ensure_future(self.process(id, shards, size))
@@ -125,6 +130,7 @@ class MultiFile:
                 ) as f:
                     for shard in shards:
                         self.dump(shard, f)
+                    os.fsync(f)  # TODO: maybe?
 
             await offload(_)
 

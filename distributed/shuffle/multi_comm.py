@@ -52,20 +52,24 @@ class MultiComm:
 
         from dask.utils import format_bytes
 
+        if self.total_size > self.memory_limit:
+            print(
+                "waiting comm",
+                format_bytes(self.total_size),
+                "this",
+                format_bytes(size),
+            )
+
         while self.total_size > self.memory_limit:
             with self.thread_condition:
-                print(
-                    "waiting comm",
-                    format_bytes(self.total_size),
-                    "this",
-                    format_bytes(size),
-                )
                 self.thread_condition.wait(1)  # Block until memory calms down
 
     async def communicate(self):
         self.comm_queue = asyncio.Queue(maxsize=self.max_connections)
         for _ in range(self.max_connections):
             self.comm_queue.put_nowait(None)
+
+        from dask.utils import format_bytes
 
         while not self._done:
             if not self.shards:
@@ -92,6 +96,15 @@ class MultiComm:
                         size += s
                         self.sizes[address] -= s
 
+            print(
+                "Sending",
+                format_bytes(size),
+                "to comm",
+                format_bytes(self.total_size),
+                "left in ",
+                len(self.shards),
+                "buckets",
+            )
             future = asyncio.ensure_future(self.process(address, shards, size))
             del shards
             self._futures.add(future)

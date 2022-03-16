@@ -88,19 +88,19 @@ class Shuffle:
             ),
             load=load_arrow,
             directory=os.path.join(self.worker.local_directory, str(self.metadata.id)),
-            memory_limit="500 MiB",  # TODO: lift this up to the global ShuffleExtension
+            memory_limit="900 MiB",  # TODO: lift this up to the global ShuffleExtension
             file_cache=file_cache,
             concurrent_files=3,
             join=pa.concat_tables,  # pd.concat
             sizeof=lambda L: sum(map(len, L)),
         )
         self.multi_comm = MultiComm(
-            memory_limit="300 MiB",  # TODO
+            memory_limit="50 MiB",  # TODO
             rpc=worker.rpc,
             shuffle_id=self.metadata.id,
             sizeof=lambda L: sum(map(len, L)),
             join=functools.partial(sum, start=[]),
-            max_connections=10,
+            max_connections=3,
         )
         self.worker.loop.add_callback(self.multi_comm.communicate)
         self.worker.loop.add_callback(self.multi_file.communicate)
@@ -118,8 +118,10 @@ class Shuffle:
         print("recved", format_bytes(sum(map(len, data))))
         self.total_recvd += sum(map(len, data))
         # An ugly way of turning these batches back into an arrow table
-        data = list_of_buffers_to_table(
-            data, schema=pa.Schema.from_pandas(self.metadata.empty)
+        data = await offload(
+            list_of_buffers_to_table,
+            data,
+            schema=pa.Schema.from_pandas(self.metadata.empty),
         )
 
         groups = await offload(split_by_partition, data, self.metadata.column)
@@ -224,12 +226,11 @@ class ShuffleWorkerExtension:
         # TODO: it would be good to not have comms wait on disk if not
         # necessary
         future = asyncio.ensure_future(shuffle.receive(data))
-        await future  # backpressure
+        # await future  # backpressure
         if (
             shuffle.multi_file.total_size + sum(map(len, data))
             > shuffle.multi_file.memory_limit
         ):
-            return
             await future  # backpressure
 
     async def shuffle_inputs_done(self, comm: object, shuffle_id: ShuffleId) -> None:
