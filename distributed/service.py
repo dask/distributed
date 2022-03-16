@@ -20,9 +20,9 @@ In a graph like::
         ("input", 1): 1,
         ("input", 2): 2,
         "foo-service": (FooService, [("input", 1), ("input", 2)]),  # annotated as a service
-        ("output", 1): (service_result, "foo-service"),             # never actually runs
-        ("output", 2): (service_result, "foo-service"),             # never actually runs
-        ("output", 3): (service_result, "foo-service"),             # never actually runs
+        ("output", 1): (service_result, "foo-service", ("output", 1)),
+        ("output", 2): (service_result, "foo-service", ("output", 2)),
+        ("output", 3): (service_result, "foo-service", ("output", 3)),
         ("downstream", 1): (use, ("output", 1)),
         ("downstream", 2): (use, ("output", 2)),
         ("downstream", 3): (use, ("output", 3)),
@@ -42,8 +42,9 @@ If the single ``foo-service`` task is annotated as a service, it'll actually be 
 by launching ``FooService`` instances on every worker, passing the inputs into them,
 letting them do whatever out-of-band operations they wish (including communicating with
 each other or external systems), and waiting for them to produce the output keys. Once
-each output key is produced (the `service_result` functions never actually run), any
-tasks downstream of it can run.
+an output task is marked as ready, it'll be scheduled on the worker that marked it as
+ready, and `service_result` will pull the output data out of the `FooService` instance,
+bringing it back into the normal task-scheduling system.
 
 ---------------------------------------------------------------------------------------
 
@@ -140,7 +141,6 @@ from typing import (
     Iterable,
     Mapping,
     NewType,
-    NoReturn,
     Protocol,
     Sequence,
     TypeVar,
@@ -153,19 +153,9 @@ from dask.base import tokenize
 from dask.highlevelgraph import Layer
 
 
-def service_result(service: Service) -> NoReturn:
-    """
-    Placeholder function used in output tasks for a `Service`.
-
-    The scheduler will not actually run tasks that depend on a `Service`;
-    they are just added to the graph to create dependency structure.
-    Instead, Services use `Concierge.produce_key` to mark their output keys
-    as complete. Then, normal tasks that depend on those output keys can run.
-    """
-    raise RuntimeError(
-        f"`service_result` should not actually be called on {service!r}."
-        "Are you sure you're running on a distributed cluster?"
-    )
+def service_result(service: Service, key: str) -> Any:
+    "Retrieve an output key from a `Service`"
+    return service.get_output(key)
 
 
 ServiceKey = NewType("ServiceKey", str)
@@ -310,6 +300,29 @@ class Service(ABC):
     #     ...
 
     @abstractmethod
+    async def get_output(self, key: str) -> Any:
+        """
+        Called by tasks to hand off output data from the `Service` back to Dask.
+
+        Once `get_output` has returned, the data is owned by the worker and tracked by
+        the scheduler. The `Service` should release all references to the data.
+
+        Dask will never call `get_output` directly; it's expected to be called by
+        code in tasks (such as `service_result`). Dask will not schedule the task
+        ``key`` to run until `Concierge.key_ready` has been called for that key. That
+        task will then run on the `Worker` holding the `Service` instance that called
+        `Concierge.key_ready`. Thefore, you can generally expect that, for a given key,
+        `get_output` won't be called on an instance until that instance calls
+        `Concierge.key_ready`, and it will be called exactly once for that key across
+        all workers (though there is nothing stopping badly-behaved task code from
+        violating these expectations).
+
+        If `get_output` raises an error, it's equivalent to calling `Concierge.error`
+        with that exception: the entire service task will be erred, and all instances
+        stopped.
+        """
+
+    @abstractmethod
     async def stop(self) -> None:
         """
         Called by the `Worker` when this service task should stop.
@@ -357,16 +370,27 @@ class Concierge:
     "Interface for `Service` instances to update the progress of a service task"
     key: ServiceKey
 
-    async def produce_key(self, key: str, data: Any) -> None:
+    async def output_ready(self, key: str) -> None:
         """
-        Hand off output data from a `Service` back to Dask.
+        Inform the Scheduler that an output task is ready to run on this `Worker`.
 
-        Once ``await produce_key(key, data)`` has returned, the data is owned by the
-        worker and tracked by the scheduler. The `Service` should release all references
-        to the data.
+        After ``await output_ready(key)`` has returned, the scheduler will schedule
+        ``key`` to run on the same worker where `output_ready` was just called (with
+        worker restrictions so ``key`` can run nowhere else).
 
-        If ``produce_key`` raises an error, the state of the data is undefined. In most
-        cases, the `Service` should call `restart` if this happens.
+        If `output_ready` is passed a ``key`` that wasn't part of ``output_keys``, it
+        raises `KeyError`.
+
+        If `output_ready` has already been called for ``key`` from a different `Service`
+        instance, it raises `ValueError`, and the call is ignored.
+
+        It is idempotent to call `output_ready` multiple times with the same ``key``
+        from the same `Service` instance.
+
+        If the service task is stopped (due to error, restart, etc.) after
+        ``output_ready(key)`` has returned, but before the ``key`` task has executed,
+        the task will transition back to ``waiting`` and worker restrictions will be
+        removed.
         """
         ...
 
