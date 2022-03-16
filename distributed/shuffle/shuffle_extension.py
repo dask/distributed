@@ -211,13 +211,25 @@ class ShuffleWorkerExtension:
         self,
         comm: object,
         shuffle_id: ShuffleId,
-        data: pd.DataFrame,
+        data: list[pa.Buffer],
     ) -> None:
         """
         Hander: Receive an incoming shard of data from a peer worker.
         Using an unknown ``shuffle_id`` is an error.
         """
-        await self._get_shuffle(shuffle_id).receive(data)
+        shuffle = self._get_shuffle(shuffle_id)
+        await shuffle.receive(data)
+        return
+        # TODO: it would be good to not have comms wait on disk if not
+        # necessary
+        future = asyncio.ensure_future(shuffle.receive(data))
+        await future  # backpressure
+        if (
+            shuffle.multi_file.total_size + sum(map(len, data))
+            > shuffle.multi_file.memory_limit
+        ):
+            return
+            await future  # backpressure
 
     async def shuffle_inputs_done(self, comm: object, shuffle_id: ShuffleId) -> None:
         """

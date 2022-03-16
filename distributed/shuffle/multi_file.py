@@ -95,7 +95,13 @@ class MultiFile:
                 size = self.sizes.pop(id)
                 from dask.utils import format_bytes
 
-                print("Writing", format_bytes(size), "to disk")
+                print(
+                    "Writing",
+                    format_bytes(size),
+                    "to disk",
+                    format_bytes(self.total_size),
+                    "left",
+                )
 
                 future = asyncio.ensure_future(self.process(id, shards, size))
                 del shards
