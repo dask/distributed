@@ -88,18 +88,19 @@ class Shuffle:
             ),
             load=load_arrow,
             directory=os.path.join(self.worker.local_directory, str(self.metadata.id)),
-            memory_limit="900 MiB",  # TODO: lift this up to the global ShuffleExtension
+            memory_limit="500 MiB",  # TODO: lift this up to the global ShuffleExtension
             file_cache=file_cache,
-            concurrent_files=1,
+            concurrent_files=3,
             join=pa.concat_tables,  # pd.concat
             sizeof=lambda L: sum(map(len, L)),
         )
         self.multi_comm = MultiComm(
-            memory_limit="50 MiB",  # TODO
+            memory_limit="300 MiB",  # TODO
             rpc=worker.rpc,
             shuffle_id=self.metadata.id,
             sizeof=lambda L: sum(map(len, L)),
             join=functools.partial(sum, start=[]),
+            max_connections=10,
         )
         self.worker.loop.add_callback(self.multi_comm.communicate)
         self.worker.loop.add_callback(self.multi_file.communicate)
@@ -110,26 +111,21 @@ class Shuffle:
 
     async def receive(self, data: list[pa.Buffer]) -> None:
         assert not self.transferred, "`receive` called after barrier task"
+        import pyarrow as pa
+
         from dask.utils import format_bytes
 
         print("recved", format_bytes(sum(map(len, data))))
         self.total_recvd += sum(map(len, data))
         # An ugly way of turning these batches back into an arrow table
-        import io
-
-        import pyarrow as pa
-
-        bio = io.BytesIO()
-        bio.write(pa.Schema.from_pandas(self.metadata.empty).serialize())
-        for batch in data:
-            bio.write(batch)
-        bio.seek(0)
-        sr = pa.RecordBatchStreamReader(bio)
-        data = sr.read_all()
+        data = list_of_buffers_to_table(
+            data, schema=pa.Schema.from_pandas(self.metadata.empty)
+        )
 
         groups = await offload(split_by_partition, data, self.metadata.column)
 
         assert len(data) == sum(map(len, groups.values()))
+        del data
 
         groups = await offload(
             lambda: {
@@ -455,3 +451,19 @@ def worker_for(output_partition: int, workers: list[str], npartitions: int) -> s
     "Get the address of the worker which should hold this output partition number"
     i = len(workers) * output_partition // npartitions
     return workers[i]
+
+
+def list_of_buffers_to_table(data: list[pa.Buffer], schema: pa.Schema) -> pa.Table:
+    import io
+
+    import pyarrow as pa
+
+    bio = io.BytesIO()
+    bio.write(schema.serialize())
+    for batch in data:
+        bio.write(batch)
+    bio.seek(0)
+    sr = pa.RecordBatchStreamReader(bio)
+    data = sr.read_all()
+    bio.close()
+    return data

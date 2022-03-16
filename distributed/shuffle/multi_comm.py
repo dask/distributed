@@ -48,11 +48,19 @@ class MultiComm:
                 self.total_size += size
                 self.total_moved += size
 
-        del data
+        del data, shard
+
+        from dask.utils import format_bytes
 
         while self.total_size > self.memory_limit:
             with self.thread_condition:
-                self.thread_condition.wait(0.100)  # Block until memory calms down
+                print(
+                    "waiting comm",
+                    format_bytes(self.total_size),
+                    "this",
+                    format_bytes(size),
+                )
+                self.thread_condition.wait(1)  # Block until memory calms down
 
     async def communicate(self):
         self.comm_queue = asyncio.Queue(maxsize=self.max_connections)

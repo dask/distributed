@@ -58,14 +58,14 @@ class MultiFile:
             self.total_received += size
             this_size += size
 
-        del data
+        del data, shard
 
         while self.total_size > self.memory_limit:
             async with self.condition:
                 from dask.utils import format_bytes
 
                 print(
-                    "waiting",
+                    "waiting disk",
                     format_bytes(self.total_size),
                     "this",
                     format_bytes(this_size),
