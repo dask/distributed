@@ -148,8 +148,8 @@ Last in, first out
 When a worker finishes a task, the immediate dependencies of that task get top
 priority.  This encourages a behavior of finishing ongoing work immediately
 before starting new work (depth-first graph traversal). This often conflicts with
-the first-come-first-served objective, but often results in shorter total runtimes
-and significantly reduced memory footprints.
+the first-come-first-served objective, but often results in significantly reduced
+memory footprints and, due to avoiding data spillage to disk, better overall runtimes.
 
 .. _priority-break-ties:
 
