@@ -106,8 +106,8 @@ start running the soonest, using :meth:`Scheduler.worker_objective`. For each wo
 2.  It's possible for ties to occur with the "start soonest" metric, though uncommon
     when all workers are busy. We break ties by choosing the worker that has the
     fewest number of bytes of Dask data stored (including spilled data). Note that
-    this is not the same as :ref:`managed memory <memtypes>`, nor the total memory
-    used by the process.
+    this is the same as :ref:`managed <memtypes>` plus :ref:`spilled <memtypes>`
+    memory, not the :ref:`process <memtypes>` memory.
 
 This process is easy to change (and indeed this document may be outdated).  We
 encourage readers to inspect the ``decide_worker`` and ``worker_objective``
