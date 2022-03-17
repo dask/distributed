@@ -158,7 +158,7 @@ async def test_cluster_dump_story(c, s, a, b, tmp_path):
 
 
 @gen_cluster(client=True)
-async def test_cluster_dump_to_yaml(c, s, a, b, tmp_path):
+async def test_cluster_dump_to_yamls(c, s, a, b, tmp_path):
     futs = c.map(inc, range(2))
     await c.gather(futs)
 
@@ -172,7 +172,7 @@ async def test_cluster_dump_to_yaml(c, s, a, b, tmp_path):
 
     dump = DumpArtefact.from_url(f"{filename}.msgpack.gz")
     yaml_path = Path(tmp_path / "dump")
-    dump.to_yaml(yaml_path)
+    dump.to_yamls(yaml_path)
 
     scheduler_files = {
         "events.yaml",

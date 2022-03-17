@@ -248,7 +248,7 @@ class DumpArtefact(Mapping):
         result["general"] = general
         return result
 
-    def to_yaml(
+    def to_yamls(
         self,
         root_dir: str | Path | None = None,
         worker_expand_keys: Collection[str] = ("config", "log", "logs", "tasks"),
