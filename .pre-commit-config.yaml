@@ -39,7 +39,6 @@ repos:
           - types-docutils
           - types-requests
           - types-paramiko
-          - types-pkg_resources
           - types-PyYAML
           - types-setuptools
           - types-psutil
