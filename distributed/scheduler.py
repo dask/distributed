@@ -10,7 +10,6 @@ import os
 import pickle
 import random
 import sys
-from unittest.mock import NonCallableMagicMock
 import uuid
 import warnings
 import weakref
@@ -1478,7 +1477,7 @@ class TaskState:
     _exception_text: str
     _traceback: object
     _traceback_text: str
-    _exception_blame: "TaskState"  # TaskState | None"
+    _exception_blame: "TaskState | None"
     _erred_on: set
     _suspicious: Py_ssize_t
     _host_restrictions: set  # set[str] | None
@@ -2867,7 +2866,7 @@ class SchedulerState:
                     {
                         "op": "cancel-compute",
                         "key": key,
-                        "stimulus_id": f"processing-memory-{time()}",
+                        "stimulus_id": stimulus_id or f"processing-memory-{time()}",
                     }
                 ]
 
@@ -2995,7 +2994,7 @@ class SchedulerState:
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
-            failing_ts: TaskState
+            failing_ts: TaskState | None
             recommendations: dict = {}
             client_msgs: dict = {}
             worker_msgs: dict = {}
@@ -3017,8 +3016,8 @@ class SchedulerState:
             report_msg = {
                 "op": "task-erred",
                 "key": key,
-                "exception": failing_ts._exception,
-                "traceback": failing_ts._traceback,
+                "exception": failing_ts._exception if failing_ts else None,
+                "traceback": failing_ts._traceback if failing_ts else None,
             }
             cs: ClientState
             for cs in ts._who_wants:
@@ -8390,12 +8389,12 @@ def _task_to_report_msg(state: SchedulerState, ts: TaskState) -> dict:  # -> dic
     elif ts._state == "memory":
         return {"op": "key-in-memory", "key": ts._key}
     elif ts._state == "erred":
-        failing_ts: TaskState = ts._exception_blame
+        failing_ts: TaskState | None = ts._exception_blame
         return {
             "op": "task-erred",
             "key": ts._key,
-            "exception": failing_ts._exception,
-            "traceback": failing_ts._traceback,
+            "exception": failing_ts._exception if failing_ts else None,
+            "traceback": failing_ts._traceback if failing_ts else None,
         }
     else:
         return None  # type: ignore
