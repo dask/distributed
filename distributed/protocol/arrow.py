@@ -1,6 +1,6 @@
 import pyarrow
 
-from .serialize import dask_deserialize, dask_serialize
+from distributed.protocol.serialize import dask_deserialize, dask_serialize
 
 if pyarrow.__version__ < "0.10":
     raise ImportError(

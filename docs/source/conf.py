@@ -385,6 +385,7 @@ intersphinx_mapping = {
     "pandas": ("https://pandas.pydata.org/docs", None),
     "dask": ("https://docs.dask.org/en/latest", None),
     "bokeh": ("https://docs.bokeh.org/en/latest", None),
+    "fsspec": ("https://filesystem-spec.readthedocs.io/en/latest", None),
 }
 
 # Redirects

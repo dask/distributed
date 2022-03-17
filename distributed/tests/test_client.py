@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 import traceback
+import types
 import warnings
 import weakref
 import zipfile
@@ -88,6 +89,7 @@ from distributed.utils_test import (
     gen_cluster,
     gen_test,
     geninc,
+    get_cert,
     inc,
     map_varying,
     nodebug,
@@ -99,6 +101,7 @@ from distributed.utils_test import (
     slowdec,
     slowinc,
     throws,
+    tls_only_security,
     varying,
     wait_for,
 )
@@ -240,7 +243,7 @@ async def test_custom_key_with_batches(c, s, a, b):
     """Test of <https://github.com/dask/distributed/issues/4588>"""
 
     futs = c.map(
-        lambda x: x ** 2,
+        lambda x: x**2,
         range(10),
         batch_size=5,
         key=[str(x) for x in range(10)],
@@ -856,10 +859,10 @@ async def test_missing_data_heals(c, s, a, b):
     # Secretly delete y's key
     if y.key in a.data:
         del a.data[y.key]
-        a.release_key(y.key)
+        a.release_key(y.key, stimulus_id="test")
     if y.key in b.data:
         del b.data[y.key]
-        b.release_key(y.key)
+        b.release_key(y.key, stimulus_id="test")
     await asyncio.sleep(0)
 
     w = c.submit(add, y, z)
@@ -881,7 +884,7 @@ async def test_gather_robust_to_missing_data(c, s, a, b):
             if f.key in w.data:
                 del w.data[f.key]
                 await asyncio.sleep(0)
-                w.release_key(f.key)
+                w.release_key(f.key, stimulus_id="test")
 
     xx, yy, zz = await c.gather([x, y, z])
     assert (xx, yy, zz) == (1, 2, 3)
@@ -904,7 +907,7 @@ async def test_gather_robust_to_nested_missing_data(c, s, a, b):
             if datum.key in worker.data:
                 del worker.data[datum.key]
                 await asyncio.sleep(0)
-                worker.release_key(datum.key)
+                worker.release_key(datum.key, stimulus_id="test")
 
     result = await c.gather([z])
 
@@ -2931,95 +2934,63 @@ async def test_badly_serialized_exceptions(c, s, a, b):
         await x
 
 
-@gen_cluster(
-    client=True,
-    Worker=Nanny,
-    worker_kwargs={"memory_limit": "1 GiB"},
-    config={"distributed.worker.memory.rebalance.sender-min": 0.3},
-)
-async def test_rebalance(c, s, *_):
+# Set rebalance() to work predictably on small amounts of managed memory. By default, it
+# uses optimistic memory, which would only be possible to test by allocating very large
+# amounts of managed memory, so that they would hide variations in unmanaged memory.
+REBALANCE_MANAGED_CONFIG = {
+    "distributed.worker.memory.rebalance.measure": "managed",
+    "distributed.worker.memory.rebalance.sender-min": 0,
+    "distributed.worker.memory.rebalance.sender-recipient-gap": 0,
+}
+
+
+@gen_cluster(client=True, config=REBALANCE_MANAGED_CONFIG)
+async def test_rebalance(c, s, a, b):
     """Test Client.rebalance(). These are just to test the Client wrapper around
     Scheduler.rebalance(); for more thorough tests on the latter see test_scheduler.py.
     """
-    # We used nannies to have separate processes for each worker
-    a, b = s.workers
-
-    # Generate 10 buffers worth 512 MiB total on worker a. This sends its memory
-    # utilisation slightly above 50% (after counting unmanaged) which is above the
-    # distributed.worker.memory.rebalance.sender-min threshold.
-    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
-    await wait(futures)
-    # Wait for heartbeats
-    while s.memory.process < 2 ** 29:
-        await asyncio.sleep(0.1)
-
-    assert await c.run(lambda dask_worker: len(dask_worker.data)) == {a: 10, b: 0}
-
+    futures = await c.scatter(range(100), workers=[a.address])
+    assert len(a.data) == 100
+    assert len(b.data) == 0
     await c.rebalance()
-
-    ndata = await c.run(lambda dask_worker: len(dask_worker.data))
-    # Allow for some uncertainty as the unmanaged memory is not stable
-    assert sum(ndata.values()) == 10
-    assert 3 <= ndata[a] <= 7
-    assert 3 <= ndata[b] <= 7
+    assert len(a.data) == 50
+    assert len(b.data) == 50
 
 
-@gen_cluster(
-    nthreads=[("127.0.0.1", 1)] * 3,
-    client=True,
-    Worker=Nanny,
-    worker_kwargs={"memory_limit": "1 GiB"},
-)
-async def test_rebalance_workers_and_keys(client, s, *_):
+@gen_cluster(nthreads=[("", 1)] * 3, client=True, config=REBALANCE_MANAGED_CONFIG)
+async def test_rebalance_workers_and_keys(client, s, a, b, c):
     """Test Client.rebalance(). These are just to test the Client wrapper around
     Scheduler.rebalance(); for more thorough tests on the latter see test_scheduler.py.
     """
-    a, b, c = s.workers
-    futures = client.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
-    await wait(futures)
-    # Wait for heartbeats
-    while s.memory.process < 2 ** 29:
-        await asyncio.sleep(0.1)
+    futures = await client.scatter(range(100), workers=[a.address])
+    assert (len(a.data), len(b.data), len(c.data)) == (100, 0, 0)
 
     # Passing empty iterables is not the same as omitting the arguments
     await client.rebalance([])
     await client.rebalance(workers=[])
-    assert await client.run(lambda dask_worker: len(dask_worker.data)) == {
-        a: 10,
-        b: 0,
-        c: 0,
-    }
+    assert (len(a.data), len(b.data), len(c.data)) == (100, 0, 0)
 
     # Limit rebalancing to two arbitrary keys and two arbitrary workers.
-    await client.rebalance([futures[3], futures[7]], [a, b])
-    assert await client.run(lambda dask_worker: len(dask_worker.data)) == {
-        a: 8,
-        b: 2,
-        c: 0,
-    }
+    await client.rebalance([futures[3], futures[7]], [a.address, b.address])
+    assert (len(a.data), len(b.data), len(c.data)) == (98, 2, 0)
 
     with pytest.raises(KeyError):
         await client.rebalance(workers=["notexist"])
 
 
 def test_rebalance_sync():
-    # can't use the 'c' fixture because we need workers to run in a separate process
-    with Client(n_workers=2, memory_limit="1 GiB", dashboard_address=":0") as c:
-        s = c.cluster.scheduler
-        a, b = (ws.address for ws in s.workers.values())
-        futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
-        wait(futures)
-        # Wait for heartbeat
-        while s.memory.process < 2 ** 29:
-            sleep(0.1)
+    with dask.config.set(REBALANCE_MANAGED_CONFIG):
+        with Client(n_workers=2, processes=False, dashboard_address=":0") as c:
+            s = c.cluster.scheduler
+            a = c.cluster.workers[0]
+            b = c.cluster.workers[1]
+            futures = c.scatter(range(100), workers=[a.address])
 
-        assert c.run(lambda dask_worker: len(dask_worker.data)) == {a: 10, b: 0}
-        c.rebalance()
-        ndata = c.run(lambda dask_worker: len(dask_worker.data))
-        # Allow for some uncertainty as the unmanaged memory is not stable
-        assert sum(ndata.values()) == 10
-        assert 3 <= ndata[a] <= 7
-        assert 3 <= ndata[b] <= 7
+            assert len(a.data) == 100
+            assert len(b.data) == 0
+            c.rebalance()
+            assert len(a.data) == 50
+            assert len(b.data) == 50
 
 
 @gen_cluster(client=True)
@@ -4393,7 +4364,7 @@ async def test_retire_workers_2(c, s, a, b):
     assert a.address not in s.workers
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10)
+@gen_cluster(client=True, nthreads=[("", 1)] * 10)
 async def test_retire_many_workers(c, s, *workers):
     futures = await c.scatter(list(range(100)))
 
@@ -4409,8 +4380,16 @@ async def test_retire_many_workers(c, s, *workers):
 
     assert all(future.done() for future in futures)
     assert all(s.tasks[future.key].state == "memory" for future in futures)
-    for w, keys in s.has_what.items():
-        assert 15 < len(keys) < 50
+    assert await c.gather(futures) == list(range(100))
+
+    # Don't count how many task landed on each worker.
+    # Normally, tasks would be distributed evenly over the surviving workers. However,
+    # here all workers share the same process memory, so you'll get an unintuitive
+    # distribution of tasks if for any reason one transfer take longer than 2 seconds
+    # and as a consequence the Active Memory Manager ends up running for two iterations.
+    # This is something that will happen more frequently on low-powered CI machines.
+    # See test_active_memory_manager.py for tests that robustly verify the statistical
+    # distribution of tasks after worker retirement.
 
 
 @gen_cluster(
@@ -4528,7 +4507,7 @@ async def test_normalize_collection_dask_array(c, s, a, b):
 def test_normalize_collection_with_released_futures(c):
     da = pytest.importorskip("dask.array")
 
-    x = da.arange(2 ** 20, chunks=2 ** 10)
+    x = da.arange(2**20, chunks=2**10)
     y = x.persist()
     wait(y)
     sol = y.sum().compute()
@@ -4663,13 +4642,14 @@ async def test_client_timeout():
     """`await Client(...)` keeps retrying for 10 seconds if it can't find the Scheduler
     straight away
     """
-    c = Client("127.0.0.1:57484", asynchronous=True)
-    client_start_fut = asyncio.ensure_future(c)
-    await asyncio.sleep(4)
-    async with Scheduler(port=57484, dashboard_address=":0"):
-        await client_start_fut
-        assert await c.run_on_scheduler(lambda: 123) == 123
-        await c.close()
+    with dask.config.set({"distributed.comm.timeouts.connect": "10s"}):
+        c = Client("127.0.0.1:57484", asynchronous=True)
+        client_start_fut = asyncio.ensure_future(c)
+        await asyncio.sleep(2)
+        async with Scheduler(port=57484, dashboard_address=":0"):
+            await client_start_fut
+            assert await c.run_on_scheduler(lambda: 123) == 123
+            await c.close()
 
 
 @gen_cluster(client=True)
@@ -5174,7 +5154,7 @@ def test_get_client_no_cluster():
     Worker._instances.clear()
 
     msg = "No global client found and no address provided"
-    with pytest.raises(ValueError, match=fr"^{msg}$"):
+    with pytest.raises(ValueError, match=rf"^{msg}$"):
         get_client()
 
 
@@ -5347,7 +5327,7 @@ def test_dynamic_workloads_sync_random(c):
     assert future.result(timeout=20) == 52
 
 
-@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
+@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(client=True)
 async def test_bytes_keys(c, s, a, b):
     key = b"inc-123"
@@ -5894,7 +5874,11 @@ async def test_scatter_error_cancel(c, s, a, b):
 @pytest.mark.parametrize("workers_arg", [False, True])
 @pytest.mark.parametrize("direct", [False, True])
 @pytest.mark.parametrize("broadcast", [False, True, 10])
-@gen_cluster(client=True, nthreads=[("", 1)] * 10)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 10,
+    worker_kwargs={"memory_monitor_interval": "20ms"},
+)
 async def test_scatter_and_replicate_avoid_paused_workers(
     c, s, *workers, workers_arg, direct, broadcast
 ):
@@ -7169,6 +7153,28 @@ async def test_events_subscribe_topic(c, s, a):
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
+async def test_events_subscribe_topic_cancelled(c, s, a):
+    event_handler_started = asyncio.Event()
+    exc_info = None
+
+    async def user_event_handler(event):
+        nonlocal exc_info
+        c.unsubscribe_topic("test-topic")
+        event_handler_started.set()
+        with pytest.raises(asyncio.CancelledError) as exc_info:
+            await asyncio.sleep(0.5)
+
+    c.subscribe_topic("test-topic", user_event_handler)
+    while not s.event_subscriber["test-topic"]:
+        await asyncio.sleep(0.01)
+
+    a.log_event("test-topic", {})
+    await event_handler_started.wait()
+    await c._close(fast=True)
+    assert exc_info is not None
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_events_all_servers_use_same_channel(c, s, a):
     """Ensure that logs from all server types (scheduler, worker, nanny)
     and the clients themselves arrive"""
@@ -7254,23 +7260,23 @@ def test_print_simple(capsys):
     assert "Hello!:123" in out
 
 
-def _verify_cluster_dump(path, _format: str, addresses: set[str]) -> dict:
-    path = str(path)
-    if _format == "msgpack":
-        import gzip
+def _verify_cluster_dump(url, format: str, addresses: set[str]) -> dict:
+    fsspec = pytest.importorskip("fsspec")
 
+    url = str(url)
+    if format == "msgpack":
         import msgpack
 
-        path += ".msgpack.gz"
-
-        with gzip.open(path) as fd_zip:
-            state = msgpack.unpack(fd_zip)
+        url += ".msgpack.gz"
+        loader = msgpack.unpack
     else:
         import yaml
 
-        path += ".yaml"
-        with open(path) as fd_plain:
-            state = yaml.safe_load(fd_plain)
+        url += ".yaml"
+        loader = yaml.safe_load
+
+    with fsspec.open(url, mode="rb", compression="infer") as f:
+        state = loader(f)
 
     assert isinstance(state, dict)
     assert "scheduler" in state
@@ -7280,62 +7286,215 @@ def _verify_cluster_dump(path, _format: str, addresses: set[str]) -> dict:
     return state
 
 
+def test_dump_cluster_state_write_from_scheduler(
+    c, s, a, b, tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.chdir(tmp_path)
+
+    scheduler_dir = tmp_path / "scheduler"
+    scheduler_dir.mkdir()
+    c.run_on_scheduler(os.chdir, str(scheduler_dir))
+
+    c.dump_cluster_state("not-url")
+    assert (tmp_path / "not-url.msgpack.gz").is_file()
+
+    c.dump_cluster_state("file://is-url")
+    assert (scheduler_dir / "is-url.msgpack.gz").is_file()
+
+    c.dump_cluster_state("file://local-explicit", write_from_scheduler=False)
+    assert (tmp_path / "local-explicit.msgpack.gz").is_file()
+
+    c.dump_cluster_state("scheduler-explicit", write_from_scheduler=True)
+    assert (scheduler_dir / "scheduler-explicit.msgpack.gz").is_file()
+
+
+@pytest.mark.parametrize("local", [True, False])
 @pytest.mark.parametrize("_format", ["msgpack", "yaml"])
-def test_dump_cluster_state_sync(c, s, a, b, tmp_path, _format):
+def test_dump_cluster_state_sync(c, s, a, b, tmp_path, _format, local):
     filename = tmp_path / "foo"
+    if not local:
+        pytest.importorskip("fsspec")
+        # Make it look like an fsspec path
+        filename = f"file://{filename}"
     c.dump_cluster_state(filename, format=_format)
     _verify_cluster_dump(filename, _format, {a["address"], b["address"]})
 
 
+@pytest.mark.parametrize("local", [True, False])
 @pytest.mark.parametrize("_format", ["msgpack", "yaml"])
 @gen_cluster(client=True)
-async def test_dump_cluster_state_async(c, s, a, b, tmp_path, _format):
+async def test_dump_cluster_state_async(c, s, a, b, tmp_path, _format, local):
     filename = tmp_path / "foo"
+    if not local:
+        pytest.importorskip("fsspec")
+        # Make it look like an fsspec path
+        filename = f"file://{filename}"
     await c.dump_cluster_state(filename, format=_format)
     _verify_cluster_dump(filename, _format, {a.address, b.address})
 
 
+@pytest.mark.parametrize("local", [True, False])
 @gen_cluster(client=True)
-async def test_dump_cluster_state_json(c, s, a, b, tmp_path):
+async def test_dump_cluster_state_json(c, s, a, b, tmp_path, local):
+    filename = tmp_path / "foo"
+    if not local:
+        pytest.importorskip("fsspec")
+        # Make it look like an fsspec path
+        filename = f"file://{filename}"
     with pytest.raises(ValueError, match="Unsupported format"):
-        await c.dump_cluster_state(tmp_path / "foo", format="json")
+        await c.dump_cluster_state(filename, format="json")
 
 
 @gen_cluster(client=True)
-async def test_dump_cluster_state_exclude(c, s, a, b, tmp_path):
+async def test_dump_cluster_state_exclude_default(c, s, a, b, tmp_path):
     futs = c.map(inc, range(10))
     while len(s.tasks) != len(futs):
         await asyncio.sleep(0.01)
-    exclude = [
-        # these are TaskState attributes
-        "_runspec",
-        "runspec",
+    excluded_by_default = [
+        "run_spec",
     ]
+
     filename = tmp_path / "foo"
-    await c.dump_cluster_state(filename=filename, format="yaml")
+    await c.dump_cluster_state(
+        filename=filename,
+        format="yaml",
+    )
 
     with open(f"{filename}.yaml") as fd:
         state = yaml.safe_load(fd)
 
     assert "workers" in state
     assert len(state["workers"]) == len(s.workers)
+    for worker, worker_dump in state["workers"].items():
+        for k, task_dump in worker_dump["tasks"].items():
+            assert not any(blocked in task_dump for blocked in excluded_by_default)
+            assert k in s.tasks
     assert "scheduler" in state
     assert "tasks" in state["scheduler"]
     tasks = state["scheduler"]["tasks"]
     assert len(tasks) == len(futs)
     for k, task_dump in tasks.items():
-        assert not any(blocked in task_dump for blocked in exclude)
+        assert not any(blocked in task_dump for blocked in excluded_by_default)
+        assert k in s.tasks
+
+    await c.dump_cluster_state(
+        filename=filename,
+        format="yaml",
+        exclude=(),
+    )
+
+    with open(f"{filename}.yaml") as fd:
+        state = yaml.safe_load(fd)
+
+    assert "workers" in state
+    assert len(state["workers"]) == len(s.workers)
+    for worker, worker_dump in state["workers"].items():
+        for k, task_dump in worker_dump["tasks"].items():
+            assert all(blocked in task_dump for blocked in excluded_by_default)
+            assert k in s.tasks
+    assert "scheduler" in state
+    assert "tasks" in state["scheduler"]
+    tasks = state["scheduler"]["tasks"]
+    assert len(tasks) == len(futs)
+    for k, task_dump in tasks.items():
+        assert all(blocked in task_dump for blocked in excluded_by_default)
         assert k in s.tasks
 
 
-@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "200ms"})
-async def test_dump_cluster_state_error(c, s, a, b, tmp_path):
-    a.stop()
-    filename = tmp_path / "foo"
-    await c.dump_cluster_state(filename, format="yaml")
-    state = _verify_cluster_dump(filename, "yaml", {a.address, b.address})
-    assert state["workers"][a.address] == (
-        f"OSError('Timed out trying to connect to {a.address} after 0.2 s')"
-    )
-    assert isinstance(state["workers"][b.address], dict)
-    assert state["versions"]["workers"].keys() == {b.address}
+class TestClientSecurityLoader:
+    @contextmanager
+    def config_loader(self, monkeypatch, loader):
+        module_name = "totally_fake_module_name_1"
+        module = types.ModuleType(module_name)
+        module.loader = loader
+        with monkeypatch.context() as m:
+            m.setitem(sys.modules, module_name, module)
+            with dask.config.set(
+                {"distributed.client.security-loader": f"{module_name}.loader"}
+            ):
+                yield
+
+    @pytest.mark.asyncio
+    async def test_security_loader(self, monkeypatch):
+        security = tls_only_security()
+
+        async with Scheduler(
+            dashboard_address=":0", protocol="tls", security=security
+        ) as scheduler:
+
+            def loader(info):
+                assert info == {"address": scheduler.address}
+                return security
+
+            with self.config_loader(monkeypatch, loader):
+                async with Client(scheduler.address, asynchronous=True) as client:
+                    assert client.security is security
+
+    @pytest.mark.asyncio
+    async def test_security_loader_ignored_if_explicit_security_provided(
+        self, monkeypatch
+    ):
+        security = tls_only_security()
+
+        def loader(info):
+            assert False
+
+        async with Scheduler(
+            dashboard_address=":0", protocol="tls", security=security
+        ) as scheduler:
+            with self.config_loader(monkeypatch, loader):
+                async with Client(
+                    scheduler.address, security=security, asynchronous=True
+                ) as client:
+                    assert client.security is security
+
+    @pytest.mark.asyncio
+    async def test_security_loader_ignored_if_returns_none(self, monkeypatch):
+        """Test that if a security loader is configured, but it returns `None`,
+        then the default security configuration is used"""
+        ca_file = get_cert("tls-ca-cert.pem")
+        keycert = get_cert("tls-key-cert.pem")
+
+        config = {
+            "distributed.comm.require-encryption": True,
+            "distributed.comm.tls.ca-file": ca_file,
+            "distributed.comm.tls.client.cert": keycert,
+            "distributed.comm.tls.scheduler.cert": keycert,
+            "distributed.comm.tls.worker.cert": keycert,
+        }
+
+        def loader(info):
+            loader.called = True
+            return None
+
+        with dask.config.set(config):
+            async with Scheduler(dashboard_address=":0", protocol="tls") as scheduler:
+                # Smoketest to make sure config was picked up (so we're actually testing something)
+                assert scheduler.security.tls_client_cert
+                assert scheduler.security.tls_scheduler_cert
+                with self.config_loader(monkeypatch, loader):
+                    async with Client(scheduler.address, asynchronous=True) as client:
+                        assert (
+                            client.security.tls_client_cert
+                            == scheduler.security.tls_client_cert
+                        )
+
+        assert loader.called
+
+    @pytest.mark.asyncio
+    async def test_security_loader_import_failed(self):
+        security = tls_only_security()
+
+        with dask.config.set(
+            {"distributed.client.security-loader": "totally_fake_module_name_2.loader"}
+        ):
+            with pytest.raises(ImportError, match="totally_fake_module_name_2.loader"):
+                async with Client("tls://bad-address:8888", asynchronous=True):
+                    pass
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_wait_for_workers_updates_info(c, s):
+    async with Worker(s.address):
+        await c.wait_for_workers(1)
+        assert c.scheduler_info()["workers"]

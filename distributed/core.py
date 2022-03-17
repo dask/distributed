@@ -7,12 +7,14 @@ import sys
 import threading
 import traceback
 import uuid
+import warnings
 import weakref
 from collections import defaultdict
+from collections.abc import Container
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import ClassVar, Container
+from typing import Callable, ClassVar
 
 import tblib
 from tlz import merge
@@ -22,10 +24,8 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
-from distributed.utils import recursive_to_dict
-
-from . import profile, protocol
-from .comm import (
+from distributed import profile, protocol
+from distributed.comm import (
     Comm,
     CommClosedError,
     connect,
@@ -34,13 +34,14 @@ from .comm import (
     normalize_address,
     unparse_host_port,
 )
-from .metrics import time
-from .system_monitor import SystemMonitor
-from .utils import (
+from distributed.metrics import time
+from distributed.system_monitor import SystemMonitor
+from distributed.utils import (
     TimeoutError,
     get_traceback,
     has_keyword,
     is_coroutine_function,
+    recursive_to_dict,
     truncate_exception,
 )
 
@@ -69,6 +70,11 @@ class Status(Enum):
 
 
 Status.lookup = {s.name: s for s in Status}  # type: ignore
+Status.ANY_RUNNING = {  # type: ignore
+    Status.running,
+    Status.paused,
+    Status.closing_gracefully,
+}
 
 
 class RPCClosed(IOError):
@@ -90,6 +96,22 @@ tick_maximum_delay = parse_timedelta(
 )
 
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
+
+
+def _expects_comm(func: Callable) -> bool:
+    sig = inspect.signature(func)
+    params = list(sig.parameters)
+    if params and params[0] == "comm":
+        return True
+    if params and params[0] == "stream":
+        warnings.warn(
+            "Calling the first arugment of a RPC handler `stream` is "
+            "deprecated. Defining this argument is optional. Either remove the "
+            f"arugment or rename it to `comm` in {func}.",
+            FutureWarning,
+        )
+        return True
+    return False
 
 
 class Server:
@@ -192,11 +214,11 @@ class Server:
 
         # Statistics counters for various events
         with suppress(ImportError):
-            from .counter import Digest
+            from distributed.counter import Digest
 
             self.digests = defaultdict(partial(Digest, loop=self.io_loop))
 
-        from .counter import Counter
+        from distributed.counter import Counter
 
         self.counters = defaultdict(partial(Counter, loop=self.io_loop))
 
@@ -257,7 +279,7 @@ class Server:
         async def _():
             timeout = getattr(self, "death_timeout", 0)
             async with self._startup_lock:
-                if self.status in (Status.running, Status.paused):
+                if self.status in Status.ANY_RUNNING:
                     return self
                 if timeout:
                     try:
@@ -373,26 +395,20 @@ class Server:
             _, self._port = get_address_host_port(self.address)
         return self._port
 
-    def identity(self, comm=None) -> dict[str, str]:
+    def identity(self) -> dict[str, str]:
         return {"type": type(self).__name__, "id": self.id}
 
     def _to_dict(
         self, comm: Comm | None = None, *, exclude: Container[str] = ()
     ) -> dict:
-        """
-        A very verbose dictionary representation for debugging purposes.
-        Not type stable and not inteded for roundtrips.
-
-        Parameters
-        ----------
-        comm:
-        exclude:
-            A list of attributes which must not be present in the output.
+        """Dictionary representation for debugging purposes.
+        Not type stable and not intended for roundtrips.
 
         See also
         --------
         Server.identity
         Client.dump_cluster_state
+        distributed.utils.recursive_to_dict
         """
         info = self.identity()
         extra = {
@@ -401,9 +417,10 @@ class Server:
             "thread_id": self.thread_id,
         }
         info.update(extra)
+        info = {k: v for k, v in info.items() if k not in exclude}
         return recursive_to_dict(info, exclude=exclude)
 
-    def echo(self, comm=None, data=None):
+    def echo(self, data=None):
         return data
 
     async def listen(self, port_or_addr=None, allow_offload=True, **kwargs):
@@ -513,13 +530,16 @@ class Server:
 
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
-                        result = handler(comm, **msg)
+                        if _expects_comm(handler):
+                            result = handler(comm, **msg)
+                        else:
+                            result = handler(**msg)
                         if inspect.isawaitable(result):
                             result = asyncio.ensure_future(result)
                             self._ongoing_coroutines.add(result)
                             result = await result
                     except (CommClosedError, asyncio.CancelledError):
-                        if self.status in (Status.running, Status.paused):
+                        if self.status in Status.ANY_RUNNING:
                             logger.info("Lost connection to %r", address, exc_info=True)
                         break
                     except Exception as e:
@@ -624,6 +644,7 @@ class Server:
                 yield asyncio.sleep(0.05)
             else:
                 break
+        yield self.rpc.close()
         yield [comm.close() for comm in list(self._comms)]  # then forcefully close
         for cb in self._ongoing_coroutines:
             cb.cancel()

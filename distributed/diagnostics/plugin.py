@@ -255,7 +255,7 @@ class PipInstall(WorkerPlugin):
         self.pip_options = pip_options
 
     async def setup(self, worker):
-        from ..lock import Lock
+        from distributed.lock import Lock
 
         async with Lock(socket.gethostname()):  # don't clobber one installation
             logger.info("Pip installing the following packages: %s", self.packages)
@@ -378,7 +378,7 @@ class UploadDirectory(NannyPlugin):
                 self.data = f.read()
 
     async def setup(self, nanny):
-        fn = os.path.join(nanny.local_directory, f"tmp-{str(uuid.uuid4())}.zip")
+        fn = os.path.join(nanny.local_directory, f"tmp-{uuid.uuid4()}.zip")
         with open(fn, "wb") as f:
             f.write(self.data)
 

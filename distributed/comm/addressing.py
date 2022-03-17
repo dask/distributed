@@ -4,8 +4,8 @@ import itertools
 
 import dask
 
-from ..utils import get_ip_interface
-from . import registry
+from distributed.comm import registry
+from distributed.utils import get_ip_interface
 
 
 def parse_address(addr: str, strict: bool = False) -> tuple[str, str]:

@@ -17,11 +17,16 @@ except ImportError:
 
 import dask
 
-from ..utils import ensure_ip, get_ip, get_ipv6
-from .addressing import parse_host_port, unparse_host_port
-from .core import Comm, CommClosedError, Connector, Listener
-from .registry import Backend
-from .utils import ensure_concrete_host, from_frames, to_frames
+from distributed.comm.addressing import parse_host_port, unparse_host_port
+from distributed.comm.core import Comm, CommClosedError, Connector, Listener
+from distributed.comm.registry import Backend
+from distributed.comm.utils import (
+    ensure_concrete_host,
+    from_frames,
+    host_array,
+    to_frames,
+)
+from distributed.utils import ensure_ip, get_ip, get_ipv6
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +126,7 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         self._using_default_buffer = True
 
         self._default_len = max(min_read_size, 16)  # need at least 16 bytes of buffer
-        self._default_buffer = memoryview(bytearray(self._default_len))
+        self._default_buffer = host_array(self._default_len)
         # Index in default_buffer pointing to the first unparsed byte
         self._default_start = 0
         # Index in default_buffer pointing to the last written byte
@@ -258,7 +263,7 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         self._default_start += 8 * n_read
 
         if n_read == needed:
-            self._frames = [memoryview(bytearray(n)) for n in self._frame_lengths]
+            self._frames = [host_array(n) for n in self._frame_lengths]
             self._frame_index = 0
             self._frame_nbytes_needed = (
                 self._frame_lengths[0] if self._frame_lengths else 0
@@ -495,7 +500,7 @@ def _expect_tls_context(connection_args):
         raise TypeError(
             "TLS expects a `ssl_context` argument of type "
             "ssl.SSLContext (perhaps check your TLS configuration?)"
-            "  Instead got %s" % str(ctx)
+            f" Instead got {ctx!r}"
         )
     return ctx
 

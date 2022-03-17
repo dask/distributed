@@ -170,11 +170,11 @@ async def test_register_scheduler_plugin(c, s, a, b):
             scheduler.foo = "bar"
 
     assert not hasattr(s, "foo")
-    await c.register_scheduler_plugin(Dummy1)
+    await c.register_scheduler_plugin(Dummy1())
     assert s.foo == "bar"
 
     with pytest.warns(UserWarning) as w:
-        await c.register_scheduler_plugin(Dummy1)
+        await c.register_scheduler_plugin(Dummy1())
     assert "Scheduler already contains" in w[0].message.args[0]
 
     class Dummy2(SchedulerPlugin):
@@ -185,7 +185,7 @@ async def test_register_scheduler_plugin(c, s, a, b):
 
     n_plugins = len(s.plugins)
     with pytest.raises(RuntimeError, match="raising in start method"):
-        await c.register_scheduler_plugin(Dummy2)
+        await c.register_scheduler_plugin(Dummy2())
     # total number of plugins should be unchanged
     assert n_plugins == len(s.plugins)
 
@@ -198,10 +198,30 @@ async def test_register_scheduler_plugin_pickle_disabled(c, s, a, b):
 
     n_plugins = len(s.plugins)
     with pytest.raises(ValueError) as excinfo:
-        await c.register_scheduler_plugin(Dummy1)
+        await c.register_scheduler_plugin(Dummy1())
 
     msg = str(excinfo.value)
     assert "disallowed from deserializing" in msg
     assert "distributed.scheduler.pickle" in msg
 
     assert n_plugins == len(s.plugins)
+
+
+@gen_cluster(nthreads=[], client=True)
+async def test_plugin_class_warns(c, s):
+    class EmptyPlugin(SchedulerPlugin):
+        pass
+
+    with pytest.warns(FutureWarning, match=r"Adding plugins by class is deprecated"):
+        await c.register_scheduler_plugin(EmptyPlugin)
+
+
+@gen_cluster(nthreads=[], client=True)
+async def test_unused_kwargs_throws(c, s):
+    class EmptyPlugin(SchedulerPlugin):
+        pass
+
+    with pytest.raises(
+        ValueError, match=r"kwargs provided but plugin is already an instance"
+    ):
+        await c.register_scheduler_plugin(EmptyPlugin(), data=789)

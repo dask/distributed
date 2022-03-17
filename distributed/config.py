@@ -9,7 +9,7 @@ import yaml
 import dask
 from dask.utils import import_required
 
-from .compatibility import WINDOWS, logging_names
+from distributed.compatibility import WINDOWS, logging_names
 
 config = dask.config.config
 

@@ -24,12 +24,9 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar, Literal
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
-
-if TYPE_CHECKING:
-    from typing_extensions import Literal
 
 import dask
 from dask.base import collections_to_dsk, normalize_token, tokenize
@@ -55,28 +52,35 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import PeriodicCallback
 
-from . import versions as version_module  # type: ignore
-from .batched import BatchedSend
-from .cfexecutor import ClientExecutor
-from .core import (
+from distributed import cluster_dump, preloading
+from distributed import versions as version_module  # type: ignore
+from distributed.batched import BatchedSend
+from distributed.cfexecutor import ClientExecutor
+from distributed.core import (
     CommClosedError,
     ConnectionPool,
     PooledRPCCall,
+    Status,
     clean_exception,
     connect,
     rpc,
 )
-from .diagnostics.plugin import NannyPlugin, UploadFile, WorkerPlugin, _get_plugin_name
-from .metrics import time
-from .objects import HasWhat, SchedulerInfo, WhoHas
-from .protocol import to_serialize
-from .protocol.pickle import dumps, loads
-from .publish import Datasets
-from .pubsub import PubSubClientExtension
-from .security import Security
-from .sizeof import sizeof
-from .threadpoolexecutor import rejoin
-from .utils import (
+from distributed.diagnostics.plugin import (
+    NannyPlugin,
+    UploadFile,
+    WorkerPlugin,
+    _get_plugin_name,
+)
+from distributed.metrics import time
+from distributed.objects import HasWhat, SchedulerInfo, WhoHas
+from distributed.protocol import to_serialize
+from distributed.protocol.pickle import dumps, loads
+from distributed.publish import Datasets
+from distributed.pubsub import PubSubClientExtension
+from distributed.security import Security
+from distributed.sizeof import sizeof
+from distributed.threadpoolexecutor import rejoin
+from distributed.utils import (
     All,
     Any,
     CancelledError,
@@ -86,12 +90,13 @@ from .utils import (
     TimeoutError,
     format_dashboard_link,
     has_keyword,
+    import_term,
     log_errors,
     no_default,
     sync,
     thread_state,
 )
-from .utils_comm import (
+from distributed.utils_comm import (
     WrappedKey,
     gather_from_workers,
     pack_data,
@@ -99,7 +104,7 @@ from .utils_comm import (
     scatter_to_workers,
     unpack_remotedata,
 )
-from .worker import get_client, get_worker, secede
+from distributed.worker import get_client, get_worker, secede
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +142,7 @@ def _del_global_client(c: Client) -> None:
         try:
             if _global_clients[k] is c:
                 del _global_clients[k]
-        except KeyError:
+        except KeyError:  # pragma: no cover
             pass
 
 
@@ -261,8 +266,8 @@ class Future(WrappedKey):
 
         Returns
         -------
-        result : asyncio.Future
-            The Future that contains the result of the computation
+        result
+            The result of the computation. Or a coroutine if the client is asynchronous.
         """
         if self.client.asynchronous:
             return self.client.sync(self._result, callback_timeout=timeout)
@@ -420,8 +425,8 @@ class Future(WrappedKey):
 
         Returns
         -------
-        Future
-            The Future that contains the traceback
+        traceback
+            The traceback object. Or a coroutine if the client is asynchronous.
 
         See Also
         --------
@@ -434,14 +439,8 @@ class Future(WrappedKey):
         """Returns the type"""
         return self._state.type
 
-    def release(self, _in_destructor=False):
+    def release(self):
         """
-
-        Parameters
-        ----------
-        _in_destructor: bool
-            Not used
-
         Notes
         -----
         This method can be called from different threads
@@ -451,7 +450,7 @@ class Future(WrappedKey):
             self._cleared = True
             try:
                 self.client.loop.add_callback(self.client._dec_ref, stringify(self.key))
-            except TypeError:
+            except TypeError:  # pragma: no cover
                 pass  # Shutting down, add_callback may be None
 
     def __getstate__(self):
@@ -646,6 +645,21 @@ def _handle_warn(event):
         warnings.warn(msg)
 
 
+def _maybe_call_security_loader(address):
+    security_loader_term = dask.config.get("distributed.client.security-loader")
+    if security_loader_term:
+        try:
+            security_loader = import_term(security_loader_term)
+        except Exception as exc:
+            raise ImportError(
+                f"Failed to import `{security_loader_term}` configured at "
+                f"`distributed.client.security-loader` - is this module "
+                f"installed?"
+            ) from exc
+        return security_loader({"address": address})
+    return None
+
+
 class Client(SyncMethodMixin):
     """Connect to and submit computation to a Dask cluster
 
@@ -688,9 +702,11 @@ class Client(SyncMethodMixin):
     heartbeat_interval: int (optional)
         Time in milliseconds between heartbeats to scheduler
     serializers
-        The serializers to turn an object into a string
+        Iterable of approaches to use when serializing the object.
+        See :ref:`serialization` for more.
     deserializers
-        The deserializers to turn the string into the original object
+        Iterable of approaches to use when deserializing the object.
+        See :ref:`serialization` for more.
     extensions : list
         The extensions
     direct_to_workers: bool (optional)
@@ -741,6 +757,8 @@ class Client(SyncMethodMixin):
     _instances: ClassVar[weakref.WeakSet[Client]] = weakref.WeakSet()
 
     _default_event_handlers = {"print": _handle_print, "warn": _handle_warn}
+
+    preloads: list[preloading.Preload]
 
     def __init__(
         self,
@@ -813,6 +831,11 @@ class Client(SyncMethodMixin):
         elif isinstance(getattr(address, "scheduler_address", None), str):
             # It's a LocalCluster or LocalCluster-compatible object
             self.cluster = address
+            status = getattr(self.cluster, "status")
+            if status and status in [Status.closed, Status.closing]:
+                raise RuntimeError(
+                    f"Trying to connect to an already closed or closing Cluster {self.cluster}."
+                )
             with suppress(AttributeError):
                 loop = address.loop
             if security is None:
@@ -824,6 +847,11 @@ class Client(SyncMethodMixin):
                 )
             )
 
+        # If connecting to an address and no explicit security is configured, attempt
+        # to load security credentials with a security loader (if configured).
+        if security is None and isinstance(address, str):
+            security = _maybe_call_security_loader(address)
+
         if security is None:
             security = Security()
         elif isinstance(security, dict):
@@ -831,7 +859,7 @@ class Client(SyncMethodMixin):
         elif security is True:
             security = Security.temporary()
             self._startup_kwargs["security"] = security
-        elif not isinstance(security, Security):
+        elif not isinstance(security, Security):  # pragma: no cover
             raise TypeError("security must be a Security object")
 
         self.security = security
@@ -902,6 +930,10 @@ class Client(SyncMethodMixin):
 
         for ext in extensions:
             ext(self)
+
+        preload = dask.config.get("distributed.client.preload")
+        preload_argv = dask.config.get("distributed.client.preload-argv")
+        self.preloads = preloading.process_preloads(self, preload, preload_argv)
 
         self.start(timeout=timeout)
         Client._instances.add(self)
@@ -989,7 +1021,7 @@ class Client(SyncMethodMixin):
             return format_dashboard_link(host, port)
 
     def _get_scheduler_info(self):
-        from .scheduler import Scheduler
+        from distributed.scheduler import Scheduler
 
         if (
             self.cluster
@@ -1125,7 +1157,7 @@ class Client(SyncMethodMixin):
                 except (ValueError, KeyError):  # JSON file not yet flushed
                     await asyncio.sleep(0.01)
         elif self._start_arg is None:
-            from .deploy import LocalCluster
+            from distributed.deploy import LocalCluster
 
             try:
                 self.cluster = await LocalCluster(
@@ -1163,6 +1195,9 @@ class Client(SyncMethodMixin):
 
         for topic, handler in Client._default_event_handlers.items():
             self.subscribe_topic(topic, handler)
+
+        for preload in self.preloads:
+            await preload.start()
 
         self._handle_report_task = asyncio.create_task(self._handle_report())
 
@@ -1270,6 +1305,7 @@ class Client(SyncMethodMixin):
 
     async def _wait_for_workers(self, n_workers=0, timeout=None):
         info = await self.scheduler.identity()
+        self._scheduler_identity = SchedulerInfo(info)
         if timeout:
             deadline = time() + parse_timedelta(timeout)
         else:
@@ -1282,6 +1318,7 @@ class Client(SyncMethodMixin):
                 )
             await asyncio.sleep(0.1)
             info = await self.scheduler.identity()
+            self._scheduler_identity = SchedulerInfo(info)
 
     def wait_for_workers(self, n_workers=0, timeout=None):
         """Blocking call to wait for n workers before continuing
@@ -1443,6 +1480,9 @@ class Client(SyncMethodMixin):
 
         self.status = "closing"
 
+        for preload in self.preloads:
+            await preload.teardown()
+
         with suppress(AttributeError):
             for pc in self._periodic_callbacks.values():
                 pc.stop()
@@ -1498,12 +1538,11 @@ class Client(SyncMethodMixin):
                 _set_global_client(None)
 
             if (
-                not fast
-                and handle_report_task is not None
+                handle_report_task is not None
                 and handle_report_task is not current_task
             ):
                 with suppress(TimeoutError, asyncio.CancelledError):
-                    await asyncio.wait_for(handle_report_task, 2)
+                    await asyncio.wait_for(handle_report_task, 0 if fast else 2)
 
             with suppress(AttributeError):
                 await self.scheduler.close_rpc()
@@ -1993,7 +2032,7 @@ class Client(SyncMethodMixin):
                     if errors == "skip":
                         bad_keys.add(key)
                         bad_data[key] = None
-                    else:
+                    else:  # pragma: no cover
                         raise ValueError("Bad value, `errors=%s`" % errors)
 
             keys = [k for k in keys if k not in bad_keys and k not in data]
@@ -2033,7 +2072,7 @@ class Client(SyncMethodMixin):
                         self.futures[key].reset()
                     except KeyError:  # TODO: verify that this is safe
                         pass
-            else:
+            else:  # pragma: no cover
                 break
 
         if bad_data and errors == "skip" and isinstance(unpacked, list):
@@ -2209,7 +2248,7 @@ class Client(SyncMethodMixin):
                         raise TimeoutError("No valid workers found")
                     # Exclude paused and closing_gracefully workers
                     nthreads = await self.scheduler.ncores_running(workers=workers)
-                if not nthreads:
+                if not nthreads:  # pragma: no cover
                     raise ValueError("No valid workers found")
 
                 _, who_has, nbytes = await scatter_to_workers(
@@ -3016,10 +3055,13 @@ class Client(SyncMethodMixin):
 
         Parameters
         ----------
-        collection
+        collection : dask object
+            Collection like dask.array or dataframe or dask.value objects
 
         Returns
         -------
+        collection : dask object
+            Collection with its tasks replaced with any existing futures.
 
         Examples
         --------
@@ -3746,7 +3788,7 @@ class Client(SyncMethodMixin):
             plot = True
 
         if plot:
-            from . import profile
+            from distributed import profile
 
             data = profile.plot_data(state)
             figure, source = profile.plot_figure(data, sizing_mode="stretch_both")
@@ -3789,104 +3831,73 @@ class Client(SyncMethodMixin):
             self.sync(self._update_scheduler_info)
         return self._scheduler_identity
 
-    async def _dump_cluster_state(
-        self,
-        filename: str,
-        exclude: Collection[str],
-        format: Literal["msgpack", "yaml"],
-    ) -> None:
-
-        scheduler_info = self.scheduler.dump_state()
-
-        workers_info = self.scheduler.broadcast(
-            msg={"op": "dump_state", "exclude": exclude},
-            on_error="return_pickle",
-        )
-        versions_info = self._get_versions()
-        scheduler_info, workers_info, versions_info = await asyncio.gather(
-            scheduler_info, workers_info, versions_info
-        )
-        # Unpickle RPC errors and convert them to string
-        workers_info = {
-            k: repr(loads(v)) if isinstance(v, bytes) else v
-            for k, v in workers_info.items()
-        }
-
-        state = {
-            "scheduler": scheduler_info,
-            "workers": workers_info,
-            "versions": versions_info,
-        }
-
-        def tuple_to_list(node):
-            if isinstance(node, (list, tuple)):
-                return [tuple_to_list(el) for el in node]
-            elif isinstance(node, dict):
-                return {k: tuple_to_list(v) for k, v in node.items()}
-            else:
-                return node
-
-        # lists are converted to tuples by the RPC
-        state = tuple_to_list(state)
-
-        filename = str(filename)
-        if format == "msgpack":
-            import gzip
-
-            import msgpack
-
-            suffix = ".msgpack.gz"
-            if not filename.endswith(suffix):
-                filename += suffix
-
-            with gzip.open(filename, "wb") as fdg:
-                msgpack.pack(state, fdg)
-        elif format == "yaml":
-            import yaml
-
-            suffix = ".yaml"
-            if not filename.endswith(suffix):
-                filename += suffix
-
-            with open(filename, "w") as fd:
-                yaml.dump(state, fd)
-        else:
-            raise ValueError(
-                f"Unsupported format {format}. Possible values are `msgpack` or `yaml`"
-            )
-
     def dump_cluster_state(
         self,
         filename: str = "dask-cluster-dump",
-        exclude: Collection[str] = (),
+        write_from_scheduler: bool | None = None,
+        exclude: Collection[str] = ("run_spec",),
         format: Literal["msgpack", "yaml"] = "msgpack",
+        **storage_options,
     ):
-        """Extract a dump of the entire cluster state and persist to disk.
+        """Extract a dump of the entire cluster state and persist to disk or a URL.
         This is intended for debugging purposes only.
 
-        Warning: Memory usage on client side can be large.
+        Warning: Memory usage on the scheduler (and client, if writing the dump locally)
+        can be large. On a large or long-running cluster, this can take several minutes.
+        The scheduler may be unresponsive while the dump is processed.
 
         Results will be stored in a dict::
 
             {
-                "scheduler_info": {...},
-                "worker_info": {
-                    worker_addr: {...},  # worker attributes
+                "scheduler": {...},  # scheduler state
+                "workers": {
+                    worker_addr: {...},  # worker state
                     ...
+                }
+                "versions": {
+                    "scheduler": {...},
+                    "workers": {
+                        worker_addr: {...},
+                        ...
+                    }
                 }
             }
 
         Parameters
         ----------
         filename:
-            The output filename. The appropriate file suffix (`.msgpack.gz` or
-            `.yaml`) will be appended automatically.
+            The path or URL to write to. The appropriate file suffix (``.msgpack.gz`` or
+            ``.yaml``) will be appended automatically.
+
+            Must be a path supported by :func:`fsspec.open` (like ``s3://my-bucket/cluster-dump``,
+            or ``cluster-dumps/dump``). See ``write_from_scheduler`` to control whether
+            the dump is written directly to ``filename`` from the scheduler, or sent
+            back to the client over the network, then written locally.
+        write_from_scheduler:
+            If None (default), infer based on whether ``filename`` looks like a URL
+            or a local path: True if the filename contains ``://`` (like
+            ``s3://my-bucket/cluster-dump``), False otherwise (like ``local_dir/cluster-dump``).
+
+            If True, write cluster state directly to ``filename`` from the scheduler.
+            If ``filename`` is a local path, the dump will be written to that
+            path on the *scheduler's* filesystem, so be careful if the scheduler is running
+            on ephemeral hardware. Useful when the scheduler is attached to a network
+            filesystem or persistent disk, or for writing to buckets.
+
+            If False, transfer cluster state from the scheduler back to the client
+            over the network, then write it to ``filename``. This is much less
+            efficient for large dumps, but useful when the scheduler doesn't have
+            access to any persistent storage.
         exclude:
             A collection of attribute names which are supposed to be excluded
             from the dump, e.g. to exclude code, tracebacks, logs, etc.
+
+            Defaults to exclude ``run_spec``, which is the serialized user code.
+            This is typically not required for debugging. To allow serialization
+            of this, pass an empty tuple.
         format:
-            Either msgpack or yaml. If msgpack is used (default), the output
-            will be stored in a gzipped file as msgpack.
+            Either ``"msgpack"`` or ``"yaml"``. If msgpack is used (default),
+            the output will be stored in a gzipped file as msgpack.
 
             To read::
 
@@ -3903,14 +3914,44 @@ class Client(SyncMethodMixin):
                     from yaml import Loader
                 with open("filename") as fd:
                     state = yaml.load(fd, Loader=Loader)
-
+        **storage_options:
+            Any additional arguments to :func:`fsspec.open` when writing to a URL.
         """
         return self.sync(
             self._dump_cluster_state,
             filename=filename,
-            format=format,
+            write_from_scheduler=write_from_scheduler,
             exclude=exclude,
+            format=format,
+            **storage_options,
         )
+
+    async def _dump_cluster_state(
+        self,
+        filename: str = "dask-cluster-dump",
+        write_from_scheduler: bool | None = None,
+        exclude: Collection[str] = ("run_spec",),
+        format: Literal["msgpack", "yaml"] = "msgpack",
+        **storage_options,
+    ):
+        filename = str(filename)
+        if write_from_scheduler is None:
+            write_from_scheduler = "://" in filename
+
+        if write_from_scheduler:
+            await self.scheduler.dump_cluster_state_to_url(
+                url=filename,
+                exclude=exclude,
+                format=format,
+                **storage_options,
+            )
+        else:
+            await cluster_dump.write_state(
+                partial(self.scheduler.get_cluster_state, exclude=exclude),
+                filename,
+                format,
+                **storage_options,
+            )
 
     def write_scheduler_file(self, scheduler_file):
         """Write the scheduler information to a json file.
@@ -4084,10 +4125,12 @@ class Client(SyncMethodMixin):
         else:
             raise ValueError(f"No event handler known for topic {topic}.")
 
-    def retire_workers(self, workers=None, close_workers=True, **kwargs):
+    def retire_workers(
+        self, workers: list[str] | None = None, close_workers: bool = True, **kwargs
+    ):
         """Retire certain workers on the scheduler
 
-        See dask.distributed.Scheduler.retire_workers for the full docstring.
+        See :meth:`distributed.Scheduler.retire_workers` for the full docstring.
 
         Parameters
         ----------
@@ -4294,17 +4337,17 @@ class Client(SyncMethodMixin):
                 magic_names = [magic_names]
 
         if "IPython" in sys.modules:
-            from ._ipython_utils import register_remote_magic
+            from distributed._ipython_utils import register_remote_magic
 
             register_remote_magic()
         if magic_names:
-            from ._ipython_utils import register_worker_magic
+            from distributed._ipython_utils import register_worker_magic
 
             for worker, magic_name in zip(workers, magic_names):
                 connection_info = info_dict[worker]
                 register_worker_magic(connection_info, magic_name)
         if qtconsole:
-            from ._ipython_utils import connect_qtconsole
+            from distributed._ipython_utils import connect_qtconsole
 
             for worker, connection_info in info_dict.items():
                 name = "dask-" + worker.replace(":", "-").replace("/", "-")
@@ -4359,11 +4402,11 @@ class Client(SyncMethodMixin):
             else:
                 magic_name = None
         if magic_name:
-            from ._ipython_utils import register_worker_magic
+            from distributed._ipython_utils import register_worker_magic
 
             register_worker_magic(info, magic_name)
         if qtconsole:
-            from ._ipython_utils import connect_qtconsole
+            from distributed._ipython_utils import connect_qtconsole
 
             connect_qtconsole(info, name="dask-scheduler", extra_args=qtconsole_args)
         return info
@@ -4479,10 +4522,10 @@ class Client(SyncMethodMixin):
     ):
         msgs = await self.scheduler.get_task_stream(start=start, stop=stop, count=count)
         if plot:
-            from .diagnostics.task_stream import rectangles
+            from distributed.diagnostics.task_stream import rectangles
 
             rects = rectangles(msgs)
-            from .dashboard.components.scheduler import task_stream_figure
+            from distributed.dashboard.components.scheduler import task_stream_figure
 
             source, figure = task_stream_figure(sizing_mode="stretch_both")
             source.data.update(rects)
@@ -4512,15 +4555,25 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         plugin : SchedulerPlugin
-            Plugin class or object to pass to the scheduler.
+            SchedulerPlugin instance to pass to the scheduler.
         name : str
             Name for the plugin; if None, a name is taken from the
             plugin instance or automatically generated if not present.
         **kwargs : Any
-            Arguments passed to the Plugin class (if Plugin is an
+            deprecated; Arguments passed to the Plugin class (if Plugin is an
             instance kwargs are unused).
 
         """
+        if isinstance(plugin, type):
+            warnings.warn(
+                "Adding plugins by class is deprecated and will be disabled in a "
+                "future release. Please add plugins by instance instead.",
+                category=FutureWarning,
+            )
+            # note: plugin is constructed in async def _register_scheduler_plugin
+        elif kwargs:
+            raise ValueError("kwargs provided but plugin is already an instance")
+
         if name is None:
             name = _get_plugin_name(plugin)
 
@@ -4591,7 +4644,7 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         plugin : WorkerPlugin or NannyPlugin
-            The plugin object to register.
+            WorkerPlugin or NannyPlugin instance to register.
         name : str, optional
             A name for the plugin.
             Registering a plugin with the same name will have no effect.
@@ -4599,8 +4652,9 @@ class Client(SyncMethodMixin):
         nanny : bool, optional
             Whether to register the plugin with workers or nannies.
         **kwargs : optional
-            If you pass a class as the plugin, instead of a class instance, then the
-            class will be instantiated with any extra keyword arguments.
+            Deprecated; If you pass a class as the plugin, instead of a class
+            instance, then the class will be instantiated with any extra
+            keyword arguments.
 
         Examples
         --------
@@ -4636,7 +4690,14 @@ class Client(SyncMethodMixin):
         unregister_worker_plugin
         """
         if isinstance(plugin, type):
+            warnings.warn(
+                "Adding plugins by class is deprecated and will be disabled in a "
+                "future release. Please add plugins by instance instead.",
+                category=FutureWarning,
+            )
             plugin = plugin(**kwargs)
+        elif kwargs:
+            raise ValueError("kwargs provided but plugin is already an instance")
 
         if name is None:
             name = _get_plugin_name(plugin)
@@ -4699,7 +4760,7 @@ class Client(SyncMethodMixin):
     @property
     def amm(self):
         """Convenience accessors for the :doc:`active_memory_manager`"""
-        from .active_memory_manager import AMMClientProxy
+        from distributed.active_memory_manager import AMMClientProxy
 
         return AMMClientProxy(self)
 
@@ -4924,11 +4985,11 @@ class as_completed:
         """Add multiple futures to the collection.
 
         The added futures will emit from the iterator once they finish"""
-        from .actor import ActorFuture
+        from distributed.actor import BaseActorFuture
 
         with self.lock:
             for f in futures:
-                if not isinstance(f, (Future, ActorFuture)):
+                if not isinstance(f, (Future, BaseActorFuture)):
                     raise TypeError("Input must be a future, got %s" % f)
                 self.futures[f] += 1
                 self.loop.add_callback(self._track_future, f)
@@ -5072,7 +5133,7 @@ def default_client(c=None):
     Parameters
     ----------
     c : Client
-        The client
+        The client to return. If None, the default client is returned.
 
     Returns
     -------

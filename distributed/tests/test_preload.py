@@ -5,6 +5,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
+from textwrap import dedent
 from time import sleep
 
 import pytest
@@ -288,3 +289,88 @@ async def test_web_preload_worker(cleanup, worker_preload):
     async with Scheduler(port=8786, host="localhost") as s:
         async with Nanny(preload_nanny=["http://127.0.0.1:12346/preload"]) as nanny:
             assert nanny.scheduler_addr == s.address
+
+
+# This test is blocked on https://github.com/dask/distributed/issues/5819
+@pytest.mark.xfail(
+    reason="The preload argument to the client isn't supported yet", strict=True
+)
+@gen_cluster(nthreads=[])
+async def test_client_preload_text(s: Scheduler):
+    text = dedent(
+        """\
+        def dask_setup(client):
+            client.foo = "setup"
+
+
+        def dask_teardown(client):
+            client.foo = "teardown"
+        """
+    )
+    async with Client(address=s.address, asynchronous=True, preload=text) as c:
+        assert c.foo == "setup"
+    assert c.foo == "teardown"
+
+
+@gen_cluster(nthreads=[])
+async def test_client_preload_config(s):
+    text = dedent(
+        """\
+        def dask_setup(client):
+            client.foo = "setup"
+
+
+        def dask_teardown(client):
+            client.foo = "teardown"
+        """
+    )
+    with dask.config.set({"distributed.client.preload": [text]}):
+        async with Client(address=s.address, asynchronous=True) as c:
+            assert c.foo == "setup"
+        assert c.foo == "teardown"
+
+
+# This test is blocked on https://github.com/dask/distributed/issues/5819
+@pytest.mark.xfail(
+    reason="The preload argument to the client isn't supported yet", strict=True
+)
+@gen_cluster(nthreads=[])
+async def test_client_preload_click(s):
+    text = dedent(
+        """\
+        import click
+
+        @click.command()
+        @click.argument("value")
+        def dask_setup(client, value):
+            client.foo = value
+        """
+    )
+    value = "setup"
+    async with Client(
+        address=s.address, asynchronous=True, preload=text, preload_argv=[[value]]
+    ) as c:
+        assert c.foo == value
+
+
+@gen_cluster(nthreads=[])
+async def test_client_preload_config_click(s):
+    text = dedent(
+        """\
+        import click
+
+        @click.command()
+        @click.argument("value")
+        def dask_setup(client, value):
+            client.foo = value
+        """
+    )
+    value = "setup"
+    with dask.config.set(
+        {
+            "distributed.client.preload": [text],
+            "distributed.client.preload-argv": [[value]],
+        }
+    ):
+        async with Client(address=s.address, asynchronous=True) as c:
+            assert c.foo == value

@@ -8,8 +8,8 @@ import inspect
 import io
 import logging
 import logging.config
+import multiprocessing
 import os
-import queue
 import re
 import shutil
 import signal
@@ -19,7 +19,6 @@ import sys
 import tempfile
 import threading
 import uuid
-import warnings
 import weakref
 from collections import defaultdict
 from collections.abc import Callable
@@ -27,10 +26,7 @@ from contextlib import contextmanager, nullcontext, suppress
 from glob import glob
 from itertools import count
 from time import sleep
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from typing_extensions import Literal
+from typing import Any, Literal
 
 from distributed.compatibility import MACOS
 from distributed.scheduler import Scheduler
@@ -48,23 +44,22 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from distributed.comm.tcp import TCP
-
-from . import system
-from . import versions as version_module
-from .client import Client, _global_clients, default_client
-from .comm import Comm
-from .compatibility import WINDOWS
-from .config import initialize_logging
-from .core import CommClosedError, ConnectionPool, Status, connect, rpc
-from .deploy import SpecCluster
-from .diagnostics.plugin import WorkerPlugin
-from .metrics import time
-from .nanny import Nanny
-from .node import ServerNode
-from .proctitle import enable_proctitle_on_children
-from .security import Security
-from .utils import (
+from distributed import system
+from distributed import versions as version_module
+from distributed.client import Client, _global_clients, default_client
+from distributed.comm import Comm
+from distributed.comm.tcp import TCP, BaseTCPConnector
+from distributed.compatibility import WINDOWS
+from distributed.config import initialize_logging
+from distributed.core import CommClosedError, ConnectionPool, Status, connect, rpc
+from distributed.deploy import SpecCluster
+from distributed.diagnostics.plugin import WorkerPlugin
+from distributed.metrics import time
+from distributed.nanny import Nanny
+from distributed.node import ServerNode
+from distributed.proctitle import enable_proctitle_on_children
+from distributed.security import Security
+from distributed.utils import (
     DequeHandler,
     TimeoutError,
     _offload_executor,
@@ -76,7 +71,7 @@ from .utils import (
     reset_logger_locks,
     sync,
 )
-from .worker import RUNNING, Worker
+from distributed.worker import Worker
 
 try:
     import dask.array  # register config
@@ -467,12 +462,17 @@ def run_scheduler(q, nputs, config, port=0, **kwargs):
         with pristine_loop() as loop:
 
             async def _():
-                scheduler = await Scheduler(
-                    validate=True, host="127.0.0.1", port=port, **kwargs
-                )
-                for i in range(nputs):
-                    q.put(scheduler.address)
-                await scheduler.finished()
+                try:
+                    scheduler = await Scheduler(
+                        validate=True, host="127.0.0.1", port=port, **kwargs
+                    )
+                except Exception as exc:
+                    for i in range(nputs):
+                        q.put(exc)
+                else:
+                    for i in range(nputs):
+                        q.put(scheduler.address)
+                    await scheduler.finished()
 
             try:
                 loop.run_sync(_)
@@ -490,14 +490,20 @@ def run_worker(q, scheduler_q, config, **kwargs):
                 scheduler_addr = scheduler_q.get()
 
                 async def _():
-                    worker = await Worker(scheduler_addr, validate=True, **kwargs)
-                    q.put(worker.address)
-                    await worker.finished()
+                    try:
+                        worker = await Worker(scheduler_addr, validate=True, **kwargs)
+                    except Exception as exc:
+                        q.put(exc)
+                    else:
+                        q.put(worker.address)
+                        await worker.finished()
 
-                try:
-                    loop.run_sync(_)
-                finally:
-                    loop.close(all_fds=True)
+                # Scheduler might've failed
+                if isinstance(scheduler_addr, str):
+                    try:
+                        loop.run_sync(_)
+                    finally:
+                        loop.close(all_fds=True)
 
 
 def run_nanny(q, scheduler_q, config, **kwargs):
@@ -507,14 +513,20 @@ def run_nanny(q, scheduler_q, config, **kwargs):
                 scheduler_addr = scheduler_q.get()
 
                 async def _():
-                    worker = await Nanny(scheduler_addr, validate=True, **kwargs)
-                    q.put(worker.address)
-                    await worker.finished()
+                    try:
+                        worker = await Nanny(scheduler_addr, validate=True, **kwargs)
+                    except Exception as exc:
+                        q.put(exc)
+                    else:
+                        q.put(worker.address)
+                        await worker.finished()
 
-                try:
-                    loop.run_sync(_)
-                finally:
-                    loop.close(all_fds=True)
+                # Scheduler might've failed
+                if isinstance(scheduler_addr, str):
+                    try:
+                        loop.run_sync(_)
+                    finally:
+                        loop.close(all_fds=True)
 
 
 @contextmanager
@@ -674,13 +686,16 @@ def cluster(
 
         for worker in workers:
             worker["proc"].start()
-        try:
-            for worker in workers:
-                worker["address"] = worker["queue"].get(timeout=5)
-        except queue.Empty:
-            pytest.xfail("Worker failed to start in test")
+        saddr_or_exception = scheduler_q.get()
+        if isinstance(saddr_or_exception, Exception):
+            raise saddr_or_exception
+        saddr = saddr_or_exception
 
-        saddr = scheduler_q.get()
+        for worker in workers:
+            addr_or_exception = worker["queue"].get()
+            if isinstance(addr_or_exception, Exception):
+                raise addr_or_exception
+            worker["address"] = addr_or_exception
 
         start = time()
         try:
@@ -882,7 +897,6 @@ def gen_cluster(
         ("127.0.0.1", 1),
         ("127.0.0.1", 2),
     ],
-    ncores: None = None,  # deprecated
     scheduler="127.0.0.1",
     timeout: float = _TEST_TIMEOUT,
     security: Security | dict[str, Any] | None = None,
@@ -922,9 +936,6 @@ def gen_cluster(
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"
     )
-    if ncores is not None:
-        warnings.warn("ncores= has moved to nthreads=", stacklevel=2)
-        nthreads = ncores
 
     scheduler_kwargs = merge(
         {"dashboard": False, "dashboard_address": ":0"}, scheduler_kwargs
@@ -1147,7 +1158,7 @@ def raises(func, exc=Exception):
         return True
 
 
-def terminate_process(proc):
+def _terminate_process(proc):
     if proc.poll() is None:
         if sys.platform.startswith("win"):
             proc.send_signal(signal.CTRL_BREAK_EVENT)
@@ -1186,7 +1197,7 @@ def popen(args, **kwargs):
 
     finally:
         try:
-            terminate_process(proc)
+            _terminate_process(proc)
         finally:
             # XXX Also dump stdout if return code != 0 ?
             out, err = proc.communicate()
@@ -1196,23 +1207,6 @@ def popen(args, **kwargs):
 
                 print("\n\nPrint from stdout\n=================\n")
                 print(out.decode())
-
-
-def wait_for_port(address, timeout=5):
-    assert isinstance(address, tuple)
-    deadline = time() + timeout
-
-    while True:
-        timeout = deadline - time()
-        if timeout < 0:
-            raise RuntimeError(f"Failed to connect to {address}")
-        try:
-            sock = socket.create_connection(address, timeout=timeout)
-        except OSError:
-            pass
-        else:
-            sock.close()
-            break
 
 
 def wait_for(predicate, timeout, fail_func=None, period=0.001):
@@ -1264,7 +1258,6 @@ if has_ipv6():
 
     def requires_ipv6(test_func):
         return test_func
-
 
 else:
     requires_ipv6 = pytest.mark.skip("ipv6 required")
@@ -1410,7 +1403,7 @@ def new_config(new_config):
     """
     Temporarily change configuration dictionary.
     """
-    from .config import defaults
+    from distributed.config import defaults
 
     config = dask.config.config
     orig_config = copy.deepcopy(config)
@@ -1579,6 +1572,9 @@ def save_sys_modules():
 @contextmanager
 def check_thread_leak():
     """Context manager to ensure we haven't leaked any threads"""
+    # "TCP-Executor" threads are never stopped once they are started
+    BaseTCPConnector.warmup()
+
     active_threads_start = threading.enumerate()
 
     yield
@@ -1589,15 +1585,8 @@ def check_thread_leak():
             thread
             for thread in threading.enumerate()
             if thread not in active_threads_start
-            and "Threaded" not in thread.name
-            and "watch message" not in thread.name
-            and "TCP-Executor" not in thread.name
-            # TODO: Make sure profile thread is cleaned up
-            # and remove the line below
-            and "Profile" not in thread.name
-            # asyncio default executor thread pool is not shut down until loop
-            # is shut down
-            and "asyncio_" not in thread.name
+            # FIXME this looks like a genuine leak that needs fixing
+            and "watch message queue" not in thread.name
         ]
         if not bad_threads:
             break
@@ -1612,24 +1601,67 @@ def check_thread_leak():
             assert False, (bad_thread, call_stacks)
 
 
+def wait_active_children(timeout: float) -> list[multiprocessing.Process]:
+    """Wait until timeout for mp_context.active_children() to terminate.
+    Return list of active subprocesses after the timeout expired.
+    """
+    t0 = time()
+    while True:
+        # Do not sample the subprocesses once at the beginning with
+        # `for proc in mp_context.active_children: ...`, assume instead that new
+        # children processes may be spawned before the timeout expires.
+        children = mp_context.active_children()
+        if not children:
+            return []
+        join_timeout = timeout - time() + t0
+        if join_timeout <= 0:
+            return children
+        children[0].join(timeout=join_timeout)
+
+
+def term_or_kill_active_children(timeout: float) -> None:
+    """Send SIGTERM to mp_context.active_children(), wait up to 3 seconds for processes
+    to die, then send SIGKILL to the survivors
+    """
+    children = mp_context.active_children()
+    for proc in children:
+        proc.terminate()
+
+    children = wait_active_children(timeout=timeout)
+    for proc in children:
+        proc.kill()
+
+    children = wait_active_children(timeout=30)
+    if children:  # pragma: nocover
+        logger.warning("Leaked unkillable children processes: %s", children)
+        # It should be impossible to ignore SIGKILL on Linux/MacOSX
+        assert WINDOWS
+
+
 @contextmanager
-def check_process_leak(check=True):
-    for proc in mp_context.active_children():
-        proc.terminate()
+def check_process_leak(
+    check: bool = True, check_timeout: float = 40, term_timeout: float = 3
+):
+    """Terminate any currently-running subprocesses at both the beginning and end of this context
 
-    yield
-
-    if check:
-        for i in range(200):
-            if not set(mp_context.active_children()):
-                break
-            else:
-                sleep(0.2)
-        else:
-            assert not mp_context.active_children()
-
-    for proc in mp_context.active_children():
-        proc.terminate()
+    Parameters
+    ----------
+    check : bool, optional
+        If True, raise AssertionError if any processes survive at the exit
+    check_timeout: float, optional
+        Wait up to these many seconds for subprocesses to terminate before failing
+    term_timeout: float, optional
+        After sending SIGTERM to a subprocess, wait up to these many seconds before
+        sending SIGKILL
+    """
+    term_or_kill_active_children(timeout=term_timeout)
+    try:
+        yield
+        if check:
+            children = wait_active_children(timeout=check_timeout)
+            assert not children, f"Test leaked subprocesses: {children}"
+    finally:
+        term_or_kill_active_children(timeout=term_timeout)
 
 
 @contextmanager
@@ -1658,7 +1690,7 @@ def check_instances():
     for w in Worker._instances:
         with suppress(RuntimeError):  # closed IOLoop
             w.loop.add_callback(w.close, report=False, executor_wait=False)
-            if w.status in RUNNING:
+            if w.status in Status.ANY_RUNNING:
                 w.loop.add_callback(w.close)
     Worker._instances.clear()
 
@@ -1676,8 +1708,7 @@ def check_instances():
     else:
         L = [c for c in Comm._instances if not c.closed()]
         Comm._instances.clear()
-        print("Unclosed Comms", L)
-        # raise ValueError("Unclosed Comms", L)
+        raise ValueError("Unclosed Comms", L)
 
     assert all(
         n.status == Status.closed or n.status == Status.init for n in Nanny._instances
@@ -1759,6 +1790,9 @@ class LockedComm(TCP):
             await self.read_event.wait()
         return msg
 
+    async def close(self):
+        await self.comm.close()
+
 
 class _LockedCommPool(ConnectionPool):
     """A ConnectionPool wrapper to intercept network traffic between servers
@@ -1804,6 +1838,9 @@ class _LockedCommPool(ConnectionPool):
         return LockedComm(
             comm, self.read_event, self.read_queue, self.write_event, self.write_queue
         )
+
+    async def close(self):
+        await self.pool.close()
 
 
 def xfail_ssl_issue5601():
@@ -1885,7 +1922,7 @@ def assert_worker_story(
                     break
     except StopIteration:
         raise AssertionError(
-            f"assert_worker_story(strict={strict}) failed\n"
+            f"assert_worker_story({strict=}) failed\n"
             f"story:\n{_format_story(story)}\n"
             f"expect:\n{_format_story(expect)}"
         ) from None

@@ -11,8 +11,8 @@ import dask.config
 from dask.optimization import SubgraphCallable
 from dask.utils import parse_timedelta, stringify
 
-from .core import rpc
-from .utils import All
+from distributed.core import rpc
+from distributed.utils import All
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=No
     gather
     _gather
     """
-    from .worker import get_data_from_worker
+    from distributed.worker import get_data_from_worker
 
     bad_addresses = set()
     missing_workers = set()
@@ -118,7 +118,7 @@ class WrappedKey:
 _round_robin_counter = [0]
 
 
-async def scatter_to_workers(nthreads, data, rpc=rpc, report=True, serializers=None):
+async def scatter_to_workers(nthreads, data, rpc=rpc, report=True):
     """Scatter data directly to workers
 
     This distributes data in a round-robin fashion to a set of workers based on
@@ -145,7 +145,8 @@ async def scatter_to_workers(nthreads, data, rpc=rpc, report=True, serializers=N
         out = await All(
             [
                 rpcs[address].update_data(
-                    data=v, report=report, serializers=serializers
+                    data=v,
+                    report=report,
                 )
                 for address, v in d.items()
             ]
@@ -352,7 +353,7 @@ async def retry(
     Returns
     -------
     Any
-        Whatever `await `coro()` returned
+        Whatever `await coro()` returned
     """
     # this loop is a no-op in case max_retries<=0
     for i_try in range(count):
@@ -363,7 +364,7 @@ async def retry(
             logger.info(
                 f"Retrying {operation} after exception in attempt {i_try}/{count}: {ex}"
             )
-            delay = min(delay_min * (2 ** i_try - 1), delay_max)
+            delay = min(delay_min * (2**i_try - 1), delay_max)
             if jitter_fraction > 0:
                 delay *= 1 + random.random() * jitter_fraction
             await asyncio.sleep(delay)

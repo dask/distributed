@@ -8,9 +8,9 @@ from collections.abc import Hashable
 
 from dask.utils import parse_timedelta
 
-from .client import Client
-from .utils import TimeoutError, log_errors
-from .worker import get_worker
+from distributed.client import Client
+from distributed.utils import TimeoutError, log_errors
+from distributed.worker import get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -112,9 +112,7 @@ class MultiLockExtension:
         for waiter in waiters_ready:
             self.scheduler.loop.add_callback(self.events[waiter].set)
 
-    async def acquire(
-        self, comm=None, locks=None, id=None, timeout=None, num_locks=None
-    ):
+    async def acquire(self, locks=None, id=None, timeout=None, num_locks=None):
         with log_errors():
             if not self._request_locks(locks, id, num_locks):
                 assert id not in self.events
@@ -134,7 +132,7 @@ class MultiLockExtension:
             assert self.requests_left[id] == 0
             return True
 
-    def release(self, comm=None, id=None):
+    def release(self, id=None):
         with log_errors():
             self._refain_locks(self.requests[id], id)
 

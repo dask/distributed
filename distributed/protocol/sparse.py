@@ -1,6 +1,11 @@
 import sparse
 
-from .serialize import dask_deserialize, dask_serialize, deserialize, serialize
+from distributed.protocol.serialize import (
+    dask_deserialize,
+    dask_serialize,
+    deserialize,
+    serialize,
+)
 
 
 @dask_serialize.register(sparse.COO)
