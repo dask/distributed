@@ -4526,12 +4526,14 @@ def apply_function_simple(
         msg = error_message(e)
         msg["op"] = "task-erred"
         msg["actual-exception"] = e
+        msg["stimulus_id"] = f"task-sync-erred-{time()}"
     else:
         msg = {
             "op": "task-finished",
             "status": "OK",
             "result": result,
             "nbytes": sizeof(result),
+            "stimulus_id": f"task-sync-finished-{time()}",
             "type": type(result) if result is not None else None,
         }
     finally:
@@ -4562,12 +4564,14 @@ async def apply_function_async(
         msg = error_message(e)
         msg["op"] = "task-erred"
         msg["actual-exception"] = e
+        msg["stimulus_id"] = f"task-async-erred-{time()}"
     else:
         msg = {
             "op": "task-finished",
             "status": "OK",
             "result": result,
             "nbytes": sizeof(result),
+            "stimulus_id": f"task-async-finished-{time()}",
             "type": type(result) if result is not None else None,
         }
     finally:

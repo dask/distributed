@@ -2440,7 +2440,7 @@ class SchedulerState:
             key, finish = recommendations.popitem()
             keys.add(key)
 
-            new = self._transition(key, finish)
+            new = self._transition(key, finish, stimulus_id=stimulus_id)
             new_recs, new_cmsgs, new_wmsgs = new
 
             recommendations.update(new_recs)
@@ -4765,7 +4765,9 @@ class Scheduler(SchedulerState, ServerNode):
                     if k in keys:
                         keys.remove(k)
                     self.report({"op": "cancelled-key", "key": k}, client=client)
-                    self.client_releases_keys(keys=[k], client=client)
+                    self.client_releases_keys(
+                        keys=[k], client=client, stimulus_id=stimulus_id
+                    )
 
         # Avoid computation that is already finished
         ts: TaskState
@@ -5123,6 +5125,7 @@ class Scheduler(SchedulerState, ServerNode):
                 with suppress(AttributeError, CommClosedError):
                     self.stream_comms[address].send({"op": "close", "report": False})
 
+            stimulus_id = f"remove-worker-{time()}"
             self.remove_resources(address)
 
             dh: dict = parent._host_info[host]
@@ -5157,7 +5160,9 @@ class Scheduler(SchedulerState, ServerNode):
                         e = pickle.dumps(
                             KilledWorker(task=k, last_worker=ws.clean()), protocol=4
                         )
-                        r = self.transition(k, "erred", exception=e, cause=k)
+                        r = self.transition(
+                            k, "erred", exception=e, cause=k, stimulus_id=stimulus_id
+                        )
                         recommendations.update(r)
                         logger.info(
                             "Task %s marked as failed because %d workers died"
@@ -5174,7 +5179,7 @@ class Scheduler(SchedulerState, ServerNode):
                     else:  # pure data
                         recommendations[ts._key] = "forgotten"
 
-            self.transitions(recommendations)
+            self.transitions(recommendations, stimulus_id=stimulus_id)
 
             for plugin in list(self.plugins.values()):
                 try:
@@ -5207,19 +5212,25 @@ class Scheduler(SchedulerState, ServerNode):
     def stimulus_cancel(self, comm, keys=None, client=None, force=False):
         """Stop execution on a list of keys"""
         logger.info("Client %s requests to cancel %d keys", client, len(keys))
+
         if client:
             self.log_event(
                 client, {"action": "cancel", "count": len(keys), "force": force}
             )
-        for key in keys:
-            self.cancel_key(key, client, force=force)
+            stimulus_id = f"client-cancel-key-{time()}"
+        else:
+            stimulus_id = f"stimulus-cancel-key-{time()}"
 
-    def cancel_key(self, key, client, retries=5, force=False):
+        for key in keys:
+            self.cancel_key(key, client, force=force, stimulus_id=stimulus_id)
+
+    def cancel_key(self, key, client, retries=5, force=False, stimulus_id=None):
         """Cancel a particular key and all dependents"""
         # TODO: this should be converted to use the transition mechanism
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState = parent._tasks.get(key)
         dts: TaskState
+        stimulus_id = stimulus_id or f"cancel-key-{time()}"
         try:
             cs: ClientState = parent._clients[client]
         except KeyError:
@@ -5237,7 +5248,9 @@ class Scheduler(SchedulerState, ServerNode):
         self.report({"op": "cancelled-key", "key": key})
         clients = list(ts._who_wants) if force else [cs]
         for cs in clients:
-            self.client_releases_keys(keys=[key], client=cs._client_key)
+            self.client_releases_keys(
+                keys=[key], client=cs._client_key, stimulus_id=stimulus_id
+            )
 
     def client_desires_keys(self, keys=None, client=None):
         parent: SchedulerState = cast(SchedulerState, self)
@@ -5267,7 +5280,7 @@ class Scheduler(SchedulerState, ServerNode):
         recommendations: dict = {}
 
         _client_releases_keys(parent, keys=keys, cs=cs, recommendations=recommendations)
-        self.transitions(recommendations)
+        self.transitions(recommendations, stimulus_id=stimulus_id)
 
     def client_heartbeat(self, client=None):
         """Handle heartbeats from Client"""
@@ -5530,6 +5543,7 @@ class Scheduler(SchedulerState, ServerNode):
     def remove_client(self, client=None):
         """Remove client from network"""
         parent: SchedulerState = cast(SchedulerState, self)
+        stimulus_id = f"remove-client-{time()}"
         if self.status == Status.running:
             logger.info("Remove client %s", client)
         self.log_event(["all", client], {"action": "remove-client", "client": client})
@@ -5541,7 +5555,9 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             ts: TaskState
             self.client_releases_keys(
-                keys=[ts._key for ts in cs._wants_what], client=cs._client_key
+                keys=[ts._key for ts in cs._wants_what],
+                client=cs._client_key,
+                stimulus_id=stimulus_id,
             )
             del parent._clients[client]
 
@@ -5578,7 +5594,7 @@ class Scheduler(SchedulerState, ServerNode):
     def handle_uncaught_error(self, **msg):
         logger.exception(clean_exception(**msg)[1])
 
-    def handle_task_finished(self, key=None, worker=None, **msg):
+    def handle_task_finished(self, key=None, worker=None, stimulus_id=None, **msg):
         parent: SchedulerState = cast(SchedulerState, self)
         if worker not in parent._workers_dv:
             return
@@ -6293,12 +6309,13 @@ class Scheduler(SchedulerState, ServerNode):
             List of keys to delete on the specified worker
         """
         parent: SchedulerState = cast(SchedulerState, self)
+        stimulus_id = f"delete-data-{time()}"
 
         try:
             await retry_operation(
                 self.rpc(addr=worker_address).free_keys,
                 keys=list(keys),
-                stimulus_id=f"delete-data-{time()}",
+                stimulus_id=stimulus_id,
             )
         except OSError as e:
             # This can happen e.g. if the worker is going through controlled shutdown;
@@ -6320,7 +6337,7 @@ class Scheduler(SchedulerState, ServerNode):
                 parent.remove_replica(ts, ws)
                 if not ts._who_has:
                     # Last copy deleted
-                    self.transitions({key: "released"})
+                    self.transitions({key: "released"}, stimulus_id=stimulus_id)
 
         self.log_event(ws._address, {"action": "remove-worker-data", "keys": keys})
 
@@ -7558,7 +7575,9 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         client_msgs: dict = {}
         worker_msgs: dict = {}
-        parent._transitions(recommendations, client_msgs, worker_msgs)
+        parent._transitions(
+            recommendations, client_msgs, worker_msgs, stimulus_id=stimulus_id
+        )
         self.send_all(client_msgs, worker_msgs)
 
     def story(self, *keys):
