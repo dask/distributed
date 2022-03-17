@@ -80,6 +80,7 @@ from distributed.queues import QueueExtension
 from distributed.recreate_tasks import ReplayTaskScheduler
 from distributed.security import Security
 from distributed.semaphore import SemaphoreExtension
+from distributed.shuffle import ShuffleSchedulerExtension
 from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
@@ -183,6 +184,7 @@ DEFAULT_EXTENSIONS = [
     EventExtension,
     ActiveMemoryManagerExtension,
     MemorySamplerExtension,
+    ShuffleSchedulerExtension,
 ]
 
 ALL_TASK_STATES = declare(
@@ -4418,7 +4420,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         if extensions:
             for name, data in extensions.items():
-                self.extensions[name].heartbeat(data)
+                self.extensions[name].heartbeat(ws, data)
 
         self.log_event(address, merge({"action": "heartbeat"}, metrics))
 

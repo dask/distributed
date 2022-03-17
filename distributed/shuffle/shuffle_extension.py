@@ -4,6 +4,7 @@ import asyncio
 import functools
 import math
 import os
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NewType
 
@@ -109,6 +110,24 @@ class Shuffle:
         self.transferred = False
         self.total_recvd = 0
 
+    def heartbeat(self):
+        return {
+            "disk": {
+                "memory": self.multi_file.total_size,
+                "buckets": len(self.multi_file.shards),
+                "written": self.multi_file.bytes_written,
+                "read": self.multi_file.bytes_read,
+                "active": len(self.multi_file.active),
+            },
+            "comms": {
+                "memory": self.multi_comm.total_size,
+                "buckets": len(self.multi_comm.shards),
+                "written": self.multi_comm.total_moved,
+                "read": self.total_recvd,
+                "active": self.multi_comm.comm_queue.qsize(),  # TODO: maybe not built yet
+            },
+        }
+
     async def receive(self, data: list[pa.Buffer]) -> None:
         # This is actually ok.  Our local barrier might have finished,
         # but barriers on other workers might still be running and sending us
@@ -212,6 +231,9 @@ class ShuffleWorkerExtension:
             metadata,
             self.worker,
         )
+
+    def heartbeat(self):
+        return {id: shuffle.heartbeat() for id, shuffle in self.shuffles.items()}
 
     async def shuffle_receive(
         self,
@@ -379,6 +401,16 @@ class ShuffleWorkerExtension:
             raise ValueError(
                 f"Shuffle {shuffle_id!r} is not registered on worker {self.worker.address}"
             ) from None
+
+
+class ShuffleSchedulerExtension:
+    def __init__(self, scheduler):
+        self.scheduler = scheduler
+        self.shuffles = defaultdict(lambda defaultdict: dict)
+
+    def heartbeat(self, ws, data):
+        for shuffle_id, d in data.items():
+            self.shuffles[shuffle_id][ws.address].update(d)
 
 
 def split_by_worker(

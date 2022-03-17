@@ -18,3 +18,17 @@ async def test_basic(c, s, a, b):
     a = await a
     b = await b
     assert a == b
+
+
+@gen_cluster(client=True)
+async def test_heartbeat(c, s, a, b):
+    await a.heartbeat()
+    assert not s.extensions["shuffle"].shuffles
+    df = dask.datasets.timeseries(
+        dtypes={"x": float, "y": float},
+    )
+    df = dask.datasets.timeseries()
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    await out.persist()
+
+    assert s.extensions["shuffle"].shuffles
