@@ -30,8 +30,6 @@ class LockExtension:
             {"lock_acquire": self.acquire, "lock_release": self.release}
         )
 
-        self.scheduler.extensions["locks"] = self
-
     async def acquire(self, name=None, id=None, timeout=None):
         with log_errors():
             if isinstance(name, list):

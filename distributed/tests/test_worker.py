@@ -3762,7 +3762,7 @@ async def test_do_not_block_event_loop_during_shutdown(s):
 
 
 @gen_cluster(nthreads=[])
-async def test_extensions(s):
+async def test_extension_heartbeat(s):
     flag = [False]
 
     class WorkerExtension:
@@ -3777,7 +3777,8 @@ async def test_extensions(s):
             self.scheduler = scheduler
             pass
 
-        def heartbeat(self, data: dict):
+        def heartbeat(self, ws, data: dict):
+            assert ws in self.scheduler.workers.values()
             assert data == {"data": 123}
             flag[0] = True
 
