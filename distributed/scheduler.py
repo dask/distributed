@@ -1477,7 +1477,7 @@ class TaskState:
     _exception_text: str
     _traceback: object
     _traceback_text: str
-    _exception_blame: "TaskState | None"
+    _exception_blame: "TaskState"  # TaskState | None"
     _erred_on: set
     _suspicious: Py_ssize_t
     _host_restrictions: set  # set[str] | None
@@ -2269,7 +2269,9 @@ class SchedulerState:
     # State Transitions #
     #####################
 
-    def _transition(self, key, finish: str, *args, stimulus_id: str = None, **kwargs):
+    def _transition(
+        self, key, finish: str, *args, stimulus_id: str | None = None, **kwargs
+    ):
         """Transition a key from its current state to the finish state
 
         Examples
@@ -2457,7 +2459,7 @@ class SchedulerState:
             for key in keys:
                 scheduler.validate_key(key)
 
-    def transition_released_waiting(self, key, stimulus_id: str = None):
+    def transition_released_waiting(self, key, stimulus_id: str | None = None):
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -2511,7 +2513,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_no_worker_waiting(self, key, stimulus_id: str = None):
+    def transition_no_worker_waiting(self, key, stimulus_id: str | None = None):
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -2565,7 +2567,7 @@ class SchedulerState:
         type=None,
         typename: str = None,
         worker=None,
-        stimulus_id: str = None,
+        stimulus_id: str | None = None,
     ):
         try:
             ws: WorkerState = self._workers_dv[worker]
@@ -2727,7 +2729,7 @@ class SchedulerState:
 
         return total_duration
 
-    def transition_waiting_processing(self, key, stimulus_id: str = None):
+    def transition_waiting_processing(self, key, stimulus_id: str | None = None):
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -2779,7 +2781,7 @@ class SchedulerState:
         type=None,
         typename: str = None,
         worker=None,
-        stimulus_id: str = None,
+        stimulus_id: str | None = None,
         **kwargs,
     ):
         try:
@@ -2827,7 +2829,7 @@ class SchedulerState:
         typename: str = None,
         worker=None,
         startstops=None,
-        stimulus_id: str = None,
+        stimulus_id: str | None = None,
         **kwargs,
     ):
         ws: WorkerState
@@ -2917,7 +2919,7 @@ class SchedulerState:
             raise
 
     def transition_memory_released(
-        self, key, safe: bint = False, stimulus_id: str = None
+        self, key, safe: bint = False, stimulus_id: str | None = None
     ):
         ws: WorkerState
         try:
@@ -2990,7 +2992,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_released_erred(self, key, stimulus_id: str = None):
+    def transition_released_erred(self, key, stimulus_id: str | None = None):
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -3005,9 +3007,6 @@ class SchedulerState:
                     assert not ts._who_has
                     assert not ts._waiting_on
                     assert not ts._waiters
-
-            if not ts._exception_blame:
-                raise RuntimeError(f"_exception_blame not supplied for TaskState {ts}")
 
             failing_ts = ts._exception_blame
 
@@ -3038,7 +3037,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_erred_released(self, key, stimulus_id: str = None):
+    def transition_erred_released(self, key, stimulus_id: str | None = None):
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -3088,7 +3087,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_waiting_released(self, key, stimulus_id: str = None):
+    def transition_waiting_released(self, key, stimulus_id: str | None = None):
         try:
             ts: TaskState = self._tasks[key]
             recommendations: dict = {}
@@ -3125,7 +3124,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_processing_released(self, key, stimulus_id: str = None):
+    def transition_processing_released(self, key, stimulus_id: str | None = None):
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -3268,7 +3267,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_no_worker_released(self, key, stimulus_id: str = None):
+    def transition_no_worker_released(self, key, stimulus_id: str | None = None):
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -3311,7 +3310,7 @@ class SchedulerState:
         ts._exception_blame = ts._exception = ts._traceback = None
         self._task_metadata.pop(key, None)
 
-    def transition_memory_forgotten(self, key, stimulus_id: str = None):
+    def transition_memory_forgotten(self, key, stimulus_id: str | None = None):
         ws: WorkerState
         try:
             ts: TaskState = self._tasks[key]
@@ -3353,7 +3352,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_released_forgotten(self, key, stimulus_id: str = None):
+    def transition_released_forgotten(self, key, stimulus_id: str | None = None):
         try:
             ts: TaskState = self._tasks[key]
             recommendations: dict = {}
@@ -7522,7 +7521,9 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return responses
 
-    def transition(self, key, finish: str, *args, stimulus_id: str = None, **kwargs):
+    def transition(
+        self, key, finish: str, *args, stimulus_id: str | None = None, **kwargs
+    ):
         """Transition a key from its current state to the finish state
 
         Examples
@@ -8392,12 +8393,12 @@ def _task_to_report_msg(state: SchedulerState, ts: TaskState) -> dict:  # -> dic
     elif ts._state == "memory":
         return {"op": "key-in-memory", "key": ts._key}
     elif ts._state == "erred":
-        failing_ts: TaskState | None = ts._exception_blame
+        failing_ts: TaskState = ts._exception_blame
         return {
             "op": "task-erred",
             "key": ts._key,
-            "exception": failing_ts._exception if failing_ts else "<No failing task!>",
-            "traceback": failing_ts._traceback if failing_ts else "<No failing task!>",
+            "exception": failing_ts._exception,
+            "traceback": failing_ts._traceback,
         }
     else:
         return None  # type: ignore
