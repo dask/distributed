@@ -136,7 +136,10 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 no_value = "--no-value-sentinel--"
 
-DEFAULT_EXTENSIONS: list[type] = [PubSubWorkerExtension, ShuffleWorkerExtension]
+DEFAULT_EXTENSIONS: dict[str, type] = {
+    "pubsub": PubSubWorkerExtension,
+    "shuffle": ShuffleWorkerExtension,
+}
 
 DEFAULT_METRICS: dict[str, Callable[[Worker], Any]] = {}
 
@@ -458,7 +461,7 @@ class Worker(ServerNode):
         memory_spill_fraction: float | Literal[False] | None = None,
         memory_pause_fraction: float | Literal[False] | None = None,
         max_spill: float | str | Literal[False] | None = None,
-        extensions: list[type] | None = None,
+        extensions: dict[str, type] | None = None,
         metrics: Mapping[str, Callable[[Worker], Any]] = DEFAULT_METRICS,
         startup_information: Mapping[
             str, Callable[[Worker], Any]
@@ -864,8 +867,9 @@ class Worker(ServerNode):
 
         if extensions is None:
             extensions = DEFAULT_EXTENSIONS
-        for ext in extensions:
-            ext(self)
+        self.extensions = {
+            name: extension(self) for name, extension in extensions.items()
+        }
 
         self._throttled_gc = ThrottledGC(logger=logger)
 
@@ -1177,6 +1181,11 @@ class Worker(ServerNode):
                     key: start - self.tasks[key].start_time
                     for key in self.active_keys
                     if key in self.tasks
+                },
+                extensions={
+                    name: extension.heartbeat()
+                    for name, extension in self.extensions.items()
+                    if hasattr(extension, "heartbeat")
                 },
             )
             end = time()

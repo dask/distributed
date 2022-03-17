@@ -4328,6 +4328,7 @@ class Scheduler(SchedulerState, ServerNode):
         host_info: dict = None,
         metrics: dict,
         executing: dict = None,
+        extensions: dict = None,
     ):
         parent: SchedulerState = cast(SchedulerState, self)
         address = self.coerce_address(address, resolve_address)
@@ -4414,6 +4415,10 @@ class Scheduler(SchedulerState, ServerNode):
 
         if resources:
             self.add_resources(worker=address, resources=resources)
+
+        if extensions:
+            for name, data in extensions.items():
+                self.extensions[name].heartbeat(data)
 
         self.log_event(address, merge({"action": "heartbeat"}, metrics))
 

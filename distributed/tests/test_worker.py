@@ -3759,3 +3759,31 @@ async def test_do_not_block_event_loop_during_shutdown(s):
         await w.close(executor_wait=True)
 
     await asyncio.gather(block(), close(), set_future())
+
+
+@gen_cluster(nthreads=[])
+async def test_extensions(s):
+    flag = [False]
+
+    class WorkerExtension:
+        def __init__(self, worker):
+            pass
+
+        def heartbeat(self):
+            return {"data": 123}
+
+    class SchedulerExtension:
+        def __init__(self, scheduler):
+            self.scheduler = scheduler
+            pass
+
+        def heartbeat(self, data: dict):
+            assert data == {"data": 123}
+            flag[0] = True
+
+    s.extensions["test"] = SchedulerExtension(s)
+
+    async with Worker(s.address, extensions={"test": WorkerExtension}) as w:
+        await w.heartbeat()
+
+    assert flag[0]
