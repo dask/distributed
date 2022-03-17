@@ -1191,7 +1191,9 @@ def popen(args, **kwargs):
     proc = subprocess.Popen(args, **kwargs)
     try:
         yield proc
-    except Exception:
+
+    # asyncio.CancelledError is raised by @gen_test/@gen_cluster timeout
+    except (Exception, asyncio.CancelledError):
         dump_stdout = True
         raise
 
