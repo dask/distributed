@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import math
 import os
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NewType
@@ -106,9 +108,18 @@ class Shuffle:
         self.worker.loop.add_callback(self.multi_comm.communicate)
         self.worker.loop.add_callback(self.multi_file.communicate)
 
+        self.diagnostics: dict[str, float] = defaultdict(float)
         self.output_partitions_left = metadata.npartitions_for(worker.address)
         self.transferred = False
         self.total_recvd = 0
+        self.start_time = time.time()
+
+    @contextlib.contextmanager
+    def time(self, name: str):
+        start = time.time()
+        yield
+        stop = time.time()
+        self.diagnostics[name] += stop - start
 
     def heartbeat(self):
         return {
@@ -118,6 +129,7 @@ class Shuffle:
                 "written": self.multi_file.bytes_written,
                 "read": self.multi_file.bytes_read,
                 "active": len(self.multi_file.active),
+                "diagnostics": self.multi_file.diagnostics,
             },
             "comms": {
                 "memory": self.multi_comm.total_size,
@@ -125,7 +137,10 @@ class Shuffle:
                 "written": self.multi_comm.total_moved,
                 "read": self.total_recvd,
                 "active": self.multi_comm.comm_queue.qsize(),  # TODO: maybe not built yet
+                "diagnostics": self.multi_comm.diagnostics,
             },
+            "diagnostics": self.diagnostics,
+            "start": self.start_time,
         }
 
     async def receive(self, data: list[pa.Buffer]) -> None:
@@ -140,34 +155,40 @@ class Shuffle:
         print("recved", format_bytes(sum(map(len, data))))
         self.total_recvd += sum(map(len, data))
         # An ugly way of turning these batches back into an arrow table
-        data = await offload(
-            list_of_buffers_to_table,
-            data,
-            schema=pa.Schema.from_pandas(self.metadata.empty),
-        )
+        with self.time("cpu"):
+            data = await offload(
+                list_of_buffers_to_table,
+                data,
+                schema=pa.Schema.from_pandas(self.metadata.empty),
+            )
 
-        groups = await offload(split_by_partition, data, self.metadata.column)
+            groups = await offload(split_by_partition, data, self.metadata.column)
 
         assert len(data) == sum(map(len, groups.values()))
         del data
 
-        groups = await offload(
-            lambda: {
-                k: [batch.serialize() for batch in v.to_batches()]
-                for k, v in groups.items()
-            }
-        )  # TODO: consider offloading
+        with self.time("cpu"):
+            groups = await offload(
+                lambda: {
+                    k: [batch.serialize() for batch in v.to_batches()]
+                    for k, v in groups.items()
+                }
+            )  # TODO: consider offloading
         await self.multi_file.put(groups)
 
     def add_partition(self, data: pd.DataFrame) -> None:
-        out = split_by_worker(
-            data, self.metadata.column, self.metadata.npartitions, self.metadata.workers
-        )
-        assert len(data) == sum(map(len, out.values()))
-        out = {
-            k: [b.serialize().to_pybytes() for b in t.to_batches()]
-            for k, t in out.items()
-        }
+        with self.time("cpu"):
+            out = split_by_worker(
+                data,
+                self.metadata.column,
+                self.metadata.npartitions,
+                self.metadata.workers,
+            )
+            assert len(data) == sum(map(len, out.values()))
+            out = {
+                k: [b.serialize().to_pybytes() for b in t.to_batches()]
+                for k, t in out.items()
+            }
         self.multi_comm.put(out)
 
     def get_output_partition(self, i: int) -> pd.DataFrame:
@@ -188,7 +209,8 @@ class Shuffle:
         sync(self.worker.loop, self.multi_file.flush)  # type: ignore
         try:
             df = self.multi_file.read(i)
-            return df.to_pandas()
+            with self.time("cpu"):
+                return df.to_pandas()
         except KeyError:
             return self.metadata.empty.head(0)
 

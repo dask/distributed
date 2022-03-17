@@ -1,8 +1,10 @@
 import asyncio
+import contextlib
 import os
 import pathlib
 import pickle
 import shutil
+import time
 from collections import defaultdict
 
 from dask.sizeof import sizeof
@@ -47,6 +49,7 @@ class MultiFile:
         self._done = False
         self._futures = set()
         self.active = set()
+        self.diagnostics = defaultdict(float)
 
     async def put(self, data: dict):
         this_size = 0
@@ -71,14 +74,15 @@ class MultiFile:
             )
 
         while self.total_size > self.memory_limit:
-            async with self.condition:
+            with self.time("waiting-on-memory"):
+                async with self.condition:
 
-                try:
-                    await asyncio.wait_for(
-                        self.condition.wait(), 1
-                    )  # Block until memory calms down
-                except asyncio.TimeoutError:
-                    continue
+                    try:
+                        await asyncio.wait_for(
+                            self.condition.wait(), 1
+                        )  # Block until memory calms down
+                    except asyncio.TimeoutError:
+                        continue
 
     async def communicate(self):
         with log_errors():
@@ -87,11 +91,12 @@ class MultiFile:
                 self.queue.put_nowait(None)
 
             while not self._done:
-                if not self.shards:
-                    await asyncio.sleep(0.1)
-                    continue
+                with self.time("idle"):
+                    if not self.shards:
+                        await asyncio.sleep(0.1)
+                        continue
 
-                await self.queue.get()
+                    await self.queue.get()
 
                 id = max(self.sizes, key=self.sizes.get)
                 shards = self.shards.pop(id)
@@ -131,7 +136,17 @@ class MultiFile:
                         self.dump(shard, f)
                     os.fsync(f)  # TODO: maybe?
 
-            await offload(_)
+            start = time.time()
+            with self.time("write"):
+                await offload(_)
+            stop = time.time()
+
+            self.diagnostics["avg_size"] = (
+                0.98 * self.diagnostics["avg_size"] + 0.02 * size
+            )
+            self.diagnostics["avg_duration"] = 0.98 * self.diagnostics[
+                "avg_duration"
+            ] + 0.02 * (stop - start)
 
             self.active.remove(id)
             self.total_size -= size
@@ -143,12 +158,15 @@ class MultiFile:
         parts = []
 
         try:
-            with open(self.directory / str(id), mode="rb", buffering=100_000_000) as f:
-                while True:
-                    try:
-                        parts.append(self.load(f))
-                    except EOFError:
-                        break
+            with self.time("read"):
+                with open(
+                    self.directory / str(id), mode="rb", buffering=100_000_000
+                ) as f:
+                    while True:
+                        try:
+                            parts.append(self.load(f))
+                        except EOFError:
+                            break
         except FileNotFoundError:
             raise KeyError(id)
 
@@ -180,3 +198,10 @@ class MultiFile:
 
     def __exit__(self, exc, typ, traceback):
         self.close()
+
+    @contextlib.contextmanager
+    def time(self, name: str):
+        start = time.time()
+        yield
+        stop = time.time()
+        self.diagnostics[name] += stop - start

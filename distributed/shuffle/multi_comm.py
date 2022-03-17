@@ -1,14 +1,16 @@
 import asyncio
+import contextlib
 import threading
+import time
 from collections import defaultdict
 
 from dask.utils import parse_bytes
 
-from ..core import rpc
-from ..protocol import to_serialize
-from ..sizeof import sizeof
-from ..system import MEMORY_LIMIT
-from ..utils import log_errors
+from distributed.core import rpc
+from distributed.protocol import to_serialize
+from distributed.sizeof import sizeof
+from distributed.system import MEMORY_LIMIT
+from distributed.utils import log_errors
 
 
 class MultiComm:
@@ -38,6 +40,7 @@ class MultiComm:
         self._futures = set()
         self._done = False
         self.rpc = rpc
+        self.diagnostics = defaultdict(float)
 
     def put(self, data: dict):
         with self.lock:
@@ -61,8 +64,9 @@ class MultiComm:
             )
 
         while self.total_size > self.memory_limit:
-            with self.thread_condition:
-                self.thread_condition.wait(1)  # Block until memory calms down
+            with self.time("waiting-on-memory"):
+                with self.thread_condition:
+                    self.thread_condition.wait(1)  # Block until memory calms down
 
     async def communicate(self):
         self.comm_queue = asyncio.Queue(maxsize=self.max_connections)
@@ -72,11 +76,12 @@ class MultiComm:
         from dask.utils import format_bytes
 
         while not self._done:
-            if not self.shards:
-                await asyncio.sleep(0.1)
-                continue
+            with self.time("idle"):
+                if not self.shards:
+                    await asyncio.sleep(0.1)
+                    continue
 
-            await self.comm_queue.get()
+                await self.comm_queue.get()
 
             with self.lock:
                 address = max(self.sizes, key=self.sizes.get)
@@ -121,10 +126,19 @@ class MultiComm:
             # Consider boosting total_size a bit here to account for duplication
 
             try:
-                await self.rpc(address).shuffle_receive(
-                    data=to_serialize(shards),
-                    shuffle_id=self.shuffle_id,
+                start = time.time()
+                with self.time("send"):
+                    await self.rpc(address).shuffle_receive(
+                        data=to_serialize(shards),
+                        shuffle_id=self.shuffle_id,
+                    )
+                stop = time.time()
+                self.diagnostics["avg_size"] = (
+                    0.95 * self.diagnostics["avg_size"] + 0.05 * size
                 )
+                self.diagnostics["avg_duration"] = 0.98 * self.diagnostics[
+                    "avg_duration"
+                ] + 0.02 * (stop - start)
             finally:
                 self.total_size -= size
                 with self.thread_condition:
@@ -146,3 +160,10 @@ class MultiComm:
         print("total moved", format_bytes(self.total_moved))
 
         self._done = True
+
+    @contextlib.contextmanager
+    def time(self, name: str):
+        start = time.time()
+        yield
+        stop = time.time()
+        self.diagnostics[name] += stop - start
