@@ -48,8 +48,8 @@ from dask import istask
 from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
-from .compatibility import WINDOWS
-from .metrics import time
+from distributed.compatibility import WINDOWS
+from distributed.metrics import time
 
 try:
     from dask.context import thread_state
@@ -74,10 +74,8 @@ def _initialize_mp_context():
     if method == "forkserver":
         # Makes the test suite much faster
         preload = ["distributed"]
-        if "pkg_resources" in sys.modules:
-            preload.append("pkg_resources")
 
-        from .versions import optional_packages, required_packages
+        from distributed.versions import optional_packages, required_packages
 
         for pkg, _ in required_packages + optional_packages:
             try:
@@ -689,7 +687,7 @@ def key_split_group(x) -> str:
 
 @contextmanager
 def log_errors(pdb=False):
-    from .comm import CommClosedError
+    from distributed.comm import CommClosedError
 
     try:
         yield

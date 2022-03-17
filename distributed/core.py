@@ -24,10 +24,8 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
-from distributed.utils import recursive_to_dict
-
-from . import profile, protocol
-from .comm import (
+from distributed import profile, protocol
+from distributed.comm import (
     Comm,
     CommClosedError,
     connect,
@@ -36,13 +34,14 @@ from .comm import (
     normalize_address,
     unparse_host_port,
 )
-from .metrics import time
-from .system_monitor import SystemMonitor
-from .utils import (
+from distributed.metrics import time
+from distributed.system_monitor import SystemMonitor
+from distributed.utils import (
     TimeoutError,
     get_traceback,
     has_keyword,
     is_coroutine_function,
+    recursive_to_dict,
     truncate_exception,
 )
 
@@ -215,11 +214,11 @@ class Server:
 
         # Statistics counters for various events
         with suppress(ImportError):
-            from .counter import Digest
+            from distributed.counter import Digest
 
             self.digests = defaultdict(partial(Digest, loop=self.io_loop))
 
-        from .counter import Counter
+        from distributed.counter import Counter
 
         self.counters = defaultdict(partial(Counter, loop=self.io_loop))
 

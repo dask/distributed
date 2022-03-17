@@ -16,7 +16,6 @@ from unittest import mock
 
 import psutil
 import pytest
-from packaging.version import parse as parse_version
 from tlz import first, pluck, sliding_window
 
 import dask
@@ -43,6 +42,7 @@ from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
+from distributed.spill import has_zict_210
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
@@ -59,26 +59,13 @@ from distributed.utils_test import (
     slowinc,
     slowsum,
 )
-from distributed.worker import (
-    TaskState,
-    UniqueTaskHeap,
-    Worker,
-    error_message,
-    logger,
-    parse_memory_limit,
-)
+from distributed.worker import Worker, error_message, logger, parse_memory_limit
 
 pytestmark = pytest.mark.ci1
 
-try:
-    import zict
-except ImportError:
-    zict = None  # type: ignore
-
-requires_zict = pytest.mark.skipif(not zict, reason="requires zict")
 requires_zict_210 = pytest.mark.skipif(
-    not zict or parse_version(zict.__version__) <= parse_version("2.0.0"),
-    reason="requires zict version > 2.0.0",
+    not has_zict_210,
+    reason="requires zict version >= 2.1.0",
 )
 
 
@@ -931,7 +918,6 @@ async def assert_basic_futures(c: Client) -> None:
     assert results == list(map(inc, range(10)))
 
 
-@requires_zict
 @gen_cluster(client=True)
 async def test_fail_write_to_disk_target_1(c, s, a, b):
     """Test failure to spill triggered by key which is individually larger
@@ -949,7 +935,6 @@ async def test_fail_write_to_disk_target_1(c, s, a, b):
     await assert_basic_futures(c)
 
 
-@requires_zict
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -972,10 +957,8 @@ async def test_fail_write_to_disk_target_2(c, s, a):
 
     y = c.submit(lambda: "y" * 256, key="y")
     await wait(y)
-    if parse_version(zict.__version__) <= parse_version("2.0.0"):
-        assert set(a.data.memory) == {"y"}
-    else:
-        assert set(a.data.memory) == {"x", "y"}
+
+    assert set(a.data.memory) == {"x", "y"} if has_zict_210 else {"y"}
     assert not a.data.disk
 
     await assert_basic_futures(c)
@@ -1194,7 +1177,6 @@ async def test_statistical_profiling_2(c, s, a, b):
             break
 
 
-@requires_zict
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -1284,7 +1266,6 @@ async def test_spill_constrained(c, s, w):
     assert set(w.data.disk) == {x.key}
 
 
-@requires_zict
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
@@ -1308,7 +1289,6 @@ async def test_spill_spill_threshold(c, s, a):
     assert await x == 1
 
 
-@requires_zict
 @pytest.mark.parametrize(
     "memory_target_fraction,managed,expect_spilled",
     [
@@ -3747,67 +3727,6 @@ async def test_Worker__to_dict(c, s, a):
     assert d["tasks"]["x"]["key"] == "x"
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_TaskState__to_dict(c, s, a):
-    """tasks that are listed as dependencies of other tasks are dumped as a short repr
-    and always appear in full under Worker.tasks
-    """
-    x = c.submit(inc, 1, key="x")
-    y = c.submit(inc, x, key="y")
-    z = c.submit(inc, 2, key="z")
-    await wait([x, y, z])
-
-    tasks = a._to_dict()["tasks"]
-
-    assert isinstance(tasks["x"], dict)
-    assert isinstance(tasks["y"], dict)
-    assert isinstance(tasks["z"], dict)
-    assert tasks["x"]["dependents"] == ["<TaskState 'y' memory>"]
-    assert tasks["y"]["dependencies"] == ["<TaskState 'x' memory>"]
-
-
-def test_unique_task_heap():
-    heap = UniqueTaskHeap()
-
-    for x in range(10):
-        ts = TaskState(f"f{x}")
-        ts.priority = (0, 0, 1, x % 3)
-        heap.push(ts)
-
-    heap_list = list(heap)
-    # iteration does not empty heap
-    assert len(heap) == 10
-    assert heap_list == sorted(heap_list, key=lambda ts: ts.priority)
-
-    seen = set()
-    last_prio = (0, 0, 0, 0)
-    while heap:
-        peeked = heap.peek()
-        ts = heap.pop()
-        assert peeked == ts
-        seen.add(ts.key)
-        assert ts.priority
-        assert last_prio <= ts.priority
-        last_prio = last_prio
-
-    ts = TaskState("foo")
-    heap.push(ts)
-    heap.push(ts)
-    assert len(heap) == 1
-
-    assert repr(heap) == "<UniqueTaskHeap: 1 items>"
-
-    assert heap.pop() == ts
-    assert not heap
-
-    # Test that we're cleaning the seen set on pop
-    heap.push(ts)
-    assert len(heap) == 1
-    assert heap.pop() == ts
-
-    assert repr(heap) == "<UniqueTaskHeap: 0 items>"
-
-
 @gen_cluster(nthreads=[])
 async def test_do_not_block_event_loop_during_shutdown(s):
     loop = asyncio.get_running_loop()
@@ -3840,3 +3759,31 @@ async def test_do_not_block_event_loop_during_shutdown(s):
         await w.close(executor_wait=True)
 
     await asyncio.gather(block(), close(), set_future())
+
+
+@gen_cluster(nthreads=[])
+async def test_extensions(s):
+    flag = [False]
+
+    class WorkerExtension:
+        def __init__(self, worker):
+            pass
+
+        def heartbeat(self):
+            return {"data": 123}
+
+    class SchedulerExtension:
+        def __init__(self, scheduler):
+            self.scheduler = scheduler
+            pass
+
+        def heartbeat(self, data: dict):
+            assert data == {"data": 123}
+            flag[0] = True
+
+    s.extensions["test"] = SchedulerExtension(s)
+
+    async with Worker(s.address, extensions={"test": WorkerExtension}) as w:
+        await w.heartbeat()
+
+    assert flag[0]

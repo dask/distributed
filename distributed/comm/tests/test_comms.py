@@ -2,18 +2,15 @@ import asyncio
 import os
 import sys
 import threading
-import types
 import warnings
 from functools import partial
 
-import pkg_resources
 import pytest
 from tornado import ioloop
 from tornado.concurrent import Future
 
 import dask
 
-import distributed
 from distributed.comm import (
     CommClosedError,
     asyncio_tcp,
@@ -30,7 +27,7 @@ from distributed.comm import (
 from distributed.comm.registry import backends, get_backend
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
-from distributed.utils import get_ip, get_ipv6
+from distributed.utils import get_ip, get_ipv6, mp_context
 from distributed.utils_test import (
     get_cert,
     get_client_ssl_context,
@@ -1313,30 +1310,18 @@ async def test_inproc_adresses():
     await check_addresses(a, b)
 
 
-def test_register_backend_entrypoint():
-    # Code adapted from pandas backend entry point testing
-    # https://github.com/pandas-dev/pandas/blob/2470690b9f0826a8feb426927694fa3500c3e8d2/pandas/tests/plotting/test_backend.py#L50-L76
+def _get_backend_on_path(path):
+    sys.path.append(os.fsdecode(path))
+    return get_backend("udp")
 
-    dist = pkg_resources.get_distribution("distributed")
-    if dist.module_path not in distributed.__file__:
-        # We are running from a non-installed distributed, and this test is invalid
-        pytest.skip("Testing a non-installed distributed")
 
-    mod = types.ModuleType("dask_udp")
-    mod.UDPBackend = lambda: 1
-    sys.modules[mod.__name__] = mod
-
-    entry_point_name = "distributed.comm.backends"
-    backends_entry_map = pkg_resources.get_entry_map("distributed")
-    if entry_point_name not in backends_entry_map:
-        backends_entry_map[entry_point_name] = dict()
-    backends_entry_map[entry_point_name]["udp"] = pkg_resources.EntryPoint(
-        "udp", mod.__name__, attrs=["UDPBackend"], dist=dist
+def test_register_backend_entrypoint(tmp_path):
+    (tmp_path / "dask_udp.py").write_bytes(b"def udp_backend():\n    return 1\n")
+    dist_info = tmp_path / "dask_udp-0.0.0.dist-info"
+    dist_info.mkdir()
+    (dist_info / "entry_points.txt").write_bytes(
+        b"[distributed.comm.backends]\nudp = dask_udp:udp_backend\n"
     )
-
-    # The require is disabled here since particularly unit tests may install
-    # dirty or dev versions which are conflicting with backend entrypoints if
-    # they are demanding for exact, stable versions. This should not fail the
-    # test
-    result = get_backend("udp", require=False)
-    assert result == 1
+    with mp_context.Pool(1) as pool:
+        assert pool.apply(_get_backend_on_path, args=(tmp_path,)) == 1
+    pool.join()

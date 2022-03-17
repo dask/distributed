@@ -11,8 +11,8 @@ import dask.config
 from dask.optimization import SubgraphCallable
 from dask.utils import parse_timedelta, stringify
 
-from .core import rpc
-from .utils import All
+from distributed.core import rpc
+from distributed.utils import All
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=No
     gather
     _gather
     """
-    from .worker import get_data_from_worker
+    from distributed.worker import get_data_from_worker
 
     bad_addresses = set()
     missing_workers = set()

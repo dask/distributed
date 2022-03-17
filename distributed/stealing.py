@@ -14,10 +14,10 @@ from tornado.ioloop import PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
-from .comm.addressing import get_address_host
-from .core import CommClosedError, Status
-from .diagnostics.plugin import SchedulerPlugin
-from .utils import log_errors, recursive_to_dict
+from distributed.comm.addressing import get_address_host
+from distributed.core import CommClosedError, Status
+from distributed.diagnostics.plugin import SchedulerPlugin
+from distributed.utils import log_errors, recursive_to_dict
 
 # Stealing requires multiple network bounces and if successful also task
 # submission which may include code serialization. Therefore, be very

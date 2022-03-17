@@ -23,18 +23,24 @@ import dask
 from dask.system import CPU_COUNT
 from dask.utils import parse_timedelta
 
-from . import preloading
-from .comm import get_address_host, unparse_host_port
-from .comm.addressing import address_from_user_args
-from .core import CommClosedError, RPCClosed, Status, coerce_to_address, error_message
-from .diagnostics.plugin import _get_plugin_name
-from .metrics import time
-from .node import ServerNode
-from .process import AsyncProcess
-from .proctitle import enable_proctitle_on_children
-from .protocol import pickle
-from .security import Security
-from .utils import (
+from distributed import preloading
+from distributed.comm import get_address_host, unparse_host_port
+from distributed.comm.addressing import address_from_user_args
+from distributed.core import (
+    CommClosedError,
+    RPCClosed,
+    Status,
+    coerce_to_address,
+    error_message,
+)
+from distributed.diagnostics.plugin import _get_plugin_name
+from distributed.metrics import time
+from distributed.node import ServerNode
+from distributed.process import AsyncProcess
+from distributed.proctitle import enable_proctitle_on_children
+from distributed.protocol import pickle
+from distributed.security import Security
+from distributed.utils import (
     TimeoutError,
     get_ip,
     json_load_robust,
@@ -43,10 +49,10 @@ from .utils import (
     parse_ports,
     silence_logging,
 )
-from .worker import Worker, parse_memory_limit, run
+from distributed.worker import Worker, parse_memory_limit, run
 
 if TYPE_CHECKING:
-    from .diagnostics.plugin import NannyPlugin
+    from distributed.diagnostics.plugin import NannyPlugin
 
 logger = logging.getLogger(__name__)
 

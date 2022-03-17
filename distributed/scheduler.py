@@ -51,40 +51,37 @@ from dask.highlevelgraph import HighLevelGraph
 from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta, tmpfile
 from dask.widgets import get_template
 
-from distributed import cluster_dump
-from distributed.utils import recursive_to_dict
-
-from . import preloading, profile
-from . import versions as version_module
-from .active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
-from .batched import BatchedSend
-from .comm import (
+from distributed import cluster_dump, preloading, profile
+from distributed import versions as version_module
+from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
+from distributed.batched import BatchedSend
+from distributed.comm import (
     Comm,
     get_address_host,
     normalize_address,
     resolve_address,
     unparse_host_port,
 )
-from .comm.addressing import addresses_from_user_args
-from .core import CommClosedError, Status, clean_exception, rpc, send_recv
-from .diagnostics.memory_sampler import MemorySamplerExtension
-from .diagnostics.plugin import SchedulerPlugin, _get_plugin_name
-from .event import EventExtension
-from .http import get_handlers
-from .lock import LockExtension
-from .metrics import time
-from .multi_lock import MultiLockExtension
-from .node import ServerNode
-from .proctitle import setproctitle
-from .protocol.pickle import dumps, loads
-from .publish import PublishExtension
-from .pubsub import PubSubSchedulerExtension
-from .queues import QueueExtension
-from .recreate_tasks import ReplayTaskScheduler
-from .security import Security
-from .semaphore import SemaphoreExtension
-from .stealing import WorkStealing
-from .utils import (
+from distributed.comm.addressing import addresses_from_user_args
+from distributed.core import CommClosedError, Status, clean_exception, rpc, send_recv
+from distributed.diagnostics.memory_sampler import MemorySamplerExtension
+from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
+from distributed.event import EventExtension
+from distributed.http import get_handlers
+from distributed.lock import LockExtension
+from distributed.metrics import time
+from distributed.multi_lock import MultiLockExtension
+from distributed.node import ServerNode
+from distributed.proctitle import setproctitle
+from distributed.protocol.pickle import dumps, loads
+from distributed.publish import PublishExtension
+from distributed.pubsub import PubSubSchedulerExtension
+from distributed.queues import QueueExtension
+from distributed.recreate_tasks import ReplayTaskScheduler
+from distributed.security import Security
+from distributed.semaphore import SemaphoreExtension
+from distributed.stealing import WorkStealing
+from distributed.utils import (
     All,
     TimeoutError,
     empty_context,
@@ -93,11 +90,16 @@ from .utils import (
     key_split_group,
     log_errors,
     no_default,
+    recursive_to_dict,
     validate_key,
 )
-from .utils_comm import gather_from_workers, retry_operation, scatter_to_workers
-from .utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
-from .variable import VariableExtension
+from distributed.utils_comm import (
+    gather_from_workers,
+    retry_operation,
+    scatter_to_workers,
+)
+from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
+from distributed.variable import VariableExtension
 
 try:
     from cython import compiled
@@ -1210,6 +1212,8 @@ class TaskGroup:
 class TaskState:
     """
     A simple object holding information about a task.
+    Not to be confused with :class:`distributed.worker_state_machine.TaskState`, which
+    holds similar information on the Worker side.
 
     .. attribute:: key: str
 
@@ -4324,6 +4328,7 @@ class Scheduler(SchedulerState, ServerNode):
         host_info: dict = None,
         metrics: dict,
         executing: dict = None,
+        extensions: dict = None,
     ):
         parent: SchedulerState = cast(SchedulerState, self)
         address = self.coerce_address(address, resolve_address)
@@ -4410,6 +4415,10 @@ class Scheduler(SchedulerState, ServerNode):
 
         if resources:
             self.add_resources(worker=address, resources=resources)
+
+        if extensions:
+            for name, data in extensions.items():
+                self.extensions[name].heartbeat(data)
 
         self.log_event(address, merge({"action": "heartbeat"}, metrics))
 
@@ -7353,7 +7362,7 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Client.run_on_scheduler
         """
-        from .worker import run
+        from distributed.worker import run
 
         if not dask.config.get("distributed.scheduler.pickle"):
             raise ValueError(
@@ -7635,7 +7644,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         Returns Jupyter connection info dictionary.
         """
-        from ._ipython_utils import start_ipython
+        from distributed._ipython_utils import start_ipython
 
         if self._ipython_kernel is None:
             self._ipython_kernel = start_ipython(
@@ -7744,7 +7753,7 @@ class Scheduler(SchedulerState, ServerNode):
                 self.get_profile(server=True, start=start),
             ]
         )
-        from . import profile
+        from distributed import profile
 
         def profile_to_figure(state):
             data = profile.plot_data(state)
@@ -7766,8 +7775,8 @@ class Scheduler(SchedulerState, ServerNode):
         for k in sorted(timespent.keys()):
             tasks_timings += f"\n<li> {k} time: {format_time(timespent[k])} </li>"
 
-        from .dashboard.components.scheduler import task_stream_figure
-        from .diagnostics.task_stream import rectangles
+        from distributed.dashboard.components.scheduler import task_stream_figure
+        from distributed.diagnostics.task_stream import rectangles
 
         rects = rectangles(task_stream)
         source, task_stream = task_stream_figure(sizing_mode="stretch_both")
