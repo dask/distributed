@@ -2269,9 +2269,7 @@ class SchedulerState:
     # State Transitions #
     #####################
 
-    def _transition(
-        self, key, finish: str, *args, stimulus_id: str | None = None, **kwargs
-    ):
+    def _transition(self, key, finish: str, *args, stimulus_id=None, **kwargs):
         """Transition a key from its current state to the finish state
 
         Examples
@@ -2418,7 +2416,13 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def _transitions(self, recommendations: dict, client_msgs: dict, worker_msgs: dict):
+    def _transitions(
+        self,
+        recommendations: dict,
+        client_msgs: dict,
+        worker_msgs: dict,
+        stimulus_id=None,
+    ):
         """Process transitions until none are left
 
         This includes feedback from previous transitions and continues until we
@@ -2459,7 +2463,7 @@ class SchedulerState:
             for key in keys:
                 scheduler.validate_key(key)
 
-    def transition_released_waiting(self, key, stimulus_id: str | None = None):
+    def transition_released_waiting(self, key, stimulus_id=None):
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -2513,7 +2517,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_no_worker_waiting(self, key, stimulus_id: str | None = None):
+    def transition_no_worker_waiting(self, key, stimulus_id=None):
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -2567,7 +2571,7 @@ class SchedulerState:
         type=None,
         typename: str = None,
         worker=None,
-        stimulus_id: str | None = None,
+        stimulus_id=None,
     ):
         try:
             ws: WorkerState = self._workers_dv[worker]
@@ -2729,7 +2733,7 @@ class SchedulerState:
 
         return total_duration
 
-    def transition_waiting_processing(self, key, stimulus_id: str | None = None):
+    def transition_waiting_processing(self, key, stimulus_id=None):
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -2781,7 +2785,7 @@ class SchedulerState:
         type=None,
         typename: str = None,
         worker=None,
-        stimulus_id: str | None = None,
+        stimulus_id=None,
         **kwargs,
     ):
         try:
@@ -2829,7 +2833,7 @@ class SchedulerState:
         typename: str = None,
         worker=None,
         startstops=None,
-        stimulus_id: str | None = None,
+        stimulus_id=None,
         **kwargs,
     ):
         ws: WorkerState
@@ -2918,9 +2922,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_memory_released(
-        self, key, safe: bint = False, stimulus_id: str | None = None
-    ):
+    def transition_memory_released(self, key, safe: bint = False, stimulus_id=None):
         ws: WorkerState
         try:
             ts: TaskState = self._tasks[key]
@@ -2992,7 +2994,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_released_erred(self, key, stimulus_id: str | None = None):
+    def transition_released_erred(self, key, stimulus_id=None):
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -3037,7 +3039,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_erred_released(self, key, stimulus_id: str | None = None):
+    def transition_erred_released(self, key, stimulus_id=None):
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -3087,7 +3089,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_waiting_released(self, key, stimulus_id: str | None = None):
+    def transition_waiting_released(self, key, stimulus_id=None):
         try:
             ts: TaskState = self._tasks[key]
             recommendations: dict = {}
@@ -3124,7 +3126,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_processing_released(self, key, stimulus_id: str | None = None):
+    def transition_processing_released(self, key, stimulus_id=None):
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -3267,7 +3269,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_no_worker_released(self, key, stimulus_id: str | None = None):
+    def transition_no_worker_released(self, key, stimulus_id=None):
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -3310,7 +3312,7 @@ class SchedulerState:
         ts._exception_blame = ts._exception = ts._traceback = None
         self._task_metadata.pop(key, None)
 
-    def transition_memory_forgotten(self, key, stimulus_id: str | None = None):
+    def transition_memory_forgotten(self, key, stimulus_id=None):
         ws: WorkerState
         try:
             ts: TaskState = self._tasks[key]
@@ -3352,7 +3354,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_released_forgotten(self, key, stimulus_id: str | None = None):
+    def transition_released_forgotten(self, key, stimulus_id=None):
         try:
             ts: TaskState = self._tasks[key]
             recommendations: dict = {}
@@ -4726,6 +4728,7 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         start = time()
         fifo_timeout = parse_timedelta(fifo_timeout)
+        stimulus_id = f"update-graph-{time()}"
         keys = set(keys)
         if len(tasks) > 1:
             self.log_event(
@@ -4980,7 +4983,7 @@ class Scheduler(SchedulerState, ServerNode):
             except Exception as e:
                 logger.exception(e)
 
-        self.transitions(recommendations)
+        self.transitions(recommendations, stimulus_id=stimulus_id)
 
         for ts in touched_tasks:
             if ts._state in ("memory", "erred"):
@@ -5254,7 +5257,7 @@ class Scheduler(SchedulerState, ServerNode):
             if ts._state in ("memory", "erred"):
                 self.report_on_key(ts=ts, client=client)
 
-    def client_releases_keys(self, keys=None, client=None):
+    def client_releases_keys(self, keys=None, client=None, stimulus_id=None):
         """Remove keys from client desired list"""
 
         parent: SchedulerState = cast(SchedulerState, self)
@@ -7521,9 +7524,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return responses
 
-    def transition(
-        self, key, finish: str, *args, stimulus_id: str | None = None, **kwargs
-    ):
+    def transition(self, key, finish: str, *args, stimulus_id=None, **kwargs):
         """Transition a key from its current state to the finish state
 
         Examples
@@ -7548,7 +7549,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.send_all(client_msgs, worker_msgs)
         return recommendations
 
-    def transitions(self, recommendations: dict):
+    def transitions(self, recommendations: dict, stimulus_id=None):
         """Process transitions until none are left
 
         This includes feedback from previous transitions and continues until we
