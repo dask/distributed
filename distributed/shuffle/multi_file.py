@@ -8,8 +8,8 @@ from collections import defaultdict
 from dask.sizeof import sizeof
 from dask.utils import parse_bytes
 
-from ..system import MEMORY_LIMIT
-from ..utils import log_errors, offload
+from distributed.system import MEMORY_LIMIT
+from distributed.utils import log_errors, offload
 
 
 class MultiFile:
@@ -21,7 +21,6 @@ class MultiFile:
         join=None,
         concurrent_files=1,
         memory_limit=MEMORY_LIMIT / 2,
-        file_cache=None,
         sizeof=sizeof,
     ):
         assert join
@@ -175,7 +174,6 @@ class MultiFile:
 
     def close(self):
         shutil.rmtree(self.directory)
-        self.file_cache.clear()
 
     def __enter__(self):
         return self

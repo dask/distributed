@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, NewType
 
 import toolz
-import zict
 
 from distributed.protocol import to_serialize
 from distributed.shuffle.multi_comm import MultiComm
@@ -75,7 +74,9 @@ class Shuffle:
     "State for a single active shuffle"
 
     def __init__(
-        self, metadata: ShuffleMetadata, worker: Worker, file_cache=None
+        self,
+        metadata: ShuffleMetadata,
+        worker: Worker,
     ) -> None:
         self.metadata = metadata
         self.worker = worker
@@ -89,7 +90,6 @@ class Shuffle:
             load=load_arrow,
             directory=os.path.join(self.worker.local_directory, str(self.metadata.id)),
             memory_limit="900 MiB",  # TODO: lift this up to the global ShuffleExtension
-            file_cache=file_cache,
             concurrent_files=2,
             join=pa.concat_tables,  # pd.concat
             sizeof=lambda L: sum(map(len, L)),
@@ -194,7 +194,6 @@ class ShuffleWorkerExtension:
         # Initialize
         self.worker: Worker = worker
         self.shuffles: dict[ShuffleId, Shuffle] = {}
-        self.file_cache = zict.LRU(256, dict(), on_evict=lambda k, v: v.close())
 
     # Handlers
     ##########
@@ -210,7 +209,8 @@ class ShuffleWorkerExtension:
                 f"Shuffle {metadata.id!r} is already registered on worker {self.worker.address}"
             )
         self.shuffles[metadata.id] = Shuffle(
-            metadata, self.worker, file_cache=self.file_cache
+            metadata,
+            self.worker,
         )
 
     async def shuffle_receive(
