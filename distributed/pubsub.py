@@ -34,8 +34,6 @@ class PubSubSchedulerExtension:
             }
         )
 
-        self.scheduler.extensions["pubsub"] = self
-
     def add_publisher(self, name=None, worker=None):
         logger.debug("Add publisher: %s %s", name, worker)
         self.publishers[name].add(worker)

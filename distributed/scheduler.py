@@ -172,20 +172,20 @@ DEFAULT_DATA_SIZE = declare(
     Py_ssize_t, parse_bytes(dask.config.get("distributed.scheduler.default-data-size"))
 )
 
-DEFAULT_EXTENSIONS = [
-    LockExtension,
-    MultiLockExtension,
-    PublishExtension,
-    ReplayTaskScheduler,
-    QueueExtension,
-    VariableExtension,
-    PubSubSchedulerExtension,
-    SemaphoreExtension,
-    EventExtension,
-    ActiveMemoryManagerExtension,
-    MemorySamplerExtension,
-    ShuffleSchedulerExtension,
-]
+DEFAULT_EXTENSIONS = {
+    "locks": LockExtension,
+    "multi_locks": MultiLockExtension,
+    "publish": PublishExtension,
+    "replay-tasks": ReplayTaskScheduler,
+    "queues": QueueExtension,
+    "variables": VariableExtension,
+    "pubsub": PubSubSchedulerExtension,
+    "semaphores": SemaphoreExtension,
+    "events": EventExtension,
+    "amm": ActiveMemoryManagerExtension,
+    "memory_sampler": MemorySamplerExtension,
+    "shuffle": ShuffleSchedulerExtension,
+}
 
 ALL_TASK_STATES = declare(
     set, {"released", "waiting", "no-worker", "processing", "erred", "memory"}
@@ -4013,11 +4013,12 @@ class Scheduler(SchedulerState, ServerNode):
             self.periodic_callbacks["idle-timeout"] = pc
 
         if extensions is None:
-            extensions = list(DEFAULT_EXTENSIONS)
+            extensions = DEFAULT_EXTENSIONS.copy()
             if dask.config.get("distributed.scheduler.work-stealing"):
-                extensions.append(WorkStealing)
-        for ext in extensions:
-            ext(self)
+                extensions["stealing"] = WorkStealing
+        self._extensions = {
+            name: extension(self) for name, extension in extensions.items()
+        }
 
         setproctitle("dask-scheduler [not started]")
         Scheduler._instances.add(self)
