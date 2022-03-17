@@ -2994,7 +2994,7 @@ class SchedulerState:
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
-            failing_ts: TaskState | None
+            failing_ts: TaskState
             recommendations: dict = {}
             client_msgs: dict = {}
             worker_msgs: dict = {}
@@ -3006,6 +3006,9 @@ class SchedulerState:
                     assert not ts._waiting_on
                     assert not ts._waiters
 
+            if not ts._exception_blame:
+                raise RuntimeError(f"_exception_blame not supplied for TaskState {ts}")
+
             failing_ts = ts._exception_blame
 
             for dts in ts._dependents:
@@ -3016,8 +3019,8 @@ class SchedulerState:
             report_msg = {
                 "op": "task-erred",
                 "key": key,
-                "exception": failing_ts._exception if failing_ts else None,
-                "traceback": failing_ts._traceback if failing_ts else None,
+                "exception": failing_ts._exception,
+                "traceback": failing_ts._traceback,
             }
             cs: ClientState
             for cs in ts._who_wants:
@@ -8393,8 +8396,8 @@ def _task_to_report_msg(state: SchedulerState, ts: TaskState) -> dict:  # -> dic
         return {
             "op": "task-erred",
             "key": ts._key,
-            "exception": failing_ts._exception if failing_ts else None,
-            "traceback": failing_ts._traceback if failing_ts else None,
+            "exception": failing_ts._exception if failing_ts else "<No failing task!>",
+            "traceback": failing_ts._traceback if failing_ts else "<No failing task!>",
         }
     else:
         return None  # type: ignore
