@@ -406,7 +406,7 @@ class ShuffleWorkerExtension:
 class ShuffleSchedulerExtension:
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        self.shuffles = defaultdict(lambda defaultdict: dict)
+        self.shuffles = defaultdict(lambda: defaultdict(dict))
 
     def heartbeat(self, ws, data):
         for shuffle_id, d in data.items():
