@@ -149,6 +149,7 @@ class MultiFile:
             ] + 0.02 * (stop - start)
 
             self.active.remove(id)
+            self.bytes_written += size
             self.total_size -= size
             async with self.condition:
                 self.condition.notify()

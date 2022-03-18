@@ -893,7 +893,7 @@ class SystemTimeseries(DashboardComponent):
     from ws.metrics["val"] for ws in scheduler.workers.values() divided by nuber of workers.
     """
 
-    def __init__(self, scheduler, **kwargs):
+    def __init__(self, scheduler, follow_interval=20000, **kwargs):
         with log_errors():
             self.scheduler = scheduler
             self.source = ColumnDataSource(
@@ -910,7 +910,9 @@ class SystemTimeseries(DashboardComponent):
 
             update(self.source, self.get_data())
 
-            x_range = DataRange1d(follow="end", follow_interval=20000, range_padding=0)
+            x_range = DataRange1d(
+                follow="end", follow_interval=follow_interval, range_padding=0
+            )
             tools = "reset, xpan, xwheel_zoom"
 
             self.bandwidth = figure(
@@ -3314,6 +3316,12 @@ class Shuffling(DashboardComponent):
                     "disk_written": [],
                 }
             )
+            self.totals_source = ColumnDataSource(
+                {
+                    "x": ["Network Send", "Network Receive", "Disk Write", "Disk Read"],
+                    "value": [0, 0, 0, 0],
+                }
+            )
 
             self.comm_memory = figure(
                 title="Comms Buffer",
@@ -3397,6 +3405,44 @@ class Shuffling(DashboardComponent):
             hover.point_policy = "follow_mouse"
             self.disk_memory.add_tools(hover)
             self.disk_memory.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+
+            self.totals = figure(
+                title="Total movement",
+                tools="",
+                toolbar_location="above",
+                **kwargs,
+            )
+            titles = ["Network Send", "Network Receive", "Disk Write", "Disk Read"]
+            self.totals = figure(
+                x_range=titles,
+                title="Totals",
+                toolbar_location=None,
+                tools="",
+                **kwargs,
+            )
+
+            self.totals.vbar(
+                x="x",
+                top="values",
+                width=0.9,
+                source=self.totals_source,
+            )
+
+            self.totals.xgrid.grid_line_color = None
+            self.totals.y_range.start = 0
+            self.totals.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+
+            hover = HoverTool(
+                tooltips="""
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">@x:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@values{0.00 b}</span>
+                            </div>
+                            """,
+            )
+            hover.point_policy = "follow_mouse"
+            self.totals.add_tools(hover)
+
             self.root = row(self.comm_memory, self.disk_memory)
 
     @without_property_validation
@@ -3442,9 +3488,11 @@ class Shuffling(DashboardComponent):
                 data["comm_buckets"].append(d["comms"]["buckets"])
                 data["comm_active"].append(d["comms"]["active"])
                 data["comm_avg_duration"].append(
-                    d["comms"]["diagnostics"]["avg_duration"]
+                    d["comms"]["diagnostics"].get("avg_duration", 0)
                 )
-                data["comm_avg_size"].append(d["comms"]["diagnostics"]["avg_size"])
+                data["comm_avg_size"].append(
+                    d["comms"]["diagnostics"].get("avg_size", 0)
+                )
                 data["comm_read"].append(d["comms"]["read"])
                 data["comm_written"].append(d["comms"]["written"])
                 if d["comms"]["active"]:
@@ -3460,9 +3508,11 @@ class Shuffling(DashboardComponent):
                 data["disk_buckets"].append(d["disk"]["buckets"])
                 data["disk_active"].append(d["disk"]["active"])
                 data["disk_avg_duration"].append(
-                    d["disk"]["diagnostics"]["avg_duration"]
+                    d["disk"]["diagnostics"].get("avg_duration", 0)
                 )
-                data["disk_avg_size"].append(d["disk"]["diagnostics"]["avg_size"])
+                data["disk_avg_size"].append(
+                    d["disk"]["diagnostics"].get("avg_size", 0)
+                )
                 data["disk_read"].append(d["disk"]["read"])
                 data["disk_written"].append(d["disk"]["written"])
                 if d["disk"]["active"]:
@@ -3494,9 +3544,21 @@ class Shuffling(DashboardComponent):
             ]
             singletons["y"] = [data["y"][-1] / 2]
 
+            totals = {
+                "x": ["Network Send", "Network Receive", "Disk Write", "Disk Read"],
+                "values": [
+                    sum(data["comm_written"]),
+                    sum(data["comm_read"]),
+                    sum(data["disk_written"]),
+                    sum(data["disk_read"]),
+                ],
+            }
+            update(self.totals_source, totals)
+
             update(self.source, data)
-            self.comm_memory.x_range.end = max(data["comm_memory_limit"]) * 1.2
-            self.disk_memory.x_range.end = max(data["disk_memory_limit"]) * 1.2
+            limit = max(data["comm_memory_limit"] + data["disk_memory_limit"]) * 1.2
+            self.comm_memory.x_range.end = limit
+            self.disk_memory.x_range.end = limit
 
 
 class SchedulerLogs:
@@ -3549,7 +3611,9 @@ def shuffling_doc(scheduler, extra, doc):
 
         shuffling = Shuffling(scheduler, width=400, height=400)
         workers_memory = WorkersMemory(scheduler, width=400, height=400)
-        timeseries = SystemTimeseries(scheduler, width=1200, height=200)
+        timeseries = SystemTimeseries(
+            scheduler, width=1400, height=200, follow_interval=3000
+        )
 
         add_periodic_callback(doc, shuffling, 200)
         add_periodic_callback(doc, workers_memory, 200)
@@ -3559,7 +3623,12 @@ def shuffling_doc(scheduler, extra, doc):
 
         doc.add_root(
             column(
-                row(workers_memory.root, shuffling.comm_memory, shuffling.disk_memory),
+                row(
+                    workers_memory.root,
+                    shuffling.comm_memory,
+                    shuffling.disk_memory,
+                    shuffling.totals,
+                ),
                 row(column(timeseries.bandwidth, timeseries.disk)),
             )
         )

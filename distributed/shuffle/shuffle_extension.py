@@ -270,8 +270,8 @@ class ShuffleWorkerExtension:
         Using an unknown ``shuffle_id`` is an error.
         """
         shuffle = self._get_shuffle(shuffle_id)
-        await shuffle.receive(data)
-        return
+        # await shuffle.receive(data)
+        # return
         # TODO: it would be good to not have comms wait on disk if not
         # necessary
         future = asyncio.ensure_future(shuffle.receive(data))
