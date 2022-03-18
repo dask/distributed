@@ -268,7 +268,7 @@ User-defined managed memory containers
 
 The design described in the sections above stores data in the worker's RAM, with
 automatic spilling to disk when the ``target`` or ``spill`` thresholds are passed.
-If one desires a different behaviour, they can pass a ``data=`` parameter when
+If one desires a different behaviour, a ``data=`` parameter can be passed when
 initializing the :class:`~distributed.worker.Worker` or
 :class:`~distributed.nanny.Nanny`.
 This optional parameter accepts any of the following values:
