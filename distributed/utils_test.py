@@ -1091,7 +1091,6 @@ def gen_cluster(
                         # zict backends can fail if their storage directory
                         # was already removed
                         pass
-                    del w.data
 
             return result
 

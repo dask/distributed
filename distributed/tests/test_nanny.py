@@ -6,7 +6,6 @@ import os
 import random
 import sys
 from contextlib import suppress
-from time import sleep
 from unittest import mock
 
 import psutil
@@ -27,7 +26,7 @@ from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, parse_ports
-from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
+from distributed.utils_test import captured_logger, gen_cluster, gen_test
 
 pytestmark = pytest.mark.ci1
 
@@ -265,55 +264,25 @@ async def test_nanny_timeout(c, s, a):
 
 
 @gen_cluster(
-    nthreads=[("127.0.0.1", 1)],
+    nthreads=[("", 1)] * 8,
     client=True,
-    Worker=Nanny,
-    worker_kwargs={"memory_limit": "400 MiB"},
-)
-async def test_nanny_terminate(c, s, a):
-    def leak():
-        L = []
-        while True:
-            L.append(b"0" * 5_000_000)
-            sleep(0.01)
-
-    before = a.process.pid
-    with captured_logger(logging.getLogger("distributed.nanny")) as logger:
-        future = c.submit(leak)
-        while a.process.pid == before:
-            await asyncio.sleep(0.01)
-
-    out = logger.getvalue()
-    assert "restart" in out.lower()
-    assert "memory" in out.lower()
-
-
-@gen_cluster(
-    nthreads=[("127.0.0.1", 1)] * 8,
-    client=True,
-    Worker=Worker,
     clean_kwargs={"threads": False},
+    config={"distributed.worker.memory.pause": False},
 )
-async def test_throttle_outgoing_connections(c, s, a, *workers):
-    # But a bunch of small data on worker a
-    await c.run(lambda: logging.getLogger("distributed.worker").setLevel(logging.DEBUG))
+async def test_throttle_outgoing_connections(c, s, a, *other_workers):
+    # Put a bunch of small data on worker a
+    logging.getLogger("distributed.worker").setLevel(logging.DEBUG)
     remote_data = c.map(
         lambda x: b"0" * 10000, range(10), pure=False, workers=[a.address]
     )
     await wait(remote_data)
 
-    def pause(dask_worker):
-        # Patch paused and memory_monitor on the one worker
-        # This is is very fragile, since a refactor of memory_monitor to
-        # remove _memory_monitoring will break this test.
-        dask_worker._memory_monitoring = True
-        dask_worker.status = Status.paused
-        dask_worker.outgoing_current_count = 2
+    a.status = Status.paused
+    a.outgoing_current_count = 2
 
-    await c.run(pause, workers=[a.address])
     requests = [
         await a.get_data(await w.rpc.connect(w.address), keys=[f.key], who=w.address)
-        for w in workers
+        for w in other_workers
         for f in remote_data
     ]
     await wait(requests)
@@ -322,36 +291,13 @@ async def test_throttle_outgoing_connections(c, s, a, *workers):
     assert "throttling" in wlogs.lower()
 
 
-@gen_cluster(nthreads=[], client=True)
-async def test_avoid_memory_monitor_if_zero_limit(c, s):
-    nanny = await Nanny(s.address, loop=s.loop, memory_limit=0)
-    typ = await c.run(lambda dask_worker: type(dask_worker.data))
-    assert typ == {nanny.worker_address: dict}
-    pcs = await c.run(lambda dask_worker: list(dask_worker.periodic_callbacks))
-    assert "memory" not in pcs
-    assert "memory" not in nanny.periodic_callbacks
-
-    future = c.submit(inc, 1)
-    assert await future == 2
-    await asyncio.sleep(0.02)
-
-    await c.submit(inc, 2)  # worker doesn't pause
-
-    await nanny.close()
-
-
-@gen_cluster(nthreads=[], client=True)
-async def test_scheduler_address_config(c, s):
+@gen_cluster(nthreads=[])
+async def test_scheduler_address_config(s):
     with dask.config.set({"scheduler-address": s.address}):
-        nanny = await Nanny(loop=s.loop)
-        assert nanny.scheduler.address == s.address
-
-        start = time()
-        while not s.workers:
-            await asyncio.sleep(0.1)
-            assert time() < start + 10
-
-    await nanny.close()
+        async with Nanny() as nanny:
+            assert nanny.scheduler.address == s.address
+            while not s.workers:
+                await asyncio.sleep(0.01)
 
 
 @pytest.mark.slow
@@ -419,14 +365,6 @@ async def test_environment_variable_config(c, s, monkeypatch):
         assert results[n.worker_address]["B"] == "3"
         assert results[n.worker_address]["C"] == "4"
         assert results[n.worker_address]["D"] == "123"
-
-
-@gen_cluster(nthreads=[], client=True)
-async def test_data_types(c, s):
-    w = await Nanny(s.address, data=dict)
-    r = await c.run(lambda dask_worker: type(dask_worker.data))
-    assert r[w.worker_address] == dict
-    await w.close()
 
 
 @gen_cluster(nthreads=[])

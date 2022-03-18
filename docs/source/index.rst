@@ -100,6 +100,7 @@ Contents
    scheduling-policies
    scheduling-state
    worker
+   worker-memory
    work-stealing
    killed
 
