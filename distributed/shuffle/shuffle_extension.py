@@ -98,12 +98,13 @@ class Shuffle:
             sizeof=lambda L: sum(map(len, L)),
         )
         self.multi_comm = MultiComm(
-            memory_limit="500 MiB",  # TODO
+            memory_limit="300 MiB",  # TODO
             rpc=worker.rpc,
             shuffle_id=self.metadata.id,
             sizeof=lambda L: sum(map(len, L)),
             join=functools.partial(sum, start=[]),
             max_connections=min((len(self.metadata.workers) - 1) or 1, 10),
+            max_message_size="10 MiB",
         )
         self.worker.loop.add_callback(self.multi_comm.communicate)
         self.worker.loop.add_callback(self.multi_file.communicate)
@@ -267,12 +268,7 @@ class ShuffleWorkerExtension:
         Using an unknown ``shuffle_id`` is an error.
         """
         shuffle = self._get_shuffle(shuffle_id)
-        # await shuffle.receive(data)
-        # return
-        # TODO: it would be good to not have comms wait on disk if not
-        # necessary
         future = asyncio.ensure_future(shuffle.receive(data))
-        # await future  # backpressure
         if (
             shuffle.multi_file.total_size + sum(map(len, data))
             > shuffle.multi_file.memory_limit
