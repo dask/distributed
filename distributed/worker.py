@@ -875,12 +875,13 @@ class Worker(ServerNode):
         return self._deque_handler.deque
 
     def log_event(self, topic, msg):
-        self.batched_stream.send(
+        self.loop.add_callback(
+            self.batched_stream.send,
             {
                 "op": "log-event",
                 "topic": topic,
                 "msg": msg,
-            }
+            },
         )
 
     @property
