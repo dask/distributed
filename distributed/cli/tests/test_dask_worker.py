@@ -38,7 +38,7 @@ async def test_nanny_worker_ports(c, s):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[], timeout=1800)
+@gen_cluster(client=True, nthreads=[])
 async def test_nanny_worker_port_range(c, s):
     with popen(
         [
