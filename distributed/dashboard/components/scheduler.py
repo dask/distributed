@@ -3320,6 +3320,7 @@ class Shuffling(DashboardComponent):
                 tools="",
                 toolbar_location="above",
                 x_range=Range1d(0, 100_000_000),
+                **kwargs,
             )
             self.comm_memory.rect(
                 source=self.source,
@@ -3360,6 +3361,7 @@ class Shuffling(DashboardComponent):
                 tools="",
                 toolbar_location="above",
                 x_range=Range1d(0, 100_000_000),
+                **kwargs,
             )
             self.disk_memory.yaxis.visible = False
 
@@ -3543,11 +3545,24 @@ def systemmonitor_doc(scheduler, extra, doc):
 
 def shuffling_doc(scheduler, extra, doc):
     with log_errors():
-        shuffling = Shuffling(scheduler, sizing_mode="stretch_both")
         doc.title = "Dask: Shuffling"
-        add_periodic_callback(doc, shuffling, 500)
 
-        doc.add_root(shuffling.root)
+        shuffling = Shuffling(scheduler, width=400, height=400)
+        workers_memory = WorkersMemory(scheduler, width=400, height=400)
+        timeseries = SystemTimeseries(scheduler, width=1200, height=200)
+
+        add_periodic_callback(doc, shuffling, 200)
+        add_periodic_callback(doc, workers_memory, 200)
+        add_periodic_callback(doc, timeseries, 500)
+
+        timeseries.bandwidth.y_range = timeseries.disk.y_range
+
+        doc.add_root(
+            column(
+                row(workers_memory.root, shuffling.comm_memory, shuffling.disk_memory),
+                row(column(timeseries.bandwidth, timeseries.disk)),
+            )
+        )
         doc.template = env.get_template("simple.html")
         doc.template_variables.update(extra)
         doc.theme = BOKEH_THEME
