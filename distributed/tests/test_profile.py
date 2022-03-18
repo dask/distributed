@@ -1,5 +1,9 @@
+from __future__ import annotations
+
+import dataclasses
 import sys
 import threading
+from collections.abc import Iterator, Sequence
 from time import sleep
 
 import pytest
@@ -11,6 +15,7 @@ from distributed.profile import (
     call_stack,
     create,
     identifier,
+    info_frame,
     ll_get_stack,
     llprocess,
     merge,
@@ -200,3 +205,110 @@ def test_watch():
     while threading.active_count() > start_threads:
         assert time() < start + 2
         sleep(0.01)
+
+
+@dataclasses.dataclass(frozen=True)
+class FakeCode:
+    co_filename: str
+    co_name: str
+    co_firstlineno: int
+    co_lnotab: bytes
+    co_lines_seq: Sequence[tuple[int, int, int | None]]
+    co_code: bytes
+
+    def co_lines(self) -> Iterator[tuple[int, int, int | None]]:
+        yield from self.co_lines_seq
+
+
+@dataclasses.dataclass(frozen=True)
+class FakeFrame:
+    f_lasti: int
+    f_code: FakeCode
+    f_lineno: int | None = None
+    f_back: FakeFrame | None = None
+    f_globals: dict[str, object] = dataclasses.field(default_factory=dict)
+
+
+@pytest.mark.parametrize(
+    "f_lasti,f_lineno",
+    [
+        (-1, 1),
+        (0, 2),
+        (1, 2),
+        (11, 2),
+        (12, 3),
+        (21, 4),
+        (22, 4),
+        (23, 4),
+        (24, 2),
+        (25, 2),
+        (26, 2),
+        (27, 2),
+        (100, 2),
+    ],
+)
+def test_info_frame_f_lineno(f_lasti: int, f_lineno: int) -> None:
+    assert info_frame(
+        FakeFrame(
+            f_lasti=f_lasti,
+            f_code=FakeCode(
+                co_filename="<stdin>",
+                co_name="example",
+                co_firstlineno=1,
+                co_lnotab=b"\x00\x01\x0c\x01\x08\x01\x04\xfe",
+                co_lines_seq=[
+                    (0, 12, 2),
+                    (12, 20, 3),
+                    (20, 22, 4),
+                    (22, 24, None),
+                    (24, 28, 2),
+                ],
+                co_code=b"t\x00d\x01\x83\x01D\x00]\x07}\x00|\x00d\x02k\x05r\x0b\t\x00q\x04d\x00S\x00",
+            ),
+        )
+    ) == {
+        "filename": "<stdin>",
+        "name": "example",
+        "line_number": f_lineno,
+        "line": "",
+    }
+
+
+@pytest.mark.parametrize(
+    "f_lasti,f_lineno",
+    [
+        (-1, 1),
+        (0, 2),
+        (1, 2),
+        (11, 2),
+        (12, 3),
+        (21, 4),
+        (22, 4),
+        (23, 4),
+        (24, 2),
+        (25, 2),
+        (26, 2),
+        (27, 2),
+        (100, 2),
+    ],
+)
+def test_call_stack_f_lineno(f_lasti: int, f_lineno: int) -> None:
+    assert call_stack(
+        FakeFrame(
+            f_lasti=f_lasti,
+            f_code=FakeCode(
+                co_filename="<stdin>",
+                co_name="example",
+                co_firstlineno=1,
+                co_lnotab=b"\x00\x01\x0c\x01\x08\x01\x04\xfe",
+                co_lines_seq=[
+                    (0, 12, 2),
+                    (12, 20, 3),
+                    (20, 22, 4),
+                    (22, 24, None),
+                    (24, 28, 2),
+                ],
+                co_code=b"t\x00d\x01\x83\x01D\x00]\x07}\x00|\x00d\x02k\x05r\x0b\t\x00q\x04d\x00S\x00",
+            ),
+        )
+    ) == [f'  File "<stdin>", line {f_lineno}, in example\n\t']
