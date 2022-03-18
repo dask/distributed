@@ -3284,6 +3284,201 @@ class WorkerTable(DashboardComponent):
         self.source.data.update(data)
 
 
+class Shuffling(DashboardComponent):
+    """Occupancy (in time) per worker"""
+
+    def __init__(self, scheduler, **kwargs):
+        with log_errors():
+            self.scheduler = scheduler
+            self.source = ColumnDataSource(
+                {
+                    "worker": [],
+                    "y": [],
+                    "comm_memory": [],
+                    "comm_memory_half": [],
+                    "comm_memory_limit": [],
+                    "comm_buckets": [],
+                    "comm_active": [],
+                    "comm_avg_duration": [],
+                    "comm_avg_size": [],
+                    "comm_read": [],
+                    "comm_written": [],
+                    "disk_memory": [],
+                    "disk_memory_half": [],
+                    "disk_memory_limit": [],
+                    "disk_buckets": [],
+                    "disk_active": [],
+                    "disk_avg_duration": [],
+                    "disk_avg_size": [],
+                    "disk_read": [],
+                    "disk_written": [],
+                }
+            )
+
+            self.comm_memory = figure(
+                title="Comms Buffer",
+                tools="",
+                toolbar_location="above",
+            )
+            self.comm_memory.rect(
+                source=self.source,
+                x="comm_memory_half",
+                width="comm_memory",
+                y="y",
+                height=0.9,
+            )
+            hover = HoverTool(
+                tooltips="""
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Memory Used:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@comm_memory{0.00 b}</span>
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Average Write:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@comm_avg_size{0.00 b}</span>
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;"># Buckets:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@comm_buckets</span>
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Average Duration:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@comm_avg_duration</span>
+                            </div>
+                            """,
+            )
+            hover.point_policy = "follow_mouse"
+            self.comm_memory.add_tools(hover)
+            self.comm_memory.x_range.start = 0
+            self.comm_memory.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+
+            self.disk_memory = figure(
+                title="Disk Buffer",
+                tools="",
+                toolbar_location="above",
+            )
+            self.disk_memory.yaxis.visible = False
+
+            self.disk_memory.rect(
+                source=self.source,
+                x="disk_memory_half",
+                width="disk_memory",
+                y="y",
+                height=0.9,
+            )
+
+            hover = HoverTool(
+                tooltips="""
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Memory Used:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@disk_memory{0.00 b}</span>
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Average Write:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@disk_avg_size{0.00 b}</span>
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;"># Buckets:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@disk_buckets</span>
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Average Duration:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@disk_avg_duration</span>
+                            </div>
+                            """,
+            )
+            hover.point_policy = "follow_mouse"
+            self.disk_memory.add_tools(hover)
+            self.disk_memory.x_range.start = 0
+            self.disk_memory.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            self.root = row(self.comm_memory, self.disk_memory)
+
+    @without_property_validation
+    def update(self):
+        with log_errors():
+            input = self.scheduler.extensions["shuffle"].shuffles
+            if not input:
+                return
+
+            input = list(input.values())[-1]  # TODO: multiple concurrent shuffles
+
+            data = {
+                "worker": [],
+                "y": [],
+                "comm_memory": [],
+                "comm_memory_half": [],
+                "comm_memory_limit": [],
+                "comm_buckets": [],
+                "comm_active": [],
+                "comm_avg_duration": [],
+                "comm_avg_size": [],
+                "comm_read": [],
+                "comm_written": [],
+                "disk_memory": [],
+                "disk_memory_half": [],
+                "disk_memory_limit": [],
+                "disk_buckets": [],
+                "disk_active": [],
+                "disk_avg_duration": [],
+                "disk_avg_size": [],
+                "disk_read": [],
+                "disk_written": [],
+            }
+
+            for i, (worker, d) in enumerate(input.items()):
+                data["y"].append(i)
+                data["worker"].append(worker)
+                data["comm_memory"].append(d["comms"]["memory"])
+                data["comm_memory_half"].append(d["comms"]["memory"] / 2)
+                data["comm_memory_limit"].append(d["comms"]["memory_limit"])
+                data["comm_buckets"].append(d["comms"]["buckets"])
+                data["comm_active"].append(d["comms"]["active"])
+                data["comm_avg_duration"].append(
+                    d["comms"]["diagnostics"]["avg_duration"]
+                )
+                data["comm_avg_size"].append(d["comms"]["diagnostics"]["avg_size"])
+                data["comm_read"].append(d["comms"]["read"])
+                data["comm_written"].append(d["comms"]["written"])
+
+                data["disk_memory"].append(d["disk"]["memory"])
+                data["disk_memory_half"].append(d["disk"]["memory"] / 2)
+                data["disk_memory_limit"].append(d["disk"]["memory_limit"])
+                data["disk_buckets"].append(d["disk"]["buckets"])
+                data["disk_active"].append(d["disk"]["active"])
+                data["disk_avg_duration"].append(
+                    d["disk"]["diagnostics"]["avg_duration"]
+                )
+                data["disk_avg_size"].append(d["disk"]["diagnostics"]["avg_size"])
+                data["disk_read"].append(d["disk"]["read"])
+                data["disk_written"].append(d["disk"]["written"])
+
+            singletons = {
+                "comm_avg_duration": [
+                    sum(data["comm_avg_duration"]) / len(data["comm_avg_duration"])
+                ],
+                "comm_avg_size": [
+                    sum(data["comm_avg_size"]) / len(data["comm_avg_size"])
+                ],
+                "disk_avg_duration": [
+                    sum(data["disk_avg_duration"]) / len(data["disk_avg_duration"])
+                ],
+                "disk_avg_size": [
+                    sum(data["disk_avg_size"]) / len(data["disk_avg_size"])
+                ],
+            }
+            singletons["comm_avg_bandwidth"] = [
+                singletons["comm_avg_size"][0] / singletons["comm_avg_duration"][0]
+            ]
+            singletons["disk_avg_bandwidth"] = [
+                singletons["disk_avg_size"][0] / singletons["disk_avg_duration"][0]
+            ]
+            singletons["y"] = [data["y"][-1] / 2]
+
+            update(self.source, data)
+            self.comm_memory.x_range.end = max(data["comm_memory_limit"]) * 1.2
+            self.disk_memory.x_range.end = max(data["disk_memory_limit"]) * 1.2
+
+
 class SchedulerLogs:
     def __init__(self, scheduler, start=None):
         logs = scheduler.get_logs(start=start, timestamps=True)
@@ -3323,6 +3518,18 @@ def systemmonitor_doc(scheduler, extra, doc):
         add_periodic_callback(doc, sysmon, 500)
 
         doc.add_root(sysmon.root)
+        doc.template = env.get_template("simple.html")
+        doc.template_variables.update(extra)
+        doc.theme = BOKEH_THEME
+
+
+def shuffling_doc(scheduler, extra, doc):
+    with log_errors():
+        shuffling = Shuffling(scheduler, sizing_mode="stretch_both")
+        doc.title = "Dask: Shuffling"
+        add_periodic_callback(doc, shuffling, 500)
+
+        doc.add_root(shuffling.root)
         doc.template = env.get_template("simple.html")
         doc.template_variables.update(extra)
         doc.theme = BOKEH_THEME

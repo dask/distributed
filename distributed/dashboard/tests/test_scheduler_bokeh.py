@@ -28,6 +28,7 @@ from distributed.dashboard.components.scheduler import (
     Occupancy,
     ProcessingHistogram,
     ProfileServer,
+    Shuffling,
     StealingEvents,
     StealingTimeSeries,
     SystemMonitor,
@@ -991,3 +992,18 @@ async def test_prefix_bokeh(s, a, b):
     bokeh_app = s.http_application.applications[0]
     assert isinstance(bokeh_app, BokehTornado)
     assert bokeh_app.prefix == f"/{prefix}"
+
+
+@gen_cluster(client=True, worker_kwargs={"dashboard": True})
+async def test_shuffling(c, s, a, b):
+    dd = pytest.importorskip("dask.dataframe")
+    ss = Shuffling(s)
+
+    df = dask.datasets.timeseries()
+    df2 = dd.shuffle.shuffle(df, "x", shuffle="p2p").persist()
+
+    start = time()
+    while not ss.source.data["disk_read"]:
+        ss.update()
+        await asyncio.sleep(0.1)
+        assert time() < start + 5

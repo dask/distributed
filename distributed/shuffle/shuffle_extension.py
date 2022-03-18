@@ -130,6 +130,7 @@ class Shuffle:
                 "read": self.multi_file.bytes_read,
                 "active": len(self.multi_file.active),
                 "diagnostics": self.multi_file.diagnostics,
+                "memory_limit": self.multi_file.memory_limit,
             },
             "comms": {
                 "memory": self.multi_comm.total_size,
@@ -138,6 +139,7 @@ class Shuffle:
                 "read": self.total_recvd,
                 "active": self.multi_comm.comm_queue.qsize(),  # TODO: maybe not built yet
                 "diagnostics": self.multi_comm.diagnostics,
+                "memory_limit": self.multi_comm.memory_limit,
             },
             "diagnostics": self.diagnostics,
             "start": self.start_time,
