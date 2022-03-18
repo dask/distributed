@@ -185,6 +185,7 @@ DEFAULT_EXTENSIONS = {
     "amm": ActiveMemoryManagerExtension,
     "memory_sampler": MemorySamplerExtension,
     "shuffle": ShuffleSchedulerExtension,
+    "stealing": WorkStealing,
 }
 
 ALL_TASK_STATES = declare(
@@ -4014,8 +4015,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         if extensions is None:
             extensions = DEFAULT_EXTENSIONS.copy()
-            if dask.config.get("distributed.scheduler.work-stealing"):
-                extensions["stealing"] = WorkStealing
+            if not dask.config.get("distributed.scheduler.work-stealing"):
+                if "stealing" in extensions:
+                    del extensions["stealing"]
         self._extensions = {
             name: extension(self) for name, extension in extensions.items()
         }

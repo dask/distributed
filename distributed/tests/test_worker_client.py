@@ -254,13 +254,9 @@ def test_secede_without_stealing_issue_1262():
     Tests that seceding works with the Stealing extension disabled
     https://github.com/dask/distributed/issues/1262
     """
-
-    # turn off all extensions
-    extensions = []
-
     # run the loop as an inner function so all workers are closed
     # and exceptions can be examined
-    @gen_cluster(client=True, scheduler_kwargs={"extensions": extensions})
+    @gen_cluster(client=True, scheduler_kwargs={"extensions": {}})
     async def secede_test(c, s, a, b):
         def func(x):
             with worker_client() as wc:

@@ -80,6 +80,7 @@ class WorkStealing(SchedulerPlugin):
         self._in_flight_event = asyncio.Event()
 
         self.scheduler.stream_handlers["steal-response"] = self.move_task_confirm
+        self.scheduler.extensions["stealing"] = self
 
     async def start(self, scheduler=None):
         """Start the background coroutine to balance the tasks on the cluster.
