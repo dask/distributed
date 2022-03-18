@@ -49,7 +49,6 @@ from distributed.batched import BatchedSend
 from distributed.comm import connect, get_address_host
 from distributed.comm.addressing import address_from_user_args, parse_address
 from distributed.comm.utils import OFFLOAD_THRESHOLD
-from distributed.compatibility import to_thread
 from distributed.core import (
     CommClosedError,
     Status,
@@ -1478,19 +1477,11 @@ class Worker(ServerNode):
             for executor in self.executors.values():
                 if executor is utils._offload_executor:
                     continue  # Never shutdown the offload executor
-
-                def _close():
-                    if isinstance(executor, ThreadPoolExecutor):
-                        executor._work_queue.queue.clear()
-                        executor.shutdown(wait=executor_wait, timeout=timeout)
-                    else:
-                        executor.shutdown(wait=executor_wait)
-
-                # Waiting for the shutdown can block the event loop causing
-                # weird deadlocks particularly if the task that is executing in
-                # the thread is waiting for a server reply, e.g. when using
-                # worker clients, semaphores, etc.
-                await to_thread(_close)
+                if isinstance(executor, ThreadPoolExecutor):
+                    executor._work_queue.queue.clear()
+                    executor.shutdown(wait=executor_wait, timeout=timeout)
+                else:
+                    executor.shutdown(wait=executor_wait)
 
             self.stop()
             await self.rpc.close()
