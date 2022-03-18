@@ -80,13 +80,17 @@ def test_errors():
             '{"foo": "bar"}',
             "--spec-file",
             "foo.yaml",
-        ]
+        ],
+        flush_output=False,
     ) as proc:
         line = proc.stdout.readline().decode()
         assert "exactly one" in line
         assert "--spec" in line and "--spec-file" in line
 
-    with popen([sys.executable, "-m", "distributed.cli.dask_spec"]) as proc:
+    with popen(
+        [sys.executable, "-m", "distributed.cli.dask_spec"],
+        flush_output=False,
+    ) as proc:
         line = proc.stdout.readline().decode()
         assert "exactly one" in line
         assert "--spec" in line and "--spec-file" in line
