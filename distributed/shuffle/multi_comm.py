@@ -53,16 +53,6 @@ class MultiComm:
 
         del data, shard
 
-        from dask.utils import format_bytes
-
-        if self.total_size > self.memory_limit:
-            print(
-                "waiting comm",
-                format_bytes(self.total_size),
-                "this",
-                format_bytes(size),
-            )
-
         while self.total_size > self.memory_limit:
             with self.time("waiting-on-memory"):
                 with self.thread_condition:
@@ -72,8 +62,6 @@ class MultiComm:
         self.comm_queue = asyncio.Queue(maxsize=self.max_connections)
         for _ in range(self.max_connections):
             self.comm_queue.put_nowait(None)
-
-        from dask.utils import format_bytes
 
         while not self._done:
             with self.time("idle"):
@@ -105,15 +93,6 @@ class MultiComm:
 
                 assert set(self.sizes) == set(self.shards)
                 assert shards
-                print(
-                    "Sending",
-                    format_bytes(size),
-                    "to comm",
-                    format_bytes(self.total_size),
-                    "left in ",
-                    len(self.shards),
-                    "buckets",
-                )
                 future = asyncio.ensure_future(self.process(address, shards, size))
                 del shards
                 self._futures.add(future)
@@ -126,10 +105,12 @@ class MultiComm:
             # Consider boosting total_size a bit here to account for duplication
 
             try:
+                # while (time.time() // 5 % 4) == 0:
+                #     await asyncio.sleep(0.1)
                 start = time.time()
                 with self.time("send"):
                     await self.rpc(address).shuffle_receive(
-                        data=to_serialize(shards),
+                        data=to_serialize([b"".join(shards)]),
                         shuffle_id=self.shuffle_id,
                     )
                 stop = time.time()
@@ -155,9 +136,6 @@ class MultiComm:
         if self.total_size:
             breakpoint()
         assert not self.total_size
-        from dask.utils import format_bytes
-
-        print("total moved", format_bytes(self.total_moved))
 
         self._done = True
 

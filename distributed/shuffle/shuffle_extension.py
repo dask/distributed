@@ -98,7 +98,7 @@ class Shuffle:
             sizeof=lambda L: sum(map(len, L)),
         )
         self.multi_comm = MultiComm(
-            memory_limit="200 MiB",  # TODO
+            memory_limit="500 MiB",  # TODO
             rpc=worker.rpc,
             shuffle_id=self.metadata.id,
             sizeof=lambda L: sum(map(len, L)),
@@ -152,9 +152,6 @@ class Shuffle:
         # assert not self.transferred, "`receive` called after barrier task"
         import pyarrow as pa
 
-        from dask.utils import format_bytes
-
-        print("recved", format_bytes(sum(map(len, data))))
         self.total_recvd += sum(map(len, data))
         # An ugly way of turning these batches back into an arrow table
         with self.time("cpu"):

@@ -3305,6 +3305,7 @@ class Shuffling(DashboardComponent):
                     "comm_avg_size": [],
                     "comm_read": [],
                     "comm_written": [],
+                    "comm_color": [],
                     "disk_memory": [],
                     "disk_memory_half": [],
                     "disk_memory_limit": [],
@@ -3314,12 +3315,13 @@ class Shuffling(DashboardComponent):
                     "disk_avg_size": [],
                     "disk_read": [],
                     "disk_written": [],
+                    "disk_color": [],
                 }
             )
             self.totals_source = ColumnDataSource(
                 {
                     "x": ["Network Send", "Network Receive", "Disk Write", "Disk Read"],
-                    "value": [0, 0, 0, 0],
+                    "values": [0, 0, 0, 0],
                 }
             )
 
@@ -3339,24 +3341,13 @@ class Shuffling(DashboardComponent):
                 color="comm_color",
             )
             hover = HoverTool(
-                tooltips="""
-                            <div>
-                                <span style="font-size: 12px; font-weight: bold;">Memory Used:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@comm_memory{0.00 b}</span>
-                            </div>
-                            <div>
-                                <span style="font-size: 12px; font-weight: bold;">Average Write:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@comm_avg_size{0.00 b}</span>
-                            </div>
-                            <div>
-                                <span style="font-size: 12px; font-weight: bold;"># Buckets:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@comm_buckets</span>
-                            </div>
-                            <div>
-                                <span style="font-size: 12px; font-weight: bold;">Average Duration:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@comm_avg_duration</span>
-                            </div>
-                            """,
+                tooltips=[
+                    ("Memory Used", "@comm_memory{0.00 b}"),
+                    ("Average Write", "@comm_avg_size{0.00 b}"),
+                    ("# Buckets", "@comm_buckets"),
+                    ("Average Duration", "@comm_avg_duration"),
+                ],
+                formatters={"@comm_avg_duration": "datetime"},
             )
             hover.point_policy = "follow_mouse"
             self.comm_memory.add_tools(hover)
@@ -3517,11 +3508,12 @@ class Shuffling(DashboardComponent):
                 data["disk_written"].append(d["disk"]["written"])
                 if d["disk"]["active"]:
                     data["disk_color"].append("green")
-                elif d["comms"]["memory"] > d["comms"]["memory_limit"]:
+                elif d["disk"]["memory"] > d["disk"]["memory_limit"]:
                     data["disk_color"].append("red")
                 else:
                     data["disk_color"].append("blue")
 
+            """
             singletons = {
                 "comm_avg_duration": [
                     sum(data["comm_avg_duration"]) / len(data["comm_avg_duration"])
@@ -3543,6 +3535,7 @@ class Shuffling(DashboardComponent):
                 singletons["disk_avg_size"][0] / singletons["disk_avg_duration"][0]
             ]
             singletons["y"] = [data["y"][-1] / 2]
+            """
 
             totals = {
                 "x": ["Network Send", "Network Receive", "Disk Write", "Disk Read"],

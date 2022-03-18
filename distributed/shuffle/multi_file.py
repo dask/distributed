@@ -11,7 +11,7 @@ from dask.sizeof import sizeof
 from dask.utils import parse_bytes
 
 from distributed.system import MEMORY_LIMIT
-from distributed.utils import log_errors, offload
+from distributed.utils import log_errors
 
 
 class MultiFile:
@@ -63,16 +63,6 @@ class MultiFile:
 
         del data, shard
 
-        from dask.utils import format_bytes
-
-        if self.total_size > self.memory_limit:
-            print(
-                "waiting disk",
-                format_bytes(self.total_size),
-                "this",
-                format_bytes(this_size),
-            )
-
         while self.total_size > self.memory_limit:
             with self.time("waiting-on-memory"):
                 async with self.condition:
@@ -101,17 +91,6 @@ class MultiFile:
                 id = max(self.sizes, key=self.sizes.get)
                 shards = self.shards.pop(id)
                 size = self.sizes.pop(id)
-                from dask.utils import format_bytes
-
-                print(
-                    "Writing",
-                    format_bytes(size),
-                    "to disk",
-                    format_bytes(self.total_size),
-                    "left in",
-                    len(self.shards),
-                    "buckets",
-                )
 
                 future = asyncio.ensure_future(self.process(id, shards, size))
                 del shards
@@ -128,17 +107,17 @@ class MultiFile:
             self.active.add(id)
 
             def _():
-                # TODO: offload
                 with open(
                     self.directory / str(id), mode="ab", buffering=100_000_000
                 ) as f:
                     for shard in shards:
                         self.dump(shard, f)
-                    os.fsync(f)  # TODO: maybe?
+                    # os.fsync(f)  # TODO: maybe?
 
             start = time.time()
             with self.time("write"):
-                await offload(_)
+                _()
+            #     await offload(_)
             stop = time.time()
 
             self.diagnostics["avg_size"] = (
@@ -168,13 +147,13 @@ class MultiFile:
                             parts.append(self.load(f))
                         except EOFError:
                             break
+                    size = f.tell()
         except FileNotFoundError:
             raise KeyError(id)
 
         # TODO: We could consider deleting the file at this point
         if parts:
-            for part in parts:
-                self.bytes_read += sizeof(part)
+            self.bytes_read += size
             return self.join(parts)
         else:
             raise KeyError(id)
