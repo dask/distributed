@@ -5,7 +5,7 @@ import psutil
 __all__ = ("memory_limit", "MEMORY_LIMIT")
 
 
-def memory_limit():
+def memory_limit() -> int:
     """Get the memory limit (in bytes) for this system.
 
     Takes the minimum value from the following locations:
