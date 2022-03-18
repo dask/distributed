@@ -18,14 +18,17 @@ def test_version_option():
     assert result.exit_code == 0
 
 
+@pytest.mark.slow
 def test_ssh_cli_nprocs_renamed_to_nworkers(loop):
-    n_workers = 2
     with popen(
-        ["dask-ssh", f"--nprocs={n_workers}", "--nohost", "localhost"],
+        ["dask-ssh", "--nprocs=2", "--nohost", "localhost"],
         flush_output=False,
     ) as proc:
-        with Client("tcp://127.0.0.1:8786", loop=loop) as c:
-            c.wait_for_workers(n_workers)
+        with Client("tcp://127.0.0.1:8786", timeout="15 seconds", loop=loop) as c:
+            c.wait_for_workers(2, timeout="15 seconds")
+        # This interrupt is necessary for the cluster to place output into the stdout
+        # and stderr pipes
+        proc.send_signal(2)
         assert any(
             b"renamed to --nworkers" in proc.stdout.readline() for _ in range(15)
         )
