@@ -176,7 +176,6 @@ class PubSubClientExtension:
         self.client._stream_handlers.update({"pubsub-msg": self.handle_message})
 
         self.subscribers = defaultdict(weakref.WeakSet)
-        self.client.extensions["pubsub"] = self  # TODO: circular reference
 
     async def handle_message(self, name=None, msg=None):
         for sub in self.subscribers[name]:
