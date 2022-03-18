@@ -1,6 +1,57 @@
 Changelog
 =========
 
+.. _v2022.03.0:
+
+2022.03.0
+---------
+
+Released on March 18, 2022
+
+New Features
+^^^^^^^^^^^^
+- Support dumping cluster state to URL (:pr:`5863`) `Gabe Joseph`_
+
+Enhancements
+^^^^^^^^^^^^
+- Prevent data duplication on unspill (:pr:`5936`) `crusaderky`_
+- Encapsulate spill buffer and memory_monitor (:pr:`5904`) `crusaderky`_
+- Drop ``pkg_resources`` in favour of ``importlib.metadata`` (:pr:`5923`) `Thomas Grainger`_
+- Worker State Machine refactor: redesign ``TaskState`` and scheduler messages (:pr:`5922`) `crusaderky`_
+- Tidying of OpenSSL 1.0.2/Python 3.9 (and earlier) handling (:pr:`5854`) `jakirkham`_
+- ``zict`` type annotations (:pr:`5905`) `crusaderky`_
+- Add key to compute failed message (:pr:`5928`) `Florian Jetter`_
+- Change default log format to include timestamp (:pr:`5897`) `Florian Jetter`_
+- Improve type annotations in worker.py (:pr:`5814`) `crusaderky`_
+
+Bug Fixes
+^^^^^^^^^
+- Fix ``progress_stream`` teardown (:pr:`5823`) `Thomas Grainger`_
+- Handle concurrent or failing handshakes in ``InProcListener`` (:pr:`5903`) `Thomas Grainger`_
+- Make ``log_event`` threadsafe (:pr:`5946`) `Gabe Joseph`_
+
+Documentation
+^^^^^^^^^^^^^
+- Fixes to documentation regarding plugins (:pr:`5940`) `crendoncoiled`_
+- Some updates to scheduling policies docs (:pr:`5911`) `Gabe Joseph`_
+
+Maintenance
+^^^^^^^^^^^
+- Fix ``test_nanny_worker_port_range`` hangs on Windows (:pr:`5956`) `crusaderky`_
+- (REVERTED) Unblock event loop while waiting for ThreadpoolExecutor to shut down (:pr:`5883`) `Florian Jetter`_
+- Revert :pr:`5883` (:pr:`5961`) `crusaderky`_
+- Invert ``event_name`` check in ``test-report`` job (:pr:`5959`) `jakirkham`_
+- Only run ``gh-pages`` workflow on ``dask/distributed`` (:pr:`5942`) `jakirkham`_
+- ``absolufy-imports`` - No relative imports - PEP8 (:pr:`5924`) `Florian Jetter`_
+- Fix ``track_features`` for distributed pre-releases (:pr:`5927`) `Charles Blackmon-Luca`_
+- Xfail ``test_submit_different_names`` (:pr:`5916`) `Florian Jetter`_
+- Fix ``distributed`` pre-release's ``distributed-impl`` constraint (:pr:`5867`) `Charles Blackmon-Luca`_
+- Mock process memory readings in test_worker.py (v2) (:pr:`5878`) `crusaderky`_
+- Drop unused ``_round_robin`` global variable (:pr:`5881`) `jakirkham`_
+- Add GitHub URL for PyPi (:pr:`5886`) `Andrii Oriekhov`_
+- Mark ``xfail`` COMPILED tests ``skipif`` instead (:pr:`5884`) `Florian Jetter`_
+
+
 .. _v2022.02.1:
 
 2022.02.1
@@ -3333,3 +3384,5 @@ significantly without many new features.
 .. _`Sarah Charlotte Johnson`: https://github.com/scharlottej13
 .. _`Tim Harris`: https://github.com/tharris72
 .. _`Bryan W. Weber`: https://github.com/bryanwweber
+.. _`crendoncoiled`: https://github.com/crendoncoiled
+.. _`Andrii Oriekhov`: https://github.com/andriyor
