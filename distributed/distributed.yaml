@@ -149,6 +149,10 @@ distributed:
       # Set to false for no maximum.
       max-spill: false
 
+      # Interval between checks for the spill, pause, and terminate thresholds.
+      # The target threshold is checked every time new data is inserted.
+      monitor-interval: 100ms
+
     http:
       routes:
         - distributed.http.worker.prometheus

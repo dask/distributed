@@ -263,7 +263,10 @@ class Server:
 
     @property
     def status(self):
-        return self._status
+        try:
+            return self._status
+        except AttributeError:
+            return Status.undefined
 
     @status.setter
     def status(self, new_status):
@@ -398,9 +401,7 @@ class Server:
     def identity(self) -> dict[str, str]:
         return {"type": type(self).__name__, "id": self.id}
 
-    def _to_dict(
-        self, comm: Comm | None = None, *, exclude: Container[str] = ()
-    ) -> dict:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
