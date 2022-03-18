@@ -38,7 +38,7 @@ async def test_nanny_worker_ports(c, s):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[])
+@gen_cluster(client=True, nthreads=[], timeout=1800)
 async def test_nanny_worker_port_range(c, s):
     with popen(
         [
@@ -77,9 +77,10 @@ async def test_nanny_worker_port_range_too_many_workers_raises(s):
             "--nanny-port",
             "9686:9687",
             "--no-dashboard",
-        ]
+        ],
+        flush_output=False,
     ) as worker:
-        assert any(b"Could not start" in worker.stderr.readline() for _ in range(100))
+        assert any(b"Could not start" in worker.stdout.readline() for _ in range(100))
 
 
 @pytest.mark.slow
@@ -118,7 +119,8 @@ async def test_no_reconnect(c, s, nanny):
             "--no-reconnect",
             nanny,
             "--no-dashboard",
-        ]
+        ],
+        flush_output=False,
     ) as worker:
         # roundtrip works
         assert await c.submit(lambda x: x + 1, 10) == 11
@@ -142,7 +144,8 @@ async def test_reconnect(c, s, nanny):
             "--reconnect",
             nanny,
             "--no-dashboard",
-        ]
+        ],
+        flush_output=False,
     ) as worker:
         # roundtrip works
         await c.submit(lambda x: x + 1, 10) == 11
@@ -226,9 +229,12 @@ def test_scheduler_address_env(loop, monkeypatch):
 
 @gen_cluster(nthreads=[])
 async def test_nworkers_requires_nanny(s):
-    with popen(["dask-worker", s.address, "--nworkers=2", "--no-nanny"]) as worker:
+    with popen(
+        ["dask-worker", s.address, "--nworkers=2", "--no-nanny"],
+        flush_output=False,
+    ) as worker:
         assert any(
-            b"Failed to launch worker" in worker.stderr.readline() for i in range(15)
+            b"Failed to launch worker" in worker.stdout.readline() for _ in range(15)
         )
 
 
@@ -264,18 +270,24 @@ async def test_nworkers_expands_name(c, s):
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[])
 async def test_worker_cli_nprocs_renamed_to_nworkers(c, s):
-    with popen(["dask-worker", s.address, "--nprocs=2"]) as worker:
+    with popen(
+        ["dask-worker", s.address, "--nprocs=2"],
+        flush_output=False,
+    ) as worker:
         await c.wait_for_workers(2)
         assert any(
-            b"renamed to --nworkers" in worker.stderr.readline() for _ in range(15)
+            b"renamed to --nworkers" in worker.stdout.readline() for _ in range(15)
         )
 
 
 @gen_cluster(nthreads=[])
 async def test_worker_cli_nworkers_with_nprocs_is_an_error(s):
-    with popen(["dask-worker", s.address, "--nprocs=2", "--nworkers=2"]) as worker:
+    with popen(
+        ["dask-worker", s.address, "--nprocs=2", "--nworkers=2"],
+        flush_output=False,
+    ) as worker:
         assert any(
-            b"Both --nprocs and --nworkers" in worker.stderr.readline()
+            b"Both --nprocs and --nworkers" in worker.stdout.readline()
             for _ in range(15)
         )
 
