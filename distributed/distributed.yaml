@@ -39,6 +39,7 @@ distributed:
         ca-file: null
         key: null
         cert: null
+        password: null
       bokeh-application:  # keywords to pass to BokehTornado application
         allow_websocket_origin: ["*"]
         keep_alive_milliseconds: 500

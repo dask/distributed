@@ -204,6 +204,12 @@ properties:
                     type:
                     - string
                     - "null"
+                  password:
+                    type:
+                    - string
+                    - "null"
+                    description: |
+                      An optional password for decrypting the private key.
               bokeh-application:
                 type: object
                 description: |

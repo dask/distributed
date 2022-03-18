@@ -4,6 +4,7 @@ import re
 import ssl
 import sys
 from time import sleep
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -45,6 +46,7 @@ from distributed.dashboard.components.worker import Counters
 from distributed.dashboard.scheduler import applications
 from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.metrics import time
+from distributed.node import _load_http_server_ssl_options
 from distributed.utils import format_dashboard_link
 from distributed.utils_test import dec, div, gen_cluster, get_cert, inc, slowinc
 
@@ -912,6 +914,40 @@ async def test_https_support(c, s, a, b):
         assert response.code < 300
         body = response.body.decode()
         assert not re.search("href=./", body)  # no absolute links
+
+
+@pytest.mark.parametrize("ssl_enabled", [True, False])
+@pytest.mark.parametrize("has_password", [True, False])
+def test_http_server_ssl_config(monkeypatch, ssl_enabled, has_password):
+    """Test that the dashboard TLS config is loaded using the proper ssl lib calls"""
+    create_default_context = MagicMock(spec=ssl.create_default_context)
+    monkeypatch.setattr(ssl, "create_default_context", create_default_context)
+
+    config = {}
+    if ssl_enabled:
+        config.update(
+            {
+                "distributed.scheduler.dashboard.tls.cert": "mycert.pem",
+                "distributed.scheduler.dashboard.tls.key": "mykey.pem",
+                "distributed.scheduler.dashboard.tls.ca-file": "myca.pem",
+            }
+        )
+    if has_password:
+        config["distributed.scheduler.dashboard.tls.password"] = "mypassword"
+
+    with dask.config.set(config):
+        ssl_options = _load_http_server_ssl_options()
+
+    password = "mypassword" if has_password else None
+
+    if ssl_enabled:
+        assert ssl_options is create_default_context.return_value
+        assert create_default_context.call_args[1]["cafile"] == "myca.pem"
+        assert ssl_options.load_cert_chain.call_args[0][0] == "mycert.pem"
+        assert ssl_options.load_cert_chain.call_args[1]["keyfile"] == "mykey.pem"
+        assert ssl_options.load_cert_chain.call_args[1]["password"] == password
+    else:
+        assert ssl_options is None
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
