@@ -14,7 +14,7 @@ This module does *not* cover:
 
 See also:
 - :mod:`distributed.spill`, which implements the spill-to-disk mechanism and is wrapped
-  around by this module. Unlike this module, :mod:`distributed.spill` is agnostic to the
+  by this module. Unlike this module, :mod:`distributed.spill` is agnostic to the
   Worker.
 - :mod:`distributed.active_memory_manager`, which runs on the scheduler side
 """
