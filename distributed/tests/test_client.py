@@ -7493,6 +7493,11 @@ class TestClientSecurityLoader:
                     pass
 
 
+@gen_cluster(client=True)
+async def test_benchmark_hardware(c, s, a, b):
+    result = await c.benchmark_hardware()
+
+
 @gen_cluster(client=True, nthreads=[])
 async def test_wait_for_workers_updates_info(c, s):
     async with Worker(s.address):

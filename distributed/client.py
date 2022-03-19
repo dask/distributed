@@ -4041,6 +4041,10 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self.scheduler.worker_logs, n=n, workers=workers, nanny=nanny)
 
+    def benchmark_hardware(self) -> dict:
+        """Run a hardware benchmark"""
+        return self.sync(self.scheduler.benchmark_hardware)
+
     def log_event(self, topic, msg):
         """Log an event under a given topic
 

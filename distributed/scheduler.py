@@ -3976,6 +3976,7 @@ class Scheduler(SchedulerState, ServerNode):
             "stop_task_metadata": self.stop_task_metadata,
             "get_cluster_state": self.get_cluster_state,
             "dump_cluster_state_to_url": self.dump_cluster_state_to_url,
+            "benchmark_hardware": self.benchmark_hardware,
         }
 
         connection_limit = get_fileno_limit() / 2
@@ -7327,6 +7328,10 @@ class Scheduler(SchedulerState, ServerNode):
         )
         response = {w: r for w, r in zip(workers, results) if r}
         return response
+
+    async def benchmark_hardware(self, comm=None):
+        responses = await self.broadcast(msg=dict(op="benchmark_hardware"))
+        return responses
 
     def get_nbytes(self, keys=None, summary=True):
         parent: SchedulerState = cast(SchedulerState, self)

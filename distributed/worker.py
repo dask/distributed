@@ -740,6 +740,7 @@ class Worker(ServerNode):
             "plugin-add": self.plugin_add,
             "plugin-remove": self.plugin_remove,
             "get_monitor_info": self.get_monitor_info,
+            "benchmark_hardware": self.benchmark_hardware,
         }
 
         stream_handlers = {
@@ -3699,6 +3700,11 @@ class Worker(ServerNode):
                     logger.info(
                         "Plugin '%s' failed with exception", name, exc_info=True
                     )
+
+    async def benchmark_hardware(self, comm):
+        memory = self.executor.submit(benchmark_memory).result()
+        disk = self.executor.submit(benchmark_disk).result()
+        return {"memory": memory, "disk": disk}
 
     ##############
     # Validation #
