@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
 import sys
@@ -203,17 +204,38 @@ class Scheduler(Process):
     kwargs: dict
         These will be passed through the dask-scheduler CLI to the
         dask.distributed.Scheduler class
+    forward_scheduler_port: int, optional
+        Local port to forward the remote scheduler port to.
+    forward_dashboard_port: int, optional
+        Local port to forward the remote dashboard port to.
     """
 
     def __init__(
-        self, address: str, connect_options: dict, kwargs: dict, remote_python=None
+        self,
+        address: str,
+        connect_options: dict,
+        kwargs: dict,
+        remote_python=None,
+        forward_scheduler_port: int = None,
+        forward_dashboard_port: int = None,
     ):
         super().__init__()
+
+        try:
+            import asyncssh  # import now to avoid adding to module startup time
+        except ImportError:
+            raise ImportError(
+                "Dask's SSHCluster requires the `asyncssh` package to be installed. "
+                "Please install it using pip or conda."
+            )
 
         self.address = address
         self.kwargs = kwargs
         self.connect_options = connect_options
         self.remote_python = remote_python
+        self.forward_scheduler_port = forward_scheduler_port
+        self.forward_dashboard_port = forward_dashboard_port
+        self.port_forwards: list[asyncssh.SSHListener] = []
 
     async def start(self):
         try:
@@ -267,9 +289,36 @@ class Scheduler(Process):
             logger.info(line.strip())
             if "Scheduler at" in line:
                 self.address = line.split("Scheduler at:")[1].strip()
+                if self.forward_scheduler_port:
+                    protocol, *_, port = self.address.split(":")
+                    self.port_forwards.append(
+                        await self.connection.forward_remote_port(
+                            "localhost",
+                            int(self.forward_scheduler_port),
+                            "localhost",
+                            int(port),
+                        )
+                    )
+                    self.address = "{}://localhost:{}".format(
+                        protocol, self.forward_scheduler_port
+                    )
+                if self.forward_dashboard_port:
+                    self.port_forwards.append(
+                        await self.connection.forward_remote_port(
+                            "localhost",
+                            int(self.forward_dashboard_port),
+                            "localhost",
+                            8787,
+                        )
+                    )
                 break
+
         logger.debug("%s", line)
         await super().start()
+
+    async def close(self):
+        await asyncio.gather(*[p.wait_closed() for p in self.port_forwards])
+        await super().close()
 
 
 old_cluster_kwargs = {
@@ -300,6 +349,8 @@ def SSHCluster(
     worker_module: str = "deprecated",
     worker_class: str = "distributed.Nanny",
     remote_python: str | list[str] | None = None,
+    forward_scheduler_port: int = None,
+    forward_dashboard_port: int = None,
     **kwargs,
 ):
     """Deploy a Dask cluster using SSH
@@ -340,6 +391,10 @@ def SSHCluster(
         The python class to use to create the worker(s).
     remote_python : str or list of str, optional
         Path to Python on remote nodes.
+    forward_scheduler_port: int, optional
+        Local port to forward the remote scheduler port to.
+    forward_dashboard_port: int, optional
+        Local port to forward the remote dashboard port to.
 
     Examples
     --------
@@ -381,6 +436,20 @@ def SSHCluster(
     ...     connect_options={"known_hosts": None},
     ...     scheduler_options={"port": 0, "dashboard_address": ":8797"},
     ...     worker_class="dask_cuda.CUDAWorker")
+    >>> client = Client(cluster)
+
+    An example of forwarding the Dask scheduler ports locally. Useful if
+    you only have SSH access to a host but the firewall blocks other ports.
+    This will forward to remote scheduler port and dashboard to 8786 and 8787
+    on your local machine respectively.
+
+    >>> from dask.distributed import Client, SSHCluster
+    >>> cluster = SSHCluster(
+    ...     ["localhost", "hostwithgpus", "anothergpuhost"],
+    ...     connect_options={"known_hosts": None},
+    ...     scheduler_options={"port": 0, "dashboard_address": ":8797"},
+    ...     forward_scheduler_port=8786,
+    ...     forward_dashboard_port=8787)
     >>> client = Client(cluster)
 
     See Also
@@ -433,6 +502,8 @@ def SSHCluster(
             "remote_python": remote_python[0]
             if isinstance(remote_python, list)
             else remote_python,
+            "forward_scheduler_port": forward_scheduler_port,
+            "forward_dashboard_port": forward_dashboard_port,
         },
     }
     workers = {
