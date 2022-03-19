@@ -3665,12 +3665,14 @@ def shuffling_doc(scheduler, extra, doc):
         shuffling = Shuffling(scheduler, width=400, height=400)
         workers_memory = WorkersMemory(scheduler, width=400, height=400)
         timeseries = SystemTimeseries(
-            scheduler, width=1400, height=200, follow_interval=3000
+            scheduler, width=1600, height=200, follow_interval=3000
         )
+        event_loop = EventLoop(scheduler, width=200, height=400)
 
         add_periodic_callback(doc, shuffling, 200)
         add_periodic_callback(doc, workers_memory, 200)
         add_periodic_callback(doc, timeseries, 500)
+        add_periodic_callback(doc, event_loop, 500)
 
         timeseries.bandwidth.y_range = timeseries.disk.y_range
 
@@ -3681,6 +3683,7 @@ def shuffling_doc(scheduler, extra, doc):
                     shuffling.comm_memory,
                     shuffling.disk_memory,
                     shuffling.totals,
+                    event_loop.root,
                 ),
                 row(column(timeseries.bandwidth, timeseries.disk)),
             )
