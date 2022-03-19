@@ -3335,3 +3335,33 @@ async def test_extension_heartbeat(s):
         await w.heartbeat()
 
     assert flag[0]
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.admin.tick.interval": "5ms",
+        "distributed.admin.tick.cycle": "100ms",
+    },
+)
+async def test_tick_interval(c, s, a, b):
+    import time
+
+    await a.heartbeat()
+    x = s.workers[a.address].metrics["event_loop_interval"]
+    assert x
+    assert 0.0001 < x < 1
+    old = a._tick_interval_observed
+
+    old_count_last = a._tick_count_last
+
+    time.sleep(0.500)  # Block event loop
+
+    while a._tick_count_last == old_count_last:
+        await asyncio.sleep(0.01)
+
+    await a.heartbeat()
+    y = s.workers[a.address].metrics["event_loop_interval"]
+    new = a._tick_interval_observed
+
+    assert y > x

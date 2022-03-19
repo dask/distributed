@@ -23,6 +23,7 @@ from distributed.dashboard.components.scheduler import (
     ClusterMemory,
     ComputePerKey,
     CurrentLoad,
+    EventLoop,
     Events,
     MemoryByKey,
     Occupancy,
@@ -76,7 +77,13 @@ async def test_simple(c, s, a, b):
 
 @gen_cluster(client=True, worker_kwargs={"dashboard": True})
 async def test_basic(c, s, a, b):
-    for component in [TaskStream, SystemMonitor, Occupancy, StealingTimeSeries]:
+    for component in [
+        TaskStream,
+        SystemMonitor,
+        Occupancy,
+        StealingTimeSeries,
+        EventLoop,
+    ]:
         ss = component(s)
 
         ss.update()
