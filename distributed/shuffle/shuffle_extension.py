@@ -7,6 +7,7 @@ import math
 import os
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NewType
 
@@ -15,7 +16,7 @@ import toolz
 from distributed.protocol import to_serialize
 from distributed.shuffle.multi_comm import MultiComm
 from distributed.shuffle.multi_file import MultiFile
-from distributed.utils import offload, sync
+from distributed.utils import sync
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -80,9 +81,11 @@ class Shuffle:
         self,
         metadata: ShuffleMetadata,
         worker: Worker,
+        executor: ThreadPoolExecutor,
     ) -> None:
         self.metadata = metadata
         self.worker = worker
+        self.executor = executor
 
         import pyarrow as pa
 
@@ -98,13 +101,13 @@ class Shuffle:
             sizeof=lambda L: sum(map(len, L)),
         )
         self.multi_comm = MultiComm(
-            memory_limit="300 MiB",  # TODO
+            memory_limit="100 MiB",  # TODO
             rpc=worker.rpc,
             shuffle_id=self.metadata.id,
             sizeof=lambda L: sum(map(len, L)),
             join=functools.partial(sum, start=[]),
-            max_connections=min((len(self.metadata.workers) - 1) or 1, 10),
-            max_message_size="10 MiB",
+            max_connections=min(len(self.metadata.workers), 10),
+            max_message_size="2 MiB",
         )
         self.worker.loop.add_callback(self.multi_comm.communicate)
         self.worker.loop.add_callback(self.multi_file.communicate)
@@ -121,6 +124,14 @@ class Shuffle:
         yield
         stop = time.time()
         self.diagnostics[name] += stop - start
+
+    async def offload(self, func, *args):
+        # return func(*args)
+        return await asyncio.get_event_loop().run_in_executor(
+            self.executor,
+            func,
+            *args,
+        )
 
     def heartbeat(self):
         return {
@@ -156,24 +167,24 @@ class Shuffle:
         self.total_recvd += sum(map(len, data))
         # An ugly way of turning these batches back into an arrow table
         with self.time("cpu"):
-            data = await offload(
+            data = await self.offload(
                 list_of_buffers_to_table,
                 data,
-                schema=pa.Schema.from_pandas(self.metadata.empty),
+                pa.Schema.from_pandas(self.metadata.empty),
             )
 
-            groups = await offload(split_by_partition, data, self.metadata.column)
+            groups = await self.offload(split_by_partition, data, self.metadata.column)
 
         assert len(data) == sum(map(len, groups.values()))
         del data
 
         with self.time("cpu"):
-            groups = await offload(
+            groups = await self.offload(
                 lambda: {
                     k: [batch.serialize() for batch in v.to_batches()]
                     for k, v in groups.items()
                 }
-            )  # TODO: consider offloading
+            )
         await self.multi_file.put(groups)
 
     def add_partition(self, data: pd.DataFrame) -> None:
@@ -235,6 +246,7 @@ class ShuffleWorkerExtension:
         # Initialize
         self.worker: Worker = worker
         self.shuffles: dict[ShuffleId, Shuffle] = {}
+        self.executor = ThreadPoolExecutor(worker.nthreads)
 
     # Handlers
     ##########
@@ -252,6 +264,7 @@ class ShuffleWorkerExtension:
         self.shuffles[metadata.id] = Shuffle(
             metadata,
             self.worker,
+            self.executor,
         )
 
     def heartbeat(self):
@@ -437,6 +450,7 @@ def split_by_worker(
     Split data into many arrow batches, partitioned by destination worker
     """
     import numpy as np
+    import pandas as pd
     import pyarrow as pa
 
     grouper = (len(workers) * df[column] // npartitions).astype(df[column].dtype).values
@@ -456,7 +470,7 @@ def split_by_worker(
     ]
     shards.append(t.slice(offset=splits[-1], length=None))
 
-    w = np.unique(grouper)
+    w = pd.Series(grouper).unique()
     w.sort()
 
     return {workers[w]: shard for w, shard in zip(w, shards)}
@@ -471,7 +485,7 @@ def split_by_partition(
     """
     import numpy as np
 
-    partitions = np.unique(np.asarray(t.select([column]))[0])
+    partitions = t.select([column]).to_pandas()[column].unique()
     partitions.sort()
     t = t.sort_by(column)
 
