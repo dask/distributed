@@ -463,6 +463,10 @@ async def test_metrics(c, s, a, b):
     expected_average_pending_lease_time = (time() - before_acquiring) / 2
     epsilon = max(0.1, 0.5 * expected_average_pending_lease_time)
 
+    if "semaphores" not in s.extensions:
+        from pprint import pprint
+
+        pprint(s.extensions)
     sem_ext = s.extensions["semaphores"]
 
     actual = sem_ext.metrics.copy()
