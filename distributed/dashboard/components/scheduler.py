@@ -3469,6 +3469,7 @@ class Shuffling(DashboardComponent):
                 "disk_written": [],
                 "disk_color": [],
             }
+            now = time()
 
             for i, (worker, d) in enumerate(input.items()):
                 data["y"].append(i)
@@ -3486,7 +3487,9 @@ class Shuffling(DashboardComponent):
                 )
                 data["comm_read"].append(d["comms"]["read"])
                 data["comm_written"].append(d["comms"]["written"])
-                if d["comms"]["active"]:
+                if self.scheduler.workers[worker].last_seen < now - 5:
+                    data["comm_color"].append("gray")
+                elif d["comms"]["active"]:
                     data["comm_color"].append("green")
                 elif d["comms"]["memory"] > d["comms"]["memory_limit"]:
                     data["comm_color"].append("red")
@@ -3506,7 +3509,9 @@ class Shuffling(DashboardComponent):
                 )
                 data["disk_read"].append(d["disk"]["read"])
                 data["disk_written"].append(d["disk"]["written"])
-                if d["disk"]["active"]:
+                if self.scheduler.workers[worker].last_seen < now - 5:
+                    data["disk_color"].append("gray")
+                elif d["disk"]["active"]:
                     data["disk_color"].append("green")
                 elif d["disk"]["memory"] > d["disk"]["memory_limit"]:
                     data["disk_color"].append("red")
