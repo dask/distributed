@@ -3040,10 +3040,11 @@ class EventLoop(DashboardComponent):
                 y_range=[
                     0,
                     parse_timedelta(dask.config.get("distributed.admin.tick.interval"))
-                    * 10,
+                    * 25,
                 ],
                 tools="",
                 toolbar_location="above",
+                **kwargs,
             )
             self.root.vbar(x="names", top="values", width=0.9, source=self.source)
 
