@@ -234,11 +234,20 @@ class Server:
         self.periodic_callbacks["monitor"] = pc
 
         self._last_tick = time()
-        measure_tick_interval = parse_timedelta(
+        self._tick_counter = 0
+        self._tick_count = 0
+        self._tick_count_last = time()
+        self._tick_interval = parse_timedelta(
             dask.config.get("distributed.admin.tick.interval"), default="ms"
         )
-        pc = PeriodicCallback(self._measure_tick, measure_tick_interval * 1000)
+        self._tick_interval_observed = self._tick_interval
+        pc = PeriodicCallback(self._measure_tick, self._tick_interval * 1000)
         self.periodic_callbacks["tick"] = pc
+        pc = PeriodicCallback(
+            self._cycle_ticks,
+            parse_timedelta(dask.config.get("distributed.admin.tick.cycle")) * 1000,
+        )
+        self.periodic_callbacks["ticks"] = pc
 
         self.thread_id = 0
 
@@ -351,6 +360,7 @@ class Server:
         now = time()
         diff = now - self._last_tick
         self._last_tick = now
+        self._tick_counter += 1
         if diff > tick_maximum_delay:
             logger.info(
                 "Event loop was unresponsive in %s for %.2fs.  "
@@ -362,6 +372,13 @@ class Server:
             )
         if self.digests is not None:
             self.digests["tick-duration"].add(diff)
+
+    def _cycle_ticks(self):
+        if not self._tick_counter:
+            return
+        last, self._tick_count_last = self._tick_count_last, time()
+        count, self._tick_counter = self._tick_counter, 0
+        self._tick_interval_observed = (time() - last) / (count or 1)
 
     @property
     def address(self):

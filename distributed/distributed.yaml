@@ -270,6 +270,7 @@ distributed:
     tick:
       interval: 20ms  # time between event loop health checks
       limit: 3s       # time allowed before triggering a warning
+      cycle: 1s
 
     max-error-length: 10000 # Maximum size traceback after error to return
     log-length: 10000  # default length of logs to keep in memory
