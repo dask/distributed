@@ -57,7 +57,14 @@ from distributed.utils_test import (
     slowinc,
     slowsum,
 )
-from distributed.worker import Worker, error_message, logger
+from distributed.worker import (
+    Worker,
+    benchmark_disk,
+    benchmark_memory,
+    benchmark_network,
+    error_message,
+    logger,
+)
 
 pytestmark = pytest.mark.ci1
 
@@ -3306,3 +3313,19 @@ async def test_Worker__to_dict(c, s, a):
     }
     assert d["tasks"]["x"]["key"] == "x"
     assert d["data"] == ["x"]
+
+
+@gen_cluster()
+async def test_benchmark(s, a, b):
+    for i in range(10):
+        disk = benchmark_disk()
+        memory = benchmark_memory()
+        network = await benchmark_network(address=a.address, rpc=b.rpc)
+        assert isinstance(disk, dict) and disk
+        assert isinstance(memory, dict) and memory
+        assert isinstance(network, dict) and network
+        # from toolz import valmap
+        # from dask.utils import format_bytes
+        # print("Memory", valmap(format_bytes, memory))
+        # print("Disk", valmap(format_bytes, disk))
+        # print("Network", valmap(format_bytes, network))

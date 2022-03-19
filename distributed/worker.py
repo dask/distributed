@@ -7,6 +7,7 @@ import errno
 import heapq
 import logging
 import os
+import pathlib
 import random
 import sys
 import threading
@@ -41,6 +42,7 @@ from dask.utils import (
     parse_bytes,
     parse_timedelta,
     stringify,
+    tmpdir,
     typename,
 )
 
@@ -55,6 +57,7 @@ from distributed.core import (
     coerce_to_address,
     error_message,
     pingpong,
+    rpc,
     send_recv,
 )
 from distributed.diagnostics import nvml
@@ -4576,3 +4579,71 @@ def warn(*args, **kwargs):
         worker.log_event("warn", {"args": args, "kwargs": kwargs})
 
     warnings.warn(*args, **kwargs)
+
+
+def benchmark_disk(
+    sizes=["1 kiB", "100 kIB", "1 MiB", "10 MiB", "100 MiB"],
+    rootdir=None,
+    duration=1.0,
+) -> dict:
+
+    out = {}
+    for size_str in sizes:
+        with tmpdir(dir=rootdir) as dir:
+            dir = pathlib.Path(dir)
+            names = list(map(str, range(100)))
+            size = parse_bytes(size_str)
+
+            data = os.urandom(size)
+
+            start = time()
+            total = 0
+            while time() < start + 1.0:
+                with open(dir / random.choice(names), mode="ab") as f:
+                    f.write(data)
+                    os.fsync(f)
+                total += size
+
+            out[size_str] = total / (time() - start)
+    return out
+
+
+def benchmark_memory(
+    sizes=["10 kiB", "100 kiB", "1 MiB", "10 MiB", "100 MiB"],
+    duration=0.2,
+) -> dict:
+    out = {}
+    for size_str in sizes:
+        size = parse_bytes(size_str)
+        data = os.urandom(size)
+
+        start = time()
+        total = 0
+        while time() < start + duration:
+            data[:-1]
+            total += size
+
+        out[size_str] = total / (time() - start)
+    return out
+
+
+async def benchmark_network(
+    sizes=["1 kiB", "10kiB", "100kiB", "1 MiB", "10 MiB", "50 MiB"],
+    rpc=rpc,
+    duration=1.0,
+    address=None,
+) -> dict:
+    out = {}
+    with rpc(address) as r:
+        for size_str in sizes:
+            size = parse_bytes(size_str)
+            data = os.urandom(size)
+
+            start = time()
+            total = 0
+            while time() < start + duration:
+                await r.echo(data=to_serialize(data))
+                total += size * 2
+
+            out[size_str] = total / (time() - start)
+    return out
