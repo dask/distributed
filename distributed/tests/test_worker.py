@@ -3316,16 +3316,12 @@ async def test_Worker__to_dict(c, s, a):
 
 
 @gen_cluster()
-async def test_benchmark(s, a, b):
-    for i in range(10):
-        disk = benchmark_disk()
-        memory = benchmark_memory()
-        network = await benchmark_network(address=a.address, rpc=b.rpc)
-        assert isinstance(disk, dict) and disk
-        assert isinstance(memory, dict) and memory
-        assert isinstance(network, dict) and network
-        # from toolz import valmap
-        # from dask.utils import format_bytes
-        # print("Memory", valmap(format_bytes, memory))
-        # print("Disk", valmap(format_bytes, disk))
-        # print("Network", valmap(format_bytes, network))
+async def test_benchmark_hardware(s, a, b):
+    sizes = ["1 kiB", "10 kiB"]
+    disk = benchmark_disk(sizes=sizes, duration="1 ms")
+    memory = benchmark_memory(sizes=sizes, duration="1 ms")
+    network = await benchmark_network(
+        address=a.address, rpc=b.rpc, sizes=sizes, duration="1 ms"
+    )
+
+    assert set(disk) == set(memory) == set(network) == set(sizes)

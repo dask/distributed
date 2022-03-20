@@ -4598,6 +4598,7 @@ def benchmark_disk(
     rootdir=None,
     duration=1.0,
 ) -> dict:
+    duration = parse_timedelta(duration)
 
     out = {}
     for size_str in sizes:
@@ -4610,7 +4611,7 @@ def benchmark_disk(
 
             start = time()
             total = 0
-            while time() < start + 1.0:
+            while time() < start + duration:
                 with open(dir / random.choice(names), mode="ab") as f:
                     f.write(data)
                     os.fsync(f)
@@ -4624,6 +4625,7 @@ def benchmark_memory(
     sizes=["2 kiB", "10 kiB", "100 kiB", "1 MiB", "10 MiB"],
     duration=0.2,
 ) -> dict:
+    duration = parse_timedelta(duration)
     out = {}
     for size_str in sizes:
         size = parse_bytes(size_str)
@@ -4645,6 +4647,7 @@ async def benchmark_network(
     duration=1.0,
     address=None,
 ) -> dict:
+    duration = parse_timedelta(duration)
     out = {}
     with rpc(address) as r:
         for size_str in sizes:
