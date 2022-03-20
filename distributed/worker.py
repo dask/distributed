@@ -740,7 +740,9 @@ class Worker(ServerNode):
             "plugin-add": self.plugin_add,
             "plugin-remove": self.plugin_remove,
             "get_monitor_info": self.get_monitor_info,
-            "benchmark_hardware": self.benchmark_hardware,
+            "benchmark_disk": self.benchmark_disk,
+            "benchmark_memory": self.benchmark_memory,
+            "benchmark_network": self.benchmark_network,
         }
 
         stream_handlers = {
@@ -3701,10 +3703,14 @@ class Worker(ServerNode):
                         "Plugin '%s' failed with exception", name, exc_info=True
                     )
 
-    async def benchmark_hardware(self, comm):
-        memory = self.executor.submit(benchmark_memory).result()
-        disk = self.executor.submit(benchmark_disk).result()
-        return {"memory": memory, "disk": disk}
+    async def benchmark_disk(self, comm=None):
+        return self.executor.submit(benchmark_disk).result()
+
+    async def benchmark_memory(self, comm=None):
+        return self.executor.submit(benchmark_memory).result()
+
+    async def benchmark_network(self, comm=None, address=None):
+        return await benchmark_network(rpc=self.rpc, address=address)
 
     ##############
     # Validation #
@@ -4588,7 +4594,7 @@ def warn(*args, **kwargs):
 
 
 def benchmark_disk(
-    sizes=["1 kiB", "100 kIB", "1 MiB", "10 MiB", "100 MiB"],
+    sizes=["1 kiB", "100 kiB", "1 MiB", "10 MiB", "100 MiB"],
     rootdir=None,
     duration=1.0,
 ) -> dict:
@@ -4615,7 +4621,7 @@ def benchmark_disk(
 
 
 def benchmark_memory(
-    sizes=["10 kiB", "100 kiB", "1 MiB", "10 MiB", "100 MiB"],
+    sizes=["2 kiB", "10 kiB", "100 kiB", "1 MiB", "10 MiB"],
     duration=0.2,
 ) -> dict:
     out = {}

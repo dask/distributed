@@ -7330,8 +7330,31 @@ class Scheduler(SchedulerState, ServerNode):
         return response
 
     async def benchmark_hardware(self, comm=None):
-        responses = await self.broadcast(msg=dict(op="benchmark_hardware"))
-        return responses
+        out = defaultdict(lambda: defaultdict(list))
+
+        for mode in ["disk", "memory"]:
+            result = await self.broadcast(msg={"op": "benchmark_" + mode})
+            for d in result.values():
+                for size, duration in d.items():
+                    out[mode][size].append(duration)
+
+        workers = list(self.workers)
+        futures = []
+        for a, b in zip(workers[:-1], workers[1:]):
+            future = self.rpc(a).benchmark_network(address=b)
+            futures.append(future)
+        responses = await asyncio.gather(*futures)
+        result = dict(zip(workers, responses))
+        for d in result.values():
+            for size, duration in d.items():
+                out["network"][size].append(duration)
+
+        for mode in out:
+            out[mode] = {
+                size: sum(durations) / len(durations)
+                for size, durations in out[mode].items()
+            }
+        return dict(out)
 
     def get_nbytes(self, keys=None, summary=True):
         parent: SchedulerState = cast(SchedulerState, self)

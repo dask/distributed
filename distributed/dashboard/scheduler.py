@@ -30,6 +30,7 @@ from distributed.dashboard.components.scheduler import (
     WorkerTable,
     events_doc,
     graph_doc,
+    hardware_doc,
     individual_doc,
     individual_profile_doc,
     individual_profile_server_doc,
@@ -56,6 +57,7 @@ applications = {
     "/profile": profile_doc,
     "/profile-server": profile_server_doc,
     "/graph": graph_doc,
+    "/hardware": hardware_doc,
     "/groups": tg_graph_doc,
     "/gpu": gpu_doc,
     "/individual-task-stream": individual_doc(

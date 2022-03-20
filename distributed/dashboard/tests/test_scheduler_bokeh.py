@@ -24,6 +24,7 @@ from distributed.dashboard.components.scheduler import (
     ComputePerKey,
     CurrentLoad,
     Events,
+    Hardware,
     MemoryByKey,
     Occupancy,
     ProcessingHistogram,
@@ -991,3 +992,8 @@ async def test_prefix_bokeh(s, a, b):
     bokeh_app = s.http_application.applications[0]
     assert isinstance(bokeh_app, BokehTornado)
     assert bokeh_app.prefix == f"/{prefix}"
+
+
+@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
+async def test_hardware(c, s, a, b):
+    Hardware(s)  # don't call update, takes too long for a test

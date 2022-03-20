@@ -559,6 +559,140 @@ class WorkersMemoryHistogram(DashboardComponent):
         update(self.source, d)
 
 
+class Hardware(DashboardComponent):
+    """Occupancy (in time) per worker"""
+
+    def __init__(self, scheduler, **kwargs):
+        with log_errors():
+            self.scheduler = scheduler
+            # Disk
+            self.disk_source = ColumnDataSource(
+                {
+                    "size": [],
+                    "bandwidth": [],
+                }
+            )
+
+            self.disk_figure = figure(
+                title="Disk Bandwidth -- Computing ...",
+                tools="",
+                toolbar_location="above",
+                x_range=["1 kiB", "100 kiB", "1 MiB", "10 MiB", "100 MiB"],
+                **kwargs,
+            )
+            self.disk_figure.vbar(
+                x="size", top="bandwidth", width=0.9, source=self.disk_source
+            )
+            hover = HoverTool(
+                mode="vline", tooltips=[("Bandwidth", "@bandwidth{0.00 b}/s")]
+            )
+            self.disk_figure.add_tools(hover)
+            self.disk_figure.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            self.disk_figure.xgrid.visible = False
+
+            # Memory
+            self.memory_source = ColumnDataSource(
+                {
+                    "size": [],
+                    "bandwidth": [],
+                }
+            )
+
+            self.memory_figure = figure(
+                title="Memory Bandwidth -- Computing ...",
+                tools="",
+                toolbar_location="above",
+                x_range=["2 kiB", "10 kiB", "100 kiB", "1 MiB", "10 MiB"],
+                **kwargs,
+            )
+
+            self.memory_figure.vbar(
+                x="size", top="bandwidth", width=0.9, source=self.memory_source
+            )
+            hover = HoverTool(
+                mode="vline", tooltips=[("Bandwidth", "@bandwidth{0.00 b}/s")]
+            )
+            self.memory_figure.add_tools(hover)
+            self.memory_figure.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            self.memory_figure.xgrid.visible = False
+
+            # Network
+            self.network_source = ColumnDataSource(
+                {
+                    "size": [],
+                    "bandwidth": [],
+                }
+            )
+
+            self.network_figure = figure(
+                title="Network Bandwidth -- Computing ...",
+                tools="",
+                toolbar_location="above",
+                x_range=["1 kiB", "10kiB", "100kiB", "1 MiB", "10 MiB", "50 MiB"],
+                **kwargs,
+            )
+
+            self.network_figure.vbar(
+                x="size", top="bandwidth", width=0.9, source=self.network_source
+            )
+            hover = HoverTool(
+                mode="vline", tooltips=[("Bandwidth", "@bandwidth{0.00 b}/s")]
+            )
+            self.network_figure.add_tools(hover)
+            self.network_figure.yaxis[0].formatter = NumeralTickFormatter(
+                format="0.0 b"
+            )
+            self.network_figure.xgrid.visible = False
+
+            self.root = row(
+                self.memory_figure,
+                self.disk_figure,
+                self.network_figure,
+            )
+
+            self.memory_data = {
+                "size": [],
+                "bandwidth": [],
+            }
+            self.disk_data = {
+                "size": [],
+                "bandwidth": [],
+            }
+            self.network_data = {
+                "size": [],
+                "bandwidth": [],
+            }
+
+            async def f():
+                result = await self.scheduler.benchmark_hardware()
+
+                for size, bandwidth in result["disk"].items():
+                    self.disk_data["size"].append(size)
+                    self.disk_data["bandwidth"].append(bandwidth)
+
+                for size, bandwidth in result["memory"].items():
+                    self.memory_data["size"].append(size)
+                    self.memory_data["bandwidth"].append(bandwidth)
+
+                for size, bandwidth in result["network"].items():
+                    self.network_data["size"].append(size)
+                    self.network_data["bandwidth"].append(bandwidth)
+
+            self.scheduler.loop.add_callback(f)
+
+    def update(self):
+        if any(self.disk_data.values()):
+            if self.memory_figure.title.text == "Memory Bandwidth":
+                return
+            else:
+                update(self.disk_source, self.disk_data)
+                update(self.memory_source, self.memory_data)
+                update(self.network_source, self.network_data)
+                self.memory_figure.title.text = "Memory Bandwidth"
+                self.disk_figure.title.text = "Disk Bandwidth"
+                self.network_figure.title.text = "Network Bandwidth"
+
+
 class BandwidthTypes(DashboardComponent):
     """Bar chart showing bandwidth per type"""
 
@@ -3377,6 +3511,19 @@ def workers_doc(scheduler, extra, doc):
         doc.template = env.get_template("simple.html")
         doc.template_variables.update(extra)
         doc.theme = BOKEH_THEME
+
+
+def hardware_doc(scheduler, extra, doc):
+    with log_errors():
+        hw = Hardware(scheduler)
+        hw.update()
+        doc.title = "Dask: Cluster Hardware Bandwidth"
+        doc.add_root(hw.root)
+        doc.template = env.get_template("simple.html")
+        doc.template_variables.update(extra)
+        doc.theme = BOKEH_THEME
+
+        add_periodic_callback(doc, hw, 500)
 
 
 def tasks_doc(scheduler, extra, doc):
