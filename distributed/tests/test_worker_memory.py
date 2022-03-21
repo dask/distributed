@@ -141,8 +141,9 @@ async def test_fail_to_pickle_target_2(c, s, a):
     await assert_basic_futures(c)
 
 
+@pytest.mark.parametrize("direct", [False, True])
 @gen_cluster(client=True, nthreads=[("", 1)])
-async def test_fail_to_pickle_target_scatter(c, s, a):
+async def test_fail_to_pickle_target_scatter(c, s, a, direct):
     """Test failure to serialize triggered by a multi-key scatter(), where one of the
     keys is individually larger than target. The data is lost and the task is marked as
     failed; other keys remain healthy; the worker remains in usable condition.
@@ -157,10 +158,11 @@ async def test_fail_to_pickle_target_scatter(c, s, a):
             "x": 1,
             "y": FailToPickle(reported_size=100e9, fail_after=1),
             "z": 3,
-        }
+        },
+        direct=direct,
     )
 
-    assert a.data.fast == {"x": 1, "z": 3}
+    assert set(a.data.fast) == {"x", "z"}
     assert not a.data.slow
 
     assert futures["x"].status == "finished"
@@ -172,6 +174,39 @@ async def test_fail_to_pickle_target_scatter(c, s, a):
         await futures["y"]
     assert await futures["z"] == 3
 
+    await assert_basic_futures(c)
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_fail_to_pickle_target_scatter_within_task(c, s, a):
+    """As above, but scatter() is invoked from a worker's client"""
+
+    def f(ev: Event):
+        c = distributed.get_client()
+        futures = c.scatter(
+            {
+                "x": 1,
+                "y": FailToPickle(reported_size=100e9),
+                "z": 3,
+            }
+        )
+        ev.wait()
+
+    ev = Event()
+    task = c.submit(f, ev, key="f")
+    while set(s.tasks) != {"x", "y", "z", "f"}:
+        await asyncio.sleep(0.01)
+
+    assert set(a.data.fast) == {"x", "z"}
+    assert not a.data.slow
+    assert s.tasks["x"].state == "memory"
+    assert s.tasks["y"].state == "error"
+    assert s.tasks["z"].state == "memory"
+
+    with pytest.raises(TypeError, match="Could not serialize"):
+        await distributed.Future(key="y")
+
+    ev.set()
     await assert_basic_futures(c)
 
 
