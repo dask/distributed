@@ -3050,9 +3050,7 @@ class EventLoop(DashboardComponent):
             self.root.ygrid.visible = True
             self.root.xgrid.visible = False
 
-            hover = HoverTool()
-            hover.tooltips = [("Interval", "@text s")]
-            hover.point_policy = "follow_mouse"
+            hover = HoverTool(tooltips=[("Interval", "@text s")], mode="vline")
             self.root.add_tools(hover)
 
     @without_property_validation
