@@ -1383,7 +1383,13 @@ class Worker(ServerNode):
         return self.close(*args, **kwargs)
 
     async def close(
-        self, report=True, timeout=30, nanny=True, executor_wait=True, safe=False
+        self,
+        report=True,
+        timeout=30,
+        nanny=True,
+        executor_wait=True,
+        safe=False,
+        stimulus_id=None,
     ):
         with log_errors():
             if self.status in (Status.closed, Status.closing):
@@ -1492,7 +1498,7 @@ class Worker(ServerNode):
             setproctitle("dask-worker [closed]")
         return "OK"
 
-    async def close_gracefully(self, restart=None):
+    async def close_gracefully(self, restart=None, stimulus_id=None):
         """Gracefully shut down a worker
 
         This first informs the scheduler that we're shutting down, and asks it
@@ -1514,10 +1520,10 @@ class Worker(ServerNode):
         await self.scheduler.retire_workers(
             workers=[self.address], close_workers=False, remove=False
         )
-        await self.close(safe=True, nanny=not restart)
+        await self.close(safe=True, nanny=not restart, stimulus_id=stimulus_id)
 
-    async def terminate(self, report: bool = True, **kwargs) -> str:
-        await self.close(report=report, **kwargs)
+    async def terminate(self, report: bool = True, stimulus_id=None, **kwargs) -> str:
+        await self.close(report=report, stimulus_id=stimulus_id, **kwargs)
         return "OK"
 
     async def wait_until_closed(self):
@@ -1686,6 +1692,9 @@ class Worker(ServerNode):
         still decide to hold on to the data and task since it is required by an
         upstream dependency.
         """
+        if stimulus_id is None:
+            None
+
         self.log.append(("free-keys", keys, stimulus_id, time()))
         recommendations: Recs = {}
         for key in keys:
@@ -3016,7 +3025,12 @@ class Worker(ServerNode):
                         self.has_what[worker].discard(ts.key)
                         self.log.append((d, "missing-dep", stimulus_id, time()))
                         self.batched_stream.send(
-                            {"op": "missing-data", "errant_worker": worker, "key": d}
+                            {
+                                "op": "missing-data",
+                                "errant_worker": worker,
+                                "key": d,
+                                "stimulus_id": stimulus_id,
+                            }
                         )
                         recommendations[ts] = "fetch" if ts.who_has else "missing"
                 del data, response
@@ -4116,6 +4130,7 @@ async def get_data_from_worker(
     max_connections=None,
     serializers=None,
     deserializers=None,
+    stimulus_id=None,
 ):
     """Get keys from worker
 

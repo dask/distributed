@@ -1377,7 +1377,12 @@ class Client(SyncMethodMixin):
             st.cancel()
         if self.status != "closed":
             self._send_to_scheduler(
-                {"op": "client-releases-keys", "keys": [key], "client": self.id}
+                {
+                    "op": "client-releases-keys",
+                    "keys": [key],
+                    "client": self.id,
+                    "stimulus_id": f"client-release-key-{time()}",
+                }
             )
 
     async def _handle_report(self):

@@ -17,7 +17,9 @@ from distributed.utils import All
 logger = logging.getLogger(__name__)
 
 
-async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=None):
+async def gather_from_workers(
+    who_has, rpc, close=True, serializers=None, who=None, stimulus_id=None
+):
     """Gather data directly from peers
 
     Parameters
@@ -118,7 +120,7 @@ class WrappedKey:
 _round_robin_counter = [0]
 
 
-async def scatter_to_workers(nthreads, data, rpc=rpc, report=True):
+async def scatter_to_workers(nthreads, data, rpc=rpc, report=True, stimulus_id=None):
     """Scatter data directly to workers
 
     This distributes data in a round-robin fashion to a set of workers based on
