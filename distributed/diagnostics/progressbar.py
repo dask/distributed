@@ -163,7 +163,7 @@ class TextProgressBar(ProgressBar):
             sys.stdout.flush()
 
     def _draw_stop(self, **kwargs):
-        sys.stdout.write("\r")
+        sys.stdout.write("\33[2K\r")
         sys.stdout.flush()
 
 
