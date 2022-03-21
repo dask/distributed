@@ -470,10 +470,10 @@ def split_by_worker(
     ]
     shards.append(t.slice(offset=splits[-1], length=None))
 
-    w = pd.Series(grouper).unique()
-    w.sort()
+    w_unique = pd.Series(grouper).unique()
+    w_unique.sort()
 
-    return {workers[w]: shard for w, shard in zip(w, shards)}
+    return {workers[w]: shard for w, shard in zip(w_unique, shards)}
 
 
 def split_by_partition(
