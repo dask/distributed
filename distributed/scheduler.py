@@ -2371,7 +2371,7 @@ class SchedulerState:
             # FIXME downcast antipattern
             scheduler = pep484_cast(Scheduler, self)
             scheduler.transition_log.append(
-                (key, start, finish2, recommendations, time())
+                (key, start, finish2, recommendations, stimulus_id, time())
             )
             if parent._validate:
                 logger.debug(
