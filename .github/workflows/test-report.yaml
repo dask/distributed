@@ -9,7 +9,7 @@ jobs:
   test-report:
     name: Test Report
     # Do not run the report job on forks
-    if: github.repository == 'dask/distributed' || github.event_name != 'workflow_dispatch'
+    if: github.repository == 'dask/distributed' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       GITHUB_TOKEN: ${{ github.token }}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import copy
 import functools
 import gc
@@ -1091,7 +1092,6 @@ def gen_cluster(
                         # zict backends can fail if their storage directory
                         # was already removed
                         pass
-                    del w.data
 
             return result
 
@@ -1173,9 +1173,27 @@ def _terminate_process(proc):
 
 
 @contextmanager
-def popen(args, **kwargs):
+def popen(args: list[str], flush_output: bool = True, **kwargs):
+    """Start a shell command in a subprocess.
+    Yields a subprocess.Popen object.
+
+    stderr is redirected to stdout.
+    stdout is redirected to a pipe.
+
+    Parameters
+    ----------
+    args: list[str]
+        Command line arguments
+    flush_output: bool, optional
+        If True (the default), the stdout/stderr pipe is emptied while it is being
+        filled. Set to False if you wish to read the output yourself. Note that setting
+        this to False and then failing to periodically read from the pipe may result in
+        a deadlock due to the pipe getting full.
+    kwargs: optional
+        optional arguments to subprocess.Popen
+    """
     kwargs["stdout"] = subprocess.PIPE
-    kwargs["stderr"] = subprocess.PIPE
+    kwargs["stderr"] = subprocess.STDOUT
     if sys.platform.startswith("win"):
         # Allow using CTRL_C_EVENT / CTRL_BREAK_EVENT
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -1189,9 +1207,16 @@ def popen(args, **kwargs):
             os.environ.get("DESTDIR", "") + sys.prefix, "bin", args[0]
         )
     proc = subprocess.Popen(args, **kwargs)
+
+    if flush_output:
+        ex = concurrent.futures.ThreadPoolExecutor(1)
+        flush_future = ex.submit(proc.communicate)
+
     try:
         yield proc
-    except Exception:
+
+    # asyncio.CancelledError is raised by @gen_test/@gen_cluster timeout
+    except (Exception, asyncio.CancelledError):
         dump_stdout = True
         raise
 
@@ -1200,13 +1225,17 @@ def popen(args, **kwargs):
             _terminate_process(proc)
         finally:
             # XXX Also dump stdout if return code != 0 ?
-            out, err = proc.communicate()
-            if dump_stdout:
-                print("\n\nPrint from stderr\n  %s\n=================\n" % args[0][0])
-                print(err.decode())
+            if flush_output:
+                out, err = flush_future.result()
+                ex.shutdown()
+            else:
+                out, err = proc.communicate()
+            assert not err
 
-                print("\n\nPrint from stdout\n=================\n")
-                print(out.decode())
+            if dump_stdout:
+                print("\n" + "-" * 27 + " Subprocess stdout/stderr" + "-" * 27)
+                print(out.decode().rstrip())
+                print("-" * 80)
 
 
 def wait_for(predicate, timeout, fail_func=None, period=0.001):

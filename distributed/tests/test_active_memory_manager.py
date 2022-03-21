@@ -5,6 +5,7 @@ import logging
 import random
 from contextlib import contextmanager
 from time import sleep
+from typing import Literal
 
 import pytest
 
@@ -43,7 +44,13 @@ def assert_amm_log(expect: list[str]):
 class DemoPolicy(ActiveMemoryManagerPolicy):
     """Drop or replicate a key n times"""
 
-    def __init__(self, action, key, n, candidates):
+    def __init__(
+        self,
+        action: Literal["drop", "replicate"],
+        key: str,
+        n: int,
+        candidates: list[int] | None,
+    ):
         self.action = action
         self.key = key
         self.n = n
@@ -63,7 +70,14 @@ class DemoPolicy(ActiveMemoryManagerPolicy):
                     yield self.action, ts, candidates
 
 
-def demo_config(action, key="x", n=10, candidates=None, start=False, interval=0.1):
+def demo_config(
+    action: Literal["drop", "replicate"],
+    key: str = "x",
+    n: int = 10,
+    candidates: list[int] | None = None,
+    start: bool = False,
+    interval: float = 0.1,
+):
     """Create a dask config for AMM with DemoPolicy"""
     return {
         "distributed.scheduler.active-memory-manager.start": start,
@@ -77,6 +91,8 @@ def demo_config(action, key="x", n=10, candidates=None, start=False, interval=0.
                 "candidates": candidates,
             },
         ],
+        # If pause is required, do it manually by setting Worker.status = Status.paused
+        "distributed.worker.memory.pause": False,
     }
 
 
@@ -351,7 +367,7 @@ async def test_drop_from_worker_with_least_free_memory(c, s, *nannies):
 @gen_cluster(
     nthreads=[("", 1)] * 8,
     client=True,
-    config=demo_config("drop", n=1, candidates={5, 6}),
+    config=demo_config("drop", n=1, candidates=[5, 6]),
 )
 async def test_drop_with_candidates(c, s, *workers):
     futures = await c.scatter({"x": 1}, broadcast=True)
@@ -363,7 +379,7 @@ async def test_drop_with_candidates(c, s, *workers):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True, config=demo_config("drop", candidates=set()))
+@gen_cluster(client=True, config=demo_config("drop", candidates=[]))
 async def test_drop_with_empty_candidates(c, s, a, b):
     """Key is not dropped as the plugin proposes an empty set of candidates,
     not to be confused with None
@@ -375,7 +391,9 @@ async def test_drop_with_empty_candidates(c, s, a, b):
 
 
 @gen_cluster(
-    client=True, nthreads=[("", 1)] * 3, config=demo_config("drop", candidates={2})
+    client=True,
+    nthreads=[("", 1)] * 3,
+    config=demo_config("drop", candidates=[2]),
 )
 async def test_drop_from_candidates_without_key(c, s, *workers):
     """Key is not dropped as none of the candidates hold a replica"""
@@ -390,7 +408,7 @@ async def test_drop_from_candidates_without_key(c, s, *workers):
     assert s.tasks["x"].who_has == {ws0, ws1}
 
 
-@gen_cluster(client=True, config=demo_config("drop", candidates={0}))
+@gen_cluster(client=True, config=demo_config("drop", candidates=[0]))
 async def test_drop_with_bad_candidates(c, s, a, b):
     """Key is not dropped as all candidates hold waiter tasks"""
     ws0, ws1 = s.workers.values()  # Not necessarily a, b; it could be b, a!
@@ -404,18 +422,13 @@ async def test_drop_with_bad_candidates(c, s, a, b):
     assert s.tasks["x"].who_has == {ws0, ws1}
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)] * 10,
-    config=demo_config("drop", n=1),
-    worker_kwargs={"memory_monitor_interval": "20ms"},
-)
+@gen_cluster(client=True, nthreads=[("", 1)] * 10, config=demo_config("drop", n=1))
 async def test_drop_prefers_paused_workers(c, s, *workers):
     x = await c.scatter({"x": 1}, broadcast=True)
     ts = s.tasks["x"]
     assert len(ts.who_has) == 10
     ws = s.workers[workers[3].address]
-    workers[3].memory_pause_fraction = 1e-15
+    workers[3].status = Status.paused
     while ws.status != Status.paused:
         await asyncio.sleep(0.01)
 
@@ -426,11 +439,7 @@ async def test_drop_prefers_paused_workers(c, s, *workers):
 
 
 @pytest.mark.slow
-@gen_cluster(
-    client=True,
-    config=demo_config("drop"),
-    worker_kwargs={"memory_monitor_interval": "20ms"},
-)
+@gen_cluster(client=True, config=demo_config("drop"))
 async def test_drop_with_paused_workers_with_running_tasks_1(c, s, a, b):
     """If there is exactly 1 worker that holds a replica of a task that isn't paused or
     retiring, and there are 1+ paused/retiring workers with the same task, don't drop
@@ -445,7 +454,7 @@ async def test_drop_with_paused_workers_with_running_tasks_1(c, s, a, b):
 
     while "y" not in a.tasks or a.tasks["y"].state != "executing":
         await asyncio.sleep(0.01)
-    a.memory_pause_fraction = 1e-15
+    a.status = Status.paused
     while s.workers[a.address].status != Status.paused:
         await asyncio.sleep(0.01)
     assert a.tasks["y"].state == "executing"
@@ -455,11 +464,7 @@ async def test_drop_with_paused_workers_with_running_tasks_1(c, s, a, b):
     assert len(s.tasks["x"].who_has) == 2
 
 
-@gen_cluster(
-    client=True,
-    config=demo_config("drop"),
-    worker_kwargs={"memory_monitor_interval": "20ms"},
-)
+@gen_cluster(client=True, config=demo_config("drop"))
 async def test_drop_with_paused_workers_with_running_tasks_2(c, s, a, b):
     """If there is exactly 1 worker that holds a replica of a task that isn't paused or
     retiring, and there are 1+ paused/retiring workers with the same task, don't drop
@@ -470,7 +475,7 @@ async def test_drop_with_paused_workers_with_running_tasks_2(c, s, a, b):
     b is running and has no dependent tasks
     """
     x = (await c.scatter({"x": 1}, broadcast=True))["x"]
-    a.memory_pause_fraction = 1e-15
+    a.status = Status.paused
     while s.workers[a.address].status != Status.paused:
         await asyncio.sleep(0.01)
 
@@ -481,11 +486,7 @@ async def test_drop_with_paused_workers_with_running_tasks_2(c, s, a, b):
 
 @pytest.mark.slow
 @pytest.mark.parametrize("pause", [True, False])
-@gen_cluster(
-    client=True,
-    config=demo_config("drop"),
-    worker_kwargs={"memory_monitor_interval": "20ms"},
-)
+@gen_cluster(client=True, config=demo_config("drop"))
 async def test_drop_with_paused_workers_with_running_tasks_3_4(c, s, a, b, pause):
     """If there is exactly 1 worker that holds a replica of a task that isn't paused or
     retiring, and there are 1+ paused/retiring workers with the same task, don't drop
@@ -505,8 +506,8 @@ async def test_drop_with_paused_workers_with_running_tasks_3_4(c, s, a, b, pause
         await asyncio.sleep(0.01)
 
     if pause:
-        a.memory_pause_fraction = 1e-15
-        b.memory_pause_fraction = 1e-15
+        a.status = Status.paused
+        b.status = Status.paused
         while any(ws.status != Status.paused for ws in s.workers.values()):
             await asyncio.sleep(0.01)
 
@@ -519,12 +520,7 @@ async def test_drop_with_paused_workers_with_running_tasks_3_4(c, s, a, b, pause
 
 
 @pytest.mark.slow
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)] * 3,
-    config=demo_config("drop"),
-    worker_kwargs={"memory_monitor_interval": "20ms"},
-)
+@gen_cluster(client=True, nthreads=[("", 1)] * 3, config=demo_config("drop"))
 async def test_drop_with_paused_workers_with_running_tasks_5(c, s, w1, w2, w3):
     """If there is exactly 1 worker that holds a replica of a task that isn't paused or
     retiring, and there are 1+ paused/retiring workers with the same task, don't drop
@@ -549,7 +545,7 @@ async def test_drop_with_paused_workers_with_running_tasks_5(c, s, w1, w2, w3):
 
     while not executing():
         await asyncio.sleep(0.01)
-    w1.memory_pause_fraction = 1e-15
+    w1.status = Status.paused
     while s.workers[w1.address].status != Status.paused:
         await asyncio.sleep(0.01)
     assert executing()
@@ -635,7 +631,7 @@ async def test_replicate_to_worker_with_most_free_memory(c, s, *nannies):
 @gen_cluster(
     nthreads=[("", 1)] * 8,
     client=True,
-    config=demo_config("replicate", n=1, candidates={5, 6}),
+    config=demo_config("replicate", n=1, candidates=[5, 6]),
 )
 async def test_replicate_with_candidates(c, s, *workers):
     wss = list(s.workers.values())
@@ -647,7 +643,7 @@ async def test_replicate_with_candidates(c, s, *workers):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True, config=demo_config("replicate", candidates=set()))
+@gen_cluster(client=True, config=demo_config("replicate", candidates=[]))
 async def test_replicate_with_empty_candidates(c, s, a, b):
     """Key is not replicated as the plugin proposes an empty set of candidates,
     not to be confused with None
@@ -658,7 +654,7 @@ async def test_replicate_with_empty_candidates(c, s, a, b):
     assert len(s.tasks["x"].who_has) == 1
 
 
-@gen_cluster(client=True, config=demo_config("replicate", candidates={0}))
+@gen_cluster(client=True, config=demo_config("replicate", candidates=[0]))
 async def test_replicate_to_candidates_with_key(c, s, a, b):
     """Key is not replicated as all candidates already hold replicas"""
     ws0, ws1 = s.workers.values()  # Not necessarily a, b; it could be b, a!
@@ -668,14 +664,9 @@ async def test_replicate_to_candidates_with_key(c, s, a, b):
     assert s.tasks["x"].who_has == {ws0}
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)] * 3,
-    config=demo_config("replicate"),
-    worker_kwargs={"memory_monitor_interval": "20ms"},
-)
+@gen_cluster(client=True, nthreads=[("", 1)] * 3, config=demo_config("replicate"))
 async def test_replicate_avoids_paused_workers_1(c, s, w0, w1, w2):
-    w1.memory_pause_fraction = 1e-15
+    w1.status = Status.paused
     while s.workers[w1.address].status != Status.paused:
         await asyncio.sleep(0.01)
 
@@ -687,13 +678,9 @@ async def test_replicate_avoids_paused_workers_1(c, s, w0, w1, w2):
     assert "x" not in w1.data
 
 
-@gen_cluster(
-    client=True,
-    config=demo_config("replicate"),
-    worker_kwargs={"memory_monitor_interval": "20ms"},
-)
+@gen_cluster(client=True, config=demo_config("replicate"))
 async def test_replicate_avoids_paused_workers_2(c, s, a, b):
-    b.memory_pause_fraction = 1e-15
+    b.status = Status.paused
     while s.workers[b.address].status != Status.paused:
         await asyncio.sleep(0.01)
 
@@ -892,13 +879,14 @@ async def test_RetireWorker_no_recipients(c, s, w1, w2, w3, w4):
         "distributed.scheduler.active-memory-manager.start": True,
         "distributed.scheduler.active-memory-manager.interval": 999,
         "distributed.scheduler.active-memory-manager.policies": [],
+        "distributed.worker.memory.pause": False,
     },
 )
 async def test_RetireWorker_all_recipients_are_paused(c, s, a, b):
     ws_a = s.workers[a.address]
     ws_b = s.workers[b.address]
 
-    b.memory_pause_fraction = 1e-15
+    b.status = Status.paused
     while ws_b.status != Status.paused:
         await asyncio.sleep(0.01)
 

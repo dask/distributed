@@ -512,6 +512,11 @@ properties:
                 description: >-
                   Limit of number of bytes to be spilled on disk. 
 
+              monitor-interval:
+                type: string
+                description: >-
+                  Interval between checks for the spill, pause, and terminate thresholds
+
           http:
             type: object
             description: Settings for Dask's embedded HTTP Server
