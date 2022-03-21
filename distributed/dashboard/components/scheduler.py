@@ -914,7 +914,7 @@ class SystemTimeseries(DashboardComponent):
             tools = "reset, xpan, xwheel_zoom"
 
             self.bandwidth = figure(
-                title="Workers Network Bandwidth",
+                title="Worker Network Bandwidth (average)",
                 x_axis_type="datetime",
                 tools=tools,
                 x_range=x_range,
@@ -946,7 +946,7 @@ class SystemTimeseries(DashboardComponent):
             self.bandwidth.xgrid.visible = False
 
             self.cpu = figure(
-                title="Workers CPU",
+                title="Worker CPU Utilization (average)",
                 x_axis_type="datetime",
                 tools=tools,
                 x_range=x_range,
@@ -966,7 +966,7 @@ class SystemTimeseries(DashboardComponent):
             self.cpu.xgrid.visible = False
 
             self.memory = figure(
-                title="Workers Memory",
+                title="Worker Memory Use (average)",
                 x_axis_type="datetime",
                 tools=tools,
                 x_range=x_range,
@@ -987,7 +987,7 @@ class SystemTimeseries(DashboardComponent):
             self.memory.xgrid.visible = False
 
             self.disk = figure(
-                title="Workers Disk",
+                title="Worker Disk Bandwidth (average)",
                 x_axis_type="datetime",
                 tools=tools,
                 x_range=x_range,
