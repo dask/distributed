@@ -1653,8 +1653,7 @@ class Worker(ServerNode):
         report: bool = True,
         stimulus_id: str = None,
     ) -> dict[str, Any]:
-        if stimulus_id is None:
-            stimulus_id = f"update-data-{time()}"
+        stimulus_id = stimulus_id or f"update-data-{time()}"
         recommendations: Recs = {}
         instructions: Instructions = []
         for key, value in data.items():
@@ -1692,9 +1691,6 @@ class Worker(ServerNode):
         still decide to hold on to the data and task since it is required by an
         upstream dependency.
         """
-        if stimulus_id is None:
-            None
-
         self.log.append(("free-keys", keys, stimulus_id, time()))
         recommendations: Recs = {}
         for key in keys:
