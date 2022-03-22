@@ -1413,6 +1413,10 @@ class Worker(ServerNode):
             for preload in self.preloads:
                 await preload.teardown()
 
+            for extension in self.extensions.values():
+                if hasattr(extension, "close"):
+                    await extension.close()
+
             if nanny and self.nanny:
                 with self.rpc(self.nanny) as r:
                     await r.close_gracefully()
