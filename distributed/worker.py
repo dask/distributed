@@ -1200,7 +1200,7 @@ class Worker(ServerNode):
                 data = data.encode()
             with open(out_filename, "wb") as f:
                 f.write(data)
-                f.flush()
+                os.fsync(f)
             return data
 
         if len(data) < 10000:
@@ -3703,13 +3703,15 @@ class Worker(ServerNode):
                         "Plugin '%s' failed with exception", name, exc_info=True
                     )
 
-    async def benchmark_disk(self, comm=None):
-        return self.executor.submit(benchmark_disk).result()
+    async def benchmark_disk(self) -> dict[str, float]:
+        return await self.loop.run_in_executor(
+            None, benchmark_disk, self.local_directory
+        )
 
-    async def benchmark_memory(self, comm=None):
-        return self.executor.submit(benchmark_memory).result()
+    async def benchmark_memory(self) -> dict[str, float]:
+        return await self.loop.run_in_executor(None, benchmark_memory)
 
-    async def benchmark_network(self, comm=None, address=None):
+    async def benchmark_network(self, address=None) -> dict[str, float]:
         return await benchmark_network(rpc=self.rpc, address=address)
 
     ##############
@@ -4594,10 +4596,10 @@ def warn(*args, **kwargs):
 
 
 def benchmark_disk(
-    sizes=["1 kiB", "100 kiB", "1 MiB", "10 MiB", "100 MiB"],
     rootdir=None,
+    sizes=["1 kiB", "100 kiB", "1 MiB", "10 MiB", "100 MiB"],
     duration=1.0,
-) -> dict:
+) -> dict[str, float]:
     duration = parse_timedelta(duration)
 
     out = {}
@@ -4614,7 +4616,7 @@ def benchmark_disk(
             while time() < start + duration:
                 with open(dir / random.choice(names), mode="ab") as f:
                     f.write(data)
-                    os.fsync(f)
+                    f.flush()
                 total += size
 
             out[size_str] = total / (time() - start)
@@ -4624,7 +4626,7 @@ def benchmark_disk(
 def benchmark_memory(
     sizes=["2 kiB", "10 kiB", "100 kiB", "1 MiB", "10 MiB"],
     duration=0.2,
-) -> dict:
+) -> dict[str, float]:
     duration = parse_timedelta(duration)
     out = {}
     for size_str in sizes:
@@ -4634,7 +4636,8 @@ def benchmark_memory(
         start = time()
         total = 0
         while time() < start + duration:
-            data[:-1]
+            _ = data[:-1]
+            del _
             total += size
 
         out[size_str] = total / (time() - start)
@@ -4646,7 +4649,7 @@ async def benchmark_network(
     rpc=rpc,
     duration=1.0,
     address=None,
-) -> dict:
+) -> dict[str, float]:
     duration = parse_timedelta(duration)
     out = {}
     with rpc(address) as r:

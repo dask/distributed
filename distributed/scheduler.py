@@ -7329,32 +7329,41 @@ class Scheduler(SchedulerState, ServerNode):
         response = {w: r for w, r in zip(workers, results) if r}
         return response
 
-    async def benchmark_hardware(self, comm=None):
-        out = defaultdict(lambda: defaultdict(list))
+    async def benchmark_hardware(self, comm=None) -> dict[str, dict[str, float]]:
+        out: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
 
-        for mode in ["disk", "memory"]:
-            result = await self.broadcast(msg={"op": "benchmark_" + mode})
-            for d in result.values():
-                for size, duration in d.items():
-                    out[mode][size].append(duration)
+        # disk
+        result = await self.broadcast(msg={"op": "benchmark_disk"})
+        for d in result.values():
+            for size, duration in d.items():
+                out["disk"][size].append(duration)
 
+        # memory
+        result = await self.broadcast(msg={"op": "benchmark_memory"})
+        for d in result.values():
+            for size, duration in d.items():
+                out["memory"][size].append(duration)
+
+        # network
         workers = list(self.workers)
         futures = []
         for a, b in zip(workers[:-1], workers[1:]):
             future = self.rpc(a).benchmark_network(address=b)
             futures.append(future)
         responses = await asyncio.gather(*futures)
-        result = dict(zip(workers, responses))
-        for d in result.values():
+
+        for d in responses:
             for size, duration in d.items():
                 out["network"][size].append(duration)
 
+        result = {}
         for mode in out:
-            out[mode] = {
+            result[mode] = {
                 size: sum(durations) / len(durations)
                 for size, durations in out[mode].items()
             }
-        return dict(out)
+
+        return result
 
     def get_nbytes(self, keys=None, summary=True):
         parent: SchedulerState = cast(SchedulerState, self)

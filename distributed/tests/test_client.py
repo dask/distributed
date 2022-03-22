@@ -7493,13 +7493,18 @@ class TestClientSecurityLoader:
                     pass
 
 
-@pytest.mark.skip(reason="This is slow and probably not worth the cost")
+# @pytest.mark.skip(reason="This is slow and probably not worth the cost")
 @pytest.mark.slow
 @gen_cluster(client=True)
 async def test_benchmark_hardware(c, s, a, b):
     result = await c.benchmark_hardware()
     assert set(result).issubset({"disk", "memory", "network"})
-    assert all(isinstance(v, float) for v in result.values())
+    assert all(isinstance(v, float) for d in result.values() for v in d.values())
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_benchmark_hardware_no_workers(c, s):
+    await c.benchmark_hardware()
 
 
 @gen_cluster(client=True, nthreads=[])
