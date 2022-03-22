@@ -436,6 +436,9 @@ class ShuffleWorkerExtension:
                 f"Shuffle {shuffle_id!r} is not registered on worker {self.worker.address}"
             ) from None
 
+    async def close(self):
+        self.executor.shutdown()
+
 
 class ShuffleSchedulerExtension:
     """
