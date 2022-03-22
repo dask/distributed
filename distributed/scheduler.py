@@ -5031,7 +5031,9 @@ class Scheduler(SchedulerState, ServerNode):
                 key,
                 ts._who_has if ts else {},
             )
-            worker_msgs[worker] = [{"op": "free-keys", "keys": [key]}]
+            worker_msgs[worker] = [
+                {"op": "free-keys", "keys": [key], "stimulus_id": stimulus_id}
+            ]
         elif ts._state == "memory":
             self.add_keys(worker=worker, keys=[key], stimulus_id=stimulus_id)
         else:
