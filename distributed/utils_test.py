@@ -645,6 +645,19 @@ def _close_queue(q):
     q._writer.close()  # https://bugs.python.org/issue42752
 
 
+class _SafeTemporaryDirectory(tempfile.TemporaryDirectory):
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            return super().__exit__(exc_type, exc_val, exc_tb)
+        except PermissionError:
+            # It appears that we either have a process still interacting with
+            # the tmpdirs of the workers or that win process are not releasing
+            # their lock in time. We are receiving PermissionErrors during
+            # teardown
+            # See also https://github.com/dask/distributed/pull/5825
+            pass
+
+
 @contextmanager
 def cluster(
     nworkers=2,
@@ -687,7 +700,7 @@ def cluster(
             stack.callback(_close_queue, q)
             for _ in range(nworkers):
                 tmpdirname = stack.enter_context(
-                    tempfile.TemporaryDirectory(prefix="_dask_test_worker")
+                    _SafeTemporaryDirectory(prefix="_dask_test_worker")
                 )
                 kwargs = merge(
                     {
