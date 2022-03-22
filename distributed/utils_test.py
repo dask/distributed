@@ -1769,8 +1769,6 @@ def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
                 with check_instances() if instances else nullcontext():
                     with check_active_rpc(loop, timeout):
                         reset_config()
-
-                        dask.config.set({"distributed.comm.timeouts.connect": "5s"})
                         # Restore default logging levels
                         # XXX use pytest hooks/fixtures instead?
                         for name, level in logging_levels.items():
