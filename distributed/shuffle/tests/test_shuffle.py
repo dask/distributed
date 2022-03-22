@@ -1,3 +1,4 @@
+import asyncio
 import io
 from collections import defaultdict
 
@@ -21,11 +22,10 @@ from distributed.utils_test import gen_cluster
 async def test_basic(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
-        end="2000-06-02",
-        freq="100ms",
-        dtypes={"x": int, "y": float, "a": int, "b": float},
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
     )
-    df = dask.datasets.timeseries()
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     x, y = c.compute([df.x.size, out.x.size])
     x = await x
@@ -37,11 +37,10 @@ async def test_basic(c, s, a, b):
 async def test_concurrent(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
-        end="2000-06-02",
-        freq="100ms",
-        dtypes={"x": int, "y": float, "a": int, "b": float},
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
     )
-    df = dask.datasets.timeseries()
     x = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     y = dd.shuffle.shuffle(df, "y", shuffle="p2p")
     x, y = c.compute([x.x.size, y.y.size])
@@ -55,11 +54,17 @@ async def test_heartbeat(c, s, a, b):
     await a.heartbeat()
     assert not s.extensions["shuffle"].shuffles
     df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
         dtypes={"x": float, "y": float},
+        freq="10 s",
     )
-    df = dask.datasets.timeseries()
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    await out.persist()
+    out = out.persist()
+
+    while not s.extensions["shuffle"].shuffles:
+        await asyncio.sleep(0.001)
+        await a.heartbeat()
 
     [s] = s.extensions["shuffle"].shuffles.values()
 
