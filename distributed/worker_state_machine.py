@@ -286,6 +286,7 @@ class TaskFinishedMsg(SendMessageToScheduler):
     metadata: dict
     thread: int | None
     startstops: list[StartStop]
+    stimulus_id: str
     __slots__ = tuple(__annotations__)  # type: ignore
 
     def to_dict(self) -> dict[str, Any]:
@@ -305,6 +306,7 @@ class TaskErredMsg(SendMessageToScheduler):
     traceback_text: str
     thread: int | None
     startstops: list[StartStop]
+    stimulus_id: str
     __slots__ = tuple(__annotations__)  # type: ignore
 
     def to_dict(self) -> dict[str, Any]:
@@ -317,8 +319,9 @@ class TaskErredMsg(SendMessageToScheduler):
 class ReleaseWorkerDataMsg(SendMessageToScheduler):
     op = "release-worker-data"
 
-    __slots__ = ("key",)
+    __slots__ = ("key", "stimulus_id")
     key: str
+    stimulus_id: str
 
 
 @dataclass
@@ -326,18 +329,20 @@ class RescheduleMsg(SendMessageToScheduler):
     op = "reschedule"
 
     # Not to be confused with the distributed.Reschedule Exception
-    __slots__ = ("key", "worker")
+    __slots__ = ("key", "worker", "stimulus_id")
     key: str
     worker: str
+    stimulus_id: str
 
 
 @dataclass
 class LongRunningMsg(SendMessageToScheduler):
     op = "long-running"
 
-    __slots__ = ("key", "compute_duration")
+    __slots__ = ("key", "compute_duration", "stimulus_id")
     key: str
     compute_duration: float
+    stimulus_id: str
 
 
 @dataclass

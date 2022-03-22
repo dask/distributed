@@ -90,5 +90,9 @@ def test_sendmsg_slots(cls):
 
 def test_sendmsg_to_dict():
     # Arbitrary sample class
-    smsg = ReleaseWorkerDataMsg(key="x")
-    assert smsg.to_dict() == {"op": "release-worker-data", "key": "x"}
+    smsg = ReleaseWorkerDataMsg(key="x", stimulus_id="test-123")
+    assert smsg.to_dict() == {
+        "op": "release-worker-data",
+        "key": "x",
+        "stimulus_id": "test-123",
+    }

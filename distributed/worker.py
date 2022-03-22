@@ -912,14 +912,18 @@ class Worker(ServerNode):
             self.ensure_computing()
             self.ensure_communicating()
 
-    def _send_worker_status_change(self) -> None:
+    def _send_worker_status_change(self, stimulus_id=None) -> None:
         if (
             self.batched_stream
             and self.batched_stream.comm
             and not self.batched_stream.comm.closed()
         ):
             self.batched_stream.send(
-                {"op": "worker-status-change", "status": self._status.name}
+                {
+                    "op": "worker-status-change",
+                    "status": self._status.name,
+                    "stimulus_id": stimulus_id or f"worker-status-change-{time()}",
+                }
             )
         elif self._status != Status.closed:
             self.loop.call_later(0.05, self._send_worker_status_change)
@@ -1498,7 +1502,7 @@ class Worker(ServerNode):
             setproctitle("dask-worker [closed]")
         return "OK"
 
-    async def close_gracefully(self, restart=None, stimulus_id=None):
+    async def close_gracefully(self, restart=None):
         """Gracefully shut down a worker
 
         This first informs the scheduler that we're shutting down, and asks it
@@ -1520,7 +1524,7 @@ class Worker(ServerNode):
         await self.scheduler.retire_workers(
             workers=[self.address], close_workers=False, remove=False
         )
-        await self.close(safe=True, nanny=not restart, stimulus_id=stimulus_id)
+        await self.close(safe=True, nanny=not restart)
 
     async def terminate(self, report: bool = True, stimulus_id=None, **kwargs) -> str:
         await self.close(report=report, stimulus_id=stimulus_id, **kwargs)
@@ -1879,7 +1883,7 @@ class Worker(ServerNode):
             pass
         elif ts.state == "memory":
             recommendations[ts] = "memory"
-            instructions.append(self._get_task_finished_msg(ts))
+            instructions.append(self._get_task_finished_msg(ts, stimulus_id))
         elif ts.state in {
             "released",
             "fetch",
@@ -2007,7 +2011,7 @@ class Worker(ServerNode):
         recs, instructions = self.transition_generic_released(
             ts, stimulus_id=stimulus_id
         )
-        instructions.append(ReleaseWorkerDataMsg(ts.key))
+        instructions.append(ReleaseWorkerDataMsg(ts.key, stimulus_id))
         return recs, instructions
 
     def transition_waiting_constrained(
@@ -2030,7 +2034,7 @@ class Worker(ServerNode):
         self, ts: TaskState, *, stimulus_id: str
     ) -> tuple[Recs, Instructions]:
         recs: Recs = {ts: "released"}
-        smsg = RescheduleMsg(key=ts.key, worker=self.address)
+        smsg = RescheduleMsg(key=ts.key, worker=self.address, stimulus_id=stimulus_id)
         return recs, [smsg]
 
     def transition_executing_rescheduled(
@@ -2041,7 +2045,7 @@ class Worker(ServerNode):
         self._executing.discard(ts)
 
         recs: Recs = {ts: "released"}
-        smsg = RescheduleMsg(key=ts.key, worker=self.address)
+        smsg = RescheduleMsg(key=ts.key, worker=self.address, stimulus_id=stimulus_id)
         return recs, [smsg]
 
     def transition_waiting_ready(
@@ -2118,6 +2122,7 @@ class Worker(ServerNode):
             traceback_text=ts.traceback_text,
             thread=self.threads.get(ts.key),
             startstops=ts.startstops,
+            stimulus_id=stimulus_id,
         )
 
         return {}, [smsg]
@@ -2302,7 +2307,7 @@ class Worker(ServerNode):
             return recs, []
         if self.validate:
             assert ts.key in self.data or ts.key in self.actors
-        smsg = self._get_task_finished_msg(ts)
+        smsg = self._get_task_finished_msg(ts, stimulus_id)
         return recs, [smsg]
 
     def transition_executing_memory(
@@ -2421,7 +2426,9 @@ class Worker(ServerNode):
         ts.state = "long-running"
         self._executing.discard(ts)
         self.long_running.add(ts.key)
-        smsg = LongRunningMsg(key=ts.key, compute_duration=compute_duration)
+        smsg = LongRunningMsg(
+            key=ts.key, compute_duration=compute_duration, stimulus_id=stimulus_id
+        )
         self.io_loop.add_callback(self.ensure_computing)
         return {}, [smsg]
 
@@ -2692,7 +2699,9 @@ class Worker(ServerNode):
         for el in skipped_worker_in_flight:
             self.data_needed.push(el)
 
-    def _get_task_finished_msg(self, ts: TaskState) -> TaskFinishedMsg:
+    def _get_task_finished_msg(
+        self, ts: TaskState, stimulus_id: str
+    ) -> TaskFinishedMsg:
         if ts.key not in self.data and ts.key not in self.actors:
             raise RuntimeError(f"Task {ts} not ready")
         typ = ts.type
@@ -2718,6 +2727,7 @@ class Worker(ServerNode):
             metadata=ts.metadata,
             thread=self.threads.get(ts.key),
             startstops=ts.startstops,
+            stimulus_id=stimulus_id,
         )
 
     def _put_key_in_memory(self, ts: TaskState, value, *, stimulus_id: str) -> Recs:
@@ -3131,7 +3141,7 @@ class Worker(ServerNode):
             # `transition_constrained_executing`
             self.transition(ts, "released", stimulus_id=stimulus_id)
 
-    def handle_worker_status_change(self, status: str) -> None:
+    def handle_worker_status_change(self, status: str, stimulus_id=None) -> None:
         new_status = Status.lookup[status]  # type: ignore
 
         if (
@@ -3142,7 +3152,7 @@ class Worker(ServerNode):
                 "Invalid Worker.status transition: %s -> %s", self._status, new_status
             )
             # Reiterate the current status to the scheduler to restore sync
-            self._send_worker_status_change()
+            self._send_worker_status_change(stimulus_id=stimulus_id)
         else:
             # Update status and send confirmation to the Scheduler (see status.setter)
             self.status = new_status

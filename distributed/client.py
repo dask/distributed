@@ -1369,9 +1369,10 @@ class Client(SyncMethodMixin):
                 del self.refcount[key]
                 self._release_key(key)
 
-    def _release_key(self, key):
+    def _release_key(self, key, stimulus_id=None):
         """Release key from distributed memory"""
         logger.debug("Release key %s", key)
+        stimulus_id = stimulus_id or f"client-release-key-{time()}"
         st = self.futures.pop(key, None)
         if st is not None:
             st.cancel()
@@ -1381,7 +1382,7 @@ class Client(SyncMethodMixin):
                     "op": "client-releases-keys",
                     "keys": [key],
                     "client": self.id,
-                    "stimulus_id": f"client-release-key-{time()}",
+                    "stimulus_id": stimulus_id,
                 }
             )
 
@@ -1529,7 +1530,7 @@ class Client(SyncMethodMixin):
                 await self.scheduler_comm.close()
 
             for key in list(self.futures):
-                self._release_key(key=key)
+                self._release_key(key=key, stimulus_id=f"client-close-{time()}")
 
             if self._start_arg is None:
                 with suppress(AttributeError):
@@ -2393,7 +2394,12 @@ class Client(SyncMethodMixin):
 
     async def _cancel(self, futures, force=False):
         keys = list({stringify(f.key) for f in futures_of(futures)})
-        await self.scheduler.cancel(keys=keys, client=self.id, force=force)
+        await self.scheduler.cancel(
+            keys=keys,
+            client=self.id,
+            force=force,
+            stimulus_id=f"client-cancel-{time()}",
+        )
         for k in keys:
             st = self.futures.pop(k, None)
             if st is not None:
@@ -2420,7 +2426,9 @@ class Client(SyncMethodMixin):
 
     async def _retry(self, futures):
         keys = list({stringify(f.key) for f in futures_of(futures)})
-        response = await self.scheduler.retry(keys=keys, client=self.id)
+        response = await self.scheduler.retry(
+            keys=keys, client=self.id, stimulus_id=f"retry-{time()}"
+        )
         for key in response:
             st = self.futures[key]
             st.retry()

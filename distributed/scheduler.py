@@ -2368,12 +2368,26 @@ class SchedulerState:
                 raise RuntimeError("Impossible transition from %r to %r" % start_finish)
 
             finish2 = ts._state
+            assert stimulus_id, "stimulus_id not set"
             # FIXME downcast antipattern
             scheduler = pep484_cast(Scheduler, self)
             scheduler.transition_log.append(
                 (key, start, finish2, recommendations, stimulus_id, time())
             )
             if parent._validate:
+                if stimulus_id is None:
+                    logger.exception(
+                        "None stimulus_id %r %s->%s (actual:%s) ",
+                        key,
+                        start,
+                        finish2,
+                        ts._state,
+                    )
+                    if LOG_PDB:
+                        import pdb
+
+                        pdb.set_trace()
+
                 logger.debug(
                     "Transitioned %r %s->%s (actual: %s).  Consequence: %s",
                     key,
@@ -4253,7 +4267,7 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle(f"dask-scheduler [{self.address}]")
         return self
 
-    async def close(self, fast=False, close_workers=False, stimulus_id=None):
+    async def close(self, fast=False, close_workers=False):
         """Send cleanup signal to all coroutines then wait until finished
 
         See Also
@@ -4261,7 +4275,6 @@ class Scheduler(SchedulerState, ServerNode):
         Scheduler.cleanup
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        stimulus_id = stimulus_id or f"close-{time()}"
         if self.status in (Status.closing, Status.closed):
             await self.finished()
             return
@@ -4274,18 +4287,12 @@ class Scheduler(SchedulerState, ServerNode):
             await preload.teardown()
 
         if close_workers:
-            await self.broadcast(
-                msg={"op": "close_gracefully"}, nanny=True, stimulus_id=stimulus_id
-            )
+            await self.broadcast(msg={"op": "close_gracefully"}, nanny=True)
             for worker in parent._workers_dv:
                 # Report would require the worker to unregister with the
                 # currently closing scheduler. This is not necessary and might
                 # delay shutdown of the worker unnecessarily
-                self.worker_send(
-                    worker,
-                    {"op": "close", "report": False, "stimulus_id": stimulus_id},
-                    stimulus_id=stimulus_id,
-                )
+                self.worker_send(worker, {"op": "close", "report": False})
             for i in range(20):  # wait a second for send signals to clear
                 if parent._workers_dv:
                     await asyncio.sleep(0.05)
@@ -4310,8 +4317,8 @@ class Scheduler(SchedulerState, ServerNode):
         futures = []
         for w, comm in list(self.stream_comms.items()):
             if not comm.closed():
-                comm.send({"op": "close", "report": False, "stimulus_id": stimulus_id})
-                comm.send({"op": "close-stream", "stimulus_id": stimulus_id})
+                comm.send({"op": "close", "report": False})
+                comm.send({"op": "close-stream"})
             with suppress(AttributeError):
                 futures.append(comm.close())
 
@@ -4343,7 +4350,7 @@ class Scheduler(SchedulerState, ServerNode):
             # FIXME: This does not handle nannies
             self.worker_send(
                 worker,
-                {"op": "close", "report": False, "stimulus_id": stimulus_id},
+                {"op": "close", "report": False},
                 stimulus_id=stimulus_id,
             )
             await self.remove_worker(address=worker, safe=safe, stimulus_id=stimulus_id)
@@ -4653,7 +4660,7 @@ class Scheduler(SchedulerState, ServerNode):
             if comm:
                 await comm.write(msg)
 
-            await self.handle_worker(comm=comm, worker=address)
+            await self.handle_worker(comm=comm, worker=address, stimulus_id=stimulus_id)
 
     async def add_nanny(self, comm, stimulus_id=None):
         msg = {
@@ -5301,6 +5308,7 @@ class Scheduler(SchedulerState, ServerNode):
         """Remove keys from client desired list"""
 
         parent: SchedulerState = cast(SchedulerState, self)
+        stimulus_id = stimulus_id or f"client-releases-keys-{time()}"
         if not isinstance(keys, list):
             keys = list(keys)
         cs: ClientState = parent._clients[client]
@@ -5650,7 +5658,7 @@ class Scheduler(SchedulerState, ServerNode):
         recommendations: dict
         client_msgs: dict
         worker_msgs: dict
-        r: tuple = self.stimulus_task_erred(key=key, **msg)
+        r: tuple = self.stimulus_task_erred(key=key, stimulus_id=stimulus_id, **msg)
         recommendations, client_msgs, worker_msgs = r
         parent._transitions(
             recommendations, client_msgs, worker_msgs, stimulus_id=stimulus_id
@@ -5678,6 +5686,7 @@ class Scheduler(SchedulerState, ServerNode):
             Address of the worker supposed to hold a replica, by default None
         """
         parent: SchedulerState = cast(SchedulerState, self)
+        stimulus_id = stimulus_id or f"handle-missing-data-{time()}"
         logger.debug("handle missing data key=%s worker=%s", key, errant_worker)
         self.log_event(errant_worker, {"action": "missing-data", "key": key})
         ts: TaskState = parent._tasks.get(key)
@@ -6081,11 +6090,7 @@ class Scheduler(SchedulerState, ServerNode):
                 who_has[key] = []
 
         data, missing_keys, missing_workers = await gather_from_workers(
-            who_has,
-            rpc=self.rpc,
-            close=False,
-            serializers=serializers,
-            stimulus_id=stimulus_id,
+            who_has, rpc=self.rpc, close=False, serializers=serializers
         )
         if not missing_keys:
             result = {"status": "OK", "data": data}
@@ -6152,6 +6157,7 @@ class Scheduler(SchedulerState, ServerNode):
     async def restart(self, client=None, timeout=30, stimulus_id=None):
         """Restart all workers. Reset local state."""
         parent: SchedulerState = cast(SchedulerState, self)
+        stimulus_id = stimulus_id or f"restart-{time()}"
         with log_errors():
 
             n_workers = len(parent._workers_dv)
@@ -7155,7 +7161,11 @@ class Scheduler(SchedulerState, ServerNode):
                         ws.status = Status.closing_gracefully
                         self.running.discard(ws)
                         self.stream_comms[ws.address].send(
-                            {"op": "worker-status-change", "status": ws.status.name}
+                            {
+                                "op": "worker-status-change",
+                                "status": ws.status.name,
+                                "stimulus_id": stimulus_id,
+                            }
                         )
 
                         coros.append(
@@ -7202,7 +7212,11 @@ class Scheduler(SchedulerState, ServerNode):
                 # conditions and we can wait for a scheduler->worker->scheduler
                 # round-trip.
                 self.stream_comms[ws.address].send(
-                    {"op": "worker-status-change", "status": prev_status.name}
+                    {
+                        "op": "worker-status-change",
+                        "status": prev_status.name,
+                        "stimulus_id": stimulus_id,
+                    }
                 )
                 return None, {}
 
@@ -7717,6 +7731,7 @@ class Scheduler(SchedulerState, ServerNode):
         elsewhere
         """
         parent: SchedulerState = cast(SchedulerState, self)
+        stimulus_id = stimulus_id or f"reschedule-{time()}"
         ts: TaskState
         try:
             ts = parent._tasks[key]

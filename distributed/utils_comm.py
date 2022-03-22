@@ -17,9 +17,7 @@ from distributed.utils import All
 logger = logging.getLogger(__name__)
 
 
-async def gather_from_workers(
-    who_has, rpc, close=True, serializers=None, who=None, stimulus_id=None
-):
+async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=None):
     """Gather data directly from peers
 
     Parameters
@@ -147,8 +145,7 @@ async def scatter_to_workers(nthreads, data, rpc=rpc, report=True, stimulus_id=N
         out = await All(
             [
                 rpcs[address].update_data(
-                    data=v,
-                    report=report,
+                    data=v, report=report, stimulus_id=stimulus_id
                 )
                 for address, v in d.items()
             ]

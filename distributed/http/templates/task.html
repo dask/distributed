@@ -118,21 +118,24 @@
                   <th> Key </th>
                   <th> Start </th>
                   <th> Finish </th>
+                  <th> Stimulus ID </th> 
                   <th> Recommended Key </th>
                   <th> Recommended Action </th>
               </thead>
 
-              {% for key, start, finish, recommendations, transition_time in scheduler.story(Task) %}
+              {% for key, start, finish, recommendations, stimulus_id, transition_time in scheduler.story(Task) %}
               <tr>
                   <td> {{ fromtimestamp(transition_time) }} </td>
                   <td> <a href="{{ url_escape(key) }}.html">{{key}}</a> </td>
                   <td> {{ start }} </td>
                   <td> {{ finish }} </td>
+                  <td> {{ stimulus_id }} </td>
                   <td> </td>
                   <td> </td>
               </tr>
                 {% for key2, rec in recommendations.items() %}
               <tr>
+                  <td> </td>
                   <td> </td>
                   <td> </td>
                   <td> </td>
