@@ -15,8 +15,6 @@ from distributed.shuffle.shuffle_extension import (
     ShuffleId,
     ShuffleMetadata,
     ShuffleWorkerExtension,
-    dump_arrow,
-    load_arrow,
     split_by_partition,
     split_by_worker,
     worker_for,
@@ -343,24 +341,3 @@ def test_split_by_partition():
     assert set(out) == {1, 2, 3}
     assert out[1].column_names == list(df.columns)
     assert sum(map(len, out.values())) == len(df)
-
-
-def test_load_dump_arrow(tmp_path):
-    import pyarrow as pa
-
-    df = pd.DataFrame(
-        {
-            "x": [1, 2, 3, 4, 5],
-            "_partition": [3, 1, 2, 3, 1],
-        }
-    )
-    t = pa.Table.from_pandas(df)
-    with open(tmp_path / "foo", mode="wb") as f:
-        dump_arrow(t, f)
-        dump_arrow(t, f)
-        dump_arrow(t, f)
-
-    with open(tmp_path / "foo", mode="rb") as f:
-        tt = load_arrow(f)
-
-    assert str(tt) == str(pa.concat_tables([t, t, t]))
