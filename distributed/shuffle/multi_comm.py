@@ -46,6 +46,7 @@ class MultiComm:
     max_message_size = parse_bytes("2 MiB")
     memory_limit = parse_bytes("100 MiB")
     max_connections = 10
+    queue: asyncio.Queue = None
 
     def __init__(
         self,
@@ -61,6 +62,11 @@ class MultiComm:
         self._futures = set()
         self._done = False
         self.diagnostics = defaultdict(float)
+
+        if MultiComm.queue is None:
+            MultiComm.queue = asyncio.Queue()
+            for _ in range(MultiComm.max_connections):
+                MultiComm.queue.put_nowait(None)
 
     def put(self, data: dict):
         """
@@ -96,9 +102,6 @@ class MultiComm:
 
         We do this until we're done.  This coroutine runs in the background.
         """
-        self.queue = asyncio.Queue(maxsize=self.max_connections)
-        for _ in range(self.max_connections):
-            self.queue.put_nowait(None)
 
         while not self._done:
             with self.time("idle"):
