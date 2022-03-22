@@ -49,17 +49,17 @@ async def test_nanny_worker_port_range(c, s):
             "--host",
             "127.0.0.1",
             "--worker-port",
-            "9684:9686",
+            "10000:11000",
             "--nanny-port",
-            "9688:9690",
+            "11000:12000",
             "--no-dashboard",
         ]
     ):
         await c.wait_for_workers(3)
         worker_ports = await c.run(lambda dask_worker: dask_worker.port)
-        assert set(worker_ports.values()) == {9684, 9685, 9686}
+        assert all(10000 <= p <= 11000 for p in worker_ports.values())
         nanny_ports = await c.run(lambda dask_worker: dask_worker.port, nanny=True)
-        assert set(nanny_ports.values()) == {9688, 9689, 9690}
+        assert all(11000 <= p <= 12000 for p in nanny_ports.values())
 
 
 @gen_cluster(nthreads=[])
