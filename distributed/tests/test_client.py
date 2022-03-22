@@ -6475,6 +6475,7 @@ async def test_client_gather_semaphore_loop(s):
 async def test_as_completed_condition_loop(c, s, a, b):
     seq = c.map(inc, range(5))
     ac = as_completed(seq)
+    # consume the ac so that the ac.condition is bound to the loop on py3.10+
     async for _ in ac:
         pass
     assert ac.condition._loop == c.loop.asyncio_loop
