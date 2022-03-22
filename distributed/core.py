@@ -241,13 +241,13 @@ class Server:
             dask.config.get("distributed.admin.tick.interval"), default="ms"
         )
         self._tick_interval_observed = self._tick_interval
-        pc = PeriodicCallback(self._measure_tick, self._tick_interval * 1000)
-        self.periodic_callbacks["tick"] = pc
-        pc = PeriodicCallback(
+        self.periodic_callbacks["tick"] = PeriodicCallback(
+            self._measure_tick, self._tick_interval * 1000
+        )
+        self.periodic_callbacks["ticks"] = PeriodicCallback(
             self._cycle_ticks,
             parse_timedelta(dask.config.get("distributed.admin.tick.cycle")) * 1000,
         )
-        self.periodic_callbacks["ticks"] = pc
 
         self.thread_id = 0
 
