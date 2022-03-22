@@ -6,25 +6,50 @@ from collections import defaultdict
 
 from dask.utils import parse_bytes
 
-from distributed.core import rpc
-from distributed.protocol import to_serialize
-from distributed.sizeof import sizeof
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import log_errors
 
 
 class MultiComm:
+    """Accept, buffer, and send many small messages to many workers
+
+    This takes in lots of small messages destined for remote workers, buffers
+    those messages in memory, and then sends out batches of them when possible
+    to different workers.  This tries to send larger messages when possible,
+    while also respecting a memory bound
+
+    **State**
+
+    -   shards: dict[str, list[bytes]]
+
+        This is our in-memory buffer of data waiting to be sent to other workers.
+
+    -   sizes: dict[str, int]
+
+        The size of each list of shards.  We find the largest and send data from that buffer
+
+    Parameters
+    ----------
+    memory_limit: str
+        A maximum amount of memory to use, like "1 GiB"
+    max_connections: int
+        The maximum number of connections to have out at once
+    max_message_size: str
+        The maximum size of a single message that we want to send
+    send: callable
+        How to send a list of shards to a worker
+
+    """
+
     def __init__(
         self,
         memory_limit=MEMORY_LIMIT / 4,
-        join=None,
-        rpc=rpc,
-        sizeof=sizeof,
         max_connections=10,
-        shuffle_id=None,
         max_message_size="10 MiB",
+        send=None,
     ):
         self.lock = threading.Lock()
+        self.send = send
         self.shards = defaultdict(list)
         self.sizes = defaultdict(int)
         self.total_size = 0
@@ -32,26 +57,29 @@ class MultiComm:
         self.max_message_size = parse_bytes(max_message_size)
         self.memory_limit = parse_bytes(memory_limit)
         self.thread_condition = threading.Condition()
-        assert join
-        self.join = join
         self.max_connections = max_connections
-        self.sizeof = sizeof
-        self.shuffle_id = shuffle_id
         self._futures = set()
         self._done = False
-        self.rpc = rpc
         self.diagnostics = defaultdict(float)
 
     def put(self, data: dict):
+        """
+        Put a dict of shards into our buffers
+
+        This is intended to be run from a worker thread, hence the synchronous
+        nature and the lock.
+
+        If we're out of space then we block in order to enforce backpressure.
+        """
         with self.lock:
-            for address, shard in data.items():
-                size = self.sizeof(shard)
-                self.shards[address].append(shard)
+            for address, shards in data.items():
+                size = sum(map(len, shards))
+                self.shards[address].extend(shards)
                 self.sizes[address] += size
                 self.total_size += size
                 self.total_moved += size
 
-        del data, shard
+        del data, shards
 
         while self.total_size > self.memory_limit:
             with self.time("waiting-on-memory"):
@@ -59,6 +87,15 @@ class MultiComm:
                     self.thread_condition.wait(1)  # Block until memory calms down
 
     async def communicate(self):
+        """
+        Continuously find the largest batch and send from there
+
+        We keep ``max_connections`` comms running while we still have any data
+        as an old comm finishes, we find the next largest buffer, pull off
+        ``max_message_size`` data from it, and ship it to the target worker.
+
+        We do this until we're done.  This coroutine runs in the background.
+        """
         self.comm_queue = asyncio.Queue(maxsize=self.max_connections)
         for _ in range(self.max_connections):
             self.comm_queue.put_nowait(None)
@@ -80,7 +117,7 @@ class MultiComm:
                     try:
                         shard = self.shards[address].pop()
                         shards.append(shard)
-                        s = self.sizeof(shard)
+                        s = len(shard)
                         size += s
                         self.sizes[address] -= s
                     except IndexError:
@@ -98,9 +135,8 @@ class MultiComm:
                 self._futures.add(future)
 
     async def process(self, address: str, shards: list, size: int):
+        """Send one message off to a neighboring worker"""
         with log_errors():
-            shards = self.join(shards)
-            # shards = await offload(self.join, shards)
 
             # Consider boosting total_size a bit here to account for duplication
 
@@ -109,10 +145,7 @@ class MultiComm:
                 #     await asyncio.sleep(0.1)
                 start = time.time()
                 with self.time("send"):
-                    await self.rpc(address).shuffle_receive(
-                        data=to_serialize([b"".join(shards)]),
-                        shuffle_id=self.shuffle_id,
-                    )
+                    await self.send(address, [b"".join(shards)])
                 stop = time.time()
                 self.diagnostics["avg_size"] = (
                     0.95 * self.diagnostics["avg_size"] + 0.05 * size
@@ -127,14 +160,15 @@ class MultiComm:
                 await self.comm_queue.put(None)
 
     async def flush(self):
+        """
+        We don't expect any more data, wait until everything is flushed through
+        """
         while self.shards:
             await asyncio.sleep(0.05)
 
         await asyncio.gather(*self._futures)
         self._futures.clear()
 
-        if self.total_size:
-            breakpoint()
         assert not self.total_size
 
         self._done = True

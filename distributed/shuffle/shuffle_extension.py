@@ -100,14 +100,18 @@ class Shuffle:
             join=pa.concat_tables,  # pd.concat
             sizeof=lambda L: sum(map(len, L)),
         )
+
+        async def send(address, shards):
+            return await self.worker.rpc(address).shuffle_receive(
+                data=to_serialize(shards),
+                shuffle_id=self.metadata.id,
+            )
+
         self.multi_comm = MultiComm(
             memory_limit="100 MiB",  # TODO
-            rpc=worker.rpc,
-            shuffle_id=self.metadata.id,
-            sizeof=lambda L: sum(map(len, L)),
-            join=functools.partial(sum, start=[]),
             max_connections=min(len(self.metadata.workers), 10),
             max_message_size="2 MiB",
+            send=send,
         )
         self.worker.loop.add_callback(self.multi_comm.communicate)
         self.worker.loop.add_callback(self.multi_file.communicate)
@@ -274,7 +278,7 @@ class ShuffleWorkerExtension:
         self,
         comm: object,
         shuffle_id: ShuffleId,
-        data: list[pa.Buffer],
+        data: list[bytes],
     ) -> None:
         """
         Hander: Receive an incoming shard of data from a peer worker.
@@ -434,6 +438,17 @@ class ShuffleWorkerExtension:
 
 
 class ShuffleSchedulerExtension:
+    """
+    Shuffle extension for the scheduler
+
+    Today this mostly just collects heartbeat messages for the dashboard,
+    but in the future it may be responsible for more
+
+    See Also
+    --------
+    ShuffleWorkerExtension
+    """
+
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.shuffles = defaultdict(lambda: defaultdict(dict))
@@ -481,7 +496,7 @@ def split_by_partition(
     column: str,
 ) -> dict:
     """
-    Split data into many arrow batches, partitioned by destination worker
+    Split data into many arrow batches, partitioned by final partition
     """
     import numpy as np
 
@@ -504,20 +519,36 @@ def split_by_partition(
     return dict(zip(partitions, shards))
 
 
-def dump_batch(batch, file, schema=None):
+def dump_batch(batch, file, schema=None) -> None:
+    """
+    Dump a batch to file, if we're the first, also write the schema
+
+    See Also
+    --------
+    load_arrow
+    """
     if file.tell() == 0:
         file.write(schema.serialize())
     file.write(batch)
 
 
-def dump_arrow(t: pa.Table, file):
-    if file.tell() == 0:
-        file.write(t.schema.serialize())
-    for batch in t.to_batches():
-        file.write(batch.serialize())
+def load_arrow(file) -> pa.Table:
+    """Load batched data written to file back out into a table again
 
+    Example
+    -------
+    >>> t = pa.Table.from_pandas(df)  # doctest: +SKIP
+    >>> with open("myfile", mode="wb") as f:  # doctest: +SKIP
+    ...     for batch in t.to_batches():  # doctest: +SKIP
+    ...         dump_batch(batch, f, schema=t.schema)  # doctest: +SKIP
 
-def load_arrow(file):
+    >>> with open("myfile", mode="rb") as f:  # doctest: +SKIP
+    ...     t = load_arrow(f)  # doctest: +SKIP
+
+    See Also
+    --------
+    dump_batch
+    """
     import pyarrow as pa
 
     try:
@@ -534,6 +565,7 @@ def worker_for(output_partition: int, workers: list[str], npartitions: int) -> s
 
 
 def list_of_buffers_to_table(data: list[pa.Buffer], schema: pa.Schema) -> pa.Table:
+    """Convert a list of arrow buffers and a schema to an Arrow Table"""
     import io
 
     import pyarrow as pa

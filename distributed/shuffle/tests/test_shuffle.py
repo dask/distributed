@@ -48,7 +48,8 @@ async def test_heartbeat(c, s, a, b):
 
 
 def test_processing_chain():
-    """This is a serial version of the entire compute chain
+    """
+    This is a serial version of the entire compute chain
 
     In practice this takes place on many different workers.
     Here we verify its accuracy in a single threaded situation.
