@@ -1393,7 +1393,6 @@ class Worker(ServerNode):
         nanny=True,
         executor_wait=True,
         safe=False,
-        stimulus_id=None,
     ):
         with log_errors():
             if self.status in (Status.closed, Status.closing):
@@ -1527,7 +1526,7 @@ class Worker(ServerNode):
         await self.close(safe=True, nanny=not restart)
 
     async def terminate(self, report: bool = True, stimulus_id=None, **kwargs) -> str:
-        await self.close(report=report, stimulus_id=stimulus_id, **kwargs)
+        await self.close(report=report, **kwargs)
         return "OK"
 
     async def wait_until_closed(self):
@@ -3490,6 +3489,7 @@ class Worker(ServerNode):
             assert ts, self.story(key)
             ts.done = True
             result["key"] = ts.key
+            result["stimulus_id"] = f"{result['op']}-{time()}"
             value = result.pop("result", None)
             ts.startstops.append(
                 {"action": "compute", "start": result["start"], "stop": result["stop"]}
@@ -4134,7 +4134,6 @@ async def get_data_from_worker(
     max_connections=None,
     serializers=None,
     deserializers=None,
-    stimulus_id=None,
 ):
     """Get keys from worker
 
@@ -4358,14 +4357,12 @@ def apply_function_simple(
         msg = error_message(e)
         msg["op"] = "task-erred"
         msg["actual-exception"] = e
-        msg["stimulus_id"] = f"task-sync-erred-{time()}"
     else:
         msg = {
             "op": "task-finished",
             "status": "OK",
             "result": result,
             "nbytes": sizeof(result),
-            "stimulus_id": f"task-sync-finished-{time()}",
             "type": type(result) if result is not None else None,
         }
     finally:
@@ -4396,14 +4393,12 @@ async def apply_function_async(
         msg = error_message(e)
         msg["op"] = "task-erred"
         msg["actual-exception"] = e
-        msg["stimulus_id"] = f"task-async-erred-{time()}"
     else:
         msg = {
             "op": "task-finished",
             "status": "OK",
             "result": result,
             "nbytes": sizeof(result),
-            "stimulus_id": f"task-async-finished-{time()}",
             "type": type(result) if result is not None else None,
         }
     finally:
