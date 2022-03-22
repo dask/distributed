@@ -51,6 +51,7 @@ from distributed.batched import BatchedSend
 from distributed.comm import connect, get_address_host
 from distributed.comm.addressing import address_from_user_args, parse_address
 from distributed.comm.utils import OFFLOAD_THRESHOLD
+from distributed.compatibility import randbytes
 from distributed.core import (
     CommClosedError,
     Status,
@@ -4609,7 +4610,7 @@ def benchmark_disk(
             names = list(map(str, range(100)))
             size = parse_bytes(size_str)
 
-            data = os.urandom(size)
+            data = randbytes(size)
 
             start = time()
             total = 0
@@ -4617,6 +4618,7 @@ def benchmark_disk(
                 with open(dir / random.choice(names), mode="ab") as f:
                     f.write(data)
                     f.flush()
+                    os.fsync(f.fileno())
                 total += size
 
             out[size_str] = total / (time() - start)
@@ -4631,7 +4633,7 @@ def benchmark_memory(
     out = {}
     for size_str in sizes:
         size = parse_bytes(size_str)
-        data = os.urandom(size)
+        data = randbytes(size)
 
         start = time()
         total = 0
@@ -4645,17 +4647,17 @@ def benchmark_memory(
 
 
 async def benchmark_network(
+    address: str,
     sizes=["1 kiB", "10kiB", "100kiB", "1 MiB", "10 MiB", "50 MiB"],
     rpc=rpc,
     duration=1.0,
-    address=None,
 ) -> dict[str, float]:
     duration = parse_timedelta(duration)
     out = {}
     with rpc(address) as r:
         for size_str in sizes:
             size = parse_bytes(size_str)
-            data = os.urandom(size)
+            data = randbytes(size)
 
             start = time()
             total = 0
