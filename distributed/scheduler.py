@@ -40,6 +40,7 @@ from tlz import (
     merge,
     merge_sorted,
     merge_with,
+    partition,
     pluck,
     second,
     valmap,
@@ -7347,7 +7348,7 @@ class Scheduler(SchedulerState, ServerNode):
         # network
         workers = list(self.workers)
         futures = []
-        for a, b in zip(workers[:-1], workers[1:]):
+        for a, b in partition(2, workers):
             future = self.rpc(a).benchmark_network(address=b)
             futures.append(future)
         responses = await asyncio.gather(*futures)
