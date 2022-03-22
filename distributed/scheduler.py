@@ -4017,9 +4017,9 @@ class Scheduler(SchedulerState, ServerNode):
             if not dask.config.get("distributed.scheduler.work-stealing"):
                 if "stealing" in extensions:
                     del extensions["stealing"]
-        self._extensions = {
-            name: extension(self) for name, extension in extensions.items()
-        }
+
+        for name, extension in extensions.items():
+            self.extensions[name] = extension(self)
 
         setproctitle("dask-scheduler [not started]")
         Scheduler._instances.add(self)

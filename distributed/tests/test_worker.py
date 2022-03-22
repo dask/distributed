@@ -3309,8 +3309,9 @@ async def test_Worker__to_dict(c, s, a):
 
 
 @gen_cluster(nthreads=[])
-async def test_extension_heartbeat(s):
+async def test_extension_methods(s):
     flag = [False]
+    shutdown = [False]
 
     class WorkerExtension:
         def __init__(self, worker):
@@ -3318,6 +3319,9 @@ async def test_extension_heartbeat(s):
 
         def heartbeat(self):
             return {"data": 123}
+
+        async def close(self):
+            shutdown[0] = True
 
     class SchedulerExtension:
         def __init__(self, scheduler):
@@ -3332,9 +3336,11 @@ async def test_extension_heartbeat(s):
     s.extensions["test"] = SchedulerExtension(s)
 
     async with Worker(s.address, extensions={"test": WorkerExtension}) as w:
+        assert not shutdown[0]
         await w.heartbeat()
+        assert flag[0]
 
-    assert flag[0]
+    assert shutdown[0]
 
 
 @gen_cluster(
