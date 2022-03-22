@@ -152,6 +152,10 @@ class Occupancy(DashboardComponent):
             ms = [occ * 1000 for occ in occupancy]
             x = [occ / 500 for occ in occupancy]
             total = sum(occupancy)
+
+            idle_workers = self.scheduler.idle
+            saturated_workers = self.scheduler.saturated
+
             color = []
             for ws in workers:
                 if ws in self.scheduler.idle:
@@ -618,8 +622,8 @@ class BandwidthTypes(DashboardComponent):
                 "type": list(bw.keys()),
                 "bandwidth_text": [format_bytes(x) for x in bw.values()],
             }
-            self.root.title.text = "Bandwidth: " + format_bytes(
-                self.scheduler.bandwidth
+            self.root.title.text = (
+                f"Bandwidth: {format_bytes(self.scheduler.bandwidth)}"
             )
             update(self.source, result)
 
@@ -691,6 +695,15 @@ class BandwidthWorkers(DashboardComponent):
             hover.point_policy = "follow_mouse"
             self.root.add_tools(hover)
 
+    def worker_name(self, address):
+        try:
+            ws = self.scheduler.workers[address]
+        except KeyError:
+            return address
+        if ws.name is not None:
+            return str(ws.name)
+        return address
+
     @without_property_validation
     def update(self):
         with log_errors():
@@ -698,16 +711,12 @@ class BandwidthWorkers(DashboardComponent):
             if not bw:
                 return
 
-            def name(address):
-                try:
-                    ws = self.scheduler.workers[address]
-                except KeyError:
-                    return address
-                if ws.name is not None:
-                    return str(ws.name)
-                return address
-
-            x, y, value = zip(*((name(a), name(b), c) for (a, b), c in bw.items()))
+            x, y, value = zip(
+                *(
+                    (self.worker_name(a), self.worker_name(b), c)
+                    for (a, b), c in bw.items()
+                )
+            )
 
             self.color_map.high = max(value)
 
@@ -721,8 +730,8 @@ class BandwidthWorkers(DashboardComponent):
                 "bandwidth": value,
                 "bandwidth_text": list(map(format_bytes, value)),
             }
-            self.root.title.text = "Bandwidth: " + format_bytes(
-                self.scheduler.bandwidth
+            self.root.title.text = (
+                f"Bandwidth: {format_bytes(self.scheduler.bandwidth)}"
             )
             update(self.source, result)
 
@@ -838,16 +847,10 @@ class WorkerNetworkBandwidth(DashboardComponent):
             y_read = [i + 0.75 + i * h for i in range(len(workers))]
             y_write = [i + 0.25 + i * h for i in range(len(workers))]
 
-            x_read = []
-            x_write = []
-            x_read_disk = []
-            x_write_disk = []
-
-            for ws in workers:
-                x_read.append(ws.metrics["read_bytes"])
-                x_write.append(ws.metrics["write_bytes"])
-                x_read_disk.append(ws.metrics["read_bytes_disk"])
-                x_write_disk.append(ws.metrics["write_bytes_disk"])
+            x_read = [ws.metrics["read_bytes"] for ws in workers]
+            x_write = [ws.metrics["write_bytes"] for ws in workers]
+            x_read_disk = [ws.metrics["read_bytes_disk"] for ws in workers]
+            x_write_disk = [ws.metrics["write_bytes_disk"] for ws in workers]
 
             if self.scheduler.workers:
                 self.bandwidth.x_range.end = max(
@@ -1021,25 +1024,17 @@ class SystemTimeseries(DashboardComponent):
     def get_data(self):
         workers = self.scheduler.workers.values()
 
-        read_bytes = 0
-        write_bytes = 0
-        cpu = 0
-        memory = 0
-        read_bytes_disk = 0
-        write_bytes_disk = 0
-        time = 0
-        for ws in workers:
-            read_bytes += ws.metrics["read_bytes"]
-            write_bytes += ws.metrics["write_bytes"]
-            cpu += ws.metrics["cpu"]
-            memory += ws.metrics["memory"]
-            read_bytes_disk += ws.metrics["read_bytes_disk"]
-            write_bytes_disk += ws.metrics["write_bytes_disk"]
-            time += ws.metrics["time"]
+        read_bytes = sum([ws.metrics["read_bytes"] for ws in workers])
+        write_bytes = sum([ws.metrics["write_bytes"] for ws in workers])
+        cpu = sum([ws.metrics["cpu"] for ws in workers])
+        memory = sum([ws.metrics["memory"] for ws in workers])
+        read_bytes_disk = sum([ws.metrics["read_bytes_disk"] for ws in workers])
+        write_bytes_disk = sum([ws.metrics["write_bytes_disk"] for ws in workers])
+        worker_time = sum([ws.metrics["time"] for ws in workers])
 
         result = {
             # use `or` to avoid ZeroDivision when no workers
-            "time": [time / (len(workers) or 1) * 1000],
+            "time": [worker_time / (len(workers) or 1) * 1000],
             "read_bytes": [read_bytes / (len(workers) or 1)],
             "write_bytes": [write_bytes / (len(workers) or 1)],
             "cpu": [cpu / (len(workers) or 1)],
