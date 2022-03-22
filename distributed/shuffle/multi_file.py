@@ -14,6 +14,48 @@ from distributed.utils import log_errors
 
 
 class MultiFile:
+    """Accept, buffer, and write many small objects to many files
+
+    This takes in lots of small objects, writes them to a local directory, and
+    then reads them back when all writes are complete.  It buffers these
+    objects in memory so that it can optimize disk access for larger writes.
+
+    **State**
+
+    -   shards: dict[str, list[bytes]]
+
+        This is our in-memory buffer of data waiting to be sent to other workers.
+
+    -   sizes: dict[str, int]
+
+        The size of each list of shards.  We find the largest and send data from that buffer
+
+    State
+    -----
+
+    memory_limit: str
+        A maximum amount of memory to use, like "1 GiB"
+    max_connections: int
+        The maximum number of connections to have out at once
+    max_message_size: str
+        The maximum size of a single message that we want to send
+
+    Parameters
+    ----------
+    directory: pathlib.Path
+        Where to write and read data.  Ideally points to fast disk.
+    dump: callable
+        Writes an object to a file, like pickle.dump
+    load: callable
+        Reads an object from that file, like pickle.load
+    join: callable
+        Joins many objects together
+    send: callable
+        How to send a list of shards to a worker
+    sizeof: callable
+        Measures the size of an object in memory
+    """
+
     memory_limit = parse_bytes("1 GiB")
     queue: asyncio.Queue = None
     concurrent_files = 2
@@ -55,7 +97,18 @@ class MultiFile:
             for _ in range(MultiFile.concurrent_files):
                 MultiFile.queue.put_nowait(None)
 
-    async def put(self, data: dict):
+        self._communicate_future = asyncio.ensure_future(self.communicate())
+
+    async def put(self, data: dict[str, list[object]]):
+        """
+        Writes many objects into the local buffers, blocks until ready for more
+
+        Parameters
+        ----------
+        data: dict
+            A dictionary mapping destinations to lists of objects that should
+            be written to that destination
+        """
         this_size = 0
         for id, shard in data.items():
             size = self.sizeof(shard)
@@ -79,6 +132,19 @@ class MultiFile:
                         continue
 
     async def communicate(self):
+        """
+        Continuously find the largest batch and trigger writes
+
+        We keep ``concurrent_files`` files open, writing while we still have any data
+        as an old write finishes, we find the next largest buffer, and write
+        its contents to file.
+
+        We do this until we're done.  This coroutine runs in the background.
+
+        See Also
+        --------
+        process: does the actual writing
+        """
         with log_errors():
 
             while not self._done:
@@ -100,6 +166,19 @@ class MultiFile:
                     self.condition.notify()
 
     async def process(self, id: str, shards: list, size: int):
+        """Write one buffer to file
+
+        This function was built to offload the disk IO, but since then we've
+        decided to keep this within the event loop (disk bandwidth should be
+        prioritized, and writes are typically small enough to not be a big
+        deal).
+
+        Most of the logic here is about possibly going back to a separate
+        thread, or about diagnostics.  If things don't change much in the
+        future then we should consider simplifying this considerably and
+        dropping the write into communicate above.
+        """
+
         with log_errors():
             # Consider boosting total_size a bit here to account for duplication
             while id in self.active:
@@ -136,6 +215,7 @@ class MultiFile:
             await self.queue.put(None)
 
     def read(self, id):
+        """Read a complete file back into memory"""
         parts = []
 
         try:
@@ -160,6 +240,7 @@ class MultiFile:
             raise KeyError(id)
 
     async def flush(self):
+        """Wait until all writes are finished"""
         while self.shards:
             await asyncio.sleep(0.05)
 
@@ -171,7 +252,10 @@ class MultiFile:
 
         self._done = True
 
+        await self._communicate_future
+
     def close(self):
+        self._done = True
         shutil.rmtree(self.directory)
 
     def __enter__(self):

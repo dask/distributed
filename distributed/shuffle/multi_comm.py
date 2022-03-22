@@ -68,6 +68,8 @@ class MultiComm:
             for _ in range(MultiComm.max_connections):
                 MultiComm.queue.put_nowait(None)
 
+        self._communicate_future = asyncio.ensure_future(self.communicate())
+
     def put(self, data: dict):
         """
         Put a dict of shards into our buffers
@@ -101,6 +103,10 @@ class MultiComm:
         ``max_message_size`` data from it, and ship it to the target worker.
 
         We do this until we're done.  This coroutine runs in the background.
+
+        See Also
+        --------
+        process: does the actual writing
         """
 
         while not self._done:
@@ -175,6 +181,8 @@ class MultiComm:
         assert not self.total_size
 
         self._done = True
+
+        await self._communicate_future
 
     @contextlib.contextmanager
     def time(self, name: str):

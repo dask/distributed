@@ -109,8 +109,6 @@ class Shuffle:
             send=send,
         )
         MultiComm.max_connections = min(len(self.metadata.workers), 10)
-        self.worker.loop.add_callback(self.multi_comm.communicate)
-        self.worker.loop.add_callback(self.multi_file.communicate)
 
         self.diagnostics: dict[str, float] = defaultdict(float)
         self.output_partitions_left = metadata.npartitions_for(worker.address)
