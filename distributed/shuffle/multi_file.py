@@ -10,19 +10,20 @@ from collections import defaultdict
 from dask.sizeof import sizeof
 from dask.utils import parse_bytes
 
-from distributed.system import MEMORY_LIMIT
 from distributed.utils import log_errors
 
 
 class MultiFile:
+    memory_limit = parse_bytes("1 GiB")
+    queue: asyncio.Queue = None
+    concurrent_files = 2
+
     def __init__(
         self,
         directory,
         dump=pickle.dump,
         load=pickle.load,
         join=None,
-        concurrent_files=1,
-        memory_limit=MEMORY_LIMIT / 2,
         sizeof=sizeof,
     ):
         assert join
@@ -39,8 +40,6 @@ class MultiFile:
         self.total_size = 0
         self.total_received = 0
 
-        self.memory_limit = parse_bytes(memory_limit)
-        self.concurrent_files = concurrent_files
         self.condition = asyncio.Condition()
 
         self.bytes_written = 0
@@ -50,6 +49,11 @@ class MultiFile:
         self._futures = set()
         self.active = set()
         self.diagnostics = defaultdict(float)
+
+        if MultiFile.queue is None:
+            MultiFile.queue = asyncio.Queue()
+            for _ in range(MultiFile.concurrent_files):
+                MultiFile.queue.put_nowait(None)
 
     async def put(self, data: dict):
         this_size = 0
@@ -76,9 +80,6 @@ class MultiFile:
 
     async def communicate(self):
         with log_errors():
-            self.queue = asyncio.Queue(maxsize=self.concurrent_files)
-            for _ in range(self.concurrent_files):
-                self.queue.put_nowait(None)
 
             while not self._done:
                 with self.time("idle"):

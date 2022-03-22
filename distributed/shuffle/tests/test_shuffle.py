@@ -33,6 +33,23 @@ async def test_basic(c, s, a, b):
     assert x == y
 
 
+@gen_cluster(client=True, timeout=1000000)
+async def test_concurrent(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-06-02",
+        freq="100ms",
+        dtypes={"x": int, "y": float, "a": int, "b": float},
+    )
+    df = dask.datasets.timeseries()
+    x = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    y = dd.shuffle.shuffle(df, "y", shuffle="p2p")
+    x, y = c.compute([x.x.size, y.y.size])
+    x = await x
+    y = await y
+    assert x == y
+
+
 @gen_cluster(client=True)
 async def test_heartbeat(c, s, a, b):
     await a.heartbeat()

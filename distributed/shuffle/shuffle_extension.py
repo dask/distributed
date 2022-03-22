@@ -95,8 +95,6 @@ class Shuffle:
             ),
             load=load_arrow,
             directory=os.path.join(self.worker.local_directory, str(self.metadata.id)),
-            memory_limit="900 MiB",  # TODO: lift this up to the global ShuffleExtension
-            concurrent_files=2,
             join=pa.concat_tables,  # pd.concat
             sizeof=lambda L: sum(map(len, L)),
         )
@@ -108,11 +106,9 @@ class Shuffle:
             )
 
         self.multi_comm = MultiComm(
-            memory_limit="100 MiB",  # TODO
-            max_connections=min(len(self.metadata.workers), 10),
-            max_message_size="2 MiB",
             send=send,
         )
+        MultiComm.max_connections = min(len(self.metadata.workers), 10)
         self.worker.loop.add_callback(self.multi_comm.communicate)
         self.worker.loop.add_callback(self.multi_file.communicate)
 
@@ -153,7 +149,7 @@ class Shuffle:
                 "buckets": len(self.multi_comm.shards),
                 "written": self.multi_comm.total_moved,
                 "read": self.total_recvd,
-                "active": self.multi_comm.comm_queue.qsize(),  # TODO: maybe not built yet
+                "active": self.multi_comm.queue.qsize(),  # TODO: maybe not built yet
                 "diagnostics": self.multi_comm.diagnostics,
                 "memory_limit": self.multi_comm.memory_limit,
             },
@@ -438,6 +434,7 @@ class ShuffleWorkerExtension:
 
     async def close(self):
         self.executor.shutdown()
+        MultiFile.queue = None
 
 
 class ShuffleSchedulerExtension:

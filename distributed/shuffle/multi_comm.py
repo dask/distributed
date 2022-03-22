@@ -6,7 +6,6 @@ from collections import defaultdict
 
 from dask.utils import parse_bytes
 
-from distributed.system import MEMORY_LIMIT
 from distributed.utils import log_errors
 
 
@@ -28,24 +27,28 @@ class MultiComm:
 
         The size of each list of shards.  We find the largest and send data from that buffer
 
-    Parameters
-    ----------
+    State
+    -----
+
     memory_limit: str
         A maximum amount of memory to use, like "1 GiB"
     max_connections: int
         The maximum number of connections to have out at once
     max_message_size: str
         The maximum size of a single message that we want to send
+
+    Parameters
+    ----------
     send: callable
         How to send a list of shards to a worker
-
     """
+
+    max_message_size = parse_bytes("2 MiB")
+    memory_limit = parse_bytes("100 MiB")
+    max_connections = 10
 
     def __init__(
         self,
-        memory_limit=MEMORY_LIMIT / 4,
-        max_connections=10,
-        max_message_size="10 MiB",
         send=None,
     ):
         self.lock = threading.Lock()
@@ -54,10 +57,7 @@ class MultiComm:
         self.sizes = defaultdict(int)
         self.total_size = 0
         self.total_moved = 0
-        self.max_message_size = parse_bytes(max_message_size)
-        self.memory_limit = parse_bytes(memory_limit)
         self.thread_condition = threading.Condition()
-        self.max_connections = max_connections
         self._futures = set()
         self._done = False
         self.diagnostics = defaultdict(float)
@@ -96,9 +96,9 @@ class MultiComm:
 
         We do this until we're done.  This coroutine runs in the background.
         """
-        self.comm_queue = asyncio.Queue(maxsize=self.max_connections)
+        self.queue = asyncio.Queue(maxsize=self.max_connections)
         for _ in range(self.max_connections):
-            self.comm_queue.put_nowait(None)
+            self.queue.put_nowait(None)
 
         while not self._done:
             with self.time("idle"):
@@ -106,7 +106,7 @@ class MultiComm:
                     await asyncio.sleep(0.1)
                     continue
 
-                await self.comm_queue.get()
+                await self.queue.get()
 
             with self.lock:
                 address = max(self.sizes, key=self.sizes.get)
@@ -157,7 +157,7 @@ class MultiComm:
                 self.total_size -= size
                 with self.thread_condition:
                     self.thread_condition.notify()
-                await self.comm_queue.put(None)
+                await self.queue.put(None)
 
     async def flush(self):
         """

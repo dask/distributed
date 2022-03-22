@@ -10,9 +10,7 @@ from distributed.shuffle.multi_file import MultiFile
 
 @pytest.mark.asyncio
 async def test_basic(tmp_path):
-    with MultiFile(
-        directory=tmp_path, n_files=4, memory_limit="16 MiB", join=pd.concat
-    ) as mf:
+    with MultiFile(directory=tmp_path, memory_limit="16 MiB", join=pd.concat) as mf:
         df = pd.DataFrame({"x": np.arange(1000), "y": np.arange(1000) * 2})
         await mf.write(df, "a")
         await mf.write(df, "b")
@@ -30,9 +28,7 @@ async def test_basic(tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("count", [2, 100, 1000])
 async def test_many(tmp_path, count):
-    with MultiFile(
-        directory=tmp_path, n_files=4, memory_limit="16 MiB", join=pd.concat
-    ) as mf:
+    with MultiFile(directory=tmp_path, memory_limit="16 MiB", join=pd.concat) as mf:
         df = pd.DataFrame({"x": np.arange(10), "y": np.arange(10) * 2})
 
         L = list(range(count))
