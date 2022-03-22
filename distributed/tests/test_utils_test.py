@@ -21,7 +21,7 @@ from distributed.utils import mp_context
 from distributed.utils_test import (
     _LockedCommPool,
     _UnhashableCallable,
-    assert_worker_story,
+    assert_story,
     check_process_leak,
     cluster,
     dump_cluster_state,
@@ -407,7 +407,7 @@ def test_dump_cluster_state_timeout(tmp_path):
     assert "workers" in state
 
 
-def test_assert_worker_story():
+def test_assert_story():
     now = time()
     story = [
         ("foo", "id1", now - 600),
@@ -415,38 +415,38 @@ def test_assert_worker_story():
         ("baz", {1: 2}, "id2", now),
     ]
     # strict=False
-    assert_worker_story(story, [("foo",), ("bar",), ("baz", {1: 2})])
-    assert_worker_story(story, [])
-    assert_worker_story(story, [("foo",)])
-    assert_worker_story(story, [("foo",), ("bar",)])
-    assert_worker_story(story, [("baz", lambda d: d[1] == 2)])
+    assert_story(story, [("foo",), ("bar",), ("baz", {1: 2})])
+    assert_story(story, [])
+    assert_story(story, [("foo",)])
+    assert_story(story, [("foo",), ("bar",)])
+    assert_story(story, [("baz", lambda d: d[1] == 2)])
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("foo", "nomatch")])
+        assert_story(story, [("foo", "nomatch")])
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("baz",)])
+        assert_story(story, [("baz",)])
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("baz", {1: 3})])
+        assert_story(story, [("baz", {1: 3})])
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("foo",), ("bar",), ("baz", "extra"), ("+1",)])
+        assert_story(story, [("foo",), ("bar",), ("baz", "extra"), ("+1",)])
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("baz", lambda d: d[1] == 3)])
+        assert_story(story, [("baz", lambda d: d[1] == 3)])
     with pytest.raises(KeyError):  # Faulty lambda
-        assert_worker_story(story, [("baz", lambda d: d[2] == 1)])
-    assert_worker_story([], [])
-    assert_worker_story([("foo", "id1", now)], [("foo",)])
+        assert_story(story, [("baz", lambda d: d[2] == 1)])
+    assert_story([], [])
+    assert_story([("foo", "id1", now)], [("foo",)])
     with pytest.raises(AssertionError):
-        assert_worker_story([], [("foo",)])
+        assert_story([], [("foo",)])
 
     # strict=True
-    assert_worker_story([], [], strict=True)
-    assert_worker_story([("foo", "id1", now)], [("foo",)])
-    assert_worker_story(story, [("foo",), ("bar",), ("baz", {1: 2})], strict=True)
+    assert_story([], [], strict=True)
+    assert_story([("foo", "id1", now)], [("foo",)])
+    assert_story(story, [("foo",), ("bar",), ("baz", {1: 2})], strict=True)
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("foo",), ("bar",)], strict=True)
+        assert_story(story, [("foo",), ("bar",)], strict=True)
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("foo",), ("baz", {1: 2})], strict=True)
+        assert_story(story, [("foo",), ("baz", {1: 2})], strict=True)
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [], strict=True)
+        assert_story(story, [], strict=True)
 
 
 @pytest.mark.parametrize(
@@ -467,11 +467,11 @@ def test_assert_worker_story():
         ),
     ],
 )
-def test_assert_worker_story_malformed_story(story_factory):
+def test_assert_story_malformed_story(story_factory):
     # defer the calls to time() to when the test runs rather than collection
     story = story_factory()
     with pytest.raises(AssertionError, match="Malformed story event"):
-        assert_worker_story(story, [])
+        assert_story(story, [])
 
 
 @gen_cluster()

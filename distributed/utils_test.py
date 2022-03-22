@@ -1885,15 +1885,15 @@ def xfail_ssl_issue5601():
         raise
 
 
-def assert_worker_story(
+def assert_story(
     story: list[tuple], expect: list[tuple], *, strict: bool = False
 ) -> None:
-    """Test the output of ``Worker.story``
+    """Test the output of ``Scheduler.story`` or ``Worker.story``
 
     Parameters
     ==========
     story: list[tuple]
-        Output of Worker.story
+        Output of Scheduler.story or Worker.story
     expect: list[tuple]
         Expected events. Each expected event must contain exactly 2 less fields than the
         story (the last two fields are always the stimulus_id and the timestamp).
@@ -1951,7 +1951,7 @@ def assert_worker_story(
                     break
     except StopIteration:
         raise AssertionError(
-            f"assert_worker_story({strict=}) failed\n"
+            f"assert_story({strict=}) failed\n"
             f"story:\n{_format_story(story)}\n"
             f"expect:\n{_format_story(expect)}"
         ) from None
