@@ -2426,9 +2426,7 @@ class Worker(ServerNode):
         ts.state = "long-running"
         self._executing.discard(ts)
         self.long_running.add(ts.key)
-        smsg = LongRunningMsg(
-            key=ts.key, compute_duration=compute_duration, stimulus_id=stimulus_id
-        )
+        smsg = LongRunningMsg(key=ts.key, compute_duration=compute_duration)
         self.io_loop.add_callback(self.ensure_computing)
         return {}, [smsg]
 
