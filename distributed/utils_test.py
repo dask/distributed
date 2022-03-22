@@ -633,9 +633,6 @@ def security():
 def _terminate_join(proc):
     proc.terminate()
     proc.join()
-    # There is a problem on windows where the processes do not release file
-    # handlers if we do not close the proc. This causes the tmpdir cleanup to
-    # fail
     proc.close()
 
 
