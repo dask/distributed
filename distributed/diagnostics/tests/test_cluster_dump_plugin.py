@@ -6,7 +6,7 @@ from distributed.utils_test import gen_cluster, inc
 async def test_cluster_dump_plugin(c, s, *workers, tmp_path):
     dump_file = tmp_path / "cluster_dump.msgpack.gz"
 
-    plugin = ClusterDump(s, None, [], "msgpack")
+    plugin = ClusterDump(s, str(dump_file), [], "msgpack")
     s.add_plugin(plugin)
 
     f1 = c.submit(inc, 1)
