@@ -1,0 +1,38 @@
+from datetime import datetime
+from typing import Any, Collection, Dict, Literal
+
+from distributed.diagnostics.plugin import SchedulerPlugin
+from distributed.scheduler import Scheduler
+
+
+class ClusterDump(SchedulerPlugin):
+    """Dumps cluster state prior to Scheduler shutdown
+
+    The Scheduler may shutdown in cases where it is in an error state,
+    or when it has been unexpectedly idle for long periods of time.
+    This plugin dumps the cluster state prior to Scheduler shutdown
+    for debugging purposes.
+    """
+
+    def __init__(
+        self,
+        scheduler: Scheduler,
+        url: str = None,
+        exclude: "Collection[str]" = (),
+        format_: Literal["msgpack", "yaml"] = "msgpack",
+        **storage_options: Dict[str, Any],
+    ):
+        if not url:
+            suffix = "msgpack.gz" if format_ == "msgpack" else "yaml"
+            url = datetime.now().strftime(f"cluster-dump-%Y%m%d-%H%M%S.{suffix}")
+
+        self.scheduler = scheduler
+        self.url = url
+        self.exclude = exclude
+        self.format = format_
+        self.storage_options = storage_options
+
+    async def before_close(self):
+        await self.scheduler.dump_cluster_state_to_url(
+            self.url, self.exclude, self.format, **self.storage_options
+        )

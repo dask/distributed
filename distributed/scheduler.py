@@ -4242,6 +4242,10 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Scheduler closing...")
         setproctitle("dask-scheduler [closing]")
 
+        await asyncio.gather(
+            *[plugin.before_close() for plugin in list(self.plugins.values())]
+        )
+
         for preload in self.preloads:
             await preload.teardown()
 

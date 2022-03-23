@@ -52,6 +52,10 @@ class SchedulerPlugin:
         """
         pass
 
+    async def before_close(self):
+        """Runs prior to any Scheduler shutdown logic"""
+        pass
+
     async def close(self):
         """Run when the scheduler closes down
 
