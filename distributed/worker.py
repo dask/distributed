@@ -4600,8 +4600,16 @@ def warn(*args, **kwargs):
 def benchmark_disk(
     rootdir=None,
     sizes=["1 kiB", "100 kiB", "1 MiB", "10 MiB", "100 MiB"],
-    duration=1.0,
+    duration="1 s",
 ) -> dict[str, float]:
+    """
+    Benchmark disk bandwidth
+
+    Returns
+    -------
+    out: dict
+        Maps sizes of outputs to measured bandwidths
+    """
     duration = parse_timedelta(duration)
 
     out = {}
@@ -4628,8 +4636,16 @@ def benchmark_disk(
 
 def benchmark_memory(
     sizes=["2 kiB", "10 kiB", "100 kiB", "1 MiB", "10 MiB"],
-    duration=0.2,
+    duration="200 ms",
 ) -> dict[str, float]:
+    """
+    Benchmark memory bandwidth
+
+    Returns
+    -------
+    out: dict
+        Maps sizes of outputs to measured bandwidths
+    """
     duration = parse_timedelta(duration)
     out = {}
     for size_str in sizes:
@@ -4651,8 +4667,17 @@ async def benchmark_network(
     address: str,
     sizes=["1 kiB", "10kiB", "100kiB", "1 MiB", "10 MiB", "50 MiB"],
     rpc=rpc,
-    duration=1.0,
+    duration="1 s",
 ) -> dict[str, float]:
+    """
+    Benchmark network communications to another worker
+
+    Returns
+    -------
+    out: dict
+        Maps sizes of outputs to measured bandwidths
+    """
+
     duration = parse_timedelta(duration)
     out = {}
     with rpc(address) as r:

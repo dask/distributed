@@ -7331,7 +7331,9 @@ class Scheduler(SchedulerState, ServerNode):
         return response
 
     async def benchmark_hardware(self) -> "dict[str, dict[str, float]]":
-        out: "defaultdict[str, defaultdict[str, list[float]]]" = defaultdict(lambda: defaultdict(list))
+        out: "dict[str, defaultdict[str, list[float]]]" = {
+            name: defaultdict(list) for name in ["disk", "memory", "network"]
+        }
 
         # disk
         result = await self.broadcast(msg={"op": "benchmark_disk"})
@@ -7356,8 +7358,7 @@ class Scheduler(SchedulerState, ServerNode):
         # Randomize the connections to even out the mean measures.
         random.shuffle(workers)
         futures = [
-            self.rpc(a).benchmark_network(address=b)
-            for a, b in partition(2, workers)
+            self.rpc(a).benchmark_network(address=b) for a, b in partition(2, workers)
         ]
         responses = await asyncio.gather(*futures)
 
