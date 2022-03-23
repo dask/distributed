@@ -3320,19 +3320,8 @@ async def test_tick_interval(c, s, a, b):
 
     await a.heartbeat()
     x = s.workers[a.address].metrics["event_loop_interval"]
-    assert x
-    assert 0.0001 < x < 1
-    old = a._tick_interval_observed
-
-    old_count_last = a._tick_count_last
-
-    time.sleep(0.500)  # Block event loop
-
-    while a._tick_count_last == old_count_last:
+    while s.workers[a.address].metrics["event_loop_interval"] > 0.050:
         await asyncio.sleep(0.01)
-
-    await a.heartbeat()
-    y = s.workers[a.address].metrics["event_loop_interval"]
-    new = a._tick_interval_observed
-
-    assert y > x
+    while s.workers[a.address].metrics["event_loop_interval"] < 0.100:
+        await asyncio.sleep(0.01)
+        time.sleep(0.200)
