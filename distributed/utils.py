@@ -1093,27 +1093,17 @@ def command_has_keyword(cmd, k):
     return False
 
 
-# from bokeh.palettes import viridis
-# palette = viridis(18)
+# from https://personal.sron.nl/~pault/#fig:scheme_light
 palette = [
-    "#440154",
-    "#471669",
-    "#472A79",
-    "#433C84",
-    "#3C4D8A",
-    "#355D8C",
-    "#2E6C8E",
-    "#287A8E",
-    "#23898D",
-    "#1E978A",
-    "#20A585",
-    "#2EB27C",
-    "#45BF6F",
-    "#64CB5D",
-    "#88D547",
-    "#AFDC2E",
-    "#D7E219",
-    "#FDE724",
+    "#77AADD",
+    "#EE8866",
+    "#EEDD88",
+    "#FFAABB",
+    "#99DDFF",
+    "#44BB99",
+    "#BBCC33",
+    "#AAAA00",
+    "#DDDDDD",
 ]
 
 
