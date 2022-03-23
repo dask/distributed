@@ -49,7 +49,7 @@ from tornado import escape
 
 import dask
 from dask import config
-from dask.utils import format_bytes, format_time, key_split, parse_timedelta
+from dask.utils import format_bytes, format_time, funcname, key_split, parse_timedelta
 
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
@@ -914,7 +914,7 @@ class SystemTimeseries(DashboardComponent):
             tools = "reset, xpan, xwheel_zoom"
 
             self.bandwidth = figure(
-                title="Workers Network Bandwidth",
+                title="Worker Network Bandwidth (average)",
                 x_axis_type="datetime",
                 tools=tools,
                 x_range=x_range,
@@ -946,7 +946,7 @@ class SystemTimeseries(DashboardComponent):
             self.bandwidth.xgrid.visible = False
 
             self.cpu = figure(
-                title="Workers CPU",
+                title="Worker CPU Utilization (average)",
                 x_axis_type="datetime",
                 tools=tools,
                 x_range=x_range,
@@ -966,7 +966,7 @@ class SystemTimeseries(DashboardComponent):
             self.cpu.xgrid.visible = False
 
             self.memory = figure(
-                title="Workers Memory",
+                title="Worker Memory Use (average)",
                 x_axis_type="datetime",
                 tools=tools,
                 x_range=x_range,
@@ -987,7 +987,7 @@ class SystemTimeseries(DashboardComponent):
             self.memory.xgrid.visible = False
 
             self.disk = figure(
-                title="Workers Disk",
+                title="Worker Disk Bandwidth (average)",
                 x_axis_type="datetime",
                 tools=tools,
                 x_range=x_range,
@@ -3552,6 +3552,7 @@ def individual_doc(cls, interval, scheduler, extra, doc, fig_attr="root", **kwar
         add_periodic_callback(doc, fig, interval)
         doc.add_root(getattr(fig, fig_attr))
         doc.theme = BOKEH_THEME
+        doc.title = "Dask: " + funcname(cls)
 
 
 def individual_profile_doc(scheduler, extra, doc):

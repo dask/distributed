@@ -202,7 +202,7 @@ def test_worker_doesnt_await_task_completion(loop):
             start = time()
             c.restart()
             stop = time()
-            assert stop - start < 5
+            assert stop - start < 20
 
 
 @pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")

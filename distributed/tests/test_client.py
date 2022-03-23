@@ -63,6 +63,7 @@ from distributed.client import (
     tokenize,
     wait,
 )
+from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import Status
@@ -7261,22 +7262,9 @@ def test_print_simple(capsys):
 
 
 def _verify_cluster_dump(url, format: str, addresses: set[str]) -> dict:
-    fsspec = pytest.importorskip("fsspec")
-
-    url = str(url)
-    if format == "msgpack":
-        import msgpack
-
-        url += ".msgpack.gz"
-        loader = msgpack.unpack
-    else:
-        import yaml
-
-        url += ".yaml"
-        loader = yaml.safe_load
-
-    with fsspec.open(url, mode="rb", compression="infer") as f:
-        state = loader(f)
+    fsspec = pytest.importorskip("fsspec")  # for load_cluster_dump
+    url = str(url) + (".msgpack.gz" if format == "msgpack" else ".yaml")
+    state = load_cluster_dump(url)
 
     assert isinstance(state, dict)
     assert "scheduler" in state
