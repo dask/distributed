@@ -1201,7 +1201,8 @@ class Worker(ServerNode):
                 data = data.encode()
             with open(out_filename, "wb") as f:
                 f.write(data)
-                os.fsync(f)
+                f.flush()
+                os.fsync(f.fileno())
             return data
 
         if len(data) < 10000:
@@ -3712,7 +3713,7 @@ class Worker(ServerNode):
     async def benchmark_memory(self) -> dict[str, float]:
         return await self.loop.run_in_executor(None, benchmark_memory)
 
-    async def benchmark_network(self, address=None) -> dict[str, float]:
+    async def benchmark_network(self, address: str) -> dict[str, float]:
         return await benchmark_network(rpc=self.rpc, address=address)
 
     ##############
@@ -4657,12 +4658,12 @@ async def benchmark_network(
     with rpc(address) as r:
         for size_str in sizes:
             size = parse_bytes(size_str)
-            data = randbytes(size)
+            data = to_serialize(randbytes(size))
 
             start = time()
             total = 0
             while time() < start + duration:
-                await r.echo(data=to_serialize(data))
+                await r.echo(data=data)
                 total += size * 2
 
             out[size_str] = total / (time() - start)

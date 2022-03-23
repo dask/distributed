@@ -7330,8 +7330,8 @@ class Scheduler(SchedulerState, ServerNode):
         response = {w: r for w, r in zip(workers, results) if r}
         return response
 
-    async def benchmark_hardware(self, comm=None) -> dict[str, dict[str, float]]:
-        out: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    async def benchmark_hardware(self) -> "dict[str, dict[str, float]]":
+        out: "defaultdict[str, defaultdict[str, list[float]]]" = defaultdict(lambda: defaultdict(list))
 
         # disk
         result = await self.broadcast(msg={"op": "benchmark_disk"})
@@ -7347,10 +7347,18 @@ class Scheduler(SchedulerState, ServerNode):
 
         # network
         workers = list(self.workers)
-        futures = []
-        for a, b in partition(2, workers):
-            future = self.rpc(a).benchmark_network(address=b)
-            futures.append(future)
+        # On an adaptive cluster, if multiple workers are started on the same physical host,
+        # they are more likely to connect to the Scheduler in sequence, ending up next to
+        # each other in this list.
+        # The transfer speed within such clusters of workers will be effectively that of
+        # localhost. This could happen across different VMs and/or docker images, so
+        # implementing logic based on IP addresses would not necessarily help.
+        # Randomize the connections to even out the mean measures.
+        random.shuffle(workers)
+        futures = [
+            self.rpc(a).benchmark_network(address=b)
+            for a, b in partition(2, workers)
+        ]
         responses = await asyncio.gather(*futures)
 
         for d in responses:

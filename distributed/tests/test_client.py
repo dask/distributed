@@ -7498,13 +7498,13 @@ class TestClientSecurityLoader:
 @gen_cluster(client=True)
 async def test_benchmark_hardware(c, s, a, b):
     result = await c.benchmark_hardware()
-    assert set(result).issubset({"disk", "memory", "network"})
+    assert set(result) =={"disk", "memory", "network"}
     assert all(isinstance(v, float) for d in result.values() for v in d.values())
 
 
 @gen_cluster(client=True, nthreads=[])
 async def test_benchmark_hardware_no_workers(c, s):
-    await c.benchmark_hardware()
+    assert await c.benchmark_hardware() == {"memory": {}, "disk": {}, "network": {}}
 
 
 @gen_cluster(client=True, nthreads=[])
