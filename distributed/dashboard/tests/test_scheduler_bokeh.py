@@ -952,6 +952,12 @@ async def test_aggregate_action(c, s, a, b):
     assert ("transfer") in mbk.action_source.data["names"]
     assert ("compute") in mbk.action_source.data["names"]
 
+    [title_line] = [
+        line for line in response.body.decode().split("\n") if "<title>" in line
+    ]
+    assert "AggregateAction" in title_line
+    assert "Bokeh" not in title_line
+
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 async def test_compute_per_key(c, s, a, b):
