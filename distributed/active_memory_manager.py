@@ -1,3 +1,9 @@
+"""Implementation of the Active Memory Manager. This is a scheduler extension which
+sends drop/replicate suggestions to the worker.
+
+See also :mod:`distributed.worker_memory` and :mod:`distributed.spill`, which implement
+spill/pause/terminate mechanics on the Worker side.
+"""
 from __future__ import annotations
 
 import logging

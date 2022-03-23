@@ -12,7 +12,8 @@ from distributed.deploy.utils import nprocesses_nthreads
 from distributed.nanny import Nanny
 from distributed.scheduler import Scheduler
 from distributed.security import Security
-from distributed.worker import Worker, parse_memory_limit
+from distributed.worker import Worker
+from distributed.worker_memory import parse_memory_limit
 
 logger = logging.getLogger(__name__)
 

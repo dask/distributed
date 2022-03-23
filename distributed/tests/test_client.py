@@ -5878,14 +5878,14 @@ async def test_scatter_error_cancel(c, s, a, b):
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 10,
-    worker_kwargs={"memory_monitor_interval": "20ms"},
+    config={"distributed.worker.memory.pause": False},
 )
 async def test_scatter_and_replicate_avoid_paused_workers(
     c, s, *workers, workers_arg, direct, broadcast
 ):
     paused_workers = [w for i, w in enumerate(workers) if i not in (3, 7)]
     for w in paused_workers:
-        w.memory_pause_fraction = 1e-15
+        w.status = Status.paused
     while any(s.workers[w.address].status != Status.paused for w in paused_workers):
         await asyncio.sleep(0.01)
 

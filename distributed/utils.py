@@ -74,8 +74,6 @@ def _initialize_mp_context():
     if method == "forkserver":
         # Makes the test suite much faster
         preload = ["distributed"]
-        if "pkg_resources" in sys.modules:
-            preload.append("pkg_resources")
 
         from distributed.versions import optional_packages, required_packages
 
