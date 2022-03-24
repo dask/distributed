@@ -311,7 +311,7 @@ async def test_worker_port_range(s):
 
 
 @pytest.mark.slow
-@gen_test(timeout=60)
+@gen_test()
 async def test_worker_waits_for_scheduler():
     w = Worker("127.0.0.1:8724")
     try:
@@ -321,7 +321,7 @@ async def test_worker_waits_for_scheduler():
     else:
         assert False
     assert w.status not in (Status.closed, Status.running, Status.paused)
-    await w.close(timeout=0.1)
+    await w.close(report=False)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
