@@ -1093,17 +1093,17 @@ def command_has_keyword(cmd, k):
     return False
 
 
-# from https://personal.sron.nl/~pault/#fig:scheme_light
+# from https://colorbrewer2.org/#type=qualitative&scheme=Set3&n=10
 palette = [
-    "#77AADD",
-    "#EE8866",
-    "#EEDD88",
-    "#FFAABB",
-    "#99DDFF",
-    "#44BB99",
-    "#BBCC33",
-    "#AAAA00",
-    "#DDDDDD",
+    "#8dd3c7",
+    "#ffffb3",
+    "#bebada",
+    "#fb8072",
+    "#80b1d3",
+    "#fdb462",
+    "#b3de69",
+    "#fccde5",
+    "#bc80bd",
 ]
 
 
