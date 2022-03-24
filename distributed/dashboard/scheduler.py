@@ -119,6 +119,7 @@ template_variables = {
     ],
     "plots": [x.replace("/", "") for x in applications if "individual" in x],
 }
+template_variables["plots"].append("hardware")
 
 if NVML_ENABLED:
     template_variables["pages"].insert(4, "gpu")
