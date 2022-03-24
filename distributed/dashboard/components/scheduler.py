@@ -21,6 +21,7 @@ from bokeh.models import (
     ColumnDataSource,
     CustomJSHover,
     DataRange1d,
+    FactorRange,
     GroupFilter,
     HoverTool,
     NumberFormatter,
@@ -49,7 +50,14 @@ from tornado import escape
 
 import dask
 from dask import config
-from dask.utils import format_bytes, format_time, funcname, key_split, parse_timedelta
+from dask.utils import (
+    format_bytes,
+    format_time,
+    funcname,
+    key_split,
+    parse_bytes,
+    parse_timedelta,
+)
 
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
@@ -577,7 +585,7 @@ class Hardware(DashboardComponent):
                 title="Disk Bandwidth -- Computing ...",
                 tools="",
                 toolbar_location="above",
-                x_range=["1 kiB", "100 kiB", "1 MiB", "10 MiB", "100 MiB"],
+                x_range=FactorRange(factors=[]),
                 **kwargs,
             )
             self.disk_figure.vbar(
@@ -602,7 +610,7 @@ class Hardware(DashboardComponent):
                 title="Memory Bandwidth -- Computing ...",
                 tools="",
                 toolbar_location="above",
-                x_range=["2 kiB", "10 kiB", "100 kiB", "1 MiB", "10 MiB"],
+                x_range=FactorRange(factors=[]),
                 **kwargs,
             )
 
@@ -628,7 +636,7 @@ class Hardware(DashboardComponent):
                 title="Network Bandwidth -- Computing ...",
                 tools="",
                 toolbar_location="above",
-                x_range=["1 kiB", "10kiB", "100kiB", "1 MiB", "10 MiB", "50 MiB"],
+                x_range=FactorRange(factors=[]),
                 **kwargs,
             )
 
@@ -666,15 +674,18 @@ class Hardware(DashboardComponent):
             async def f():
                 result = await self.scheduler.benchmark_hardware()
 
-                for size, bandwidth in result["disk"].items():
+                for size in sorted(result["disk"], key=parse_bytes):
+                    bandwidth = result["disk"][size]
                     self.disk_data["size"].append(size)
                     self.disk_data["bandwidth"].append(bandwidth)
 
-                for size, bandwidth in result["memory"].items():
+                for size in sorted(result["memory"], key=parse_bytes):
+                    bandwidth = result["memory"][size]
                     self.memory_data["size"].append(size)
                     self.memory_data["bandwidth"].append(bandwidth)
 
-                for size, bandwidth in result["network"].items():
+                for size in sorted(result["network"], key=parse_bytes):
+                    bandwidth = result["network"][size]
                     self.network_data["size"].append(size)
                     self.network_data["bandwidth"].append(bandwidth)
 
@@ -685,6 +696,9 @@ class Hardware(DashboardComponent):
             if self.memory_figure.title.text == "Memory Bandwidth":
                 return
             else:
+                self.network_figure.x_range.factors = self.network_data["size"]
+                self.disk_figure.x_range.factors = self.disk_data["size"]
+                self.memory_figure.x_range.factors = self.memory_data["size"]
                 update(self.disk_source, self.disk_data)
                 update(self.memory_source, self.memory_data)
                 update(self.network_source, self.network_data)
