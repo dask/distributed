@@ -556,6 +556,29 @@ def check_active_rpc(loop, active_rpc_timeout=1):
     loop.run_sync(wait)
 
 
+@contextlib.asynccontextmanager
+async def _acheck_active_rpc(active_rpc_timeout=1):
+    active_before = set(rpc.active)
+    yield
+    # Some streams can take a bit of time to notice their peer
+    # has closed, and keep a coroutine (*) waiting for a CommClosedError
+    # before calling close_rpc() after a CommClosedError.
+    # This would happen especially if a non-localhost address is used,
+    # as Nanny does.
+    # (*) (example: gather_from_workers())
+
+    def fail():
+        pytest.fail(
+            "some RPCs left active by test: %s" % (set(rpc.active) - active_before)
+        )
+
+    await async_wait_for(
+        lambda: len(set(rpc.active) - active_before) == 0,
+        timeout=active_rpc_timeout,
+        fail_func=fail,
+    )
+
+
 @pytest.fixture
 def cluster_fixture(loop):
     with cluster() as (scheduler, workers):
@@ -843,7 +866,7 @@ def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
 async def start_cluster(
     nthreads: list[tuple[str, int] | tuple[str, int, dict]],
     scheduler_addr: str,
-    loop: IOLoop,
+    loop: IOLoop | None,
     security: Security | dict[str, Any] | None = None,
     Worker: type[ServerNode] = Worker,
     scheduler_kwargs: dict[str, Any] = {},
@@ -955,6 +978,7 @@ def gen_cluster(
     worker_kwargs = merge(
         {"memory_limit": system.MEMORY_LIMIT, "death_timeout": 15}, worker_kwargs
     )
+    threads = clean_kwargs.pop("threads", not WINDOWS)
 
     def _(func):
         if not iscoroutinefunction(func):
@@ -962,149 +986,160 @@ def gen_cluster(
 
         @functools.wraps(func)
         def test_func(*outer_args, **kwargs):
-            result = None
             workers = []
-            with clean(timeout=active_rpc_timeout, **clean_kwargs) as loop:
 
-                async def coro():
-                    with dask.config.set(config):
-                        s = False
-                        for _ in range(60):
-                            try:
-                                s, ws = await start_cluster(
-                                    nthreads,
-                                    scheduler,
-                                    loop,
-                                    security=security,
-                                    Worker=Worker,
-                                    scheduler_kwargs=scheduler_kwargs,
-                                    worker_kwargs=worker_kwargs,
-                                )
-                            except Exception as e:
-                                logger.error(
-                                    "Failed to start gen_cluster: "
-                                    f"{e.__class__.__name__}: {e}; retrying",
-                                    exc_info=True,
-                                )
-                                await asyncio.sleep(1)
-                            else:
-                                workers[:] = ws
-                                args = [s] + workers
-                                break
-                        if s is False:
-                            raise Exception("Could not start cluster")
-                        if client:
-                            c = await Client(
-                                s.address,
-                                loop=loop,
+            async def async_fn():
+                with dask.config.set(config):
+                    s = False
+                    for _ in range(60):
+                        try:
+                            s, ws = await start_cluster(
+                                nthreads,
+                                scheduler,
+                                loop=None,
                                 security=security,
-                                asynchronous=True,
-                                **client_kwargs,
+                                Worker=Worker,
+                                scheduler_kwargs=scheduler_kwargs,
+                                worker_kwargs=worker_kwargs,
                             )
-                            args = [c] + args
-
-                        try:
-                            coro = func(*args, *outer_args, **kwargs)
-                            task = asyncio.create_task(coro)
-                            coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
-                            result = await coro2
-                            if s.validate:
-                                s.validate_state()
-
-                        except asyncio.TimeoutError:
-                            assert task
-                            buffer = io.StringIO()
-                            # This stack indicates where the coro/test is suspended
-                            task.print_stack(file=buffer)
-
-                            if cluster_dump_directory:
-                                await dump_cluster_state(
-                                    s,
-                                    ws,
-                                    output_dir=cluster_dump_directory,
-                                    func_name=func.__name__,
-                                )
-
-                            task.cancel()
-                            while not task.cancelled():
-                                await asyncio.sleep(0.01)
-
-                            # Remove as much of the traceback as possible; it's
-                            # uninteresting boilerplate from utils_test and asyncio and
-                            # not from the code being tested.
-                            raise TimeoutError(
-                                f"Test timeout after {timeout}s.\n"
-                                "========== Test stack trace starts here ==========\n"
-                                f"{buffer.getvalue()}"
-                            ) from None
-
-                        except pytest.xfail.Exception:
-                            raise
-
-                        except Exception:
-                            if cluster_dump_directory and not has_pytestmark(
-                                test_func, "xfail"
-                            ):
-                                await dump_cluster_state(
-                                    s,
-                                    ws,
-                                    output_dir=cluster_dump_directory,
-                                    func_name=func.__name__,
-                                )
-                            raise
-
-                        finally:
-                            if client and c.status not in ("closing", "closed"):
-                                await c._close(fast=s.status == Status.closed)
-                            await end_cluster(s, workers)
-                            await asyncio.wait_for(cleanup_global_workers(), 1)
-
-                        try:
-                            c = await default_client()
-                        except ValueError:
-                            pass
+                        except Exception as e:
+                            logger.error(
+                                "Failed to start gen_cluster: "
+                                f"{e.__class__.__name__}: {e}; retrying",
+                                exc_info=True,
+                            )
+                            await asyncio.sleep(1)
                         else:
-                            await c._close(fast=True)
+                            workers[:] = ws
+                            args = [s] + workers
+                            break
+                    if s is False:
+                        raise Exception("Could not start cluster")
+                    if client:
+                        c = await Client(
+                            s.address,
+                            loop=None,
+                            security=security,
+                            asynchronous=True,
+                            **client_kwargs,
+                        )
+                        args = [c] + args
 
-                        def get_unclosed():
-                            return [c for c in Comm._instances if not c.closed()] + [
-                                c
-                                for c in _global_clients.values()
-                                if c.status != "closed"
-                            ]
-
-                        try:
-                            start = time()
-                            while time() < start + 60:
-                                gc.collect()
-                                if not get_unclosed():
-                                    break
-                                await asyncio.sleep(0.05)
-                            else:
-                                if allow_unclosed:
-                                    print(f"Unclosed Comms: {get_unclosed()}")
-                                else:
-                                    raise RuntimeError("Unclosed Comms", get_unclosed())
-                        finally:
-                            Comm._instances.clear()
-                            _global_clients.clear()
-
-                        return result
-
-                result = loop.run_sync(
-                    coro, timeout=timeout * 2 if timeout else timeout
-                )
-
-            for w in workers:
-                if getattr(w, "data", None):
                     try:
-                        w.data.clear()
-                    except OSError:
-                        # zict backends can fail if their storage directory
-                        # was already removed
-                        pass
+                        coro = func(*args, *outer_args, **kwargs)
+                        task = asyncio.create_task(coro)
+                        coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
+                        result = await coro2
+                        if s.validate:
+                            s.validate_state()
 
-            return result
+                    except asyncio.TimeoutError:
+                        assert task
+                        buffer = io.StringIO()
+                        # This stack indicates where the coro/test is suspended
+                        task.print_stack(file=buffer)
+
+                        if cluster_dump_directory:
+                            await dump_cluster_state(
+                                s,
+                                ws,
+                                output_dir=cluster_dump_directory,
+                                func_name=func.__name__,
+                            )
+
+                        task.cancel()
+                        while not task.cancelled():
+                            await asyncio.sleep(0.01)
+
+                        # Remove as much of the traceback as possible; it's
+                        # uninteresting boilerplate from utils_test and asyncio and
+                        # not from the code being tested.
+                        raise TimeoutError(
+                            f"Test timeout after {timeout}s.\n"
+                            "========== Test stack trace starts here ==========\n"
+                            f"{buffer.getvalue()}"
+                        ) from None
+
+                    except pytest.xfail.Exception:
+                        raise
+
+                    except Exception:
+                        if cluster_dump_directory and not has_pytestmark(
+                            test_func, "xfail"
+                        ):
+                            await dump_cluster_state(
+                                s,
+                                ws,
+                                output_dir=cluster_dump_directory,
+                                func_name=func.__name__,
+                            )
+                        raise
+
+                    finally:
+                        if client and c.status not in ("closing", "closed"):
+                            await c._close(fast=s.status == Status.closed)
+                        await end_cluster(s, workers)
+                        await asyncio.wait_for(cleanup_global_workers(), 1)
+
+                    try:
+                        c = await default_client()
+                    except ValueError:
+                        pass
+                    else:
+                        await c._close(fast=True)
+
+                    def get_unclosed():
+                        return [c for c in Comm._instances if not c.closed()] + [
+                            c for c in _global_clients.values() if c.status != "closed"
+                        ]
+
+                    try:
+                        start = time()
+                        while time() < start + 60:
+                            gc.collect()
+                            if not get_unclosed():
+                                break
+                            await asyncio.sleep(0.05)
+                        else:
+                            if allow_unclosed:
+                                print(f"Unclosed Comms: {get_unclosed()}")
+                            else:
+                                raise RuntimeError("Unclosed Comms", get_unclosed())
+                    finally:
+                        Comm._instances.clear()
+                        _global_clients.clear()
+
+                    return result
+
+            async def async_fn_outer():
+                nonlocal tornado_loop
+                tornado_loop = IOLoop.current()
+                # we try to cancel the coro after `timeout` however this only
+                # requests cancellation and this can be supressed. If after
+                # two timeouts have ellapsed we force stop the eventloop
+                # which will result in:
+                # RuntimeError: Event loop stopped before Future completed.
+                loop = asyncio.get_running_loop()
+                loop.call_later(timeout * 2, loop.stop)
+
+                async with _aclean(timeout=active_rpc_timeout, **clean_kwargs):
+                    return async_fn()
+
+            with check_thread_leak() if threads else nullcontext():
+                tornado_loop = None
+                try:
+                    return asyncio.run(async_fn_outer())
+                finally:
+                    tornado_loop.close(all_fds=True)
+
+                    for w in workers:
+                        if w_data := getattr(w, "data", None):
+                            try:
+                                w_data.clear()
+                            except OSError:
+                                # zict backends can fail if their storage directory
+                                # was already removed
+                                pass
 
         # Patch the signature so pytest can inject fixtures
         orig_sig = inspect.signature(func)
@@ -1780,6 +1815,22 @@ def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
                             logging.getLogger(name).setLevel(level)
 
                         yield loop
+
+
+@contextlib.asynccontextmanager
+async def _aclean(instances=True, timeout=1, processes=True):
+    with check_process_leak(check=processes):
+        with check_instances() if instances else nullcontext():
+            async with _acheck_active_rpc(timeout):
+                reset_config()
+
+                dask.config.set({"distributed.comm.timeouts.connect": "5s"})
+                # Restore default logging levels
+                # XXX use pytest hooks/fixtures instead?
+                for name, level in logging_levels.items():
+                    logging.getLogger(name).setLevel(level)
+
+                yield
 
 
 @pytest.fixture
