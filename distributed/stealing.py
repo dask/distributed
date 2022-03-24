@@ -415,7 +415,7 @@ class WorkStealing(SchedulerPlugin):
                         if not idle:
                             break
 
-                        thieves = self.potential_thieves_for(ts, idle, sat)
+                        thieves = _potential_thieves_for(ts, idle)
                         if not thieves:
                             break
                         thief = thieves[i % len(thieves)]
@@ -448,7 +448,7 @@ class WorkStealing(SchedulerPlugin):
                             continue
 
                         i += 1
-                        thieves = self.potential_thieves_for(ts, idle, sat)
+                        thieves = _potential_thieves_for(ts, idle)
                         if not thieves:
                             continue
                         thief = thieves[i % len(thieves)]
@@ -485,38 +485,40 @@ class WorkStealing(SchedulerPlugin):
                     out.append(t)
         return out
 
-    def potential_thieves_for(self, ts, idle, sat):
-        if _has_restrictions(ts):
-            return [ws for ws in idle if self.can_steal(ws, ts, sat)]
-        else:
-            return idle
 
-    def can_steal(self, thief, ts, victim):
-        """Determine whether worker ``thief`` can steal task ``ts`` from worker
-        ``victim``.
+def _potential_thieves_for(ts, idle):
+    """Return the list of workers from ``idle`` that could steal ``ts``."""
+    if _has_restrictions(ts):
+        return [ws for ws in idle if _can_steal(ws, ts)]
+    else:
+        return idle
 
-        Assumes that `ts` has some restrictions.
-        """
-        if (
-            ts.host_restrictions
-            and get_address_host(thief.address) not in ts.host_restrictions
-        ):
-            return False
-        elif ts.worker_restrictions and thief.address not in ts.worker_restrictions:
-            return False
 
-        if not ts.resource_restrictions:
-            return True
+def _can_steal(thief, ts):
+    """Determine whether worker ``thief`` can steal task ``ts``.
 
-        for resource, value in ts.resource_restrictions.items():
-            try:
-                supplied = thief.resources[resource]
-            except KeyError:
-                return False
-            else:
-                if supplied < value:
-                    return False
+    Assumes that `ts` has some restrictions.
+    """
+    if (
+        ts.host_restrictions
+        and get_address_host(thief.address) not in ts.host_restrictions
+    ):
+        return False
+    elif ts.worker_restrictions and thief.address not in ts.worker_restrictions:
+        return False
+
+    if not ts.resource_restrictions:
         return True
+
+    for resource, value in ts.resource_restrictions.items():
+        try:
+            supplied = thief.resources[resource]
+        except KeyError:
+            return False
+        else:
+            if supplied < value:
+                return False
+    return True
 
 
 def _has_restrictions(ts):
