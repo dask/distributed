@@ -6,7 +6,7 @@ from collections.abc import Sequence
 
 import dask
 
-from ..utils import nbytes
+from distributed.utils import nbytes
 
 BIG_BYTES_SHARD_SIZE = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
 

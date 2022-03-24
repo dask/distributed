@@ -13,16 +13,16 @@ import dask
 from dask.base import normalize_token
 from dask.utils import typename
 
-from ..utils import ensure_bytes, has_keyword
-from . import pickle
-from .compression import decompress, maybe_compress
-from .utils import (
+from distributed.protocol import pickle
+from distributed.protocol.compression import decompress, maybe_compress
+from distributed.protocol.utils import (
     frame_split_size,
     merge_memoryviews,
     msgpack_opts,
     pack_frames_prelude,
     unpack_frames,
 )
+from distributed.utils import ensure_bytes, has_keyword
 
 dask_serialize = dask.utils.Dispatch("dask_serialize")
 dask_deserialize = dask.utils.Dispatch("dask_deserialize")
@@ -522,8 +522,7 @@ to_serialize = Serialize
 
 
 class Serialized:
-    """
-    An object that is already serialized into header and frames
+    """An object that is already serialized into header and frames
 
     Normal serialization operations pass these objects through.  This is
     typically used within the scheduler which accepts messages that contain
@@ -537,6 +536,54 @@ class Serialized:
     def __eq__(self, other):
         return (
             isinstance(other, Serialized)
+            and other.header == self.header
+            and other.frames == self.frames
+        )
+
+    def __ne__(self, other):
+        return not (self == other)
+
+
+class ToPickle:
+    """Mark an object that should be pickled
+
+    Both the scheduler and workers with automatically unpickle this
+    object on arrival.
+
+    Notice, this requires that the scheduler is allowed to use pickle.
+    If the configuration option "distributed.scheduler.pickle" is set
+    to False, the scheduler will raise an exception instead.
+    """
+
+    def __init__(self, data):
+        self.data = data
+
+    def __repr__(self):
+        return "<ToPickle: %s>" % str(self.data)
+
+    def __eq__(self, other):
+        return isinstance(other, type(self)) and other.data == self.data
+
+    def __ne__(self, other):
+        return not (self == other)
+
+    def __hash__(self):
+        return hash(self.data)
+
+
+class Pickled:
+    """An object that is already pickled into header and frames
+
+    Normal pickled objects are unpickled by the scheduler.
+    """
+
+    def __init__(self, header, frames):
+        self.header = header
+        self.frames = frames
+
+    def __eq__(self, other):
+        return (
+            isinstance(other, type(self))
             and other.header == self.header
             and other.frames == self.frames
         )

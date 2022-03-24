@@ -1,3 +1,9 @@
+"""Implementation of the Active Memory Manager. This is a scheduler extension which
+sends drop/replicate suggestions to the worker.
+
+See also :mod:`distributed.worker_memory` and :mod:`distributed.spill`, which implement
+spill/pause/terminate mechanics on the Worker side.
+"""
 from __future__ import annotations
 
 import logging
@@ -10,13 +16,13 @@ from tornado.ioloop import PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
-from .core import Status
-from .metrics import time
-from .utils import import_term, log_errors
+from distributed.core import Status
+from distributed.metrics import time
+from distributed.utils import import_term, log_errors
 
-if TYPE_CHECKING:  # pragma: nocover
-    from .client import Client
-    from .scheduler import Scheduler, TaskState, WorkerState
+if TYPE_CHECKING:
+    from distributed.client import Client
+    from distributed.scheduler import Scheduler, TaskState, WorkerState
 
 # Main logger. This is reasonably terse also at DEBUG level.
 logger = logging.getLogger(__name__)

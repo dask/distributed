@@ -18,7 +18,6 @@ from collections.abc import (
     Collection,
     Container,
     Iterable,
-    Iterator,
     Mapping,
     MutableMapping,
 )
@@ -27,7 +26,7 @@ from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from tlz import first, keymap, merge, pluck  # noqa: F401
 from tornado.ioloop import IOLoop, PeriodicCallback
@@ -45,13 +44,12 @@ from dask.utils import (
     typename,
 )
 
-from . import comm, preloading, profile, system, utils
-from .batched import BatchedSend
-from .comm import Comm, connect, get_address_host
-from .comm.addressing import address_from_user_args, parse_address
-from .comm.utils import OFFLOAD_THRESHOLD
-from .compatibility import to_thread
-from .core import (
+from distributed import comm, preloading, profile, utils
+from distributed.batched import BatchedSend
+from distributed.comm import connect, get_address_host
+from distributed.comm.addressing import address_from_user_args, parse_address
+from distributed.comm.utils import OFFLOAD_THRESHOLD
+from distributed.core import (
     CommClosedError,
     Status,
     coerce_to_address,
@@ -59,21 +57,22 @@ from .core import (
     pingpong,
     send_recv,
 )
-from .diagnostics import nvml
-from .diagnostics.plugin import _get_plugin_name
-from .diskutils import WorkDir, WorkSpace
-from .http import get_handlers
-from .metrics import time
-from .node import ServerNode
-from .proctitle import setproctitle
-from .protocol import pickle, to_serialize
-from .pubsub import PubSubWorkerExtension
-from .security import Security
-from .shuffle import ShuffleWorkerExtension
-from .sizeof import safe_sizeof as sizeof
-from .threadpoolexecutor import ThreadPoolExecutor
-from .threadpoolexecutor import secede as tpe_secede
-from .utils import (
+from distributed.diagnostics import nvml
+from distributed.diagnostics.plugin import _get_plugin_name
+from distributed.diskutils import WorkDir, WorkSpace
+from distributed.http import get_handlers
+from distributed.metrics import time
+from distributed.node import ServerNode
+from distributed.proctitle import setproctitle
+from distributed.protocol import pickle, to_serialize
+from distributed.pubsub import PubSubWorkerExtension
+from distributed.security import Security
+from distributed.shuffle import ShuffleWorkerExtension
+from distributed.sizeof import safe_sizeof as sizeof
+from distributed.stories import worker_story
+from distributed.threadpoolexecutor import ThreadPoolExecutor
+from distributed.threadpoolexecutor import secede as tpe_secede
+from distributed.utils import (
     LRU,
     TimeoutError,
     _maybe_complex,
@@ -92,21 +91,44 @@ from .utils import (
     thread_state,
     warn_on_duration,
 )
-from .utils_comm import gather_from_workers, pack_data, retry_operation
-from .utils_perf import ThrottledGC, disable_gc_diagnosis, enable_gc_diagnosis
-from .versions import get_versions
+from distributed.utils_comm import gather_from_workers, pack_data, retry_operation
+from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
+from distributed.versions import get_versions
+from distributed.worker_memory import (
+    DeprecatedMemoryManagerAttribute,
+    DeprecatedMemoryMonitor,
+    WorkerMemoryManager,
+)
+from distributed.worker_state_machine import Instruction  # noqa: F401
+from distributed.worker_state_machine import (
+    PROCESSING,
+    READY,
+    AddKeysMsg,
+    InvalidTransition,
+    LongRunningMsg,
+    ReleaseWorkerDataMsg,
+    RescheduleMsg,
+    SendMessageToScheduler,
+    SerializedTask,
+    TaskErredMsg,
+    TaskFinishedMsg,
+    TaskState,
+    UniqueTaskHeap,
+)
 
 if TYPE_CHECKING:
+    # TODO move to typing (requires Python >=3.10)
     from typing_extensions import TypeAlias
 
-    from .actor import Actor
-    from .client import Client
-    from .diagnostics.plugin import WorkerPlugin
-    from .nanny import Nanny
+    from distributed.actor import Actor
+    from distributed.client import Client
+    from distributed.diagnostics.plugin import WorkerPlugin
+    from distributed.nanny import Nanny
+    from distributed.worker_state_machine import TaskStateState
 
-    # {TaskState -> finish: str | (finish: str, *args)}
-    Recs: TypeAlias = "dict[TaskState, str | tuple]"
-    Smsgs: TypeAlias = "list[dict[str, Any]]"
+    # {TaskState -> finish: TaskStateState | (finish: TaskStateState, transition *args)}
+    Recs: TypeAlias = "dict[TaskState, TaskStateState | tuple]"
+    Instructions: TypeAlias = "list[Instruction]"
 
 
 logger = logging.getLogger(__name__)
@@ -115,240 +137,11 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 no_value = "--no-value-sentinel--"
 
-# TaskState.state subsets
-PROCESSING = {
-    "waiting",
-    "ready",
-    "constrained",
-    "executing",
-    "long-running",
-    "cancelled",
-    "resumed",
-}
-READY = {"ready", "constrained"}
-
 DEFAULT_EXTENSIONS: list[type] = [PubSubWorkerExtension, ShuffleWorkerExtension]
 
 DEFAULT_METRICS: dict[str, Callable[[Worker], Any]] = {}
 
 DEFAULT_STARTUP_INFORMATION: dict[str, Callable[[Worker], Any]] = {}
-
-DEFAULT_DATA_SIZE = parse_bytes(
-    dask.config.get("distributed.scheduler.default-data-size")
-)
-
-
-class SerializedTask(NamedTuple):
-    function: Callable
-    args: tuple
-    kwargs: dict[str, Any]
-    task: object  # distributed.scheduler.TaskState.run_spec
-
-
-class StartStop(TypedDict, total=False):
-    action: str
-    start: float
-    stop: float
-    source: str  # optional
-
-
-class InvalidTransition(Exception):
-    pass
-
-
-class TaskState:
-    """Holds volatile state relating to an individual Dask task
-
-
-    * **dependencies**: ``set(TaskState instances)``
-        The data needed by this key to run
-    * **dependents**: ``set(TaskState instances)``
-        The keys that use this dependency.
-    * **duration**: ``float``
-        Expected duration the a task
-    * **priority**: ``tuple``
-        The priority this task given by the scheduler.  Determines run order.
-    * **state**: ``str``
-        The current state of the task. One of ["waiting", "ready", "executing",
-        "fetch", "memory", "flight", "long-running", "rescheduled", "error"]
-    * **who_has**: ``set(worker)``
-        Workers that we believe have this data
-    * **coming_from**: ``str``
-        The worker that current task data is coming from if task is in flight
-    * **waiting_for_data**: ``set(keys of dependencies)``
-        A dynamic version of dependencies.  All dependencies that we still don't
-        have for a particular key.
-    * **resource_restrictions**: ``{str: number}``
-        Abstract resources required to run a task
-    * **exception**: ``str``
-        The exception caused by running a task if it erred
-    * **traceback**: ``str``
-        The exception caused by running a task if it erred
-    * **type**: ``type``
-        The type of a particular piece of data
-    * **suspicious_count**: ``int``
-        The number of times a dependency has not been where we expected it
-    * **startstops**: ``[{startstop}]``
-        Log of transfer, load, and compute times for a task
-    * **start_time**: ``float``
-        Time at which task begins running
-    * **stop_time**: ``float``
-        Time at which task finishes running
-    * **metadata**: ``dict``
-        Metadata related to task. Stored metadata should be msgpack
-        serializable (e.g. int, string, list, dict).
-    * **nbytes**: ``int``
-        The size of a particular piece of data
-    * **annotations**: ``dict``
-        Task annotations
-
-    Parameters
-    ----------
-    key: str
-    run_spec: SerializedTask
-        A named tuple containing the ``function``, ``args``, ``kwargs`` and
-        ``task`` associated with this `TaskState` instance. This defaults to
-        ``None`` and can remain empty if it is a dependency that this worker
-        will receive from another worker.
-
-    """
-
-    key: str
-    run_spec: SerializedTask | None
-    dependencies: set[TaskState]
-    dependents: set[TaskState]
-    duration: float | None
-    priority: tuple[int, ...] | None
-    state: str
-    who_has: set[str]
-    coming_from: str | None
-    waiting_for_data: set[TaskState]
-    waiters: set[TaskState]
-    resource_restrictions: dict[str, float]
-    exception: Exception | None
-    exception_text: str | None
-    traceback: object | None
-    traceback_text: str | None
-    type: type | None
-    suspicious_count: int
-    startstops: list[StartStop]
-    start_time: float | None
-    stop_time: float | None
-    metadata: dict
-    nbytes: float | None
-    annotations: dict | None
-    done: bool
-    _previous: str | None
-    _next: str | None
-
-    def __init__(self, key: str, run_spec: SerializedTask | None = None):
-        assert key is not None
-        self.key = key
-        self.run_spec = run_spec
-        self.dependencies = set()
-        self.dependents = set()
-        self.duration = None
-        self.priority = None
-        self.state = "released"
-        self.who_has = set()
-        self.coming_from = None
-        self.waiting_for_data = set()
-        self.waiters = set()
-        self.resource_restrictions = {}
-        self.exception = None
-        self.exception_text = ""
-        self.traceback = None
-        self.traceback_text = ""
-        self.type = None
-        self.suspicious_count = 0
-        self.startstops = []
-        self.start_time = None
-        self.stop_time = None
-        self.metadata = {}
-        self.nbytes = None
-        self.annotations = None
-        self.done = False
-        self._previous = None
-        self._next = None
-
-    def __repr__(self) -> str:
-        return f"<TaskState {self.key!r} {self.state}>"
-
-    def get_nbytes(self) -> int:
-        nbytes = self.nbytes
-        return nbytes if nbytes is not None else DEFAULT_DATA_SIZE
-
-    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict:
-        """Dictionary representation for debugging purposes.
-        Not type stable and not intended for roundtrips.
-
-        See also
-        --------
-        Client.dump_cluster_state
-        distributed.utils.recursive_to_dict
-
-        Notes
-        -----
-        This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
-        When a task references another task, just print the task repr. All tasks
-        should neatly appear under Worker.tasks. This also prevents a RecursionError
-        during particularly heavy loads, which have been observed to happen whenever
-        there's an acyclic dependency chain of ~200+ tasks.
-        """
-        return recursive_to_dict(self, exclude=exclude, members=True)
-
-    def is_protected(self) -> bool:
-        return self.state in PROCESSING or any(
-            dep_ts.state in PROCESSING for dep_ts in self.dependents
-        )
-
-
-class UniqueTaskHeap(Collection):
-    """A heap of TaskState objects ordered by TaskState.priority
-    Ties are broken by string comparison of the key. Keys are guaranteed to be
-    unique. Iterating over this object returns the elements in priority order.
-    """
-
-    def __init__(self, collection: Collection[TaskState] = ()):
-        self._known = {ts.key for ts in collection}
-        self._heap = [(ts.priority, ts.key, ts) for ts in collection]
-        heapq.heapify(self._heap)
-
-    def push(self, ts: TaskState) -> None:
-        """Add a new TaskState instance to the heap. If the key is already
-        known, no object is added.
-
-        Note: This does not update the priority / heap order in case priority
-        changes.
-        """
-        assert isinstance(ts, TaskState)
-        if ts.key not in self._known:
-            heapq.heappush(self._heap, (ts.priority, ts.key, ts))
-            self._known.add(ts.key)
-
-    def pop(self) -> TaskState:
-        """Pop the task with highest priority from the heap."""
-        _, key, ts = heapq.heappop(self._heap)
-        self._known.remove(key)
-        return ts
-
-    def peek(self) -> TaskState:
-        """Get the highest priority TaskState without removing it from the heap"""
-        return self._heap[0][2]
-
-    def __contains__(self, x: object) -> bool:
-        if isinstance(x, TaskState):
-            x = x.key
-        return x in self._known
-
-    def __iter__(self) -> Iterator[TaskState]:
-        return (ts for _, _, ts in sorted(self._heap))
-
-    def __len__(self) -> int:
-        return len(self._known)
-
-    def __repr__(self) -> str:
-        return f"<{type(self).__name__}: {len(self)} items>"
 
 
 class Worker(ServerNode):
@@ -415,17 +208,6 @@ class Worker(ServerNode):
 
     * **tasks**: ``{key: TaskState}``
         The tasks currently executing on this worker (and any dependencies of those tasks)
-    * **data:** ``{key: object}``:
-        Prefer using the **host** attribute instead of this, unless
-        memory_limit and at least one of memory_target_fraction or
-        memory_spill_fraction values are defined, in that case, this attribute
-        is a zict.Buffer, from which information on LRU cache can be queried.
-    * **data.memory:** ``{key: object}``:
-        Dictionary mapping keys to actual values stored in memory. Only
-        available if condition for **data** being a zict.Buffer is met.
-    * **data.disk:** ``{key: object}``:
-        Dictionary mapping keys to actual values stored on disk. Only
-        available if condition for **data** being a zict.Buffer is met.
     * **data_needed**: UniqueTaskHeap
         The tasks which still require data in order to execute, prioritized as a heap
     * **ready**: [keys]
@@ -608,12 +390,6 @@ class Worker(ServerNode):
     extensions: dict
     security: Security
     connection_args: dict[str, Any]
-    memory_limit: int | None
-    memory_target_fraction: float | Literal[False]
-    memory_spill_fraction: float | Literal[False]
-    memory_pause_fraction: float | Literal[False]
-    max_spill: int | Literal[False]
-    data: MutableMapping[str, Any]  # {task key: task payload}
     actors: dict[str, Actor | None]
     loop: IOLoop
     reconnect: bool
@@ -632,9 +408,6 @@ class Worker(ServerNode):
     low_level_profiler: bool
     scheduler: Any
     execution_state: dict[str, Any]
-    memory_monitor_interval: float | None
-    _memory_monitoring: bool
-    _throttled_gc: ThrottledGC
     plugins: dict[str, WorkerPlugin]
     _pending_plugins: tuple[WorkerPlugin, ...]
 
@@ -651,7 +424,6 @@ class Worker(ServerNode):
         services: dict | None = None,
         name: Any | None = None,
         reconnect: bool = True,
-        memory_limit: str | float = "auto",
         executor: Executor | dict[str, Executor] | Literal["offload"] | None = None,
         resources: dict[str, float] | None = None,
         silence_logs: int | None = None,
@@ -661,24 +433,11 @@ class Worker(ServerNode):
         security: Security | dict[str, Any] | None = None,
         contact_address: str | None = None,
         heartbeat_interval: Any = "1s",
-        memory_monitor_interval: Any = "200ms",
-        memory_target_fraction: float | Literal[False] | None = None,
-        memory_spill_fraction: float | Literal[False] | None = None,
-        memory_pause_fraction: float | Literal[False] | None = None,
-        max_spill: float | str | Literal[False] | None = None,
         extensions: list[type] | None = None,
         metrics: Mapping[str, Callable[[Worker], Any]] = DEFAULT_METRICS,
         startup_information: Mapping[
             str, Callable[[Worker], Any]
         ] = DEFAULT_STARTUP_INFORMATION,
-        data: (
-            MutableMapping[str, Any]  # pre-initialised
-            | Callable[[], MutableMapping[str, Any]]  # constructor
-            | tuple[
-                Callable[..., MutableMapping[str, Any]], dict[str, Any]
-            ]  # (constructor, kwargs to constructor)
-            | None  # create internatlly
-        ) = None,
         interface: str | None = None,
         host: str | None = None,
         port: int | None = None,
@@ -694,6 +453,18 @@ class Worker(ServerNode):
         lifetime: Any | None = None,
         lifetime_stagger: Any | None = None,
         lifetime_restart: bool | None = None,
+        ###################################
+        # Parameters to WorkerMemoryManager
+        memory_limit: str | float = "auto",
+        # Allow overriding the dict-like that stores the task outputs.
+        # This is meant for power users only. See WorkerMemoryManager for details.
+        data=None,
+        # Deprecated parameters; please use dask config instead.
+        memory_target_fraction: float | Literal[False] | None = None,
+        memory_spill_fraction: float | Literal[False] | None = None,
+        memory_pause_fraction: float | Literal[False] | None = None,
+        ###################################
+        # Parameters to Server
         **kwargs,
     ):
         self.tasks = {}
@@ -893,54 +664,6 @@ class Worker(ServerNode):
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
 
-        self.memory_limit = parse_memory_limit(memory_limit, self.nthreads)
-
-        self.memory_target_fraction = (
-            memory_target_fraction
-            if memory_target_fraction is not None
-            else dask.config.get("distributed.worker.memory.target")
-        )
-        self.memory_spill_fraction = (
-            memory_spill_fraction
-            if memory_spill_fraction is not None
-            else dask.config.get("distributed.worker.memory.spill")
-        )
-        self.memory_pause_fraction = (
-            memory_pause_fraction
-            if memory_pause_fraction is not None
-            else dask.config.get("distributed.worker.memory.pause")
-        )
-
-        if max_spill is None:
-            max_spill = dask.config.get("distributed.worker.memory.max-spill")
-        self.max_spill = False if max_spill is False else parse_bytes(max_spill)
-
-        if isinstance(data, MutableMapping):
-            self.data = data
-        elif callable(data):
-            self.data = data()
-        elif isinstance(data, tuple):
-            self.data = data[0](**data[1])
-        elif self.memory_limit and (
-            self.memory_target_fraction or self.memory_spill_fraction
-        ):
-            from .spill import SpillBuffer
-
-            if self.memory_target_fraction:
-                target = int(
-                    self.memory_limit
-                    * (self.memory_target_fraction or self.memory_spill_fraction)
-                )
-            else:
-                target = sys.maxsize
-            self.data = SpillBuffer(
-                os.path.join(self.local_directory, "storage"),
-                target=target,
-                max_spill=self.max_spill,
-            )
-        else:
-            self.data = {}
-
         self.actors = {}
         self.loop = loop or IOLoop.current()
         self.reconnect = reconnect
@@ -1058,24 +781,19 @@ class Worker(ServerNode):
 
         self._address = contact_address
 
-        self.memory_monitor_interval = parse_timedelta(
-            memory_monitor_interval, default="ms"
-        )
-        self._memory_monitoring = False
-        if self.memory_limit:
-            assert self.memory_monitor_interval is not None
-            pc = PeriodicCallback(
-                self.memory_monitor,  # type: ignore
-                self.memory_monitor_interval * 1000,
-            )
-            self.periodic_callbacks["memory"] = pc
-
         if extensions is None:
             extensions = DEFAULT_EXTENSIONS
         for ext in extensions:
             ext(self)
 
-        self._throttled_gc = ThrottledGC(logger=logger)
+        self.memory_manager = WorkerMemoryManager(
+            self,
+            data=data,
+            memory_limit=memory_limit,
+            memory_target_fraction=memory_target_fraction,
+            memory_spill_fraction=memory_spill_fraction,
+            memory_pause_fraction=memory_pause_fraction,
+        )
 
         setproctitle("dask-worker [not started]")
 
@@ -1109,6 +827,33 @@ class Worker(ServerNode):
 
         Worker._instances.add(self)
 
+    ################
+    # Memory manager
+    ################
+    memory_manager: WorkerMemoryManager
+
+    @property
+    def data(self) -> MutableMapping[str, Any]:
+        """{task key: task payload} of all completed tasks, whether they were computed on
+        this Worker or computed somewhere else and then transferred here over the
+        network.
+
+        When using the default configuration, this is a zict buffer that automatically
+        spills to disk whenever the target threshold is exceeded.
+        If spilling is disabled, it is a plain dict instead.
+        It could also be a user-defined arbitrary dict-like passed when initialising
+        the Worker or the Nanny.
+        Worker logic should treat this opaquely and stick to the MutableMapping API.
+        """
+        return self.memory_manager.data
+
+    # Deprecated attributes moved to self.memory_manager.<name>
+    memory_limit = DeprecatedMemoryManagerAttribute()
+    memory_target_fraction = DeprecatedMemoryManagerAttribute()
+    memory_spill_fraction = DeprecatedMemoryManagerAttribute()
+    memory_pause_fraction = DeprecatedMemoryManagerAttribute()
+    memory_monitor = DeprecatedMemoryMonitor()
+
     ##################
     # Administrative #
     ##################
@@ -1130,12 +875,13 @@ class Worker(ServerNode):
         return self._deque_handler.deque
 
     def log_event(self, topic, msg):
-        self.batched_stream.send(
+        self.loop.add_callback(
+            self.batched_stream.send,
             {
                 "op": "log-event",
                 "topic": topic,
                 "msg": msg,
-            }
+            },
         )
 
     @property
@@ -1152,22 +898,20 @@ class Worker(ServerNode):
         return self.address
 
     @property
-    def local_dir(self):
-        """For API compatibility with Nanny"""
-        warnings.warn(
-            "The local_dir attribute has moved to local_directory", stacklevel=2
-        )
-        return self.local_directory
-
-    @property
     def executor(self):
         return self.executors["default"]
 
     @ServerNode.status.setter  # type: ignore
     def status(self, value):
-        """Override Server.status to notify the Scheduler of status changes"""
+        """Override Server.status to notify the Scheduler of status changes.
+        Also handles unpausing.
+        """
+        prev_status = self.status
         ServerNode.status.__set__(self, value)
         self._send_worker_status_change()
+        if prev_status == Status.paused and value == Status.running:
+            self.ensure_computing()
+            self.ensure_communicating()
 
     def _send_worker_status_change(self) -> None:
         if (
@@ -1236,12 +980,10 @@ class Worker(ServerNode):
             "id": self.id,
             "scheduler": self.scheduler.address,
             "nthreads": self.nthreads,
-            "memory_limit": self.memory_limit,
+            "memory_limit": self.memory_manager.memory_limit,
         }
 
-    def _to_dict(
-        self, comm: Comm | None = None, *, exclude: Container[str] = ()
-    ) -> dict:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -1266,16 +1008,13 @@ class Worker(ServerNode):
             "in_flight_workers": self.in_flight_workers,
             "log": self.log,
             "tasks": self.tasks,
-            "memory_limit": self.memory_limit,
-            "memory_target_fraction": self.memory_target_fraction,
-            "memory_spill_fraction": self.memory_spill_fraction,
-            "memory_pause_fraction": self.memory_pause_fraction,
             "logs": self.get_logs(),
             "config": dask.config.config,
             "incoming_transfer_log": self.incoming_transfer_log,
             "outgoing_transfer_log": self.outgoing_transfer_log,
         }
         info.update(extra)
+        info.update(self.memory_manager._to_dict(exclude=exclude))
         info = {k: v for k, v in info.items() if k not in exclude}
         return recursive_to_dict(info, exclude=exclude)
 
@@ -1316,7 +1055,7 @@ class Worker(ServerNode):
                         types={k: typename(v) for k, v in self.data.items()},
                         now=time(),
                         resources=self.total_resources,
-                        memory_limit=self.memory_limit,
+                        memory_limit=self.memory_manager.memory_limit,
                         local_directory=self.local_directory,
                         services=self.service_ports,
                         nanny=self.nanny,
@@ -1440,7 +1179,7 @@ class Worker(ServerNode):
 
         Returns Jupyter connection info dictionary.
         """
-        from ._ipython_utils import start_ipython
+        from distributed._ipython_utils import start_ipython
 
         if self._ipython_kernel is None:
             self._ipython_kernel = start_ipython(
@@ -1607,8 +1346,11 @@ class Worker(ServerNode):
         logger.info("Waiting to connect to: %26s", self.scheduler.address)
         logger.info("-" * 49)
         logger.info("              Threads: %26d", self.nthreads)
-        if self.memory_limit:
-            logger.info("               Memory: %26s", format_bytes(self.memory_limit))
+        if self.memory_manager.memory_limit:
+            logger.info(
+                "               Memory: %26s",
+                format_bytes(self.memory_manager.memory_limit),
+            )
         logger.info("      Local Directory: %26s", self.local_directory)
 
         setproctitle("dask-worker [%s]" % self.address)
@@ -1736,19 +1478,11 @@ class Worker(ServerNode):
             for executor in self.executors.values():
                 if executor is utils._offload_executor:
                     continue  # Never shutdown the offload executor
-
-                def _close():
-                    if isinstance(executor, ThreadPoolExecutor):
-                        executor._work_queue.queue.clear()
-                        executor.shutdown(wait=executor_wait, timeout=timeout)
-                    else:
-                        executor.shutdown(wait=executor_wait)
-
-                # Waiting for the shutdown can block the event loop causing
-                # weird deadlocks particularly if the task that is executing in
-                # the thread is waiting for a server reply, e.g. when using
-                # worker clients, semaphores, etc.
-                await to_thread(_close)
+                if isinstance(executor, ThreadPoolExecutor):
+                    executor._work_queue.queue.clear()
+                    executor.shutdown(wait=executor_wait, timeout=timeout)
+                else:
+                    executor.shutdown(wait=executor_wait)
 
             self.stop()
             await self.rpc.close()
@@ -1857,7 +1591,7 @@ class Worker(ServerNode):
         if len(data) < len(keys):
             for k in set(keys) - set(data):
                 if k in self.actors:
-                    from .actor import Actor
+                    from distributed.actor import Actor
 
                     data[k] = Actor(type(self.actors[k]), self.address, k, worker=self)
 
@@ -1917,7 +1651,7 @@ class Worker(ServerNode):
         if stimulus_id is None:
             stimulus_id = f"update-data-{time()}"
         recommendations: Recs = {}
-        scheduler_messages = []
+        instructions: Instructions = []
         for key, value in data.items():
             try:
                 ts = self.tasks[key]
@@ -1936,13 +1670,10 @@ class Worker(ServerNode):
             self.log.append((key, "receive-from-scatter", stimulus_id, time()))
 
         if report:
-            scheduler_messages.append(
-                {"op": "add-keys", "keys": list(data), "stimulus_id": stimulus_id}
-            )
+            instructions.append(AddKeysMsg(keys=list(data), stimulus_id=stimulus_id))
 
         self.transitions(recommendations, stimulus_id=stimulus_id)
-        for msg in scheduler_messages:
-            self.batched_stream.send(msg)
+        self._handle_instructions(instructions)
         return {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
 
     def handle_free_keys(self, keys: list[str], stimulus_id: str) -> None:
@@ -2002,9 +1733,8 @@ class Worker(ServerNode):
 
         if rejected:
             self.log.append(("remove-replica-rejected", rejected, stimulus_id, time()))
-            self.batched_stream.send(
-                {"op": "add-keys", "keys": rejected, "stimulus_id": stimulus_id}
-            )
+            smsg = AddKeysMsg(keys=rejected, stimulus_id=stimulus_id)
+            self._handle_instructions([smsg])
 
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
@@ -2129,7 +1859,7 @@ class Worker(ServerNode):
         ts.annotations = annotations
 
         recommendations: Recs = {}
-        scheduler_msgs: Smsgs = []
+        instructions: Instructions = []
         for dependency in who_has:
             dep_ts = self.ensure_task_exists(
                 key=dependency,
@@ -2145,7 +1875,7 @@ class Worker(ServerNode):
             pass
         elif ts.state == "memory":
             recommendations[ts] = "memory"
-            scheduler_msgs.append(self._get_task_finished_msg(ts))
+            instructions.append(self._get_task_finished_msg(ts))
         elif ts.state in {
             "released",
             "fetch",
@@ -2158,9 +1888,7 @@ class Worker(ServerNode):
         else:  # pragma: no cover
             raise RuntimeError(f"Unexpected task state encountered {ts} {stimulus_id}")
 
-        for msg in scheduler_msgs:
-            self.batched_stream.send(msg)
-
+        self._handle_instructions(instructions)
         self.update_who_has(who_has)
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
@@ -2170,7 +1898,7 @@ class Worker(ServerNode):
 
     def transition_missing_fetch(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         if self.validate:
             assert ts.state == "missing"
             assert ts.priority is not None
@@ -2183,15 +1911,17 @@ class Worker(ServerNode):
 
     def transition_missing_released(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         self._missing_dep_flight.discard(ts)
-        recs, smsgs = self.transition_generic_released(ts, stimulus_id=stimulus_id)
+        recs, instructions = self.transition_generic_released(
+            ts, stimulus_id=stimulus_id
+        )
         assert ts.key in self.tasks
-        return recs, smsgs
+        return recs, instructions
 
     def transition_flight_missing(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         assert ts.done
         ts.state = "missing"
         self._missing_dep_flight.add(ts)
@@ -2200,7 +1930,7 @@ class Worker(ServerNode):
 
     def transition_released_fetch(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         if self.validate:
             assert ts.state == "released"
             assert ts.priority is not None
@@ -2213,7 +1943,7 @@ class Worker(ServerNode):
 
     def transition_generic_released(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         self.release_key(ts.key, stimulus_id=stimulus_id)
         recs: Recs = {}
         for dependency in ts.dependencies:
@@ -2230,7 +1960,7 @@ class Worker(ServerNode):
 
     def transition_released_waiting(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         if self.validate:
             assert ts.state == "released"
             assert all(d.key in self.tasks for d in ts.dependencies)
@@ -2238,7 +1968,7 @@ class Worker(ServerNode):
         recommendations: Recs = {}
         ts.waiting_for_data.clear()
         for dep_ts in ts.dependencies:
-            if not dep_ts.state == "memory":
+            if dep_ts.state != "memory":
                 ts.waiting_for_data.add(dep_ts)
                 dep_ts.waiters.add(ts)
                 if dep_ts.state not in {"fetch", "flight"}:
@@ -2256,7 +1986,7 @@ class Worker(ServerNode):
 
     def transition_fetch_flight(
         self, ts: TaskState, worker, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         if self.validate:
             assert ts.state == "fetch"
             assert ts.who_has
@@ -2269,14 +1999,16 @@ class Worker(ServerNode):
 
     def transition_memory_released(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
-        recs, smsgs = self.transition_generic_released(ts, stimulus_id=stimulus_id)
-        smsgs.append({"op": "release-worker-data", "key": ts.key})
-        return recs, smsgs
+    ) -> tuple[Recs, Instructions]:
+        recs, instructions = self.transition_generic_released(
+            ts, stimulus_id=stimulus_id
+        )
+        instructions.append(ReleaseWorkerDataMsg(ts.key))
+        return recs, instructions
 
     def transition_waiting_constrained(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         if self.validate:
             assert ts.state == "waiting"
             assert not ts.waiting_for_data
@@ -2292,25 +2024,25 @@ class Worker(ServerNode):
 
     def transition_long_running_rescheduled(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         recs: Recs = {ts: "released"}
-        smsgs = [{"op": "reschedule", "key": ts.key, "worker": self.address}]
-        return recs, smsgs
+        smsg = RescheduleMsg(key=ts.key, worker=self.address)
+        return recs, [smsg]
 
     def transition_executing_rescheduled(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         for resource, quantity in ts.resource_restrictions.items():
             self.available_resources[resource] += quantity
         self._executing.discard(ts)
 
         recs: Recs = {ts: "released"}
-        smsgs: Smsgs = [{"op": "reschedule", "key": ts.key, "worker": self.address}]
-        return recs, smsgs
+        smsg = RescheduleMsg(key=ts.key, worker=self.address)
+        return recs, [smsg]
 
     def transition_waiting_ready(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         if self.validate:
             assert ts.state == "waiting"
             assert ts.key not in self.ready
@@ -2334,11 +2066,11 @@ class Worker(ServerNode):
         traceback_text,
         *,
         stimulus_id: str,
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         recs: Recs = {}
-        smsgs: Smsgs = []
+        instructions: Instructions = []
         if ts._previous == "executing":
-            recs, smsgs = self.transition_executing_error(
+            recs, instructions = self.transition_executing_error(
                 ts,
                 exception,
                 traceback,
@@ -2347,7 +2079,7 @@ class Worker(ServerNode):
                 stimulus_id=stimulus_id,
             )
         elif ts._previous == "flight":
-            recs, smsgs = self.transition_flight_error(
+            recs, instructions = self.transition_flight_error(
                 ts,
                 exception,
                 traceback,
@@ -2357,36 +2089,32 @@ class Worker(ServerNode):
             )
         if ts._next:
             recs[ts] = ts._next
-        return recs, smsgs
+        return recs, instructions
 
     def transition_generic_error(
         self,
         ts: TaskState,
-        exception,
-        traceback,
-        exception_text,
-        traceback_text,
+        exception: Exception,
+        traceback: object,
+        exception_text: str,
+        traceback_text: str,
         *,
         stimulus_id: str,
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         ts.exception = exception
         ts.traceback = traceback
         ts.exception_text = exception_text
         ts.traceback_text = traceback_text
         ts.state = "error"
-        smsg = {
-            "op": "task-erred",
-            "status": "error",
-            "key": ts.key,
-            "thread": self.threads.get(ts.key),
-            "exception": ts.exception,
-            "traceback": ts.traceback,
-            "exception_text": ts.exception_text,
-            "traceback_text": ts.traceback_text,
-        }
-
-        if ts.startstops:
-            smsg["startstops"] = ts.startstops
+        smsg = TaskErredMsg(
+            key=ts.key,
+            exception=ts.exception,
+            traceback=ts.traceback,
+            exception_text=ts.exception_text,
+            traceback_text=ts.traceback_text,
+            thread=self.threads.get(ts.key),
+            startstops=ts.startstops,
+        )
 
         return {}, [smsg]
 
@@ -2399,7 +2127,7 @@ class Worker(ServerNode):
         traceback_text,
         *,
         stimulus_id: str,
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         for resource, quantity in ts.resource_restrictions.items():
             self.available_resources[resource] += quantity
         self._executing.discard(ts)
@@ -2413,8 +2141,8 @@ class Worker(ServerNode):
         )
 
     def _transition_from_resumed(
-        self, ts: TaskState, finish: str, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+        self, ts: TaskState, finish: TaskStateState, *, stimulus_id: str
+    ) -> tuple[Recs, Instructions]:
         """`resumed` is an intermediate degenerate state which splits further up
         into two states depending on what the last signal / next state is
         intended to be. There are only two viable choices depending on whether
@@ -2435,24 +2163,24 @@ class Worker(ServerNode):
         See also `transition_resumed_waiting`
         """
         recs: Recs = {}
-        smsgs: Smsgs = []
+        instructions: Instructions = []
         if ts.done:
             next_state = ts._next
             # if the next state is already intended to be waiting or if the
             # coro/thread is still running (ts.done==False), this is a noop
             if ts._next != finish:
-                recs, smsgs = self.transition_generic_released(
+                recs, instructions = self.transition_generic_released(
                     ts, stimulus_id=stimulus_id
                 )
             assert next_state
             recs[ts] = next_state
         else:
             ts._next = finish
-        return recs, smsgs
+        return recs, instructions
 
     def transition_resumed_fetch(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         """
         See Worker._transition_from_resumed
         """
@@ -2460,7 +2188,7 @@ class Worker(ServerNode):
 
     def transition_resumed_missing(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         """
         See Worker._transition_from_resumed
         """
@@ -2474,7 +2202,7 @@ class Worker(ServerNode):
 
     def transition_cancelled_fetch(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         if ts.done:
             return {ts: "released"}, []
         elif ts._previous == "flight":
@@ -2485,15 +2213,15 @@ class Worker(ServerNode):
             return {ts: ("resumed", "fetch")}, []
 
     def transition_cancelled_resumed(
-        self, ts: TaskState, next: str, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+        self, ts: TaskState, next: TaskStateState, *, stimulus_id: str
+    ) -> tuple[Recs, Instructions]:
         ts._next = next
         ts.state = "resumed"
         return {}, []
 
     def transition_cancelled_waiting(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         if ts.done:
             return {ts: "released"}, []
         elif ts._previous == "executing":
@@ -2505,7 +2233,7 @@ class Worker(ServerNode):
 
     def transition_cancelled_forgotten(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         ts._next = "forgotten"
         if not ts.done:
             return {}, []
@@ -2513,7 +2241,7 @@ class Worker(ServerNode):
 
     def transition_cancelled_released(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         if not ts.done:
             ts._next = "released"
             return {}, []
@@ -2524,14 +2252,16 @@ class Worker(ServerNode):
 
         for resource, quantity in ts.resource_restrictions.items():
             self.available_resources[resource] += quantity
-        recs, smsgs = self.transition_generic_released(ts, stimulus_id=stimulus_id)
+        recs, instructions = self.transition_generic_released(
+            ts, stimulus_id=stimulus_id
+        )
         if next_state != "released":
             recs[ts] = next_state
-        return recs, smsgs
+        return recs, instructions
 
     def transition_executing_released(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         ts._previous = ts.state
         ts._next = "released"
         # See https://github.com/dask/distributed/pull/5046#discussion_r685093940
@@ -2541,13 +2271,13 @@ class Worker(ServerNode):
 
     def transition_long_running_memory(
         self, ts: TaskState, value=no_value, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         self.executed_count += 1
         return self.transition_generic_memory(ts, value=value, stimulus_id=stimulus_id)
 
     def transition_generic_memory(
         self, ts: TaskState, value=no_value, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         if value is no_value and ts.key not in self.data:
             raise RuntimeError(
                 f"Tried to transition task {ts} to `memory` without data available"
@@ -2566,13 +2296,14 @@ class Worker(ServerNode):
             msg = error_message(e)
             recs = {ts: tuple(msg.values())}
             return recs, []
-        assert ts.key in self.data or ts.key in self.actors
-        smsgs = [self._get_task_finished_msg(ts)]
-        return recs, smsgs
+        if self.validate:
+            assert ts.key in self.data or ts.key in self.actors
+        smsg = self._get_task_finished_msg(ts)
+        return recs, [smsg]
 
     def transition_executing_memory(
         self, ts: TaskState, value=no_value, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         if self.validate:
             assert ts.state == "executing" or ts.key in self.long_running
             assert not ts.waiting_for_data
@@ -2584,7 +2315,7 @@ class Worker(ServerNode):
 
     def transition_constrained_executing(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         if self.validate:
             assert not ts.waiting_for_data
             assert ts.key not in self.data
@@ -2602,7 +2333,7 @@ class Worker(ServerNode):
 
     def transition_ready_executing(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         if self.validate:
             assert not ts.waiting_for_data
             assert ts.key not in self.data
@@ -2620,7 +2351,7 @@ class Worker(ServerNode):
 
     def transition_flight_fetch(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         # If this transition is called after the flight coroutine has finished,
         # we can reset the task and transition to fetch again. If it is not yet
         # finished, this should be a no-op
@@ -2648,7 +2379,7 @@ class Worker(ServerNode):
         traceback_text,
         *,
         stimulus_id: str,
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         self._in_flight_tasks.discard(ts)
         ts.coming_from = None
         return self.transition_generic_error(
@@ -2662,7 +2393,7 @@ class Worker(ServerNode):
 
     def transition_flight_released(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         if ts.done:
             # FIXME: Is this even possible? Would an assert instead be more
             # sensible?
@@ -2676,70 +2407,49 @@ class Worker(ServerNode):
 
     def transition_cancelled_memory(
         self, ts: TaskState, value, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         assert ts._next
         return {ts: ts._next}, []
 
     def transition_executing_long_running(
-        self, ts: TaskState, compute_duration, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+        self, ts: TaskState, compute_duration: float, *, stimulus_id: str
+    ) -> tuple[Recs, Instructions]:
         ts.state = "long-running"
         self._executing.discard(ts)
         self.long_running.add(ts.key)
-        smsgs = [
-            {
-                "op": "long-running",
-                "key": ts.key,
-                "compute_duration": compute_duration,
-            }
-        ]
-
+        smsg = LongRunningMsg(key=ts.key, compute_duration=compute_duration)
         self.io_loop.add_callback(self.ensure_computing)
-        return {}, smsgs
+        return {}, [smsg]
 
     def transition_released_memory(
         self, ts: TaskState, value, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
-        recs: Recs = {}
+    ) -> tuple[Recs, Instructions]:
         try:
             recs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
         except Exception as e:
             msg = error_message(e)
-            recs[ts] = (
-                "error",
-                msg["exception"],
-                msg["traceback"],
-                msg["exception_text"],
-                msg["traceback_text"],
-            )
+            recs = {ts: tuple(msg.values())}
             return recs, []
-        smsgs = [{"op": "add-keys", "keys": [ts.key], "stimulus_id": stimulus_id}]
-        return recs, smsgs
+        smsg = AddKeysMsg(keys=[ts.key], stimulus_id=stimulus_id)
+        return recs, [smsg]
 
     def transition_flight_memory(
         self, ts: TaskState, value, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         self._in_flight_tasks.discard(ts)
         ts.coming_from = None
-        recs: Recs = {}
         try:
             recs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
         except Exception as e:
             msg = error_message(e)
-            recs[ts] = (
-                "error",
-                msg["exception"],
-                msg["traceback"],
-                msg["exception_text"],
-                msg["traceback_text"],
-            )
+            recs = {ts: tuple(msg.values())}
             return recs, []
-        smsgs = [{"op": "add-keys", "keys": [ts.key], "stimulus_id": stimulus_id}]
-        return recs, smsgs
+        smsg = AddKeysMsg(keys=[ts.key], stimulus_id=stimulus_id)
+        return recs, [smsg]
 
     def transition_released_forgotten(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         recommendations: Recs = {}
         # Dependents _should_ be released by the scheduler before this
         if self.validate:
@@ -2756,7 +2466,7 @@ class Worker(ServerNode):
 
     def _transition(
         self, ts: TaskState, finish: str | tuple, *args, stimulus_id: str, **kwargs
-    ) -> tuple[Recs, Smsgs]:
+    ) -> tuple[Recs, Instructions]:
         if isinstance(finish, tuple):
             # the concatenated transition path might need to access the tuple
             assert not args
@@ -2770,13 +2480,15 @@ class Worker(ServerNode):
 
         if func is not None:
             self._transition_counter += 1
-            recs, smsgs = func(ts, *args, stimulus_id=stimulus_id, **kwargs)
+            recs, instructions = func(ts, *args, stimulus_id=stimulus_id, **kwargs)
             self._notify_plugins("transition", ts.key, start, finish, **kwargs)
 
         elif "released" not in (start, finish):
             # start -> "released" -> finish
             try:
-                recs, smsgs = self._transition(ts, "released", stimulus_id=stimulus_id)
+                recs, instructions = self._transition(
+                    ts, "released", stimulus_id=stimulus_id
+                )
                 v = recs.get(ts, (finish, *args))
                 v_state: str
                 v_args: list | tuple
@@ -2784,11 +2496,11 @@ class Worker(ServerNode):
                     v_state, *v_args = v
                 else:
                     v_state, v_args = v, ()
-                b_recs, b_smsgs = self._transition(
+                b_recs, b_instructions = self._transition(
                     ts, v_state, *v_args, stimulus_id=stimulus_id
                 )
                 recs.update(b_recs)
-                smsgs += b_smsgs
+                instructions += b_instructions
             except InvalidTransition:
                 raise InvalidTransition(
                     f"Impossible transition from {start} to {finish} for {ts.key}"
@@ -2815,7 +2527,7 @@ class Worker(ServerNode):
                 time(),
             )
         )
-        return recs, smsgs
+        return recs, instructions
 
     def transition(
         self, ts: TaskState, finish: str, *, stimulus_id: str, **kwargs
@@ -2835,9 +2547,10 @@ class Worker(ServerNode):
         --------
         Scheduler.transitions: transitive version of this function
         """
-        recs, smsgs = self._transition(ts, finish, stimulus_id=stimulus_id, **kwargs)
-        for msg in smsgs:
-            self.batched_stream.send(msg)
+        recs, instructions = self._transition(
+            ts, finish, stimulus_id=stimulus_id, **kwargs
+        )
+        self._handle_instructions(instructions)
         self.transitions(recs, stimulus_id=stimulus_id)
 
     def transitions(self, recommendations: Recs, *, stimulus_id: str) -> None:
@@ -2846,34 +2559,44 @@ class Worker(ServerNode):
         This includes feedback from previous transitions and continues until we
         reach a steady state
         """
-        smsgs = []
+        instructions = []
 
         remaining_recs = recommendations.copy()
         tasks = set()
         while remaining_recs:
             ts, finish = remaining_recs.popitem()
             tasks.add(ts)
-            a_recs, a_smsgs = self._transition(ts, finish, stimulus_id=stimulus_id)
+            a_recs, a_instructions = self._transition(
+                ts, finish, stimulus_id=stimulus_id
+            )
 
             remaining_recs.update(a_recs)
-            smsgs += a_smsgs
+            instructions += a_instructions
 
         if self.validate:
             # Full state validation is very expensive
             for ts in tasks:
                 self.validate_task(ts)
 
-        if not self.batched_stream.closed():
-            for msg in smsgs:
-                self.batched_stream.send(msg)
-        else:
+        if self.batched_stream.closed():
             logger.debug(
                 "BatchedSend closed while transitioning tasks. %d tasks not sent.",
-                len(smsgs),
+                len(instructions),
             )
+        else:
+            self._handle_instructions(instructions)
+
+    def _handle_instructions(self, instructions: list[Instruction]) -> None:
+        # TODO this method is temporary.
+        #      See final design: https://github.com/dask/distributed/issues/5894
+        for inst in instructions:
+            if isinstance(inst, SendMessageToScheduler):
+                self.batched_stream.send(inst.to_dict())
+            else:
+                raise TypeError(inst)  # pragma: nocover
 
     def maybe_transition_long_running(
-        self, ts: TaskState, *, stimulus_id: str, compute_duration=None
+        self, ts: TaskState, *, compute_duration: float, stimulus_id: str
     ):
         if ts.state == "executing":
             self.transition(
@@ -2894,18 +2617,8 @@ class Worker(ServerNode):
         }
 
     def story(self, *keys_or_tasks: str | TaskState) -> list[tuple]:
-        keys = [e.key if isinstance(e, TaskState) else e for e in keys_or_tasks]
-        return [
-            msg
-            for msg in self.log
-            if any(key in msg for key in keys)
-            or any(
-                key in c
-                for key in keys
-                for c in msg
-                if isinstance(c, (tuple, list, set))
-            )
-        ]
+        keys = {e.key if isinstance(e, TaskState) else e for e in keys_or_tasks}
+        return worker_story(keys, self.log)
 
     def ensure_communicating(self) -> None:
         stimulus_id = f"ensure-communicating-{time()}"
@@ -2965,7 +2678,7 @@ class Worker(ServerNode):
         for el in skipped_worker_in_flight:
             self.data_needed.push(el)
 
-    def _get_task_finished_msg(self, ts: TaskState) -> dict[str, Any]:
+    def _get_task_finished_msg(self, ts: TaskState) -> TaskFinishedMsg:
         if ts.key not in self.data and ts.key not in self.actors:
             raise RuntimeError(f"Task {ts} not ready")
         typ = ts.type
@@ -2983,19 +2696,15 @@ class Worker(ServerNode):
             # Some types fail pickling (example: _thread.lock objects),
             # send their name as a best effort.
             typ_serialized = pickle.dumps(typ.__name__, protocol=4)
-        d = {
-            "op": "task-finished",
-            "status": "OK",
-            "key": ts.key,
-            "nbytes": ts.nbytes,
-            "thread": self.threads.get(ts.key),
-            "type": typ_serialized,
-            "typename": typename(typ),
-            "metadata": ts.metadata,
-        }
-        if ts.startstops:
-            d["startstops"] = ts.startstops
-        return d
+        return TaskFinishedMsg(
+            key=ts.key,
+            nbytes=ts.nbytes,
+            type=typ_serialized,
+            typename=typename(typ),
+            metadata=ts.metadata,
+            thread=self.threads.get(ts.key),
+            startstops=ts.startstops,
+        )
 
     def _put_key_in_memory(self, ts: TaskState, value, *, stimulus_id: str) -> Recs:
         """
@@ -3009,13 +2718,14 @@ class Worker(ServerNode):
 
         Raises
         ------
-        TypeError:
-            In case the data is put into the in memory buffer and an exception
-            occurs during spilling, this raises an exception. This has to be
-            handled by the caller since most callers generate scheduler messages
-            on success (see comment above) but we need to signal that this was
-            not successful.
-            Can only trigger if spill to disk is enabled and the task is not an
+        Exception:
+            In case the data is put into the in memory buffer and a serialization error
+            occurs during spilling, this raises that error. This has to be handled by
+            the caller since most callers generate scheduler messages on success (see
+            comment above) but we need to signal that this was not successful.
+
+            Can only trigger if distributed.worker.memory.target is enabled, the value
+            is individually larger than target * memory_limit, and the task is not an
             actor.
         """
         if ts.key in self.data:
@@ -3770,10 +3480,12 @@ class Worker(ServerNode):
             else:
                 logger.warning(
                     "Compute Failed\n"
+                    "Key:       %s\n"
                     "Function:  %s\n"
                     "args:      %s\n"
                     "kwargs:    %s\n"
                     "Exception: %r\n",
+                    ts.key,
                     str(funcname(function))[:1000],
                     convert_args_to_str(args2, max_len=1000),
                     convert_kwargs_to_str(kwargs2, max_len=1000),
@@ -3822,7 +3534,7 @@ class Worker(ServerNode):
             try:
                 data[k] = self.data[k]
             except KeyError:
-                from .actor import Actor  # TODO: create local actor
+                from distributed.actor import Actor  # TODO: create local actor
 
                 data[k] = Actor(type(self.actors[k]), self.address, k, self)
         args2 = pack_data(args, data, key_types=(bytes, str))
@@ -3837,115 +3549,6 @@ class Worker(ServerNode):
     ##################
     # Administrative #
     ##################
-
-    async def memory_monitor(self) -> None:
-        """Track this process's memory usage and act accordingly
-
-        If we rise above 70% memory use, start dumping data to disk.
-
-        If we rise above 80% memory use, stop execution of new tasks
-        """
-        if self._memory_monitoring:
-            return
-        self._memory_monitoring = True
-        assert self.memory_limit
-        total = 0
-
-        memory = self.monitor.get_process_memory()
-        frac = memory / self.memory_limit
-
-        def check_pause(memory):
-            frac = memory / self.memory_limit
-            # Pause worker threads if above 80% memory use
-            if self.memory_pause_fraction and frac > self.memory_pause_fraction:
-                # Try to free some memory while in paused state
-                self._throttled_gc.collect()
-                if self.status == Status.running:
-                    logger.warning(
-                        "Worker is at %d%% memory usage. Pausing worker.  "
-                        "Process memory: %s -- Worker memory limit: %s",
-                        int(frac * 100),
-                        format_bytes(memory),
-                        format_bytes(self.memory_limit)
-                        if self.memory_limit is not None
-                        else "None",
-                    )
-                    self.status = Status.paused
-            elif self.status == Status.paused:
-                logger.warning(
-                    "Worker is at %d%% memory usage. Resuming worker. "
-                    "Process memory: %s -- Worker memory limit: %s",
-                    int(frac * 100),
-                    format_bytes(memory),
-                    format_bytes(self.memory_limit)
-                    if self.memory_limit is not None
-                    else "None",
-                )
-                self.status = Status.running
-                self.ensure_computing()
-                self.ensure_communicating()
-
-        check_pause(memory)
-        # Dump data to disk if above 70%
-        if self.memory_spill_fraction and frac > self.memory_spill_fraction:
-            from .spill import SpillBuffer
-
-            assert isinstance(self.data, SpillBuffer)
-
-            logger.debug(
-                "Worker is at %.0f%% memory usage. Start spilling data to disk.",
-                frac * 100,
-            )
-            # Implement hysteresis cycle where spilling starts at the spill threshold
-            # and stops at the target threshold. Normally that here the target threshold
-            # defines process memory, whereas normally it defines reported managed
-            # memory (e.g. output of sizeof() ).
-            # If target=False, disable hysteresis.
-            target = self.memory_limit * (
-                self.memory_target_fraction or self.memory_spill_fraction
-            )
-            count = 0
-            need = memory - target
-            while memory > target:
-                if not self.data.fast:
-                    logger.warning(
-                        "Unmanaged memory use is high. This may indicate a memory leak "
-                        "or the memory may not be released to the OS; see "
-                        "https://distributed.dask.org/en/latest/worker.html#memtrim "
-                        "for more information. "
-                        "-- Unmanaged memory: %s -- Worker memory limit: %s",
-                        format_bytes(memory),
-                        format_bytes(self.memory_limit),
-                    )
-                    break
-                weight = self.data.evict()
-                if weight == -1:
-                    # Failed to evict:
-                    # disk full, spill size limit exceeded, or pickle error
-                    break
-
-                total += weight
-                count += 1
-                await asyncio.sleep(0)
-
-                memory = self.monitor.get_process_memory()
-                if total > need and memory > target:
-                    # Issue a GC to ensure that the evicted data is actually
-                    # freed from memory and taken into account by the monitor
-                    # before trying to evict even more data.
-                    self._throttled_gc.collect()
-                    memory = self.monitor.get_process_memory()
-
-            check_pause(memory)
-            if count:
-                logger.debug(
-                    "Moved %d tasks worth %s to disk",
-                    count,
-                    format_bytes(total),
-                )
-
-        self._memory_monitoring = False
-
     def cycle_profile(self) -> None:
         now = time() + self.scheduler_delay
         prof, self.profile_recent = self.profile_recent, profile.create()
@@ -4283,7 +3886,7 @@ class Worker(ServerNode):
         timeout = parse_timedelta(timeout, "s")
 
         try:
-            from .client import default_client
+            from distributed.client import default_client
 
             client = default_client()
         except ValueError:  # no clients found, need to make a new one
@@ -4308,7 +3911,7 @@ class Worker(ServerNode):
                 self._client = client
 
         if not self._client:
-            from .client import Client
+            from distributed.client import Client
 
             asynchronous = in_async_call(self.loop)
             self._client = Client(
@@ -4434,7 +4037,7 @@ def get_client(address=None, timeout=None, resolve_address=True) -> Client:
         if not address or worker.scheduler.address == address:
             return worker._get_client(timeout=timeout)
 
-    from .client import Client
+    from distributed.client import Client
 
     try:
         client = Client.current()  # TODO: assumes the same scheduler
@@ -4494,25 +4097,6 @@ class Reschedule(Exception):
     load across the cluster has significantly changed since first scheduling
     the task.
     """
-
-
-def parse_memory_limit(memory_limit, nthreads, total_cores=CPU_COUNT) -> int | None:
-    if memory_limit is None:
-        return None
-
-    if memory_limit == "auto":
-        memory_limit = int(system.MEMORY_LIMIT * min(1, nthreads / total_cores))
-    with suppress(ValueError, TypeError):
-        memory_limit = float(memory_limit)
-        if isinstance(memory_limit, float) and memory_limit <= 1:
-            memory_limit = int(memory_limit * system.MEMORY_LIMIT)
-
-    if isinstance(memory_limit, str):
-        memory_limit = parse_bytes(memory_limit)
-    else:
-        memory_limit = int(memory_limit)
-
-    return min(memory_limit, system.MEMORY_LIMIT)
 
 
 async def get_data_from_worker(

@@ -127,7 +127,8 @@ class WorkerPlugin:
     ...                 exc_info=exc_info
     ...             )
 
-    >>> plugin = ErrorLogger()
+    >>> import logging
+    >>> plugin = ErrorLogger(logging)
     >>> client.register_worker_plugin(plugin)  # doctest: +SKIP
     """
 
@@ -255,7 +256,7 @@ class PipInstall(WorkerPlugin):
         self.pip_options = pip_options
 
     async def setup(self, worker):
-        from ..lock import Lock
+        from distributed.lock import Lock
 
         async with Lock(socket.gethostname()):  # don't clobber one installation
             logger.info("Pip installing the following packages: %s", self.packages)

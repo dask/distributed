@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import contextlib
 import copy
 import functools
 import gc
@@ -11,19 +13,16 @@ import logging.config
 import multiprocessing
 import os
 import re
-import shutil
 import signal
 import socket
 import subprocess
 import sys
 import tempfile
 import threading
-import uuid
 import weakref
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import contextmanager, nullcontext, suppress
-from glob import glob
 from itertools import count
 from time import sleep
 from typing import Any, Literal
@@ -44,24 +43,22 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from distributed.comm.tcp import TCP
-
-from . import system
-from . import versions as version_module
-from .client import Client, _global_clients, default_client
-from .comm import Comm
-from .comm.tcp import BaseTCPConnector
-from .compatibility import WINDOWS
-from .config import initialize_logging
-from .core import CommClosedError, ConnectionPool, Status, connect, rpc
-from .deploy import SpecCluster
-from .diagnostics.plugin import WorkerPlugin
-from .metrics import time
-from .nanny import Nanny
-from .node import ServerNode
-from .proctitle import enable_proctitle_on_children
-from .security import Security
-from .utils import (
+from distributed import system
+from distributed import versions as version_module
+from distributed.client import Client, _global_clients, default_client
+from distributed.comm import Comm
+from distributed.comm.tcp import TCP, BaseTCPConnector
+from distributed.compatibility import WINDOWS
+from distributed.config import initialize_logging
+from distributed.core import CommClosedError, ConnectionPool, Status, connect, rpc
+from distributed.deploy import SpecCluster
+from distributed.diagnostics.plugin import WorkerPlugin
+from distributed.metrics import time
+from distributed.nanny import Nanny
+from distributed.node import ServerNode
+from distributed.proctitle import enable_proctitle_on_children
+from distributed.security import Security
+from distributed.utils import (
     DequeHandler,
     TimeoutError,
     _offload_executor,
@@ -73,7 +70,7 @@ from .utils import (
     reset_logger_locks,
     sync,
 )
-from .worker import Worker
+from distributed.worker import Worker
 
 try:
     import dask.array  # register config
@@ -492,12 +489,13 @@ def run_worker(q, scheduler_q, config, **kwargs):
                 scheduler_addr = scheduler_q.get()
 
                 async def _():
+                    pid = os.getpid()
                     try:
                         worker = await Worker(scheduler_addr, validate=True, **kwargs)
                     except Exception as exc:
-                        q.put(exc)
+                        q.put((pid, exc))
                     else:
-                        q.put(worker.address)
+                        q.put((pid, worker.address))
                         await worker.finished()
 
                 # Scheduler might've failed
@@ -515,12 +513,13 @@ def run_nanny(q, scheduler_q, config, **kwargs):
                 scheduler_addr = scheduler_q.get()
 
                 async def _():
+                    pid = os.getpid()
                     try:
                         worker = await Nanny(scheduler_addr, validate=True, **kwargs)
                     except Exception as exc:
-                        q.put(exc)
+                        q.put((pid, exc))
                     else:
-                        q.put(worker.address)
+                        q.put((pid, worker.address))
                         await worker.finished()
 
                 # Scheduler might've failed
@@ -631,6 +630,31 @@ def security():
     return tls_only_security()
 
 
+def _terminate_join(proc):
+    proc.terminate()
+    proc.join()
+    proc.close()
+
+
+def _close_queue(q):
+    q.close()
+    q.join_thread()
+    q._writer.close()  # https://bugs.python.org/issue42752
+
+
+class _SafeTemporaryDirectory(tempfile.TemporaryDirectory):
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            return super().__exit__(exc_type, exc_val, exc_tb)
+        except (PermissionError, NotADirectoryError):
+            # It appears that we either have a process still interacting with
+            # the tmpdirs of the workers or that win process are not releasing
+            # their lock in time. We are receiving PermissionErrors during
+            # teardown
+            # See also https://github.com/dask/distributed/pull/5825
+            pass
+
+
 @contextmanager
 def cluster(
     nworkers=2,
@@ -650,115 +674,104 @@ def cluster(
         else:
             _run_worker = run_worker
 
-        # The scheduler queue will receive the scheduler's address
-        scheduler_q = mp_context.Queue()
+        with contextlib.ExitStack() as stack:
+            # The scheduler queue will receive the scheduler's address
+            scheduler_q = mp_context.Queue()
+            stack.callback(_close_queue, scheduler_q)
 
-        # Launch scheduler
-        scheduler = mp_context.Process(
-            name="Dask cluster test: Scheduler",
-            target=run_scheduler,
-            args=(scheduler_q, nworkers + 1, config),
-            kwargs=scheduler_kwargs,
-        )
-        ws.add(scheduler)
-        scheduler.daemon = True
-        scheduler.start()
+            # Launch scheduler
+            scheduler = mp_context.Process(
+                name="Dask cluster test: Scheduler",
+                target=run_scheduler,
+                args=(scheduler_q, nworkers + 1, config),
+                kwargs=scheduler_kwargs,
+                daemon=True,
+            )
+            ws.add(scheduler)
+            scheduler.start()
+            stack.callback(_terminate_join, scheduler)
 
-        # Launch workers
-        workers = []
-        for i in range(nworkers):
+            # Launch workers
+            workers_by_pid = {}
             q = mp_context.Queue()
-            fn = "_test_worker-%s" % uuid.uuid4()
-            kwargs = merge(
-                {
-                    "nthreads": 1,
-                    "local_directory": fn,
-                    "memory_limit": system.MEMORY_LIMIT,
-                },
-                worker_kwargs,
-            )
-            proc = mp_context.Process(
-                name="Dask cluster test: Worker",
-                target=_run_worker,
-                args=(q, scheduler_q, config),
-                kwargs=kwargs,
-            )
-            ws.add(proc)
-            workers.append({"proc": proc, "queue": q, "dir": fn})
+            stack.callback(_close_queue, q)
+            for _ in range(nworkers):
+                tmpdirname = stack.enter_context(
+                    _SafeTemporaryDirectory(prefix="_dask_test_worker")
+                )
+                kwargs = merge(
+                    {
+                        "nthreads": 1,
+                        "local_directory": tmpdirname,
+                        "memory_limit": system.MEMORY_LIMIT,
+                    },
+                    worker_kwargs,
+                )
+                proc = mp_context.Process(
+                    name="Dask cluster test: Worker",
+                    target=_run_worker,
+                    args=(q, scheduler_q, config),
+                    kwargs=kwargs,
+                )
+                ws.add(proc)
+                proc.start()
+                stack.callback(_terminate_join, proc)
+                workers_by_pid[proc.pid] = {"proc": proc}
 
-        for worker in workers:
-            worker["proc"].start()
-        saddr_or_exception = scheduler_q.get()
-        if isinstance(saddr_or_exception, Exception):
-            raise saddr_or_exception
-        saddr = saddr_or_exception
+            saddr_or_exception = scheduler_q.get()
+            if isinstance(saddr_or_exception, Exception):
+                raise saddr_or_exception
+            saddr = saddr_or_exception
 
-        for worker in workers:
-            addr_or_exception = worker["queue"].get()
-            if isinstance(addr_or_exception, Exception):
-                raise addr_or_exception
-            worker["address"] = addr_or_exception
+            for _ in range(nworkers):
+                pid, addr_or_exception = q.get()
+                if isinstance(addr_or_exception, Exception):
+                    raise addr_or_exception
+                workers_by_pid[pid]["address"] = addr_or_exception
 
-        start = time()
-        try:
+            start = time()
             try:
-                security = scheduler_kwargs["security"]
-                rpc_kwargs = {"connection_args": security.get_connection_args("client")}
-            except KeyError:
-                rpc_kwargs = {}
+                try:
+                    security = scheduler_kwargs["security"]
+                    rpc_kwargs = {
+                        "connection_args": security.get_connection_args("client")
+                    }
+                except KeyError:
+                    rpc_kwargs = {}
 
-            with rpc(saddr, **rpc_kwargs) as s:
-                while True:
-                    nthreads = loop.run_sync(s.ncores)
-                    if len(nthreads) == nworkers:
-                        break
-                    if time() - start > 5:
-                        raise Exception("Timeout on cluster creation")
+                with rpc(saddr, **rpc_kwargs) as s:
+                    while True:
+                        nthreads = loop.run_sync(s.ncores)
+                        if len(nthreads) == nworkers:
+                            break
+                        if time() - start > 5:
+                            raise Exception("Timeout on cluster creation")
 
-            # avoid sending processes down to function
-            yield {"address": saddr}, [
-                {"address": w["address"], "proc": weakref.ref(w["proc"])}
-                for w in workers
-            ]
-        finally:
-            logger.debug("Closing out test cluster")
-
-            loop.run_sync(
-                lambda: disconnect_all(
-                    [w["address"] for w in workers],
-                    timeout=disconnect_timeout,
-                    rpc_kwargs=rpc_kwargs,
+                # avoid sending processes down to function
+                yield {"address": saddr}, [
+                    {"address": w["address"], "proc": weakref.ref(w["proc"])}
+                    for w in workers_by_pid.values()
+                ]
+            finally:
+                logger.debug("Closing out test cluster")
+                alive_workers = [
+                    w["address"]
+                    for w in workers_by_pid.values()
+                    if w["proc"].is_alive()
+                ]
+                loop.run_sync(
+                    lambda: disconnect_all(
+                        alive_workers,
+                        timeout=disconnect_timeout,
+                        rpc_kwargs=rpc_kwargs,
+                    )
                 )
-            )
-            loop.run_sync(
-                lambda: disconnect(
-                    saddr, timeout=disconnect_timeout, rpc_kwargs=rpc_kwargs
-                )
-            )
-
-            scheduler.terminate()
-            scheduler_q.close()
-            scheduler_q._reader.close()
-            scheduler_q._writer.close()
-
-            for w in workers:
-                w["proc"].terminate()
-                w["queue"].close()
-                w["queue"]._reader.close()
-                w["queue"]._writer.close()
-
-            scheduler.join(2)
-            del scheduler
-            for proc in [w["proc"] for w in workers]:
-                proc.join(timeout=30)
-
-            with suppress(UnboundLocalError):
-                del worker, w, proc
-            del workers[:]
-
-            for fn in glob("_test_worker-*"):
-                with suppress(OSError):
-                    shutil.rmtree(fn)
+                if scheduler.is_alive():
+                    loop.run_sync(
+                        lambda: disconnect(
+                            saddr, timeout=disconnect_timeout, rpc_kwargs=rpc_kwargs
+                        )
+                    )
 
         try:
             client = default_client()
@@ -766,12 +779,6 @@ def cluster(
             pass
         else:
             client.close()
-
-    start = time()
-    while any(proc.is_alive() for proc in ws):
-        text = str(list(ws))
-        sleep(0.2)
-        assert time() < start + 5, ("Workers still around after five seconds", text)
 
 
 async def disconnect(addr, timeout=3, rpc_kwargs=None):
@@ -1093,7 +1100,6 @@ def gen_cluster(
                         # zict backends can fail if their storage directory
                         # was already removed
                         pass
-                    del w.data
 
             return result
 
@@ -1175,9 +1181,27 @@ def _terminate_process(proc):
 
 
 @contextmanager
-def popen(args, **kwargs):
+def popen(args: list[str], flush_output: bool = True, **kwargs):
+    """Start a shell command in a subprocess.
+    Yields a subprocess.Popen object.
+
+    stderr is redirected to stdout.
+    stdout is redirected to a pipe.
+
+    Parameters
+    ----------
+    args: list[str]
+        Command line arguments
+    flush_output: bool, optional
+        If True (the default), the stdout/stderr pipe is emptied while it is being
+        filled. Set to False if you wish to read the output yourself. Note that setting
+        this to False and then failing to periodically read from the pipe may result in
+        a deadlock due to the pipe getting full.
+    kwargs: optional
+        optional arguments to subprocess.Popen
+    """
     kwargs["stdout"] = subprocess.PIPE
-    kwargs["stderr"] = subprocess.PIPE
+    kwargs["stderr"] = subprocess.STDOUT
     if sys.platform.startswith("win"):
         # Allow using CTRL_C_EVENT / CTRL_BREAK_EVENT
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -1191,9 +1215,16 @@ def popen(args, **kwargs):
             os.environ.get("DESTDIR", "") + sys.prefix, "bin", args[0]
         )
     proc = subprocess.Popen(args, **kwargs)
+
+    if flush_output:
+        ex = concurrent.futures.ThreadPoolExecutor(1)
+        flush_future = ex.submit(proc.communicate)
+
     try:
         yield proc
-    except Exception:
+
+    # asyncio.CancelledError is raised by @gen_test/@gen_cluster timeout
+    except (Exception, asyncio.CancelledError):
         dump_stdout = True
         raise
 
@@ -1202,13 +1233,17 @@ def popen(args, **kwargs):
             _terminate_process(proc)
         finally:
             # XXX Also dump stdout if return code != 0 ?
-            out, err = proc.communicate()
-            if dump_stdout:
-                print("\n\nPrint from stderr\n  %s\n=================\n" % args[0][0])
-                print(err.decode())
+            if flush_output:
+                out, err = flush_future.result()
+                ex.shutdown()
+            else:
+                out, err = proc.communicate()
+            assert not err
 
-                print("\n\nPrint from stdout\n=================\n")
-                print(out.decode())
+            if dump_stdout:
+                print("\n" + "-" * 27 + " Subprocess stdout/stderr" + "-" * 27)
+                print(out.decode().rstrip())
+                print("-" * 80)
 
 
 def wait_for(predicate, timeout, fail_func=None, period=0.001):
@@ -1405,7 +1440,7 @@ def new_config(new_config):
     """
     Temporarily change configuration dictionary.
     """
-    from .config import defaults
+    from distributed.config import defaults
 
     config = dask.config.config
     orig_config = copy.deepcopy(config)
@@ -1735,13 +1770,18 @@ def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
                     with check_active_rpc(loop, timeout):
                         reset_config()
 
-                        dask.config.set({"distributed.comm.timeouts.connect": "5s"})
-                        # Restore default logging levels
-                        # XXX use pytest hooks/fixtures instead?
-                        for name, level in logging_levels.items():
-                            logging.getLogger(name).setLevel(level)
+                        with dask.config.set(
+                            {
+                                "distributed.comm.timeouts.connect": "5s",
+                                "distributed.admin.tick.interval": "500 ms",
+                            }
+                        ):
+                            # Restore default logging levels
+                            # XXX use pytest hooks/fixtures instead?
+                            for name, level in logging_levels.items():
+                                logging.getLogger(name).setLevel(level)
 
-                        yield loop
+                            yield loop
 
 
 @pytest.fixture

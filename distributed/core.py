@@ -24,10 +24,8 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
-from distributed.utils import recursive_to_dict
-
-from . import profile, protocol
-from .comm import (
+from distributed import profile, protocol
+from distributed.comm import (
     Comm,
     CommClosedError,
     connect,
@@ -36,13 +34,14 @@ from .comm import (
     normalize_address,
     unparse_host_port,
 )
-from .metrics import time
-from .system_monitor import SystemMonitor
-from .utils import (
+from distributed.metrics import time
+from distributed.system_monitor import SystemMonitor
+from distributed.utils import (
     TimeoutError,
     get_traceback,
     has_keyword,
     is_coroutine_function,
+    recursive_to_dict,
     truncate_exception,
 )
 
@@ -215,11 +214,11 @@ class Server:
 
         # Statistics counters for various events
         with suppress(ImportError):
-            from .counter import Digest
+            from distributed.counter import Digest
 
             self.digests = defaultdict(partial(Digest, loop=self.io_loop))
 
-        from .counter import Counter
+        from distributed.counter import Counter
 
         self.counters = defaultdict(partial(Counter, loop=self.io_loop))
 
@@ -264,7 +263,10 @@ class Server:
 
     @property
     def status(self):
-        return self._status
+        try:
+            return self._status
+        except AttributeError:
+            return Status.undefined
 
     @status.setter
     def status(self, new_status):
@@ -399,9 +401,7 @@ class Server:
     def identity(self) -> dict[str, str]:
         return {"type": type(self).__name__, "id": self.id}
 
-    def _to_dict(
-        self, comm: Comm | None = None, *, exclude: Container[str] = ()
-    ) -> dict:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 

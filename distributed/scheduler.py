@@ -28,7 +28,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Dict, Literal
 from typing import cast as pep484_cast
 
 import psutil
@@ -51,39 +51,37 @@ from dask.highlevelgraph import HighLevelGraph
 from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta, tmpfile
 from dask.widgets import get_template
 
-from distributed.utils import recursive_to_dict
-
-from . import preloading, profile
-from . import versions as version_module
-from .active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
-from .batched import BatchedSend
-from .comm import (
-    Comm,
+from distributed import cluster_dump, preloading, profile
+from distributed import versions as version_module
+from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
+from distributed.batched import BatchedSend
+from distributed.comm import (
     get_address_host,
     normalize_address,
     resolve_address,
     unparse_host_port,
 )
-from .comm.addressing import addresses_from_user_args
-from .core import CommClosedError, Status, clean_exception, rpc, send_recv
-from .diagnostics.memory_sampler import MemorySamplerExtension
-from .diagnostics.plugin import SchedulerPlugin, _get_plugin_name
-from .event import EventExtension
-from .http import get_handlers
-from .lock import LockExtension
-from .metrics import time
-from .multi_lock import MultiLockExtension
-from .node import ServerNode
-from .proctitle import setproctitle
-from .protocol.pickle import dumps, loads
-from .publish import PublishExtension
-from .pubsub import PubSubSchedulerExtension
-from .queues import QueueExtension
-from .recreate_tasks import ReplayTaskScheduler
-from .security import Security
-from .semaphore import SemaphoreExtension
-from .stealing import WorkStealing
-from .utils import (
+from distributed.comm.addressing import addresses_from_user_args
+from distributed.core import CommClosedError, Status, clean_exception, rpc, send_recv
+from distributed.diagnostics.memory_sampler import MemorySamplerExtension
+from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
+from distributed.event import EventExtension
+from distributed.http import get_handlers
+from distributed.lock import LockExtension
+from distributed.metrics import time
+from distributed.multi_lock import MultiLockExtension
+from distributed.node import ServerNode
+from distributed.proctitle import setproctitle
+from distributed.protocol.pickle import dumps, loads
+from distributed.publish import PublishExtension
+from distributed.pubsub import PubSubSchedulerExtension
+from distributed.queues import QueueExtension
+from distributed.recreate_tasks import ReplayTaskScheduler
+from distributed.security import Security
+from distributed.semaphore import SemaphoreExtension
+from distributed.stealing import WorkStealing
+from distributed.stories import scheduler_story
+from distributed.utils import (
     All,
     TimeoutError,
     empty_context,
@@ -92,11 +90,16 @@ from .utils import (
     key_split_group,
     log_errors,
     no_default,
+    recursive_to_dict,
     validate_key,
 )
-from .utils_comm import gather_from_workers, retry_operation, scatter_to_workers
-from .utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
-from .variable import VariableExtension
+from distributed.utils_comm import (
+    gather_from_workers,
+    retry_operation,
+    scatter_to_workers,
+)
+from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
+from distributed.variable import VariableExtension
 
 try:
     from cython import compiled
@@ -1209,6 +1212,8 @@ class TaskGroup:
 class TaskState:
     """
     A simple object holding information about a task.
+    Not to be confused with :class:`distributed.worker_state_machine.TaskState`, which
+    holds similar information on the Worker side.
 
     .. attribute:: key: str
 
@@ -3970,6 +3975,8 @@ class Scheduler(SchedulerState, ServerNode):
             "subscribe_worker_status": self.subscribe_worker_status,
             "start_task_metadata": self.start_task_metadata,
             "stop_task_metadata": self.stop_task_metadata,
+            "get_cluster_state": self.get_cluster_state,
+            "dump_cluster_state_to_url": self.dump_cluster_state_to_url,
         }
 
         connection_limit = get_fileno_limit() / 2
@@ -4053,9 +4060,7 @@ class Scheduler(SchedulerState, ServerNode):
         }
         return d
 
-    def _to_dict(
-        self, comm: "Comm | None" = None, *, exclude: "Container[str]" = ()
-    ) -> dict:
+    def _to_dict(self, *, exclude: "Container[str]" = ()) -> dict:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -4081,6 +4086,55 @@ class Scheduler(SchedulerState, ServerNode):
         extra = {k: v for k, v in extra.items() if k not in exclude}
         info.update(recursive_to_dict(extra, exclude=exclude))
         return info
+
+    async def get_cluster_state(
+        self,
+        exclude: "Collection[str]",
+    ) -> dict:
+        "Produce the state dict used in a cluster state dump"
+        # Kick off state-dumping on workers before we block the event loop in `self._to_dict`.
+        workers_future = asyncio.gather(
+            self.broadcast(
+                msg={"op": "dump_state", "exclude": exclude},
+                on_error="return",
+            ),
+            self.broadcast(
+                msg={"op": "versions"},
+                on_error="ignore",
+            ),
+        )
+        try:
+            scheduler_state = self._to_dict(exclude=exclude)
+
+            worker_states, worker_versions = await workers_future
+        finally:
+            # Ensure the tasks aren't left running if anything fails.
+            # Someday (py3.11), use a trio-style TaskGroup for this.
+            workers_future.cancel()
+
+        # Convert any RPC errors to strings
+        worker_states = {
+            k: repr(v) if isinstance(v, Exception) else v
+            for k, v in worker_states.items()
+        }
+
+        return {
+            "scheduler": scheduler_state,
+            "workers": worker_states,
+            "versions": {"scheduler": self.versions(), "workers": worker_versions},
+        }
+
+    async def dump_cluster_state_to_url(
+        self,
+        url: str,
+        exclude: "Collection[str]",
+        format: Literal["msgpack", "yaml"],
+        **storage_options: Dict[str, Any],
+    ) -> None:
+        "Write a cluster state dump to an fsspec-compatible URL."
+        await cluster_dump.write_state(
+            partial(self.get_cluster_state, exclude), url, format, **storage_options
+        )
 
     def get_worker_service_addr(self, worker, service_name, protocol=False):
         """
@@ -7301,7 +7355,7 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Client.run_on_scheduler
         """
-        from .worker import run
+        from distributed.worker import run
 
         if not dask.config.get("distributed.scheduler.pickle"):
             raise ValueError(
@@ -7481,9 +7535,7 @@ class Scheduler(SchedulerState, ServerNode):
     def story(self, *keys):
         """Get all transitions that touch one of the input keys"""
         keys = {key.key if isinstance(key, TaskState) else key for key in keys}
-        return [
-            t for t in self.transition_log if t[0] in keys or keys.intersection(t[3])
-        ]
+        return scheduler_story(keys, self.transition_log)
 
     transition_story = story
 
@@ -7583,7 +7635,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         Returns Jupyter connection info dictionary.
         """
-        from ._ipython_utils import start_ipython
+        from distributed._ipython_utils import start_ipython
 
         if self._ipython_kernel is None:
             self._ipython_kernel = start_ipython(
@@ -7692,7 +7744,7 @@ class Scheduler(SchedulerState, ServerNode):
                 self.get_profile(server=True, start=start),
             ]
         )
-        from . import profile
+        from distributed import profile
 
         def profile_to_figure(state):
             data = profile.plot_data(state)
@@ -7714,8 +7766,8 @@ class Scheduler(SchedulerState, ServerNode):
         for k in sorted(timespent.keys()):
             tasks_timings += f"\n<li> {k} time: {format_time(timespent[k])} </li>"
 
-        from .dashboard.components.scheduler import task_stream_figure
-        from .diagnostics.task_stream import rectangles
+        from distributed.dashboard.components.scheduler import task_stream_figure
+        from distributed.diagnostics.task_stream import rectangles
 
         rects = rectangles(task_stream)
         source, task_stream = task_stream_figure(sizing_mode="stretch_both")

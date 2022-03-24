@@ -6,8 +6,8 @@ import dask
 from dask.sizeof import sizeof
 from dask.utils import parse_bytes
 
-from .. import protocol
-from ..utils import get_ip, get_ipv6, nbytes, offload
+from distributed import protocol
+from distributed.utils import get_ip, get_ipv6, nbytes, offload
 
 logger = logging.getLogger(__name__)
 

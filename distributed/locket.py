@@ -7,7 +7,7 @@ import threading
 import weakref
 from time import sleep
 
-from .metrics import time
+from distributed.metrics import time
 
 __all__ = ["lock_file"]
 

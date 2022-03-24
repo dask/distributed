@@ -38,8 +38,8 @@ import tlz as toolz
 
 from dask.utils import format_time, parse_timedelta
 
-from .metrics import time
-from .utils import color_of
+from distributed.metrics import time
+from distributed.utils import color_of
 
 
 def identifier(frame):

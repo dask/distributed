@@ -2,10 +2,10 @@ import logging
 
 from dask.utils import stringify
 
-from .client import futures_of, wait
-from .utils import sync
-from .utils_comm import pack_data
-from .worker import _deserialize
+from distributed.client import futures_of, wait
+from distributed.utils import sync
+from distributed.utils_comm import pack_data
+from distributed.worker import _deserialize
 
 logger = logging.getLogger(__name__)
 

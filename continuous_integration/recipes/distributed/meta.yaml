@@ -44,7 +44,8 @@ outputs:
       script: >
         python -m pip install . -vv --no-deps
         --install-option="--with-cython=profile"  # [cython_enabled]
-      track_features: {{ "cythonized-scheduler" if cython_enabled else "" }}
+      track_features:             # [cython_enabled]
+        - cythonized-scheduler    # [cython_enabled]
       entry_points:
         - dask-scheduler = distributed.cli.dask_scheduler:go
         - dask-ssh = distributed.cli.dask_ssh:go
@@ -72,7 +73,6 @@ outputs:
         - toolz >=0.8.2
         - tornado >=6.0.3
         - zict >=0.1.3
-        - setuptools <60.0.0
       run_constrained:
         - distributed-impl >={{ version }} *{{ build_ext }}
         - openssl !=1.1.1e

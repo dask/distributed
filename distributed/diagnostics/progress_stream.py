@@ -2,10 +2,10 @@ import logging
 
 from tlz import merge, valmap
 
-from ..core import coerce_to_address, connect
-from ..utils import color_of, key_split
-from ..worker import dumps_function
-from .progress import AllProgress
+from distributed.core import coerce_to_address, connect
+from distributed.diagnostics.progress import AllProgress
+from distributed.utils import color_of, key_split
+from distributed.worker import dumps_function
 
 logger = logging.getLogger(__name__)
 

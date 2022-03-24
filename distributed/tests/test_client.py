@@ -63,6 +63,7 @@ from distributed.client import (
     tokenize,
     wait,
 )
+from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import Status
@@ -5877,14 +5878,14 @@ async def test_scatter_error_cancel(c, s, a, b):
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 10,
-    worker_kwargs={"memory_monitor_interval": "20ms"},
+    config={"distributed.worker.memory.pause": False},
 )
 async def test_scatter_and_replicate_avoid_paused_workers(
     c, s, *workers, workers_arg, direct, broadcast
 ):
     paused_workers = [w for i, w in enumerate(workers) if i not in (3, 7)]
     for w in paused_workers:
-        w.memory_pause_fraction = 1e-15
+        w.status = Status.paused
     while any(s.workers[w.address].status != Status.paused for w in paused_workers):
         await asyncio.sleep(0.01)
 
@@ -7260,23 +7261,10 @@ def test_print_simple(capsys):
     assert "Hello!:123" in out
 
 
-def _verify_cluster_dump(path, _format: str, addresses: set[str]) -> dict:
-    path = str(path)
-    if _format == "msgpack":
-        import gzip
-
-        import msgpack
-
-        path += ".msgpack.gz"
-
-        with gzip.open(path) as fd_zip:
-            state = msgpack.unpack(fd_zip)
-    else:
-        import yaml
-
-        path += ".yaml"
-        with open(path) as fd_plain:
-            state = yaml.safe_load(fd_plain)
+def _verify_cluster_dump(url, format: str, addresses: set[str]) -> dict:
+    fsspec = pytest.importorskip("fsspec")  # for load_cluster_dump
+    url = str(url) + (".msgpack.gz" if format == "msgpack" else ".yaml")
+    state = load_cluster_dump(url)
 
     assert isinstance(state, dict)
     assert "scheduler" in state
@@ -7286,25 +7274,63 @@ def _verify_cluster_dump(path, _format: str, addresses: set[str]) -> dict:
     return state
 
 
+def test_dump_cluster_state_write_from_scheduler(
+    c, s, a, b, tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.chdir(tmp_path)
+
+    scheduler_dir = tmp_path / "scheduler"
+    scheduler_dir.mkdir()
+    c.run_on_scheduler(os.chdir, str(scheduler_dir))
+
+    c.dump_cluster_state("not-url")
+    assert (tmp_path / "not-url.msgpack.gz").is_file()
+
+    c.dump_cluster_state("file://is-url")
+    assert (scheduler_dir / "is-url.msgpack.gz").is_file()
+
+    c.dump_cluster_state("file://local-explicit", write_from_scheduler=False)
+    assert (tmp_path / "local-explicit.msgpack.gz").is_file()
+
+    c.dump_cluster_state("scheduler-explicit", write_from_scheduler=True)
+    assert (scheduler_dir / "scheduler-explicit.msgpack.gz").is_file()
+
+
+@pytest.mark.parametrize("local", [True, False])
 @pytest.mark.parametrize("_format", ["msgpack", "yaml"])
-def test_dump_cluster_state_sync(c, s, a, b, tmp_path, _format):
+def test_dump_cluster_state_sync(c, s, a, b, tmp_path, _format, local):
     filename = tmp_path / "foo"
+    if not local:
+        pytest.importorskip("fsspec")
+        # Make it look like an fsspec path
+        filename = f"file://{filename}"
     c.dump_cluster_state(filename, format=_format)
     _verify_cluster_dump(filename, _format, {a["address"], b["address"]})
 
 
+@pytest.mark.parametrize("local", [True, False])
 @pytest.mark.parametrize("_format", ["msgpack", "yaml"])
 @gen_cluster(client=True)
-async def test_dump_cluster_state_async(c, s, a, b, tmp_path, _format):
+async def test_dump_cluster_state_async(c, s, a, b, tmp_path, _format, local):
     filename = tmp_path / "foo"
+    if not local:
+        pytest.importorskip("fsspec")
+        # Make it look like an fsspec path
+        filename = f"file://{filename}"
     await c.dump_cluster_state(filename, format=_format)
     _verify_cluster_dump(filename, _format, {a.address, b.address})
 
 
+@pytest.mark.parametrize("local", [True, False])
 @gen_cluster(client=True)
-async def test_dump_cluster_state_json(c, s, a, b, tmp_path):
+async def test_dump_cluster_state_json(c, s, a, b, tmp_path, local):
+    filename = tmp_path / "foo"
+    if not local:
+        pytest.importorskip("fsspec")
+        # Make it look like an fsspec path
+        filename = f"file://{filename}"
     with pytest.raises(ValueError, match="Unsupported format"):
-        await c.dump_cluster_state(tmp_path / "foo", format="json")
+        await c.dump_cluster_state(filename, format="json")
 
 
 @gen_cluster(client=True)
@@ -7361,19 +7387,6 @@ async def test_dump_cluster_state_exclude_default(c, s, a, b, tmp_path):
     for k, task_dump in tasks.items():
         assert all(blocked in task_dump for blocked in excluded_by_default)
         assert k in s.tasks
-
-
-@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "200ms"})
-async def test_dump_cluster_state_error(c, s, a, b, tmp_path):
-    a.stop()
-    filename = tmp_path / "foo"
-    await c.dump_cluster_state(filename, format="yaml")
-    state = _verify_cluster_dump(filename, "yaml", {a.address, b.address})
-    assert state["workers"][a.address] == (
-        f"OSError('Timed out trying to connect to {a.address} after 0.2 s')"
-    )
-    assert isinstance(state["workers"][b.address], dict)
-    assert state["versions"]["workers"].keys() == {b.address}
 
 
 class TestClientSecurityLoader:
