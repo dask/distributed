@@ -761,7 +761,7 @@ async def test_counters():
         assert c["op"].components[0] == {"identity": 2, "div": 1}
 
 
-@gen_cluster()
+@gen_cluster(config={"distributed.admin.tick.interval": "20 ms"})
 async def test_ticks(s, a, b):
     pytest.importorskip("crick")
     await asyncio.sleep(0.1)
@@ -770,7 +770,7 @@ async def test_ticks(s, a, b):
     assert 0.01 < c.components[0].quantile(0.5) < 0.5
 
 
-@gen_cluster()
+@gen_cluster(config={"distributed.admin.tick.interval": "20 ms"})
 async def test_tick_logging(s, a, b):
     pytest.importorskip("crick")
     from distributed import core
