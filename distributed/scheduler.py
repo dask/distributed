@@ -4413,8 +4413,6 @@ class Scheduler(SchedulerState, ServerNode):
         if resources:
             self.add_resources(worker=address, resources=resources)
 
-        self.log_event(address, merge({"action": "heartbeat"}, metrics))
-
         return {
             "status": "OK",
             "time": local_now,
