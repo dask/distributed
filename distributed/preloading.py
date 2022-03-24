@@ -6,14 +6,13 @@ import logging
 import os
 import shutil
 import sys
-import time
-import urllib.request
 from collections.abc import Iterable
 from importlib import import_module
 from types import ModuleType
 from typing import TYPE_CHECKING, cast
 
 import click
+import urllib3
 
 from dask.utils import tmpfile
 
@@ -132,23 +131,17 @@ def _download_module(url: str) -> ModuleType:
     logger.info("Downloading preload at %s", url)
     assert is_webaddress(url)
 
-    duration = 0.2
-    for i in range(10):
-        try:
-            request = urllib.request.Request(url, method="GET")
-            response = urllib.request.urlopen(request)
-        except urllib.error.HTTPError as e:
-            if e.getcode in (429, 504, 503, 502):
-                time.sleep(duration)
-                duration *= 1.5
-                continue
-            else:
-                raise
-        else:
-            source = response.read().decode()
-            break
-    else:
-        raise
+    with urllib3.PoolManager() as http:
+        response = http.request(
+            method="GET",
+            url=url,
+            retries=urllib3.util.Retry(
+                status_forcelist=[429, 504, 503, 502],
+                backoff_factor=0.2,
+            ),
+        )
+
+        source = response.data
 
     compiled = compile(source, url, "exec")
     module = ModuleType(url)
