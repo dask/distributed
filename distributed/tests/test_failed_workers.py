@@ -145,15 +145,14 @@ async def test_restart_cleared(c, s, a, b):
 
 
 @pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
-def test_restart_sync_no_center(loop):
-    with cluster(nanny=True) as (s, [a, b]):
-        with Client(s["address"], loop=loop) as c:
-            x = c.submit(inc, 1)
-            c.restart()
-            assert x.cancelled()
-            y = c.submit(inc, 2)
-            assert y.result() == 3
-            assert len(c.nthreads()) == 2
+@gen_cluster(Worker=Nanny, client=True, timeout=60)
+async def test_restart_sync_no_center(c, s, a, b):
+    x = c.submit(inc, 1)
+    await c.restart()
+    assert x.cancelled()
+    y = c.submit(inc, 2)
+    assert (await y) == 3
+    assert len(await c.nthreads()) == 2
 
 
 @pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
