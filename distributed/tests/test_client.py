@@ -80,6 +80,7 @@ from distributed.utils import is_valid_xml, mp_context, sync, tmp_text
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _UnhashableCallable,
+    assert_story,
     async_wait_for,
     asyncinc,
     captured_logger,
@@ -7486,3 +7487,61 @@ async def test_wait_for_workers_updates_info(c, s):
     async with Worker(s.address):
         await c.wait_for_workers(1)
         assert c.scheduler_info()["workers"]
+
+
+@gen_cluster(client=True)
+async def test_client_story(c, s, *workers):
+    f1 = c.submit(inc, 1)
+    f2 = c.submit(inc, f1)
+    assert await c.gather([f1, f2]) == [2, 3]
+
+    story = await c.story(f1.key, f2.key)
+
+    assert_story(
+        story,
+        (
+            (
+                f1.key,
+                "released",
+                "waiting",
+                {f1.key: "processing"},
+            ),
+            (
+                f1.key,
+                "waiting",
+                "processing",
+                {},
+            ),
+            (
+                f2.key,
+                "released",
+                "waiting",
+                {f2.key: "processing"},
+            ),
+            (f2.key, "waiting", "processing", {}),
+            (f1.key, "processing", "memory", {}),
+            (f2.key, "processing", "memory", {}),
+            (f1.key, "compute-task"),
+            (
+                f1.key,
+                "released",
+                "waiting",
+                "waiting",
+                {f1.key: "ready"},
+            ),
+            (f1.key, "waiting", "ready", "ready", {}),
+            (f1.key, "ready", "executing", "executing", {}),
+            (f1.key, "put-in-memory"),
+            (f1.key, "executing", "memory", "memory", {}),
+            (f2.key, "compute-task"),
+            (f2.key, "released", "waiting", "waiting", {f2.key: "ready"}),
+            (f2.key, "waiting", "ready", "ready", {}),
+            (f2.key, "ready", "executing", "executing", {}),
+            (f2.key, "put-in-memory"),
+            (f2.key, "executing", "memory", "memory", {}),
+        ),
+    )
+
+    from pprint import pprint
+
+    pprint(story)

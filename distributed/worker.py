@@ -738,6 +738,7 @@ class Worker(ServerNode):
             "plugin-add": self.plugin_add,
             "plugin-remove": self.plugin_remove,
             "get_monitor_info": self.get_monitor_info,
+            "get_story": self.get_story,
         }
 
         stream_handlers = {
@@ -1257,6 +1258,9 @@ class Worker(ServerNode):
             result["gpu_name"] = self.monitor.gpu_name
             result["gpu_memory_total"] = self.monitor.gpu_memory_total
         return result
+
+    def get_story(self, keys=None):
+        return self.story(*keys)
 
     #############
     # Lifecycle #

@@ -4006,6 +4006,7 @@ class Scheduler(SchedulerState, ServerNode):
             "stop_task_metadata": self.stop_task_metadata,
             "get_cluster_state": self.get_cluster_state,
             "dump_cluster_state_to_url": self.dump_cluster_state_to_url,
+            "cluster_story": self.get_cluster_story,
         }
 
         connection_limit = get_fileno_limit() / 2
@@ -7477,6 +7478,26 @@ class Scheduler(SchedulerState, ServerNode):
                 result = dict(out)
 
             return result
+
+    async def get_cluster_story(self, keys=None):
+        assert isinstance(keys, tuple)
+        bits = [
+            (ws, await self.rpc.connect(ws.address)) for ws in self.workers.values()
+        ]
+        coros = []
+
+        for _, worker_comm in bits:
+            coros.append(
+                send_recv(comm=worker_comm, reply=True, op="get_story", keys=keys)
+            )
+
+        try:
+            worker_stories = await asyncio.gather(*coros)
+        finally:
+            for worker_state, worker_comm in bits:
+                self.rpc.reuse(worker_state.address, worker_comm)
+
+        return self.story(*keys) + [s for stories in worker_stories for s in stories]
 
     def run_function(self, comm, function, args=(), kwargs=None, wait=True):
         """Run a function within this process

@@ -1479,6 +1479,12 @@ class Client(SyncMethodMixin):
         logger.warning("Scheduler exception:")
         logger.exception(exception)
 
+    async def _story(self, keys=()):
+        return await self.scheduler.cluster_story(keys=keys)
+
+    def story(self, *keys_or_stimulus_ids):
+        return self.sync(self._story, keys=keys_or_stimulus_ids)
+
     async def _close(self, fast=False):
         """Send close signal and wait until scheduler completes"""
         if self.status == "closed":
