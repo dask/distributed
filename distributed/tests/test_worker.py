@@ -421,6 +421,22 @@ async def test_chained_error_message(c, s, a, b):
         assert "Bar" in str(e.__cause__)
 
 
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_baseexception_in_task(c, s, a):
+    class CustomBaseException(BaseException):
+        # This is exactly what Python says you shouldn't do, but users may do it anyway.
+        pass
+
+    def bad_task():
+        raise CustomBaseException("foo")
+
+    f = c.submit(bad_task)
+    with pytest.raises(CustomBaseException, match="foo"):
+        await f
+
+    assert not a.active_threads
+
+
 @gen_test()
 async def test_plugin_exception():
     class MyPlugin:

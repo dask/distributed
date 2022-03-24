@@ -3015,7 +3015,10 @@ def apply_function_simple(
     start = time()
     try:
         result = function(*args, **kwargs)
-    except Exception as e:
+    except BaseException as e:
+        # NOTE: SIGINT would always raise `KeyboardInterrupt` in the main thread, so we can assume
+        # `BaseException`s come from user code. Users _shouldn't_ use `BaseException`s, but if they do, we can
+        # assume they aren't a reason to shut down the whole system. This does block `sys.exit()` from user code.
         msg = error_message(e)
         msg["op"] = "task-erred"
         msg["actual-exception"] = e
@@ -3052,6 +3055,8 @@ async def apply_function_async(
     try:
         result = await function(*args, **kwargs)
     except Exception as e:
+        # NOTE: we don't catch `BaseException`s because we're running in the main thread,
+        # plus `asyncio.CancelledError` is a `BaseException`
         msg = error_message(e)
         msg["op"] = "task-erred"
         msg["actual-exception"] = e
