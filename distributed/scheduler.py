@@ -7484,17 +7484,21 @@ class Scheduler(SchedulerState, ServerNode):
         bits = [
             (ws, await self.rpc.connect(ws.address)) for ws in self.workers.values()
         ]
-        coros = []
+        tasks = []
 
         for _, worker_comm in bits:
-            coros.append(
-                send_recv(comm=worker_comm, reply=True, op="get_story", keys=keys)
-            )
+            coro = send_recv(comm=worker_comm, reply=True, op="get_story", keys=keys)
+            tasks.append(asyncio.ensure_future(coro))
 
         try:
             worker_stories = await asyncio.gather(
-                *coros, return_exceptions=on_error == "ignore"
+                *tasks, return_exceptions=on_error == "ignore"
             )
+        except Exception:
+            for task in tasks:
+                task.cancel()
+
+            raise
         finally:
             for worker_state, worker_comm in bits:
                 self.rpc.reuse(worker_state.address, worker_comm)

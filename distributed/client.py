@@ -1481,13 +1481,17 @@ class Client(SyncMethodMixin):
 
     async def _story(self, keys=(), on_error="raise"):
         stimulus_id = f"client-story-{time()}"
-
-        try:
-            return await self.scheduler.cluster_story(
+        task = asyncio.ensure_future(
+            self.scheduler.cluster_story(
                 keys=keys, on_error=on_error, stimulus_id=stimulus_id
             )
+        )
+
+        try:
+            return await task
         except Exception:
             if on_error == "raise":
+                task.cancel()
                 raise
             elif on_error == "ignore":
                 return [("scheduler-story-retrieval-failure", stimulus_id, time())]
