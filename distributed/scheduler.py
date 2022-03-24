@@ -7479,7 +7479,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             return result
 
-    async def get_cluster_story(self, keys=None):
+    async def get_cluster_story(self, keys=None, on_error="raise", stimulus_id=None):
         assert isinstance(keys, tuple)
         bits = [
             (ws, await self.rpc.connect(ws.address)) for ws in self.workers.values()
@@ -7492,12 +7492,28 @@ class Scheduler(SchedulerState, ServerNode):
             )
 
         try:
-            worker_stories = await asyncio.gather(*coros)
+            worker_stories = await asyncio.gather(
+                *coros, return_exceptions=on_error == "ignore"
+            )
         finally:
             for worker_state, worker_comm in bits:
                 self.rpc.reuse(worker_state.address, worker_comm)
 
-        return self.story(*keys) + [s for stories in worker_stories for s in stories]
+        flat_ws = []
+
+        for stories in worker_stories:
+            if isinstance(stories, Exception):
+                flat_ws.append(
+                    (
+                        "worker-story-retrieval-failure",
+                        stimulus_id,
+                        time(),
+                    )
+                )
+            else:
+                flat_ws.extend(s for s in stories)
+
+        return self.story(*keys) + flat_ws
 
     def run_function(self, comm, function, args=(), kwargs=None, wait=True):
         """Run a function within this process

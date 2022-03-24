@@ -1259,7 +1259,7 @@ class Worker(ServerNode):
             result["gpu_memory_total"] = self.monitor.gpu_memory_total
         return result
 
-    def get_story(self, keys=None):
+    async def get_story(self, keys=None):
         return self.story(*keys)
 
     #############

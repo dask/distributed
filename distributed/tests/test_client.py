@@ -7489,59 +7489,62 @@ async def test_wait_for_workers_updates_info(c, s):
         assert c.scheduler_info()["workers"]
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_client_story(c, s, *workers):
-    f1 = c.submit(inc, 1)
-    f2 = c.submit(inc, f1)
-    assert await c.gather([f1, f2]) == [2, 3]
-
-    story = await c.story(f1.key, f2.key)
+    f = c.submit(inc, 1, workers=workers[0].name)
+    assert await f == 2
+    story = await c.story(f.key)
 
     assert_story(
         story,
-        (
-            (
-                f1.key,
-                "released",
-                "waiting",
-                {f1.key: "processing"},
-            ),
-            (
-                f1.key,
-                "waiting",
-                "processing",
-                {},
-            ),
-            (
-                f2.key,
-                "released",
-                "waiting",
-                {f2.key: "processing"},
-            ),
-            (f2.key, "waiting", "processing", {}),
-            (f1.key, "processing", "memory", {}),
-            (f2.key, "processing", "memory", {}),
-            (f1.key, "compute-task"),
-            (
-                f1.key,
-                "released",
-                "waiting",
-                "waiting",
-                {f1.key: "ready"},
-            ),
-            (f1.key, "waiting", "ready", "ready", {}),
-            (f1.key, "ready", "executing", "executing", {}),
-            (f1.key, "put-in-memory"),
-            (f1.key, "executing", "memory", "memory", {}),
-            (f2.key, "compute-task"),
-            (f2.key, "released", "waiting", "waiting", {f2.key: "ready"}),
-            (f2.key, "waiting", "ready", "ready", {}),
-            (f2.key, "ready", "executing", "executing", {}),
-            (f2.key, "put-in-memory"),
-            (f2.key, "executing", "memory", "memory", {}),
-        ),
+        [
+            (f.key, "released", "waiting", {f.key: "processing"}),
+            (f.key, "waiting", "processing", {}),
+            (f.key, "processing", "memory", {}),
+            (f.key, "compute-task"),
+            (f.key, "released", "waiting", "waiting", {f.key: "ready"}),
+            (f.key, "waiting", "ready", "ready", {}),
+            (f.key, "ready", "executing", "executing", {}),
+            (f.key, "put-in-memory"),
+            (f.key, "executing", "memory", "memory", {}),
+        ],
     )
 
-    from pprint import pprint
 
-    pprint(story)
+class BlockedWorkerStory(Worker):
+    def __init__(self, *args, **kw):
+        super().__init__(*args, **kw)
+        self.unblock_worker = asyncio.Event()
+
+    async def get_story(self, *args, **kw):
+        await self.unblock_worker.wait()
+        return super().get_story(*args, **kw)
+
+
+@gen_cluster(client=True, Worker=BlockedWorkerStory, nthreads=[("", 1)])
+@pytest.mark.parametrize("on_error", ["raise", "ignore"])
+async def test_client_story_failed_worker(c, s, worker, on_error):
+    f = c.submit(inc, 1)
+    await asyncio.sleep(0.1)
+
+    coro = c.story(f.key, on_error=on_error)
+    worker.unblock_worker.set()
+    await f
+
+    if on_error == "raise":
+        with pytest.raises(CommClosedError) as e:
+            await coro
+    elif on_error == "ignore":
+        story = await coro
+        assert_story(
+            story,
+            [
+                (f.key, "released", "waiting", {f.key: "processing"}),
+                (f.key, "waiting", "processing", {}),
+                (f.key, "processing", "memory", {}),
+                ("worker-story-retrieval-failure",),
+            ],
+        )
+
+    else:
+        raise RuntimeError(on_error)

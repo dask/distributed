@@ -1479,11 +1479,23 @@ class Client(SyncMethodMixin):
         logger.warning("Scheduler exception:")
         logger.exception(exception)
 
-    async def _story(self, keys=()):
-        return await self.scheduler.cluster_story(keys=keys)
+    async def _story(self, keys=(), on_error="raise"):
+        stimulus_id = f"client-story-{time()}"
 
-    def story(self, *keys_or_stimulus_ids):
-        return self.sync(self._story, keys=keys_or_stimulus_ids)
+        try:
+            return await self.scheduler.cluster_story(
+                keys=keys, on_error=on_error, stimulus_id=stimulus_id
+            )
+        except Exception:
+            if on_error == "raise":
+                raise
+            elif on_error == "ignore":
+                return [("scheduler-story-retrieval-failure", stimulus_id, time())]
+            else:
+                raise ValueError(f"{on_error} not in {'raise', 'ignore'}")
+
+    def story(self, *keys_or_stimulus_ids, on_error="raise"):
+        return self.sync(self._story, keys=keys_or_stimulus_ids, on_error=on_error)
 
     async def _close(self, fast=False):
         """Send close signal and wait until scheduler completes"""
