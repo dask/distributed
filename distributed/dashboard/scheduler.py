@@ -108,7 +108,7 @@ applications = {
 }
 
 
-template_variables = {
+template_variables: dict = {
     "pages": [
         "status",
         "workers",

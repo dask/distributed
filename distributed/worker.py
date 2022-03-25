@@ -54,11 +54,11 @@ from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import randbytes
 from distributed.core import (
     CommClosedError,
+    ConnectionPool,
     Status,
     coerce_to_address,
     error_message,
     pingpong,
-    rpc,
     send_recv,
 )
 from distributed.diagnostics import nvml
@@ -4657,7 +4657,7 @@ def benchmark_memory(
 
 async def benchmark_network(
     address: str,
-    rpc: rpc,
+    rpc: ConnectionPool,
     sizes: Iterable[str] = ("1 kiB", "10 kiB", "100 kiB", "1 MiB", "10 MiB", "50 MiB"),
     duration="1 s",
 ) -> dict[str, float]:
