@@ -204,6 +204,12 @@ properties:
                     type:
                     - string
                     - "null"
+                  password:
+                    type:
+                    - string
+                    - "null"
+                    description: |
+                      An optional password for decrypting the private key.
               bokeh-application:
                 type: object
                 description: |
@@ -801,6 +807,12 @@ properties:
 
                       Alternatively, the key can be appended to the cert file
                       above, and this field left blank
+                  password:
+                    type:
+                    - string
+                    - "null"
+                    description: |
+                      An optional password for decrypting the private key.
 
               worker:
                 type: object
@@ -820,6 +832,12 @@ properties:
 
                       Alternatively, the key can be appended to the cert file
                       above, and this field left blank
+                  password:
+                    type:
+                    - string
+                    - "null"
+                    description: |
+                      An optional password for decrypting the private key.
 
               client:
                 type: object
@@ -839,6 +857,12 @@ properties:
 
                       Alternatively, the key can be appended to the cert file
                       above, and this field left blank
+                  password:
+                    type:
+                    - string
+                    - "null"
+                    description: |
+                      An optional password for decrypting the private key.
 
           ucx:
             type: object

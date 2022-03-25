@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from unittest.mock import MagicMock
 
 try:
     import ssl
@@ -165,6 +166,7 @@ def test_tls_config_for_role():
         "distributed.comm.tls.ca-file": "ca.pem",
         "distributed.comm.tls.scheduler.key": "skey.pem",
         "distributed.comm.tls.scheduler.cert": "scert.pem",
+        "distributed.comm.tls.scheduler.password": "mypassword",
         "distributed.comm.tls.worker.cert": "wcert.pem",
         "distributed.comm.tls.ciphers": FORCED_CIPHER,
     }
@@ -176,6 +178,7 @@ def test_tls_config_for_role():
         "key": "skey.pem",
         "cert": "scert.pem",
         "ciphers": FORCED_CIPHER,
+        "password": "mypassword",
     }
     t = sec.get_tls_config_for_role("worker")
     assert t == {
@@ -183,6 +186,7 @@ def test_tls_config_for_role():
         "key": None,
         "cert": "wcert.pem",
         "ciphers": FORCED_CIPHER,
+        "password": None,
     }
     t = sec.get_tls_config_for_role("client")
     assert t == {
@@ -190,6 +194,7 @@ def test_tls_config_for_role():
         "key": None,
         "cert": None,
         "ciphers": FORCED_CIPHER,
+        "password": None,
     }
     with pytest.raises(ValueError):
         sec.get_tls_config_for_role("supervisor")
@@ -249,6 +254,27 @@ def test_connection_args():
     assert len(tls_12_ciphers) == 1
     tls_13_ciphers = [c for c in supported_ciphers if "TLSv1.3" in c["description"]]
     assert len(tls_13_ciphers) in (0, 3)
+
+
+def test_tls_password_is_forwarded_to_ssl_load_cert(monkeypatch):
+    """Test that the `tls_*_password` kwarg is forwarded properly"""
+    sec = Security(
+        tls_ca_file=ca_file,
+        tls_client_key=key1,
+        tls_client_cert=cert1,
+        tls_client_password="mypassword",
+    )
+
+    # The mock is a bit unfortunate, but saves us from having to generate a new
+    # password encrypted key to test with.
+    SSLContext = MagicMock(spec=ssl.SSLContext)
+    monkeypatch.setattr(ssl, "SSLContext", SSLContext)
+
+    d = sec.get_connection_args("client")
+    assert (
+        SSLContext.return_value.load_cert_chain.call_args[1]["password"] == "mypassword"
+    )
+    assert d["ssl_context"] is SSLContext.return_value
 
 
 def test_extra_conn_args_connection_args():

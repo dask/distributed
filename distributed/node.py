@@ -15,6 +15,26 @@ from distributed.utils import DequeHandler, clean_dashboard_address
 from distributed.versions import get_versions
 
 
+def _load_http_server_ssl_options():
+    tls_cert = dask.config.get("distributed.scheduler.dashboard.tls.cert")
+    if tls_cert:
+        import ssl
+
+        tls_key = dask.config.get("distributed.scheduler.dashboard.tls.key")
+        tls_ca_file = dask.config.get("distributed.scheduler.dashboard.tls.ca-file")
+        tls_password = dask.config.get("distributed.scheduler.dashboard.tls.password")
+
+        ssl_context = ssl.create_default_context(
+            cafile=tls_ca_file, purpose=ssl.Purpose.SERVER_AUTH
+        )
+        ssl_context.load_cert_chain(tls_cert, keyfile=tls_key, password=tls_password)
+        # We don't care about auth here, just encryption
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        return ssl_context
+    return None
+
+
 class ServerNode(Server):
     """
     Base class for server nodes in a distributed cluster.
@@ -124,19 +144,8 @@ class ServerNode(Server):
         self.http_application = RoutingApplication(routes)
 
         # TLS configuration
-        tls_key = dask.config.get("distributed.scheduler.dashboard.tls.key")
-        tls_cert = dask.config.get("distributed.scheduler.dashboard.tls.cert")
-        tls_ca_file = dask.config.get("distributed.scheduler.dashboard.tls.ca-file")
-        if tls_cert:
-            import ssl
-
-            ssl_options = ssl.create_default_context(
-                cafile=tls_ca_file, purpose=ssl.Purpose.SERVER_AUTH
-            )
-            ssl_options.load_cert_chain(tls_cert, keyfile=tls_key)
-            # We don't care about auth here, just encryption
-            ssl_options.check_hostname = False
-            ssl_options.verify_mode = ssl.CERT_NONE
+        if ssl_options is None:
+            ssl_options = _load_http_server_ssl_options()
 
         self.http_server = HTTPServer(self.http_application, ssl_options=ssl_options)
 
