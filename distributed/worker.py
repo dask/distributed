@@ -1525,7 +1525,7 @@ class Worker(ServerNode):
         )
         await self.close(safe=True, nanny=not restart)
 
-    async def terminate(self, report: bool = True, stimulus_id=None, **kwargs) -> str:
+    async def terminate(self, report: bool = True, **kwargs) -> str:
         await self.close(report=report, **kwargs)
         return "OK"
 
@@ -3138,7 +3138,7 @@ class Worker(ServerNode):
             # `transition_constrained_executing`
             self.transition(ts, "released", stimulus_id=stimulus_id)
 
-    def handle_worker_status_change(self, status: str, stimulus_id=None) -> None:
+    def handle_worker_status_change(self, status: str, stimulus_id: str) -> None:
         new_status = Status.lookup[status]  # type: ignore
 
         if (
@@ -3489,7 +3489,7 @@ class Worker(ServerNode):
             assert ts, self.story(key)
             ts.done = True
             result["key"] = ts.key
-            result["stimulus_id"] = f"{result['op']}-{time()}"
+            result["stimulus_id"] = stimulus_id = f"{result['op']}-{time()}"
             value = result.pop("result", None)
             ts.startstops.append(
                 {"action": "compute", "start": result["start"], "stop": result["stop"]}

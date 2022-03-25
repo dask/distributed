@@ -4336,10 +4336,7 @@ class Scheduler(SchedulerState, ServerNode):
         with log_errors():
             self.log_event(worker, {"action": "close-worker"})
             # FIXME: This does not handle nannies
-            self.worker_send(
-                worker,
-                {"op": "close", "report": False},
-            )
+            self.worker_send(worker, {"op": "close", "report": False})
             await self.remove_worker(address=worker, safe=safe)
 
     ###########
@@ -4647,7 +4644,7 @@ class Scheduler(SchedulerState, ServerNode):
             if comm:
                 await comm.write(msg)
 
-            await self.handle_worker(comm=comm, worker=address, stimulus_id=stimulus_id)
+            await self.handle_worker(comm=comm, worker=address)
 
     async def add_nanny(self, comm):
         msg = {
@@ -5742,7 +5739,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.check_idle_saturated(ws)
 
     def handle_worker_status_change(
-        self, status: str, worker: str, stimulus_id=None
+        self, status: str, worker: str, stimulus_id: str
     ) -> None:
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState = parent._workers_dv.get(worker)  # type: ignore
@@ -5782,7 +5779,7 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             parent._running.discard(ws)
 
-    async def handle_worker(self, comm=None, worker=None, stimulus_id=None):
+    async def handle_worker(self, comm=None, worker=None):
         """
         Listen to responses from a single worker
 
@@ -5801,7 +5798,9 @@ class Scheduler(SchedulerState, ServerNode):
         finally:
             if worker in self.stream_comms:
                 worker_comm.abort()
-                await self.remove_worker(address=worker, stimulus_id=stimulus_id)
+                await self.remove_worker(
+                    address=worker, stimulus_id=f"handle-worker-{time()}"
+                )
 
     def add_plugin(
         self,
@@ -6288,10 +6287,7 @@ class Scheduler(SchedulerState, ServerNode):
     async def proxy(self, comm=None, msg=None, worker=None, serializers=None):
         """Proxy a communication through the scheduler to some other worker"""
         d = await self.broadcast(
-            comm=comm,
-            msg=msg,
-            workers=[worker],
-            serializers=serializers,
+            comm=comm, msg=msg, workers=[worker], serializers=serializers
         )
         return d[worker]
 
@@ -7075,6 +7071,7 @@ class Scheduler(SchedulerState, ServerNode):
         Scheduler.workers_to_close
         """
         parent: SchedulerState = cast(SchedulerState, self)
+        stimulus_id = stimulus_id or f"retire-workers-{time()}"
         ws: WorkerState
         ts: TaskState
         with log_errors():
@@ -7288,12 +7285,7 @@ class Scheduler(SchedulerState, ServerNode):
                     keys=list(who_has), client=client, stimulus_id=stimulus_id
                 )
 
-    def report_on_key(
-        self,
-        key: str = None,
-        ts: TaskState = None,
-        client: str = None,
-    ):
+    def report_on_key(self, key: str = None, ts: TaskState = None, client: str = None):
         parent: SchedulerState = cast(SchedulerState, self)
         if ts is None:
             ts = parent._tasks.get(key)
@@ -7312,13 +7304,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.report(report_msg, ts=ts, client=client)
 
     async def feed(
-        self,
-        comm,
-        function=None,
-        setup=None,
-        teardown=None,
-        interval="1s",
-        **kwargs,
+        self, comm, function=None, setup=None, teardown=None, interval="1s", **kwargs
     ):
         """
         Provides a data Comm to external requester

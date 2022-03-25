@@ -2199,6 +2199,8 @@ class Client(SyncMethodMixin):
             d = await self._scatter(keymap(stringify, data), workers, broadcast)
             return {k: d[stringify(k)] for k in data}
 
+        stimulus_id = f"client-scatter-{time()}"
+
         if isinstance(data, type(range(0))):
             data = list(data)
         input_type = type(data)
@@ -2258,7 +2260,7 @@ class Client(SyncMethodMixin):
                     raise ValueError("No valid workers found")
 
                 _, who_has, nbytes = await scatter_to_workers(
-                    nthreads, data2, report=False, rpc=self.rpc
+                    nthreads, data2, report=False, rpc=self.rpc, stimulus_id=stimulus_id
                 )
 
                 await self.scheduler.update_data(
@@ -2271,6 +2273,7 @@ class Client(SyncMethodMixin):
                     client=self.id,
                     broadcast=broadcast,
                     timeout=timeout,
+                    stimulus_id=stimulus_id,
                 )
 
         out = {k: Future(k, self, inform=False) for k in data}
