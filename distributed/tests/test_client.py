@@ -7535,6 +7535,7 @@ async def test_client_story_failed_worker(c, s, a, b, on_error):
                 (f.key, "waiting", "processing", {}),
                 (f.key, "processing", "memory", {}),
                 ("worker-story-retrieval-failure",),
+                ("worker-story-retrieval-failure",),
             ],
         )
 
@@ -7554,4 +7555,4 @@ async def test_client_story_failed_worker(c, s, a, b, on_error):
         assert all(isinstance(event, CommClosedError) for event in story[3:])
 
     else:
-        raise RuntimeError(on_error)
+        raise ValueError(on_error)

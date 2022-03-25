@@ -1486,28 +1486,29 @@ class Client(SyncMethodMixin):
 
         msg = {"op": "get_story", "keys": keys}
         WORKER_SENTINEL = [("worker-story-retrieval-failure", stimulus_id, time())]
+        SERVER_SENTINEL = [("scheduler-story-retrieval-failure", stimulus_id, time())]
+
         coros = [
+            send_message(
+                msg, self.rpc, self.scheduler.address, None, on_error, SERVER_SENTINEL
+            )
+        ] + [
             send_message(msg, self.rpc, address, None, on_error, WORKER_SENTINEL)
             for address in info["workers"]
         ]
 
-        worker_stories = await asyncio.gather(*coros)
-        SERVER_SENTINEL = [("scheduler-story-retrieval-failure", stimulus_id, time())]
-        scheduler_story = await send_message(
-            msg, self.rpc, self.scheduler.address, None, on_error, SERVER_SENTINEL
-        )
+        flat_stories = []
 
-        flat_worker_stories = []
-
-        for stories in worker_stories:
+        for stories in await asyncio.gather(*coros):
             if isinstance(stories, (tuple, list)):
-                flat_worker_stories.extend(s for s in stories)
+                flat_stories.extend(s for s in stories)
             else:
-                flat_worker_stories.append(stories)
+                flat_stories.append(stories)
 
-        return list(scheduler_story) + flat_worker_stories
+        return flat_stories
 
-    def story(self, *keys_or_stimulus_ids, on_error="raise"):
+    def story(self, *keys_or_stimulus_ids, on_error="return"):
+        """Returns a cluster-wide story for the given keys or simtulus_id's"""
         return self.sync(self._story, keys=keys_or_stimulus_ids, on_error=on_error)
 
     async def _close(self, fast=False):
