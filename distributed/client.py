@@ -4042,7 +4042,16 @@ class Client(SyncMethodMixin):
         return self.sync(self.scheduler.worker_logs, n=n, workers=workers, nanny=nanny)
 
     def benchmark_hardware(self) -> dict:
-        """Run a hardware benchmark"""
+        """
+        Run a benchmark on the workers for memory, disk, and network bandwidths
+
+        Returns
+        -------
+        result: dict
+            A dictionary mapping the names "disk", "memory", and "network" to
+            dictionaries mapping sizes to bandwidths.  These bandwidths are
+            averaged over many workers running computations across the cluster.
+        """
         return self.sync(self.scheduler.benchmark_hardware)
 
     def log_event(self, topic, msg):

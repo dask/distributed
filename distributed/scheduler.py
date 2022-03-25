@@ -7332,6 +7332,16 @@ class Scheduler(SchedulerState, ServerNode):
         return response
 
     async def benchmark_hardware(self) -> "dict[str, dict[str, float]]":
+        """
+        Run a benchmark on the workers for memory, disk, and network bandwidths
+
+        Returns
+        -------
+        result: dict
+            A dictionary mapping the names "disk", "memory", and "network" to
+            dictionaries mapping sizes to bandwidths.  These bandwidths are
+            averaged over many workers running computations across the cluster.
+        """
         out: "dict[str, defaultdict[str, list[float]]]" = {
             name: defaultdict(list) for name in ["disk", "memory", "network"]
         }
