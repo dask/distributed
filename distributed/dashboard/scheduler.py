@@ -117,9 +117,22 @@ template_variables = {
         "groups",
         "info",
     ],
-    "plots": [x.replace("/", "") for x in applications if "individual" in x],
+    "plots": [
+        {
+            "url": x.strip("/"),
+            "name": " ".join(x.strip("/").split("-")[1:])
+            .title()
+            .replace("Cpu", "CPU")
+            .replace("Gpu", "GPU"),
+        }
+        for x in applications
+        if "individual" in x
+    ]
+    + [{"url": "hardware", "name": "Hardware"}],
 }
-template_variables["plots"].append("hardware")
+template_variables["plots"] = sorted(
+    template_variables["plots"], key=lambda d: d["name"]
+)
 
 if NVML_ENABLED:
     template_variables["pages"].insert(4, "gpu")
