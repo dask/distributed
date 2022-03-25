@@ -8,7 +8,6 @@ import pytest
 
 import dask
 
-from distributed.comm.core import CommClosedError
 from distributed.core import (
     ConnectionPool,
     Server,
@@ -94,13 +93,13 @@ def test_server_status_compare_enum_is_quiet():
     server.status == Status.running
 
 
-def test_server(loop):
+@gen_test()
+async def test_server():
     """
     Simple Server test.
     """
 
-    async def f():
-        server = Server({"ping": pingpong})
+    async with Server({"ping": pingpong}) as server:
         with pytest.raises(ValueError):
             server.port
         await server.listen(8881)
@@ -124,27 +123,21 @@ def test_server(loop):
 
             await comm.close()
 
-        server.stop()
 
-    loop.run_sync(f)
+@gen_test()
+async def test_server_raises_on_blocked_handlers(loop):
+    async with Server({"ping": pingpong}, blocked_handlers=["ping"]) as server:
+        await server.listen(8881)
 
+        comm = await connect(server.address)
+        await comm.write({"op": "ping"})
+        msg = await comm.read()
 
-def test_server_raises_on_blocked_handlers(loop):
-    async def f():
-        async with Server({"ping": pingpong}, blocked_handlers=["ping"]) as server:
-            await server.listen(8881)
+        _, exception, _ = clean_exception(msg["exception"])
+        assert isinstance(exception, ValueError)
+        assert "'ping' handler has been explicitly disallowed" in repr(exception)
 
-            comm = await connect(server.address)
-            await comm.write({"op": "ping"})
-            msg = await comm.read()
-
-            _, exception, _ = clean_exception(msg["exception"])
-            assert isinstance(exception, ValueError)
-            assert "'ping' handler has been explicitly disallowed" in repr(exception)
-
-            await comm.close()
-
-    res = loop.run_sync(f)
+        await comm.close()
 
 
 class MyServer(Server):
@@ -303,7 +296,7 @@ async def test_rpc_default():
     await check_rpc(8883)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_rpc_tcp():
     await check_rpc("tcp://:8883", "tcp://127.0.0.1:8883")
     await check_rpc("tcp://")
@@ -640,13 +633,12 @@ async def test_connection_pool_close_while_connecting(monkeypatch):
 
     tasks = [asyncio.create_task(connect_to_server()) for _ in range(30)]
 
-    await asyncio.sleep(0)
-    assert pool._connecting
+    while not pool._connecting:
+        await asyncio.sleep(0.01)
+
     close_fut = asyncio.create_task(pool.close())
 
-    with pytest.raises(
-        CommClosedError, match="ConnectionPool not running. Status: Status.closed"
-    ):
+    with pytest.raises(asyncio.CancelledError):
         await asyncio.gather(*tasks)
 
     await close_fut

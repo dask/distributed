@@ -556,7 +556,7 @@ class Server:
                             result = asyncio.ensure_future(result)
                             self._ongoing_coroutines.add(result)
                             result = await result
-                    except (CommClosedError, asyncio.CancelledError):
+                    except CommClosedError:
                         if self.status in Status.ANY_RUNNING:
                             logger.info("Lost connection to %r", address, exc_info=True)
                         break
@@ -1015,7 +1015,6 @@ class ConnectionPool:
         self.deserializers = deserializers if deserializers is not None else serializers
         self.connection_args = connection_args or {}
         self.timeout = timeout
-        self._n_connecting = 0
         self.server = weakref.ref(server) if server else None
         self._created = weakref.WeakSet()
         self._instances.add(self)
@@ -1024,6 +1023,7 @@ class ConnectionPool:
         # while the _n_connecting also accounts for connection attempts which
         # are waiting due to the connection limit
         self._connecting = set()
+        self._pending = set()
         self.status = Status.init
 
     def _validate(self):
@@ -1068,6 +1068,10 @@ class ConnectionPool:
         self.semaphore = asyncio.Semaphore(self.limit)
         self.status = Status.running
 
+    @property
+    def _n_connecting(self) -> int:
+        return len(self._pending) + len(self._connecting)
+
     async def connect(self, addr, timeout=None):
         """
         Get a Comm to the given address.  For internal use.
@@ -1085,16 +1089,21 @@ class ConnectionPool:
         if self.semaphore.locked():
             self.collect()
 
-        self._n_connecting += 1
-        await self.semaphore.acquire()
-        fut = None
+        pending_task = asyncio.create_task(
+            self.semaphore.acquire(),
+            name="pending-connect",
+        )
+        self._pending.add(pending_task)
+        pending_task.add_done_callback(lambda _: self._pending.discard(pending_task))
+        await pending_task
+        task = None
         try:
             if self.status != Status.running:
                 raise CommClosedError(
                     f"ConnectionPool not running. Status: {self.status}"
                 )
 
-            fut = asyncio.create_task(
+            task = asyncio.create_task(
                 connect(
                     addr,
                     timeout=timeout or self.timeout,
@@ -1102,8 +1111,9 @@ class ConnectionPool:
                     **self.connection_args,
                 )
             )
-            self._connecting.add(fut)
-            comm = await fut
+            self._connecting.add(task)
+            task.add_done_callback(lambda _: self._connecting.discard(task))
+            comm = await task
             comm.name = "ConnectionPool"
             comm._pool = weakref.ref(self)
             comm.allow_offload = self.allow_offload
@@ -1112,17 +1122,9 @@ class ConnectionPool:
             occupied.add(comm)
 
             return comm
-        except asyncio.CancelledError as exc:
-            self.semaphore.release()
-            raise CommClosedError(
-                f"ConnectionPool not running. Status: {self.status}"
-            ) from exc
-        except Exception:
+        except BaseException:
             self.semaphore.release()
             raise
-        finally:
-            self._connecting.discard(fut)
-            self._n_connecting -= 1
 
     def reuse(self, addr, comm):
         """
@@ -1180,6 +1182,10 @@ class ConnectionPool:
         Close all communications
         """
         self.status = Status.closed
+        for conn_fut in self._pending:
+            conn_fut.cancel()
+        for conn_fut in self._connecting:
+            conn_fut.cancel()
         for d in [self.available, self.occupied]:
             comms = set()
             while d:
@@ -1191,9 +1197,6 @@ class ConnectionPool:
 
             for _ in comms:
                 self.semaphore.release()
-
-        for conn_fut in self._connecting:
-            conn_fut.cancel()
 
         # We might still have tasks haning in the semaphore. This will let them
         # run into an exception and raise a commclosed
