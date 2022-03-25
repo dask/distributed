@@ -202,9 +202,8 @@ async def test_gen_test_double_parametrized(foo, bar):
 
 
 @gen_test()
-async def test_gen_test_pytest_fixture(tmp_path, c):
+async def test_gen_test_pytest_fixture(tmp_path):
     assert isinstance(tmp_path, pathlib.Path)
-    assert isinstance(c, Client)
 
 
 @contextmanager
