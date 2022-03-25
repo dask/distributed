@@ -3310,8 +3310,8 @@ async def test_Worker__to_dict(c, s, a):
 
 @gen_cluster(nthreads=[])
 async def test_extension_methods(s):
-    flag = [False]
-    shutdown = [False]
+    flag = False
+    shutdown = False
 
     class WorkerExtension:
         def __init__(self, worker):
@@ -3321,7 +3321,8 @@ async def test_extension_methods(s):
             return {"data": 123}
 
         async def close(self):
-            shutdown[0] = True
+            nonlocal shutdown
+            shutdown = True
 
     class SchedulerExtension:
         def __init__(self, scheduler):
@@ -3329,18 +3330,19 @@ async def test_extension_methods(s):
             pass
 
         def heartbeat(self, ws, data: dict):
+            nonlocal flag
             assert ws in self.scheduler.workers.values()
             assert data == {"data": 123}
-            flag[0] = True
+            flag = True
 
     s.extensions["test"] = SchedulerExtension(s)
 
     async with Worker(s.address, extensions={"test": WorkerExtension}) as w:
-        assert not shutdown[0]
+        assert not shutdown
         await w.heartbeat()
-        assert flag[0]
+        assert flag
 
-    assert shutdown[0]
+    assert shutdown
 
 
 @gen_cluster(
@@ -3355,19 +3357,8 @@ async def test_tick_interval(c, s, a, b):
 
     await a.heartbeat()
     x = s.workers[a.address].metrics["event_loop_interval"]
-    assert x
-    assert 0.0001 < x < 1
-    old = a._tick_interval_observed
-
-    old_count_last = a._tick_count_last
-
-    time.sleep(0.500)  # Block event loop
-
-    while a._tick_count_last == old_count_last:
+    while s.workers[a.address].metrics["event_loop_interval"] > 0.050:
         await asyncio.sleep(0.01)
-
-    await a.heartbeat()
-    y = s.workers[a.address].metrics["event_loop_interval"]
-    new = a._tick_interval_observed
-
-    assert y > x
+    while s.workers[a.address].metrics["event_loop_interval"] < 0.100:
+        await asyncio.sleep(0.01)
+        time.sleep(0.200)

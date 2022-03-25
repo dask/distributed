@@ -81,6 +81,7 @@ from distributed.security import Security
 from distributed.semaphore import SemaphoreExtension
 from distributed.shuffle import ShuffleSchedulerExtension
 from distributed.stealing import WorkStealing
+from distributed.stories import scheduler_story
 from distributed.utils import (
     All,
     TimeoutError,
@@ -4422,8 +4423,6 @@ class Scheduler(SchedulerState, ServerNode):
             for name, data in extensions.items():
                 self.extensions[name].heartbeat(ws, data)
 
-        self.log_event(address, merge({"action": "heartbeat"}, metrics))
-
         return {
             "status": "OK",
             "time": local_now,
@@ -7544,9 +7543,7 @@ class Scheduler(SchedulerState, ServerNode):
     def story(self, *keys):
         """Get all transitions that touch one of the input keys"""
         keys = {key.key if isinstance(key, TaskState) else key for key in keys}
-        return [
-            t for t in self.transition_log if t[0] in keys or keys.intersection(t[3])
-        ]
+        return scheduler_story(keys, self.transition_log)
 
     transition_story = story
 

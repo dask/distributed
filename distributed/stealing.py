@@ -80,7 +80,6 @@ class WorkStealing(SchedulerPlugin):
         self._in_flight_event = asyncio.Event()
 
         self.scheduler.stream_handlers["steal-response"] = self.move_task_confirm
-        self.scheduler.extensions["stealing"] = self
 
     async def start(self, scheduler=None):
         """Start the background coroutine to balance the tasks on the cluster.
@@ -415,10 +414,7 @@ class WorkStealing(SchedulerPlugin):
                         if not idle:
                             break
 
-                        if _has_restrictions(ts):
-                            thieves = [ws for ws in idle if _can_steal(ws, ts, sat)]
-                        else:
-                            thieves = idle
+                        thieves = _potential_thieves_for(ts, idle)
                         if not thieves:
                             break
                         thief = thieves[i % len(thieves)]
@@ -451,10 +447,7 @@ class WorkStealing(SchedulerPlugin):
                             continue
 
                         i += 1
-                        if _has_restrictions(ts):
-                            thieves = [ws for ws in idle if _can_steal(ws, ts, sat)]
-                        else:
-                            thieves = idle
+                        thieves = _potential_thieves_for(ts, idle)
                         if not thieves:
                             continue
                         thief = thieves[i % len(thieves)]
@@ -492,18 +485,16 @@ class WorkStealing(SchedulerPlugin):
         return out
 
 
-def _has_restrictions(ts):
-    """Determine whether the given task has restrictions and whether these
-    restrictions are strict.
-    """
-    return not ts.loose_restrictions and (
-        ts.host_restrictions or ts.worker_restrictions or ts.resource_restrictions
-    )
+def _potential_thieves_for(ts, idle):
+    """Return the list of workers from ``idle`` that could steal ``ts``."""
+    if _has_restrictions(ts):
+        return [ws for ws in idle if _can_steal(ws, ts)]
+    else:
+        return idle
 
 
-def _can_steal(thief, ts, victim):
-    """Determine whether worker ``thief`` can steal task ``ts`` from worker
-    ``victim``.
+def _can_steal(thief, ts):
+    """Determine whether worker ``thief`` can steal task ``ts``.
 
     Assumes that `ts` has some restrictions.
     """
@@ -527,6 +518,15 @@ def _can_steal(thief, ts, victim):
             if supplied < value:
                 return False
     return True
+
+
+def _has_restrictions(ts):
+    """Determine whether the given task has restrictions and whether these
+    restrictions are strict.
+    """
+    return not ts.loose_restrictions and (
+        ts.host_restrictions or ts.worker_restrictions or ts.resource_restrictions
+    )
 
 
 fast_tasks = {"split-shuffle"}
