@@ -145,6 +145,10 @@ class DumpArtefact(Mapping):
         else:
             return list(context.values())
 
+    @staticmethod
+    def _slugify_addr(addr: str) -> str:
+        return addr.replace("://", "-").replace("/", "_")
+
     def scheduler_tasks_in_state(self, state: str | None = None) -> list:
         """
         Parameters
@@ -198,22 +202,43 @@ class DumpArtefact(Mapping):
 
         return dict(stories)
 
-    def worker_story(self, *key_or_stimulus_id: str) -> dict:
+    def worker_stories(self, *key_or_stimulus_id: str) -> dict:
         """
         Returns
         -------
         stories : dict
-            A dict of stories for the keys/stimulus ID's in ``*key_or_stimulus_id`.`
+            A dict for each worker of the story for all the keys/stimulus IDs
+            in ``*key_or_stimulus_id`.`
         """
         keys = set(key_or_stimulus_id)
-        stories = defaultdict(list)
+        return {
+            addr: _worker_story(keys, wlog, datetimes=True)
+            for addr, worker_dump in self.dump["workers"].items()
+            if isinstance(worker_dump, dict) and (wlog := worker_dump.get("log"))
+        }
 
-        for worker_dump in self.dump["workers"].values():
-            if isinstance(worker_dump, dict) and "log" in worker_dump:
-                for story in _worker_story(keys, worker_dump["log"]):
-                    stories[story[0]].append(tuple(story))
+    def worker_stories_to_yamls(
+        self, root_dir: str | Path | None = None, *key_or_stimulus_id: str
+    ) -> None:
+        """
+        Write the results of `worker_stories` to separate YAML files per worker.
+        """
+        import yaml
 
-        return dict(stories)
+        root_dir = Path(root_dir) if root_dir else Path.cwd()
+
+        stories = self.worker_stories(*key_or_stimulus_id)
+        for i, (addr, story) in enumerate(stories.items()):
+            worker_dir = root_dir / self._slugify_addr(addr)
+            worker_dir.mkdir(parents=True, exist_ok=True)
+            path = (
+                worker_dir
+                / f"story-{key_or_stimulus_id[0] if len(key_or_stimulus_id) == 1 else key_or_stimulus_id}.yaml"
+            )
+
+            print(f"Dumping story {i:>3}/{len(stories)} to {path}")
+            with open(path, "w") as f:
+                yaml.dump(story, f, Dumper=yaml.CSafeDumper)
 
     def missing_workers(self) -> list:
         """
@@ -334,8 +359,7 @@ class DumpArtefact(Mapping):
 
         workers = self.dump["workers"]
         for i, (addr, info) in enumerate(workers.items()):
-            worker_name = addr.replace("://", "-").replace("/", "_")
-            log_dir = root_dir / worker_name
+            log_dir = root_dir / self._slugify_addr(addr)
             log_dir.mkdir(parents=True, exist_ok=True)
 
             if log:
