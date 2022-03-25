@@ -3701,7 +3701,7 @@ async def test_scatter_raises_if_no_workers(c, s):
 
 
 @pytest.mark.slow
-@gen_test()
+@gen_test(timeout=60)
 async def test_reconnect():
     futures = []
     w = Worker("127.0.0.1", 9393)
