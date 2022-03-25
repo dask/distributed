@@ -220,6 +220,32 @@ class FakeCode:
         yield from self.co_lines_seq
 
 
+FAKE_CODE = FakeCode(
+    co_filename="<stdin>",
+    co_name="example",
+    co_firstlineno=1,
+    # https://github.com/python/cpython/blob/b68431fadb3150134ac6ccbf501cdfeaf4c75678/Objects/lnotab_notes.txt#L84
+    # generated from:
+    # def example():
+    #     for i in range(1):
+    #         if i >= 0:
+    #             pass
+    # example.__code__.co_lnotab
+    co_lnotab=b"\x00\x01\x0c\x01\x08\x01\x04\xfe",
+    # generated with list(example.__code__.co_lines())
+    co_lines_seq=[
+        (0, 12, 2),
+        (12, 20, 3),
+        (20, 22, 4),
+        (22, 24, None),
+        (24, 28, 2),
+    ],
+    # used in dis.findlinestarts as bytecode_len = len(code.co_code)
+    # https://github.com/python/cpython/blob/6f345d363308e3e6ecf0ad518ea0fcc30afde2a8/Lib/dis.py#L457
+    co_code=bytes(28),
+)
+
+
 @dataclasses.dataclass(frozen=True)
 class FakeFrame:
     f_lasti: int
@@ -248,25 +274,7 @@ class FakeFrame:
     ],
 )
 def test_info_frame_f_lineno(f_lasti: int, f_lineno: int) -> None:
-    assert info_frame(
-        FakeFrame(
-            f_lasti=f_lasti,
-            f_code=FakeCode(
-                co_filename="<stdin>",
-                co_name="example",
-                co_firstlineno=1,
-                co_lnotab=b"\x00\x01\x0c\x01\x08\x01\x04\xfe",
-                co_lines_seq=[
-                    (0, 12, 2),
-                    (12, 20, 3),
-                    (20, 22, 4),
-                    (22, 24, None),
-                    (24, 28, 2),
-                ],
-                co_code=b"t\x00d\x01\x83\x01D\x00]\x07}\x00|\x00d\x02k\x05r\x0b\t\x00q\x04d\x00S\x00",
-            ),
-        )
-    ) == {
+    assert info_frame(FakeFrame(f_lasti=f_lasti, f_code=FAKE_CODE)) == {
         "filename": "<stdin>",
         "name": "example",
         "line_number": f_lineno,
@@ -293,22 +301,6 @@ def test_info_frame_f_lineno(f_lasti: int, f_lineno: int) -> None:
     ],
 )
 def test_call_stack_f_lineno(f_lasti: int, f_lineno: int) -> None:
-    assert call_stack(
-        FakeFrame(
-            f_lasti=f_lasti,
-            f_code=FakeCode(
-                co_filename="<stdin>",
-                co_name="example",
-                co_firstlineno=1,
-                co_lnotab=b"\x00\x01\x0c\x01\x08\x01\x04\xfe",
-                co_lines_seq=[
-                    (0, 12, 2),
-                    (12, 20, 3),
-                    (20, 22, 4),
-                    (22, 24, None),
-                    (24, 28, 2),
-                ],
-                co_code=b"t\x00d\x01\x83\x01D\x00]\x07}\x00|\x00d\x02k\x05r\x0b\t\x00q\x04d\x00S\x00",
-            ),
-        )
-    ) == [f'  File "<stdin>", line {f_lineno}, in example\n\t']
+    assert call_stack(FakeFrame(f_lasti=f_lasti, f_code=FAKE_CODE)) == [
+        f'  File "<stdin>", line {f_lineno}, in example\n\t'
+    ]
