@@ -3018,6 +3018,59 @@ class TaskProgress(DashboardComponent):
             )
 
 
+class EventLoop(DashboardComponent):
+    """Event Loop Health"""
+
+    def __init__(self, scheduler, **kwargs):
+        with log_errors():
+            self.scheduler = scheduler
+            self.source = ColumnDataSource(
+                {
+                    "names": ["Scheduler", "Workers"],
+                    "values": [0, 0],
+                    "text": ["0", "0"],
+                }
+            )
+
+            self.root = figure(
+                title="Event Loop Health",
+                x_range=["Scheduler", "Workers"],
+                y_range=[
+                    0,
+                    parse_timedelta(dask.config.get("distributed.admin.tick.interval"))
+                    * 25,
+                ],
+                tools="",
+                toolbar_location="above",
+                **kwargs,
+            )
+            self.root.vbar(x="names", top="values", width=0.9, source=self.source)
+
+            self.root.xaxis.minor_tick_line_alpha = 0
+            self.root.ygrid.visible = True
+            self.root.xgrid.visible = False
+
+            hover = HoverTool(tooltips=[("Interval", "@text s")], mode="vline")
+            self.root.add_tools(hover)
+
+    @without_property_validation
+    def update(self):
+        with log_errors():
+            s = self.scheduler
+
+            data = {
+                "names": ["Scheduler", "Workers"],
+                "values": [
+                    s._tick_interval_observed,
+                    sum([w.metrics["event_loop_interval"] for w in s.workers.values()])
+                    / (len(s.workers) or 1),
+                ],
+            }
+            data["text"] = [format_time(x) for x in data["values"]]
+
+            update(self.source, data)
+
+
 class WorkerTable(DashboardComponent):
     """Status of the current workers
 

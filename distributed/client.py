@@ -682,7 +682,7 @@ class Client(SyncMethodMixin):
         ``'127.0.0.1:8786'`` or a cluster object like ``LocalCluster()``
     loop
         The event loop
-    timeout: int
+    timeout: int (defaults to configuration ``distributed.comm.timeouts.connect``)
         Timeout duration for initial connection to the scheduler
     set_as_default: bool (True)
         Use this Client as the global dask scheduler
