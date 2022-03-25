@@ -3401,8 +3401,8 @@ class Shuffling(DashboardComponent):
                     ("Average Duration", "@comm_avg_duration"),
                 ],
                 formatters={"@comm_avg_duration": "datetime"},
+                point_policy="follow_mouse",
             )
-            hover.point_policy = "follow_mouse"
             self.comm_memory.add_tools(hover)
             self.comm_memory.x_range.start = 0
             self.comm_memory.x_range.end = 1
@@ -3427,26 +3427,15 @@ class Shuffling(DashboardComponent):
             )
 
             hover = HoverTool(
-                tooltips="""
-                            <div>
-                                <span style="font-size: 12px; font-weight: bold;">Memory Used:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@disk_memory{0.00 b}</span>
-                            </div>
-                            <div>
-                                <span style="font-size: 12px; font-weight: bold;">Average Write:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@disk_avg_size{0.00 b}</span>
-                            </div>
-                            <div>
-                                <span style="font-size: 12px; font-weight: bold;"># Buckets:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@disk_buckets</span>
-                            </div>
-                            <div>
-                                <span style="font-size: 12px; font-weight: bold;">Average Duration:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@disk_avg_duration</span>
-                            </div>
-                            """,
+                tooltips=[
+                    ("Memory Used", "@disk_memory{0.00 b}"),
+                    ("Average Write", "@disk_avg_size{0.00 b}"),
+                    ("# Buckets", "@disk_buckets"),
+                    ("Average Duration", "@disk_avg_duration"),
+                ],
+                formatters={"@disk_avg_duration": "datetime"},
+                point_policy="follow_mouse",
             )
-            hover.point_policy = "follow_mouse"
             self.disk_memory.add_tools(hover)
             self.disk_memory.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
 
