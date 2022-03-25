@@ -3701,9 +3701,11 @@ async def test_scatter_raises_if_no_workers(c, s):
 
 
 @pytest.mark.slow
-def test_reconnect(loop):
-    w = Worker("127.0.0.1", 9393, loop=loop)
-    loop.add_callback(w.start)
+@gen_test()
+async def test_reconnect():
+    futures = []
+    w = Worker("127.0.0.1", 9393)
+    futures.append(asyncio.ensure_future(w.start()))
 
     scheduler_cli = [
         "dask-scheduler",
@@ -3714,46 +3716,46 @@ def test_reconnect(loop):
         "--no-dashboard",
     ]
     with popen(scheduler_cli):
-        c = Client("127.0.0.1:9393", loop=loop)
-        c.wait_for_workers(1, timeout=10)
+        c = await Client("127.0.0.1:9393", asynchronous=True)
+        await c.wait_for_workers(1, timeout=10)
         x = c.submit(inc, 1)
-        assert x.result(timeout=10) == 2
+        assert (await x) == 2
 
     start = time()
     while c.status != "connecting":
         assert time() < start + 10
-        sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert x.status == "cancelled"
     with pytest.raises(CancelledError):
-        x.result(timeout=10)
+        await x
 
     with popen(scheduler_cli):
         start = time()
         while c.status != "running":
-            sleep(0.1)
+            await asyncio.sleep(0.1)
             assert time() < start + 10
         start = time()
-        while len(c.nthreads()) != 1:
-            sleep(0.05)
+        while len(await c.nthreads()) != 1:
+            await asyncio.sleep(0.05)
             assert time() < start + 10
 
         x = c.submit(inc, 1)
-        assert x.result(timeout=10) == 2
+        assert (await x) == 2
 
     start = time()
     while True:
         assert time() < start + 10
         try:
-            x.result(timeout=10)
+            await x
             assert False
         except CommClosedError:
             continue
         except CancelledError:
             break
 
-    sync(loop, w.close, timeout=1)
-    c.close()
+    await w.close()
+    await c.close()
 
 
 class UnhandledException(Exception):
