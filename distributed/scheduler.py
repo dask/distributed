@@ -4421,8 +4421,6 @@ class Scheduler(SchedulerState, ServerNode):
             for name, data in extensions.items():
                 self.extensions[name].heartbeat(ws, data)
 
-        self.log_event(address, merge({"action": "heartbeat"}, metrics))
-
         return {
             "status": "OK",
             "time": local_now,

@@ -646,7 +646,7 @@ class _SafeTemporaryDirectory(tempfile.TemporaryDirectory):
     def __exit__(self, exc_type, exc_val, exc_tb):
         try:
             return super().__exit__(exc_type, exc_val, exc_tb)
-        except PermissionError:
+        except (PermissionError, NotADirectoryError):
             # It appears that we either have a process still interacting with
             # the tmpdirs of the workers or that win process are not releasing
             # their lock in time. We are receiving PermissionErrors during
@@ -1770,13 +1770,18 @@ def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
                     with check_active_rpc(loop, timeout):
                         reset_config()
 
-                        dask.config.set({"distributed.comm.timeouts.connect": "5s"})
-                        # Restore default logging levels
-                        # XXX use pytest hooks/fixtures instead?
-                        for name, level in logging_levels.items():
-                            logging.getLogger(name).setLevel(level)
+                        with dask.config.set(
+                            {
+                                "distributed.comm.timeouts.connect": "5s",
+                                "distributed.admin.tick.interval": "500 ms",
+                            }
+                        ):
+                            # Restore default logging levels
+                            # XXX use pytest hooks/fixtures instead?
+                            for name, level in logging_levels.items():
+                                logging.getLogger(name).setLevel(level)
 
-                        yield loop
+                            yield loop
 
 
 @pytest.fixture

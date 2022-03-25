@@ -3343,3 +3343,22 @@ async def test_extension_methods(s):
         assert flag
 
     assert shutdown
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.admin.tick.interval": "5ms",
+        "distributed.admin.tick.cycle": "100ms",
+    },
+)
+async def test_tick_interval(c, s, a, b):
+    import time
+
+    await a.heartbeat()
+    x = s.workers[a.address].metrics["event_loop_interval"]
+    while s.workers[a.address].metrics["event_loop_interval"] > 0.050:
+        await asyncio.sleep(0.01)
+    while s.workers[a.address].metrics["event_loop_interval"] < 0.100:
+        await asyncio.sleep(0.01)
+        time.sleep(0.200)

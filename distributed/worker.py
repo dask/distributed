@@ -950,6 +950,7 @@ class Worker(ServerNode):
                 "memory": spilled_memory,
                 "disk": spilled_disk,
             },
+            event_loop_interval=self._tick_interval_observed,
         )
         out.update(self.monitor.recent())
 

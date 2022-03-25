@@ -510,7 +510,7 @@ properties:
                   - {type: number, minimum: 0}
                   - enum: [false]
                 description: >-
-                  Limit of number of bytes to be spilled on disk. 
+                  Limit of number of bytes to be spilled on disk.
 
               monitor-interval:
                 type: string
@@ -976,6 +976,9 @@ properties:
               limit :
                 type: string
                 description: The time allowed before triggering a warning
+              cycle :
+                type: string
+                description: The time in between verifying event loop speed
 
           max-error-length:
             type: integer
