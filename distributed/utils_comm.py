@@ -11,7 +11,8 @@ import dask.config
 from dask.optimization import SubgraphCallable
 from dask.utils import parse_timedelta, stringify
 
-from distributed.core import rpc
+from distributed.core import rpc, send_recv
+from distributed.protocol.pickle import dumps
 from distributed.utils import All
 
 logger = logging.getLogger(__name__)
@@ -389,3 +390,32 @@ async def retry_operation(coro, *args, operation=None, **kwargs):
         delay_max=retry_delay_max,
         operation=operation,
     )
+
+
+SEND_ERROR = object()
+
+
+async def send_message(msg, rpc, addr, serializers=None, on_error="raise"):
+    try:
+        comm = await rpc.connect(addr)
+        comm.name = "Scheduler Broadcast"
+        try:
+            resp = await send_recv(comm, close=True, serializers=serializers, **msg)
+        finally:
+            rpc.reuse(addr, comm)
+        return resp
+    except Exception as e:
+        logger.error(f"broadcast to {addr} failed: {e.__class__.__name__}: {e}")
+        if on_error == "raise":
+            raise
+        elif on_error == "return":
+            return e
+        elif on_error == "return_pickle":
+            return dumps(e, protocol=4)
+        elif on_error == "ignore":
+            return SEND_ERROR
+        else:
+            raise ValueError(
+                f"on_error must be 'raise', 'return', 'return_pickle', "
+                f"or 'ignore'; got {on_error!r}"
+            )
