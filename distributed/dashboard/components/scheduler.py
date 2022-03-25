@@ -3350,7 +3350,6 @@ class Shuffling(DashboardComponent):
                     "worker": [],
                     "y": [],
                     "comm_memory": [],
-                    "comm_memory_half": [],
                     "comm_memory_limit": [],
                     "comm_buckets": [],
                     "comm_active": [],
@@ -3360,7 +3359,6 @@ class Shuffling(DashboardComponent):
                     "comm_written": [],
                     "comm_color": [],
                     "disk_memory": [],
-                    "disk_memory_half": [],
                     "disk_memory_limit": [],
                     "disk_buckets": [],
                     "disk_active": [],
@@ -3385,10 +3383,9 @@ class Shuffling(DashboardComponent):
                 x_range=Range1d(0, 100_000_000),
                 **kwargs,
             )
-            self.comm_memory.rect(
+            self.comm_memory.hbar(
                 source=self.source,
-                x="comm_memory_half",
-                width="comm_memory",
+                right="comm_memory",
                 y="y",
                 height=0.9,
                 color="comm_color",
@@ -3401,7 +3398,7 @@ class Shuffling(DashboardComponent):
                     ("Average Duration", "@comm_avg_duration"),
                 ],
                 formatters={"@comm_avg_duration": "datetime"},
-                point_policy="follow_mouse",
+                mode="hline",
             )
             self.comm_memory.add_tools(hover)
             self.comm_memory.x_range.start = 0
@@ -3417,10 +3414,9 @@ class Shuffling(DashboardComponent):
             )
             self.disk_memory.yaxis.visible = False
 
-            self.disk_memory.rect(
+            self.disk_memory.hbar(
                 source=self.source,
-                x="disk_memory_half",
-                width="disk_memory",
+                right="disk_memory",
                 y="y",
                 height=0.9,
                 color="disk_color",
@@ -3434,7 +3430,7 @@ class Shuffling(DashboardComponent):
                     ("Average Duration", "@disk_avg_duration"),
                 ],
                 formatters={"@disk_avg_duration": "datetime"},
-                point_policy="follow_mouse",
+                mode="hline",
             )
             self.disk_memory.add_tools(hover)
             self.disk_memory.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
@@ -3466,14 +3462,9 @@ class Shuffling(DashboardComponent):
             self.totals.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
 
             hover = HoverTool(
-                tooltips="""
-                            <div>
-                                <span style="font-size: 12px; font-weight: bold;">@x:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@values{0.00 b}</span>
-                            </div>
-                            """,
+                tooltips=[("Total", "@values{0.00b}")],
+                mode="vline",
             )
-            hover.point_policy = "follow_mouse"
             self.totals.add_tools(hover)
 
             self.root = row(self.comm_memory, self.disk_memory)
@@ -3491,7 +3482,6 @@ class Shuffling(DashboardComponent):
                 "worker": [],
                 "y": [],
                 "comm_memory": [],
-                "comm_memory_half": [],
                 "comm_memory_limit": [],
                 "comm_buckets": [],
                 "comm_active": [],
@@ -3501,7 +3491,6 @@ class Shuffling(DashboardComponent):
                 "comm_written": [],
                 "comm_color": [],
                 "disk_memory": [],
-                "disk_memory_half": [],
                 "disk_memory_limit": [],
                 "disk_buckets": [],
                 "disk_active": [],
@@ -3517,7 +3506,6 @@ class Shuffling(DashboardComponent):
                 data["y"].append(i)
                 data["worker"].append(worker)
                 data["comm_memory"].append(d["comms"]["memory"])
-                data["comm_memory_half"].append(d["comms"]["memory"] / 2)
                 data["comm_memory_limit"].append(d["comms"]["memory_limit"])
                 data["comm_buckets"].append(d["comms"]["buckets"])
                 data["comm_active"].append(d["comms"]["active"])
@@ -3542,7 +3530,6 @@ class Shuffling(DashboardComponent):
                     data["comm_color"].append("black")
 
                 data["disk_memory"].append(d["disk"]["memory"])
-                data["disk_memory_half"].append(d["disk"]["memory"] / 2)
                 data["disk_memory_limit"].append(d["disk"]["memory_limit"])
                 data["disk_buckets"].append(d["disk"]["buckets"])
                 data["disk_active"].append(d["disk"]["active"])
