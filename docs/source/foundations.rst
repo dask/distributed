@@ -99,10 +99,12 @@ Server Side
            data += 1
            await comm.write(data)
 
-   s = Server({'add': add, 'stream_data': stream_data})
-   s.listen('tcp://:8888')   # listen on TCP port 8888
+   async def amain():
+       async with Server({'add': add, 'stream_data': stream_data}) as s:
+           await s.listen('tcp://:8888')   # listen on TCP port 8888
+           await asyncio.Event().wait()  # run forever
 
-   asyncio.get_event_loop().run_forever()
+   asyncio.run(amain())
 
 
 Client Side
@@ -114,23 +116,22 @@ Client Side
    from distributed.core import connect
 
    async def f():
-       comm = await connect('tcp://127.0.0.1:8888')
-       await comm.write({'op': 'add', 'x': 1, 'y': 2})
-       result = await comm.read()
-       await comm.close()
+       async with await connect('tcp://127.0.0.1:8888') as comm:
+           await comm.write({'op': 'add', 'x': 1, 'y': 2})
+           result = await comm.read()
        print(result)
 
-   >>> asyncio.get_event_loop().run_until_complete(f())
+   >>> asyncio.run(f())
    3
 
    async def g():
-       comm = await connect('tcp://127.0.0.1:8888')
-       await comm.write({'op': 'stream_data', 'interval': 1})
-       while True:
-           result = await comm.read()
-           print(result)
+       async with await connect('tcp://127.0.0.1:8888') as comm:
+           await comm.write({'op': 'stream_data', 'interval': 1})
+           while True:
+               result = await comm.read()
+               print(result)
 
-   >>> asyncio.get_event_loop().run_until_complete(g())
+   >>> asyncio.run(g())
    1
    2
    3
@@ -154,10 +155,10 @@ with the stream data case above.
        # comm = await connect('tcp://127.0.0.1', 8888)
        # await comm.write({'op': 'add', 'x': 1, 'y': 2})
        # result = await comm.read()
-       with rpc('tcp://127.0.0.1:8888') as r:
+       async with rpc('tcp://127.0.0.1:8888') as r:
            result = await r.add(x=1, y=2)
 
        print(result)
 
-   >>> asyncio.get_event_loop().run_until_complete(f())
+   >>> asyncio.run(f())
    3
