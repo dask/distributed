@@ -98,7 +98,7 @@ class MultiComm:
                 MultiComm.total_size += size
                 self.total_moved += size
 
-        del data, shards
+        del data
 
         while MultiComm.total_size > self.memory_limit:
             with self.time("waiting-on-memory"):

@@ -7,6 +7,8 @@ import pytest
 
 from distributed.shuffle.multi_file import MultiFile
 
+pytestmark = pytest.mark.skip(reason="Internal API has shifted")
+
 
 @pytest.mark.asyncio
 async def test_basic(tmp_path):

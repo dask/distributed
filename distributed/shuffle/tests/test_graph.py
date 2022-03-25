@@ -46,6 +46,7 @@ def test_shuffle_helper(client: Client):
 
 def test_basic(client: Client):
     df = dd.demo.make_timeseries(freq="15D", partition_freq="30D")
+    df["name"] = df["name"].astype("string[python]")
     shuffled = shuffle(df, "id")
 
     (opt,) = dask.optimize(shuffled)
@@ -79,6 +80,7 @@ async def test_basic_state(c: Client, s: Scheduler, *workers: Worker):
 
 def test_multiple_linear(client: Client):
     df = dd.demo.make_timeseries(freq="15D", partition_freq="30D")
+    df["name"] = df["name"].astype("string[python]")
     s1 = shuffle(df, "id")
     s1["x"] = s1["x"] + 1
     s2 = shuffle(s1, "x")
