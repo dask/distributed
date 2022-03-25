@@ -251,7 +251,13 @@ class DumpArtefact(Mapping):
     def to_yamls(
         self,
         root_dir: str | Path | None = None,
-        worker_expand_keys: Collection[str] = ("config", "log", "logs", "tasks"),
+        worker_expand_keys: Collection[str] = (
+            "config",
+            "incoming_transfer_log",
+            "log",
+            "logs",
+            "tasks",
+        ),
         scheduler_expand_keys: Collection[str] = (
             "events",
             "extensions",
