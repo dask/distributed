@@ -62,6 +62,7 @@ class MultiFile:
     memory_limit = parse_bytes("1 GiB")
     _queues: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
     concurrent_files = 2
+    total_size = 0
 
     def __init__(
         self,
@@ -126,12 +127,13 @@ class MultiFile:
             self.shards[id].extend(shard)
             self.sizes[id] += size
             self.total_size += size
+            MultiFile.total_size += size
             self.total_received += size
             this_size += size
 
         del data, shard
 
-        while self.total_size > self.memory_limit:
+        while MultiFile.total_size > self.memory_limit:
             with self.time("waiting-on-memory"):
                 async with self.condition:
 
@@ -221,6 +223,7 @@ class MultiFile:
             self.active.remove(id)
             self.bytes_written += size
             self.total_size -= size
+            MultiFile.total_size -= size
             async with self.condition:
                 self.condition.notify()
             await self.queue.put(None)

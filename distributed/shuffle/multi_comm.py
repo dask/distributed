@@ -48,13 +48,14 @@ class MultiComm:
     memory_limit = parse_bytes("100 MiB")
     max_connections = 10
     _queues: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+    total_size = 0
+    lock = threading.Lock()
 
     def __init__(
         self,
         send=None,
         loop=None,
     ):
-        self.lock = threading.Lock()
         self.send = send
         self.shards = defaultdict(list)
         self.sizes = defaultdict(int)
@@ -94,11 +95,12 @@ class MultiComm:
                 self.shards[address].extend(shards)
                 self.sizes[address] += size
                 self.total_size += size
+                MultiComm.total_size += size
                 self.total_moved += size
 
         del data, shards
 
-        while self.total_size > self.memory_limit:
+        while MultiComm.total_size > self.memory_limit:
             with self.time("waiting-on-memory"):
                 with self.thread_condition:
                     self.thread_condition.wait(1)  # Block until memory calms down
@@ -173,6 +175,7 @@ class MultiComm:
                 ] + 0.02 * (stop - start)
             finally:
                 self.total_size -= size
+                MultiComm.total_size -= size
                 with self.thread_condition:
                     self.thread_condition.notify()
                 await self.queue.put(None)
