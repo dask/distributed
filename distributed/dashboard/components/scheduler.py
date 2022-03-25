@@ -692,7 +692,7 @@ class Hardware(DashboardComponent):
             self.scheduler.loop.add_callback(f)
 
     def update(self):
-        if not self.disk_data["size"]:
+        if not self.disk_data["size"] or self.disk_figure.title.text == "Disk Bandwidth":
             return
 
         self.network_figure.x_range.factors = self.network_data["size"]
