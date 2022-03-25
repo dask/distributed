@@ -3699,11 +3699,11 @@ class Worker(ServerNode):
 
     async def benchmark_disk(self) -> dict[str, float]:
         return await self.loop.run_in_executor(
-            None, benchmark_disk, self.local_directory
+            self.executor, benchmark_disk, self.local_directory
         )
 
     async def benchmark_memory(self) -> dict[str, float]:
-        return await self.loop.run_in_executor(None, benchmark_memory)
+        return await self.loop.run_in_executor(self.executor, benchmark_memory)
 
     async def benchmark_network(self, address: str) -> dict[str, float]:
         return await benchmark_network(rpc=self.rpc, address=address)
