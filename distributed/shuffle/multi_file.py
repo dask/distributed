@@ -7,6 +7,7 @@ import pathlib
 import pickle
 import shutil
 import time
+import weakref
 from collections import defaultdict
 
 from dask.sizeof import sizeof
@@ -59,7 +60,7 @@ class MultiFile:
     """
 
     memory_limit = parse_bytes("1 GiB")
-    queue: asyncio.Queue = None
+    _queues: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
     concurrent_files = 2
 
     def __init__(
@@ -69,6 +70,7 @@ class MultiFile:
         load=pickle.load,
         join=None,
         sizeof=sizeof,
+        loop=None,
     ):
         assert join
         self.directory = pathlib.Path(directory)
@@ -94,12 +96,19 @@ class MultiFile:
         self.active = set()
         self.diagnostics = defaultdict(float)
 
-        if MultiFile.queue is None:
-            MultiFile.queue = asyncio.Queue()
-            for _ in range(MultiFile.concurrent_files):
-                MultiFile.queue.put_nowait(None)
-
         self._communicate_future = asyncio.ensure_future(self.communicate())
+        self._loop = loop
+
+    @property
+    def queue(self):
+        try:
+            return MultiFile._queues[self._loop]
+        except KeyError:
+            queue = asyncio.Queue()
+            for _ in range(MultiFile.concurrent_files):
+                queue.put_nowait(None)
+            MultiFile._queues[self._loop] = queue
+            return queue
 
     async def put(self, data: dict[str, list[object]]):
         """

@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import threading
 import time
+import weakref
 from collections import defaultdict
 
 from dask.utils import parse_bytes
@@ -46,11 +47,12 @@ class MultiComm:
     max_message_size = parse_bytes("2 MiB")
     memory_limit = parse_bytes("100 MiB")
     max_connections = 10
-    queue: asyncio.Queue = None
+    _queues: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
     def __init__(
         self,
         send=None,
+        loop=None,
     ):
         self.lock = threading.Lock()
         self.send = send
@@ -62,13 +64,20 @@ class MultiComm:
         self._futures = set()
         self._done = False
         self.diagnostics = defaultdict(float)
-
-        if MultiComm.queue is None:
-            MultiComm.queue = asyncio.Queue()
-            for _ in range(MultiComm.max_connections):
-                MultiComm.queue.put_nowait(None)
+        self._loop = loop
 
         self._communicate_future = asyncio.ensure_future(self.communicate())
+
+    @property
+    def queue(self):
+        try:
+            return MultiComm._queues[self._loop]
+        except KeyError:
+            queue = asyncio.Queue()
+            for _ in range(MultiComm.max_connections):
+                queue.put_nowait(None)
+            MultiComm._queues[self._loop] = queue
+            return queue
 
     def put(self, data: dict):
         """

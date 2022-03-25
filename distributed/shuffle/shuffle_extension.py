@@ -97,6 +97,7 @@ class Shuffle:
             directory=os.path.join(self.worker.local_directory, str(self.metadata.id)),
             join=pa.concat_tables,  # pd.concat
             sizeof=lambda L: sum(map(len, L)),
+            loop=worker.io_loop,
         )
 
         async def send(address, shards):
@@ -107,6 +108,7 @@ class Shuffle:
 
         self.multi_comm = MultiComm(
             send=send,
+            loop=worker.io_loop,
         )
         MultiComm.max_connections = min(len(self.metadata.workers), 10)
 
@@ -432,7 +434,6 @@ class ShuffleWorkerExtension:
 
     async def close(self):
         self.executor.shutdown()
-        MultiFile.queue = None
 
 
 class ShuffleSchedulerExtension:
