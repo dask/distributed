@@ -953,6 +953,7 @@ class Worker(ServerNode):
                 "memory": spilled_memory,
                 "disk": spilled_disk,
             },
+            event_loop_interval=self._tick_interval_observed,
         )
         out.update(self.monitor.recent())
 
@@ -4591,7 +4592,7 @@ def warn(*args, **kwargs):
 def benchmark_disk(
     rootdir: str | None = None,
     sizes: Iterable[str] = ("1 kiB", "100 kiB", "1 MiB", "10 MiB", "100 MiB"),
-    duration: str = "1 s",
+    duration="1 s",
 ) -> dict[str, float]:
     """
     Benchmark disk bandwidth
@@ -4627,7 +4628,7 @@ def benchmark_disk(
 
 def benchmark_memory(
     sizes: Iterable[str] = ("2 kiB", "10 kiB", "100 kiB", "1 MiB", "10 MiB"),
-    duration: str = "200 ms",
+    duration="200 ms",
 ) -> dict[str, float]:
     """
     Benchmark memory bandwidth
@@ -4658,7 +4659,7 @@ async def benchmark_network(
     address: str,
     rpc: rpc,
     sizes: Iterable[str] = ("1 kiB", "10 kiB", "100 kiB", "1 MiB", "10 MiB", "50 MiB"),
-    duration: str = "1 s",
+    duration="1 s",
 ) -> dict[str, float]:
     """
     Benchmark network communications to another worker
