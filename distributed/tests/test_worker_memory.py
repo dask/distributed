@@ -14,12 +14,65 @@ from distributed import Client, Event, Nanny, Worker, wait
 from distributed.core import Status
 from distributed.spill import has_zict_210
 from distributed.utils_test import captured_logger, gen_cluster, inc
-from distributed.worker_memory import parse_memory_limit
+from distributed.worker_memory import WorkerMemoryManager, parse_memory_limit
 
 requires_zict_210 = pytest.mark.skipif(
     not has_zict_210,
     reason="requires zict version >= 2.1.0",
 )
+
+
+def get_fake_wmm_fast_static(value: float) -> type[WorkerMemoryManager]:
+    """Fake factory for WorkerMemoryManager for convenience
+
+    This will set the observed process memory to be constant to ``value`` if
+    there is data in `data.fast`.
+    """
+
+    class FakeWMMFastStatic(WorkerMemoryManager):
+        def get_process_memory(self):
+            worker = self.worker()
+            if worker and worker.data.fast:
+                return value
+            else:
+                return 0
+
+    return FakeWMMFastStatic
+
+
+def get_fake_wmm_fast_dynamic(value: float) -> type[WorkerMemoryManager]:
+    """Fake factory for WorkerMemoryManager for convenience
+
+    This will set the observed process memory to be ``value`` times the number of elements in `data.fast`.
+    """
+
+    class FakeWMMFastDyn(WorkerMemoryManager):
+        def get_process_memory(self):
+            worker = self.worker()
+            if worker and worker.data.fast:
+                return value * len(worker.data.fast)
+            else:
+                return 0
+
+    return FakeWMMFastDyn
+
+
+def get_fake_wmm_all_static(value: float) -> type[WorkerMemoryManager]:
+    """Fake factory for WorkerMemoryManager for convenience
+
+    This will set the observed process memory to be ``value`` as long as there
+    is any data in the buffer
+    """
+
+    class FakeWMMAll(WorkerMemoryManager):
+        def get_process_memory(self):
+            worker = self.worker()
+            if worker and worker.data:
+                return value
+            else:
+                return 0
+
+    return FakeWMMAll
 
 
 def memory_monitor_running(dask_worker: Worker | Nanny) -> bool:
@@ -109,7 +162,9 @@ async def test_fail_to_pickle_target_1(c, s, a, b):
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
-    worker_kwargs={"memory_limit": "1 kiB"},
+    worker_kwargs={
+        "memory_limit": "1 kiB",
+    },
     config={
         "distributed.worker.memory.target": 0.5,
         "distributed.worker.memory.spill": False,
@@ -142,7 +197,10 @@ async def test_fail_to_pickle_target_2(c, s, a):
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
-    worker_kwargs={"memory_limit": "1 kB"},
+    worker_kwargs={
+        "memory_limit": "1 kB",
+        "memory_manager_cls": get_fake_wmm_fast_static(701),
+    },
     config={
         "distributed.worker.memory.target": False,
         "distributed.worker.memory.spill": 0.7,
@@ -151,7 +209,6 @@ async def test_fail_to_pickle_target_2(c, s, a):
 )
 async def test_fail_to_pickle_spill(c, s, a):
     """Test failure to evict a key, triggered by the spill threshold"""
-    a.monitor.get_process_memory = lambda: 701 if a.data.fast else 0
 
     with captured_logger(logging.getLogger("distributed.spill")) as logs:
         bad = c.submit(FailToPickle, key="bad")
@@ -268,7 +325,10 @@ async def test_spill_constrained(c, s, w):
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
-    worker_kwargs={"memory_limit": "1000 MB"},
+    worker_kwargs={
+        "memory_limit": "1000 MB",
+        "memory_manager_cls": get_fake_wmm_fast_static(800_000_000),
+    },
     config={
         "distributed.worker.memory.target": False,
         "distributed.worker.memory.spill": 0.7,
@@ -282,7 +342,6 @@ async def test_spill_spill_threshold(c, s, a):
     reported by sizeof(), which may be inaccurate.
     """
     assert memory_monitor_running(a)
-    a.monitor.get_process_memory = lambda: 800_000_000 if a.data.fast else 0
     x = c.submit(inc, 0, key="x")
     while not a.data.disk:
         await asyncio.sleep(0.01)
@@ -326,8 +385,11 @@ async def test_spill_hysteresis(c, s, target, managed, expect_spilled):
             return managed
 
     with dask.config.set({"distributed.worker.memory.target": target}):
-        async with Worker(s.address, memory_limit="1000 MB") as a:
-            a.monitor.get_process_memory = lambda: 50_000_000 * len(a.data.fast)
+        async with Worker(
+            s.address,
+            memory_limit="1000 MB",
+            memory_manager_cls=get_fake_wmm_fast_dynamic(50_000_000),
+        ) as a:
 
             # Add 500MB (reported) process memory. Spilling must not happen.
             futures = [c.submit(C, pure=False) for _ in range(10)]

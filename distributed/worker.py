@@ -455,6 +455,7 @@ class Worker(ServerNode):
         lifetime_restart: bool | None = None,
         ###################################
         # Parameters to WorkerMemoryManager
+        memory_manager_cls: type[WorkerMemoryManager] = WorkerMemoryManager,
         memory_limit: str | float = "auto",
         # Allow overriding the dict-like that stores the task outputs.
         # This is meant for power users only. See WorkerMemoryManager for details.
@@ -786,7 +787,7 @@ class Worker(ServerNode):
         for ext in extensions:
             ext(self)
 
-        self.memory_manager = WorkerMemoryManager(
+        self.memory_manager = memory_manager_cls(
             self,
             data=data,
             memory_limit=memory_limit,

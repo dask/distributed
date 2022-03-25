@@ -25,9 +25,9 @@ import logging
 import os
 import sys
 import warnings
+import weakref
 from collections.abc import Callable, MutableMapping
 from contextlib import suppress
-from functools import partial
 from typing import TYPE_CHECKING, Any, Container, Literal, cast
 
 import psutil
@@ -135,23 +135,32 @@ class WorkerMemoryManager:
         )
         assert isinstance(self.memory_monitor_interval, (int, float))
 
+        self._worker = weakref.ref(worker)
+
         if self.memory_limit and (
             self.memory_spill_fraction is not False
             or self.memory_pause_fraction is not False
         ):
             assert self.memory_monitor_interval is not None
             pc = PeriodicCallback(
-                # Don't store worker as self.worker to avoid creating a circular
-                # dependency. We could have alternatively used a weakref.
                 # FIXME annotations: https://github.com/tornadoweb/tornado/issues/3117
-                partial(self.memory_monitor, worker),  # type: ignore
+                self.memory_monitor,  # type: ignore
                 self.memory_monitor_interval * 1000,
             )
             worker.periodic_callbacks["memory_monitor"] = pc
 
         self._throttled_gc = ThrottledGC(logger=logger)
 
-    async def memory_monitor(self, worker: Worker) -> None:
+    def get_process_memory(self) -> int:
+        """Get a measure for process memory.
+        This can be a mock target.
+        """
+        worker = self._worker()
+        if worker:
+            return worker.monitor.get_process_memory()
+        return -1
+
+    async def memory_monitor(self) -> None:
         """Track this process's memory usage and act accordingly.
         If process memory rises above the spill threshold (70%), start dumping data to
         disk until it goes below the target threshold (60%).
@@ -166,16 +175,18 @@ class WorkerMemoryManager:
                 # Don't use psutil directly; instead read from the same API that is used
                 # to send info to the Scheduler (e.g. for the benefit of Active Memory
                 # Manager) and which can be easily mocked in unit tests.
-                memory = worker.monitor.get_process_memory()
-                self._maybe_pause_or_unpause(worker, memory)
-                await self._maybe_spill(worker, memory)
+                memory = self.get_process_memory()
+                self._maybe_pause_or_unpause(memory)
+                await self._maybe_spill(memory)
             finally:
                 self._memory_monitoring = False
 
-    def _maybe_pause_or_unpause(self, worker: Worker, memory: int) -> None:
+    def _maybe_pause_or_unpause(self, memory: int) -> None:
         if self.memory_pause_fraction is False:
             return
-
+        worker = self._worker()
+        if not worker:
+            return
         assert self.memory_limit
         frac = memory / self.memory_limit
         # Pause worker threads if above 80% memory use
@@ -205,7 +216,7 @@ class WorkerMemoryManager:
             )
             worker.status = Status.running
 
-    async def _maybe_spill(self, worker: Worker, memory: int) -> None:
+    async def _maybe_spill(self, memory: int) -> None:
         if self.memory_spill_fraction is False:
             return
 
@@ -257,15 +268,15 @@ class WorkerMemoryManager:
             count += 1
             await asyncio.sleep(0)
 
-            memory = worker.monitor.get_process_memory()
+            memory = self.get_process_memory()
             if total_spilled > need and memory > target:
                 # Issue a GC to ensure that the evicted data is actually
                 # freed from memory and taken into account by the monitor
                 # before trying to evict even more data.
                 self._throttled_gc.collect()
-                memory = worker.monitor.get_process_memory()
+                memory = self.get_process_memory()
 
-        self._maybe_pause_or_unpause(worker, memory)
+        self._maybe_pause_or_unpause(memory)
         if count:
             logger.debug(
                 "Moved %d tasks worth %s to disk",
@@ -302,32 +313,46 @@ class NannyMemoryManager:
             dask.config.get("distributed.worker.memory.monitor-interval"),
             default=None,
         )
+        self.nanny = weakref.ref(nanny)
         assert isinstance(self.memory_monitor_interval, (int, float))
         if self.memory_limit and self.memory_terminate_fraction is not False:
             pc = PeriodicCallback(
-                partial(self.memory_monitor, nanny),
+                self.memory_monitor,
                 self.memory_monitor_interval * 1000,
             )
             nanny.periodic_callbacks["memory_monitor"] = pc
 
-    def memory_monitor(self, nanny: Nanny) -> None:
-        """Track worker's memory. Restart if it goes above terminate fraction."""
-        if nanny.status != Status.running:
-            return  # pragma: nocover
-        if nanny.process is None or nanny.process.process is None:
-            return  # pragma: nocover
-        process = nanny.process.process
-        try:
-            proc = nanny._psutil_process
-            memory = proc.memory_info().rss
-        except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
-            return  # pragma: nocover
+    def get_process_memory(self) -> int:
+        """Get a measure for process memory.
+        This can be a mock target.
+        """
+        nanny = self.nanny()
+        if nanny:
+            try:
+                proc = nanny._psutil_process
+                return proc.memory_info().rss
+            except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
+                return -1  # pragma: nocover
+        return -1
 
+    def memory_monitor(self) -> None:
+        """Track worker's memory. Restart if it goes above terminate fraction."""
+        nanny = self.nanny()
+        if (
+            not nanny
+            or nanny.status != Status.running
+            or nanny.process is None
+            or nanny.process.process is None
+            or self.memory_limit is None
+        ):
+            return  # pragma: nocover
+        memory = self.get_process_memory()
         if memory / self.memory_limit > self.memory_terminate_fraction:
             logger.warning(
                 "Worker exceeded %d%% memory budget. Restarting",
                 100 * self.memory_terminate_fraction,
             )
+            process = nanny.process.process
             process.terminate()
 
 
@@ -403,4 +428,4 @@ class DeprecatedMemoryMonitor:
             # This is triggered by Sphinx
             return None  # pragma: nocover
         _warn_deprecated(instance, "memory_monitor")
-        return partial(instance.memory_manager.memory_monitor, instance)
+        return instance.memory_manager.memory_monitor
