@@ -62,7 +62,7 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.addressing import addresses_from_user_args
-from distributed.core import CommClosedError, Status, clean_exception, rpc, send_recv
+from distributed.core import CommClosedError, Status, clean_exception, rpc
 from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
@@ -94,7 +94,6 @@ from distributed.utils import (
     validate_key,
 )
 from distributed.utils_comm import (
-    SEND_ERROR,
     gather_from_workers,
     retry_operation,
     scatter_to_workers,
@@ -4008,7 +4007,7 @@ class Scheduler(SchedulerState, ServerNode):
             "stop_task_metadata": self.stop_task_metadata,
             "get_cluster_state": self.get_cluster_state,
             "dump_cluster_state_to_url": self.dump_cluster_state_to_url,
-            "cluster_story": self.get_cluster_story,
+            "get_story": self.get_story,
         }
 
         connection_limit = get_fileno_limit() / 2
@@ -6251,15 +6250,17 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             addresses = workers
 
+        ERROR = object()
+
         results = await All(
             [
-                send_message(msg, self.rpc, address, serializers, on_error)
+                send_message(msg, self.rpc, address, serializers, on_error, ERROR)
                 for address in addresses
                 if address is not None
             ]
         )
 
-        return {k: v for k, v in zip(workers, results) if v is not SEND_ERROR}
+        return {k: v for k, v in zip(workers, results) if v is not ERROR}
 
     async def proxy(self, comm=None, msg=None, worker=None, serializers=None):
         """Proxy a communication through the scheduler to some other worker"""
@@ -7458,33 +7459,18 @@ class Scheduler(SchedulerState, ServerNode):
 
     async def get_cluster_story(self, keys=None, on_error="raise", stimulus_id=None):
         assert isinstance(keys, tuple)
-        bits = [
-            (ws, await self.rpc.connect(ws.address)) for ws in self.workers.values()
+        ERROR = object()
+        msg = {"op": "get_story", "keys": keys}
+        coros = [
+            send_message(msg, self.rpc, w.address, None, on_error, ERROR)
+            for w in self.workers.values()
         ]
-        tasks = []
-
-        for _, worker_comm in bits:
-            coro = send_recv(comm=worker_comm, reply=True, op="get_story", keys=keys)
-            tasks.append(asyncio.ensure_future(coro))
-
-        try:
-            worker_stories = await asyncio.gather(
-                *tasks, return_exceptions=on_error == "ignore"
-            )
-        except Exception:
-            for task in tasks:
-                task.cancel()
-
-            raise
-        finally:
-            for worker_state, worker_comm in bits:
-                self.rpc.reuse(worker_state.address, worker_comm)
-
-        flat_ws = []
+        worker_stories = await asyncio.gather(*coros)
+        flat_stories = []
 
         for stories in worker_stories:
-            if isinstance(stories, Exception):
-                flat_ws.append(
+            if stories is ERROR:
+                flat_stories.append(
                     (
                         "worker-story-retrieval-failure",
                         stimulus_id,
@@ -7492,9 +7478,9 @@ class Scheduler(SchedulerState, ServerNode):
                     )
                 )
             else:
-                flat_ws.extend(s for s in stories)
+                flat_stories.extend(s for s in stories)
 
-        return self.story(*keys) + flat_ws
+        return self.story(*keys) + flat_stories
 
     def run_function(self, comm, function, args=(), kwargs=None, wait=True):
         """Run a function within this process
@@ -7688,6 +7674,9 @@ class Scheduler(SchedulerState, ServerNode):
         """Get all transitions that touch one of the input keys"""
         keys = {key.key if isinstance(key, TaskState) else key for key in keys}
         return scheduler_story(keys, self.transition_log)
+
+    async def get_story(self, keys=None):
+        return self.story(*keys)
 
     transition_story = story
 

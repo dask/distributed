@@ -392,10 +392,11 @@ async def retry_operation(coro, *args, operation=None, **kwargs):
     )
 
 
-SEND_ERROR = object()
+async def send_message(
+    msg, rpc, addr, serializers=None, on_error="raise", sentinel=None
+):
+    sentinel = sentinel or object()
 
-
-async def send_message(msg, rpc, addr, serializers=None, on_error="raise"):
     try:
         comm = await rpc.connect(addr)
         comm.name = "Scheduler Broadcast"
@@ -413,7 +414,7 @@ async def send_message(msg, rpc, addr, serializers=None, on_error="raise"):
         elif on_error == "return_pickle":
             return dumps(e, protocol=4)
         elif on_error == "ignore":
-            return SEND_ERROR
+            return sentinel
         else:
             raise ValueError(
                 f"on_error must be 'raise', 'return', 'return_pickle', "

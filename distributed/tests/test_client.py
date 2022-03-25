@@ -7511,24 +7511,16 @@ async def test_client_story(c, s, *workers):
     )
 
 
-class BlockedWorkerStory(Worker):
-    def __init__(self, *args, **kw):
-        super().__init__(*args, **kw)
-        self.unblock_worker = asyncio.Event()
-
+class WorkerBrokenStory(Worker):
     async def get_story(self, *args, **kw):
-        await self.unblock_worker.wait()
-        return super().get_story(*args, **kw)
+        raise CommClosedError
 
 
-@gen_cluster(client=True, Worker=BlockedWorkerStory, nthreads=[("", 1)])
-@pytest.mark.parametrize("on_error", ["raise", "ignore"])
-async def test_client_story_failed_worker(c, s, worker, on_error):
+@gen_cluster(client=True, Worker=WorkerBrokenStory)
+@pytest.mark.parametrize("on_error", ["ignore", "return", "raise"])
+async def test_client_story_failed_worker(c, s, a, b, on_error):
     f = c.submit(inc, 1)
-    await asyncio.sleep(0.1)
-
     coro = c.story(f.key, on_error=on_error)
-    worker.unblock_worker.set()
     await f
 
     if on_error == "raise":
@@ -7545,6 +7537,21 @@ async def test_client_story_failed_worker(c, s, worker, on_error):
                 ("worker-story-retrieval-failure",),
             ],
         )
+
+    elif on_error == "return":
+        story = await coro
+
+        # Scheduler story is intact
+        assert_story(
+            story[:3],
+            [
+                (f.key, "released", "waiting", {f.key: "processing"}),
+                (f.key, "waiting", "processing", {}),
+                (f.key, "processing", "memory", {}),
+            ],
+        )
+
+        assert all(isinstance(event, CommClosedError) for event in story[3:])
 
     else:
         raise RuntimeError(on_error)

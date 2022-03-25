@@ -102,6 +102,7 @@ from distributed.utils_comm import (
     pack_data,
     retry_operation,
     scatter_to_workers,
+    send_message,
     unpack_remotedata,
 )
 from distributed.worker import get_client, get_worker, secede
@@ -1481,22 +1482,30 @@ class Client(SyncMethodMixin):
 
     async def _story(self, keys=(), on_error="raise"):
         stimulus_id = f"client-story-{time()}"
-        task = asyncio.ensure_future(
-            self.scheduler.cluster_story(
-                keys=keys, on_error=on_error, stimulus_id=stimulus_id
-            )
+        info = self.scheduler_info()
+
+        msg = {"op": "get_story", "keys": keys}
+        WORKER_SENTINEL = [("worker-story-retrieval-failure", stimulus_id, time())]
+        coros = [
+            send_message(msg, self.rpc, address, None, on_error, WORKER_SENTINEL)
+            for address in info["workers"]
+        ]
+
+        worker_stories = await asyncio.gather(*coros)
+        SERVER_SENTINEL = [("scheduler-story-retrieval-failure", stimulus_id, time())]
+        scheduler_story = await send_message(
+            msg, self.rpc, self.scheduler.address, None, on_error, SERVER_SENTINEL
         )
 
-        try:
-            return await task
-        except Exception:
-            if on_error == "raise":
-                task.cancel()
-                raise
-            elif on_error == "ignore":
-                return [("scheduler-story-retrieval-failure", stimulus_id, time())]
+        flat_worker_stories = []
+
+        for stories in worker_stories:
+            if isinstance(stories, (tuple, list)):
+                flat_worker_stories.extend(s for s in stories)
             else:
-                raise ValueError(f"{on_error} not in {'raise', 'ignore'}")
+                flat_worker_stories.append(stories)
+
+        return list(scheduler_story) + flat_worker_stories
 
     def story(self, *keys_or_stimulus_ids, on_error="raise"):
         return self.sync(self._story, keys=keys_or_stimulus_ids, on_error=on_error)
