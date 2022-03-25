@@ -298,7 +298,7 @@ class DumpArtefact(Mapping):
             Keys that are not in this iterable are compacted into a
             ``general.yaml`` file.
         background:
-            If True, run in a separate thread in the background.
+            If True, run in a separate daemon thread in the background.
             Returns the `threading.Thread` object immediately.
         log:
             Print progress updates if True. Defaults to None, which means
@@ -317,6 +317,7 @@ class DumpArtefact(Mapping):
                     background=False,
                     log=log if log is not None else False,
                 ),
+                daemon=True,
             )
             t.start()
             return t
