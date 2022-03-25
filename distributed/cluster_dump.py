@@ -333,13 +333,7 @@ class DumpArtefact(Mapping):
 
         workers = self.dump["workers"]
         for i, (addr, info) in enumerate(workers.items()):
-            try:
-                worker_name = self.dump["scheduler"]["workers"][addr]["name"]
-            except KeyError:
-                if log:
-                    print(f"    Worker {addr} unknown to scheduler")
-                worker_name = addr.replace("://", "-").replace("/", "_")
-
+            worker_name = addr.replace("://", "-").replace("/", "_")
             log_dir = root_dir / worker_name
             log_dir.mkdir(parents=True, exist_ok=True)
 
