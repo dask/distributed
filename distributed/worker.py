@@ -15,6 +15,7 @@ import warnings
 import weakref
 from collections import defaultdict, deque
 from collections.abc import (
+    Awaitable,
     Callable,
     Collection,
     Container,
@@ -108,6 +109,7 @@ from distributed.worker_state_machine import (
     PROCESSING,
     READY,
     AddKeysMsg,
+    Execute,
     InvalidTransition,
     LongRunningMsg,
     ReleaseWorkerDataMsg,
@@ -2337,8 +2339,8 @@ class Worker(ServerNode):
             self.available_resources[resource] -= quantity
         ts.state = "executing"
         self._executing.add(ts)
-        self.loop.add_callback(self.execute, ts.key, stimulus_id=stimulus_id)
-        return {}, []
+        instr = Execute(key=ts.key, stimulus_id=stimulus_id)
+        return {}, [instr]
 
     def transition_ready_executing(
         self, ts: TaskState, *, stimulus_id: str
@@ -2355,8 +2357,8 @@ class Worker(ServerNode):
 
         ts.state = "executing"
         self._executing.add(ts)
-        self.loop.add_callback(self.execute, ts.key, stimulus_id=stimulus_id)
-        return {}, []
+        instr = Execute(key=ts.key, stimulus_id=stimulus_id)
+        return {}, [instr]
 
     def transition_flight_fetch(
         self, ts: TaskState, *, stimulus_id: str
@@ -2601,8 +2603,24 @@ class Worker(ServerNode):
         for inst in instructions:
             if isinstance(inst, SendMessageToScheduler):
                 self.batched_stream.send(inst.to_dict())
+            elif isinstance(inst, Execute):
+                self.loop.add_callback(
+                    self._async_instruction_callback,
+                    self.execute(inst.key, stimulus_id=inst.stimulus_id),
+                    stimulus_id=inst.stimulus_id,
+                )
             else:
                 raise TypeError(inst)  # pragma: nocover
+
+    async def _async_instruction_callback(
+        self, coro: Awaitable[tuple[Recs, Instructions]], *, stimulus_id: str
+    ) -> None:
+        with log_errors():
+            recs, instructions = await coro
+            self.transitions(recs, stimulus_id=stimulus_id)
+            self._handle_instructions(instructions)
+            self.ensure_computing()
+            self.ensure_communicating()
 
     def maybe_transition_long_running(
         self, ts: TaskState, *, compute_duration: float, stimulus_id: str
@@ -3392,11 +3410,11 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    async def execute(self, key: str, *, stimulus_id: str) -> None:
+    async def execute(self, key: str, *, stimulus_id: str) -> tuple[Recs, Instructions]:
         if self.status in {Status.closing, Status.closed, Status.closing_gracefully}:
-            return
+            return {}, []
         if key not in self.tasks:
-            return
+            return {}, []
         ts = self.tasks[key]
 
         try:
@@ -3407,8 +3425,7 @@ class Worker(ServerNode):
                     ts,
                 )
                 ts.done = True
-                self.transition(ts, "released", stimulus_id=stimulus_id)
-                return
+                return {ts: "released"}, []
 
             if self.validate:
                 assert not ts.waiting_for_data
@@ -3426,7 +3443,7 @@ class Worker(ServerNode):
             else:
                 executor = "default"
             assert executor in self.executors
-            assert key == ts.key
+
             self.active_keys.add(ts.key)
 
             result: dict
@@ -3508,30 +3525,16 @@ class Worker(ServerNode):
                     result["traceback_text"],
                 )
 
-            self.transitions(recommendations, stimulus_id=stimulus_id)
-
             logger.debug("Send compute response to scheduler: %s, %s", ts.key, result)
 
-            if self.validate:
-                assert ts.state != "executing"
-                assert not ts.waiting_for_data
-
         except Exception as exc:
-            assert ts
             logger.error(
                 "Exception during execution of task %s.", ts.key, exc_info=True
             )
-            emsg = error_message(exc)
-            emsg.pop("status")
-            self.transition(
-                ts,
-                "error",
-                **emsg,
-                stimulus_id=stimulus_id,
-            )
-        finally:
-            self.ensure_computing()
-            self.ensure_communicating()
+            msg = error_message(exc)
+            recommendations = {ts: tuple(msg.values())}
+
+        return recommendations, []
 
     def _prepare_args_for_execution(
         self, ts: TaskState, args: tuple, kwargs: dict[str, Any]

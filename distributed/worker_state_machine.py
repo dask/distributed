@@ -256,11 +256,11 @@ class Instruction:
 #    __slots__ = ()
 
 
-# @dataclass
-# class Execute(Instruction):
-#    __slots__ = ("key", "stimulus_id")
-#    key: str
-#    stimulus_id: str
+@dataclass
+class Execute(Instruction):
+    __slots__ = ("key", "stimulus_id")
+    key: str
+    stimulus_id: str
 
 
 class SendMessageToScheduler(Instruction):

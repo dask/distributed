@@ -2,6 +2,7 @@ import pytest
 
 from distributed.utils import recursive_to_dict
 from distributed.worker_state_machine import (
+    Execute,
     ReleaseWorkerDataMsg,
     SendMessageToScheduler,
     TaskState,
@@ -80,6 +81,12 @@ def test_unique_task_heap():
     assert heap.pop() == ts
 
     assert repr(heap) == "<UniqueTaskHeap: 0 items>"
+
+
+@pytest.mark.parametrize("cls", [Execute])
+def test_instruction_slots(cls):
+    instr = cls(**dict.fromkeys(cls.__annotations__))
+    assert not hasattr(instr, "__dict__")
 
 
 @pytest.mark.parametrize("cls", SendMessageToScheduler.__subclasses__())
