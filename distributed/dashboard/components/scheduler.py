@@ -692,19 +692,18 @@ class Hardware(DashboardComponent):
             self.scheduler.loop.add_callback(f)
 
     def update(self):
-        if any(self.disk_data.values()):
-            if self.memory_figure.title.text == "Memory Bandwidth":
-                return
-            else:
-                self.network_figure.x_range.factors = self.network_data["size"]
-                self.disk_figure.x_range.factors = self.disk_data["size"]
-                self.memory_figure.x_range.factors = self.memory_data["size"]
-                update(self.disk_source, self.disk_data)
-                update(self.memory_source, self.memory_data)
-                update(self.network_source, self.network_data)
-                self.memory_figure.title.text = "Memory Bandwidth"
-                self.disk_figure.title.text = "Disk Bandwidth"
-                self.network_figure.title.text = "Network Bandwidth"
+        if not self.disk_data["size"]:
+            return
+
+        self.network_figure.x_range.factors = self.network_data["size"]
+        self.disk_figure.x_range.factors = self.disk_data["size"]
+        self.memory_figure.x_range.factors = self.memory_data["size"]
+        update(self.disk_source, self.disk_data)
+        update(self.memory_source, self.memory_data)
+        update(self.network_source, self.network_data)
+        self.memory_figure.title.text = "Memory Bandwidth"
+        self.disk_figure.title.text = "Disk Bandwidth"
+        self.network_figure.title.text = "Network Bandwidth"
 
 
 class BandwidthTypes(DashboardComponent):
