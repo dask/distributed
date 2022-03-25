@@ -261,6 +261,8 @@ class DumpArtefact(Mapping):
             "transition_log",
             "workers",
         ),
+        background: bool = False,
+        log: bool | None = None,
     ):
         """
         Splits the Dump Artefact into a tree of yaml files with
@@ -289,7 +291,33 @@ class DumpArtefact(Mapping):
             into separate yaml files.
             Keys that are not in this iterable are compacted into a
             ``general.yaml`` file.
+        background:
+            If True, run in a separate thread in the background.
+            Returns the `threading.Thread` object immediately.
+        log:
+            Print progress updates if True. Defaults to None, which means
+            False if ``background`` is True, and True otherwise.
         """
+        if background:
+            import threading
+
+            t = threading.Thread(
+                target=self.to_yamls,
+                name="to-yamls",
+                kwargs=dict(
+                    root_dir=root_dir,
+                    worker_expand_keys=worker_expand_keys,
+                    scheduler_expand_keys=scheduler_expand_keys,
+                    background=False,
+                    log=log if log is not None else False,
+                ),
+            )
+            t.start()
+            return t
+
+        if log is None:
+            log = True
+
         import yaml
 
         root_dir = Path(root_dir) if root_dir else Path.cwd()
@@ -298,16 +326,21 @@ class DumpArtefact(Mapping):
         worker_expand_keys = set(worker_expand_keys)
 
         workers = self.dump["workers"]
-        for info in workers.values():
+        for i, (addr, info) in enumerate(workers.items()):
             try:
-                worker_id = info["id"]
+                worker_name = self.dump["scheduler"]["workers"][addr]["name"]
             except KeyError:
-                continue
+                if log:
+                    print(f"    Worker {addr} unknown to scheduler")
+                worker_name = addr.replace("://", "-").replace("/", "_")
+
+            log_dir = root_dir / worker_name
+            log_dir.mkdir(parents=True, exist_ok=True)
+
+            if log:
+                print(f"Dumping worker {i:>4}/{len(workers)} to {log_dir}")
 
             worker_state = self._compact_state(info, worker_expand_keys)
-
-            log_dir = root_dir / worker_id
-            log_dir.mkdir(parents=True, exist_ok=True)
 
             for name, _logs in worker_state.items():
                 filename = str(log_dir / f"{name}.yaml")
@@ -315,14 +348,18 @@ class DumpArtefact(Mapping):
                     yaml.dump(_logs, fd, Dumper=dumper)
 
         context = "scheduler"
-        scheduler_state = self._compact_state(self.dump[context], scheduler_expand_keys)
-
         log_dir = root_dir / context
         log_dir.mkdir(parents=True, exist_ok=True)
-        # Compact smaller keys into a general dict
 
-        for name, _logs in scheduler_state.items():
+        if log:
+            print(f"Dumping scheduler to {log_dir}")
+
+        # Compact smaller keys into a general dict
+        scheduler_state = self._compact_state(self.dump[context], scheduler_expand_keys)
+        for i, (name, _logs) in enumerate(scheduler_state.items()):
             filename = str(log_dir / f"{name}.yaml")
+            if log:
+                print(f"    Dumping {i:>2}/{len(scheduler_state)} {filename}")
 
             with open(filename, "w") as fd:
                 yaml.dump(_logs, fd, Dumper=dumper)
