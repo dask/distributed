@@ -291,6 +291,7 @@ class DumpArtefact(Mapping):
             "tasks",
         ),
         scheduler_expand_keys: Collection[str] = (
+            "clients",
             "events",
             "extensions",
             "log",
