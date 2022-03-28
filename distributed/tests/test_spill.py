@@ -3,6 +3,7 @@ from __future__ import annotations
 import gc
 import logging
 import os
+import uuid
 
 import pytest
 
@@ -285,22 +286,28 @@ def test_spillbuffer_evict(tmpdir):
     assert_buf(buf, {"bad": bad}, {"a": a})
 
 
-class SupportsWeakRef:
-    def __init__(self, n):
-        self.n = n
-
-    def __sizeof__(self):
-        return self.n
-
-
 class NoWeakRef:
-    __slots__ = ("n",)
+    """A class which
+    1. reports an arbitrary managed memory usage
+    2. does not support being targeted by weakref.ref()
+    3. has a property `id` which changes every time it is unpickled
+    """
 
-    def __init__(self, n):
-        self.n = n
+    __slots__ = ("size", "id")
+
+    def __init__(self, size):
+        self.size = size
+        self.id = uuid.uuid4()
 
     def __sizeof__(self):
-        return self.n
+        return self.size
+
+    def __reduce__(self):
+        return (type(self), (self.size,))
+
+
+class SupportsWeakRef(NoWeakRef):
+    __slots__ = ("__weakref__",)
 
 
 @pytest.mark.parametrize(
@@ -326,7 +333,10 @@ def test_weakref_cache(tmpdir, cls, expect_cached, size):
     # Test that we update the weakref cache on setitem
     assert (buf["x"] is x) == expect_cached
 
-    id_x = id(x)
+    # Do not use id_x = id(x), as in CPython id's are C memory addresses and are reused
+    # by PyMalloc when you descope objects, so a brand new object might end up having
+    # the same id as a deleted one
+    id_x = x.id
     del x
     gc.collect()  # Only needed on pypy
 
@@ -335,7 +345,7 @@ def test_weakref_cache(tmpdir, cls, expect_cached, size):
     assert "x" in buf.slow
 
     x2 = buf["x"]
-    assert id(x2) != id_x
+    assert x2.id != id_x
     if size < 100:
         buf["y"]
     assert "x" in buf.slow

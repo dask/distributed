@@ -145,18 +145,6 @@ async def test_restart_cleared(c, s, a, b):
 
 
 @pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
-def test_restart_sync_no_center(loop):
-    with cluster(nanny=True) as (s, [a, b]):
-        with Client(s["address"], loop=loop) as c:
-            x = c.submit(inc, 1)
-            c.restart()
-            assert x.cancelled()
-            y = c.submit(inc, 2)
-            assert y.result() == 3
-            assert len(c.nthreads()) == 2
-
-
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 def test_restart_sync(loop):
     with cluster(nanny=True) as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -202,7 +190,7 @@ def test_worker_doesnt_await_task_completion(loop):
             start = time()
             c.restart()
             stop = time()
-            assert stop - start < 5
+            assert stop - start < 20
 
 
 @pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
