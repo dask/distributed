@@ -61,6 +61,7 @@ class WorkerMemoryManager:
     memory_monitor_interval: float
     _memory_monitoring: bool
     _throttled_gc: ThrottledGC
+    _worker: weakref.ReferenceType[Worker]
 
     def __init__(
         self,
@@ -298,6 +299,7 @@ class NannyMemoryManager:
     memory_limit: int | None
     memory_terminate_fraction: float | Literal[False]
     memory_monitor_interval: float | None
+    _nanny: weakref.ReferenceType[Nanny]
 
     def __init__(
         self,
