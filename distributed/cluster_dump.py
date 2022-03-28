@@ -236,7 +236,7 @@ class DumpArtefact(Mapping):
                 / f"story-{key_or_stimulus_id[0] if len(key_or_stimulus_id) == 1 else key_or_stimulus_id}.yaml"
             )
 
-            print(f"Dumping story {i:>3}/{len(stories)} to {path}")
+            print(f"Dumping story {i+1:>3}/{len(stories)} to {path}")
             with open(path, "w") as f:
                 yaml.dump(story, f, Dumper=yaml.CSafeDumper)
 
@@ -363,7 +363,7 @@ class DumpArtefact(Mapping):
             log_dir.mkdir(parents=True, exist_ok=True)
 
             if log:
-                print(f"Dumping worker {i:>4}/{len(workers)} to {log_dir}")
+                print(f"Dumping worker {i+1:>4}/{len(workers)} to {log_dir}")
 
             worker_state = self._compact_state(info, worker_expand_keys)
 
@@ -384,7 +384,7 @@ class DumpArtefact(Mapping):
         for i, (name, _logs) in enumerate(scheduler_state.items()):
             filename = str(log_dir / f"{name}.yaml")
             if log:
-                print(f"    Dumping {i:>2}/{len(scheduler_state)} {filename}")
+                print(f"    Dumping {i+1:>2}/{len(scheduler_state)} {filename}")
 
             with open(filename, "w") as fd:
                 yaml.dump(_logs, fd, Dumper=dumper)
