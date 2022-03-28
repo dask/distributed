@@ -283,6 +283,8 @@ class DumpArtefact(Mapping):
         worker_expand_keys: Collection[str] = (
             "config",
             "incoming_transfer_log",
+            "outgoing_transfer_log",
+            "pending_data_per_worker",
             "log",
             "logs",
             "tasks",
