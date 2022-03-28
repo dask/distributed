@@ -57,7 +57,14 @@ from distributed.utils_test import (
     slowinc,
     slowsum,
 )
-from distributed.worker import Worker, error_message, logger
+from distributed.worker import (
+    Worker,
+    benchmark_disk,
+    benchmark_memory,
+    benchmark_network,
+    error_message,
+    logger,
+)
 
 pytestmark = pytest.mark.ci1
 
@@ -3343,6 +3350,18 @@ async def test_extension_methods(s):
         assert flag
 
     assert shutdown
+
+
+@gen_cluster()
+async def test_benchmark_hardware(s, a, b):
+    sizes = ["1 kiB", "10 kiB"]
+    disk = benchmark_disk(sizes=sizes, duration="1 ms")
+    memory = benchmark_memory(sizes=sizes, duration="1 ms")
+    network = await benchmark_network(
+        address=a.address, rpc=b.rpc, sizes=sizes, duration="1 ms"
+    )
+
+    assert set(disk) == set(memory) == set(network) == set(sizes)
 
 
 @gen_cluster(

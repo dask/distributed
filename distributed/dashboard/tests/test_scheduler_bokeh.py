@@ -25,6 +25,7 @@ from distributed.dashboard.components.scheduler import (
     CurrentLoad,
     EventLoop,
     Events,
+    Hardware,
     MemoryByKey,
     Occupancy,
     ProcessingHistogram,
@@ -1020,3 +1021,8 @@ async def test_shuffling(c, s, a, b):
         ss.update()
         await asyncio.sleep(0.1)
         assert time() < start + 5
+
+
+@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
+async def test_hardware(c, s, a, b):
+    Hardware(s)  # don't call update, takes too long for a test
