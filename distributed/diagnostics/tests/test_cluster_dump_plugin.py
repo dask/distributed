@@ -1,3 +1,4 @@
+from distributed.cluster_dump import DumpArtefact
 from distributed.diagnostics.cluster_dump import ClusterDump
 from distributed.utils_test import gen_cluster, inc
 
@@ -15,4 +16,6 @@ async def test_cluster_dump_plugin(c, s, *workers, tmp_path):
     assert (await f2) == 3
     await s.close(close_workers=True)
 
-    assert dump_file.exists()
+    dump = DumpArtefact.from_url(str(dump_file))
+    assert {f1.key, f2.key} == set(dump.scheduler_story(f1.key, f2.key).keys())
+    assert {f1.key, f2.key} == set(dump.worker_story(f1.key, f2.key).keys())
