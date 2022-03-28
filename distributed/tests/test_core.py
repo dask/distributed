@@ -11,9 +11,9 @@ import dask
 from distributed.comm.core import CommClosedError
 from distributed.core import (
     ConnectionPool,
+    Handler,
     Server,
     Status,
-    _expects_comm,
     clean_exception,
     coerce_to_address,
     connect,
@@ -808,6 +808,9 @@ def test_compression(compression, serialize, loop):
 @pytest.mark.asyncio
 async def test_rpc_serialization():
     server = Server({"echo": echo_serialize})
+    from distributed.core import Handler
+
+    assert isinstance(server.handlers["echo"], Handler)
     await server.listen("tcp://")
 
     async with rpc(server.address, serializers=["msgpack"]) as r:
@@ -994,6 +997,51 @@ async def test_close_grace_period_for_handlers():
     await server.close()
 
 
+@pytest.mark.asyncio
+async def test_handlers():
+    def f(a, b, stimulus_id=None):
+        return (a, b, stimulus_id)
+
+    def g(a, b):
+        return (a, b)
+
+    from distributed.core import AsyncHandler, Handler, handler_factory
+
+    fh = handler_factory(f)
+    assert isinstance(fh, Handler)
+    assert fh.wants_stimulus_id
+    assert fh(1, 2, stimulus_id="stimulus-123") == f(1, 2, stimulus_id="stimulus-123")
+
+    ah, bh, stimulus_idh = fh(1, 2)
+    a, b, stimulus_id = f(1, 2)
+    assert (ah, bh) == (a, b)
+    assert stimulus_idh.startswith("f-")
+    assert stimulus_id is None
+
+    gh = handler_factory(g)
+    assert isinstance(gh, Handler)
+    assert not gh.wants_stimulus_id
+    assert gh(1, 2) == g(1, 2)
+
+    async def f(a, b, stimulus_id=None):
+        return (a, b, stimulus_id)
+
+    async def g(a, b):
+        return (a, b)
+
+    fh = handler_factory(f)
+    assert isinstance(fh, AsyncHandler)
+    assert fh.wants_stimulus_id
+    assert await fh(1, 2, stimulus_id="stimulus-123") == await f(
+        1, 2, stimulus_id="stimulus-123"
+    )
+
+    gh = handler_factory(g)
+    assert isinstance(gh, AsyncHandler)
+    assert not gh.wants_stimulus_id
+    assert await gh(1, 2) == await g(1, 2)
+
+
 def test_expects_comm():
     class A:
         def empty(self):
@@ -1033,17 +1081,17 @@ def test_expects_comm():
 
     instance = A()
 
-    assert not _expects_comm(instance.empty)
-    assert not _expects_comm(instance.one_arg)
-    assert _expects_comm(instance.comm_arg)
+    assert not Handler(instance.empty).expects_comm()
+    assert not Handler(instance.one_arg).expects_comm()
+    assert Handler(instance.comm_arg).expects_comm()
     with pytest.warns(FutureWarning, match=expected_warning):
-        assert _expects_comm(instance.stream_arg)
-    assert not _expects_comm(instance.two_arg)
-    assert _expects_comm(instance.comm_arg_other)
+        assert Handler(instance.stream_arg).expects_comm()
+    assert not Handler(instance.two_arg).expects_comm()
+    assert Handler(instance.comm_arg_other).expects_comm()
     with pytest.warns(FutureWarning, match=expected_warning):
-        assert _expects_comm(instance.stream_arg_other)
-    assert not _expects_comm(instance.arg_kwarg)
-    assert _expects_comm(instance.comm_posarg_only)
-    assert not _expects_comm(instance.comm_not_leading_position)
+        assert Handler(instance.stream_arg_other).expects_comm()
+    assert not Handler(instance.arg_kwarg).expects_comm()
+    assert Handler(instance.comm_posarg_only).expects_comm()
+    assert not Handler(instance.comm_not_leading_position).expects_comm()
 
-    assert not _expects_comm(instance.stream_not_leading_position)
+    assert not Handler(instance.stream_not_leading_position).expects_comm()

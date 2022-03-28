@@ -1125,7 +1125,11 @@ def color_of(x, palette=palette):
 
 
 def iscoroutinefunction(f):
-    return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
+    return (
+        inspect.iscoroutinefunction(f)
+        or inspect.iscoroutinefunction(getattr(f, "__call__", None))
+        or gen.is_coroutine_function(f)
+    )
 
 
 @contextmanager

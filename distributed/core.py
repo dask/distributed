@@ -14,7 +14,7 @@ from collections.abc import Container
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import Callable, ClassVar
+from typing import ClassVar
 
 import tblib
 from tlz import merge
@@ -88,7 +88,7 @@ def raise_later(exc):
     def _raise(*args, **kwargs):
         raise exc
 
-    return _raise
+    return Handler(_raise)
 
 
 tick_maximum_delay = parse_timedelta(
@@ -98,20 +98,73 @@ tick_maximum_delay = parse_timedelta(
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 
-def _expects_comm(func: Callable) -> bool:
-    sig = inspect.signature(func)
-    params = list(sig.parameters)
-    if params and params[0] == "comm":
-        return True
-    if params and params[0] == "stream":
-        warnings.warn(
-            "Calling the first arugment of a RPC handler `stream` is "
-            "deprecated. Defining this argument is optional. Either remove the "
-            f"arugment or rename it to `comm` in {func}.",
-            FutureWarning,
-        )
-        return True
-    return False
+class Handler:
+    def __init__(self, func):
+        if isinstance(func, Handler):
+            func = func.func
+        elif callable(func):
+            pass
+        else:
+            raise TypeError(f"{func} must be callable")
+
+        assert callable(func)
+
+        self.func = func
+        self.stimulus_name = func.__name__.replace("_", "-")
+        self.sig = inspect.signature(func)
+        self.wants_stimulus_id = "stimulus_id" in self.sig.parameters
+
+    def __call__(self, *args, **kwargs):
+        if self.wants_stimulus_id and "stimulus_id" not in kwargs:
+            kwargs["stimulus_id"] = f"{self.stimulus_name}-{time()}"
+
+        return self.func(*args, **kwargs)
+
+    def __hash__(self):
+        return hash(self.func)
+
+    def expects_comm(self):
+        params = list(self.sig.parameters.keys())
+
+        if params and params[0] == "comm":
+            return True
+        if params and params[0] == "stream":
+            warnings.warn(
+                "Calling the first arugment of a RPC handler `stream` is "
+                "deprecated. Defining this argument is optional. Either remove the "
+                f"arugment or rename it to `comm` in {self.func}{self.sig}.",
+                FutureWarning,
+            )
+            return True
+        return False
+
+    def __reduce__(self):
+        return (handler_factory, (self.func,))
+
+    def __name__(self):
+        return self.func.__name__
+
+    def __eq__(self, other: object):
+        return isinstance(other, Handler) and self.func == other.func
+
+    def __str__(self):
+        return f"handler({self.func})"
+
+    def __repr__(self):
+        return f"handler({self.func})"
+
+
+class AsyncHandler(Handler):
+    async def __call__(self, *args, **kwargs):
+        return await super().__call__(*args, **kwargs)
+
+    # def __eq__(self, other: AsyncHandler):
+    #     return isinstance(other, AsyncHandler) and self.func == other.func
+
+
+def handler_factory(func):
+    cls = AsyncHandler if is_coroutine_function(func) else Handler
+    return cls(func)
 
 
 class Server:
@@ -181,6 +234,11 @@ class Server:
         self.blocked_handlers = blocked_handlers
         self.stream_handlers = {}
         self.stream_handlers.update(stream_handlers or {})
+
+        self.handlers = {k: handler_factory(f) for k, f in self.handlers.items()}
+        self.stream_handlers = {
+            k: handler_factory(f) for k, f in self.stream_handlers.items()
+        }
 
         self.id = type(self).__name__ + "-" + str(uuid.uuid4())
         self._address = None
@@ -547,8 +605,14 @@ class Server:
                         msg["serializers"] = serializers  # add back in
 
                     logger.debug("Calling into handler %s", handler.__name__)
+
                     try:
-                        if _expects_comm(handler):
+                        # TODO(sjperkins)
+                        # Somehow distributed.lock.__enter__ gets here without a handler
+                        if not isinstance(handler, Handler):
+                            handler = handler_factory(handler)
+
+                        if handler.expects_comm():
                             result = handler(comm, **msg)
                         else:
                             result = handler(**msg)
@@ -617,6 +681,10 @@ class Server:
                                 closed = True
                                 break
                             handler = self.stream_handlers[op]
+                            if op == "close":
+                                print(
+                                    f"{op} {handler} {is_coroutine_function(handler)}"
+                                )
                             if is_coroutine_function(handler):
                                 self.loop.add_callback(handler, **merge(extra, msg))
                                 await gen.sleep(0)
