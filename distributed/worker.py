@@ -140,9 +140,6 @@ if TYPE_CHECKING:
     # {TaskState -> finish: TaskStateState | (finish: TaskStateState, transition *args)}
     Recs: TypeAlias = "dict[TaskState, TaskStateState | tuple]"
     Instructions: TypeAlias = "list[Instruction]"
-else:
-    Recs = dict
-    Instructions = list
 
 logger = logging.getLogger(__name__)
 
@@ -3545,8 +3542,10 @@ class Worker(ServerNode):
     def handle_event(self, ev: StateMachineEvent) -> tuple[Recs, Instructions]:
         raise TypeError(ev)  # pragma: nocover
 
+    # TODO Set return type annotation of all handle_event implementations
+    #      to tuple[Recs, Instructions] (requires Python >=3.9)
     @handle_event.register
-    def _(self, ev: CancelComputeEvent) -> tuple[Recs, Instructions]:
+    def _(self, ev: CancelComputeEvent):  # -> tuple[Recs, Instructions]:
         ts = self.tasks.get(ev.key)
         if not ts or ts.state not in READY | {"waiting"}:
             return {}, []
@@ -3559,7 +3558,7 @@ class Worker(ServerNode):
         return {ts: "released"}, []
 
     @handle_event.register
-    def _(self, ev: ExecuteSuccessEvent) -> tuple[Recs, Instructions]:
+    def _(self, ev: ExecuteSuccessEvent):  # -> tuple[Recs, Instructions]:
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
         ts = self.tasks.get(ev.key)  # type: ignore
@@ -3572,7 +3571,7 @@ class Worker(ServerNode):
         return {ts: ("memory", ev.value)}, []
 
     @handle_event.register
-    def _(self, ev: ExecuteFailureEvent) -> tuple[Recs, Instructions]:
+    def _(self, ev: ExecuteFailureEvent):  # -> tuple[Recs, Instructions]:
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
         ts = self.tasks.get(ev.key)  # type: ignore
@@ -3595,7 +3594,7 @@ class Worker(ServerNode):
         }, []
 
     @handle_event.register
-    def _(self, ev: RescheduleEvent) -> tuple[Recs, Instructions]:
+    def _(self, ev: RescheduleEvent):  # -> tuple[Recs, Instructions]:
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
         ts = self.tasks.get(ev.key)  # type: ignore
