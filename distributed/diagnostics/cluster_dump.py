@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Any, Collection, Dict, Literal
 
 from distributed.cluster_dump import (
@@ -26,10 +25,6 @@ class ClusterDump(SchedulerPlugin):
         format_: Literal["msgpack", "yaml"] = DEFAULT_CLUSTER_DUMP_FORMAT,
         **storage_options: Dict[str, Any],
     ):
-        if not url:
-            suffix = "msgpack.gz" if format_ == "msgpack" else "yaml"
-            url = datetime.now().strftime(f"cluster-dump-%Y%m%d-%H%M%S.{suffix}")
-
         self.scheduler = scheduler
         self.url = url
         self.exclude = exclude
