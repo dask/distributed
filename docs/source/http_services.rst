@@ -21,6 +21,7 @@ others via a header navbar.
 - ``/graph``: currently processing graphs in a dependency tree view
 - ``/groups``: graph layout for task groups (dependencies, memory, output type, progress, tasks status)
 - ``/info``: redirect to ``/info/main/workers.html``
+- ``/hardware``: gathers bandwidth information on memory, disk, and network
 
 Scheduler HTTP
 --------------
@@ -81,11 +82,11 @@ Individual bokeh plots
 Worker HTTP
 -----------
 
-- ``/status``: 
-- ``/counters``: 
+- ``/status``:
+- ``/counters``:
 - ``/crossfilter``:
 - ``/sitemap.json``: list of available endpoints
-- ``/system``: 
+- ``/system``:
 - ``/health``: check server is alive
 - ``/metrics``: prometheus endpoint
 - ``/statics/()``: static file content (CSS, etc)
