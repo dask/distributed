@@ -37,3 +37,19 @@ else:
         ctx = contextvars.copy_context()
         func_call = functools.partial(ctx.run, func, *args, **kwargs)
         return await loop.run_in_executor(None, func_call)
+
+
+if sys.version_info >= (3, 9):
+    from random import randbytes
+else:
+    try:
+        import numpy
+
+        def randbytes(size):
+            return numpy.random.randint(255, size=size, dtype="u8").tobytes()
+
+    except ImportError:
+        import secrets
+
+        def randbytes(size):
+            return secrets.token_bytes(size)
