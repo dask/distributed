@@ -3438,17 +3438,22 @@ class Worker(ServerNode):
 
             args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
 
-            if ts.annotations is not None and "executor" in ts.annotations:
-                executor = ts.annotations["executor"]
-            else:
+            try:
+                executor = ts.annotations["executor"]  # type: ignore
+            except (TypeError, KeyError):
                 executor = "default"
-            assert executor in self.executors
-            assert key == ts.key
+            try:
+                e = self.executors[executor]
+            except KeyError:
+                raise ValueError(
+                    f"Invalid executor {executor!r}; "
+                    f"expected one of: {sorted(self.executors)}"
+                )
+
             self.active_keys.add(ts.key)
 
             result: dict
             try:
-                e = self.executors[executor]
                 ts.start_time = time()
                 if iscoroutinefunction(function):
                     result = await apply_function_async(
