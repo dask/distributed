@@ -3450,9 +3450,7 @@ class Worker(ServerNode):
                     f"expected one of: {sorted(self.executors)}"
                 )
 
-            self.active_keys.add(ts.key)
-
-            result: dict
+            self.active_keys.add(key)
             try:
                 ts.start_time = time()
                 if iscoroutinefunction(function):
@@ -3470,7 +3468,7 @@ class Worker(ServerNode):
                         args2,
                         kwargs2,
                         self.execution_state,
-                        ts.key,
+                        key,
                         self.active_threads,
                         self.active_threads_lock,
                         self.scheduler_delay,
@@ -3485,15 +3483,15 @@ class Worker(ServerNode):
                         self.scheduler_delay,
                     )
             finally:
-                self.active_keys.discard(ts.key)
+                self.active_keys.discard(key)
 
-            self.threads[ts.key] = result["thread"]
+            self.threads[key] = result["thread"]
 
             if result["op"] == "task-finished":
                 if self.digests is not None:
                     self.digests["task-duration"].add(result["stop"] - result["start"])
                 return ExecuteSuccessEvent(
-                    key=ts.key,
+                    key=key,
                     value=result["result"],
                     start=result["start"],
                     stop=result["stop"],
@@ -3512,14 +3510,14 @@ class Worker(ServerNode):
                 "args:      %s\n"
                 "kwargs:    %s\n"
                 "Exception: %r\n",
-                ts.key,
+                key,
                 str(funcname(function))[:1000],
                 convert_args_to_str(args2, max_len=1000),
                 convert_kwargs_to_str(kwargs2, max_len=1000),
                 result["exception_text"],
             )
             return ExecuteFailureEvent(
-                key=ts.key,
+                key=key,
                 start=result["start"],
                 stop=result["stop"],
                 exception=result["exception"],
@@ -3530,12 +3528,10 @@ class Worker(ServerNode):
             )
 
         except Exception as exc:
-            logger.error(
-                "Exception during execution of task %s.", ts.key, exc_info=True
-            )
+            logger.error("Exception during execution of task %s.", key, exc_info=True)
             msg = error_message(exc)
             return ExecuteFailureEvent(
-                key=ts.key,
+                key=key,
                 start=None,
                 stop=None,
                 exception=msg["exception"],
