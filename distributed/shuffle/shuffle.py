@@ -3,14 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from dask.base import tokenize
-from dask.delayed import Delayed, delayed
+from dask.delayed import Delayed
 from dask.highlevelgraph import HighLevelGraph
 
-from distributed.shuffle.shuffle_extension import (
-    NewShuffleMetadata,
-    ShuffleId,
-    ShuffleWorkerExtension,
-)
+from distributed.shuffle.shuffle_extension import ShuffleId, ShuffleWorkerExtension
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -37,12 +33,10 @@ def get_ext() -> ShuffleWorkerExtension:
     return extension
 
 
-def shuffle_setup(metadata: NewShuffleMetadata) -> None:
-    get_ext().create_shuffle(metadata)
-
-
-def shuffle_transfer(input: pd.DataFrame, id: ShuffleId, setup=None) -> None:
-    get_ext().add_partition(input, id)
+def shuffle_transfer(
+    input: pd.DataFrame, id: ShuffleId, npartitions: int = None, column=None
+) -> None:
+    get_ext().add_partition(input, id, npartitions=npartitions, column=column)
 
 
 def shuffle_unpack(id: ShuffleId, output_partition: int, barrier=None) -> pd.DataFrame:
@@ -71,19 +65,11 @@ def rearrange_by_column_p2p(
             )  # TODO: we fail at non-string object dtypes
     empty[column] = empty[column].astype("int64")  # TODO: this shouldn't be necesssary
 
-    setup = delayed(shuffle_setup, pure=True)(
-        NewShuffleMetadata(
-            ShuffleId(token),
-            empty,
-            column,
-            npartitions,
-        )
-    )
-
     transferred = df.map_partitions(
         shuffle_transfer,
-        token,
-        setup,
+        id=token,
+        npartitions=npartitions,
+        column=column,
         meta=df,
         enforce_metadata=False,
         transform_divisions=False,

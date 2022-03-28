@@ -3,12 +3,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
-import math
 import os
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, NewType
 
 import toolz
@@ -27,93 +25,62 @@ if TYPE_CHECKING:
 ShuffleId = NewType("ShuffleId", str)
 
 
-# NOTE: we use these dataclasses primarily for type-checking benefits.
-# They take the place of positional arguments to `shuffle_init`,
-# which the type-checker can't validate when it's called as an RPC.
-
-
-@dataclass(frozen=True, eq=False)
-class NewShuffleMetadata:
-    "Metadata to create a shuffle"
-    id: ShuffleId
-    empty: pd.DataFrame
-    column: str
-    npartitions: int
-
-
-@dataclass(frozen=True, eq=False)
-class ShuffleMetadata(NewShuffleMetadata):
-    """
-    Metadata every worker needs to share about a shuffle.
-
-    A `ShuffleMetadata` is created with a task and sent to all workers
-    over the `ShuffleWorkerExtension.shuffle_init` RPC.
-    """
-
-    workers: list[str]
-
-    def worker_for(self, output_partition: int) -> str:
-        "Get the address of the worker which should hold this output partition number"
-        assert output_partition >= 0, f"Negative output partition: {output_partition}"
-        if output_partition >= self.npartitions:
-            raise IndexError(
-                f"Output partition {output_partition} does not exist in a shuffle producing {self.npartitions} partitions"
-            )
-        return worker_for(output_partition, self.workers, self.npartitions)
-
-    def _partition_range(self, worker: str) -> tuple[int, int]:
-        "Get the output partition numbers (inclusive) that a worker will hold"
-        i = self.workers.index(worker)
-        first = math.ceil(self.npartitions * i / len(self.workers))
-        last = math.ceil(self.npartitions * (i + 1) / len(self.workers)) - 1
-        return first, last
-
-    def npartitions_for(self, worker: str) -> int:
-        "Get the number of output partitions a worker will hold"
-        first, last = self._partition_range(worker)
-        return last - first + 1
-
-
 class Shuffle:
-    "State for a single active shuffle"
+    """State for a single active shuffle"""
 
     def __init__(
         self,
-        metadata: ShuffleMetadata,
+        column,
+        workers: list[str],
+        worker_for: dict[int, str],
+        schema: pa.Schema,
+        id: ShuffleId,
         worker: Worker,
         executor: ThreadPoolExecutor,
     ) -> None:
-        self.metadata = metadata
+
+        import pandas as pd
+        import pyarrow as pa
+
+        self.column = column
+        self.id = id
+        self.schema = schema
         self.worker = worker
+        self.all_workers = workers
         self.executor = executor
 
-        import pyarrow as pa
+        partitions_of = defaultdict(list)
+        for part, address in worker_for.items():
+            partitions_of[address].append(part)
+        self.partitions_of = dict(partitions_of)
+        self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
 
         self.multi_file = MultiFile(
             dump=functools.partial(
-                dump_batch, schema=pa.Schema.from_pandas(self.metadata.empty)
+                dump_batch,
+                schema=self.schema,
             ),
             load=load_arrow,
-            directory=os.path.join(self.worker.local_directory, str(self.metadata.id)),
+            directory=os.path.join(self.worker.local_directory, str(self.id)),
             join=pa.concat_tables,  # pd.concat
             sizeof=lambda L: sum(map(len, L)),
-            loop=worker.io_loop,
+            loop=self.worker.io_loop,
         )
 
         async def send(address, shards):
             return await self.worker.rpc(address).shuffle_receive(
                 data=to_serialize(shards),
-                shuffle_id=self.metadata.id,
+                shuffle_id=self.id,
             )
 
         self.multi_comm = MultiComm(
             send=send,
-            loop=worker.io_loop,
+            loop=self.worker.io_loop,
         )
-        MultiComm.max_connections = min(len(self.metadata.workers), 10)
+        MultiComm.max_connections = min(len(self.partitions_of), 10)
 
         self.diagnostics: dict[str, float] = defaultdict(float)
-        self.output_partitions_left = metadata.npartitions_for(worker.address)
+        self.output_partitions_left = len(self.partitions_of[self.worker.address])
         self.transferred = False
         self.total_recvd = 0
         self.start_time = time.time()
@@ -149,7 +116,7 @@ class Shuffle:
                 "buckets": len(self.multi_comm.shards),
                 "written": self.multi_comm.total_moved,
                 "read": self.total_recvd,
-                "active": self.multi_comm.queue.qsize(),  # TODO: maybe not built yet
+                "active": self.multi_comm.queue.qsize(),
                 "diagnostics": self.multi_comm.diagnostics,
                 "memory_limit": self.multi_comm.memory_limit,
             },
@@ -162,7 +129,6 @@ class Shuffle:
         # but barriers on other workers might still be running and sending us
         # data
         # assert not self.transferred, "`receive` called after barrier task"
-        import pyarrow as pa
 
         self.total_recvd += sum(map(len, data))
         # An ugly way of turning these batches back into an arrow table
@@ -170,10 +136,10 @@ class Shuffle:
             data = await self.offload(
                 list_of_buffers_to_table,
                 data,
-                pa.Schema.from_pandas(self.metadata.empty),
+                self.schema,
             )
 
-            groups = await self.offload(split_by_partition, data, self.metadata.column)
+            groups = await self.offload(split_by_partition, data, self.column)
 
         assert len(data) == sum(map(len, groups.values()))
         del data
@@ -191,11 +157,11 @@ class Shuffle:
         with self.time("cpu"):
             out = split_by_worker(
                 data,
-                self.metadata.column,
-                self.metadata.npartitions,
-                self.metadata.workers,
+                self.column,
+                self.worker_for,
             )
-            assert len(data) == sum(map(len, out.values()))
+            if not len(data) == sum(map(len, out.values())):
+                breakpoint()
             out = {
                 k: [b.serialize().to_pybytes() for b in t.to_batches()]
                 for k, t in out.items()
@@ -205,9 +171,9 @@ class Shuffle:
     def get_output_partition(self, i: int) -> pd.DataFrame:
         assert self.transferred, "`get_output_partition` called before barrier task"
 
-        assert self.metadata.worker_for(i) == self.worker.address, (
-            f"Output partition {i} belongs on {self.metadata.worker_for(i)}, "
-            f"not {self.worker.address}. {self.metadata!r}"
+        assert self.worker_for[i] == self.worker.address, (
+            f"Output partition {i} belongs on {self.worker_for[i]}, "
+            f"not {self.worker.address}. "
         )
         # ^ NOTE: this check isn't necessary, just a nice validation to prevent incorrect
         # data in the case something has gone very wrong
@@ -223,7 +189,7 @@ class Shuffle:
             with self.time("cpu"):
                 return df.to_pandas()
         except KeyError:
-            return self.metadata.empty.head(0)
+            return self.schema.empty_table().to_pandas()
 
     def inputs_done(self) -> None:
         assert not self.transferred, "`inputs_done` called multiple times"
@@ -239,7 +205,6 @@ class ShuffleWorkerExtension:
     def __init__(self, worker: Worker) -> None:
         # Attach to worker
         worker.handlers["shuffle_receive"] = self.shuffle_receive
-        worker.handlers["shuffle_init"] = self.shuffle_init
         worker.handlers["shuffle_inputs_done"] = self.shuffle_inputs_done
         worker.extensions["shuffle"] = self
 
@@ -251,21 +216,6 @@ class ShuffleWorkerExtension:
     # Handlers
     ##########
     # NOTE: handlers are not threadsafe, but they're called from async comms, so that's okay
-
-    def shuffle_init(self, comm: object, metadata: ShuffleMetadata) -> None:
-        """
-        Hander: Register a new shuffle that is about to begin.
-        Using a shuffle with an already-known ID is an error.
-        """
-        if metadata.id in self.shuffles:
-            raise ValueError(
-                f"Shuffle {metadata.id!r} is already registered on worker {self.worker.address}"
-            )
-        self.shuffles[metadata.id] = Shuffle(
-            metadata,
-            self.worker,
-            self.executor,
-        )
 
     def heartbeat(self):
         return {id: shuffle.heartbeat() for id, shuffle in self.shuffles.items()}
@@ -280,7 +230,7 @@ class ShuffleWorkerExtension:
         Hander: Receive an incoming shard of data from a peer worker.
         Using an unknown ``shuffle_id`` is an error.
         """
-        shuffle = self._get_shuffle(shuffle_id)
+        shuffle = await self._get_shuffle(shuffle_id)
         future = asyncio.ensure_future(shuffle.receive(data))
         if (
             shuffle.multi_file.total_size + sum(map(len, data))
@@ -293,7 +243,7 @@ class ShuffleWorkerExtension:
         Hander: Inform the extension that all input partitions have been handed off to extensions.
         Using an unknown ``shuffle_id`` is an error.
         """
-        shuffle = self._get_shuffle(shuffle_id)
+        shuffle = await self._get_shuffle(shuffle_id)
         await shuffle.multi_comm.flush()
         shuffle.inputs_done()
         if shuffle.done():
@@ -302,58 +252,17 @@ class ShuffleWorkerExtension:
             # This happens when there are fewer output partitions than workers.
             del self.shuffles[shuffle_id]
 
-    # Tasks
-    #######
-
-    def create_shuffle(self, new_metadata: NewShuffleMetadata) -> ShuffleMetadata:
-        return sync(self.worker.loop, self._create_shuffle, new_metadata)  # type: ignore
-
-    async def _create_shuffle(
-        self, new_metadata: NewShuffleMetadata
-    ) -> ShuffleMetadata:
-        """
-        Task: Create a new shuffle and broadcast it to all workers.
-        """
-        # TODO would be nice to not have to have the RPC in this method, and have shuffles started implicitly
-        # by the first `receive`/`add_partition`. To do that, shuffle metadata would be passed into
-        # every task, and from there into the extension (rather than stored within a `Shuffle`),
-        # However:
-        # 1. It makes scheduling much harder, since it's a widely-shared common dep
-        #    (https://github.com/dask/distributed/pull/5325)
-        # 2. Passing in metadata everywhere feels contrived when it would be so easy to store
-        # 3. The metadata may not be _that_ small (1000s of columns + 1000s of workers);
-        #    serializing and transferring it repeatedly adds overhead.
-        if new_metadata.id in self.shuffles:
-            raise ValueError(
-                f"Shuffle {new_metadata.id!r} is already registered on worker {self.worker.address}"
-            )
-
-        identity = await self.worker.scheduler.identity()
-
-        workers = list(identity["workers"])
-        metadata = ShuffleMetadata(
-            new_metadata.id,
-            new_metadata.empty,
-            new_metadata.column,
-            new_metadata.npartitions,
-            workers,
+    def add_partition(
+        self,
+        data: pd.DataFrame,
+        shuffle_id: ShuffleId,
+        npartitions: int = None,
+        column=None,
+    ) -> None:
+        shuffle = self.get_shuffle(
+            shuffle_id, empty=data, npartitions=npartitions, column=column
         )
-
-        # Start the shuffle on all peers
-        # Note that this will call `shuffle_init` on our own worker as well
-        await asyncio.gather(
-            *(
-                self.worker.rpc(addr).shuffle_init(metadata=to_serialize(metadata))
-                for addr in metadata.workers
-            ),
-        )
-        # TODO handle errors from peers, and cancellation.
-        # If any peers can't start the shuffle, tell successful peers to cancel it.
-
-        return metadata  # NOTE: unused in tasks, just handy for tests
-
-    def add_partition(self, data: pd.DataFrame, shuffle_id: ShuffleId) -> None:
-        self._get_shuffle(shuffle_id).add_partition(data=data)
+        shuffle.add_partition(data=data)
 
     def barrier(self, shuffle_id: ShuffleId) -> None:
         sync(self.worker.loop, self._barrier, shuffle_id)
@@ -365,46 +274,16 @@ class ShuffleWorkerExtension:
         Using an unknown ``shuffle_id`` is an error. Calling this before all partitions have been
         added is undefined.
         """
-        # NOTE: in this basic shuffle implementation, doing things during the barrier
-        # is mostly unnecessary. We only need it to inform workers that don't receive
-        # any output partitions that they can clean up.
-        # (Otherwise, they'd have no way to know if they needed to keep the `Shuffle` around
-        # for more input partitions, which might come at some point. Workers that _do_ receive
-        # output partitions could infer this, since once `get_output_partition` gets called the
-        # first time, they can assume there are no more inputs.)
-        #
-        # Technically right now, we could call the `shuffle_inputs_done` RPC only on workers
-        # where `metadata.npartitions_for(worker) == 0`.
-        # However, when we have buffering, this barrier step will become important for
-        # all workers, since they'll use it to flush their buffers and send any leftover shards
-        # to their peers.
 
-        metadata = self._get_shuffle(shuffle_id).metadata
-
-        # Set worker restrictions for unpack tasks
-
-        # Could do this during `create_shuffle`, but we might as well overlap it with the time
-        # workers will be flushing buffers to each other.
-        name = "shuffle-unpack-" + metadata.id  # TODO single-source task name
-
-        # FIXME TODO XXX what about when culling means not all of the output tasks actually exist??!
-        # - these restrictions are invalid
-        # - get_output_partition won't be called enough times, so cleanup won't happen
-        # - also, we're transferring data we don't need to transfer
-        restrictions = {
-            f"('{name}', {i})": [metadata.worker_for(i)]
-            for i in range(metadata.npartitions)
-        }
+        shuffle = await self._get_shuffle(shuffle_id)
 
         # Tell all peers that we've reached the barrier
-
         # Note that this will call `shuffle_inputs_done` on our own worker as well
         await asyncio.gather(
             *(
                 self.worker.rpc(worker).shuffle_inputs_done(shuffle_id=shuffle_id)
-                for worker in metadata.workers
+                for worker in shuffle.all_workers
             ),
-            self.worker.scheduler.set_restrictions(worker=restrictions),
         )
         # TODO handle errors from workers and scheduler, and cancellation.
 
@@ -416,21 +295,57 @@ class ShuffleWorkerExtension:
 
         Calling this for a ``shuffle_id`` which is unknown or incomplete is an error.
         """
-        shuffle = self._get_shuffle(shuffle_id)
+        shuffle = self.get_shuffle(shuffle_id)
         output = shuffle.get_output_partition(output_partition)
         if shuffle.done():
             self.shuffles.pop(shuffle_id, None)
             # key missing if another thread got to it first
         return output
 
-    def _get_shuffle(self, shuffle_id: ShuffleId) -> Shuffle:
+    async def _get_shuffle(
+        self,
+        shuffle_id: ShuffleId,
+        empty: pd.DataFrame | None = None,
+        column=None,
+        npartitions: int = None,
+    ) -> Shuffle:
         "Get a shuffle by ID; raise ValueError if it's not registered."
+        import pyarrow as pa
+
         try:
             return self.shuffles[shuffle_id]
         except KeyError:
-            raise ValueError(
-                f"Shuffle {shuffle_id!r} is not registered on worker {self.worker.address}"
-            ) from None
+            result = await self.worker.scheduler.shuffle_get(
+                id=shuffle_id,
+                schema=pa.Schema.from_pandas(empty).serialize().to_pybytes()
+                if empty is not None
+                else None,
+                npartitions=npartitions,
+                column=column,
+            )
+            if shuffle_id not in self.shuffles:
+                shuffle = Shuffle(
+                    column=result["column"],
+                    worker_for=result["worker_for"],
+                    workers=result["workers"],
+                    worker=self.worker,
+                    schema=deserialize_schema(result["schema"]),
+                    id=shuffle_id,
+                    executor=self.executor,
+                )
+                self.shuffles[shuffle_id] = shuffle
+            return self.shuffles[shuffle_id]
+
+    def get_shuffle(
+        self,
+        shuffle_id: ShuffleId,
+        empty: pd.DataFrame | None = None,
+        column=None,
+        npartitions: int = None,
+    ):
+        return sync(
+            self.worker.loop, self._get_shuffle, shuffle_id, empty, column, npartitions
+        )
 
     async def close(self):
         self.executor.shutdown()
@@ -450,33 +365,89 @@ class ShuffleSchedulerExtension:
 
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        self.shuffles = defaultdict(lambda: defaultdict(dict))
+        self.scheduler.handlers.update(
+            {
+                "shuffle_get": self.get,
+            }
+        )
+        self.heartbeats = defaultdict(lambda: defaultdict(dict))
+        self.worker_for = dict()
+        self.schemas = dict()
+        self.columns = dict()
+        self.workers = dict()
 
     def heartbeat(self, ws, data):
         for shuffle_id, d in data.items():
-            self.shuffles[shuffle_id][ws.address].update(d)
+            self.heartbeats[shuffle_id][ws.address].update(d)
+
+    def get(
+        self, id: ShuffleId, schema: bytes | None, column, npartitions: int | None
+    ) -> dict:
+        if id not in self.worker_for:
+            assert schema is not None
+            assert column is not None
+            assert npartitions is not None
+            workers = list(self.scheduler.workers)
+            partitions = list(range(npartitions))  # TODO: check output partitions
+
+            # TODO: honor pre-existing restrictions
+            # TODO: only ask for desired outputs
+            mapping = {
+                part: worker_for(part, workers, npartitions) for part in partitions
+            }
+
+            name = "shuffle-unpack-" + id  # TODO single-source task name
+
+            for partition, worker in mapping.items():
+                key = f"('{name}', {partition})"
+                ts = self.scheduler.tasks[key]
+                if ts._worker_restrictions:
+                    raise NotImplementedError(
+                        "Shuffling and restrictions don't yet mix, use shuffle='tasks'"
+                    )
+                ts._worker_restrictions = {worker}
+
+            self.worker_for[id] = mapping
+            self.schemas[id] = schema
+            self.columns[id] = column
+            self.workers[id] = workers
+
+        return {
+            "worker_for": self.worker_for[id],
+            "workers": self.workers[id],
+            "column": self.columns[id],
+            "schema": self.schemas[id],
+        }
 
 
 def split_by_worker(
-    df: pd.DataFrame, column: str, npartitions: int, workers: list[str]
+    df: pd.DataFrame,
+    column: str,
+    worker_for: pd.Series,
 ) -> dict:
     """
     Split data into many arrow batches, partitioned by destination worker
     """
     import numpy as np
-    import pandas as pd
     import pyarrow as pa
 
-    grouper = (len(workers) * df[column] // npartitions).astype(df[column].dtype).values
-
+    df = df.merge(
+        right=worker_for.cat.codes.rename("_worker"),
+        left_on=column,
+        right_index=True,
+        how="inner",
+    )
+    nrows = len(df)
+    if not nrows:
+        return {}
+    # assert len(df) == nrows  # Not true if some outputs aren't wanted
     t = pa.Table.from_pandas(df)
-    del df
-    t = t.add_column(len(t.columns), "_worker", [grouper])
     t = t.sort_by("_worker")
-
-    worker = np.asarray(t.select(["_worker"]))[0]
+    codes = np.asarray(t.select(["_worker"]))[0]
     t = t.drop(["_worker"])
-    splits = np.where(worker[1:] != worker[:-1])[0] + 1
+    del df
+
+    splits = np.where(codes[1:] != codes[:-1])[0] + 1
     splits = np.concatenate([[0], splits])
 
     shards = [
@@ -484,10 +455,13 @@ def split_by_worker(
     ]
     shards.append(t.slice(offset=splits[-1], length=None))
 
-    w_unique = pd.Series(grouper).unique()
-    w_unique.sort()
-
-    return {workers[w]: shard for w, shard in zip(w_unique, shards)}
+    unique_codes = codes[splits]
+    out = {
+        worker_for.cat.categories[code]: shard
+        for code, shard in zip(unique_codes, shards)
+    }
+    assert sum(map(len, out.values())) == nrows
+    return out
 
 
 def split_by_partition(
@@ -578,3 +552,28 @@ def list_of_buffers_to_table(data: list[pa.Buffer], schema: pa.Schema) -> pa.Tab
     data = sr.read_all()
     bio.close()
     return data
+
+
+def deserialize_schema(data: bytes) -> pa.Schema:
+    """Deserialize an arrow schema
+
+    Examples
+    --------
+    >>> b = schema.serialize()  # doctest: +SKIP
+    >>> deserialize_schema(b)  # doctest: +SKIP
+
+    See also
+    --------
+    pa.Schema.serialize
+    """
+    import io
+
+    import pyarrow as pa
+
+    bio = io.BytesIO()
+    bio.write(data)
+    bio.seek(0)
+    sr = pa.RecordBatchStreamReader(bio)
+    table = sr.read_all()
+    bio.close()
+    return table.schema

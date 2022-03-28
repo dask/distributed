@@ -3472,7 +3472,7 @@ class Shuffling(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
-            input = self.scheduler.extensions["shuffle"].shuffles
+            input = self.scheduler.extensions["shuffle"].heartbeats
             if not input:
                 return
 
