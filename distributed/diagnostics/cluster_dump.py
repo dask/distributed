@@ -1,6 +1,10 @@
 from datetime import datetime
 from typing import Any, Collection, Dict, Literal
 
+from distributed.cluster_dump import (
+    DEFAULT_CLUSTER_DUMP_EXCLUDE,
+    DEFAULT_CLUSTER_DUMP_FORMAT,
+)
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.scheduler import Scheduler
 
@@ -17,9 +21,9 @@ class ClusterDump(SchedulerPlugin):
     def __init__(
         self,
         scheduler: Scheduler,
-        url: str = None,
-        exclude: "Collection[str]" = (),
-        format_: Literal["msgpack", "yaml"] = "msgpack",
+        url: str,
+        exclude: "Collection[str]" = DEFAULT_CLUSTER_DUMP_EXCLUDE,
+        format_: Literal["msgpack", "yaml"] = DEFAULT_CLUSTER_DUMP_FORMAT,
         **storage_options: Dict[str, Any],
     ):
         if not url:

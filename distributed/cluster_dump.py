@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from typing import IO, Any, Awaitable, Callable, Literal
+from typing import IO, Any, Awaitable, Callable, Collection, Literal
 
 import fsspec
 import msgpack
 
 from distributed.compatibility import to_thread
+
+DEFAULT_CLUSTER_DUMP_FORMAT: Literal["msgpack" | "yaml"] = "msgpack"
+DEFAULT_CLUSTER_DUMP_EXCLUDE: Collection[str] = ("run_spec",)
 
 
 def _tuple_to_list(node):
@@ -22,7 +25,7 @@ def _tuple_to_list(node):
 async def write_state(
     get_state: Callable[[], Awaitable[Any]],
     url: str,
-    format: Literal["msgpack", "yaml"],
+    format: Literal["msgpack", "yaml"] = DEFAULT_CLUSTER_DUMP_FORMAT,
     **storage_options: dict[str, Any],
 ) -> None:
     "Await a cluster dump, then serialize and write it to a path"
