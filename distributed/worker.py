@@ -2069,10 +2069,10 @@ class Worker(ServerNode):
     def transition_cancelled_error(
         self,
         ts: TaskState,
-        exception,
-        traceback,
-        exception_text,
-        traceback_text,
+        exception: bytes,
+        traceback: bytes,
+        exception_text: str,
+        traceback_text: str,
         *,
         stimulus_id: str,
     ) -> tuple[Recs, Instructions]:
@@ -2103,8 +2103,8 @@ class Worker(ServerNode):
     def transition_generic_error(
         self,
         ts: TaskState,
-        exception: Exception,
-        traceback: object,
+        exception: bytes,
+        traceback: bytes,
         exception_text: str,
         traceback_text: str,
         *,
@@ -2117,10 +2117,10 @@ class Worker(ServerNode):
         ts.state = "error"
         smsg = TaskErredMsg(
             key=ts.key,
-            exception=ts.exception,
-            traceback=ts.traceback,
-            exception_text=ts.exception_text,
-            traceback_text=ts.traceback_text,
+            exception=exception,
+            traceback=traceback,
+            exception_text=exception_text,
+            traceback_text=traceback_text,
             thread=self.threads.get(ts.key),
             startstops=ts.startstops,
         )
@@ -2130,10 +2130,10 @@ class Worker(ServerNode):
     def transition_executing_error(
         self,
         ts: TaskState,
-        exception,
-        traceback,
-        exception_text,
-        traceback_text,
+        exception: bytes,
+        traceback: bytes,
+        exception_text: str,
+        traceback_text: str,
         *,
         stimulus_id: str,
     ) -> tuple[Recs, Instructions]:
@@ -2382,10 +2382,10 @@ class Worker(ServerNode):
     def transition_flight_error(
         self,
         ts: TaskState,
-        exception,
-        traceback,
-        exception_text,
-        traceback_text,
+        exception: bytes,
+        traceback: bytes,
+        exception_text: str,
+        traceback_text: str,
         *,
         stimulus_id: str,
     ) -> tuple[Recs, Instructions]:

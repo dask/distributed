@@ -119,12 +119,12 @@ class TaskState:
     coming_from: str | None = None
     #: Abstract resources required to run a task
     resource_restrictions: dict[str, float] = field(default_factory=dict)
-    #: The exception caused by running a task if it erred
-    exception: Exception | None = None
+    #: The exception caused by running a task if it erred (serialized)
+    exception: bytes | None = None
+    #: The traceback caused by running a task if it erred (serialized)
+    traceback: bytes | None = None
     #: string representation of exception
     exception_text: str = ""
-    #: The traceback caused by running a task if it erred
-    traceback: object | None = None
     #: string representation of traceback
     traceback_text: str = ""
     #: The type of a particular piece of data
@@ -299,9 +299,9 @@ class TaskErredMsg(SendMessageToScheduler):
     op = "task-erred"
 
     key: str
-    exception: Exception
+    exception: bytes  # serialized
+    traceback: bytes  # serialized
     exception_text: str
-    traceback: object
     traceback_text: str
     thread: int | None
     startstops: list[StartStop]
