@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
-from typing import IO, Any, Awaitable, Callable, Collection, Literal
+from typing import IO, TYPE_CHECKING, Any, Awaitable, Callable, Collection, Literal
 
 import fsspec
 import msgpack
@@ -13,6 +14,9 @@ import msgpack
 from distributed.compatibility import to_thread
 from distributed.stories import scheduler_story as _scheduler_story
 from distributed.stories import worker_story as _worker_story
+
+if TYPE_CHECKING:
+    import yaml
 
 
 def _tuple_to_list(node):
@@ -370,7 +374,8 @@ class DumpArtefact(Mapping):
             for name, _logs in worker_state.items():
                 filename = str(log_dir / f"{name}.yaml")
                 with open(filename, "w") as fd:
-                    yaml.dump(_logs, fd, Dumper=dumper)
+                    with _block_literals(dumper) if name == "logs" else nullcontext():
+                        yaml.dump(_logs, fd, Dumper=dumper)
 
         context = "scheduler"
         log_dir = root_dir / context
@@ -387,4 +392,24 @@ class DumpArtefact(Mapping):
                 print(f"    Dumping {i+1:>2}/{len(scheduler_state)} {filename}")
 
             with open(filename, "w") as fd:
-                yaml.dump(_logs, fd, Dumper=dumper)
+                with _block_literals(dumper) if name == "logs" else nullcontext():
+                    yaml.dump(_logs, fd, Dumper=dumper)
+
+
+@contextmanager
+def _block_literals(dumper: type[yaml.Dumper | yaml.CDumper]):
+    "Contextmanager to use literal-block YAML syntax for multiline strings. Not thread-safe."
+    # based on https://stackoverflow.com/a/33300001/17100540
+    original_respresenter = dumper.yaml_representers[str]
+
+    def represent_str(self, data: str):
+        if "\n" in data:
+            return self.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+        return self.represent_scalar("tag:yaml.org,2002:str", data)
+
+    dumper.add_representer(str, represent_str)
+
+    try:
+        yield
+    finally:
+        dumper.add_representer(str, original_respresenter)
