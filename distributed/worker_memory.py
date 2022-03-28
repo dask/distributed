@@ -313,7 +313,7 @@ class NannyMemoryManager:
             dask.config.get("distributed.worker.memory.monitor-interval"),
             default=None,
         )
-        self.nanny = weakref.ref(nanny)
+        self._nanny = weakref.ref(nanny)
         assert isinstance(self.memory_monitor_interval, (int, float))
         if self.memory_limit and self.memory_terminate_fraction is not False:
             pc = PeriodicCallback(
@@ -326,7 +326,7 @@ class NannyMemoryManager:
         """Get a measure for process memory.
         This can be a mock target.
         """
-        nanny = self.nanny()
+        nanny = self._nanny()
         if nanny:
             try:
                 proc = nanny._psutil_process
@@ -337,7 +337,7 @@ class NannyMemoryManager:
 
     def memory_monitor(self) -> None:
         """Track worker's memory. Restart if it goes above terminate fraction."""
-        nanny = self.nanny()
+        nanny = self._nanny()
         if (
             not nanny
             or nanny.status != Status.running
