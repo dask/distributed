@@ -5,6 +5,7 @@ from distributed.worker_state_machine import (
     Execute,
     ReleaseWorkerDataMsg,
     SendMessageToScheduler,
+    StateMachineEvent,
     TaskState,
     UniqueTaskHeap,
 )
@@ -99,3 +100,9 @@ def test_sendmsg_to_dict():
     # Arbitrary sample class
     smsg = ReleaseWorkerDataMsg(key="x")
     assert smsg.to_dict() == {"op": "release-worker-data", "key": "x"}
+
+
+@pytest.mark.parametrize("cls", StateMachineEvent.__subclasses__())
+def test_event_slots(cls):
+    smsg = cls(**dict.fromkeys(cls.__annotations__), stimulus_id="test")
+    assert not hasattr(smsg, "__dict__")

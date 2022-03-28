@@ -321,11 +321,11 @@ class ReleaseWorkerDataMsg(SendMessageToScheduler):
     key: str
 
 
+# Not to be confused with RescheduleEvent below or the distributed.Reschedule Exception
 @dataclass
 class RescheduleMsg(SendMessageToScheduler):
     op = "reschedule"
 
-    # Not to be confused with the distributed.Reschedule Exception
     __slots__ = ("key", "worker")
     key: str
     worker: str
@@ -347,3 +347,45 @@ class AddKeysMsg(SendMessageToScheduler):
     __slots__ = ("keys", "stimulus_id")
     keys: list[str]
     stimulus_id: str
+
+
+@dataclass
+class StateMachineEvent:
+    __slots__ = ("stimulus_id",)
+    stimulus_id: str
+
+
+@dataclass
+class ExecuteSuccessEvent(StateMachineEvent):
+    key: str
+    value: object
+    start: float
+    stop: float
+    nbytes: int
+    type: type | None
+    __slots__ = tuple(__annotations__)  # type: ignore
+
+
+@dataclass
+class ExecuteFailureEvent(StateMachineEvent):
+    key: str
+    start: float | None
+    stop: float | None
+    exception: bytes  # serialized
+    traceback: bytes  # serialized
+    exception_text: str
+    traceback_text: str
+    __slots__ = tuple(__annotations__)  # type: ignore
+
+
+@dataclass
+class CancelComputeEvent(StateMachineEvent):
+    __slots__ = ("key",)
+    key: str
+
+
+# Not to be confused with RescheduleMsg above or the distributed.Reschedule Exception
+@dataclass
+class RescheduleEvent(StateMachineEvent):
+    __slots__ = ("key",)
+    key: str
