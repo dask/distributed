@@ -12,6 +12,7 @@ import fsspec
 import msgpack
 
 from distributed.compatibility import to_thread
+from distributed.stories import msg_with_datetime
 from distributed.stories import scheduler_story as _scheduler_story
 from distributed.stories import worker_story as _worker_story
 
@@ -375,7 +376,10 @@ class DumpArtefact(Mapping):
 
             for name, _logs in worker_state.items():
                 filename = str(log_dir / f"{name}.yaml")
+                if name == "log":
+                    _logs = list(map(msg_with_datetime, _logs))
                 with open(filename, "w") as fd:
+
                     with _block_literals(dumper) if name == "logs" else nullcontext():
                         yaml.dump(_logs, fd, Dumper=dumper)
 
@@ -392,6 +396,9 @@ class DumpArtefact(Mapping):
             filename = str(log_dir / f"{name}.yaml")
             if log:
                 print(f"    Dumping {i+1:>2}/{len(scheduler_state)} {filename}")
+
+            if name == "transition_log":
+                _logs = list(map(msg_with_datetime, _logs))
 
             with open(filename, "w") as fd:
                 with _block_literals(dumper) if name == "logs" else nullcontext():

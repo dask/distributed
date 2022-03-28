@@ -41,7 +41,7 @@ def worker_story(keys: set, log: Iterable, datetimes: bool = False) -> list:
     story : list
     """
     return [
-        _msg_with_datetime(msg) if datetimes else msg
+        msg_with_datetime(msg) if datetimes else msg
         for msg in log
         if any(key in msg for key in keys)
         or any(
@@ -53,7 +53,7 @@ def worker_story(keys: set, log: Iterable, datetimes: bool = False) -> list:
 T = TypeVar("T", list, tuple)
 
 
-def _msg_with_datetime(msg: T) -> T:
+def msg_with_datetime(msg: T) -> T:
     dt = msg[-1]
     try:
         dt = datetime.fromtimestamp(dt)
