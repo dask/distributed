@@ -1898,15 +1898,6 @@ async def test_multiple_executors(c, s):
 
 
 @gen_cluster(client=True)
-async def test_bad_executor_annotation(c, s, a, b):
-    with dask.annotate(executor="bad"):
-        future = c.submit(inc, 1)
-    with pytest.raises(ValueError, match="Invalid executor 'bad'; expected one of: "):
-        await future
-    assert future.status == "error"
-
-
-@gen_cluster(client=True)
 async def test_process_executor(c, s, a, b):
     with ProcessPoolExecutor() as e:
         a.executors["processes"] = e
