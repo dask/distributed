@@ -401,11 +401,11 @@ class ShuffleSchedulerExtension:
             for partition, worker in mapping.items():
                 key = f"('{name}', {partition})"
                 ts = self.scheduler.tasks[key]
-                if ts._worker_restrictions:
+                if ts.worker_restrictions:
                     raise NotImplementedError(
                         "Shuffling and restrictions don't yet mix, use shuffle='tasks'"
                     )
-                ts._worker_restrictions = {worker}
+                ts.worker_restrictions = {worker}
 
             self.worker_for[id] = mapping
             self.schemas[id] = schema
