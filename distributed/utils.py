@@ -92,6 +92,88 @@ def _initialize_mp_context():
 mp_context = _initialize_mp_context()
 
 
+class Handler:
+    def __init__(self, func):
+        if isinstance(func, Handler):
+            func = func.func
+        elif callable(func):
+            pass
+        else:
+            raise TypeError(f"{func} must be callable")
+
+        self.func = func
+        self.stimulus_name = func.__name__.replace("_", "-")
+        self.sig = inspect.signature(func)
+        self.wants_stimulus_id = "stimulus_id" in self.sig.parameters
+
+    def expects_comm(self):
+        params = list(self.sig.parameters.keys())
+
+        if params and params[0] == "comm":
+            return True
+        if params and params[0] == "stream":
+            warnings.warn(
+                "Calling the first argument of a RPC handler `stream` is "
+                "deprecated. Defining this argument is optional. Either remove the "
+                f"argument or rename it to `comm` in {self.func}{self.sig}.",
+                FutureWarning,
+            )
+            return True
+        return False
+
+    def __call__(self, *args, **kwargs):
+        if self.wants_stimulus_id and "stimulus_id" not in kwargs:
+            kwargs["stimulus_id"] = f"{self.stimulus_name}-{time()}"
+
+        return self.func(*args, **kwargs)
+
+    def __hash__(self):
+        return hash(self.func)
+
+    def __reduce__(self):
+        return (Handler, (self.func,))
+
+    def __name__(self):
+        return self.func.__name__
+
+    def __eq__(self, other: object):
+        return isinstance(other, Handler) and self.func == other.func
+
+    def __str__(self):
+        return str(self.func)
+
+    def __repr__(self):
+        return repr(self.func)
+
+
+class AsyncHandler(Handler):
+    async def __call__(self, *args, **kwargs):
+        return await super().__call__(*args, **kwargs)
+
+    def __hash__(self):
+        return super().__hash__()
+
+    def __reduce__(self):
+        return (AsyncHandler, (self.func,))
+
+    def __name__(self):
+        return super().__name__()
+
+    def __eq__(self, other: object):
+        return isinstance(other, AsyncHandler) and self.func == other.func
+
+    def __str__(self):
+        return str(self.func)
+
+    def __repr__(self):
+        return repr(self.func)
+
+
+def handler_factory(func):
+    cls = AsyncHandler if is_coroutine_function(func) else Handler
+    return cls(func)
+
+
 def has_arg(func, argname):
     """
     Whether the function takes an argument with the given name.
@@ -1066,6 +1148,9 @@ def reset_logger_locks():
 
 @functools.lru_cache(1000)
 def has_keyword(func, keyword):
+    if isinstance(func, Handler):
+        return keyword in func.sig.parameters
+
     return keyword in inspect.signature(func).parameters
 
 
