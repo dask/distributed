@@ -25,8 +25,11 @@ class SchedulerPlugin:
     Plugins are often used for diagnostics and measurement, but have full
     access to the scheduler and could in principle affect core scheduling.
 
-    To implement a plugin implement some of the methods of this class and add
-    the plugin to the scheduler with ``Scheduler.add_plugin(myplugin)``.
+    To implement a plugin:
+
+    1. subclass this class
+    2. override some of its methods
+    3. add the plugin to the scheduler with ``Scheduler.add_plugin(myplugin)``.
 
     Examples
     --------
@@ -50,7 +53,6 @@ class SchedulerPlugin:
 
         This runs at the end of the Scheduler startup process
         """
-        pass
 
     async def close(self):
         """Run when the scheduler closes down
@@ -58,7 +60,6 @@ class SchedulerPlugin:
         This runs at the beginning of the Scheduler shutdown process, but after
         workers have been asked to shut down gracefully
         """
-        pass
 
     def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
         """Run when a new graph / tasks enter the scheduler"""
