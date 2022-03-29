@@ -636,10 +636,8 @@ async def test_connection_pool_close_while_connecting(monkeypatch):
     while not pool._connecting:
         await asyncio.sleep(0.01)
 
-    close_fut = asyncio.create_task(pool.close())
-
+    await pool.close()
     done, _ = await asyncio.wait(tasks)
-    await close_fut
     assert all(t.cancelled() for t in done)
     assert not pool.open
     assert not pool._n_connecting
