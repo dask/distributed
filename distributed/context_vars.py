@@ -1,6 +1,6 @@
 import inspect
 from contextvars import ContextVar, Token
-from typing import Any, Callable
+from typing import Any, Callable, Union
 
 from dask.utils import funcname
 
@@ -39,18 +39,35 @@ class STIMULUS_ID:
         return f"{name}-{time()}"
 
     @classmethod
-    def get(cls, on_error: str = "generate"):
+    def get(cls, on_error: Union[str, bool] = "generate"):
+        """Gets the stimulus_id from the current context.
+
+        Parameters
+        ----------
+        on_error: {"generate", "raise", True, False}
+            If the context does not have a stimulus_id, this will be used to
+            generate one. If the value is "generate" or False, a new stimulus_id
+            will be generated. If the value is "raise" or True, the
+            original LookupError will be re-reraised.
+
+        Returns
+        -------
+        stimulus_id : str
+            The stimulus_id from the current context.
+        """
         try:
             return cls.STIMULUS_ID_CTXVAR.get()
         except LookupError:
-            if on_error == "generate":
+            if on_error is False or on_error == "generate":
                 stimulus_id = cls.from_callstack(depth=2)
                 cls.STIMULUS_ID_CTXVAR.set(stimulus_id)
                 return stimulus_id
-            elif on_error == "raise":
+            elif on_error is True or on_error == "raise":
                 raise
             else:
-                raise ValueError(f"'{on_error}' not in {'raise', 'generate'}")
+                raise ValueError(
+                    f"'{on_error}' not in {'raise', 'generate', True, False}"
+                )
 
     @classmethod
     def set(cls, value: str):

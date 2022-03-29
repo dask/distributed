@@ -1674,7 +1674,9 @@ class Worker(ServerNode):
                 else:
                     recommendations.update(recs)
 
-            self.log.append((key, "receive-from-scatter", STIMULUS_ID.get(), time()))
+            self.log.append(
+                (key, "receive-from-scatter", STIMULUS_ID.get(self.validate), time())
+            )
 
         if report:
             instructions.append(
@@ -1696,7 +1698,7 @@ class Worker(ServerNode):
         still decide to hold on to the data and task since it is required by an
         upstream dependency.
         """
-        self.log.append(("free-keys", keys, STIMULUS_ID.get(), time()))
+        self.log.append(("free-keys", keys, STIMULUS_ID.get(self.validate), time()))
         recommendations: Recs = {}
         for key in keys:
             ts = self.tasks.get(key)
@@ -1724,7 +1726,9 @@ class Worker(ServerNode):
 
         For stronger guarantees, see handler free_keys
         """
-        self.log.append(("remove-replicas", keys, STIMULUS_ID.get(), time()))
+        self.log.append(
+            ("remove-replicas", keys, STIMULUS_ID.get(self.validate), time())
+        )
         recommendations: Recs = {}
 
         rejected = []
@@ -1734,7 +1738,12 @@ class Worker(ServerNode):
                 continue
             if not ts.is_protected():
                 self.log.append(
-                    (ts.key, "remove-replica-confirmed", STIMULUS_ID.get(), time())
+                    (
+                        ts.key,
+                        "remove-replica-confirmed",
+                        STIMULUS_ID.get(self.validate),
+                        time(),
+                    )
                 )
                 recommendations[ts] = "released"
             else:
@@ -1742,7 +1751,12 @@ class Worker(ServerNode):
 
         if rejected:
             self.log.append(
-                ("remove-replica-rejected", rejected, STIMULUS_ID.get(), time())
+                (
+                    "remove-replica-rejected",
+                    rejected,
+                    STIMULUS_ID.get(self.validate),
+                    time(),
+                )
             )
             smsg = AddKeysMsg(keys=rejected, stimulus_id=STIMULUS_ID.get())
             self._handle_instructions([smsg])
@@ -1777,7 +1791,9 @@ class Worker(ServerNode):
         """
         ts = self.tasks.get(key)
         if ts and ts.state in READY | {"waiting"}:
-            self.log.append((key, "cancel-compute", STIMULUS_ID.get(), time()))
+            self.log.append(
+                (key, "cancel-compute", STIMULUS_ID.get(self.validate), time())
+            )
             # All possible dependents of TS should not be in state Processing on
             # scheduler side and therefore should not be assigned to a worker,
             # yet.
@@ -1816,7 +1832,13 @@ class Worker(ServerNode):
             ts.priority = priority
 
         self.log.append(
-            (key, "ensure-task-exists", ts.state, STIMULUS_ID.get(), time())
+            (
+                key,
+                "ensure-task-exists",
+                ts.state,
+                STIMULUS_ID.get(self.validate),
+                time(),
+            )
         )
         return ts
 
@@ -1836,7 +1858,7 @@ class Worker(ServerNode):
         actor: bool = False,
         annotations: dict | None = None,
     ) -> None:
-        self.log.append((key, "compute-task", STIMULUS_ID.get(), time()))
+        self.log.append((key, "compute-task", STIMULUS_ID.get(self.validate), time()))
         try:
             ts = self.tasks[key]
             logger.debug(
@@ -2456,7 +2478,7 @@ class Worker(ServerNode):
                 ts.state,
                 # new recommendations
                 {ts.key: new for ts, new in recs.items()},
-                STIMULUS_ID.get(),
+                STIMULUS_ID.get(self.validate),
                 time(),
             )
         )
@@ -2576,7 +2598,13 @@ class Worker(ServerNode):
             to_gather, total_nbytes = self.select_keys_for_gather(worker, ts.key)
 
             self.log.append(
-                ("gather-dependencies", worker, to_gather, STIMULUS_ID.get(), time())
+                (
+                    "gather-dependencies",
+                    worker,
+                    to_gather,
+                    STIMULUS_ID.get(self.validate),
+                    time(),
+                )
             )
 
             self.comm_nbytes += total_nbytes
@@ -2674,7 +2702,9 @@ class Worker(ServerNode):
                 self.waiting_for_data_count -= 1
                 recommendations[dep] = "ready"
 
-        self.log.append((ts.key, "put-in-memory", STIMULUS_ID.get(), time()))
+        self.log.append(
+            (ts.key, "put-in-memory", STIMULUS_ID.get(self.validate), time())
+        )
         return recommendations
 
     def select_keys_for_gather(self, worker, dep):
@@ -2840,7 +2870,7 @@ class Worker(ServerNode):
                             "nothing-to-gather",
                             worker,
                             to_gather,
-                            STIMULUS_ID.get(),
+                            STIMULUS_ID.get(self.validate),
                             time(),
                         )
                     )
@@ -2852,7 +2882,13 @@ class Worker(ServerNode):
                 del to_gather
 
                 self.log.append(
-                    ("request-dep", worker, to_gather_keys, STIMULUS_ID.get(), time())
+                    (
+                        "request-dep",
+                        worker,
+                        to_gather_keys,
+                        STIMULUS_ID.get(self.validate),
+                        time(),
+                    )
                 )
                 logger.debug(
                     "Request %d keys for task %s from %s",
@@ -2881,7 +2917,7 @@ class Worker(ServerNode):
                         "receive-dep",
                         worker,
                         set(response["data"]),
-                        STIMULUS_ID.get(),
+                        STIMULUS_ID.get(self.validate),
                         time(),
                     )
                 )
@@ -2891,7 +2927,13 @@ class Worker(ServerNode):
                 has_what = self.has_what.pop(worker)
                 self.pending_data_per_worker.pop(worker)
                 self.log.append(
-                    ("receive-dep-failed", worker, has_what, STIMULUS_ID.get(), time())
+                    (
+                        "receive-dep-failed",
+                        worker,
+                        has_what,
+                        STIMULUS_ID.get(self.validate),
+                        time(),
+                    )
                 )
                 for d in has_what:
                     ts = self.tasks[d]
@@ -2919,7 +2961,7 @@ class Worker(ServerNode):
                             "busy-gather",
                             worker,
                             to_gather_keys,
-                            STIMULUS_ID.get(),
+                            STIMULUS_ID.get(self.validate),
                             time(),
                         )
                     )
@@ -2939,7 +2981,9 @@ class Worker(ServerNode):
                     elif ts not in recommendations:
                         ts.who_has.discard(worker)
                         self.has_what[worker].discard(ts.key)
-                        self.log.append((d, "missing-dep", STIMULUS_ID.get(), time()))
+                        self.log.append(
+                            (d, "missing-dep", STIMULUS_ID.get(self.validate), time())
+                        )
                         self.batched_stream.send(
                             {"op": "missing-data", "errant_worker": worker, "key": d}
                         )
@@ -3081,10 +3125,18 @@ class Worker(ServerNode):
             )
             if cause:
                 self.log.append(
-                    (key, "release-key", {"cause": cause}, STIMULUS_ID.get(), time())
+                    (
+                        key,
+                        "release-key",
+                        {"cause": cause},
+                        STIMULUS_ID.get(self.validate),
+                        time(),
+                    )
                 )
             else:
-                self.log.append((key, "release-key", STIMULUS_ID.get(), time()))
+                self.log.append(
+                    (key, "release-key", STIMULUS_ID.get(self.validate), time())
+                )
             if key in self.data:
                 try:
                     del self.data[key]
@@ -3264,7 +3316,9 @@ class Worker(ServerNode):
             return function, args, kwargs
         except Exception as e:
             logger.error("Could not deserialize task", exc_info=True)
-            self.log.append((ts.key, "deserialize-error", STIMULUS_ID.get(), time()))
+            self.log.append(
+                (ts.key, "deserialize-error", STIMULUS_ID.get(self.validate), time())
+            )
             emsg = error_message(e)
             emsg.pop("status")
             self.transition(ts, "error", **emsg)

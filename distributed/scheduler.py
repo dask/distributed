@@ -2372,9 +2372,7 @@ class SchedulerState:
 
             finish2 = ts._state
 
-            stimulus_id = STIMULUS_ID.get(
-                on_error="raise" if parent._validate else "generate"
-            )
+            stimulus_id = STIMULUS_ID.get(parent._validate)
 
             # FIXME downcast antipattern
             scheduler = pep484_cast(Scheduler, self)
@@ -2384,7 +2382,7 @@ class SchedulerState:
 
             if parent._validate:
                 logger.debug(
-                    "Transitioned %r %s->%s (actual: %s).  Consequence: %s",
+                    "Transitioned %s: %r %s->%s (actual: %s).  Consequence: %s",
                     stimulus_id,
                     key,
                     start,
