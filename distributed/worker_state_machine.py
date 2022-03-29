@@ -14,7 +14,7 @@ from dask.utils import parse_bytes
 from distributed.utils import recursive_to_dict
 
 if TYPE_CHECKING:
-    # TODO move to typing (requires Python >=3.10)
+    # TODO move to typing and get out of TYPE_CHECKING (requires Python >=3.10)
     from typing_extensions import TypeAlias
 
     TaskStateState: TypeAlias = Literal[
@@ -34,7 +34,8 @@ if TYPE_CHECKING:
         "resumed",
         "waiting",
     ]
-
+else:
+    TaskStateState = str
 
 # TaskState.state subsets
 PROCESSING: set[TaskStateState] = {
@@ -389,3 +390,16 @@ class CancelComputeEvent(StateMachineEvent):
 class RescheduleEvent(StateMachineEvent):
     __slots__ = ("key",)
     key: str
+
+
+if TYPE_CHECKING:
+    # TODO remove quotes (requires Python >=3.9)
+    # TODO get out of TYPE_CHECKING (requires Python >=3.10)
+    # {TaskState -> finish: TaskStateState | (finish: TaskStateState, transition *args)}
+    Recs: TypeAlias = "dict[TaskState, TaskStateState | tuple]"
+    Instructions: TypeAlias = "list[Instruction]"
+    RecsInstrs: TypeAlias = "tuple[Recs, Instructions]"
+else:
+    Recs = dict
+    Instructions = list
+    RecsInstrs = tuple
