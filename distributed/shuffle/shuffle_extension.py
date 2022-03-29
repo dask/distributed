@@ -12,6 +12,12 @@ from typing import TYPE_CHECKING, NewType
 import toolz
 
 from distributed.protocol import to_serialize
+from distributed.shuffle.arrow import (
+    deserialize_schema,
+    dump_batch,
+    list_of_buffers_to_table,
+    load_arrow,
+)
 from distributed.shuffle.multi_comm import MultiComm
 from distributed.shuffle.multi_file import MultiFile
 from distributed.utils import sync
@@ -40,7 +46,6 @@ class Shuffle:
     ) -> None:
 
         import pandas as pd
-        import pyarrow as pa
 
         self.column = column
         self.id = id
@@ -62,7 +67,6 @@ class Shuffle:
             ),
             load=load_arrow,
             directory=os.path.join(self.worker.local_directory, str(self.id)),
-            join=pa.concat_tables,  # pd.concat
             sizeof=lambda L: sum(map(len, L)),
             loop=self.worker.io_loop,
         )
@@ -420,6 +424,12 @@ class ShuffleSchedulerExtension:
         }
 
 
+def worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
+    "Get the address of the worker which should hold this output partition number"
+    i = len(workers) * output_partition // npartitions
+    return workers[i]
+
+
 def split_by_worker(
     df: pd.DataFrame,
     column: str,
@@ -490,90 +500,3 @@ def split_by_partition(
         breakpoint()
     assert len(partitions) == len(shards)
     return dict(zip(partitions, shards))
-
-
-def dump_batch(batch, file, schema=None) -> None:
-    """
-    Dump a batch to file, if we're the first, also write the schema
-
-    See Also
-    --------
-    load_arrow
-    """
-    if file.tell() == 0:
-        file.write(schema.serialize())
-    file.write(batch)
-
-
-def load_arrow(file) -> pa.Table:
-    """Load batched data written to file back out into a table again
-
-    Example
-    -------
-    >>> t = pa.Table.from_pandas(df)  # doctest: +SKIP
-    >>> with open("myfile", mode="wb") as f:  # doctest: +SKIP
-    ...     for batch in t.to_batches():  # doctest: +SKIP
-    ...         dump_batch(batch, f, schema=t.schema)  # doctest: +SKIP
-
-    >>> with open("myfile", mode="rb") as f:  # doctest: +SKIP
-    ...     t = load_arrow(f)  # doctest: +SKIP
-
-    See Also
-    --------
-    dump_batch
-    """
-    import pyarrow as pa
-
-    try:
-        sr = pa.RecordBatchStreamReader(file)
-        return sr.read_all()
-    except Exception:
-        raise EOFError
-
-
-def worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
-    "Get the address of the worker which should hold this output partition number"
-    i = len(workers) * output_partition // npartitions
-    return workers[i]
-
-
-def list_of_buffers_to_table(data: list[pa.Buffer], schema: pa.Schema) -> pa.Table:
-    """Convert a list of arrow buffers and a schema to an Arrow Table"""
-    import io
-
-    import pyarrow as pa
-
-    bio = io.BytesIO()
-    bio.write(schema.serialize())
-    for batch in data:
-        bio.write(batch)
-    bio.seek(0)
-    sr = pa.RecordBatchStreamReader(bio)
-    data = sr.read_all()
-    bio.close()
-    return data
-
-
-def deserialize_schema(data: bytes) -> pa.Schema:
-    """Deserialize an arrow schema
-
-    Examples
-    --------
-    >>> b = schema.serialize()  # doctest: +SKIP
-    >>> deserialize_schema(b)  # doctest: +SKIP
-
-    See also
-    --------
-    pa.Schema.serialize
-    """
-    import io
-
-    import pyarrow as pa
-
-    bio = io.BytesIO()
-    bio.write(data)
-    bio.seek(0)
-    sr = pa.RecordBatchStreamReader(bio)
-    table = sr.read_all()
-    bio.close()
-    return table.schema

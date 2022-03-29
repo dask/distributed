@@ -51,8 +51,6 @@ class MultiFile:
         Writes an object to a file, like pickle.dump
     load: callable
         Reads an object from that file, like pickle.load
-    join: callable
-        Joins many objects together
     send: callable
         How to send a list of shards to a worker
     sizeof: callable
@@ -69,17 +67,14 @@ class MultiFile:
         directory,
         dump=pickle.dump,
         load=pickle.load,
-        join=None,
         sizeof=sizeof,
         loop=None,
     ):
-        assert join
         self.directory = pathlib.Path(directory)
         if not os.path.exists(self.directory):
             os.mkdir(self.directory)
         self.dump = dump
         self.load = load
-        self.join = join
         self.sizeof = sizeof
 
         self.shards = defaultdict(list)
@@ -98,7 +93,7 @@ class MultiFile:
         self.diagnostics = defaultdict(float)
 
         self._communicate_future = asyncio.ensure_future(self.communicate())
-        self._loop = loop
+        self._loop = loop or self
 
     @property
     def queue(self):
@@ -249,7 +244,8 @@ class MultiFile:
         # TODO: We could consider deleting the file at this point
         if parts:
             self.bytes_read += size
-            return self.join(parts)
+            assert len(parts) == 1
+            return parts[0]
         else:
             raise KeyError(id)
 

@@ -57,7 +57,14 @@ from distributed.utils_test import (
     slowinc,
     slowsum,
 )
-from distributed.worker import Worker, error_message, logger
+from distributed.worker import (
+    Worker,
+    benchmark_disk,
+    benchmark_memory,
+    benchmark_network,
+    error_message,
+    logger,
+)
 
 pytestmark = pytest.mark.ci1
 
@@ -1891,6 +1898,15 @@ async def test_multiple_executors(c, s):
 
 
 @gen_cluster(client=True)
+async def test_bad_executor_annotation(c, s, a, b):
+    with dask.annotate(executor="bad"):
+        future = c.submit(inc, 1)
+    with pytest.raises(ValueError, match="Invalid executor 'bad'; expected one of: "):
+        await future
+    assert future.status == "error"
+
+
+@gen_cluster(client=True)
 async def test_process_executor(c, s, a, b):
     with ProcessPoolExecutor() as e:
         a.executors["processes"] = e
@@ -3343,6 +3359,18 @@ async def test_extension_methods(s):
         assert flag
 
     assert shutdown
+
+
+@gen_cluster()
+async def test_benchmark_hardware(s, a, b):
+    sizes = ["1 kiB", "10 kiB"]
+    disk = benchmark_disk(sizes=sizes, duration="1 ms")
+    memory = benchmark_memory(sizes=sizes, duration="1 ms")
+    network = await benchmark_network(
+        address=a.address, rpc=b.rpc, sizes=sizes, duration="1 ms"
+    )
+
+    assert set(disk) == set(memory) == set(network) == set(sizes)
 
 
 @gen_cluster(

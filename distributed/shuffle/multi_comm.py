@@ -65,7 +65,7 @@ class MultiComm:
         self._futures = set()
         self._done = False
         self.diagnostics = defaultdict(float)
-        self._loop = loop
+        self._loop = loop or self
 
         self._communicate_future = asyncio.ensure_future(self.communicate())
 

@@ -40,6 +40,7 @@ from tlz import (
     merge,
     merge_sorted,
     merge_with,
+    partition,
     pluck,
     second,
     valmap,
@@ -56,13 +57,15 @@ from distributed import versions as version_module
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
 from distributed.comm import (
+    Comm,
+    CommClosedError,
     get_address_host,
     normalize_address,
     resolve_address,
     unparse_host_port,
 )
 from distributed.comm.addressing import addresses_from_user_args
-from distributed.core import CommClosedError, Status, clean_exception, rpc, send_recv
+from distributed.core import Status, clean_exception, rpc, send_recv
 from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
@@ -3980,6 +3983,7 @@ class Scheduler(SchedulerState, ServerNode):
             "stop_task_metadata": self.stop_task_metadata,
             "get_cluster_state": self.get_cluster_state,
             "dump_cluster_state_to_url": self.dump_cluster_state_to_url,
+            "benchmark_hardware": self.benchmark_hardware,
         }
 
         connection_limit = get_fileno_limit() / 2
@@ -5457,7 +5461,7 @@ class Scheduler(SchedulerState, ServerNode):
                         "Closed comm %r while trying to write %s", c, msg, exc_info=True
                     )
 
-    async def add_client(self, comm, client=None, versions=None):
+    async def add_client(self, comm: Comm, client: str, versions: dict) -> None:
         """Add client to network
 
         We listen to all future messages from this Comm.
@@ -5506,7 +5510,7 @@ class Scheduler(SchedulerState, ServerNode):
             except TypeError:  # comm becomes None during GC
                 pass
 
-    def remove_client(self, client=None):
+    def remove_client(self, client: str) -> None:
         """Remove client from network"""
         parent: SchedulerState = cast(SchedulerState, self)
         if self.status == Status.running:
@@ -7336,6 +7340,61 @@ class Scheduler(SchedulerState, ServerNode):
         )
         response = {w: r for w, r in zip(workers, results) if r}
         return response
+
+    async def benchmark_hardware(self) -> "dict[str, dict[str, float]]":
+        """
+        Run a benchmark on the workers for memory, disk, and network bandwidths
+
+        Returns
+        -------
+        result: dict
+            A dictionary mapping the names "disk", "memory", and "network" to
+            dictionaries mapping sizes to bandwidths.  These bandwidths are
+            averaged over many workers running computations across the cluster.
+        """
+        out: "dict[str, defaultdict[str, list[float]]]" = {
+            name: defaultdict(list) for name in ["disk", "memory", "network"]
+        }
+
+        # disk
+        result = await self.broadcast(msg={"op": "benchmark_disk"})
+        for d in result.values():
+            for size, duration in d.items():
+                out["disk"][size].append(duration)
+
+        # memory
+        result = await self.broadcast(msg={"op": "benchmark_memory"})
+        for d in result.values():
+            for size, duration in d.items():
+                out["memory"][size].append(duration)
+
+        # network
+        workers = list(self.workers)
+        # On an adaptive cluster, if multiple workers are started on the same physical host,
+        # they are more likely to connect to the Scheduler in sequence, ending up next to
+        # each other in this list.
+        # The transfer speed within such clusters of workers will be effectively that of
+        # localhost. This could happen across different VMs and/or docker images, so
+        # implementing logic based on IP addresses would not necessarily help.
+        # Randomize the connections to even out the mean measures.
+        random.shuffle(workers)
+        futures = [
+            self.rpc(a).benchmark_network(address=b) for a, b in partition(2, workers)
+        ]
+        responses = await asyncio.gather(*futures)
+
+        for d in responses:
+            for size, duration in d.items():
+                out["network"][size].append(duration)
+
+        result = {}
+        for mode in out:
+            result[mode] = {
+                size: sum(durations) / len(durations)
+                for size, durations in out[mode].items()
+            }
+
+        return result
 
     def get_nbytes(self, keys=None, summary=True):
         parent: SchedulerState = cast(SchedulerState, self)
