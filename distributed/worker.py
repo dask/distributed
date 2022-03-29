@@ -141,7 +141,10 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 no_value = "--no-value-sentinel--"
 
-DEFAULT_EXTENSIONS: list[type] = [PubSubWorkerExtension, ShuffleWorkerExtension]
+DEFAULT_EXTENSIONS: dict[str, type] = {
+    "pubsub": PubSubWorkerExtension,
+    "shuffle": ShuffleWorkerExtension,
+}
 
 DEFAULT_METRICS: dict[str, Callable[[Worker], Any]] = {}
 
@@ -437,7 +440,7 @@ class Worker(ServerNode):
         security: Security | dict[str, Any] | None = None,
         contact_address: str | None = None,
         heartbeat_interval: Any = "1s",
-        extensions: list[type] | None = None,
+        extensions: dict[str, type] | None = None,
         metrics: Mapping[str, Callable[[Worker], Any]] = DEFAULT_METRICS,
         startup_information: Mapping[
             str, Callable[[Worker], Any]
@@ -790,8 +793,9 @@ class Worker(ServerNode):
 
         if extensions is None:
             extensions = DEFAULT_EXTENSIONS
-        for ext in extensions:
-            ext(self)
+        self.extensions = {
+            name: extension(self) for name, extension in extensions.items()
+        }
 
         self.memory_manager = WorkerMemoryManager(
             self,
@@ -1132,6 +1136,11 @@ class Worker(ServerNode):
                     for key in self.active_keys
                     if key in self.tasks
                 },
+                extensions={
+                    name: extension.heartbeat()
+                    for name, extension in self.extensions.items()
+                    if hasattr(extension, "heartbeat")
+                },
             )
             end = time()
             middle = (start + end) / 2
@@ -1413,6 +1422,10 @@ class Worker(ServerNode):
 
             for preload in self.preloads:
                 await preload.teardown()
+
+            for extension in self.extensions.values():
+                if hasattr(extension, "close"):
+                    await extension.close()
 
             if nanny and self.nanny:
                 with self.rpc(self.nanny) as r:

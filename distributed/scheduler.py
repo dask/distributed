@@ -174,19 +174,20 @@ DEFAULT_DATA_SIZE = declare(
     Py_ssize_t, parse_bytes(dask.config.get("distributed.scheduler.default-data-size"))
 )
 
-DEFAULT_EXTENSIONS = [
-    LockExtension,
-    MultiLockExtension,
-    PublishExtension,
-    ReplayTaskScheduler,
-    QueueExtension,
-    VariableExtension,
-    PubSubSchedulerExtension,
-    SemaphoreExtension,
-    EventExtension,
-    ActiveMemoryManagerExtension,
-    MemorySamplerExtension,
-]
+DEFAULT_EXTENSIONS = {
+    "locks": LockExtension,
+    "multi_locks": MultiLockExtension,
+    "publish": PublishExtension,
+    "replay-tasks": ReplayTaskScheduler,
+    "queues": QueueExtension,
+    "variables": VariableExtension,
+    "pubsub": PubSubSchedulerExtension,
+    "semaphores": SemaphoreExtension,
+    "events": EventExtension,
+    "amm": ActiveMemoryManagerExtension,
+    "memory_sampler": MemorySamplerExtension,
+    "stealing": WorkStealing,
+}
 
 ALL_TASK_STATES = declare(
     set, {"released", "waiting", "no-worker", "processing", "erred", "memory"}
@@ -4015,11 +4016,13 @@ class Scheduler(SchedulerState, ServerNode):
             self.periodic_callbacks["idle-timeout"] = pc
 
         if extensions is None:
-            extensions = list(DEFAULT_EXTENSIONS)
-            if dask.config.get("distributed.scheduler.work-stealing"):
-                extensions.append(WorkStealing)
-        for ext in extensions:
-            ext(self)
+            extensions = DEFAULT_EXTENSIONS.copy()
+            if not dask.config.get("distributed.scheduler.work-stealing"):
+                if "stealing" in extensions:
+                    del extensions["stealing"]
+
+        for name, extension in extensions.items():
+            self.extensions[name] = extension(self)
 
         setproctitle("dask-scheduler [not started]")
         Scheduler._instances.add(self)
@@ -4335,6 +4338,7 @@ class Scheduler(SchedulerState, ServerNode):
         host_info: dict = None,
         metrics: dict,
         executing: dict = None,
+        extensions: dict = None,
     ):
         parent: SchedulerState = cast(SchedulerState, self)
         address = self.coerce_address(address, resolve_address)
@@ -4421,6 +4425,10 @@ class Scheduler(SchedulerState, ServerNode):
 
         if resources:
             self.add_resources(worker=address, resources=resources)
+
+        if extensions:
+            for name, data in extensions.items():
+                self.extensions[name].heartbeat(ws, data)
 
         return {
             "status": "OK",

@@ -71,7 +71,6 @@ class WorkStealing(SchedulerPlugin):
         )
         # `callback_time` is in milliseconds
         self.scheduler.add_plugin(self)
-        self.scheduler.extensions["stealing"] = self
         self.scheduler.events["stealing"] = deque(maxlen=100000)
         self.count = 0
         # { task state: <stealing info dict> }
