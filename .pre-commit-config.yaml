@@ -34,11 +34,7 @@ repos:
     rev: v0.942
     hooks:
       - id: mypy
-        args:
-          - --ignore-missing-imports
-          # Silence errors about Python 3.9-style delayed type annotations on Python 3.8
-          - --python-version
-          - "3.9"
+        args: []
         additional_dependencies:
           # Type stubs
           - types-docutils
@@ -46,6 +42,7 @@ repos:
           - types-paramiko
           - types-PyYAML
           - types-psutil
+          - types-setuptools
           # Typed libraries
           - numpy
           - dask
