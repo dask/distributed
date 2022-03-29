@@ -92,9 +92,9 @@ def _initialize_mp_context():
 mp_context = _initialize_mp_context()
 
 
-class Handler:
+class RPCHandler:
     def __init__(self, func):
-        if isinstance(func, Handler):
+        if isinstance(func, RPCHandler):
             func = func.func
         elif callable(func):
             pass
@@ -131,13 +131,13 @@ class Handler:
         return hash(self.func)
 
     def __reduce__(self):
-        return (Handler, (self.func,))
+        return (RPCHandler, (self.func,))
 
     def __name__(self):
         return self.func.__name__
 
     def __eq__(self, other: object):
-        return isinstance(other, Handler) and self.func == other.func
+        return isinstance(other, RPCHandler) and self.func == other.func
 
     def __str__(self):
         return str(self.func)
@@ -146,7 +146,7 @@ class Handler:
         return repr(self.func)
 
 
-class AsyncHandler(Handler):
+class AsyncRPCHandler(RPCHandler):
     async def __call__(self, *args, **kwargs):
         return await super().__call__(*args, **kwargs)
 
@@ -154,13 +154,13 @@ class AsyncHandler(Handler):
         return super().__hash__()
 
     def __reduce__(self):
-        return (AsyncHandler, (self.func,))
+        return (AsyncRPCHandler, (self.func,))
 
     def __name__(self):
         return super().__name__()
 
     def __eq__(self, other: object):
-        return isinstance(other, AsyncHandler) and self.func == other.func
+        return isinstance(other, AsyncRPCHandler) and self.func == other.func
 
     def __str__(self):
         return str(self.func)
@@ -169,8 +169,8 @@ class AsyncHandler(Handler):
         return repr(self.func)
 
 
-def handler_factory(func):
-    cls = AsyncHandler if is_coroutine_function(func) else Handler
+def rpc_handler_factory(func):
+    cls = AsyncRPCHandler if is_coroutine_function(func) else RPCHandler
     return cls(func)
 
 
@@ -1148,7 +1148,7 @@ def reset_logger_locks():
 
 @functools.lru_cache(1000)
 def has_keyword(func, keyword):
-    if isinstance(func, Handler):
+    if isinstance(func, RPCHandler):
         return keyword in func.sig.parameters
 
     return keyword in inspect.signature(func).parameters

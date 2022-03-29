@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import inspect
 import logging
 import sys
@@ -37,13 +36,13 @@ from distributed.comm import (
 from distributed.metrics import time
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
-    Handler,
+    RPCHandler,
     TimeoutError,
     get_traceback,
-    handler_factory,
     has_keyword,
     is_coroutine_function,
     recursive_to_dict,
+    rpc_handler_factory,
     truncate_exception,
 )
 
@@ -90,7 +89,7 @@ def raise_later(exc):
     def _raise(*args, **kwargs):
         raise exc
 
-    return Handler(_raise)
+    return rpc_handler_factory(_raise)
 
 
 tick_maximum_delay = parse_timedelta(
@@ -168,12 +167,11 @@ class Server:
         self.stream_handlers = {}
         self.stream_handlers.update(stream_handlers or {})
 
-        self.handlers = {k: handler_factory(f) for k, f in self.handlers.items()}
+        self.handlers = {k: rpc_handler_factory(f) for k, f in self.handlers.items()}
         self.stream_handlers = {
-            k: handler_factory(f) for k, f in self.stream_handlers.items()
+            k: rpc_handler_factory(f) for k, f in self.stream_handlers.items()
         }
 
-        self.context = contextvars.copy_context()
         self.id = type(self).__name__ + "-" + str(uuid.uuid4())
         self._address = None
         self._listen_address = None
@@ -543,8 +541,8 @@ class Server:
                     try:
                         # TODO(sjperkins)
                         # Somehow distributed.lock.__enter__ gets here without a handler
-                        if not isinstance(handler, Handler):
-                            handler = handler_factory(handler)
+                        if not isinstance(handler, RPCHandler):
+                            handler = rpc_handler_factory(handler)
 
                         if handler.expects_comm():
                             result = handler(comm, **msg)
