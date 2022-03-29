@@ -612,7 +612,7 @@ async def test_connection_pool_close_while_connecting(monkeypatch):
 
     class SlowConnector(TCPConnector):
         async def connect(self, address, deserialize, **connection_args):
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(10000)
             return await super().connect(
                 address, deserialize=deserialize, **connection_args
             )
@@ -638,15 +638,11 @@ async def test_connection_pool_close_while_connecting(monkeypatch):
 
     close_fut = asyncio.create_task(pool.close())
 
-    with pytest.raises(asyncio.CancelledError):
-        await asyncio.gather(*tasks)
-
+    done, _ = await asyncio.wait(tasks)
     await close_fut
+    assert all(t.cancelled() for t in done)
     assert not pool.open
     assert not pool._n_connecting
-
-    for t in tasks:
-        t.cancel()
 
 
 @pytest.mark.asyncio
