@@ -37,6 +37,7 @@ from distributed.scheduler import MemoryState, Scheduler
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
     BrokenComm,
+    assert_story,
     captured_logger,
     cluster,
     dec,
@@ -820,6 +821,17 @@ async def test_story(c, s, a, b):
     assert len(s.story(x.key, y.key)) > len(story)
 
     assert s.story(x.key) == s.story(s.tasks[x.key])
+
+    assert_story(
+        story,
+        [
+            (x.key, "released", "waiting", {x.key: "processing"}),
+            (x.key, "waiting", "processing", {}),
+            (x.key, "processing", "memory", {y.key: "processing"}),
+            (y.key, "processing", "memory", {x.key: "released"}),
+            (x.key, "memory", "released", {}),
+        ],
+    )
 
 
 @pytest.mark.parametrize("direct", [False, True])
