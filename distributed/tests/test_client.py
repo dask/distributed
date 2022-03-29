@@ -3787,7 +3787,6 @@ async def test_reconnect_timeout(c, s):
     ) as logger:
         await s.close()
         while c.status != "closed":
-            await c._update_scheduler_info()
             await asyncio.sleep(0.05)
     text = logger.getvalue()
     assert "Failed to reconnect" in text
@@ -5698,7 +5697,6 @@ async def test_quiet_scheduler_loss(c, s):
     c._periodic_callbacks["scheduler-info"].interval = 10
     with captured_logger(logging.getLogger("distributed.client")) as logger:
         await s.close()
-        await c._update_scheduler_info()
     text = logger.getvalue()
     assert "BrokenPipeError" not in text
 
