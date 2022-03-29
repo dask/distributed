@@ -50,6 +50,7 @@ from distributed.comm import Comm
 from distributed.comm.tcp import TCP, BaseTCPConnector
 from distributed.compatibility import WINDOWS
 from distributed.config import initialize_logging
+from distributed.context_vars import STIMULUS_ID
 from distributed.core import CommClosedError, ConnectionPool, Status, connect, rpc
 from distributed.deploy import SpecCluster
 from distributed.diagnostics.plugin import WorkerPlugin
@@ -89,6 +90,28 @@ logging_levels = {
 
 _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
+
+
+@pytest.fixture(autouse=True)
+def generate_stimulus_id(request):
+    token = None
+
+    try:
+        if request.scope == "function":
+            stimulus_id = STIMULUS_ID.from_function(request.function)
+        elif request.scope == "class":
+            raise ValueError(f"Unhandled pytest scope {request.scope}")
+        elif request.scope == "module":
+            raise ValueError(f"Unhandled pytest scope {request.scope}")
+        elif request.scope == "session":
+            raise ValueError(f"Unhandled pytest scope {request.scope}")
+        else:
+            raise ValueError(f"Unhandled pytest scope {request.scope}")
+
+        token = STIMULUS_ID.set(stimulus_id)
+    finally:
+        if token:
+            STIMULUS_ID.reset(token)
 
 
 @pytest.fixture(scope="session")
@@ -959,6 +982,10 @@ def gen_cluster(
 
         @functools.wraps(func)
         def test_func(*outer_args, **kwargs):
+            # TODO(sjperkins)
+            # Should be set by generate_stimulus_id autouse fixture
+            STIMULUS_ID.set(STIMULUS_ID.from_function(func))
+
             result = None
             workers = []
             with clean(timeout=active_rpc_timeout, **clean_kwargs) as loop:

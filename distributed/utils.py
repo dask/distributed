@@ -49,6 +49,7 @@ from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
 from distributed.compatibility import WINDOWS
+from distributed.context_vars import STIMULUS_ID
 from distributed.metrics import time
 
 try:
@@ -102,7 +103,6 @@ class RPCHandler:
             raise TypeError(f"{func} must be callable")
 
         self.func = func
-        self.stimulus_name = func.__name__.replace("_", "-")
         self.sig = inspect.signature(func)
         self.wants_stimulus_id = "stimulus_id" in self.sig.parameters
 
@@ -122,10 +122,21 @@ class RPCHandler:
         return False
 
     def __call__(self, *args, **kwargs):
-        if self.wants_stimulus_id and "stimulus_id" not in kwargs:
-            kwargs["stimulus_id"] = f"{self.stimulus_name}-{time()}"
+        try:
+            stimulus_id = kwargs["stimulus_id"]
+        except KeyError:
+            stimulus_id = STIMULUS_ID.from_function(self.func)
 
-        return self.func(*args, **kwargs)
+            if self.wants_stimulus_id:
+                kwargs["stimulus_id"] = stimulus_id
+        else:
+            if not self.wants_stimulus_id:
+                kwargs.pop("stimulus_id")
+
+        STIMULUS_ID.set(stimulus_id)
+
+        b = self.sig.bind(*args, **kwargs)
+        return self.func(*b.args, **b.kwargs)
 
     def __hash__(self):
         return hash(self.func)

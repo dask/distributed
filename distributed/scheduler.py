@@ -65,6 +65,7 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.addressing import addresses_from_user_args
+from distributed.context_vars import STIMULUS_ID
 from distributed.core import Status, clean_exception, rpc, send_recv
 from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
@@ -2370,14 +2371,21 @@ class SchedulerState:
                 raise RuntimeError("Impossible transition from %r to %r" % start_finish)
 
             finish2 = ts._state
+
+            stimulus_id = STIMULUS_ID.get(
+                on_error="raise" if parent._validate else "generate"
+            )
+
             # FIXME downcast antipattern
             scheduler = pep484_cast(Scheduler, self)
             scheduler.transition_log.append(
-                (key, start, finish2, recommendations, time())
+                (key, start, finish2, recommendations, stimulus_id, time())
             )
+
             if parent._validate:
                 logger.debug(
                     "Transitioned %r %s->%s (actual: %s).  Consequence: %s",
+                    stimulus_id,
                     key,
                     start,
                     finish2,
@@ -2856,7 +2864,7 @@ class SchedulerState:
                     {
                         "op": "cancel-compute",
                         "key": key,
-                        "stimulus_id": f"processing-memory-{time()}",
+                        "stimulus_id": STIMULUS_ID.get(),
                     }
                 ]
 
@@ -2944,7 +2952,7 @@ class SchedulerState:
             worker_msg = {
                 "op": "free-keys",
                 "keys": [key],
-                "stimulus_id": f"memory-released-{time()}",
+                "stimulus_id": STIMULUS_ID.get(),
             }
             for ws in ts._who_has:
                 worker_msgs[ws._address] = [worker_msg]
@@ -3047,7 +3055,7 @@ class SchedulerState:
             w_msg = {
                 "op": "free-keys",
                 "keys": [key],
-                "stimulus_id": f"erred-released-{time()}",
+                "stimulus_id": STIMULUS_ID.get(),
             }
             for ws_addr in ts._erred_on:
                 worker_msgs[ws_addr] = [w_msg]
@@ -3126,7 +3134,7 @@ class SchedulerState:
                     {
                         "op": "free-keys",
                         "keys": [key],
-                        "stimulus_id": f"processing-released-{time()}",
+                        "stimulus_id": STIMULUS_ID.get(),
                     }
                 ]
 
@@ -4567,7 +4575,7 @@ class Scheduler(SchedulerState, ServerNode):
                         {
                             "op": "remove-replicas",
                             "keys": already_released_keys,
-                            "stimulus_id": f"reconnect-already-released-{time()}",
+                            "stimulus_id": STIMULUS_ID.get(),
                         }
                     )
 
@@ -4992,7 +5000,7 @@ class Scheduler(SchedulerState, ServerNode):
                 {
                     "op": "free-keys",
                     "keys": [key],
-                    "stimulus_id": f"already-released-or-forgotten-{time()}",
+                    "stimulus_id": STIMULUS_ID.get(),
                 }
             ]
         elif ts._state == "memory":
@@ -6271,7 +6279,7 @@ class Scheduler(SchedulerState, ServerNode):
             await retry_operation(
                 self.rpc(addr=worker_address).free_keys,
                 keys=list(keys),
-                stimulus_id=f"delete-data-{time()}",
+                stimulus_id=STIMULUS_ID.get(),
             )
         except OSError as e:
             # This can happen e.g. if the worker is going through controlled shutdown;
@@ -7081,7 +7089,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Retired worker %s", ws._address)
         return ws._address, ws.identity()
 
-    def add_keys(self, worker=None, keys=(), stimulus_id=None):
+    def add_keys(self, worker=None, keys=()):
         """
         Learn that a worker has certain keys
 
@@ -7102,14 +7110,12 @@ class Scheduler(SchedulerState, ServerNode):
                 redundant_replicas.append(key)
 
         if redundant_replicas:
-            if not stimulus_id:
-                stimulus_id = f"redundant-replicas-{time()}"
             self.worker_send(
                 worker,
                 {
                     "op": "remove-replicas",
                     "keys": redundant_replicas,
-                    "stimulus_id": stimulus_id,
+                    "stimulus_id": STIMULUS_ID.get(),
                 },
             )
 
@@ -8150,7 +8156,7 @@ class Scheduler(SchedulerState, ServerNode):
             to_close = self.workers_to_close()
             return len(parent._workers_dv) - len(to_close)
 
-    def request_acquire_replicas(self, addr: str, keys: list, *, stimulus_id: str):
+    def request_acquire_replicas(self, addr: str, keys: list):
         """Asynchronously ask a worker to acquire a replica of the listed keys from
         other workers. This is a fire-and-forget operation which offers no feedback for
         success or failure, and is intended for housekeeping and not for computation.
@@ -8169,11 +8175,11 @@ class Scheduler(SchedulerState, ServerNode):
                 "op": "acquire-replicas",
                 "keys": keys,
                 "who_has": who_has,
-                "stimulus_id": stimulus_id,
+                "stimulus_id": STIMULUS_ID.get(),
             },
         )
 
-    def request_remove_replicas(self, addr: str, keys: list, *, stimulus_id: str):
+    def request_remove_replicas(self, addr: str, keys: list):
         """Asynchronously ask a worker to discard its replica of the listed keys.
         This must never be used to destroy the last replica of a key. This is a
         fire-and-forget operation, intended for housekeeping and not for computation.
@@ -8199,11 +8205,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.remove_replica(ts, ws)
 
         self.stream_comms[addr].send(
-            {
-                "op": "remove-replicas",
-                "keys": keys,
-                "stimulus_id": stimulus_id,
-            }
+            {"op": "remove-replicas", "keys": keys, "stimulus_id": STIMULUS_ID.get()}
         )
 
 
@@ -8339,7 +8341,7 @@ def _propagate_forgotten(
                 {
                     "op": "free-keys",
                     "keys": [key],
-                    "stimulus_id": f"propagate-forgotten-{time()}",
+                    "stimulus_id": STIMULUS_ID.get(),
                 }
             ]
     state.remove_all_replicas(ts)
@@ -8382,7 +8384,7 @@ def _task_to_msg(state: SchedulerState, ts: TaskState, duration: double = -1) ->
         "key": ts._key,
         "priority": ts._priority,
         "duration": duration,
-        "stimulus_id": f"compute-task-{time()}",
+        "stimulus_id": STIMULUS_ID.get(),
         "who_has": {},
     }
     if ts._resource_restrictions:

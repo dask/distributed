@@ -16,6 +16,7 @@ from tornado.ioloop import PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
+from distributed.context_vars import STIMULUS_ID
 from distributed.core import Status
 from distributed.metrics import time
 from distributed.utils import import_term, log_errors
@@ -370,17 +371,14 @@ class ActiveMemoryManagerExtension:
                     assert ws in ts.who_has
                 drop_by_worker[ws].append(ts.key)
 
-        stimulus_id = f"active_memory_manager-{time()}"
+        STIMULUS_ID.set(f"active_memory_manager-{time()}")
+
         for ws, keys in repl_by_worker.items():
             logger.debug("- %s to acquire %d replicas", ws, len(keys))
-            self.scheduler.request_acquire_replicas(
-                ws.address, keys, stimulus_id=stimulus_id
-            )
+            self.scheduler.request_acquire_replicas(ws.address, keys)
         for ws, keys in drop_by_worker.items():
             logger.debug("- %s to drop %d replicas", ws, len(keys))
-            self.scheduler.request_remove_replicas(
-                ws.address, keys, stimulus_id=stimulus_id
-            )
+            self.scheduler.request_remove_replicas(ws.address, keys)
 
 
 class ActiveMemoryManagerPolicy:

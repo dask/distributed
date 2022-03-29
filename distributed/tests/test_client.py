@@ -4567,7 +4567,7 @@ def test_auto_normalize_collection_sync(c):
 
 
 def assert_no_data_loss(scheduler):
-    for key, start, finish, recommendations, _ in scheduler.transition_log:
+    for key, start, finish, recommendations, _, _ in scheduler.transition_log:
         if start == "memory" and finish == "released":
             for k, v in recommendations.items():
                 assert not (k == key and v == "waiting")

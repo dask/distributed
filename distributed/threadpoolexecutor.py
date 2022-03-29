@@ -25,6 +25,7 @@ import logging
 import os
 import queue
 import threading
+from contextvars import copy_context
 
 from distributed import _concurrent_futures_thread as thread
 from distributed.metrics import time
@@ -88,6 +89,9 @@ class ThreadPoolExecutor(thread.ThreadPoolExecutor):
             t.daemon = True
             self._threads.add(t)
             t.start()
+
+    def submit(self, fn, /, *args, **kwargs):
+        return super().submit(copy_context().run, fn, *args, **kwargs)
 
     def shutdown(self, wait=True, timeout=None):
         with threads_lock:
