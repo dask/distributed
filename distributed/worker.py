@@ -7,6 +7,7 @@ import errno
 import heapq
 import logging
 import os
+import pathlib
 import random
 import sys
 import threading
@@ -41,6 +42,7 @@ from dask.utils import (
     parse_bytes,
     parse_timedelta,
     stringify,
+    tmpdir,
     typename,
 )
 
@@ -49,8 +51,10 @@ from distributed.batched import BatchedSend
 from distributed.comm import connect, get_address_host
 from distributed.comm.addressing import address_from_user_args, parse_address
 from distributed.comm.utils import OFFLOAD_THRESHOLD
+from distributed.compatibility import randbytes
 from distributed.core import (
     CommClosedError,
+    ConnectionPool,
     Status,
     coerce_to_address,
     error_message,
@@ -738,6 +742,9 @@ class Worker(ServerNode):
             "plugin-add": self.plugin_add,
             "plugin-remove": self.plugin_remove,
             "get_monitor_info": self.get_monitor_info,
+            "benchmark_disk": self.benchmark_disk,
+            "benchmark_memory": self.benchmark_memory,
+            "benchmark_network": self.benchmark_network,
         }
 
         stream_handlers = {
@@ -1197,6 +1204,7 @@ class Worker(ServerNode):
             with open(out_filename, "wb") as f:
                 f.write(data)
                 f.flush()
+                os.fsync(f.fileno())
             return data
 
         if len(data) < 10000:
@@ -3413,17 +3421,22 @@ class Worker(ServerNode):
 
             args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
 
-            if ts.annotations is not None and "executor" in ts.annotations:
-                executor = ts.annotations["executor"]
-            else:
+            try:
+                executor = ts.annotations["executor"]  # type: ignore
+            except (TypeError, KeyError):
                 executor = "default"
-            assert executor in self.executors
-            assert key == ts.key
+            try:
+                e = self.executors[executor]
+            except KeyError:
+                raise ValueError(
+                    f"Invalid executor {executor!r}; "
+                    f"expected one of: {sorted(self.executors)}"
+                )
+
             self.active_keys.add(ts.key)
 
             result: dict
             try:
-                e = self.executors[executor]
                 ts.start_time = time()
                 if iscoroutinefunction(function):
                     result = await apply_function_async(
@@ -3688,6 +3701,17 @@ class Worker(ServerNode):
                     logger.info(
                         "Plugin '%s' failed with exception", name, exc_info=True
                     )
+
+    async def benchmark_disk(self) -> dict[str, float]:
+        return await self.loop.run_in_executor(
+            self.executor, benchmark_disk, self.local_directory
+        )
+
+    async def benchmark_memory(self) -> dict[str, float]:
+        return await self.loop.run_in_executor(self.executor, benchmark_memory)
+
+    async def benchmark_network(self, address: str) -> dict[str, float]:
+        return await benchmark_network(rpc=self.rpc, address=address)
 
     ##############
     # Validation #
@@ -4568,3 +4592,101 @@ def warn(*args, **kwargs):
         worker.log_event("warn", {"args": args, "kwargs": kwargs})
 
     warnings.warn(*args, **kwargs)
+
+
+def benchmark_disk(
+    rootdir: str | None = None,
+    sizes: Iterable[str] = ("1 kiB", "100 kiB", "1 MiB", "10 MiB", "100 MiB"),
+    duration="1 s",
+) -> dict[str, float]:
+    """
+    Benchmark disk bandwidth
+
+    Returns
+    -------
+    out: dict
+        Maps sizes of outputs to measured bandwidths
+    """
+    duration = parse_timedelta(duration)
+
+    out = {}
+    for size_str in sizes:
+        with tmpdir(dir=rootdir) as dir:
+            dir = pathlib.Path(dir)
+            names = list(map(str, range(100)))
+            size = parse_bytes(size_str)
+
+            data = randbytes(size)
+
+            start = time()
+            total = 0
+            while time() < start + duration:
+                with open(dir / random.choice(names), mode="ab") as f:
+                    f.write(data)
+                    f.flush()
+                    os.fsync(f.fileno())
+                total += size
+
+            out[size_str] = total / (time() - start)
+    return out
+
+
+def benchmark_memory(
+    sizes: Iterable[str] = ("2 kiB", "10 kiB", "100 kiB", "1 MiB", "10 MiB"),
+    duration="200 ms",
+) -> dict[str, float]:
+    """
+    Benchmark memory bandwidth
+
+    Returns
+    -------
+    out: dict
+        Maps sizes of outputs to measured bandwidths
+    """
+    duration = parse_timedelta(duration)
+    out = {}
+    for size_str in sizes:
+        size = parse_bytes(size_str)
+        data = randbytes(size)
+
+        start = time()
+        total = 0
+        while time() < start + duration:
+            _ = data[:-1]
+            del _
+            total += size
+
+        out[size_str] = total / (time() - start)
+    return out
+
+
+async def benchmark_network(
+    address: str,
+    rpc: ConnectionPool,
+    sizes: Iterable[str] = ("1 kiB", "10 kiB", "100 kiB", "1 MiB", "10 MiB", "50 MiB"),
+    duration="1 s",
+) -> dict[str, float]:
+    """
+    Benchmark network communications to another worker
+
+    Returns
+    -------
+    out: dict
+        Maps sizes of outputs to measured bandwidths
+    """
+
+    duration = parse_timedelta(duration)
+    out = {}
+    with rpc(address) as r:
+        for size_str in sizes:
+            size = parse_bytes(size_str)
+            data = to_serialize(randbytes(size))
+
+            start = time()
+            total = 0
+            while time() < start + duration:
+                await r.echo(data=data)
+                total += size * 2
+
+            out[size_str] = total / (time() - start)
+    return out

@@ -31,6 +31,7 @@ from distributed.dashboard.components.scheduler import (
     WorkerTable,
     events_doc,
     graph_doc,
+    hardware_doc,
     individual_doc,
     individual_profile_doc,
     individual_profile_server_doc,
@@ -57,6 +58,7 @@ applications = {
     "/profile": profile_doc,
     "/profile-server": profile_server_doc,
     "/graph": graph_doc,
+    "/hardware": hardware_doc,
     "/groups": tg_graph_doc,
     "/gpu": gpu_doc,
     "/individual-task-stream": individual_doc(
@@ -106,7 +108,7 @@ applications = {
 }
 
 
-template_variables = {
+template_variables: dict = {
     "pages": [
         "status",
         "workers",
@@ -117,8 +119,22 @@ template_variables = {
         "groups",
         "info",
     ],
-    "plots": [x.replace("/", "") for x in applications if "individual" in x],
+    "plots": [
+        {
+            "url": x.strip("/"),
+            "name": " ".join(x.strip("/").split("-")[1:])
+            .title()
+            .replace("Cpu", "CPU")
+            .replace("Gpu", "GPU"),
+        }
+        for x in applications
+        if "individual" in x
+    ]
+    + [{"url": "hardware", "name": "Hardware"}],
 }
+template_variables["plots"] = sorted(
+    template_variables["plots"], key=lambda d: d["name"]
+)
 
 if NVML_ENABLED:
     template_variables["pages"].insert(4, "gpu")
