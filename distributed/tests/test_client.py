@@ -1637,6 +1637,8 @@ async def test_upload_file_zip(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_upload_file_egg(c, s, a, b):
+    pytest.importorskip("setuptools")
+
     def g():
         import package_1
         import package_2
@@ -1657,9 +1659,8 @@ async def test_upload_file_egg(c, s, a, b):
                 with open(os.path.join(dirname, "setup.py"), "w") as f:
                     f.write("from setuptools import setup, find_packages\n")
                     f.write(
-                        'setup(name="my_package", packages=find_packages(), version="{}")\n'.format(
-                            value
-                        )
+                        'setup(name="my_package", packages=find_packages(), '
+                        f'version="{value}")\n'
                     )
 
                 # test a package with an underscore in the name

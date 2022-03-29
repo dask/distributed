@@ -45,7 +45,6 @@ repos:
           - types-requests
           - types-paramiko
           - types-PyYAML
-          - types-setuptools
           - types-psutil
           # Typed libraries
           - numpy
