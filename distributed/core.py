@@ -1023,7 +1023,6 @@ class ConnectionPool:
         # while the _n_connecting also accounts for connection attempts which
         # are waiting due to the connection limit
         self._connecting = set()
-        self._pending = set()
         self.status = Status.init
 
     def _validate(self):
@@ -1070,7 +1069,7 @@ class ConnectionPool:
 
     @property
     def _n_connecting(self) -> int:
-        return len(self._pending) + len(self._connecting)
+        return len(self._connecting)
 
     async def connect(self, addr, timeout=None):
         """
@@ -1093,8 +1092,8 @@ class ConnectionPool:
             self.semaphore.acquire(),
             name="pending-connect",
         )
-        self._pending.add(pending_task)
-        pending_task.add_done_callback(lambda _: self._pending.discard(pending_task))
+        self._connecting.add(pending_task)
+        pending_task.add_done_callback(lambda _: self._connecting.discard(pending_task))
         await pending_task
         task = None
         try:
@@ -1182,8 +1181,6 @@ class ConnectionPool:
         Close all communications
         """
         self.status = Status.closed
-        for conn_fut in self._pending:
-            conn_fut.cancel()
         for conn_fut in self._connecting:
             conn_fut.cancel()
         for d in [self.available, self.occupied]:
@@ -1198,8 +1195,6 @@ class ConnectionPool:
             for _ in comms:
                 self.semaphore.release()
 
-        # We might still have tasks haning in the semaphore. This will let them
-        # run into an exception and raise a commclosed
         while self._n_connecting:
             await asyncio.sleep(0.005)
 
