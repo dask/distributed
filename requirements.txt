@@ -1,4 +1,4 @@
-click >= 6.6
+click >= 6.6, <= 8.0.2
 cloudpickle >= 1.5.0
 dask == 2022.03.0
 jinja2
