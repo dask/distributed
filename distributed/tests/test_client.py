@@ -33,6 +33,8 @@ from tlz import concat, first, identity, isdistinct, merge, pluck, valmap
 import dask
 import dask.bag as db
 from dask import delayed
+from dask.delayed import Delayed
+from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 from dask.optimization import SubgraphCallable
 from dask.utils import parse_timedelta, stringify, tmpfile
 
@@ -6797,6 +6799,18 @@ async def test_annotations_loose_restrictions(c, s, a, b):
             for ts in s.tasks.values()
         ]
     )
+
+
+@gen_cluster(client=True)
+async def test_raw_annotations(c, s, a, b):
+    dsk = {"x": 1, "y": (inc, "x")}
+    annotations = {"x": 123, "y": 456}
+    layer = MaterializedLayer(mapping=dsk, annotations=annotations)
+    graph = HighLevelGraph.from_collections("y", layer, dependencies=[])
+    x = Delayed("y", graph)
+
+    x = await x.persist()
+    assert s.tasks["y"].annotations == 456
 
 
 @gen_cluster(client=True)
