@@ -69,8 +69,6 @@ class SemaphoreExtension:
             }
         )
 
-        self.scheduler.extensions["semaphores"] = self
-
         # {metric_name: {semaphore_name: metric}}
         self.metrics = {
             "acquire_total": defaultdict(int),  # counter
