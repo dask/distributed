@@ -96,7 +96,6 @@ class Shuffle:
             ),
             load=load_arrow,
             directory=os.path.join(self.worker.local_directory, str(self.metadata.id)),
-            join=pa.concat_tables,  # pd.concat
             sizeof=lambda L: sum(map(len, L)),
             loop=worker.io_loop,
         )
