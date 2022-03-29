@@ -1093,7 +1093,7 @@ class ConnectionPool:
             name="pending-connect",
         )
         self._connecting.add(pending_task)
-        pending_task.add_done_callback(lambda _: self._connecting.discard(pending_task))
+        pending_task.add_done_callback(self._connecting.discard)
         await pending_task
         task = None
         try:
@@ -1111,7 +1111,7 @@ class ConnectionPool:
                 )
             )
             self._connecting.add(task)
-            task.add_done_callback(lambda _: self._connecting.discard(task))
+            task.add_done_callback(self._connecting.discard)
             comm = await task
             comm.name = "ConnectionPool"
             comm._pool = weakref.ref(self)
