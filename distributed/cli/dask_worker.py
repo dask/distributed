@@ -16,7 +16,7 @@ import dask
 from dask.system import CPU_COUNT
 
 from distributed import Nanny
-from distributed.cli.utils import check_python_3, install_signal_handlers
+from distributed.cli.utils import install_signal_handlers
 from distributed.comm import get_address_host_port
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.preloading import validate_preload_argv
@@ -486,10 +486,5 @@ def main(
         logger.info("End worker")
 
 
-def go():
-    check_python_3()
-    main()
-
-
 if __name__ == "__main__":
-    go()  # pragma: no cover
+    main()  # pragma: no cover

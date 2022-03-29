@@ -105,9 +105,9 @@ setup(
     ],
     entry_points="""
         [console_scripts]
-        dask-ssh=distributed.cli.dask_ssh:go
-        dask-scheduler=distributed.cli.dask_scheduler:go
-        dask-worker=distributed.cli.dask_worker:go
+        dask-ssh=distributed.cli.dask_ssh:main
+        dask-scheduler=distributed.cli.dask_scheduler:main
+        dask-worker=distributed.cli.dask_worker:main
       """,
     # https://mypy.readthedocs.io/en/latest/installed_packages.html
     zip_safe=False,
