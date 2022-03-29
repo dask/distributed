@@ -2305,30 +2305,43 @@ async def test_cancel_tuple_key(c, s, a, b):
 
 @gen_cluster()
 async def test_cancel_multi_client(s, a, b):
-    c = await Client(s.address, asynchronous=True)
-    f = await Client(s.address, asynchronous=True)
+    async with Client(s.address, asynchronous=True, name="c") as c:
+        async with Client(s.address, asynchronous=True, name="f") as f:
 
-    x = c.submit(slowinc, 1)
-    y = f.submit(slowinc, 1)
+            x = c.submit(slowinc, 1)
+            y = f.submit(slowinc, 1)
 
-    assert x.key == y.key
+            assert x.key == y.key
 
-    await c.cancel([x])
+            # Ensure both clients are known to the scheduler.
+            await y
+            await x
 
-    assert x.cancelled()
-    assert not y.cancelled()
+            await c.cancel([x])
 
-    while y.key not in s.tasks:
-        await asyncio.sleep(0.01)
+            # Give the scheduler time to pass messages
+            await asyncio.sleep(0.1)
 
-    out = await y
-    assert out == 2
+            assert x.cancelled()
+            assert not y.cancelled()
 
-    with pytest.raises(CancelledError):
-        await x
+            out = await y
+            assert out == 2
 
-    await c.close()
-    await f.close()
+            with pytest.raises(CancelledError):
+                await x
+
+
+@gen_cluster(nthreads=[("", 1)], client=True)
+async def test_cancel_before_known_to_scheduler(c, s, a):
+    with captured_logger("distributed.scheduler") as slogs:
+        f = c.submit(inc, 1)
+        await c.cancel([f])
+
+        with pytest.raises(CancelledError):
+            await f
+
+        assert "Scheduler cancels key" in slogs.getvalue()
 
 
 @gen_cluster(client=True)
