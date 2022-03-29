@@ -19,19 +19,20 @@ class ClusterDump(SchedulerPlugin):
 
     def __init__(
         self,
-        scheduler: Scheduler,
         url: str,
         exclude: "Collection[str]" = DEFAULT_CLUSTER_DUMP_EXCLUDE,
         format_: Literal["msgpack", "yaml"] = DEFAULT_CLUSTER_DUMP_FORMAT,
         **storage_options: Dict[str, Any],
     ):
-        self.scheduler = scheduler
         self.url = url
         self.exclude = exclude
         self.format = format_
         self.storage_options = storage_options
 
-    async def before_close(self):
+    async def start(self, scheduler: Scheduler) -> None:
+        self.scheduler = scheduler
+
+    async def before_close(self) -> None:
         await self.scheduler.dump_cluster_state_to_url(
             self.url, self.exclude, self.format, **self.storage_options
         )
