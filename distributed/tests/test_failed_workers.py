@@ -442,7 +442,7 @@ async def test_worker_same_host_replicas_missing(c, s, a, b, x):
         # artificially, without notifying the scheduler.
         # This can only succeed if B handles the missing data properly by
         # removing A from the known sources of keys
-        a.handle_free_keys(keys=["f1"], stimulus_id="Am I evil?")  # Yes, I am!
+        a.handle_free_keys(keys=["f1"])
         result_fut = c.submit(sink, futures, workers=x.address)
 
         await result_fut
@@ -492,7 +492,7 @@ async def test_forget_data_not_supposed_to_have(s, a, b):
     ts = TaskState("key", state="flight")
     a.tasks["key"] = ts
     recommendations = {ts: ("memory", 123)}
-    a.transitions(recommendations, stimulus_id="test")
+    a.transitions(recommendations)
 
     assert a.data
     while a.data:

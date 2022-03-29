@@ -3,6 +3,7 @@ from contextlib import contextmanager
 
 import dask
 
+from distributed.context_vars import STIMULUS_ID
 from distributed.metrics import time
 from distributed.threadpoolexecutor import rejoin, secede
 from distributed.worker import get_client, get_worker, thread_state
@@ -48,6 +49,8 @@ def worker_client(timeout=None, separate_thread=True):
 
     timeout = dask.utils.parse_timedelta(timeout, "s")
 
+    token = STIMULUS_ID.set(f"worker-client-secede-{time()}")
+
     worker = get_worker()
     client = get_client(timeout=timeout)
     if separate_thread:
@@ -57,7 +60,6 @@ def worker_client(timeout=None, separate_thread=True):
             worker.transition,
             worker.tasks[thread_state.key],
             "long-running",
-            stimulus_id=f"worker-client-secede-{time()}",
             compute_duration=duration,
         )
 
@@ -65,6 +67,8 @@ def worker_client(timeout=None, separate_thread=True):
 
     if separate_thread:
         rejoin()
+
+    STIMULUS_ID.reset(token)
 
 
 def local_client(*args, **kwargs):

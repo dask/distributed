@@ -73,6 +73,22 @@ class STIMULUS_ID:
     def set(cls, value: str):
         return cls.STIMULUS_ID_CTXVAR.set(value)
 
+    def setdefault(cls, value: str, return_token=False) -> Union[str, tuple[str, Any]]:
+        token: Any
+
+        try:
+            stimulus_id = cls.STIMULUS_ID_CTXVAR.get()
+        except LookupError:
+            stimulus_id = value
+            token = cls.STIMULUS_ID_CTXVAR.set(value)
+        else:
+            token = Token.MISSING
+
+        if return_token:
+            return stimulus_id, token
+
+        return stimulus_id
+
     @classmethod
     def reset(cls, token: Token):
         return cls.STIMULUS_ID_CTXVAR.reset(token)
