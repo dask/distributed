@@ -8,7 +8,7 @@ import yaml
 
 import distributed
 from distributed.cluster_dump import DumpArtefact, _tuple_to_list, write_state
-from distributed.utils_test import assert_worker_story, gen_cluster, gen_test, inc
+from distributed.utils_test import assert_story, gen_cluster, gen_test, inc
 
 
 @pytest.mark.parametrize(
@@ -144,7 +144,7 @@ async def test_cluster_dump_story(c, s, a, b, tmp_path):
     assert len(story) == len(fut_keys)
 
     for k, task_story in story.items():
-        assert_worker_story(
+        assert_story(
             task_story,
             [
                 (k, "compute-task"),
