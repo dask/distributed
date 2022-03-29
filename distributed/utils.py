@@ -29,7 +29,7 @@ from importlib.util import cache_from_source
 from time import sleep
 from types import ModuleType
 from typing import Any as AnyType
-from typing import ClassVar
+from typing import Callable, ClassVar
 
 import click
 import tblib.pickling_support
@@ -94,14 +94,7 @@ mp_context = _initialize_mp_context()
 
 
 class RPCHandler:
-    def __init__(self, func):
-        if isinstance(func, RPCHandler):
-            func = func.func
-        elif callable(func):
-            pass
-        else:
-            raise TypeError(f"{func} must be callable")
-
+    def __init__(self, func: Callable):
         self.func = func
         self.sig = inspect.signature(func)
         self.wants_stimulus_id = "stimulus_id" in self.sig.parameters
