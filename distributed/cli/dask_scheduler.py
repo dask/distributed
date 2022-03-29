@@ -10,7 +10,7 @@ import click
 from tornado.ioloop import IOLoop
 
 from distributed import Scheduler
-from distributed.cli.utils import check_python_3, install_signal_handlers
+from distributed.cli.utils import install_signal_handlers
 from distributed.preloading import validate_preload_argv
 from distributed.proctitle import (
     enable_proctitle_on_children,
@@ -212,10 +212,5 @@ def main(
         logger.info("End scheduler at %r", scheduler.address)
 
 
-def go():
-    check_python_3()
-    main()
-
-
 if __name__ == "__main__":
-    go()  # pragma: no cover
+    main()  # pragma: no cover

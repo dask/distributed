@@ -57,13 +57,15 @@ from distributed import versions as version_module
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
 from distributed.comm import (
+    Comm,
+    CommClosedError,
     get_address_host,
     normalize_address,
     resolve_address,
     unparse_host_port,
 )
 from distributed.comm.addressing import addresses_from_user_args
-from distributed.core import CommClosedError, Status, clean_exception, rpc, send_recv
+from distributed.core import Status, clean_exception, rpc, send_recv
 from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
@@ -5459,7 +5461,7 @@ class Scheduler(SchedulerState, ServerNode):
                         "Closed comm %r while trying to write %s", c, msg, exc_info=True
                     )
 
-    async def add_client(self, comm, client=None, versions=None):
+    async def add_client(self, comm: Comm, client: str, versions: dict) -> None:
         """Add client to network
 
         We listen to all future messages from this Comm.
@@ -5508,7 +5510,7 @@ class Scheduler(SchedulerState, ServerNode):
             except TypeError:  # comm becomes None during GC
                 pass
 
-    def remove_client(self, client=None):
+    def remove_client(self, client: str) -> None:
         """Remove client from network"""
         parent: SchedulerState = cast(SchedulerState, self)
         if self.status == Status.running:
