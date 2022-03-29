@@ -1023,6 +1023,7 @@ class ConnectionPool:
         # while the _n_connecting also accounts for connection attempts which
         # are waiting due to the connection limit
         self._connecting = set()
+        self._pending = set()
         self.status = Status.init
 
     def _validate(self):
@@ -1045,7 +1046,7 @@ class ConnectionPool:
         return "<ConnectionPool: open=%d, active=%d, connecting=%d>" % (
             self.open,
             self.active,
-            self._n_connecting,
+            len(self._connecting),
         )
 
     def __call__(self, addr=None, ip=None, port=None):
@@ -1092,8 +1093,8 @@ class ConnectionPool:
             self.semaphore.acquire(),
             name="pending-connect",
         )
-        self._connecting.add(pending_task)
-        pending_task.add_done_callback(self._connecting.discard)
+        self._pending.add(pending_task)
+        pending_task.add_done_callback(self._pending.discard)
         await pending_task
         task = None
         try:
@@ -1141,7 +1142,7 @@ class ConnectionPool:
                 self.semaphore.release()
             else:
                 self.available[addr].add(comm)
-                if self.semaphore.locked() and self._n_connecting > 0:
+                if self.semaphore.locked() and self._pending:
                     self.collect()
 
     def collect(self):
@@ -1149,10 +1150,11 @@ class ConnectionPool:
         Collect open but unused communications, to allow opening other ones.
         """
         logger.info(
-            "Collecting unused comms.  open: %d, active: %d, connecting: %d",
+            "Collecting unused comms.  open: %d, active: %d, connecting: %d, pending: %d",
             self.open,
             self.active,
-            self._n_connecting,
+            len(self._connecting),
+            len(self._pending),
         )
         for addr, comms in self.available.items():
             for comm in comms:
@@ -1183,6 +1185,8 @@ class ConnectionPool:
         self.status = Status.closed
         for conn_fut in self._connecting:
             conn_fut.cancel()
+        for conn_fut in self._pending:
+            conn_fut.cancel()
         for d in [self.available, self.occupied]:
             comms = set()
             while d:
@@ -1195,7 +1199,7 @@ class ConnectionPool:
             for _ in comms:
                 self.semaphore.release()
 
-        while self._n_connecting:
+        while self._pending or self._connecting:
             await asyncio.sleep(0.005)
 
 
