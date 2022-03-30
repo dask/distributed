@@ -6,7 +6,6 @@ from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
 from distributed.protocol.serialize import (
     Serialize,
     Serialized,
-    ToPickle,
     dask_deserialize,
     dask_serialize,
     deserialize,
@@ -254,14 +253,3 @@ def test_preserve_header(serializers):
     header, frames = serialize(MyObj(), serializers=serializers)
     o = deserialize(header, frames)
     assert isinstance(o, MyObj)
-
-
-def test_ToPickle():
-    class Foo:
-        def __init__(self, data):
-            self.data = data
-
-    msg = {"x": ToPickle(Foo(123))}
-    frames = dumps(msg)
-    out = loads(frames)
-    assert out["x"].data == 123
