@@ -80,8 +80,7 @@ def test_maybe_compress(lib, compression):
 
         payload = b"0" * 10000
         rc, rd = maybe_compress(f(payload), compression=compression)
-        # For some reason compressing memoryviews can force blosc...
-        assert rc in (compression, "blosc")
+        assert rc == compression
         assert compressions[rc]["decompress"](rd) == payload
 
 
@@ -218,14 +217,8 @@ def test_maybe_compress_memoryviews():
     pytest.importorskip("lz4")
     x = np.arange(1000000, dtype="int64")
     compression, payload = maybe_compress(x.data)
-    try:
-        import blosc  # noqa: F401
-    except ImportError:
-        assert compression == "lz4"
-        assert len(payload) < x.nbytes * 0.75
-    else:
-        assert compression == "blosc"
-        assert len(payload) < x.nbytes / 10
+    assert compression == "lz4"
+    assert len(payload) < x.nbytes * 0.75
 
 
 @pytest.mark.parametrize("serializers", [("dask",), ("cuda",)])

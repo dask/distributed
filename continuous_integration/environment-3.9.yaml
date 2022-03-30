@@ -35,7 +35,6 @@ dependencies:
   - pytest-repeat
   - pytest-rerunfailures
   - pytest-timeout
-  - python-blosc  # Only tested here
   - python-snappy  # Only tested here
   - pytorch  # Only tested here
   - requests
