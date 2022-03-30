@@ -3934,8 +3934,8 @@ class Client(SyncMethodMixin):
         self,
         filename: str = "dask-cluster-dump",
         write_from_scheduler: bool | None = None,
-        exclude: Collection[str] = ("run_spec",),
-        format: Literal["msgpack", "yaml"] = "msgpack",
+        exclude: Collection[str] = cluster_dump.DEFAULT_CLUSTER_DUMP_EXCLUDE,
+        format: Literal["msgpack", "yaml"] = cluster_dump.DEFAULT_CLUSTER_DUMP_FORMAT,
         **storage_options,
     ):
         filename = str(filename)
