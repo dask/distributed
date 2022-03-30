@@ -4245,6 +4245,11 @@ class Scheduler(SchedulerState, ServerNode):
         if self.status in (Status.closing, Status.closed):
             await self.finished()
             return
+
+        await asyncio.gather(
+            *[plugin.before_close() for plugin in list(self.plugins.values())]
+        )
+
         self.status = Status.closing
 
         logger.info("Scheduler closing...")
