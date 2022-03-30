@@ -3555,23 +3555,6 @@ class Worker(ServerNode):
         raise TypeError(ev)  # pragma: nocover
 
     @handle_event.register
-    def _(self, ev: EnsureComputingEvent) -> RecsInstrs:
-        """Let various methods of worker give an artificial 'kick' to _ensure_computing.
-        This is a temporary hack to be removed as part of
-        https://github.com/dask/distributed/issues/5894.
-        """
-        return self._ensure_computing()
-
-    @handle_event.register
-    def _(self, ev: UnpauseEvent) -> RecsInstrs:
-        """Emerge from paused status. Do not send this event directly. Instead, just set
-        Worker.status back to running.
-        """
-        assert self.status == Status.running
-        self.ensure_communicating()
-        return self._ensure_computing()
-
-    @handle_event.register
     def _(self, ev: CancelComputeEvent) -> RecsInstrs:
         """Scheduler requested to cancel a task"""
         ts = self.tasks.get(ev.key)
