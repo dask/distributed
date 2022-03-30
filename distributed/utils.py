@@ -116,6 +116,10 @@ class RPCHandler:
             return True
         return False
 
+    @property
+    def parameters(self):
+        return self._signature.parameters
+
     def expects_comm(self):
         return self._expects_comm
 
@@ -1161,7 +1165,7 @@ def reset_logger_locks():
 @functools.lru_cache(1000)
 def has_keyword(func, keyword):
     if isinstance(func, RPCHandler):
-        return keyword in func.sig.parameters
+        return keyword in func.parameters
 
     return keyword in inspect.signature(func).parameters
 
