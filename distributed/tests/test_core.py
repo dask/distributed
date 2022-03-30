@@ -847,9 +847,6 @@ def test_compression(compression, serialize, loop):
 @pytest.mark.asyncio
 async def test_rpc_serialization():
     server = Server({"echo": echo_serialize})
-    from distributed.core import RPCHandler
-
-    assert isinstance(server.handlers["echo"], RPCHandler)
     await server.listen("tcp://")
 
     async with rpc(server.address, serializers=["msgpack"]) as r:
