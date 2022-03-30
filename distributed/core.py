@@ -1023,7 +1023,8 @@ class ConnectionPool:
         # while the _n_connecting also accounts for connection attempts which
         # are waiting due to the connection limit
         self._connecting = set()
-        self._pending = set()
+        self._pending_count = 0
+        self._connecting_count = 0
         self.status = Status.init
 
     def _validate(self):
@@ -1070,7 +1071,37 @@ class ConnectionPool:
 
     @property
     def _n_connecting(self) -> int:
-        return len(self._connecting)
+        return self._connecting_count
+
+    async def _connect(self, addr, timeout=None):
+        self._pending_count += 1
+        try:
+            await self.semaphore.acquire()
+            try:
+                self._connecting_count += 1
+                comm = await connect(
+                    addr,
+                    timeout=timeout or self.timeout,
+                    deserialize=self.deserialize,
+                    **self.connection_args,
+                )
+                comm.name = "ConnectionPool"
+                comm._pool = weakref.ref(self)
+                comm.allow_offload = self.allow_offload
+                self._created.add(comm)
+
+                self.occupied[addr].add(comm)
+
+                return comm
+            except BaseException:
+                self.semaphore.release()
+                raise
+            finally:
+                self._connecting_count -= 1
+        except asyncio.CancelledError:
+            raise CommClosedError("ConnectionPool closing.")
+        finally:
+            self._pending_count -= 1
 
     async def connect(self, addr, timeout=None):
         """
@@ -1089,42 +1120,30 @@ class ConnectionPool:
         if self.semaphore.locked():
             self.collect()
 
-        pending_task = asyncio.create_task(
-            self.semaphore.acquire(),
-            name="pending-connect",
-        )
-        self._pending.add(pending_task)
-        pending_task.add_done_callback(self._pending.discard)
-        await pending_task
-        task = None
+        connect_attempt = asyncio.create_task(self._connect(addr, timeout))
+        # This construcation is there to ensure that cancellation requests from
+        # the outside can be distinguished from cancellations of our own.
+        # Once the CommPool closes, we'll cancel the connect_attempt which will
+        # raise an OSError
+        # If the ``connect`` is cancelled from the outside, the Event.wait will
+        # be cancelled instead which we'll reraise as a CancelledError and allow
+        # it to propagate
+        done = asyncio.Event()
+        self._connecting.add(connect_attempt)
+        connect_attempt.add_done_callback(lambda _: done.set())
+        connect_attempt.add_done_callback(self._connecting.discard)
+
         try:
-            if self.status != Status.running:
-                raise CommClosedError(
-                    f"ConnectionPool not running. Status: {self.status}"
-                )
-
-            task = asyncio.create_task(
-                connect(
-                    addr,
-                    timeout=timeout or self.timeout,
-                    deserialize=self.deserialize,
-                    **self.connection_args,
-                )
-            )
-            self._connecting.add(task)
-            task.add_done_callback(self._connecting.discard)
-            comm = await task
-            comm.name = "ConnectionPool"
-            comm._pool = weakref.ref(self)
-            comm.allow_offload = self.allow_offload
-            self._created.add(comm)
-
-            occupied.add(comm)
-
-            return comm
-        except BaseException:
-            self.semaphore.release()
+            await done.wait()
+        except asyncio.CancelledError:
+            # This is an outside cancel attempt
+            connect_attempt.cancel()
+            try:
+                await connect_attempt
+            except CommClosedError:
+                pass
             raise
+        return await connect_attempt
 
     def reuse(self, addr, comm):
         """
@@ -1142,7 +1161,7 @@ class ConnectionPool:
                 self.semaphore.release()
             else:
                 self.available[addr].add(comm)
-                if self.semaphore.locked() and self._pending:
+                if self.semaphore.locked() and self._pending_count:
                     self.collect()
 
     def collect(self):
@@ -1150,11 +1169,10 @@ class ConnectionPool:
         Collect open but unused communications, to allow opening other ones.
         """
         logger.info(
-            "Collecting unused comms.  open: %d, active: %d, connecting: %d, pending: %d",
+            "Collecting unused comms.  open: %d, active: %d, connecting: %d",
             self.open,
             self.active,
             len(self._connecting),
-            len(self._pending),
         )
         for addr, comms in self.available.items():
             for comm in comms:
@@ -1185,8 +1203,6 @@ class ConnectionPool:
         self.status = Status.closed
         for conn_fut in self._connecting:
             conn_fut.cancel()
-        for conn_fut in self._pending:
-            conn_fut.cancel()
         for d in [self.available, self.occupied]:
             comms = set()
             while d:
@@ -1199,7 +1215,7 @@ class ConnectionPool:
             for _ in comms:
                 self.semaphore.release()
 
-        while self._pending or self._connecting:
+        while self._connecting:
             await asyncio.sleep(0.005)
 
 

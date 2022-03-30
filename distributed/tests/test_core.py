@@ -8,6 +8,7 @@ import pytest
 
 import dask
 
+from distributed.comm.core import CommClosedError
 from distributed.core import (
     ConnectionPool,
     Server,
@@ -631,16 +632,56 @@ async def test_connection_pool_close_while_connecting(monkeypatch):
         comm = await pool.connect(server.address)
         pool.reuse(server.address, comm)
 
-    tasks = [asyncio.create_task(connect_to_server()) for _ in range(30)]
+    # #tasks > limit
+    tasks = [asyncio.create_task(connect_to_server()) for _ in range(5)]
 
     while not pool._connecting:
         await asyncio.sleep(0.01)
 
     await pool.close()
-    done, _ = await asyncio.wait(tasks)
-    assert all(t.cancelled() for t in done)
+    for t in tasks:
+        with pytest.raises(CommClosedError):
+            await t
     assert not pool.open
     assert not pool._n_connecting
+
+
+@pytest.mark.asyncio
+async def test_connection_pool_outside_cancellation(monkeypatch):
+    # Ensure cancellation errors are properly reraised
+    from distributed.comm.registry import backends
+    from distributed.comm.tcp import TCPBackend, TCPConnector
+
+    class SlowConnector(TCPConnector):
+        async def connect(self, address, deserialize, **connection_args):
+            await asyncio.sleep(10000)
+            return await super().connect(
+                address, deserialize=deserialize, **connection_args
+            )
+
+    class SlowBackend(TCPBackend):
+        _connector_class = SlowConnector
+
+    monkeypatch.setitem(backends, "tcp", SlowBackend())
+
+    server = Server({})
+    await server.listen("tcp://")
+    pool = await ConnectionPool(limit=2)
+
+    async def connect_to_server():
+        comm = await pool.connect(server.address)
+        pool.reuse(server.address, comm)
+
+    # #tasks > limit
+    tasks = [asyncio.create_task(connect_to_server()) for _ in range(5)]
+    while not pool._connecting:
+        await asyncio.sleep(0.01)
+
+    for t in tasks:
+        t.cancel()
+
+    done, _ = await asyncio.wait(tasks)
+    assert all(t.cancelled() for t in tasks)
 
 
 @pytest.mark.asyncio
