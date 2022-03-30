@@ -5527,7 +5527,7 @@ async def test_future_defaults_to_default_client(c, s, a, b):
     x = c.submit(inc, 1)
     await wait(x)
 
-    future = Future(x.key)
+    future = Future(x.key, client=c)
     assert future.client is c
 
 
@@ -7509,3 +7509,8 @@ async def test_wait_for_workers_updates_info(c, s):
     async with Worker(s.address):
         await c.wait_for_workers(1)
         assert c.scheduler_info()["workers"]
+
+
+def test_future_without_client():
+    future = Future("x")
+    assert future.client is None

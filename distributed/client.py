@@ -193,32 +193,38 @@ class Future(WrappedKey):
     def __init__(self, key, client=None, inform=True, state=None):
         self.key = key
         self._cleared = False
-        tkey = stringify(key)
-        self.client = client or Client.current()
-        self.client._inc_ref(tkey)
-        self._generation = self.client.generation
-
-        if tkey in self.client.futures:
-            self._state = self.client.futures[tkey]
-        else:
-            self._state = self.client.futures[tkey] = FutureState()
-
-        if inform:
-            self.client._send_to_scheduler(
-                {
-                    "op": "client-desires-keys",
-                    "keys": [stringify(key)],
-                    "client": self.client.id,
-                }
-            )
-
-        if state is not None:
+        if client is None:
             try:
-                handler = self.client._state_handlers[state]
-            except KeyError:
+                client = Client.current(allow_global=False)
+            except ValueError:
                 pass
+        self.client = client
+        if self.client:
+            tkey = stringify(key)
+            self.client._inc_ref(tkey)
+            self._generation = self.client.generation
+
+            if tkey in self.client.futures:
+                self._state = self.client.futures[tkey]
             else:
-                handler(key=key)
+                self._state = self.client.futures[tkey] = FutureState()
+
+            if inform:
+                self.client._send_to_scheduler(
+                    {
+                        "op": "client-desires-keys",
+                        "keys": [stringify(key)],
+                        "client": self.client.id,
+                    }
+                )
+
+            if state is not None:
+                try:
+                    handler = self.client._state_handlers[state]
+                except KeyError:
+                    pass
+                else:
+                    handler(key=key)
 
     @property
     def executor(self):
@@ -449,6 +455,8 @@ class Future(WrappedKey):
         This method can be called from different threads
         (see e.g. Client.get() or Future.__del__())
         """
+        if self.client is None:
+            return
         if not self._cleared and self.client.generation == self._generation:
             self._cleared = True
             try:
@@ -461,19 +469,17 @@ class Future(WrappedKey):
 
     def __setstate__(self, state):
         key, address = state
-        try:
-            c = Client.current(allow_global=False)
-        except ValueError:
-            c = get_client(address)
-        self.__init__(key, c)
-        c._send_to_scheduler(
-            {
-                "op": "update-graph",
-                "tasks": {},
-                "keys": [stringify(self.key)],
-                "client": c.id,
-            }
-        )
+        self.__init__(key, client=None)
+
+        if self.client:
+            self.client._send_to_scheduler(
+                {
+                    "op": "update-graph",
+                    "tasks": {},
+                    "keys": [stringify(self.key)],
+                    "client": self.client.id,
+                }
+            )
 
     def __del__(self):
         try:
