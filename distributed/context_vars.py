@@ -1,6 +1,6 @@
 import inspect
 from contextvars import ContextVar, Token
-from typing import Any, Callable, Union
+from typing import Any, Callable, Tuple, Union
 
 from dask.utils import funcname
 
@@ -73,7 +73,7 @@ class STIMULUS_ID:
     def set(cls, value: str):
         return cls.STIMULUS_ID_CTXVAR.set(value)
 
-    def setdefault(cls, value: str, return_token=False) -> Union[str, tuple[str, Any]]:
+    def setdefault(cls, value: str, return_token=False) -> Union[str, Tuple[str, Any]]:
         token: Any
 
         try:

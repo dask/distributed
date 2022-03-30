@@ -9,9 +9,9 @@ import pytest
 import dask
 
 from distributed.comm.core import CommClosedError
+from distributed.context_vars import STIMULUS_ID
 from distributed.core import (
     ConnectionPool,
-    RPCHandler,
     Server,
     Status,
     clean_exception,
@@ -24,7 +24,14 @@ from distributed.core import (
 from distributed.metrics import time
 from distributed.protocol import to_serialize
 from distributed.protocol.compression import compressions
-from distributed.utils import get_ip, get_ipv6
+from distributed.utils import (
+    AsyncRPCHandler,
+    RPCHandler,
+    get_ip,
+    get_ipv6,
+    is_coroutine_function,
+    rpc_handler_factory,
+)
 from distributed.utils_test import (
     assert_can_connect,
     assert_can_connect_from_everywhere_4,
@@ -997,32 +1004,46 @@ async def test_close_grace_period_for_handlers():
     await server.close()
 
 
-@pytest.mark.asyncio
-async def test_rpc_handlers():
+def test_rpc_handlers():
     def f(a, b, stimulus_id=None):
         return (a, b, stimulus_id)
+
+    fh = rpc_handler_factory(f)
+    assert isinstance(fh, RPCHandler)
+    assert not is_coroutine_function(fh)
+    assert fh.expects_stimulus_id()
+
+    # Stimulus ID is supplied, set and passed through to f
+    assert fh(1, 2, stimulus_id="stimulus-123") == f(1, 2, stimulus_id="stimulus-123")
+    assert STIMULUS_ID.get() == "stimulus-123"
+
+    # Stimulus ID is not supplied, automatically set and passed through to f
+    hres = fh(1, 2)
+    res = f(1, 2)
+    assert res[2] is None
+    assert hres[:2] == res[:2]
+    assert hres[2].startswith("f-")
+    assert STIMULUS_ID.get().startswith("f-")
 
     def g(a, b):
         return (a, b)
 
-    from distributed.utils import AsyncRPCHandler, RPCHandler, rpc_handler_factory
-
-    fh = rpc_handler_factory(f)
-    assert isinstance(fh, RPCHandler)
-    assert fh.wants_stimulus_id
-    assert fh(1, 2, stimulus_id="stimulus-123") == f(1, 2, stimulus_id="stimulus-123")
-
-    ah, bh, stimulus_idh = fh(1, 2)
-    a, b, stimulus_id = f(1, 2)
-    assert (ah, bh) == (a, b)
-    assert stimulus_idh.startswith("f-")
-    assert stimulus_id is None
-
     gh = rpc_handler_factory(g)
     assert isinstance(gh, RPCHandler)
-    assert not gh.wants_stimulus_id
-    assert gh(1, 2) == g(1, 2)
+    assert not is_coroutine_function(gh)
+    assert not gh.expects_stimulus_id()
 
+    # Stimulus ID is supplied, set and not passed through to g
+    assert gh(1, 2, stimulus_id="stimulus-123") == g(1, 2)
+    assert STIMULUS_ID.get() == "stimulus-123"
+
+    # Stimulus ID is not supplied, set and not passed through to g
+    assert gh(1, 2) == g(1, 2)
+    assert STIMULUS_ID.get().startswith("g-")
+
+
+@pytest.mark.asyncio
+async def test_rpc_handlers_async():
     async def f(a, b, stimulus_id=None):
         return (a, b, stimulus_id)
 
@@ -1030,15 +1051,17 @@ async def test_rpc_handlers():
         return (a, b)
 
     fh = rpc_handler_factory(f)
+    assert is_coroutine_function(fh)
     assert isinstance(fh, AsyncRPCHandler)
-    assert fh.wants_stimulus_id
+    assert fh.expects_stimulus_id()
     assert await fh(1, 2, stimulus_id="stimulus-123") == await f(
         1, 2, stimulus_id="stimulus-123"
     )
 
     gh = rpc_handler_factory(g)
+    assert is_coroutine_function(gh)
     assert isinstance(gh, AsyncRPCHandler)
-    assert not gh.wants_stimulus_id
+    assert not gh.expects_stimulus_id()
     assert await gh(1, 2) == await g(1, 2)
 
 

@@ -94,13 +94,15 @@ mp_context = _initialize_mp_context()
 
 
 class RPCHandler:
-    def __init__(self, func: Callable):
-        self.func = func
-        self.sig = inspect.signature(func)
-        self.wants_stimulus_id = "stimulus_id" in self.sig.parameters
+    def __init__(self, fn: Callable):
+        self._fn = fn
+        self._signature = signature = inspect.signature(fn)
+        self._expects_stimulus_id = "stimulus_id" in signature.parameters
+        self._expects_comm = self._expects_comm_argument(fn, signature)
 
-    def expects_comm(self):
-        params = list(self.sig.parameters.keys())
+    @staticmethod
+    def _expects_comm_argument(fn, signature):
+        params = list(signature.parameters.keys())
 
         if params and params[0] == "comm":
             return True
@@ -108,46 +110,52 @@ class RPCHandler:
             warnings.warn(
                 "Calling the first argument of a RPC handler `stream` is "
                 "deprecated. Defining this argument is optional. Either remove the "
-                f"argument or rename it to `comm` in {self.func}{self.sig}.",
+                f"argument or rename it to `comm` in {fn}{signature}.",
                 FutureWarning,
             )
             return True
         return False
 
+    def expects_comm(self):
+        return self._expects_comm
+
+    def expects_stimulus_id(self):
+        return self._expects_stimulus_id
+
     def __call__(self, *args, **kwargs):
         try:
             stimulus_id = kwargs["stimulus_id"]
         except KeyError:
-            stimulus_id = STIMULUS_ID.from_function(self.func)
+            stimulus_id = STIMULUS_ID.from_function(self._fn)
 
-            if self.wants_stimulus_id:
+            if self._expects_stimulus_id:
                 kwargs["stimulus_id"] = stimulus_id
         else:
-            if not self.wants_stimulus_id:
+            if not self._expects_stimulus_id:
                 kwargs.pop("stimulus_id")
 
         STIMULUS_ID.set(stimulus_id)
 
-        b = self.sig.bind(*args, **kwargs)
-        return self.func(*b.args, **b.kwargs)
+        b = self._signature.bind(*args, **kwargs)
+        return self._fn(*b.args, **b.kwargs)
 
     def __hash__(self):
-        return hash(self.func)
+        return hash(self._fn)
 
     def __reduce__(self):
-        return (RPCHandler, (self.func,))
+        return (RPCHandler, (self._fn,))
 
     def __name__(self):
-        return self.func.__name__
+        return self._fn.__name__
 
     def __eq__(self, other: object):
-        return isinstance(other, RPCHandler) and self.func == other.func
+        return isinstance(other, RPCHandler) and self._fn == other._fn
 
     def __str__(self):
-        return str(self.func)
+        return str(self._fn)
 
     def __repr__(self):
-        return repr(self.func)
+        return repr(self._fn)
 
 
 class AsyncRPCHandler(RPCHandler):
@@ -158,19 +166,19 @@ class AsyncRPCHandler(RPCHandler):
         return super().__hash__()
 
     def __reduce__(self):
-        return (AsyncRPCHandler, (self.func,))
+        return (AsyncRPCHandler, (self._fn,))
 
     def __name__(self):
         return super().__name__()
 
     def __eq__(self, other: object):
-        return isinstance(other, AsyncRPCHandler) and self.func == other.func
+        return isinstance(other, AsyncRPCHandler) and self._fn == other._fn
 
     def __str__(self):
-        return str(self.func)
+        return str(self._fn)
 
     def __repr__(self):
-        return repr(self.func)
+        return repr(self._fn)
 
 
 def rpc_handler_factory(func):
