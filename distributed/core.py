@@ -1120,14 +1120,14 @@ class ConnectionPool:
         if self.semaphore.locked():
             self.collect()
 
-        connect_attempt = asyncio.create_task(self._connect(addr, timeout))
-        # This construcation is there to ensure that cancellation requests from
+        # This construction is there to ensure that cancellation requests from
         # the outside can be distinguished from cancellations of our own.
         # Once the CommPool closes, we'll cancel the connect_attempt which will
         # raise an OSError
         # If the ``connect`` is cancelled from the outside, the Event.wait will
         # be cancelled instead which we'll reraise as a CancelledError and allow
         # it to propagate
+        connect_attempt = asyncio.create_task(self._connect(addr, timeout))
         done = asyncio.Event()
         self._connecting.add(connect_attempt)
         connect_attempt.add_done_callback(lambda _: done.set())
