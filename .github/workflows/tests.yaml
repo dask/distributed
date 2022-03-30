@@ -23,7 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.8", "3.9"]
+        python-version: ["3.8", "3.9", "3.10"]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
         include:
@@ -64,12 +64,6 @@ jobs:
       - name: Show conda options
         shell: bash -l {0}
         run: conda config --show
-
-      - name: Install stacktrace
-        shell: bash -l {0}
-        # stacktrace for Python 3.8 has not been released at the moment of writing
-        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version < '3.8' }}
-        run: mamba install -c conda-forge -c defaults -c numba libunwind stacktrace
 
       - name: Hack around https://github.com/ipython/ipython/issues/12197
         # This upstream issue causes an interpreter crash when running
