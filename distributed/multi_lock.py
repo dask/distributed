@@ -46,8 +46,6 @@ class MultiLockExtension:
             {"multi_lock_acquire": self.acquire, "multi_lock_release": self.release}
         )
 
-        self.scheduler.extensions["multi_locks"] = self
-
     def _request_locks(self, locks: list[str], id: Hashable, num_locks: int) -> bool:
         """Request locks
 

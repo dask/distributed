@@ -3315,6 +3315,43 @@ async def test_Worker__to_dict(c, s, a):
     assert d["data"] == ["x"]
 
 
+@gen_cluster(nthreads=[])
+async def test_extension_methods(s):
+    flag = False
+    shutdown = False
+
+    class WorkerExtension:
+        def __init__(self, worker):
+            pass
+
+        def heartbeat(self):
+            return {"data": 123}
+
+        async def close(self):
+            nonlocal shutdown
+            shutdown = True
+
+    class SchedulerExtension:
+        def __init__(self, scheduler):
+            self.scheduler = scheduler
+            pass
+
+        def heartbeat(self, ws, data: dict):
+            nonlocal flag
+            assert ws in self.scheduler.workers.values()
+            assert data == {"data": 123}
+            flag = True
+
+    s.extensions["test"] = SchedulerExtension(s)
+
+    async with Worker(s.address, extensions={"test": WorkerExtension}) as w:
+        assert not shutdown
+        await w.heartbeat()
+        assert flag
+
+    assert shutdown
+
+
 @gen_cluster()
 async def test_benchmark_hardware(s, a, b):
     sizes = ["1 kiB", "10 kiB"]

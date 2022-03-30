@@ -40,8 +40,6 @@ class VariableExtension:
         self.scheduler.stream_handlers["variable-future-release"] = self.future_release
         self.scheduler.stream_handlers["variable_delete"] = self.delete
 
-        self.scheduler.extensions["variables"] = self
-
     async def set(self, name=None, key=None, data=None, client=None):
         if key is not None:
             record = {"type": "Future", "value": key}

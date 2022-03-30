@@ -98,16 +98,19 @@ setup(
         "License :: OSI Approved :: BSD License",
         "Operating System :: OS Independent",
         "Programming Language :: Python",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3 :: Only",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
         "Topic :: Scientific/Engineering",
         "Topic :: System :: Distributed Computing",
     ],
     entry_points="""
         [console_scripts]
-        dask-ssh=distributed.cli.dask_ssh:go
-        dask-scheduler=distributed.cli.dask_scheduler:go
-        dask-worker=distributed.cli.dask_worker:go
+        dask-ssh=distributed.cli.dask_ssh:main
+        dask-scheduler=distributed.cli.dask_scheduler:main
+        dask-worker=distributed.cli.dask_worker:main
       """,
     # https://mypy.readthedocs.io/en/latest/installed_packages.html
     zip_safe=False,

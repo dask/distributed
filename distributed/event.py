@@ -58,8 +58,6 @@ class EventExtension:
             }
         )
 
-        self.scheduler.extensions["events"] = self
-
     async def event_wait(self, name=None, timeout=None):
         """Wait until the event is set to true.
         Returns false, when this did not happen in the given time
