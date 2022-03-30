@@ -8,8 +8,6 @@ from functools import lru_cache
 from typing import Collection  # TODO move to collections.abc (requires Python >=3.9)
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict
 
-from tlz import concat, merge
-
 import dask
 from dask.utils import parse_bytes
 
@@ -359,21 +357,6 @@ class StateMachineEvent:
 
 
 @dataclass
-class EnsureComputingEvent(StateMachineEvent):
-    """Let various methods of worker give an artificial 'kick' to _ensure_computing.
-    This is a temporary hack to be removed as part of
-    https://github.com/dask/distributed/issues/5894.
-    """
-
-    __slots__ = ()
-
-
-@dataclass
-class UnpauseEvent(StateMachineEvent):
-    __slots__ = ()
-
-
-@dataclass
 class ExecuteSuccessEvent(StateMachineEvent):
     key: str
     value: object
@@ -426,10 +409,3 @@ else:
     Recs = dict
     Instructions = list
     RecsInstrs = tuple
-
-
-def merge_recs_instructions(*args: RecsInstrs) -> RecsInstrs:
-    return (
-        merge(e[0] for e in args),
-        list(concat([e[1] for e in args])),
-    )
