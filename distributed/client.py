@@ -2884,20 +2884,13 @@ class Client(SyncMethodMixin):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
             annotations = {}
-            if user_priority:
-                annotations["priority"] = user_priority
             if workers:
                 if not isinstance(workers, (list, tuple, set)):
                     workers = [workers]
-                annotations["workers"] = workers
-            if retries:
-                annotations["retries"] = retries
             if allow_other_workers not in (True, False, None):
                 raise TypeError("allow_other_workers= must be True, False, or None")
             if allow_other_workers:
                 annotations["allow_other_workers"] = allow_other_workers
-            if resources:
-                annotations["resources"] = resources
 
             # Merge global and local annotations
             annotations = merge(dask.config.get("annotations", {}), annotations)
@@ -2919,6 +2912,10 @@ class Client(SyncMethodMixin):
                     "fifo_timeout": fifo_timeout,
                     "actors": actors,
                     "code": self._get_computation_code(),
+                    "retries": retries,
+                    "resources": resources,
+                    "user_priority": user_priority,
+                    "restrictions": workers,
                 }
             )
             return futures

@@ -37,6 +37,7 @@ from tlz import (
     compose,
     first,
     groupby,
+    keymap,
     merge,
     merge_sorted,
     merge_with,
@@ -4672,14 +4673,28 @@ class Scheduler(SchedulerState, ServerNode):
         for k, futures in fut_deps.items():
             dependencies[k].update(f.key for f in futures)
 
+        pre_stringify = set(dsk)
         dsk = {stringify(k): stringify(v, exclusive=graph) for k, v in dsk.items()}
 
-        from toolz import valmap
+        def process(x):
+            if callable(x):
+                return {stringify(k): x(k) for k in pre_stringify}
+            elif isinstance(x, int):
+                return {k: x for k in dsk}
+            elif isinstance(x, dict):
+                return keymap(stringify, x)
+            raise TypeError()
+
+        if retries:
+            retries = process(retries)
+        if resources:
+            resources = process(resources)
+        if user_priority:
+            user_priority = process(user_priority)
 
         from distributed.worker import dumps_task
 
         dsk = valmap(dumps_task, dsk)
-        # breakpoint()
 
         dependencies = {
             stringify(k): {stringify(dep) for dep in deps}
