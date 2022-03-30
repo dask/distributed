@@ -2904,15 +2904,15 @@ class Client(SyncMethodMixin):
 
             # Pack the high level graph before sending it to the scheduler
             keyset = set(keys)
-            dsk = dsk.__dask_distributed_pack__(self, keyset, annotations)
 
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
+            from distributed.protocol.serialize import ToPickle
 
             self._send_to_scheduler(
                 {
                     "op": "update-graph-hlg",
-                    "hlg": dsk,
+                    "graph": ToPickle(dsk),
                     "keys": list(map(stringify, keys)),
                     "priority": priority,
                     "submitting_task": getattr(thread_state, "key", None),

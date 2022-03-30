@@ -111,6 +111,15 @@ pytestmark = pytest.mark.ci1
 
 
 @gen_cluster(client=True)
+async def test_basic(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+    x = da.ones(15, chunks=(5,))
+    out = await c.compute(x.sum())
+    assert out == 15
+    s.validate_state()
+
+
+@gen_cluster(client=True)
 async def test_submit(c, s, a, b):
     x = c.submit(inc, 10, key="x")
     assert not x.done()

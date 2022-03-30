@@ -48,8 +48,16 @@ from tlz import (
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
+from dask.core import get_deps
 from dask.highlevelgraph import HighLevelGraph
-from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta, tmpfile
+from dask.utils import (
+    format_bytes,
+    format_time,
+    parse_bytes,
+    parse_timedelta,
+    stringify,
+    tmpfile,
+)
 from dask.widgets import get_template
 
 from distributed import cluster_dump, preloading, profile
@@ -4629,8 +4637,8 @@ class Scheduler(SchedulerState, ServerNode):
 
     def update_graph_hlg(
         self,
-        client=None,
-        hlg=None,
+        client: str,
+        graph: HighLevelGraph,
         keys=None,
         dependencies=None,
         restrictions=None,
@@ -4644,10 +4652,43 @@ class Scheduler(SchedulerState, ServerNode):
         fifo_timeout=0,
         code=None,
     ):
-        unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg)
-        dsk = unpacked_graph["dsk"]
-        dependencies = unpacked_graph["deps"]
-        annotations = unpacked_graph["annotations"]
+        dsk = dict(graph)
+
+        from distributed.utils_comm import unpack_remotedata
+
+        dependencies, dependents = get_deps(dsk)
+        annotations: dict = {}
+
+        # Remove `Future` objects from graph and note any future     dependencies
+        dsk2 = {}
+        fut_deps = {}
+        for k, v in dsk.items():
+            dsk2[k], futs = unpack_remotedata(v, byte_keys=True)
+            if futs:
+                fut_deps[k] = futs
+        dsk = dsk2
+
+        # - Add in deps for any tasks that depend on futures
+        for k, futures in fut_deps.items():
+            dependencies[k].update(f.key for f in futures)
+
+        dsk = {stringify(k): stringify(v, exclusive=graph) for k, v in dsk.items()}
+
+        from toolz import valmap
+
+        from distributed.worker import dumps_task
+
+        dsk = valmap(dumps_task, dsk)
+        # breakpoint()
+
+        dependencies = {
+            stringify(k): {stringify(dep) for dep in deps}
+            for k, deps in dependencies.items()
+        }
+
+        # dsk = unpacked_graph["dsk"]
+        # dependencies = unpacked_graph["deps"]
+        # annotations = unpacked_graph["annotations"]
 
         # Remove any self-dependencies (happens on test_publish_bag() and others)
         for k, v in dependencies.items():
