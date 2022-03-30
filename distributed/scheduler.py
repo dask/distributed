@@ -4679,7 +4679,7 @@ class Scheduler(SchedulerState, ServerNode):
         def process(x):
             if callable(x):
                 return {stringify(k): x(k) for k in pre_stringify}
-            elif isinstance(x, int):
+            elif isinstance(x, (int, dict, tuple)):
                 return {k: x for k in dsk}
             elif isinstance(x, dict):
                 return keymap(stringify, x)
@@ -4691,6 +4691,8 @@ class Scheduler(SchedulerState, ServerNode):
             resources = process(resources)
         if user_priority:
             user_priority = process(user_priority)
+        if restrictions:
+            restrictions = process(restrictions)
 
         from distributed.worker import dumps_task
 
