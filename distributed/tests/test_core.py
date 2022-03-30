@@ -89,6 +89,38 @@ def test_server_status_is_always_enum():
         server.status = "running"
 
 
+@pytest.mark.asyncio
+async def test_partial_inherit():
+    """This should be removed prior to final merge"""
+    import inspect
+    from functools import partial
+
+    class Handler(partial):
+        """
+        partial properly supports inspect.iscoroutinefunction
+        Inheriting from it would be nice because it means we
+        wouldn't have to special case RPCHandler in various
+        places in the code.
+        """
+
+    async def f(a, b=None):
+        None
+
+    f_handler = Handler(f)
+    assert inspect.iscoroutinefunction(f)
+    assert inspect.iscoroutinefunction(f_handler)
+    assert await f(1, b=2) == await f_handler(1, b=2)
+
+    # TODO(sjperkins)
+    # This breaks in real code for some reason and I can't figure it out
+    # Create a real server to minimally reproduce this
+    from distributed.worker import Worker
+
+    close_handler = Handler(Worker.handle_stream)
+    assert inspect.iscoroutinefunction(Worker.handle_stream)
+    assert inspect.iscoroutinefunction(close_handler)
+
+
 def test_server_assign_assign_enum_is_quiet():
     """That would be the default in user code"""
     server = Server({})
