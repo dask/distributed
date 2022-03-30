@@ -3754,8 +3754,8 @@ async def test_reconnect():
         except CancelledError:
             break
 
-    await w.close()
-    await c.close()
+    await w.close(report=False)
+    await c._close(fast=True)
 
 
 class UnhandledException(Exception):
