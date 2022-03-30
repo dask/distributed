@@ -34,6 +34,7 @@ repos:
     rev: v0.942
     hooks:
       - id: mypy
+        # Override default --ignore-missing-imports
         args: []
         additional_dependencies:
           # Type stubs
