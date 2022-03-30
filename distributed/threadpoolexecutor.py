@@ -91,6 +91,7 @@ class ThreadPoolExecutor(thread.ThreadPoolExecutor):
             t.start()
 
     def submit(self, fn, /, *args, **kwargs):
+        # NOTE: concurrent.futures._base.Executor.map() defers to submit()
         return super().submit(copy_context().run, fn, *args, **kwargs)
 
     def shutdown(self, wait=True, timeout=None):
