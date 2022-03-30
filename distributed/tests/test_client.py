@@ -6712,7 +6712,6 @@ async def test_annotations_retries(c, s, a, b):
         x = await x.persist()
 
     assert all(ts.retries == 2 for ts in s.tasks.values())
-    assert all(ts.annotations == {"retries": 2} for ts in s.tasks.values())
 
 
 @gen_cluster(client=True)

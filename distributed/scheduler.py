@@ -4676,11 +4676,11 @@ class Scheduler(SchedulerState, ServerNode):
         pre_stringify = set(dsk)
         dsk = {stringify(k): stringify(v, exclusive=graph) for k, v in dsk.items()}
 
-        def process(x):
+        def process(x, keys=dsk, string_keys=pre_stringify):
             if callable(x):
-                return {stringify(k): x(k) for k in pre_stringify}
-            elif isinstance(x, (int, dict, tuple)):
-                return {k: x for k in dsk}
+                return {stringify(k): x(k) for k in keys}
+            elif isinstance(x, (int, dict, tuple, set)):
+                return {stringify(k): x for k in string_keys or map(stringify, keys)}
             elif isinstance(x, dict):
                 return keymap(stringify, x)
             raise TypeError()
@@ -4693,6 +4693,24 @@ class Scheduler(SchedulerState, ServerNode):
             user_priority = process(user_priority)
         if restrictions:
             restrictions = process(restrictions)
+
+        for layer in graph.layers.values():
+            if layer.annotations and "retries" in layer.annotations:
+                retries = retries or {}
+                d = process(layer.annotations["retries"], keys=layer, string_keys=None)
+                retries.update(d)  # TODO: there is an implicit ordering here
+            if layer.annotations and "user_priority" in layer.annotations:
+                user_priority = user_priority or {}
+                d = process(
+                    layer.annotations["user_priority"], keys=layer, string_keys=None
+                )
+                user_priority.update(d)  # TODO: there is an implicit ordering here
+            if layer.annotations and "resources" in layer.annotations:
+                resources = resources or {}
+                d = process(
+                    layer.annotations["resources"], keys=layer, string_keys=None
+                )
+                resources.update(d)  # TODO: there is an implicit ordering here
 
         from distributed.worker import dumps_task
 
