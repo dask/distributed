@@ -6,6 +6,7 @@ import logging
 import sys
 import threading
 import traceback
+import types
 import uuid
 import warnings
 import weakref
@@ -14,7 +15,7 @@ from collections.abc import Container
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import Callable, ClassVar
+from typing import Callable, ClassVar, TypedDict, TypeVar
 
 import tblib
 from tlz import merge
@@ -1208,7 +1209,7 @@ def coerce_to_address(o):
     return normalize_address(o)
 
 
-def collect_causes(e):
+def collect_causes(e: BaseException) -> list[BaseException]:
     causes = []
     while e.__cause__ is not None:
         causes.append(e.__cause__)
@@ -1216,7 +1217,15 @@ def collect_causes(e):
     return causes
 
 
-def error_message(e, status="error"):
+class ErrorMessage(TypedDict):
+    status: str
+    exception: protocol.to_serialize
+    traceback: protocol.to_serialize | None
+    exception_text: str
+    traceback_text: str
+
+
+def error_message(e: BaseException, status="error") -> ErrorMessage:
     """Produce message to send back given an exception has occurred
 
     This does the following:
@@ -1237,33 +1246,38 @@ def error_message(e, status="error"):
     tb_text = "".join(traceback.format_tb(tb))
     e = truncate_exception(e, MAX_ERROR_LEN)
     try:
-        e_serialized = protocol.pickle.dumps(e)
-        protocol.pickle.loads(e_serialized)
+        e_bytes = protocol.pickle.dumps(e)
+        protocol.pickle.loads(e_bytes)
     except Exception:
-        e_serialized = protocol.pickle.dumps(Exception(repr(e)))
-    e_serialized = protocol.to_serialize(e_serialized)
+        e_bytes = protocol.pickle.dumps(Exception(repr(e)))
+    e_serialized = protocol.to_serialize(e_bytes)
 
     try:
-        tb_serialized = protocol.pickle.dumps(tb)
-        protocol.pickle.loads(tb_serialized)
+        tb_bytes = protocol.pickle.dumps(tb)
+        protocol.pickle.loads(tb_bytes)
     except Exception:
-        tb_serialized = protocol.pickle.dumps(tb_text)
+        tb_bytes = protocol.pickle.dumps(tb_text)
 
-    if len(tb_serialized) > MAX_ERROR_LEN:
-        tb_result = None
+    if len(tb_bytes) > MAX_ERROR_LEN:
+        tb_serialized = None
     else:
-        tb_result = protocol.to_serialize(tb_serialized)
+        tb_serialized = protocol.to_serialize(tb_bytes)
 
     return {
         "status": status,
         "exception": e_serialized,
-        "traceback": tb_result,
+        "traceback": tb_serialized,
         "exception_text": repr(e),
         "traceback_text": tb_text,
     }
 
 
-def clean_exception(exception, traceback=None, **kwargs):
+E = TypeVar("E", bound=BaseException)
+
+
+def clean_exception(
+    exception: E, traceback: types.TracebackType | None = None, **kwargs
+) -> tuple[type[E], E, types.TracebackType | None]:
     """Reraise exception and traceback. Deserialize if necessary
 
     See Also

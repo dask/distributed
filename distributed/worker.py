@@ -2069,8 +2069,8 @@ class Worker(ServerNode):
     def transition_cancelled_error(
         self,
         ts: TaskState,
-        exception: bytes,
-        traceback: bytes,
+        exception: to_serialize,
+        traceback: to_serialize | None,
         exception_text: str,
         traceback_text: str,
         *,
@@ -2103,8 +2103,8 @@ class Worker(ServerNode):
     def transition_generic_error(
         self,
         ts: TaskState,
-        exception: bytes,
-        traceback: bytes,
+        exception: to_serialize,
+        traceback: to_serialize | None,
         exception_text: str,
         traceback_text: str,
         *,
@@ -2130,8 +2130,8 @@ class Worker(ServerNode):
     def transition_executing_error(
         self,
         ts: TaskState,
-        exception: bytes,
-        traceback: bytes,
+        exception: to_serialize,
+        traceback: to_serialize | None,
         exception_text: str,
         traceback_text: str,
         *,
@@ -2382,8 +2382,8 @@ class Worker(ServerNode):
     def transition_flight_error(
         self,
         ts: TaskState,
-        exception: bytes,
-        traceback: bytes,
+        exception: to_serialize,
+        traceback: to_serialize | None,
         exception_text: str,
         traceback_text: str,
         *,
@@ -3252,7 +3252,7 @@ class Worker(ServerNode):
                     if not catch_errors:
                         raise
                     msg = error_message(e)
-                    return msg
+                    return cast("dict[str, Any]", msg)
 
             return {"status": "OK"}
 
@@ -3267,7 +3267,7 @@ class Worker(ServerNode):
                         result = await result
             except Exception as e:
                 msg = error_message(e)
-                return msg
+                return cast("dict[str, Any]", msg)
 
             return {"status": "OK"}
 
@@ -3346,11 +3346,10 @@ class Worker(ServerNode):
             logger.error("Could not deserialize task", exc_info=True)
             self.log.append((ts.key, "deserialize-error", stimulus_id, time()))
             emsg = error_message(e)
-            emsg.pop("status")
             self.transition(
                 ts,
                 "error",
-                **emsg,
+                **{k: v for k, v in emsg.items() if k != "status"},
                 stimulus_id=stimulus_id,
             )
             raise
@@ -3522,11 +3521,10 @@ class Worker(ServerNode):
                 "Exception during execution of task %s.", ts.key, exc_info=True
             )
             emsg = error_message(exc)
-            emsg.pop("status")
             self.transition(
                 ts,
                 "error",
-                **emsg,
+                **{k: v for k, v in emsg.items() if k != "status"},
                 stimulus_id=stimulus_id,
             )
         finally:

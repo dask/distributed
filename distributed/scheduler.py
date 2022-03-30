@@ -1475,8 +1475,8 @@ class TaskState:
     _nbytes: Py_ssize_t
     _type: str  # str | None
     _exception: object
-    _exception_text: str
     _traceback: object
+    _exception_text: str
     _traceback_text: str
     _exception_blame: "TaskState"  # TaskState | None"
     _erred_on: set
