@@ -66,7 +66,7 @@ from distributed.client import (
 from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import Status
+from distributed.core import Server, Status
 from distributed.metrics import time
 from distributed.objects import HasWhat, WhoHas
 from distributed.scheduler import (
@@ -94,7 +94,6 @@ from distributed.utils_test import (
     inc,
     map_varying,
     nodebug,
-    popen,
     pristine_loop,
     randominc,
     save_sys_modules,
@@ -3700,26 +3699,33 @@ async def test_scatter_raises_if_no_workers(c, s):
         await c.scatter(1, timeout=0.5)
 
 
-@pytest.mark.slow
-@gen_test(timeout=60)
+@gen_test()
 async def test_reconnect():
+    async def hard_stop(s):
+        for pc in s.periodic_callbacks.values():
+            pc.stop()
+
+        s.stop_services()
+        for comm in list(s.stream_comms.values()):
+            comm.abort()
+        for comm in list(s.client_comms.values()):
+            comm.abort()
+
+        await s.rpc.close()
+        s.stop()
+        await Server.close(s)
+
+    port = 9393
     futures = []
-    w = Worker("127.0.0.1", 9393)
+    w = Worker(f"127.0.0.1:{port}")
     futures.append(asyncio.ensure_future(w.start()))
 
-    scheduler_cli = [
-        "dask-scheduler",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        "9393",
-        "--no-dashboard",
-    ]
-    with popen(scheduler_cli):
-        c = await Client("127.0.0.1:9393", asynchronous=True)
-        await c.wait_for_workers(1, timeout=10)
-        x = c.submit(inc, 1)
-        assert (await x) == 2
+    s = await Scheduler(port=port)
+    c = await Client(f"127.0.0.1:{port}", asynchronous=True)
+    await c.wait_for_workers(1, timeout=10)
+    x = c.submit(inc, 1)
+    assert (await x) == 2
+    await hard_stop(s)
 
     start = time()
     while c.status != "connecting":
@@ -3730,18 +3736,19 @@ async def test_reconnect():
     with pytest.raises(CancelledError):
         await x
 
-    with popen(scheduler_cli):
-        start = time()
-        while c.status != "running":
-            await asyncio.sleep(0.1)
-            assert time() < start + 10
-        start = time()
-        while len(await c.nthreads()) != 1:
-            await asyncio.sleep(0.05)
-            assert time() < start + 10
+    s = await Scheduler(port=port)
+    start = time()
+    while c.status != "running":
+        await asyncio.sleep(0.1)
+        assert time() < start + 10
+    start = time()
+    while len(await c.nthreads()) != 1:
+        await asyncio.sleep(0.05)
+        assert time() < start + 10
 
-        x = c.submit(inc, 1)
-        assert (await x) == 2
+    x = c.submit(inc, 1)
+    assert (await x) == 2
+    await hard_stop(s)
 
     start = time()
     while True:
