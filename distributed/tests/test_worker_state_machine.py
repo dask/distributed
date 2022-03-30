@@ -6,10 +6,12 @@ from distributed.utils import recursive_to_dict
 from distributed.worker_state_machine import (
     Instruction,
     ReleaseWorkerDataMsg,
+    RescheduleMsg,
     SendMessageToScheduler,
     StateMachineEvent,
     TaskState,
     UniqueTaskHeap,
+    merge_recs_instructions,
 )
 
 
@@ -115,3 +117,17 @@ def test_sendmsg_to_dict():
 def test_event_slots(cls):
     smsg = cls(**dict.fromkeys(cls.__annotations__), stimulus_id="test")
     assert not hasattr(smsg, "__dict__")
+
+
+def test_merge_recs_instructions():
+    x = TaskState("x")
+    y = TaskState("y")
+    instr1 = RescheduleMsg(key="foo", worker="a")
+    instr2 = RescheduleMsg(key="bar", worker="b")
+    assert merge_recs_instructions(
+        ({x: "memory"}, [instr1]),
+        ({y: "released"}, [instr2]),
+    ) == (
+        {x: "memory", y: "released"},
+        [instr1, instr2],
+    )
