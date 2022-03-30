@@ -27,6 +27,7 @@ We represent this tree as a nested dictionary with the following form:
 from __future__ import annotations
 
 import bisect
+import dis
 import linecache
 import sys
 import threading
@@ -59,21 +60,41 @@ def identifier(frame):
         )
 
 
+# work around some frames lacking an f_lineo eg: https://bugs.python.org/issue47085
+def _f_lineno(frame):
+    f_lineno = frame.f_lineno
+    if f_lineno is not None:
+        return f_lineno
+
+    f_lasti = frame.f_lasti
+    code = frame.f_code
+    prev_line = code.co_firstlineno
+
+    for start, next_line in dis.findlinestarts(code):
+        if f_lasti < start:
+            return prev_line
+        prev_line = next_line
+
+    return prev_line
+
+
 def repr_frame(frame):
     """Render a frame as a line for inclusion into a text traceback"""
     co = frame.f_code
-    text = f'  File "{co.co_filename}", line {frame.f_lineno}, in {co.co_name}'
-    line = linecache.getline(co.co_filename, frame.f_lineno, frame.f_globals).lstrip()
+    f_lineno = _f_lineno(frame)
+    text = f'  File "{co.co_filename}", line {f_lineno}, in {co.co_name}'
+    line = linecache.getline(co.co_filename, f_lineno, frame.f_globals).lstrip()
     return text + "\n\t" + line
 
 
 def info_frame(frame):
     co = frame.f_code
-    line = linecache.getline(co.co_filename, frame.f_lineno, frame.f_globals).lstrip()
+    f_lineno = _f_lineno(frame)
+    line = linecache.getline(co.co_filename, f_lineno, frame.f_globals).lstrip()
     return {
         "filename": co.co_filename,
         "name": co.co_name,
-        "line_number": frame.f_lineno,
+        "line_number": f_lineno,
         "line": line,
     }
 
