@@ -2572,7 +2572,12 @@ class Worker(ServerNode):
         }
 
     def story(self, *keys_or_tasks: str | TaskState) -> list[tuple]:
-        keys = {e.key if isinstance(e, TaskState) else e for e in keys_or_tasks}
+        keys = set(
+            map(
+                stringify,
+                (e.key if isinstance(e, TaskState) else e for e in keys_or_tasks),
+            )
+        )
         return worker_story(keys, self.log)
 
     def ensure_communicating(self) -> None:

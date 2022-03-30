@@ -49,7 +49,14 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask.highlevelgraph import HighLevelGraph
-from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta, tmpfile
+from dask.utils import (
+    format_bytes,
+    format_time,
+    parse_bytes,
+    parse_timedelta,
+    stringify,
+    tmpfile,
+)
 from dask.widgets import get_template
 
 from distributed import cluster_dump, preloading, profile
@@ -7603,7 +7610,9 @@ class Scheduler(SchedulerState, ServerNode):
 
     def story(self, *keys):
         """Get all transitions that touch one of the input keys"""
-        keys = {key.key if isinstance(key, TaskState) else key for key in keys}
+        keys = set(
+            map(stringify, (k.key if isinstance(k, TaskState) else k for k in keys))
+        )
         return scheduler_story(keys, self.transition_log)
 
     transition_story = story
