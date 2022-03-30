@@ -108,6 +108,7 @@ from distributed.worker_state_machine import (
     PROCESSING,
     READY,
     AddKeysMsg,
+    AlreadyCancelledEvent,
     CancelComputeEvent,
     Execute,
     ExecuteFailureEvent,
@@ -3428,7 +3429,11 @@ class Worker(ServerNode):
         if not ts:
             return None
         if ts.state == "cancelled":
-            return CancelComputeEvent(key=ts.key, stimulus_id=stimulus_id)
+            logger.debug(
+                "Trying to execute task %s which is not in executing state anymore",
+                ts,
+            )
+            return AlreadyCancelledEvent(key=ts.key, stimulus_id=stimulus_id)
 
         try:
             if self.validate:
@@ -3550,7 +3555,25 @@ class Worker(ServerNode):
         raise TypeError(ev)  # pragma: nocover
 
     @handle_event.register
+    def _(self, ev: EnsureComputingEvent) -> RecsInstrs:
+        """Let various methods of worker give an artificial 'kick' to _ensure_computing.
+        This is a temporary hack to be removed as part of
+        https://github.com/dask/distributed/issues/5894.
+        """
+        return self._ensure_computing()
+
+    @handle_event.register
+    def _(self, ev: UnpauseEvent) -> RecsInstrs:
+        """Emerge from paused status. Do not send this event directly. Instead, just set
+        Worker.status back to running.
+        """
+        assert self.status == Status.running
+        self.ensure_communicating()
+        return self._ensure_computing()
+
+    @handle_event.register
     def _(self, ev: CancelComputeEvent) -> RecsInstrs:
+        """Scheduler requested to cancel a task"""
         ts = self.tasks.get(ev.key)
         if not ts or ts.state not in READY | {"waiting"}:
             return {}, []
@@ -3559,11 +3582,21 @@ class Worker(ServerNode):
         # All possible dependents of ts should not be in state Processing on
         # scheduler side and therefore should not be assigned to a worker, yet.
         assert not ts.dependents
+        return {ts: "released"}, []
+
+    @handle_event.register
+    def _(self, ev: AlreadyCancelledEvent) -> RecsInstrs:
+        """Task is already cancelled by the time execute() runs"""
+        # key *must* be still in tasks. Releasing it directly is forbidden
+        # without going through cancelled
+        ts = self.tasks.get(ev.key)  # type: ignore
+        assert ts, self.story(ev.key)
         ts.done = True
         return {ts: "released"}, []
 
     @handle_event.register
     def _(self, ev: ExecuteSuccessEvent) -> RecsInstrs:
+        """Task completed successfully"""
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
         ts = self.tasks.get(ev.key)  # type: ignore
@@ -3577,6 +3610,7 @@ class Worker(ServerNode):
 
     @handle_event.register
     def _(self, ev: ExecuteFailureEvent) -> RecsInstrs:
+        """Task execution failed"""
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
         ts = self.tasks.get(ev.key)  # type: ignore
@@ -3600,6 +3634,7 @@ class Worker(ServerNode):
 
     @handle_event.register
     def _(self, ev: RescheduleEvent) -> RecsInstrs:
+        """Task raised Reschedule exception while it was running"""
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
         ts = self.tasks.get(ev.key)  # type: ignore

@@ -385,6 +385,12 @@ class CancelComputeEvent(StateMachineEvent):
     key: str
 
 
+@dataclass
+class AlreadyCancelledEvent(StateMachineEvent):
+    __slots__ = ("key",)
+    key: str
+
+
 # Not to be confused with RescheduleMsg above or the distributed.Reschedule Exception
 @dataclass
 class RescheduleEvent(StateMachineEvent):
