@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import gc
 import logging
 import os
 import uuid
@@ -338,7 +337,6 @@ def test_weakref_cache(tmpdir, cls, expect_cached, size):
     # the same id as a deleted one
     id_x = x.id
     del x
-    gc.collect()  # Only needed on pypy
 
     if size < 100:
         buf["y"]
