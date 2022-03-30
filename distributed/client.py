@@ -115,7 +115,10 @@ _global_client_index = [0]
 
 _current_client = ContextVar("_current_client", default=None)
 
-DEFAULT_EXTENSIONS = [PubSubClientExtension]
+DEFAULT_EXTENSIONS = {
+    "pubsub": PubSubClientExtension,
+}
+
 # Placeholder used in the get_dataset function(s)
 NO_DEFAULT_PLACEHOLDER = "_no_default_"
 
@@ -928,8 +931,9 @@ class Client(SyncMethodMixin):
             server=self,
         )
 
-        for ext in extensions:
-            ext(self)
+        self.extensions = {
+            name: extension(self) for name, extension in extensions.items()
+        }
 
         preload = dask.config.get("distributed.client.preload")
         preload_argv = dask.config.get("distributed.client.preload-argv")
@@ -3930,8 +3934,8 @@ class Client(SyncMethodMixin):
         self,
         filename: str = "dask-cluster-dump",
         write_from_scheduler: bool | None = None,
-        exclude: Collection[str] = ("run_spec",),
-        format: Literal["msgpack", "yaml"] = "msgpack",
+        exclude: Collection[str] = cluster_dump.DEFAULT_CLUSTER_DUMP_EXCLUDE,
+        format: Literal["msgpack", "yaml"] = cluster_dump.DEFAULT_CLUSTER_DUMP_FORMAT,
         **storage_options,
     ):
         filename = str(filename)

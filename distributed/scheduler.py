@@ -57,13 +57,15 @@ from distributed import versions as version_module
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
 from distributed.comm import (
+    Comm,
+    CommClosedError,
     get_address_host,
     normalize_address,
     resolve_address,
     unparse_host_port,
 )
 from distributed.comm.addressing import addresses_from_user_args
-from distributed.core import CommClosedError, Status, clean_exception, rpc, send_recv
+from distributed.core import Status, clean_exception, rpc, send_recv
 from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
@@ -172,19 +174,20 @@ DEFAULT_DATA_SIZE = declare(
     Py_ssize_t, parse_bytes(dask.config.get("distributed.scheduler.default-data-size"))
 )
 
-DEFAULT_EXTENSIONS = [
-    LockExtension,
-    MultiLockExtension,
-    PublishExtension,
-    ReplayTaskScheduler,
-    QueueExtension,
-    VariableExtension,
-    PubSubSchedulerExtension,
-    SemaphoreExtension,
-    EventExtension,
-    ActiveMemoryManagerExtension,
-    MemorySamplerExtension,
-]
+DEFAULT_EXTENSIONS = {
+    "locks": LockExtension,
+    "multi_locks": MultiLockExtension,
+    "publish": PublishExtension,
+    "replay-tasks": ReplayTaskScheduler,
+    "queues": QueueExtension,
+    "variables": VariableExtension,
+    "pubsub": PubSubSchedulerExtension,
+    "semaphores": SemaphoreExtension,
+    "events": EventExtension,
+    "amm": ActiveMemoryManagerExtension,
+    "memory_sampler": MemorySamplerExtension,
+    "stealing": WorkStealing,
+}
 
 ALL_TASK_STATES = declare(
     set, {"released", "waiting", "no-worker", "processing", "erred", "memory"}
@@ -4013,11 +4016,13 @@ class Scheduler(SchedulerState, ServerNode):
             self.periodic_callbacks["idle-timeout"] = pc
 
         if extensions is None:
-            extensions = list(DEFAULT_EXTENSIONS)
-            if dask.config.get("distributed.scheduler.work-stealing"):
-                extensions.append(WorkStealing)
-        for ext in extensions:
-            ext(self)
+            extensions = DEFAULT_EXTENSIONS.copy()
+            if not dask.config.get("distributed.scheduler.work-stealing"):
+                if "stealing" in extensions:
+                    del extensions["stealing"]
+
+        for name, extension in extensions.items():
+            self.extensions[name] = extension(self)
 
         setproctitle("dask-scheduler [not started]")
         Scheduler._instances.add(self)
@@ -4240,6 +4245,11 @@ class Scheduler(SchedulerState, ServerNode):
         if self.status in (Status.closing, Status.closed):
             await self.finished()
             return
+
+        await asyncio.gather(
+            *[plugin.before_close() for plugin in list(self.plugins.values())]
+        )
+
         self.status = Status.closing
 
         logger.info("Scheduler closing...")
@@ -4328,6 +4338,7 @@ class Scheduler(SchedulerState, ServerNode):
         host_info: dict = None,
         metrics: dict,
         executing: dict = None,
+        extensions: dict = None,
     ):
         parent: SchedulerState = cast(SchedulerState, self)
         address = self.coerce_address(address, resolve_address)
@@ -4414,6 +4425,10 @@ class Scheduler(SchedulerState, ServerNode):
 
         if resources:
             self.add_resources(worker=address, resources=resources)
+
+        if extensions:
+            for name, data in extensions.items():
+                self.extensions[name].heartbeat(ws, data)
 
         return {
             "status": "OK",
@@ -5449,7 +5464,7 @@ class Scheduler(SchedulerState, ServerNode):
                         "Closed comm %r while trying to write %s", c, msg, exc_info=True
                     )
 
-    async def add_client(self, comm, client=None, versions=None):
+    async def add_client(self, comm: Comm, client: str, versions: dict) -> None:
         """Add client to network
 
         We listen to all future messages from this Comm.
@@ -5498,7 +5513,7 @@ class Scheduler(SchedulerState, ServerNode):
             except TypeError:  # comm becomes None during GC
                 pass
 
-    def remove_client(self, client=None):
+    def remove_client(self, client: str) -> None:
         """Remove client from network"""
         parent: SchedulerState = cast(SchedulerState, self)
         if self.status == Status.running:

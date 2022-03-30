@@ -14,6 +14,9 @@ from distributed.compatibility import to_thread
 from distributed.stories import scheduler_story as _scheduler_story
 from distributed.stories import worker_story as _worker_story
 
+DEFAULT_CLUSTER_DUMP_FORMAT: Literal["msgpack" | "yaml"] = "msgpack"
+DEFAULT_CLUSTER_DUMP_EXCLUDE: Collection[str] = ("run_spec",)
+
 
 def _tuple_to_list(node):
     if isinstance(node, (list, tuple)):
@@ -27,7 +30,7 @@ def _tuple_to_list(node):
 async def write_state(
     get_state: Callable[[], Awaitable[Any]],
     url: str,
-    format: Literal["msgpack", "yaml"],
+    format: Literal["msgpack", "yaml"] = DEFAULT_CLUSTER_DUMP_FORMAT,
     **storage_options: dict[str, Any],
 ) -> None:
     "Await a cluster dump, then serialize and write it to a path"

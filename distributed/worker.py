@@ -141,7 +141,10 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 no_value = "--no-value-sentinel--"
 
-DEFAULT_EXTENSIONS: list[type] = [PubSubWorkerExtension, ShuffleWorkerExtension]
+DEFAULT_EXTENSIONS: dict[str, type] = {
+    "pubsub": PubSubWorkerExtension,
+    "shuffle": ShuffleWorkerExtension,
+}
 
 DEFAULT_METRICS: dict[str, Callable[[Worker], Any]] = {}
 
@@ -437,7 +440,7 @@ class Worker(ServerNode):
         security: Security | dict[str, Any] | None = None,
         contact_address: str | None = None,
         heartbeat_interval: Any = "1s",
-        extensions: list[type] | None = None,
+        extensions: dict[str, type] | None = None,
         metrics: Mapping[str, Callable[[Worker], Any]] = DEFAULT_METRICS,
         startup_information: Mapping[
             str, Callable[[Worker], Any]
@@ -790,8 +793,9 @@ class Worker(ServerNode):
 
         if extensions is None:
             extensions = DEFAULT_EXTENSIONS
-        for ext in extensions:
-            ext(self)
+        self.extensions = {
+            name: extension(self) for name, extension in extensions.items()
+        }
 
         self.memory_manager = WorkerMemoryManager(
             self,
@@ -1132,6 +1136,11 @@ class Worker(ServerNode):
                     for key in self.active_keys
                     if key in self.tasks
                 },
+                extensions={
+                    name: extension.heartbeat()
+                    for name, extension in self.extensions.items()
+                    if hasattr(extension, "heartbeat")
+                },
             )
             end = time()
             middle = (start + end) / 2
@@ -1413,6 +1422,10 @@ class Worker(ServerNode):
 
             for preload in self.preloads:
                 await preload.teardown()
+
+            for extension in self.extensions.values():
+                if hasattr(extension, "close"):
+                    await extension.close()
 
             if nanny and self.nanny:
                 with self.rpc(self.nanny) as r:
@@ -3420,17 +3433,22 @@ class Worker(ServerNode):
 
             args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
 
-            if ts.annotations is not None and "executor" in ts.annotations:
-                executor = ts.annotations["executor"]
-            else:
+            try:
+                executor = ts.annotations["executor"]  # type: ignore
+            except (TypeError, KeyError):
                 executor = "default"
-            assert executor in self.executors
-            assert key == ts.key
+            try:
+                e = self.executors[executor]
+            except KeyError:
+                raise ValueError(
+                    f"Invalid executor {executor!r}; "
+                    f"expected one of: {sorted(self.executors)}"
+                )
+
             self.active_keys.add(ts.key)
 
             result: dict
             try:
-                e = self.executors[executor]
                 ts.start_time = time()
                 if iscoroutinefunction(function):
                     result = await apply_function_async(
