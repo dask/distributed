@@ -37,6 +37,7 @@ async def test_nanny_worker_ports(c, s):
         assert d["workers"]["tcp://127.0.0.1:9684"]["nanny"] == "tcp://127.0.0.1:5273"
 
 
+@pytest.mark.skip(reason="flaky, probably due to popen")
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[])
 async def test_nanny_worker_port_range(c, s):
