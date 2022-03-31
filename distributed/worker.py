@@ -2581,6 +2581,7 @@ class Worker(ServerNode):
         return worker_story(keys, self.log)
 
     def ensure_communicating(self) -> None:
+        STIMULUS_ID.set(f"ensure-communicating-{time()}")
         skipped_worker_in_flight = []
 
         while self.data_needed and (
@@ -3346,6 +3347,7 @@ class Worker(ServerNode):
         if self.status in (Status.paused, Status.closing_gracefully):
             return
         try:
+            STIMULUS_ID.set(f"ensure-computing-{time()}")
             while self.constrained and self.executing_count < self.nthreads:
                 key = self.constrained[0]
                 ts = self.tasks.get(key, None)

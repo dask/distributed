@@ -1688,8 +1688,8 @@ async def test_story_with_deps(c, s, a, b):
 
     # Story now includes randomized stimulus_ids and timestamps.
     stimulus_ids = {ev[-2] for ev in story}
-    # FIXME(sjperkins)
-    assert len(stimulus_ids) == 3, stimulus_ids
+    # NOTE(sjperkins): There's an extra ensure-communicating event now
+    assert len(stimulus_ids) == 4, stimulus_ids
     # This is a simple transition log
     expected = [
         (key, "compute-task"),
