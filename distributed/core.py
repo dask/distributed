@@ -613,10 +613,6 @@ class Server:
                                 closed = True
                                 break
                             handler = self.stream_handlers[op]
-                            if op == "close":
-                                print(
-                                    f"{op} {handler} {is_coroutine_function(handler)}"
-                                )
                             if is_coroutine_function(handler):
                                 self.loop.add_callback(handler, **merge(extra, msg))
                                 await gen.sleep(0)
