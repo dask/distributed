@@ -4679,10 +4679,11 @@ class Scheduler(SchedulerState, ServerNode):
         def process(x, keys=dsk, string_keys=pre_stringify):
             if callable(x):
                 return {stringify(k): x(k) for k in keys}
-            elif isinstance(x, (int, dict, tuple, set)):
+            elif isinstance(x, (int, dict, tuple, set, list)):
                 return {stringify(k): x for k in string_keys or map(stringify, keys)}
             elif isinstance(x, dict):
                 return keymap(stringify, x)
+            breakpoint()
             raise TypeError()
 
         if retries:
@@ -4711,6 +4712,12 @@ class Scheduler(SchedulerState, ServerNode):
                     layer.annotations["resources"], keys=layer, string_keys=None
                 )
                 resources.update(d)  # TODO: there is an implicit ordering here
+            if layer.annotations and "workers" in layer.annotations:
+                if isinstance(layer.annotations["workers"], (str, int)):
+                    layer.annotations["workers"] = [layer.annotations["workers"]]
+                restrictions = restrictions or {}
+                d = process(layer.annotations["workers"], keys=layer, string_keys=None)
+                restrictions.update(d)  # TODO: there is an implicit ordering here
 
         from distributed.worker import dumps_task
 

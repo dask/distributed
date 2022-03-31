@@ -1764,6 +1764,12 @@ class Client(SyncMethodMixin):
 
         if isinstance(workers, (str, Number)):
             workers = [workers]
+        if workers is not None:
+            restrictions = workers
+            loose_restrictions = [skey] if allow_other_workers else []
+        else:
+            restrictions = {}
+            loose_restrictions = []
 
         if kwargs:
             dsk = {skey: (apply, func, list(args), kwargs)}
@@ -1773,12 +1779,12 @@ class Client(SyncMethodMixin):
         futures = self._graph_to_futures(
             dsk,
             [skey],
-            workers=workers,
-            allow_other_workers=allow_other_workers,
             priority={skey: 0},
             user_priority=priority,
             resources=resources,
             retries=retries,
+            restrictions=restrictions,
+            loose_restrictions=loose_restrictions,
             fifo_timeout=fifo_timeout,
             actors=actor,
         )
@@ -1960,19 +1966,30 @@ class Client(SyncMethodMixin):
 
         if isinstance(workers, (str, Number)):
             workers = [workers]
-        if workers is not None and not isinstance(workers, (list, set)):
+        if isinstance(workers, (list, set)):
+            restrictions = workers
+        elif workers is None:
+            restrictions = {}
+        else:
             raise TypeError("Workers must be a list or set of workers or None")
+
+        if allow_other_workers not in (True, False, None):
+            raise TypeError("allow_other_workers= must be True or    False")
+        if allow_other_workers is True:
+            loose_restrictions = set(keys)
+        else:
+            loose_restrictions = set()
 
         internal_priority = dict(zip(keys, range(len(keys))))
 
         futures = self._graph_to_futures(
             dsk,
             keys,
-            workers=workers,
-            allow_other_workers=allow_other_workers,
             priority=internal_priority,
             resources=resources,
             retries=retries,
+            restrictions=restrictions,
+            loose_restrictions=loose_restrictions,
             user_priority=priority,
             fifo_timeout=fifo_timeout,
             actors=actor,
@@ -2872,12 +2889,12 @@ class Client(SyncMethodMixin):
         self,
         dsk,
         keys,
-        workers=None,
-        allow_other_workers=None,
         priority=None,
         user_priority=0,
         resources=None,
         retries=None,
+        restrictions=None,
+        loose_restrictions=None,
         fifo_timeout=0,
         actors=None,
     ):
@@ -2890,13 +2907,6 @@ class Client(SyncMethodMixin):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
             annotations = {}
-            if workers:
-                if not isinstance(workers, (list, tuple, set)):
-                    workers = [workers]
-            if allow_other_workers not in (True, False, None):
-                raise TypeError("allow_other_workers= must be True, False, or None")
-            if allow_other_workers:
-                annotations["allow_other_workers"] = allow_other_workers
 
             # Merge global and local annotations
             annotations = merge(dask.config.get("annotations", {}), annotations)
@@ -2921,7 +2931,8 @@ class Client(SyncMethodMixin):
                     "retries": retries,
                     "resources": resources,
                     "user_priority": user_priority,
-                    "restrictions": workers,
+                    "restrictions": restrictions,
+                    "loose_restrictions": loose_restrictions,
                 }
             )
             return futures
@@ -2999,13 +3010,20 @@ class Client(SyncMethodMixin):
         --------
         Client.compute : Compute asynchronous collections
         """
+        if isinstance(workers, (str, int)):
+            workers = [workers]
+        if allow_other_workers:
+            loose_restrictions = list(dsk)
+        else:
+            loose_restrictions = []
+
         futures = self._graph_to_futures(
             dsk,
             keys=set(flatten([keys])),
-            workers=workers,
-            allow_other_workers=allow_other_workers,
             resources=resources,
             fifo_timeout=fifo_timeout,
+            restrictions=workers,
+            loose_restrictions=loose_restrictions,
             retries=retries,
             user_priority=priority,
             actors=actors,
@@ -3212,14 +3230,21 @@ class Client(SyncMethodMixin):
         dependencies.update(dsk.dependencies)
         dsk = HighLevelGraph(layers, dependencies)
 
+        if isinstance(workers, (str, int)):
+            workers = [workers]
+        if allow_other_workers and workers is not None:
+            loose_restrictions = list(dsk)
+        else:
+            loose_restrictions = None
+
         futures_dict = self._graph_to_futures(
             dsk,
             names,
-            workers=workers,
-            allow_other_workers=allow_other_workers,
             resources=resources,
             retries=retries,
             user_priority=priority,
+            restrictions=workers,
+            loose_restrictions=loose_restrictions,
             fifo_timeout=fifo_timeout,
             actors=actors,
         )
@@ -3318,12 +3343,19 @@ class Client(SyncMethodMixin):
 
         names = {k for c in collections for k in flatten(c.__dask_keys__())}
 
+        if isinstance(workers, (str, int)):
+            workers = [workers]
+        if allow_other_workers and workers is not None:
+            loose_restrictions = list(dsk)
+        else:
+            loose_restrictions = None
+
         futures = self._graph_to_futures(
             dsk,
             names,
-            workers=workers,
-            allow_other_workers=allow_other_workers,
             resources=resources,
+            restrictions=workers,
+            loose_restrictions=loose_restrictions,
             retries=retries,
             user_priority=priority,
             fifo_timeout=fifo_timeout,
