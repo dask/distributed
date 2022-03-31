@@ -2918,6 +2918,14 @@ class Client(SyncMethodMixin):
 
             buffers = []
             out = pickle.dumps(dsk, buffer_callback=buffers.append)
+            buffers = [buffer.raw() for buffer in buffers]
+            nbytes = len(out) + sum(map(len, buffers))
+            if nbytes > 10_000_000:
+                warnings.warn(
+                    f"Sending large graph of {format_bytes(nbytes)}.\n"
+                    "This may cause some slowdown\n."
+                    "Consider scattering data ahead of time and using futures."
+                )
 
             self._send_to_scheduler(
                 {
@@ -2991,7 +2999,6 @@ class Client(SyncMethodMixin):
             Whether these tasks should exist on the worker as stateful actors.
             Specified on a global (True/False) or per-task (``{'x': True,
             'y': False}``) basis. See :doc:`actors` for additional details.
-
 
         Returns
         -------
