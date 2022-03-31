@@ -184,6 +184,8 @@ class MultiComm:
         """
         We don't expect any more data, wait until everything is flushed through
         """
+        if self._exception:
+            raise self._exception
         while self.shards:
             await asyncio.sleep(0.05)
 

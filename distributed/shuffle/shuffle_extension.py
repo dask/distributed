@@ -121,6 +121,7 @@ class Shuffle:
         self.transferred = False
         self.total_recvd = 0
         self.start_time = time.time()
+        self._exception: Exception | None = None
 
     @contextlib.contextmanager
     def time(self, name: str):
@@ -166,6 +167,8 @@ class Shuffle:
         # but barriers on other workers might still be running and sending us
         # data
         # assert not self.transferred, "`receive` called after barrier task"
+        if self._exception:
+            raise self._exception
         import pyarrow as pa
 
         self.total_recvd += sum(map(len, data))
@@ -189,7 +192,10 @@ class Shuffle:
                     for k, v in groups.items()
                 }
             )
-        await self.multi_file.put(groups)
+        try:
+            await self.multi_file.put(groups)
+        except Exception as e:
+            self._exception = e
 
     def add_partition(self, data: pd.DataFrame) -> None:
         with self.time("cpu"):

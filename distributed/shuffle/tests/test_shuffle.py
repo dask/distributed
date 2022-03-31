@@ -1,9 +1,11 @@
 import asyncio
 import io
+import os
 from collections import defaultdict
 
 import pandas as pd
 import pyarrow as pa
+import pytest
 
 import dask
 import dask.dataframe as dd
@@ -47,6 +49,29 @@ async def test_concurrent(c, s, a, b):
     x = await x
     y = await y
     assert x == y
+
+
+@gen_cluster(client=True)
+async def test_bad_disk(c, s, a, b):
+
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = out.persist()
+    while not a.extensions["shuffle"].shuffles:
+        await asyncio.sleep(0.01)
+    os.chmod(a.local_directory, 0o444)
+    while not b.extensions["shuffle"].shuffles:
+        await asyncio.sleep(0.01)
+    os.chmod(b.local_directory, 0o444)
+    with pytest.raises(PermissionError) as e:
+        out = await c.compute(out)
+
+    assert a.local_directory in str(e.value) or b.local_directory in str(e.value)
 
 
 @gen_cluster(client=True)

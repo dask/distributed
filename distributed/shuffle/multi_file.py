@@ -94,6 +94,7 @@ class MultiFile:
 
         self._communicate_future = asyncio.create_task(self.communicate())
         self._loop = loop or asyncio.get_event_loop()
+        self._exception = None
 
     @property
     def queue(self):
@@ -116,6 +117,9 @@ class MultiFile:
             A dictionary mapping destinations to lists of objects that should
             be written to that destination
         """
+        if self._exception:
+            raise self._exception
+
         this_size = 0
         for id, shard in data.items():
             size = self.sizeof(shard)
@@ -194,18 +198,19 @@ class MultiFile:
 
             self.active.add(id)
 
-            def _():
-                with open(
-                    self.directory / str(id), mode="ab", buffering=100_000_000
-                ) as f:
-                    for shard in shards:
-                        self.dump(shard, f)
-                    # os.fsync(f)  # TODO: maybe?
-
             start = time.time()
-            with self.time("write"):
-                _()
-            #     await offload(_)
+            try:
+                with self.time("write"):
+                    with open(
+                        self.directory / str(id), mode="ab", buffering=100_000_000
+                    ) as f:
+                        for shard in shards:
+                            self.dump(shard, f)
+                        # os.fsync(f)  # TODO: maybe?
+            except Exception as e:
+                self._exception = e
+                self._done = True
+
             stop = time.time()
 
             self.diagnostics["avg_size"] = (
@@ -225,6 +230,8 @@ class MultiFile:
 
     def read(self, id):
         """Read a complete file back into memory"""
+        if self._exception:
+            raise self._exception
         parts = []
 
         try:
@@ -251,6 +258,8 @@ class MultiFile:
 
     async def flush(self):
         """Wait until all writes are finished"""
+        if self._exception:
+            raise self._exception
         while self.shards:
             await asyncio.sleep(0.05)
 
