@@ -1219,8 +1219,8 @@ def collect_causes(e: BaseException) -> list[BaseException]:
 
 class ErrorMessage(TypedDict):
     status: str
-    exception: protocol.to_serialize
-    traceback: protocol.to_serialize | None
+    exception: protocol.Serialize
+    traceback: protocol.Serialize | None
     exception_text: str
     traceback_text: str
 

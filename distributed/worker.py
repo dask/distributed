@@ -68,7 +68,7 @@ from distributed.http import get_handlers
 from distributed.metrics import time
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
-from distributed.protocol import pickle, to_serialize
+from distributed.protocol import Serialize, pickle, to_serialize
 from distributed.pubsub import PubSubWorkerExtension
 from distributed.security import Security
 from distributed.shuffle import ShuffleWorkerExtension
@@ -2082,8 +2082,8 @@ class Worker(ServerNode):
     def transition_cancelled_error(
         self,
         ts: TaskState,
-        exception: to_serialize,
-        traceback: to_serialize | None,
+        exception: Serialize,
+        traceback: Serialize | None,
         exception_text: str,
         traceback_text: str,
         *,
@@ -2116,8 +2116,8 @@ class Worker(ServerNode):
     def transition_generic_error(
         self,
         ts: TaskState,
-        exception: to_serialize,
-        traceback: to_serialize | None,
+        exception: Serialize,
+        traceback: Serialize | None,
         exception_text: str,
         traceback_text: str,
         *,
@@ -2143,8 +2143,8 @@ class Worker(ServerNode):
     def transition_executing_error(
         self,
         ts: TaskState,
-        exception: to_serialize,
-        traceback: to_serialize | None,
+        exception: Serialize,
+        traceback: Serialize | None,
         exception_text: str,
         traceback_text: str,
         *,
@@ -2395,8 +2395,8 @@ class Worker(ServerNode):
     def transition_flight_error(
         self,
         ts: TaskState,
-        exception: to_serialize,
-        traceback: to_serialize | None,
+        exception: Serialize,
+        traceback: Serialize | None,
         exception_text: str,
         traceback_text: str,
         *,
@@ -3359,10 +3359,11 @@ class Worker(ServerNode):
             logger.error("Could not deserialize task", exc_info=True)
             self.log.append((ts.key, "deserialize-error", stimulus_id, time()))
             emsg = error_message(e)
+            del emsg["status"]  # type: ignore
             self.transition(
                 ts,
                 "error",
-                **{k: v for k, v in emsg.items() if k != "status"},
+                **emsg,
                 stimulus_id=stimulus_id,
             )
             raise
@@ -3539,10 +3540,11 @@ class Worker(ServerNode):
                 "Exception during execution of task %s.", ts.key, exc_info=True
             )
             emsg = error_message(exc)
+            del emsg["status"]  # type: ignore
             self.transition(
                 ts,
                 "error",
-                **{k: v for k, v in emsg.items() if k != "status"},
+                **emsg,
                 stimulus_id=stimulus_id,
             )
         finally:
