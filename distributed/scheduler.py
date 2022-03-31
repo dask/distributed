@@ -7,7 +7,6 @@ import logging
 import math
 import operator
 import os
-import pickle
 import random
 import sys
 import uuid
@@ -84,7 +83,7 @@ from distributed.metrics import time
 from distributed.multi_lock import MultiLockExtension
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
-from distributed.protocol.pickle import dumps, loads
+from distributed.protocol import pickle
 from distributed.publish import PublishExtension
 from distributed.pubsub import PubSubSchedulerExtension
 from distributed.queues import QueueExtension
@@ -4639,7 +4638,8 @@ class Scheduler(SchedulerState, ServerNode):
     def update_graph_hlg(
         self,
         client: str,
-        graph: HighLevelGraph,
+        graph_header: bytes,
+        graph_frames: list[bytes],
         keys=None,
         dependencies=None,
         restrictions=None,
@@ -4653,6 +4653,24 @@ class Scheduler(SchedulerState, ServerNode):
         fifo_timeout=0,
         code=None,
     ):
+        try:
+            graph: HighLevelGraph = pickle.loads(graph_header, buffers=graph_frames)
+        except Exception as e:
+            text = str(e)
+            exc = pickle.dumps(e)
+            parent: SchedulerState = cast(SchedulerState, self)
+            for key in keys:
+                ts = parent.new_task(
+                    key, None, "erred", computation=None  # computation
+                )
+                ts._exception = exc
+                ts._exception_text = text
+                ts._exception_blame = ts
+                parent.tasks[key] = ts
+
+            self.client_desires_keys(keys=keys, client=client)
+            return
+
         dsk = dict(graph)
 
         from distributed.utils_comm import unpack_remotedata
@@ -5912,7 +5930,7 @@ class Scheduler(SchedulerState, ServerNode):
                 "arbitrary bytestrings using pickle via the "
                 "'distributed.scheduler.pickle' configuration setting."
             )
-        plugin = loads(plugin)
+        plugin = pickle.loads(plugin)
 
         if name is None:
             name = _get_plugin_name(plugin)
@@ -6249,7 +6267,7 @@ class Scheduler(SchedulerState, ServerNode):
                 elif on_error == "return":
                     return e
                 elif on_error == "return_pickle":
-                    return dumps(e, protocol=4)
+                    return pickle.dumps(e, protocol=4)
                 elif on_error == "ignore":
                     return ERROR
                 else:

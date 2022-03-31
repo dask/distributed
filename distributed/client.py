@@ -73,8 +73,7 @@ from distributed.diagnostics.plugin import (
 )
 from distributed.metrics import time
 from distributed.objects import HasWhat, SchedulerInfo, WhoHas
-from distributed.protocol import to_serialize
-from distributed.protocol.pickle import dumps, loads
+from distributed.protocol import pickle, to_serialize
 from distributed.publish import Datasets
 from distributed.pubsub import PubSubClientExtension
 from distributed.security import Security
@@ -1442,7 +1441,7 @@ class Client(SyncMethodMixin):
         if state is not None:
             if type and not state.type:  # Type exists and not yet set
                 try:
-                    type = loads(type)
+                    type = pickle.loads(type)
                 except Exception:
                     type = None
                 # Here, `type` may be a str if actual type failed
@@ -2613,9 +2612,9 @@ class Client(SyncMethodMixin):
 
     async def _run_on_scheduler(self, function, *args, wait=True, **kwargs):
         response = await self.scheduler.run_function(
-            function=dumps(function, protocol=4),
-            args=dumps(args, protocol=4),
-            kwargs=dumps(kwargs, protocol=4),
+            function=pickle.dumps(function, protocol=4),
+            args=pickle.dumps(args, protocol=4),
+            kwargs=pickle.dumps(kwargs, protocol=4),
             wait=wait,
         )
         if response["status"] == "error":
@@ -2677,10 +2676,10 @@ class Client(SyncMethodMixin):
         responses = await self.scheduler.broadcast(
             msg=dict(
                 op="run",
-                function=dumps(function, protocol=4),
-                args=dumps(args, protocol=4),
+                function=pickle.dumps(function, protocol=4),
+                args=pickle.dumps(args, protocol=4),
                 wait=wait,
-                kwargs=dumps(kwargs, protocol=4),
+                kwargs=pickle.dumps(kwargs, protocol=4),
             ),
             workers=workers,
             nanny=nanny,
@@ -2690,7 +2689,7 @@ class Client(SyncMethodMixin):
         for key, resp in responses.items():
             if isinstance(resp, bytes):
                 # Pickled RPC exception
-                exc = loads(resp)
+                exc = pickle.loads(resp)
                 assert isinstance(exc, Exception)
             elif resp["status"] == "error":
                 # Exception raised by the remote function
@@ -2916,12 +2915,15 @@ class Client(SyncMethodMixin):
 
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
-            from distributed.protocol.serialize import ToPickle
+
+            buffers = []
+            out = pickle.dumps(dsk, buffer_callback=buffers.append)
 
             self._send_to_scheduler(
                 {
                     "op": "update-graph-hlg",
-                    "graph": ToPickle(dsk),
+                    "graph_header": out,
+                    "graph_frames": buffers,
                     "keys": list(map(stringify, keys)),
                     "priority": priority,
                     "submitting_task": getattr(thread_state, "key", None),
@@ -4595,7 +4597,7 @@ class Client(SyncMethodMixin):
             plugin = plugin(**kwargs)
 
         return await self.scheduler.register_scheduler_plugin(
-            plugin=dumps(plugin, protocol=4),
+            plugin=pickle.dumps(plugin, protocol=4),
             name=name,
         )
 
@@ -4662,7 +4664,7 @@ class Client(SyncMethodMixin):
         else:
             method = self.scheduler.register_worker_plugin
 
-        responses = await method(plugin=dumps(plugin, protocol=4), name=name)
+        responses = await method(plugin=pickle.dumps(plugin, protocol=4), name=name)
         for response in responses.values():
             if response["status"] == "error":
                 _, exc, tb = clean_exception(
