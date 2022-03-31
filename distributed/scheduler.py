@@ -40,6 +40,7 @@ from tlz import (
     merge,
     merge_sorted,
     merge_with,
+    partition,
     pluck,
     second,
     valmap,
@@ -56,13 +57,14 @@ from distributed import versions as version_module
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
 from distributed.comm import (
+    CommClosedError,
     get_address_host,
     normalize_address,
     resolve_address,
     unparse_host_port,
 )
 from distributed.comm.addressing import addresses_from_user_args
-from distributed.core import CommClosedError, Status, clean_exception, rpc, send_recv
+from distributed.core import Status, clean_exception, rpc, send_recv
 from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
@@ -171,19 +173,20 @@ DEFAULT_DATA_SIZE = declare(
     Py_ssize_t, parse_bytes(dask.config.get("distributed.scheduler.default-data-size"))
 )
 
-DEFAULT_EXTENSIONS = [
-    LockExtension,
-    MultiLockExtension,
-    PublishExtension,
-    ReplayTaskScheduler,
-    QueueExtension,
-    VariableExtension,
-    PubSubSchedulerExtension,
-    SemaphoreExtension,
-    EventExtension,
-    ActiveMemoryManagerExtension,
-    MemorySamplerExtension,
-]
+DEFAULT_EXTENSIONS = {
+    "locks": LockExtension,
+    "multi_locks": MultiLockExtension,
+    "publish": PublishExtension,
+    "replay-tasks": ReplayTaskScheduler,
+    "queues": QueueExtension,
+    "variables": VariableExtension,
+    "pubsub": PubSubSchedulerExtension,
+    "semaphores": SemaphoreExtension,
+    "events": EventExtension,
+    "amm": ActiveMemoryManagerExtension,
+    "memory_sampler": MemorySamplerExtension,
+    "stealing": WorkStealing,
+}
 
 ALL_TASK_STATES = declare(
     set, {"released", "waiting", "no-worker", "processing", "erred", "memory"}
@@ -4006,6 +4009,7 @@ class Scheduler(SchedulerState, ServerNode):
             "stop_task_metadata": self.stop_task_metadata,
             "get_cluster_state": self.get_cluster_state,
             "dump_cluster_state_to_url": self.dump_cluster_state_to_url,
+            "benchmark_hardware": self.benchmark_hardware,
         }
 
         connection_limit = get_fileno_limit() / 2
@@ -4040,11 +4044,13 @@ class Scheduler(SchedulerState, ServerNode):
             self.periodic_callbacks["idle-timeout"] = pc
 
         if extensions is None:
-            extensions = list(DEFAULT_EXTENSIONS)
-            if dask.config.get("distributed.scheduler.work-stealing"):
-                extensions.append(WorkStealing)
-        for ext in extensions:
-            ext(self)
+            extensions = DEFAULT_EXTENSIONS.copy()
+            if not dask.config.get("distributed.scheduler.work-stealing"):
+                if "stealing" in extensions:
+                    del extensions["stealing"]
+
+        for name, extension in extensions.items():
+            self.extensions[name] = extension(self)
 
         setproctitle("dask-scheduler [not started]")
         Scheduler._instances.add(self)
@@ -4267,6 +4273,11 @@ class Scheduler(SchedulerState, ServerNode):
         if self.status in (Status.closing, Status.closed):
             await self.finished()
             return
+
+        await asyncio.gather(
+            *[plugin.before_close() for plugin in list(self.plugins.values())]
+        )
+
         self.status = Status.closing
 
         logger.info("Scheduler closing...")
@@ -4355,6 +4366,7 @@ class Scheduler(SchedulerState, ServerNode):
         host_info: dict = None,
         metrics: dict,
         executing: dict = None,
+        extensions: dict = None,
     ):
         parent: SchedulerState = cast(SchedulerState, self)
         address = self.coerce_address(address, resolve_address)
@@ -4441,6 +4453,10 @@ class Scheduler(SchedulerState, ServerNode):
 
         if resources:
             self.add_resources(worker=address, resources=resources)
+
+        if extensions:
+            for name, data in extensions.items():
+                self.extensions[name].heartbeat(ws, data)
 
         return {
             "status": "OK",
@@ -7458,6 +7474,61 @@ class Scheduler(SchedulerState, ServerNode):
         )
         response = {w: r for w, r in zip(workers, results) if r}
         return response
+
+    async def benchmark_hardware(self) -> "dict[str, dict[str, float]]":
+        """
+        Run a benchmark on the workers for memory, disk, and network bandwidths
+
+        Returns
+        -------
+        result: dict
+            A dictionary mapping the names "disk", "memory", and "network" to
+            dictionaries mapping sizes to bandwidths.  These bandwidths are
+            averaged over many workers running computations across the cluster.
+        """
+        out: "dict[str, defaultdict[str, list[float]]]" = {
+            name: defaultdict(list) for name in ["disk", "memory", "network"]
+        }
+
+        # disk
+        result = await self.broadcast(msg={"op": "benchmark_disk"})
+        for d in result.values():
+            for size, duration in d.items():
+                out["disk"][size].append(duration)
+
+        # memory
+        result = await self.broadcast(msg={"op": "benchmark_memory"})
+        for d in result.values():
+            for size, duration in d.items():
+                out["memory"][size].append(duration)
+
+        # network
+        workers = list(self.workers)
+        # On an adaptive cluster, if multiple workers are started on the same physical host,
+        # they are more likely to connect to the Scheduler in sequence, ending up next to
+        # each other in this list.
+        # The transfer speed within such clusters of workers will be effectively that of
+        # localhost. This could happen across different VMs and/or docker images, so
+        # implementing logic based on IP addresses would not necessarily help.
+        # Randomize the connections to even out the mean measures.
+        random.shuffle(workers)
+        futures = [
+            self.rpc(a).benchmark_network(address=b) for a, b in partition(2, workers)
+        ]
+        responses = await asyncio.gather(*futures)
+
+        for d in responses:
+            for size, duration in d.items():
+                out["network"][size].append(duration)
+
+        result = {}
+        for mode in out:
+            result[mode] = {
+                size: sum(durations) / len(durations)
+                for size, durations in out[mode].items()
+            }
+
+        return result
 
     def get_nbytes(self, keys=None, summary=True):
         parent: SchedulerState = cast(SchedulerState, self)

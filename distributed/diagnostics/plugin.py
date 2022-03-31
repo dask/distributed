@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import os
 import socket
@@ -5,8 +7,13 @@ import subprocess
 import sys
 import uuid
 import zipfile
+from collections.abc import Awaitable
+from typing import TYPE_CHECKING
 
 from dask.utils import funcname, tmpfile
+
+if TYPE_CHECKING:
+    from distributed.scheduler import Scheduler  # circular import
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +32,11 @@ class SchedulerPlugin:
     Plugins are often used for diagnostics and measurement, but have full
     access to the scheduler and could in principle affect core scheduling.
 
-    To implement a plugin implement some of the methods of this class and add
-    the plugin to the scheduler with ``Scheduler.add_plugin(myplugin)``.
+    To implement a plugin:
+
+    1. subclass this class
+    2. override some of its methods
+    3. add the plugin to the scheduler with ``Scheduler.add_plugin(myplugin)``.
 
     Examples
     --------
@@ -45,28 +55,31 @@ class SchedulerPlugin:
     >>> scheduler.add_plugin(plugin)  # doctest: +SKIP
     """
 
-    async def start(self, scheduler):
+    async def start(self, scheduler: Scheduler) -> None:
         """Run when the scheduler starts up
 
         This runs at the end of the Scheduler startup process
         """
-        pass
 
-    async def close(self):
+    async def before_close(self) -> None:
+        """Runs prior to any Scheduler shutdown logic"""
+
+    async def close(self) -> None:
         """Run when the scheduler closes down
 
         This runs at the beginning of the Scheduler shutdown process, but after
         workers have been asked to shut down gracefully
         """
-        pass
 
-    def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
+    def update_graph(
+        self, scheduler: Scheduler, keys: set[str], restrictions: dict, **kwargs
+    ) -> None:
         """Run when a new graph / tasks enter the scheduler"""
 
-    def restart(self, scheduler, **kwargs):
+    def restart(self, scheduler: Scheduler) -> None:
         """Run when the scheduler restarts itself"""
 
-    def transition(self, key, start, finish, *args, **kwargs):
+    def transition(self, key: str, start: str, finish: str, *args, **kwargs) -> None:
         """Run whenever a task changes state
 
         Parameters
@@ -81,16 +94,18 @@ class SchedulerPlugin:
             This may include worker ID, compute time, etc.
         """
 
-    def add_worker(self, scheduler=None, worker=None, **kwargs):
+    def add_worker(self, scheduler: Scheduler, worker: str) -> None | Awaitable[None]:
         """Run when a new worker enters the cluster"""
 
-    def remove_worker(self, scheduler=None, worker=None, **kwargs):
+    def remove_worker(
+        self, scheduler: Scheduler, worker: str
+    ) -> None | Awaitable[None]:
         """Run when a worker leaves the cluster"""
 
-    def add_client(self, scheduler=None, client=None, **kwargs):
+    def add_client(self, scheduler: Scheduler, client: str) -> None:
         """Run when a new client connects"""
 
-    def remove_client(self, scheduler=None, client=None, **kwargs):
+    def remove_client(self, scheduler: Scheduler, client: str) -> None:
         """Run when a client disconnects"""
 
 

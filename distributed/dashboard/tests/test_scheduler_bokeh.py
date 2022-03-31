@@ -23,7 +23,9 @@ from distributed.dashboard.components.scheduler import (
     ClusterMemory,
     ComputePerKey,
     CurrentLoad,
+    EventLoop,
     Events,
+    Hardware,
     MemoryByKey,
     Occupancy,
     ProcessingHistogram,
@@ -75,7 +77,13 @@ async def test_simple(c, s, a, b):
 
 @gen_cluster(client=True, worker_kwargs={"dashboard": True})
 async def test_basic(c, s, a, b):
-    for component in [TaskStream, SystemMonitor, Occupancy, StealingTimeSeries]:
+    for component in [
+        TaskStream,
+        SystemMonitor,
+        Occupancy,
+        StealingTimeSeries,
+        EventLoop,
+    ]:
         ss = component(s)
 
         ss.update()
@@ -997,3 +1005,8 @@ async def test_prefix_bokeh(s, a, b):
     bokeh_app = s.http_application.applications[0]
     assert isinstance(bokeh_app, BokehTornado)
     assert bokeh_app.prefix == f"/{prefix}"
+
+
+@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
+async def test_hardware(c, s, a, b):
+    Hardware(s)  # don't call update, takes too long for a test

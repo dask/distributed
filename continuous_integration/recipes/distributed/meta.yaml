@@ -47,18 +47,19 @@ outputs:
       track_features:             # [cython_enabled]
         - cythonized-scheduler    # [cython_enabled]
       entry_points:
-        - dask-scheduler = distributed.cli.dask_scheduler:go
-        - dask-ssh = distributed.cli.dask_ssh:go
-        - dask-worker = distributed.cli.dask_worker:go
+        - dask-scheduler = distributed.cli.dask_scheduler:main
+        - dask-ssh = distributed.cli.dask_ssh:main
+        - dask-worker = distributed.cli.dask_worker:main
     requirements:
       build:
         - {{ compiler('c') }}                     # [cython_enabled]
       host:
-        - python
+        - python >=3.8
         - pip
+        - setuptools
         - cython                                  # [cython_enabled]
       run:
-        - python
+        - python >=3.8
         - click >=6.6
         - cloudpickle >=1.5.0
         - cytoolz >=0.8.2

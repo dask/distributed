@@ -21,6 +21,7 @@ from bokeh.models import (
     ColumnDataSource,
     CustomJSHover,
     DataRange1d,
+    FactorRange,
     GroupFilter,
     HoverTool,
     NumberFormatter,
@@ -49,7 +50,14 @@ from tornado import escape
 
 import dask
 from dask import config
-from dask.utils import format_bytes, format_time, funcname, key_split, parse_timedelta
+from dask.utils import (
+    format_bytes,
+    format_time,
+    funcname,
+    key_split,
+    parse_bytes,
+    parse_timedelta,
+)
 
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
@@ -557,6 +565,148 @@ class WorkersMemoryHistogram(DashboardComponent):
         counts, x = np.histogram(nbytes, bins=40)
         d = {"left": x[:-1], "right": x[1:], "top": counts}
         update(self.source, d)
+
+
+class Hardware(DashboardComponent):
+    """Occupancy (in time) per worker"""
+
+    def __init__(self, scheduler, **kwargs):
+        with log_errors():
+            self.scheduler = scheduler
+            # Disk
+            self.disk_source = ColumnDataSource(
+                {
+                    "size": [],
+                    "bandwidth": [],
+                }
+            )
+
+            self.disk_figure = figure(
+                title="Disk Bandwidth -- Computing ...",
+                tools="",
+                toolbar_location="above",
+                x_range=FactorRange(factors=[]),
+                **kwargs,
+            )
+            self.disk_figure.vbar(
+                x="size", top="bandwidth", width=0.9, source=self.disk_source
+            )
+            hover = HoverTool(
+                mode="vline", tooltips=[("Bandwidth", "@bandwidth{0.00 b}/s")]
+            )
+            self.disk_figure.add_tools(hover)
+            self.disk_figure.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            self.disk_figure.xgrid.visible = False
+
+            # Memory
+            self.memory_source = ColumnDataSource(
+                {
+                    "size": [],
+                    "bandwidth": [],
+                }
+            )
+
+            self.memory_figure = figure(
+                title="Memory Bandwidth -- Computing ...",
+                tools="",
+                toolbar_location="above",
+                x_range=FactorRange(factors=[]),
+                **kwargs,
+            )
+
+            self.memory_figure.vbar(
+                x="size", top="bandwidth", width=0.9, source=self.memory_source
+            )
+            hover = HoverTool(
+                mode="vline", tooltips=[("Bandwidth", "@bandwidth{0.00 b}/s")]
+            )
+            self.memory_figure.add_tools(hover)
+            self.memory_figure.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            self.memory_figure.xgrid.visible = False
+
+            # Network
+            self.network_source = ColumnDataSource(
+                {
+                    "size": [],
+                    "bandwidth": [],
+                }
+            )
+
+            self.network_figure = figure(
+                title="Network Bandwidth -- Computing ...",
+                tools="",
+                toolbar_location="above",
+                x_range=FactorRange(factors=[]),
+                **kwargs,
+            )
+
+            self.network_figure.vbar(
+                x="size", top="bandwidth", width=0.9, source=self.network_source
+            )
+            hover = HoverTool(
+                mode="vline", tooltips=[("Bandwidth", "@bandwidth{0.00 b}/s")]
+            )
+            self.network_figure.add_tools(hover)
+            self.network_figure.yaxis[0].formatter = NumeralTickFormatter(
+                format="0.0 b"
+            )
+            self.network_figure.xgrid.visible = False
+
+            self.root = row(
+                self.memory_figure,
+                self.disk_figure,
+                self.network_figure,
+            )
+
+            self.memory_data = {
+                "size": [],
+                "bandwidth": [],
+            }
+            self.disk_data = {
+                "size": [],
+                "bandwidth": [],
+            }
+            self.network_data = {
+                "size": [],
+                "bandwidth": [],
+            }
+
+            async def f():
+                result = await self.scheduler.benchmark_hardware()
+
+                for size in sorted(result["disk"], key=parse_bytes):
+                    bandwidth = result["disk"][size]
+                    self.disk_data["size"].append(size)
+                    self.disk_data["bandwidth"].append(bandwidth)
+
+                for size in sorted(result["memory"], key=parse_bytes):
+                    bandwidth = result["memory"][size]
+                    self.memory_data["size"].append(size)
+                    self.memory_data["bandwidth"].append(bandwidth)
+
+                for size in sorted(result["network"], key=parse_bytes):
+                    bandwidth = result["network"][size]
+                    self.network_data["size"].append(size)
+                    self.network_data["bandwidth"].append(bandwidth)
+
+            self.scheduler.loop.add_callback(f)
+
+    def update(self):
+        if (
+            not self.disk_data["size"]
+            or self.disk_figure.title.text == "Disk Bandwidth"
+        ):
+            return
+
+        self.network_figure.x_range.factors = self.network_data["size"]
+        self.disk_figure.x_range.factors = self.disk_data["size"]
+        self.memory_figure.x_range.factors = self.memory_data["size"]
+        update(self.disk_source, self.disk_data)
+        update(self.memory_source, self.memory_data)
+        update(self.network_source, self.network_data)
+        self.memory_figure.title.text = "Memory Bandwidth"
+        self.disk_figure.title.text = "Disk Bandwidth"
+        self.network_figure.title.text = "Network Bandwidth"
 
 
 class BandwidthTypes(DashboardComponent):
@@ -3018,6 +3168,59 @@ class TaskProgress(DashboardComponent):
             )
 
 
+class EventLoop(DashboardComponent):
+    """Event Loop Health"""
+
+    def __init__(self, scheduler, **kwargs):
+        with log_errors():
+            self.scheduler = scheduler
+            self.source = ColumnDataSource(
+                {
+                    "names": ["Scheduler", "Workers"],
+                    "values": [0, 0],
+                    "text": ["0", "0"],
+                }
+            )
+
+            self.root = figure(
+                title="Event Loop Health",
+                x_range=["Scheduler", "Workers"],
+                y_range=[
+                    0,
+                    parse_timedelta(dask.config.get("distributed.admin.tick.interval"))
+                    * 25,
+                ],
+                tools="",
+                toolbar_location="above",
+                **kwargs,
+            )
+            self.root.vbar(x="names", top="values", width=0.9, source=self.source)
+
+            self.root.xaxis.minor_tick_line_alpha = 0
+            self.root.ygrid.visible = True
+            self.root.xgrid.visible = False
+
+            hover = HoverTool(tooltips=[("Interval", "@text s")], mode="vline")
+            self.root.add_tools(hover)
+
+    @without_property_validation
+    def update(self):
+        with log_errors():
+            s = self.scheduler
+
+            data = {
+                "names": ["Scheduler", "Workers"],
+                "values": [
+                    s._tick_interval_observed,
+                    sum([w.metrics["event_loop_interval"] for w in s.workers.values()])
+                    / (len(s.workers) or 1),
+                ],
+            }
+            data["text"] = [format_time(x) for x in data["values"]]
+
+            update(self.source, data)
+
+
 class WorkerTable(DashboardComponent):
     """Status of the current workers
 
@@ -3377,6 +3580,19 @@ def workers_doc(scheduler, extra, doc):
         doc.template = env.get_template("simple.html")
         doc.template_variables.update(extra)
         doc.theme = BOKEH_THEME
+
+
+def hardware_doc(scheduler, extra, doc):
+    with log_errors():
+        hw = Hardware(scheduler)
+        hw.update()
+        doc.title = "Dask: Cluster Hardware Bandwidth"
+        doc.add_root(hw.root)
+        doc.template = env.get_template("simple.html")
+        doc.template_variables.update(extra)
+        doc.theme = BOKEH_THEME
+
+        add_periodic_callback(doc, hw, 500)
 
 
 def tasks_doc(scheduler, extra, doc):

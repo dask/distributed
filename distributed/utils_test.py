@@ -739,13 +739,16 @@ def cluster(
                 except KeyError:
                     rpc_kwargs = {}
 
-                with rpc(saddr, **rpc_kwargs) as s:
-                    while True:
-                        nthreads = loop.run_sync(s.ncores)
-                        if len(nthreads) == nworkers:
-                            break
-                        if time() - start > 5:
-                            raise Exception("Timeout on cluster creation")
+                async def wait_for_workers():
+                    async with rpc(saddr, **rpc_kwargs) as s:
+                        while True:
+                            nthreads = await s.ncores()
+                            if len(nthreads) == nworkers:
+                                break
+                            if time() - start > 5:
+                                raise Exception("Timeout on cluster creation")
+
+                loop.run_sync(wait_for_workers)
 
                 # avoid sending processes down to function
                 yield {"address": saddr}, [
