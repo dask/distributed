@@ -6,6 +6,7 @@ import io
 import os
 import re
 import shelve
+import sys
 import zipfile
 from collections.abc import Iterator
 from typing import Any
@@ -379,6 +380,8 @@ def main(argv: list[str] | None = None) -> None:
         .configure_title(anchor="start")
         .resolve_scale(x="shared")  # enforce aligned x axes
     )
+    chart.title = " ".join(argv if argv is not None else sys.argv)
+
     altair_saver.save(
         chart,
         args.output,
