@@ -116,20 +116,30 @@ Client Side
    from distributed.core import connect
 
    async def f():
-       async with await connect('tcp://127.0.0.1:8888') as comm:
+       comm = await connect('tcp://127.0.0.1:8888')
+       try:
            await comm.write({'op': 'add', 'x': 1, 'y': 2})
            result = await comm.read()
+       except BaseException:
+           comm.abort()
+           raise
+       await comm.close()
        print(result)
 
    >>> asyncio.run(f())
    3
 
    async def g():
-       async with await connect('tcp://127.0.0.1:8888') as comm:
+       comm = await connect('tcp://127.0.0.1:8888')
+       try:
            await comm.write({'op': 'stream_data', 'interval': 1})
            while True:
                result = await comm.read()
                print(result)
+       except BaseException:
+           comm.abort()
+           raise
+       await comm.close()
 
    >>> asyncio.run(g())
    1
