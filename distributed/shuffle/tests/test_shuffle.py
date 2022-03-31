@@ -62,16 +62,21 @@ async def test_bad_disk(c, s, a, b):
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
+    original_stat = os.stat(a.local_directory).st_mode
     while not a.extensions["shuffle"].shuffles:
         await asyncio.sleep(0.01)
     os.chmod(a.local_directory, 0o444)
     while not b.extensions["shuffle"].shuffles:
         await asyncio.sleep(0.01)
     os.chmod(b.local_directory, 0o444)
-    with pytest.raises(PermissionError) as e:
-        out = await c.compute(out)
+    try:
+        with pytest.raises(PermissionError) as e:
+            out = await c.compute(out)
 
-    assert a.local_directory in str(e.value) or b.local_directory in str(e.value)
+        assert a.local_directory in str(e.value) or b.local_directory in str(e.value)
+    finally:
+        os.chmod(a.local_directory, original_stat)
+        os.chmod(b.local_directory, original_stat)
 
 
 @pytest.mark.slow
