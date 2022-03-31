@@ -465,10 +465,10 @@ class Future(WrappedKey):
                 pass  # Shutting down, add_callback may be None
 
     def __getstate__(self):
-        return self.key, self.client.scheduler.address
+        return self.key
 
     def __setstate__(self, state):
-        key, address = state
+        key = state
         self.__init__(key, client=None)
 
         if self.client:
