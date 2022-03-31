@@ -3085,7 +3085,7 @@ async def test_submit_on_cancelled_future(c, s, a, b):
     await c.cancel(x)
 
     with pytest.raises(CancelledError):
-        c.submit(inc, x)
+        await c.submit(inc, x)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10)
