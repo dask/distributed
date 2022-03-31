@@ -3189,7 +3189,9 @@ class Worker(ServerNode):
             self._executing.discard(ts)
             self._in_flight_tasks.discard(ts)
 
-            self._notify_plugins("release_key", key, state_before, cause, report)
+            self._notify_plugins(
+                "release_key", key, state_before, cause, STIMULUS_ID.get(), report
+            )
         except CommClosedError:
             # Batched stream send might raise if it was already closed
             pass
