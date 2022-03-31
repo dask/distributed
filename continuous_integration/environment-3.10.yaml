@@ -38,7 +38,7 @@ dependencies:
   - sortedcollections
   - tblib
   - toolz
-  - tornado=6
+  - tornado
   - zict  # overridden by git tip below
   - zstandard
   - pip:

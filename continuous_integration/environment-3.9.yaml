@@ -46,7 +46,7 @@ dependencies:
   - tblib
   - toolz
   - torchvision  # Only tested here
-  - tornado=6
+  - tornado
   - zict
   - zstandard
   - pip:
