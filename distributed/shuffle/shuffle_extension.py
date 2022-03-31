@@ -164,8 +164,6 @@ class Shuffle:
                 self.column,
                 self.worker_for,
             )
-            if not len(data) == sum(map(len, out.values())):
-                breakpoint()
             out = {
                 k: [b.serialize().to_pybytes() for b in t.to_batches()]
                 for k, t in out.items()
@@ -392,23 +390,17 @@ class ShuffleSchedulerExtension:
             assert column is not None
             assert npartitions is not None
             workers = list(self.scheduler.workers)
-            partitions = list(range(npartitions))  # TODO: check output partitions
 
-            # TODO: honor pre-existing restrictions
-            # TODO: only ask for desired outputs
-            mapping = {
-                part: worker_for(part, workers, npartitions) for part in partitions
-            }
+            name = "shuffle-barrier-" + id  # TODO single-source task name
+            mapping = {}
 
-            name = "shuffle-unpack-" + id  # TODO single-source task name
-
-            for partition, worker in mapping.items():
-                key = f"('{name}', {partition})"
-                ts = self.scheduler.tasks[key]
+            for ts in self.scheduler.tasks[name].dependents:
+                part = ts.annotations["shuffle"]
                 if ts._worker_restrictions:
-                    raise NotImplementedError(
-                        "Shuffling and restrictions don't yet mix, use shuffle='tasks'"
-                    )
+                    worker = list(ts._worker_restrictions)[0]
+                else:
+                    worker = worker_for(part, workers, npartitions)
+                mapping[part] = worker
                 ts._worker_restrictions = {worker}
 
             self.worker_for[id] = mapping

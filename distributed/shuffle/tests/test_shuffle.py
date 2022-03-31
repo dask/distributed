@@ -171,3 +171,17 @@ def test_split_by_worker():
     df["_partitions"] = df.x % npartitions
     worker_for = {i: random.choice(workers) for i in range(npartitions)}
     s = pd.Series(worker_for, name="_worker").astype("category")
+
+
+@gen_cluster(client=True)
+async def test_tail(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-30",
+        dtypes={"x": float, "y": float},
+        freq="1 s",
+    )
+    shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p").tail(compute=False)
+    persisted = await shuffled.persist()  # Only ask for one key
+
+    assert len(s.tasks) < df.npartitions * 2
