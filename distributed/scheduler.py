@@ -2718,9 +2718,9 @@ class SchedulerState:
             comm: double = self.get_comm_cost(ts, ws)
             total_duration = duration + comm
         old = ws._processing.get(ts, 0)
-        ws._processing[ts] = total_duration
 
         if ts not in ws._long_running:
+            ws._processing[ts] = total_duration
             self._total_occupancy += total_duration - old
             ws._occupancy += total_duration - old
 
