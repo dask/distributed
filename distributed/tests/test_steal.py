@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import gc
 import itertools
 import logging
 import random
@@ -945,6 +946,7 @@ async def test_cleanup_repeated_tasks(c, s, a, b):
     assert not s.who_has
     assert not any(s.has_what.values())
 
+    gc.collect()
     assert not list(ws)
 
 
