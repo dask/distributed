@@ -6695,7 +6695,6 @@ async def test_annotations_workers(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         x = await x.persist()
 
-    assert all({"workers": (a.address,)} == ts.annotations for ts in s.tasks.values())
     assert all({a.address} == ts.worker_restrictions for ts in s.tasks.values())
     assert a.data
     assert not b.data
@@ -6762,7 +6761,6 @@ async def test_annotations_resources(c, s, a, b):
         x = await x.persist()
 
     assert all([{"GPU": 1} == ts.resource_restrictions for ts in s.tasks.values()])
-    assert all([{"resources": {"GPU": 1}} == ts.annotations for ts in s.tasks.values()])
 
 
 @gen_cluster(
@@ -6799,12 +6797,6 @@ async def test_annotations_loose_restrictions(c, s, a, b):
 
     assert all(not ts.worker_restrictions for ts in s.tasks.values())
     assert all({"fake"} == ts.host_restrictions for ts in s.tasks.values())
-    assert all(
-        [
-            {"workers": ("fake",), "allow_other_workers": True} == ts.annotations
-            for ts in s.tasks.values()
-        ]
-    )
 
 
 @gen_cluster(client=True)

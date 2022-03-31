@@ -4683,7 +4683,6 @@ class Scheduler(SchedulerState, ServerNode):
                 return {stringify(k): x for k in string_keys or map(stringify, keys)}
             elif isinstance(x, dict):
                 return keymap(stringify, x)
-            breakpoint()
             raise TypeError()
 
         if retries:
@@ -4700,11 +4699,9 @@ class Scheduler(SchedulerState, ServerNode):
                 retries = retries or {}
                 d = process(layer.annotations["retries"], keys=layer, string_keys=None)
                 retries.update(d)  # TODO: there is an implicit ordering here
-            if layer.annotations and "user_priority" in layer.annotations:
+            if layer.annotations and "priority" in layer.annotations:
                 user_priority = user_priority or {}
-                d = process(
-                    layer.annotations["user_priority"], keys=layer, string_keys=None
-                )
+                d = process(layer.annotations["priority"], keys=layer, string_keys=None)
                 user_priority.update(d)  # TODO: there is an implicit ordering here
             if layer.annotations and "resources" in layer.annotations:
                 resources = resources or {}
@@ -4714,10 +4711,14 @@ class Scheduler(SchedulerState, ServerNode):
                 resources.update(d)  # TODO: there is an implicit ordering here
             if layer.annotations and "workers" in layer.annotations:
                 if isinstance(layer.annotations["workers"], (str, int)):
-                    layer.annotations["workers"] = [layer.annotations["workers"]]
+                    layer.annotations["workers"] = (layer.annotations["workers"],)
                 restrictions = restrictions or {}
                 d = process(layer.annotations["workers"], keys=layer, string_keys=None)
                 restrictions.update(d)  # TODO: there is an implicit ordering here
+
+            if layer.annotations:
+                d = process(layer.annotations, keys=layer, string_keys=None)
+                annotations.update(d)
 
         from distributed.worker import dumps_task
 
@@ -4727,10 +4728,6 @@ class Scheduler(SchedulerState, ServerNode):
             stringify(k): {stringify(dep) for dep in deps}
             for k, deps in dependencies.items()
         }
-
-        # dsk = unpacked_graph["dsk"]
-        # dependencies = unpacked_graph["deps"]
-        # annotations = unpacked_graph["annotations"]
 
         # Remove any self-dependencies (happens on test_publish_bag() and others)
         for k, v in dependencies.items():
@@ -4910,9 +4907,6 @@ class Scheduler(SchedulerState, ServerNode):
 
         # Override existing taxonomy with per task annotations
         if annotations:
-            if "priority" in annotations:
-                user_priority.update(annotations["priority"])
-
             if "workers" in annotations:
                 restrictions.update(annotations["workers"])
 
@@ -4921,19 +4915,10 @@ class Scheduler(SchedulerState, ServerNode):
                     k for k, v in annotations["allow_other_workers"].items() if v
                 )
 
-            if "retries" in annotations:
-                retries.update(annotations["retries"])
-
-            if "resources" in annotations:
-                resources.update(annotations["resources"])
-
-            for a, kv in annotations.items():
-                for k, v in kv.items():
-                    # Tasks might have been culled, in which case
-                    # we have nothing to annotate.
-                    ts = parent._tasks.get(k)
-                    if ts is not None:
-                        ts._annotations[a] = v
+            for key, d in annotations.items():
+                ts = parent._tasks.get(key)
+                if ts is not None:
+                    ts._annotations.update(d)
 
         # Add actors
         if actors is True:
