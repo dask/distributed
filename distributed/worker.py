@@ -731,7 +731,6 @@ class Worker(ServerNode):
             "terminate": self.close,
             "ping": pingpong,
             "upload_file": self.upload_file,
-            "start_ipython": self.start_ipython,
             "call_stack": self.get_call_stack,
             "profile": self.get_profile,
             "profile_metadata": self.get_profile_metadata,
