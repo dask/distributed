@@ -47,7 +47,7 @@ from distributed import system
 from distributed import versions as version_module
 from distributed.client import Client, _global_clients, default_client
 from distributed.comm import Comm
-from distributed.comm.tcp import TCP, BaseTCPConnector
+from distributed.comm.tcp import TCP
 from distributed.compatibility import WINDOWS
 from distributed.config import initialize_logging
 from distributed.core import CommClosedError, ConnectionPool, Status, connect, rpc
@@ -1612,9 +1612,6 @@ def save_sys_modules():
 @contextmanager
 def check_thread_leak():
     """Context manager to ensure we haven't leaked any threads"""
-    # "TCP-Executor" threads are never stopped once they are started
-    BaseTCPConnector.warmup()
-
     active_threads_start = threading.enumerate()
 
     yield
