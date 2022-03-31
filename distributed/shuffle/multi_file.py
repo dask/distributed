@@ -259,6 +259,8 @@ class MultiFile:
     async def flush(self):
         """Wait until all writes are finished"""
         if self._exception:
+            await self._communicate_future
+            await asyncio.gather(*self._futures)
             raise self._exception
         while self.shards:
             await asyncio.sleep(0.05)

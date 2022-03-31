@@ -192,7 +192,10 @@ class MultiComm:
         We don't expect any more data, wait until everything is flushed through
         """
         if self._exception:
+            await self._communicate_future
+            await asyncio.gather(*self._futures)
             raise self._exception
+
         while self.shards:
             await asyncio.sleep(0.05)
 
@@ -202,7 +205,6 @@ class MultiComm:
         assert not self.total_size
 
         self._done = True
-
         await self._communicate_future
 
     @contextlib.contextmanager

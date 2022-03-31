@@ -129,6 +129,7 @@ async def test_heartbeat(c, s, a, b):
         await a.heartbeat()
 
     [s] = s.extensions["shuffle"].shuffles.values()
+    await out
 
 
 def test_processing_chain():
