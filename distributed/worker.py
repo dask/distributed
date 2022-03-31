@@ -3507,7 +3507,8 @@ class Worker(ServerNode):
             assert ts, self.story(key)
             ts.done = True
             result["key"] = ts.key
-            result["stimulus_id"] = stimulus_id = f"{result['op']}-{time()}"
+            result["stimulus_id"] = new_stimulus_id = f"{result['op']}-{time()}"
+            del stimulus_id
             value = result.pop("result", None)
             ts.startstops.append(
                 {"action": "compute", "start": result["start"], "stop": result["stop"]}
@@ -3544,7 +3545,7 @@ class Worker(ServerNode):
                     result["traceback_text"],
                 )
 
-            self.transitions(recommendations, stimulus_id=stimulus_id)
+            self.transitions(recommendations, stimulus_id=new_stimulus_id)
 
             logger.debug("Send compute response to scheduler: %s, %s", ts.key, result)
 
@@ -3563,7 +3564,7 @@ class Worker(ServerNode):
                 ts,
                 "error",
                 **emsg,
-                stimulus_id=stimulus_id,
+                stimulus_id=f"execute-erred-{time}",
             )
         finally:
             self.ensure_computing()
