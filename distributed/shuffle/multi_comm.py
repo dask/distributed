@@ -65,9 +65,9 @@ class MultiComm:
         self._futures = set()
         self._done = False
         self.diagnostics = defaultdict(float)
-        self._loop = loop or self
+        self._loop = loop or asyncio.get_event_loop()
 
-        self._communicate_future = asyncio.ensure_future(self.communicate())
+        self._communicate_future = asyncio.create_task(self.communicate())
 
     @property
     def queue(self):
@@ -150,7 +150,7 @@ class MultiComm:
 
                 assert set(self.sizes) == set(self.shards)
                 assert shards
-                future = asyncio.ensure_future(self.process(address, shards, size))
+                future = asyncio.create_task(self.process(address, shards, size))
                 del shards
                 self._futures.add(future)
 

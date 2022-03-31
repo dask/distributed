@@ -21,7 +21,11 @@ from distributed.utils import sync
 
 if TYPE_CHECKING:
     import pandas as pd
-    import pyarrow as pa
+
+    try:
+        import pyarrow as pa
+    except ImportError:
+        raise ImportError("PyArrow is needed for fast shuffling")
 
     from distributed.worker import Worker
 
@@ -432,7 +436,7 @@ class ShuffleWorkerExtension:
                 f"Shuffle {shuffle_id!r} is not registered on worker {self.worker.address}"
             ) from None
 
-    async def close(self):
+    def close(self):
         self.executor.shutdown()
 
 
@@ -518,7 +522,5 @@ def split_by_partition(
     ]
     shards.append(t.slice(offset=splits[-1], length=None))
     assert len(t) == sum(map(len, shards))
-    if len(partitions) != len(shards):
-        breakpoint()
     assert len(partitions) == len(shards)
     return dict(zip(partitions, shards))

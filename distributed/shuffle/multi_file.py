@@ -92,8 +92,8 @@ class MultiFile:
         self.active = set()
         self.diagnostics = defaultdict(float)
 
-        self._communicate_future = asyncio.ensure_future(self.communicate())
-        self._loop = loop or self
+        self._communicate_future = asyncio.create_task(self.communicate())
+        self._loop = loop or asyncio.get_event_loop()
 
     @property
     def queue(self):
@@ -167,7 +167,7 @@ class MultiFile:
                 shards = self.shards.pop(id)
                 size = self.sizes.pop(id)
 
-                future = asyncio.ensure_future(self.process(id, shards, size))
+                future = asyncio.create_task(self.process(id, shards, size))
                 del shards
                 self._futures.add(future)
                 async with self.condition:
