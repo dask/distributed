@@ -84,7 +84,9 @@ class Shuffle:
         MultiComm.max_connections = min(len(self.partitions_of), 10)
 
         self.diagnostics: dict[str, float] = defaultdict(float)
-        self.output_partitions_left = len(self.partitions_of[self.worker.address])
+        self.output_partitions_left = len(
+            self.partitions_of.get(self.worker.address, ())
+        )
         self.transferred = False
         self.total_recvd = 0
         self.start_time = time.time()
