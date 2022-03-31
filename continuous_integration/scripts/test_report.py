@@ -55,6 +55,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Number of days to look back from now",
     )
     parser.add_argument(
+        "--max-workflows",
+        type=int,
+        default=50,
+        help="Maximum number of workflows to fetch regardless of days",
+    )
+    parser.add_argument(
         "--nfails",
         "-n",
         type=int,
@@ -210,7 +216,7 @@ def dataframe_from_jxml(run: list) -> pandas.DataFrame:
 
 
 def download_and_parse_artifacts(
-    repo: str, branch: str, events: list[str], days: int
+    repo: str, branch: str, events: list[str], days: int, max_workflows: int
 ) -> Iterator[pandas.DataFrame]:
 
     print("Getting workflows list...")
@@ -236,7 +242,7 @@ def download_and_parse_artifacts(
     # Each workflow processed takes ~10-15 API requests. To avoid being
     # rate limited by GitHub (1000 requests per hour) we choose just the
     # most recent N runs. This also keeps the viz size from blowing up.
-    workflows = sorted(workflows, key=lambda w: w["created_at"])[-50:]
+    workflows = sorted(workflows, key=lambda w: w["created_at"])[-max_workflows:]
     print(f"Fetching artifact listing for the {len(workflows)} most recent workflows")
 
     for w in workflows:
@@ -302,6 +308,7 @@ def main(argv: list[str] | None = None) -> None:
             branch=args.branch,
             events=args.events,
             days=args.days,
+            max_workflows=args.max_workflows,
         )
     )
 
