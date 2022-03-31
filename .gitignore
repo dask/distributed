@@ -33,6 +33,7 @@ tags
 .mypy_cache/
 
 reports/
+test_report.*
 
 # Test failures will dump the cluster state in here
 test_cluster_dump/
