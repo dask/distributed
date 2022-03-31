@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import logging
 import os
 import uuid
@@ -337,6 +338,9 @@ def test_weakref_cache(tmpdir, cls, expect_cached, size):
     # the same id as a deleted one
     id_x = x.id
     del x
+    # Surprisingly, even on CPython this is needed to ensure that the object is garbage
+    # collected, even if there are no obvious circular references going on
+    gc.collect()
 
     if size < 100:
         buf["y"]
