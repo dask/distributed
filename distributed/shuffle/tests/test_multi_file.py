@@ -1,3 +1,4 @@
+import asyncio
 import os
 
 import pytest
@@ -49,3 +50,21 @@ async def test_many(tmp_path, count):
             assert out == str(i).encode() * 100 * 10
 
     assert not os.path.exists(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_exceptions(tmp_path):
+    def dump(data, f):
+        raise Exception(123)
+
+    with MultiFile(directory=tmp_path, dump=dump, load=load) as mf:
+        await mf.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
+
+        while not mf._exception:
+            await asyncio.sleep(0.1)
+
+        with pytest.raises(Exception, match="123"):
+            await mf.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
+
+        with pytest.raises(Exception, match="123"):
+            await mf.flush()

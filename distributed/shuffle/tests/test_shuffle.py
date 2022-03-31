@@ -86,10 +86,6 @@ async def test_crashed_worker(c, s, a, b):
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
-    while not a.extensions["shuffle"].shuffles:
-        await asyncio.sleep(0.01)
-    while not b.extensions["shuffle"].shuffles:
-        await asyncio.sleep(0.01)
 
     while (
         len(
