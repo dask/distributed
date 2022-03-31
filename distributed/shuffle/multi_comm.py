@@ -68,6 +68,7 @@ class MultiComm:
         self._loop = loop or asyncio.get_event_loop()
 
         self._communicate_future = asyncio.create_task(self.communicate())
+        self._exception = None
 
     @property
     def queue(self):
@@ -89,6 +90,8 @@ class MultiComm:
 
         If we're out of space then we block in order to enforce backpressure.
         """
+        if self._exception:
+            raise self._exception
         with self.lock:
             for address, shards in data.items():
                 size = sum(map(len, shards))
@@ -164,8 +167,12 @@ class MultiComm:
                 # while (time.time() // 5 % 4) == 0:
                 #     await asyncio.sleep(0.1)
                 start = time.time()
-                with self.time("send"):
-                    await self.send(address, [b"".join(shards)])
+                try:
+                    with self.time("send"):
+                        await self.send(address, [b"".join(shards)])
+                except Exception as e:
+                    self._exception = e
+                    self._done = True
                 stop = time.time()
                 self.diagnostics["avg_size"] = (
                     0.95 * self.diagnostics["avg_size"] + 0.05 * size

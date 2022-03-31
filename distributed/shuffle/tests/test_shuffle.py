@@ -74,6 +74,42 @@ async def test_bad_disk(c, s, a, b):
     assert a.local_directory in str(e.value) or b.local_directory in str(e.value)
 
 
+@pytest.mark.slow
+@gen_cluster(client=True)
+async def test_crashed_worker(c, s, a, b):
+
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = out.persist()
+    while not a.extensions["shuffle"].shuffles:
+        await asyncio.sleep(0.01)
+    while not b.extensions["shuffle"].shuffles:
+        await asyncio.sleep(0.01)
+
+    while (
+        len(
+            [
+                ts
+                for ts in s.tasks.values()
+                if "shuffle_transfer" in ts.key and ts.state == "memory"
+            ]
+        )
+        < 3
+    ):
+        await asyncio.sleep(0.01)
+    await b.close()
+
+    with pytest.raises(Exception) as e:
+        out = await c.compute(out)
+
+    assert a.address in str(e.value) or b.address in str(e.value)
+
+
 @gen_cluster(client=True)
 async def test_heartbeat(c, s, a, b):
     await a.heartbeat()
