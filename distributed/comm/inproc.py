@@ -199,8 +199,7 @@ class InProc(Comm):
             self._finalizer.detach()
             raise CommClosedError()
 
-        if self.deserialize:
-            msg = nested_deserialize(msg)
+        msg = nested_deserialize(msg, self.deserialize)
         return msg
 
     async def write(self, msg, serializers=None, on_error=None):

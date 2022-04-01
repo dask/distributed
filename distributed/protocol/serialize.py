@@ -592,14 +592,26 @@ class Pickled:
         return not (self == other)
 
 
-def nested_deserialize(x):
-    """
-    Replace all Serialize and Serialized values nested in *x*
-    with the original values.  Returns a copy of *x*.
+def nested_deserialize(x, deserializing=True):
+    """Unwrap and deserialize all items in `x`
+
+    Walks through `x` and unwrap and deserialize (if `deserializing=True`)
+    all items wrapped in Serialize, ToPickle, Serialized, Pickled.
 
     >>> msg = {'op': 'update', 'data': to_serialize(123)}
     >>> nested_deserialize(msg)
     {'op': 'update', 'data': 123}
+
+    Parameters
+    ----------
+    x: Any
+        Object to unwrap and deserialize recursively.
+    deserializing: bool
+        Whether to deserialize serialized objects or leave them as is.
+
+    Returns
+    -------
+        copy of x
     """
 
     def replace_inner(x):
@@ -609,10 +621,12 @@ def nested_deserialize(x):
                 typ = type(v)
                 if typ is dict or typ is list:
                     x[k] = replace_inner(v)
-                elif typ is Serialize:
+                elif typ is Serialize or typ is ToPickle:
                     x[k] = v.data
-                elif typ is Serialized:
+                elif typ is Serialized and deserializing:
                     x[k] = deserialize(v.header, v.frames)
+                elif typ is Pickled and deserializing:
+                    x[k] = pickle.loads(v.header, buffers=v.frames)
 
         elif type(x) is list:
             x = list(x)
@@ -620,10 +634,12 @@ def nested_deserialize(x):
                 typ = type(v)
                 if typ is dict or typ is list:
                     x[k] = replace_inner(v)
-                elif typ is Serialize:
+                elif typ is Serialize or typ is ToPickle:
                     x[k] = v.data
-                elif typ is Serialized:
+                elif typ is Serialized and deserializing:
                     x[k] = deserialize(v.header, v.frames)
+                elif typ is Pickled and deserializing:
+                    x[k] = pickle.loads(v.header, buffers=v.frames)
 
         return x
 

@@ -31,7 +31,7 @@ from distributed.protocol import (
     serialize_bytes,
     to_serialize,
 )
-from distributed.protocol.serialize import check_dask_serializable
+from distributed.protocol.serialize import Pickled, ToPickle, check_dask_serializable
 from distributed.utils import nbytes
 from distributed.utils_test import gen_test, inc
 
@@ -134,6 +134,7 @@ def test_nested_deserialize():
         "op": "update",
         "x": [to_serialize(123), to_serialize(456), 789],
         "y": {"a": ["abc", Serialized(*serialize("def"))], "b": b"ghi"},
+        "z": {"a": ["abc", ToPickle("def")], "b": Pickled(pickle.dumps(b"ghi"), [])},
     }
     x_orig = copy.deepcopy(x)
 
@@ -141,6 +142,15 @@ def test_nested_deserialize():
         "op": "update",
         "x": [123, 456, 789],
         "y": {"a": ["abc", "def"], "b": b"ghi"},
+        "z": {"a": ["abc", "def"], "b": b"ghi"},
+    }
+    assert x == x_orig  # x wasn't mutated
+
+    assert nested_deserialize(x, deserializing=False) == {
+        "op": "update",
+        "x": [123, 456, 789],
+        "y": {"a": ["abc", Serialized(*serialize("def"))], "b": b"ghi"},
+        "z": {"a": ["abc", "def"], "b": Pickled(pickle.dumps(b"ghi"), [])},
     }
     assert x == x_orig  # x wasn't mutated
 
