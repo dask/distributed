@@ -5013,9 +5013,13 @@ class Scheduler(SchedulerState, ServerNode):
 
         # TODO: balance workers
 
-    def stimulus_task_finished(self, key=None, worker=None, **kwargs):
+    def stimulus_task_finished(self, key=None, worker=None, stimulus_id=None, **kwargs):
         """Mark that a task has finished execution on a particular worker"""
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"stimulus-task-finished-{time()}")
         logger.debug("Stimulus task finished %s, %s", key, worker)
 
         recommendations: dict = {}
@@ -5054,11 +5058,21 @@ class Scheduler(SchedulerState, ServerNode):
         return recommendations, client_msgs, worker_msgs
 
     def stimulus_task_erred(
-        self, key=None, worker=None, exception=None, traceback=None, **kwargs
+        self,
+        key=None,
+        worker=None,
+        exception=None,
+        traceback=None,
+        stimulus_id=None,
+        **kwargs,
     ):
         """Mark that a task has erred on a particular worker"""
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("Stimulus task erred %s, %s", key, worker)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"stimulus-task-erred-{time()}")
 
         ts: TaskState = parent._tasks.get(key)
         if ts is None or ts._state != "processing":
@@ -5640,7 +5654,12 @@ class Scheduler(SchedulerState, ServerNode):
     def handle_uncaught_error(self, **msg):
         logger.exception(clean_exception(**msg)[1])
 
-    def handle_task_finished(self, key=None, worker=None, **msg):
+    def handle_task_finished(self, key=None, worker=None, stimulus_id=None, **msg):
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"handle-task-finished-{time()}")
+
         parent: SchedulerState = cast(SchedulerState, self)
         if worker not in parent._workers_dv:
             return
@@ -5656,8 +5675,12 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.send_all(client_msgs, worker_msgs)
 
-    def handle_task_erred(self, key=None, **msg):
+    def handle_task_erred(self, key=None, stimulus_id=None, **msg):
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"handle-task-erred-{time()}")
         recommendations: dict
         client_msgs: dict
         worker_msgs: dict
@@ -5700,8 +5723,13 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 self.transitions({key: "forgotten"})
 
-    def release_worker_data(self, key, worker):
+    def release_worker_data(self, key, worker, stimulus_id=None):
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"release-worker-data-{time()}")
+
         ws: WorkerState = parent._workers_dv.get(worker)
         ts: TaskState = parent._tasks.get(key)
         if not ws or not ts:
@@ -5756,8 +5784,17 @@ class Scheduler(SchedulerState, ServerNode):
         ws._long_running.add(ts)
         self.check_idle_saturated(ws)
 
-    def handle_worker_status_change(self, status: str, worker: str) -> None:
+    def handle_worker_status_change(
+        self, status: str, worker: str, stimulus_id=None
+    ) -> None:
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(
+                stimulus_id or f"handle-worker-status-change-{time()}"
+            )
+
         ws: WorkerState = parent._workers_dv.get(worker)  # type: ignore
         if not ws:
             return
@@ -5793,7 +5830,7 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             parent._running.discard(ws)
 
-    async def handle_worker(self, comm=None, worker=None):
+    async def handle_worker(self, comm=None, worker=None, stimulus_id=None):
         """
         Listen to responses from a single worker
 
@@ -5803,6 +5840,11 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Scheduler.handle_client: Equivalent coroutine for clients
         """
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"handle-worker-{time()}")
+
         comm.name = "Scheduler connection to worker"
         worker_comm = self.stream_comms[worker]
         worker_comm.start(comm)
@@ -6009,6 +6051,7 @@ class Scheduler(SchedulerState, ServerNode):
         client=None,
         broadcast=False,
         timeout=2,
+        stimulus_id=None,
     ):
         """Send data out to workers
 
@@ -6017,6 +6060,11 @@ class Scheduler(SchedulerState, ServerNode):
         Scheduler.broadcast:
         """
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"scatter-{time()}")
+
         ws: WorkerState
 
         start = time()
@@ -6053,9 +6101,14 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return keys
 
-    async def gather(self, keys, serializers=None):
+    async def gather(self, keys, serializers=None, stimulus_id=None):
         """Collect data from workers to the scheduler"""
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"gather-{time()}")
+
         ws: WorkerState
         keys = list(keys)
         who_has = {}
@@ -6126,9 +6179,14 @@ class Scheduler(SchedulerState, ServerNode):
         for collection in self._task_state_collections:
             collection.clear()
 
-    async def restart(self, client=None, timeout=30):
+    async def restart(self, client=None, timeout=30, stimulus_id=None):
         """Restart all workers. Reset local state."""
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"restart-{time()}")
+
         with log_errors():
 
             n_workers = len(parent._workers_dv)
@@ -6398,6 +6456,7 @@ class Scheduler(SchedulerState, ServerNode):
         comm=None,
         keys: "Iterable[Hashable]" = None,
         workers: "Iterable[str]" = None,
+        stimulus_id=None,
     ) -> dict:
         """Rebalance keys so that each worker ends up with roughly the same process
         memory (managed+unmanaged).
@@ -6463,8 +6522,14 @@ class Scheduler(SchedulerState, ServerNode):
             allowlist of workers addresses to be considered as senders or recipients.
             All other workers will be ignored. The mean cluster occupancy will be
             calculated only using the allowed workers.
+        stimulus_id: str, optional
+            Stimulus ID that caused this function call
         """
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"rebalance-{time()}")
 
         with log_errors():
             wss: "Collection[WorkerState]"
@@ -6767,6 +6832,7 @@ class Scheduler(SchedulerState, ServerNode):
         branching_factor=2,
         delete=True,
         lock=True,
+        stimulus_id=None,
     ):
         """Replicate data throughout cluster
 
@@ -6784,12 +6850,19 @@ class Scheduler(SchedulerState, ServerNode):
             The larger the branching factor, the more data we copy in
             a single step, but the more a given worker risks being
             swamped by data requests.
+        stimulus_id: str, optional
+            Stimulus ID that caused this function call.
 
         See also
         --------
         Scheduler.rebalance
         """
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"replicate-{time()}")
+
         ws: WorkerState
         wws: WorkerState
         ts: TaskState
@@ -7019,6 +7092,7 @@ class Scheduler(SchedulerState, ServerNode):
         names: "list | None" = None,
         close_workers: bool = False,
         remove: bool = True,
+        stimulus_id=None,
         **kwargs,
     ) -> dict:
         """Gracefully retire workers from cluster
@@ -7039,6 +7113,8 @@ class Scheduler(SchedulerState, ServerNode):
         remove: bool (defaults to True)
             Whether or not to remove the worker metadata immediately or else
             wait for the worker to contact us
+        stimulus_id: str, optional
+            Stimulus ID that caused this function call.
         **kwargs: dict
             Extra options to pass to workers_to_close to determine which
             workers we should drop
@@ -7053,6 +7129,11 @@ class Scheduler(SchedulerState, ServerNode):
         Scheduler.workers_to_close
         """
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"retire-workers-{time()}")
+
         ws: WorkerState
         ts: TaskState
         with log_errors():
@@ -7212,11 +7293,7 @@ class Scheduler(SchedulerState, ServerNode):
         return "OK"
 
     def update_data(
-        self,
-        *,
-        who_has: dict,
-        nbytes: dict,
-        client=None,
+        self, *, who_has: dict, nbytes: dict, client=None, stimulus_id=None
     ):
         """
         Learn that new data has entered the network from an external source
@@ -7226,6 +7303,10 @@ class Scheduler(SchedulerState, ServerNode):
         Scheduler.mark_key_in_memory
         """
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"update-data-{time()}")
         with log_errors():
             who_has = {
                 k: [self.coerce_address(vv) for vv in v] for k, v in who_has.items()
