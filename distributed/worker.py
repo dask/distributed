@@ -380,7 +380,7 @@ class Worker(ServerNode):
     bandwidth_types: defaultdict[type, tuple[float, int]]
     preloads: list[preloading.Preload]
     contact_address: str | None
-    _start_port: int | None
+    _start_port: int | str | Collection[int] | None = None
     _start_host: str | None
     _interface: str | None
     _protocol: str
@@ -447,7 +447,7 @@ class Worker(ServerNode):
         ] = DEFAULT_STARTUP_INFORMATION,
         interface: str | None = None,
         host: str | None = None,
-        port: int | None = None,
+        port: int | str | Collection[int] | None = None,
         protocol: str | None = None,
         dashboard_address: str | None = None,
         dashboard: bool = False,
