@@ -8,12 +8,150 @@ from click.testing import CliRunner
 
 from dask.utils import tmpfile
 
-import distributed.cli.dask_worker
 from distributed import Client
+from distributed.cli.dask_worker import _apportion_ports, main
 from distributed.compatibility import LINUX, to_thread
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, popen, requires_ipv6
+
+
+@pytest.mark.parametrize(
+    # args: (worker_port, nanny_port, n_workers, nanny)
+    # Passing *args tuple instead of single args is to improve readability with black
+    "args,expect",
+    [
+        # Single worker
+        (
+            (None, None, 1, False),
+            [{"port": None}],
+        ),
+        (
+            (None, None, 1, True),
+            [{"port": None, "worker_port": None}],
+        ),
+        (("123", None, 1, False), [{"port": 123}]),
+        (
+            ("123", None, 1, True),
+            [{"port": None, "worker_port": 123}],
+        ),
+        (
+            (None, "456", 1, True),
+            [{"port": 456, "worker_port": None}],
+        ),
+        (
+            ("123", "456", 1, True),
+            [{"port": 456, "worker_port": 123}],
+        ),
+        # port=None or 0 and multiple workers
+        (
+            (None, None, 2, False),
+            [
+                {"port": None},
+                {"port": None},
+            ],
+        ),
+        (
+            (None, None, 2, True),
+            [
+                {"port": None, "worker_port": None},
+                {"port": None, "worker_port": None},
+            ],
+        ),
+        (
+            (0, "0", 2, True),
+            [
+                {"port": 0, "worker_port": 0},
+                {"port": 0, "worker_port": 0},
+            ],
+        ),
+        (
+            ("0", None, 2, True),
+            [
+                {"port": None, "worker_port": 0},
+                {"port": None, "worker_port": 0},
+            ],
+        ),
+        # port ranges
+        (
+            ("100:103", None, 1, False),
+            [{"port": [100, 101, 102, 103]}],
+        ),
+        (
+            ("100:103", None, 2, False),
+            [
+                {"port": [100, 102]},  # Round robin apportion
+                {"port": [101, 103]},
+            ],
+        ),
+        # port range is not an exact multiple of n_workers
+        (
+            ("100:107", None, 3, False),
+            [
+                {"port": [100, 103, 106]},
+                {"port": [101, 104, 107]},
+                {"port": [102, 105]},
+            ],
+        ),
+        (
+            ("100:103", None, 2, True),
+            [
+                {"port": None, "worker_port": [100, 102]},
+                {"port": None, "worker_port": [101, 103]},
+            ],
+        ),
+        (
+            (None, "110:113", 2, True),
+            [
+                {"port": [110, 112], "worker_port": None},
+                {"port": [111, 113], "worker_port": None},
+            ],
+        ),
+        # port ranges have different length between nannies and workers
+        (
+            ("100:103", "110:114", 2, True),
+            [
+                {"port": [110, 112, 114], "worker_port": [100, 102]},
+                {"port": [111, 113], "worker_port": [101, 103]},
+            ],
+        ),
+        # identical port ranges
+        (
+            ("100:103", "100:103", 2, True),
+            [
+                {"port": 101, "worker_port": 100},
+                {"port": 103, "worker_port": 102},
+            ],
+        ),
+        # overlapping port ranges
+        (
+            ("100:105", "104:106", 2, True),
+            [
+                {"port": [104, 106], "worker_port": [100, 102]},
+                {"port": 105, "worker_port": [101, 103]},
+            ],
+        ),
+    ],
+)
+def test_apportion_ports(args, expect):
+    assert _apportion_ports(*args) == expect
+
+
+def test_apportion_ports_bad():
+    with pytest.raises(ValueError, match="Not enough ports in range"):
+        _apportion_ports("100:102", None, 4, False)
+    with pytest.raises(ValueError, match="Not enough ports in range"):
+        _apportion_ports(None, "100:102", 4, False)
+    with pytest.raises(ValueError, match="Not enough ports in range"):
+        _apportion_ports("100:102", "100:102", 3, True)
+    with pytest.raises(ValueError, match="Not enough ports in range"):
+        _apportion_ports("100:102", "102:104", 3, True)
+    with pytest.raises(ValueError, match="port_stop must be greater than port_start"):
+        _apportion_ports("102:100", None, 4, False)
+    with pytest.raises(ValueError, match="invalid literal for int"):
+        _apportion_ports("foo", None, 1, False)
+    with pytest.raises(ValueError, match="too many values to unpack"):
+        _apportion_ports("100:101:102", None, 1, False)
 
 
 @pytest.mark.slow
@@ -80,7 +218,10 @@ async def test_nanny_worker_port_range_too_many_workers_raises(s):
         ],
         flush_output=False,
     ) as worker:
-        assert any(b"Could not start" in worker.stdout.readline() for _ in range(100))
+        assert any(
+            b"Not enough ports in range" in worker.stdout.readline()
+            for _ in range(100)
+        )
 
 
 @pytest.mark.slow
@@ -416,7 +557,7 @@ async def test_dashboard_non_standard_ports(c, s):
 
 def test_version_option():
     runner = CliRunner()
-    result = runner.invoke(distributed.cli.dask_worker.main, ["--version"])
+    result = runner.invoke(main, ["--version"])
     assert result.exit_code == 0
 
 
@@ -427,7 +568,7 @@ def test_worker_timeout(no_nanny):
     args = ["192.168.1.100:7777", "--death-timeout=1"]
     if no_nanny:
         args.append("--no-nanny")
-    result = runner.invoke(distributed.cli.dask_worker.main, args)
+    result = runner.invoke(main, args)
     assert result.exit_code != 0
 
 
@@ -437,14 +578,14 @@ def test_bokeh_deprecation():
     runner = CliRunner()
     with pytest.warns(UserWarning, match="dashboard"):
         try:
-            runner.invoke(distributed.cli.dask_worker.main, ["--bokeh"])
+            runner.invoke(main, ["--bokeh"])
         except ValueError:
             # didn't pass scheduler
             pass
 
     with pytest.warns(UserWarning, match="dashboard"):
         try:
-            runner.invoke(distributed.cli.dask_worker.main, ["--no-bokeh"])
+            runner.invoke(main, ["--no-bokeh"])
         except ValueError:
             # didn't pass scheduler
             pass
