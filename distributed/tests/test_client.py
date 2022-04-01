@@ -3462,7 +3462,9 @@ async def test_default_global_client_multi_clients(s):
 async def test_ensure_default_client(c, s, a, b):
     assert c is default_client()
 
-    async with Client(s.address, set_as_default=False, asynchronous=True) as c2:
+    async with Client(
+        s.address, set_as_default=False, asynchronous=True, name="c2"
+    ) as c2:
         assert c is default_client()
         assert c2 is not default_client()
         ensure_default_client(c2)

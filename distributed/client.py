@@ -1633,7 +1633,8 @@ class Client(SyncMethodMixin):
             return
 
         self.status = "closing"
-        _del_global_client(self)
+        if self._set_as_default:
+            _del_global_client(self)
 
         for preload in self.preloads:
             await preload.teardown()
@@ -5240,6 +5241,7 @@ def ensure_default_client(client: Client) -> None:
     client : Client
         The client
     """
+    client._set_as_default = True
     _set_global_client(client)
 
 
