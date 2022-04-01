@@ -17,7 +17,7 @@ async def test_text():
             "-m",
             "distributed.cli.dask_spec",
             "--spec",
-            '{"cls": "dask.distributed.Scheduler", "opts": {"port": 9373}}',
+            '{"cls": "dask.distributed.Scheduler", "opts": {"port": 8786}}',
         ]
     ):
         with popen(
@@ -25,12 +25,12 @@ async def test_text():
                 sys.executable,
                 "-m",
                 "distributed.cli.dask_spec",
-                "tcp://localhost:9373",
+                "tcp://localhost:8786",
                 "--spec",
                 '{"cls": "dask.distributed.Worker", "opts": {"nanny": false, "nthreads": 3, "name": "foo"}}',
             ]
         ):
-            async with Client("tcp://localhost:9373", asynchronous=True) as client:
+            async with Client("tcp://localhost:8786", asynchronous=True) as client:
                 await client.wait_for_workers(1)
                 info = await client.scheduler.identity()
                 [w] = info["workers"].values()
@@ -51,18 +51,18 @@ async def test_file(cleanup, tmp_path):
             f,
         )
 
-    with popen(["dask-scheduler", "--port", "9373", "--no-dashboard"]):
+    with popen(["dask-scheduler", "--port", "8786", "--no-dashboard"]):
         with popen(
             [
                 sys.executable,
                 "-m",
                 "distributed.cli.dask_spec",
-                "tcp://localhost:9373",
+                "tcp://localhost:8786",
                 "--spec-file",
                 fn,
             ]
         ):
-            async with Client("tcp://localhost:9373", asynchronous=True) as client:
+            async with Client("tcp://localhost:8786", asynchronous=True) as client:
                 await client.wait_for_workers(1)
                 info = await client.scheduler.identity()
                 [w] = info["workers"].values()
