@@ -2375,6 +2375,8 @@ class SchedulerState:
             except LookupError:
                 if self._validate:
                     raise
+                else:
+                    stimulus_id = "<stimulus_id not set>"
 
             finish2 = ts._state
             # FIXME downcast antipattern
@@ -5067,8 +5069,13 @@ class Scheduler(SchedulerState, ServerNode):
                 **kwargs,
             )
 
-    def stimulus_retry(self, keys, client=None):
+    def stimulus_retry(self, keys, client=None, stimulus_id=None):
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"stimulus-retry-{time()}")
+
         logger.info("Client %s requests to retry %d keys", client, len(keys))
         if client:
             self.log_event(client, {"action": "retry", "count": len(keys)})
@@ -5219,8 +5226,15 @@ class Scheduler(SchedulerState, ServerNode):
 
         return "OK"
 
-    def stimulus_cancel(self, comm, keys=None, client=None, force=False):
+    def stimulus_cancel(
+        self, comm, keys=None, client=None, force=False, stimulus_id=None
+    ):
         """Stop execution on a list of keys"""
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"add-worker-{time()}")
+
         logger.info("Client %s requests to cancel %d keys", client, len(keys))
         if client:
             self.log_event(

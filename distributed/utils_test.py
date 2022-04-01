@@ -50,7 +50,14 @@ from distributed.comm import Comm
 from distributed.comm.tcp import TCP, BaseTCPConnector
 from distributed.compatibility import WINDOWS
 from distributed.config import initialize_logging
-from distributed.core import CommClosedError, ConnectionPool, Status, connect, rpc
+from distributed.core import (
+    SERVER_STIMULUS_ID,
+    CommClosedError,
+    ConnectionPool,
+    Status,
+    connect,
+    rpc,
+)
 from distributed.deploy import SpecCluster
 from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
@@ -115,6 +122,17 @@ def invalid_python_script(tmpdir_factory):
     local_file = tmpdir_factory.mktemp("data").join("file.py")
     local_file.write("a+1")
     return local_file
+
+
+@pytest.fixture
+def set_stimulus(request):
+    stimulus_id = f"{request.function.__name__.replace('_', '-')}-{time()}"
+
+    try:
+        token = SERVER_STIMULUS_ID.set(stimulus_id)
+        yield
+    finally:
+        SERVER_STIMULUS_ID.reset(token)
 
 
 async def cleanup_global_workers():

@@ -2605,7 +2605,7 @@ async def test_gather_dep_exception_one_task(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_gather_dep_exception_one_task_2(c, s, a, b):
+async def test_gather_dep_exception_one_task_2(c, s, a, b, set_stimulus):
     """Ensure an exception in a single task does not tear down an entire batch of gather_dep
 
     The below triggers an fetch->memory transition
