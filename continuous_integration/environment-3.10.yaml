@@ -17,7 +17,6 @@ dependencies:
   - ipykernel
   - ipywidgets
   - jinja2
-  - jupyter_client
   - msgpack-python
   - netcdf4
   - paramiko
