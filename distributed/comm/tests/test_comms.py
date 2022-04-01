@@ -26,13 +26,7 @@ from distributed.comm import (
 )
 from distributed.comm.registry import backends, get_backend
 from distributed.metrics import time
-from distributed.protocol import (
-    Serialized,
-    deserialize,
-    pickle,
-    serialize,
-    to_serialize,
-)
+from distributed.protocol import Serialized, deserialize, serialize, to_serialize
 from distributed.protocol.serialize import Pickled, ToPickle
 from distributed.utils import get_ip, get_ipv6, mp_context
 from distributed.utils_test import (
@@ -1080,8 +1074,7 @@ async def check_deserialize(addr):
         "x": b"abc",
         "to_ser": [to_serialize(123)],
         "ser": Serialized(*serialize(456)),
-        "to_pickle": [ToPickle(123)],
-        "pickled": Pickled(pickle.dumps(456), []),
+        "to_pickle": ToPickle(123),
     }
     msg_orig = msg.copy()
 
@@ -1091,20 +1084,15 @@ async def check_deserialize(addr):
         to_ser = out_value.pop("to_ser")
         ser = out_value.pop("ser")
         to_pickle = out_value.pop("to_pickle")
-        pickled = out_value.pop("pickled")
         expected_msg = msg_orig.copy()
         del expected_msg["ser"]
         del expected_msg["to_ser"]
         del expected_msg["to_pickle"]
-        del expected_msg["pickled"]
         assert out_value == expected_msg
 
         assert isinstance(ser, Serialized)
         assert deserialize(ser.header, ser.frames) == 456
-        assert isinstance(pickled, Pickled)
-        assert pickle.loads(pickled.header, buffers=pickled.frames) == 456
-        assert to_pickle == [123]
-
+        assert to_pickle == 123
         assert isinstance(to_ser, (tuple, list)) and len(to_ser) == 1
         (to_ser,) = to_ser
         # The to_serialize() value could have been actually serialized
@@ -1119,8 +1107,7 @@ async def check_deserialize(addr):
         expected_msg = msg.copy()
         expected_msg["ser"] = 456
         expected_msg["to_ser"] = [123]
-        expected_msg["pickled"] = 456
-        expected_msg["to_pickle"] = [123]
+        expected_msg["to_pickle"] = 123
         # Notice, we allow "to_ser" to be a tuple or a list
         assert list(out_value.pop("to_ser")) == expected_msg.pop("to_ser")
         assert out_value == expected_msg
@@ -1202,7 +1189,6 @@ async def check_deserialize_roundtrip(addr):
         "to_ser": [to_serialize(_uncompressible)],
         "ser": Serialized(*serialize(_uncompressible)),
         "to_pickle": [ToPickle(_uncompressible)],
-        "pickled": Pickled(pickle.dumps(_uncompressible), []),
     }
 
     for should_deserialize in (True, False):
@@ -1219,12 +1205,10 @@ async def check_deserialize_roundtrip(addr):
             assert isinstance(got["to_ser"][0], (bytes, bytearray))
             assert isinstance(got["ser"], (bytes, bytearray))
             assert isinstance(got["to_pickle"][0], (bytes, bytearray))
-            assert isinstance(got["pickled"], (bytes, bytearray))
         else:
             assert isinstance(got["to_ser"][0], (type(_uncompressible), Serialized))
             assert isinstance(got["ser"], Serialized)
             assert isinstance(got["to_pickle"][0], (type(_uncompressible), Pickled))
-            assert isinstance(got["pickled"], Pickled)
 
 
 @pytest.mark.asyncio

@@ -596,7 +596,7 @@ def nested_deserialize(x, deserializing=True):
     """Unwrap and deserialize all items in `x`
 
     Walks through `x` and unwrap and deserialize (if `deserializing=True`)
-    all items wrapped in Serialize, ToPickle, Serialized, Pickled.
+    all items wrapped in Serialize, ToPickle, and Serialized.
 
     >>> msg = {'op': 'update', 'data': to_serialize(123)}
     >>> nested_deserialize(msg)
@@ -625,8 +625,6 @@ def nested_deserialize(x, deserializing=True):
                     x[k] = v.data
                 elif typ is Serialized and deserializing:
                     x[k] = deserialize(v.header, v.frames)
-                elif typ is Pickled and deserializing:
-                    x[k] = pickle.loads(v.header, buffers=v.frames)
 
         elif type(x) is list:
             x = list(x)
@@ -638,8 +636,6 @@ def nested_deserialize(x, deserializing=True):
                     x[k] = v.data
                 elif typ is Serialized and deserializing:
                     x[k] = deserialize(v.header, v.frames)
-                elif typ is Pickled and deserializing:
-                    x[k] = pickle.loads(v.header, buffers=v.frames)
 
         return x
 
