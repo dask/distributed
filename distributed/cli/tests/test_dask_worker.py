@@ -219,8 +219,7 @@ async def test_nanny_worker_port_range_too_many_workers_raises(s):
         flush_output=False,
     ) as worker:
         assert any(
-            b"Not enough ports in range" in worker.stdout.readline()
-            for _ in range(100)
+            b"Not enough ports in range" in worker.stdout.readline() for _ in range(100)
         )
 
 
