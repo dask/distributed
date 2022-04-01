@@ -598,6 +598,10 @@ def nested_deserialize(x, deserializing=True):
     Walks through `x` and unwrap and deserialize (if `deserializing=True`)
     all items wrapped in Serialize, ToPickle, and Serialized.
 
+    Notice, Pickled objects are not unwrapped or deserialized. It is only
+    protocol.dumps() and protocol.loads() and produce and consume Pickled
+    objects.
+
     >>> msg = {'op': 'update', 'data': to_serialize(123)}
     >>> nested_deserialize(msg)
     {'op': 'update', 'data': 123}

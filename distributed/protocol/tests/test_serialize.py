@@ -134,7 +134,7 @@ def test_nested_deserialize():
         "op": "update",
         "x": [to_serialize(123), to_serialize(456), 789],
         "y": {"a": ["abc", Serialized(*serialize("def"))], "b": b"ghi"},
-        "z": {"a": ["abc", ToPickle("def")], "b": Pickled(pickle.dumps(b"ghi"), [])},
+        "z": {"a": ["abc", ToPickle("def")], "b": Pickled("ghi", "jkl")},
     }
     x_orig = copy.deepcopy(x)
 
@@ -142,7 +142,7 @@ def test_nested_deserialize():
         "op": "update",
         "x": [123, 456, 789],
         "y": {"a": ["abc", "def"], "b": b"ghi"},
-        "z": {"a": ["abc", "def"], "b": b"ghi"},
+        "z": {"a": ["abc", "def"], "b": Pickled("ghi", "jkl")},
     }
     assert x == x_orig  # x wasn't mutated
 
@@ -150,7 +150,7 @@ def test_nested_deserialize():
         "op": "update",
         "x": [123, 456, 789],
         "y": {"a": ["abc", Serialized(*serialize("def"))], "b": b"ghi"},
-        "z": {"a": ["abc", "def"], "b": Pickled(pickle.dumps(b"ghi"), [])},
+        "z": {"a": ["abc", "def"], "b": Pickled("ghi", "jkl")},
     }
     assert x == x_orig  # x wasn't mutated
 
