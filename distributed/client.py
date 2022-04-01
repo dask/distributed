@@ -1373,7 +1373,7 @@ class Client(SyncMethodMixin):
                 del self.refcount[key]
                 self._release_key(key)
 
-    def _release_key(self, key):
+    def _release_key(self, key, stimulus_id=None):
         """Release key from distributed memory"""
         logger.debug("Release key %s", key)
         st = self.futures.pop(key, None)
@@ -1381,7 +1381,12 @@ class Client(SyncMethodMixin):
             st.cancel()
         if self.status != "closed":
             self._send_to_scheduler(
-                {"op": "client-releases-keys", "keys": [key], "client": self.id}
+                {
+                    "op": "client-releases-keys",
+                    "keys": [key],
+                    "client": self.id,
+                    "stimulus_id": stimulus_id,
+                }
             )
 
     async def _handle_report(self):
@@ -1527,8 +1532,10 @@ class Client(SyncMethodMixin):
             ):
                 await self.scheduler_comm.close()
 
+            stimulus_id = f"client-close-{time()}"
+
             for key in list(self.futures):
-                self._release_key(key=key)
+                self._release_key(key=key, stimulus_id=stimulus_id)
 
             if self._start_arg is None:
                 with suppress(AttributeError):
@@ -2111,7 +2118,11 @@ class Client(SyncMethodMixin):
                         response["data"].update(data2)
 
             else:  # ask scheduler to gather data for us
-                response = await retry_operation(self.scheduler.gather, keys=keys)
+                response = await retry_operation(
+                    self.scheduler.gather,
+                    keys=keys,
+                    stimulus_id=f"client-gather-remote-{time()}",
+                )
 
         return response
 
@@ -2197,6 +2208,8 @@ class Client(SyncMethodMixin):
             d = await self._scatter(keymap(stringify, data), workers, broadcast)
             return {k: d[stringify(k)] for k in data}
 
+        stimulus_id = f"client-scatter-{time()}"
+
         if isinstance(data, type(range(0))):
             data = list(data)
         input_type = type(data)
@@ -2238,6 +2251,7 @@ class Client(SyncMethodMixin):
                 who_has={key: [local_worker.address] for key in data},
                 nbytes=valmap(sizeof, data),
                 client=self.id,
+                stimulus_id=stimulus_id,
             )
 
         else:
@@ -2260,7 +2274,10 @@ class Client(SyncMethodMixin):
                 )
 
                 await self.scheduler.update_data(
-                    who_has=who_has, nbytes=nbytes, client=self.id
+                    who_has=who_has,
+                    nbytes=nbytes,
+                    client=self.id,
+                    stimulus_id=stimulus_id,
                 )
             else:
                 await self.scheduler.scatter(
@@ -2269,6 +2286,7 @@ class Client(SyncMethodMixin):
                     client=self.id,
                     broadcast=broadcast,
                     timeout=timeout,
+                    stimulus_id=stimulus_id,
                 )
 
         out = {k: Future(k, self, inform=False) for k in data}
@@ -2392,7 +2410,12 @@ class Client(SyncMethodMixin):
 
     async def _cancel(self, futures, force=False):
         keys = list({stringify(f.key) for f in futures_of(futures)})
-        await self.scheduler.cancel(keys=keys, client=self.id, force=force)
+        await self.scheduler.cancel(
+            keys=keys,
+            client=self.id,
+            force=force,
+            stimulus_id=f"client-cancel-{time()}",
+        )
         for k in keys:
             st = self.futures.pop(k, None)
             if st is not None:
@@ -2419,7 +2442,9 @@ class Client(SyncMethodMixin):
 
     async def _retry(self, futures):
         keys = list({stringify(f.key) for f in futures_of(futures)})
-        response = await self.scheduler.retry(keys=keys, client=self.id)
+        response = await self.scheduler.retry(
+            keys=keys, client=self.id, stimulus_id=f"client-retry-{time()}"
+        )
         for key in response:
             st = self.futures[key]
             st.retry()
@@ -3421,7 +3446,9 @@ class Client(SyncMethodMixin):
             keys = list({stringify(f.key) for f in self.futures_of(futures)})
         else:
             keys = None
-        result = await self.scheduler.rebalance(keys=keys, workers=workers)
+        result = await self.scheduler.rebalance(
+            keys=keys, workers=workers, stimulus_id=f"client-rebalance-{time()}"
+        )
         if result["status"] == "partial-fail":
             raise KeyError(f"Could not rebalance keys: {result['keys']}")
         assert result["status"] == "OK", result
@@ -3456,7 +3483,11 @@ class Client(SyncMethodMixin):
         await _wait(futures)
         keys = {stringify(f.key) for f in futures}
         await self.scheduler.replicate(
-            keys=list(keys), n=n, workers=workers, branching_factor=branching_factor
+            keys=list(keys),
+            n=n,
+            workers=workers,
+            branching_factor=branching_factor,
+            stimulus_id=f"client-replicate-{time()}",
         )
 
     def replicate(self, futures, n=None, workers=None, branching_factor=2, **kwargs):
@@ -4174,6 +4205,7 @@ class Client(SyncMethodMixin):
             self.scheduler.retire_workers,
             workers=workers,
             close_workers=close_workers,
+            stimulus_id=f"client-retire-workers-{time()}",
             **kwargs,
         )
 
