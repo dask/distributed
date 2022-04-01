@@ -1315,7 +1315,11 @@ class Client(SyncMethodMixin):
         else:
             deadline = None
         while n_workers and len(info["workers"]) < n_workers:
+            if self.cluster:
+                self.cluster.handle_still_waiting_for_workers()
             if deadline and time() > deadline:
+                if self.cluster:
+                    self.cluster.handle_wait_for_workers_timeout()
                 raise TimeoutError(
                     "Only %d/%d workers arrived after %s"
                     % (len(info["workers"]), n_workers, timeout)

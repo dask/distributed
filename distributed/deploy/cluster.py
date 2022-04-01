@@ -516,3 +516,17 @@ class Cluster(SyncMethodMixin):
 
     def __hash__(self):
         return id(self)
+
+    def handle_wait_for_workers_timeout(self):
+        """
+        Subclasses may (but need not) override this to implement special behavior (such as logging)
+        to be called when wait_for_workers times out.
+        """
+        pass
+
+    def handle_still_waiting_for_workers(self):
+        """
+        Subclasses may (but need not) override this to implement special behavior (such as logging)
+        to be called while waiting for workers.
+        """
+        pass
