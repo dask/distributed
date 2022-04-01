@@ -810,7 +810,7 @@ async def test_story(c, s, a, b):
     story = s.story(x.key)
     assert all(line in s.transition_log for line in story)
     assert len(story) < len(s.transition_log)
-    assert all(x.key == line[0] or x.key in line[-2] for line in story)
+    assert all(x.key == line[0] or x.key in line[3] for line in story)
 
     assert len(s.story(x.key, y.key)) > len(story)
 
@@ -3253,7 +3253,7 @@ async def test_worker_reconnect_task_memory(c, s, a):
 
     await res
     assert ("no-worker", "memory") in {
-        (start, finish) for (_, start, finish, _, _) in s.transition_log
+        (start, finish) for (_, start, finish, _, _, _) in s.transition_log
     }
 
 
@@ -3277,7 +3277,7 @@ async def test_worker_reconnect_task_memory_with_resources(c, s, a):
 
         await res
         assert ("no-worker", "memory") in {
-            (start, finish) for (_, start, finish, _, _) in s.transition_log
+            (start, finish) for (_, start, finish, _, _, _) in s.transition_log
         }
 
 

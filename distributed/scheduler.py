@@ -65,7 +65,7 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.addressing import addresses_from_user_args
-from distributed.core import Status, clean_exception, rpc, send_recv
+from distributed.core import SERVER_STIMULUS_ID, Status, clean_exception, rpc, send_recv
 from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
@@ -2370,11 +2370,17 @@ class SchedulerState:
             else:
                 raise RuntimeError("Impossible transition from %r to %r" % start_finish)
 
+            try:
+                stimulus_id = SERVER_STIMULUS_ID.get()
+            except LookupError:
+                if self._validate:
+                    raise
+
             finish2 = ts._state
             # FIXME downcast antipattern
             scheduler = pep484_cast(Scheduler, self)
             scheduler.transition_log.append(
-                (key, start, finish2, recommendations, time())
+                (key, start, finish2, recommendations, stimulus_id, time())
             )
             if parent._validate:
                 logger.debug(
@@ -4459,9 +4465,14 @@ class Scheduler(SchedulerState, ServerNode):
         versions=None,
         nanny=None,
         extra=None,
+        stimulus_id=None,
     ):
         """Add a new worker to the cluster"""
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"add-worker-{time()}")
         with log_errors():
             address = self.coerce_address(address, resolve_address)
             address = normalize_address(address)
@@ -4648,7 +4659,13 @@ class Scheduler(SchedulerState, ServerNode):
         actors=None,
         fifo_timeout=0,
         code=None,
+        stimulus_id=None,
     ):
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"update-graph-hlg-{time()}")
+
         unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg)
         dsk = unpacked_graph["dsk"]
         dependencies = unpacked_graph["deps"]
@@ -4687,6 +4704,7 @@ class Scheduler(SchedulerState, ServerNode):
             fifo_timeout,
             annotations,
             code=code,
+            stimulus_id=SERVER_STIMULUS_ID.get(),
         )
 
     def update_graph(
@@ -4706,6 +4724,7 @@ class Scheduler(SchedulerState, ServerNode):
         fifo_timeout=0,
         annotations=None,
         code=None,
+        stimulus_id=None,
     ):
         """
         Add new computations to the internal dask graph
@@ -4713,6 +4732,10 @@ class Scheduler(SchedulerState, ServerNode):
         This happens whenever the Client calls submit, map, get, or compute.
         """
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"update-graph-hlg-{time()}")
         start = time()
         fifo_timeout = parse_timedelta(fifo_timeout)
         keys = set(keys)
@@ -5074,7 +5097,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return tuple(seen)
 
-    async def remove_worker(self, address, safe=False, close=True):
+    async def remove_worker(self, address, safe=False, close=True, stimulus_id=None):
         """
         Remove worker from cluster
 
@@ -5083,6 +5106,12 @@ class Scheduler(SchedulerState, ServerNode):
         state.
         """
         parent: SchedulerState = cast(SchedulerState, self)
+
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"remove-worker-{time()}")
+
         with log_errors():
             if self.status == Status.closed:
                 return
@@ -5200,10 +5229,14 @@ class Scheduler(SchedulerState, ServerNode):
         for key in keys:
             self.cancel_key(key, client, force=force)
 
-    def cancel_key(self, key, client, retries=5, force=False):
+    def cancel_key(self, key, client, retries=5, force=False, stimulus_id=None):
         """Cancel a particular key and all dependents"""
         # TODO: this should be converted to use the transition mechanism
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"cancel-key-{time()}")
         ts: TaskState = parent._tasks.get(key)
         dts: TaskState
         try:
@@ -5225,8 +5258,13 @@ class Scheduler(SchedulerState, ServerNode):
         for cs in clients:
             self.client_releases_keys(keys=[key], client=cs._client_key)
 
-    def client_desires_keys(self, keys=None, client=None):
+    def client_desires_keys(self, keys=None, client=None, stimulus_id=None):
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"client-desires-keys-{time()}")
+
         cs: ClientState = parent._clients.get(client)
         if cs is None:
             # For publish, queues etc.
@@ -5243,10 +5281,15 @@ class Scheduler(SchedulerState, ServerNode):
             if ts._state in ("memory", "erred"):
                 self.report_on_key(ts=ts, client=client)
 
-    def client_releases_keys(self, keys=None, client=None):
+    def client_releases_keys(self, keys=None, client=None, stimulus_id=None):
         """Remove keys from client desired list"""
 
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"client-releases-keys-{time()}")
+
         if not isinstance(keys, list):
             keys = list(keys)
         cs: ClientState = parent._clients[client]
@@ -5464,12 +5507,18 @@ class Scheduler(SchedulerState, ServerNode):
                         "Closed comm %r while trying to write %s", c, msg, exc_info=True
                     )
 
-    async def add_client(self, comm: Comm, client: str, versions: dict) -> None:
+    async def add_client(
+        self, comm: Comm, client: str, versions: dict, stimulus_id=None
+    ) -> None:
         """Add client to network
 
         We listen to all future messages from this Comm.
         """
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"add-client-{time()}")
         assert client is not None
         comm.name = "Scheduler->Client"
         logger.info("Receive client connection: %s", client)
@@ -5513,9 +5562,13 @@ class Scheduler(SchedulerState, ServerNode):
             except TypeError:  # comm becomes None during GC
                 pass
 
-    def remove_client(self, client: str) -> None:
+    def remove_client(self, client: str, stimulus_id=None) -> None:
         """Remove client from network"""
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"remove-client-{time()}")
         if self.status == Status.running:
             logger.info("Remove client %s", client)
         self.log_event(["all", client], {"action": "remove-client", "client": client})
@@ -6267,7 +6320,10 @@ class Scheduler(SchedulerState, ServerNode):
         return keys_failed
 
     async def delete_worker_data(
-        self, worker_address: str, keys: "Collection[str]"
+        self,
+        worker_address: str,
+        keys: "Collection[str]",
+        stimulus_id=None,
     ) -> None:
         """Delete data from a worker and update the corresponding worker/task states
 
@@ -6279,6 +6335,10 @@ class Scheduler(SchedulerState, ServerNode):
             List of keys to delete on the specified worker
         """
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"delete-worker-data-{time()}")
 
         try:
             await retry_operation(
@@ -7609,13 +7669,18 @@ class Scheduler(SchedulerState, ServerNode):
 
     transition_story = story
 
-    def reschedule(self, key=None, worker=None):
+    def reschedule(self, key=None, worker=None, stimulus_id=None):
         """Reschedule a task
 
         Things may have shifted and this task may now be better suited to run
         elsewhere
         """
         parent: SchedulerState = cast(SchedulerState, self)
+        try:
+            SERVER_STIMULUS_ID.get()
+        except LookupError:
+            SERVER_STIMULUS_ID.set(stimulus_id or f"reschedule-{time()}")
+
         ts: TaskState
         try:
             ts = parent._tasks[key]
