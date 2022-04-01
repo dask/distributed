@@ -1007,6 +1007,9 @@ async def test_prefix_bokeh(s, a, b):
     assert bokeh_app.prefix == f"/{prefix}"
 
 
-@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
-async def test_hardware(c, s, a, b):
-    Hardware(s)  # don't call update, takes too long for a test
+@gen_cluster(client=True, nthreads=[], scheduler_kwargs={"dashboard": True})
+async def test_hardware(c, s):
+    plot = Hardware(s)
+    while not plot.disk_data:
+        await asyncio.sleep(0.1)
+        plot.update()

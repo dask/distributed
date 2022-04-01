@@ -196,29 +196,6 @@ def pristine_loop():
         IOLoop.clear_current()
 
 
-@contextmanager
-def mock_ipython():
-    from unittest import mock
-
-    from distributed._ipython_utils import remote_magic
-
-    ip = mock.Mock()
-    ip.user_ns = {}
-    ip.kernel = None
-
-    def get_ip():
-        return ip
-
-    with mock.patch("IPython.get_ipython", get_ip), mock.patch(
-        "distributed._ipython_utils.get_ipython", get_ip
-    ):
-        yield ip
-    # cleanup remote_magic client cache
-    for kc in remote_magic._clients.values():
-        kc.stop_channels()
-    remote_magic._clients.clear()
-
-
 original_config = copy.deepcopy(dask.config.config)
 
 

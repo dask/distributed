@@ -18,7 +18,6 @@ dependencies:
   - ipywidgets
   - jinja2
   - joblib  # overridden by git tip below
-  - jupyter_client
   - msgpack-python
   - netcdf4
   - paramiko
