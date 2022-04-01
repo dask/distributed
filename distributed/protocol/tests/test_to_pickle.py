@@ -1,4 +1,7 @@
+import logging
 from typing import Dict
+
+import pytest
 
 import dask.config
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
@@ -6,18 +9,33 @@ from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 from distributed.client import Client
 from distributed.protocol import dumps, loads
 from distributed.protocol.serialize import ToPickle
-from distributed.utils_test import gen_cluster
+from distributed.scheduler import Scheduler
+from distributed.utils import CancelledError
+from distributed.utils_test import captured_logger
+from distributed.worker import Worker
 
 
-def test_ToPickle():
+@pytest.mark.parametrize("allow_pickle", [False, True])
+def test_ToPickle(allow_pickle):
     class Foo:
         def __init__(self, data):
             self.data = data
 
-    msg = {"x": ToPickle(Foo(123))}
-    frames = dumps(msg)
-    out = loads(frames)
-    assert out["x"].data == 123
+    with dask.config.set(
+        {
+            "distributed.scheduler.pickle": allow_pickle,
+        }
+    ):
+        msg = {"x": ToPickle(Foo(123))}
+        frames = dumps(msg)
+        if allow_pickle:
+            out = loads(frames)
+            assert out["x"].data == 123
+        else:
+            with pytest.raises(
+                ValueError, match="Unpickle on the Scheduler isn't allowed"
+            ):
+                loads(frames)
 
 
 class NonMsgPackSerializableLayer(MaterializedLayer):
@@ -36,12 +54,30 @@ class NonMsgPackSerializableLayer(MaterializedLayer):
         return super().__dask_distributed_unpack__(state, *args, **kwargs)
 
 
-@gen_cluster(client=True)
-async def test_non_msgpack_serializable_layer(c: Client, s, w1, w2):
-    with dask.config.set({"distributed.scheduler.allowed-imports": "test_to_pickle"}):
+@pytest.mark.parametrize("allow_pickle", [False, True])
+@pytest.mark.asyncio
+async def test_non_msgpack_serializable(allow_pickle):
+    async def client_run(log, a, c):
         a = NonMsgPackSerializableLayer({"x": 42})
         layers = {"a": a}
         dependencies: Dict[str, set] = {"a": set()}
         hg = HighLevelGraph(layers, dependencies)
-        res = await c.get(hg, "x", sync=False)
-        assert res == 42
+        if allow_pickle:
+            res = await c.get(hg, "x", sync=False)
+            assert res == 42
+        else:
+            with pytest.raises(CancelledError):
+                await c.get(hg, "x", sync=False)
+            assert "Unpickle on the Scheduler isn't allowed" in log.getvalue()
+
+    with dask.config.set(
+        {
+            "distributed.scheduler.allowed-imports": "test_to_pickle",
+            "distributed.scheduler.pickle": allow_pickle,
+        }
+    ):
+        with captured_logger(logging.getLogger("distributed.core")) as log:
+            async with Scheduler(dashboard_address=":0", protocol="tcp") as s:
+                async with Worker(s.listeners[0].contact_address) as a:
+                    async with Client(s.address, asynchronous=True) as c:
+                        await client_run(log, a, c)
