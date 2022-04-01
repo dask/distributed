@@ -411,7 +411,7 @@ async def test_pause_executor_manual(c, s, a):
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
-    worker_kwargs={"memory_limit": "1000 MB"},
+    worker_kwargs={"memory_limit": "10 GB"},
     config={
         "distributed.worker.memory.target": False,
         "distributed.worker.memory.spill": False,
@@ -442,8 +442,8 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
         while "y" not in a.tasks:
             await asyncio.sleep(0.01)
 
-        # Hog the worker with 900MB unmanaged memory
-        mocked_rss = 900_000_000
+        # Hog the worker with 900GB unmanaged memory
+        mocked_rss = 900 * 1000**3
         while s.workers[a.address].status != Status.paused:
             await asyncio.sleep(0.01)
 
@@ -539,17 +539,17 @@ async def test_override_data_nanny(c, s, n):
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
-    worker_kwargs={"memory_limit": "1 GB", "data": UserDict},
+    worker_kwargs={"memory_limit": "10 GB", "data": UserDict},
     config={"distributed.worker.memory.monitor-interval": "10ms"},
 )
 async def test_override_data_vs_memory_monitor(c, s, a):
-    a.monitor.get_process_memory = lambda: 801_000_000 if a.data else 0
+    a.monitor.get_process_memory = lambda: 8_100_000_000 if a.data else 0
     assert memory_monitor_running(a)
 
     # Push a key that would normally trip both the target and the spill thresholds
     class C:
         def __sizeof__(self):
-            return 801_000_000
+            return 8_100_000_000
 
     # Capture output of log_errors()
     with captured_logger(logging.getLogger("distributed.utils")) as logger:
