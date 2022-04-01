@@ -2376,7 +2376,7 @@ class SchedulerState:
                 if self._validate:
                     raise
                 else:
-                    stimulus_id = "<stimulus_id not set>"
+                    stimulus_id = "<stimulus_id unset>"
 
             finish2 = ts._state
             # FIXME downcast antipattern
@@ -2386,11 +2386,12 @@ class SchedulerState:
             )
             if parent._validate:
                 logger.debug(
-                    "Transitioned %r %s->%s (actual: %s).  Consequence: %s",
+                    "Transitioned %r %s->%s (actual: %s) from %s.  Consequence: %s",
                     key,
                     start,
                     finish2,
                     ts._state,
+                    stimulus_id,
                     dict(recommendations),
                 )
             if self.plugins:
@@ -2865,7 +2866,9 @@ class SchedulerState:
                     {
                         "op": "cancel-compute",
                         "key": key,
-                        "stimulus_id": f"processing-memory-{time()}",
+                        "stimulus_id": SERVER_STIMULUS_ID.get(
+                            f"processing-memory-{time()}"
+                        ),
                     }
                 ]
 
@@ -2953,7 +2956,7 @@ class SchedulerState:
             worker_msg = {
                 "op": "free-keys",
                 "keys": [key],
-                "stimulus_id": f"memory-released-{time()}",
+                "stimulus_id": SERVER_STIMULUS_ID.get(f"memory-released-{time()}"),
             }
             for ws in ts._who_has:
                 worker_msgs[ws._address] = [worker_msg]
@@ -3056,7 +3059,7 @@ class SchedulerState:
             w_msg = {
                 "op": "free-keys",
                 "keys": [key],
-                "stimulus_id": f"erred-released-{time()}",
+                "stimulus_id": SERVER_STIMULUS_ID.get(f"erred-released-{time()}"),
             }
             for ws_addr in ts._erred_on:
                 worker_msgs[ws_addr] = [w_msg]
@@ -3135,7 +3138,9 @@ class SchedulerState:
                     {
                         "op": "free-keys",
                         "keys": [key],
-                        "stimulus_id": f"processing-released-{time()}",
+                        "stimulus_id": SERVER_STIMULUS_ID.get(
+                            f"processing-released-{time()}"
+                        ),
                     }
                 ]
 
@@ -4593,7 +4598,9 @@ class Scheduler(SchedulerState, ServerNode):
                         {
                             "op": "remove-replicas",
                             "keys": already_released_keys,
-                            "stimulus_id": f"reconnect-already-released-{time()}",
+                            "stimulus_id": SERVER_STIMULUS_ID.get(
+                                f"reconnect-already-released-{time()}"
+                            ),
                         }
                     )
 
@@ -5030,7 +5037,9 @@ class Scheduler(SchedulerState, ServerNode):
                 {
                     "op": "free-keys",
                     "keys": [key],
-                    "stimulus_id": f"already-released-or-forgotten-{time()}",
+                    "stimulus_id": SERVER_STIMULUS_ID.get(
+                        f"already-released-or-forgotten-{time()}"
+                    ),
                 }
             ]
         elif ts._state == "memory":
@@ -7189,14 +7198,14 @@ class Scheduler(SchedulerState, ServerNode):
                 redundant_replicas.append(key)
 
         if redundant_replicas:
-            if not stimulus_id:
-                stimulus_id = f"redundant-replicas-{time()}"
             self.worker_send(
                 worker,
                 {
                     "op": "remove-replicas",
                     "keys": redundant_replicas,
-                    "stimulus_id": stimulus_id,
+                    "stimulus_id": SERVER_STIMULUS_ID.get(
+                        stimulus_id or f"redundant-replicas-{time()}"
+                    ),
                 },
             )
 
@@ -8431,7 +8440,9 @@ def _propagate_forgotten(
                 {
                     "op": "free-keys",
                     "keys": [key],
-                    "stimulus_id": f"propagate-forgotten-{time()}",
+                    "stimulus_id": SERVER_STIMULUS_ID.get(
+                        f"propagate-forgotten-{time()}"
+                    ),
                 }
             ]
     state.remove_all_replicas(ts)
@@ -8474,7 +8485,7 @@ def _task_to_msg(state: SchedulerState, ts: TaskState, duration: double = -1) ->
         "key": ts._key,
         "priority": ts._priority,
         "duration": duration,
-        "stimulus_id": f"compute-task-{time()}",
+        "stimulus_id": SERVER_STIMULUS_ID.get(f"compute-task-{time()}"),
         "who_has": {},
     }
     if ts._resource_restrictions:
