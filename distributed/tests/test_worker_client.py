@@ -339,3 +339,38 @@ async def test_secede_does_not_claim_worker(c, s, a, b):
     assert len(res) == 2
     assert res[a.address] > 25
     assert res[b.address] > 25
+
+
+def test_sync_func_on_main_thread(client):
+    """A synchronous client running a worker that calls an async task which submits its own task to
+    the scheduler should not fail"""
+    # https://github.com/dask/distributed/issues/5513
+
+    async def inc(n):
+        return n+1
+
+    async def f():
+        with worker_client(separate_thread=True) as c:
+            m = c.submit(inc, 1)
+            return m
+
+    res = client.submit(f)
+    assert res.exception() is None
+
+
+@gen_cluster(client=True)
+async def test_async_func_on_main_thread(c, s, a, b):
+    """An asynchronous client running a worker that calls an async task which submits its own task to
+    the scheduler should not fail"""
+    # https://github.com/dask/distributed/issues/5513
+
+    async def inc(n):
+        return n+1
+
+    async def f():
+        with worker_client(separate_thread=True) as client:
+            m = await client.submit(inc, 1)
+            return m
+
+    res = await c.submit(f)
+    assert res == 2
