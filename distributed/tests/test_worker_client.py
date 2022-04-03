@@ -347,7 +347,7 @@ def test_sync_func_on_main_thread(client):
     # https://github.com/dask/distributed/issues/5513
 
     async def inc(n):
-        return n+1
+        return n + 1
 
     async def f():
         with worker_client(separate_thread=True) as c:
@@ -365,7 +365,7 @@ async def test_async_func_on_main_thread(c, s, a, b):
     # https://github.com/dask/distributed/issues/5513
 
     async def inc(n):
-        return n+1
+        return n + 1
 
     async def f():
         with worker_client(separate_thread=True) as client:
