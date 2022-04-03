@@ -1,5 +1,6 @@
 import warnings
 from contextlib import contextmanager
+import threading
 
 import dask
 
@@ -50,7 +51,12 @@ def worker_client(timeout=None, separate_thread=True):
 
     worker = get_worker()
     client = get_client(timeout=timeout)
-    if separate_thread:
+
+    # When passing the client an async function, it runs on the event loop
+    # in the main thread instead of a background thread.  This causes secede() to fail,
+    is_main_thread = threading.current_thread() is threading.main_thread()
+    if not is_main_thread and separate_thread:
+
         duration = time() - thread_state.start_time
         secede()  # have this thread secede from the thread pool
         worker.loop.add_callback(
@@ -63,7 +69,7 @@ def worker_client(timeout=None, separate_thread=True):
 
     yield client
 
-    if separate_thread:
+    if not is_main_thread and separate_thread:
         rejoin()
 
 
