@@ -115,15 +115,20 @@ async def test_ssh_nprocs_renamed_to_n_workers():
 
 @gen_test()
 async def test_ssh_n_workers_with_nprocs_is_an_error():
-    with pytest.raises(ValueError, match="Both nprocs and n_workers"):
-        async with SSHCluster(
-            ["127.0.0.1"] * 3,
-            connect_options=dict(known_hosts=None),
-            asynchronous=True,
-            scheduler_options={},
-            worker_options={"n_workers": 2, "nprocs": 2},
-        ) as cluster:
-            assert not cluster
+    cluster = SSHCluster(
+        ["127.0.0.1"] * 3,
+        connect_options=dict(known_hosts=None),
+        asynchronous=True,
+        scheduler_options={},
+        worker_options={"n_workers": 2, "nprocs": 2},
+    )
+    try:
+        with pytest.raises(ValueError, match="Both nprocs and n_workers"):
+            async with cluster:
+                pass
+    finally:
+        # FIXME: SSHCluster leaks if SSHCluster.__aenter__ raises
+        await cluster.close()
 
 
 @gen_test()
