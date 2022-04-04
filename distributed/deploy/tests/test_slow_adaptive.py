@@ -5,7 +5,7 @@ import pytest
 from dask.distributed import Client, Scheduler, SpecCluster, Worker
 
 from distributed.metrics import time
-from distributed.utils_test import slowinc
+from distributed.utils_test import gen_test, slowinc
 
 
 class SlowWorker:

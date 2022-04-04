@@ -10,7 +10,7 @@ import dask
 from distributed import Client
 from distributed.comm.ucx import _scrub_ucx_config
 from distributed.utils import get_ip
-from distributed.utils_test import popen
+from distributed.utils_test import gen_test, popen
 
 try:
     HOST = get_ip()

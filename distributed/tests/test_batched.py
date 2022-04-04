@@ -9,7 +9,7 @@ from distributed.core import CommClosedError, connect, listen
 from distributed.metrics import time
 from distributed.protocol import to_serialize
 from distributed.utils import All
-from distributed.utils_test import captured_logger
+from distributed.utils_test import captured_logger, gen_test
 
 
 class EchoServer:

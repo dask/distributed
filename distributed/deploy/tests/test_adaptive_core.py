@@ -1,10 +1,8 @@
 import asyncio
 
-import pytest
-
 from distributed.deploy.adaptive_core import AdaptiveCore
 from distributed.metrics import time
-from distributed.utils_test import captured_logger
+from distributed.utils_test import captured_logger, gen_test
 
 
 class MyAdaptive(AdaptiveCore):

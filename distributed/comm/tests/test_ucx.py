@@ -14,7 +14,7 @@ from distributed.comm.registry import backends, get_backend
 from distributed.deploy.local import LocalCluster
 from distributed.diagnostics.nvml import has_cuda_context
 from distributed.protocol import to_serialize
-from distributed.utils_test import inc
+from distributed.utils_test import gen_test, inc
 
 try:
     HOST = ucp.get_address()

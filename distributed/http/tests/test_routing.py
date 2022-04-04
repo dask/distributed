@@ -3,6 +3,7 @@ from tornado import web
 from tornado.httpclient import AsyncHTTPClient, HTTPClientError
 
 from distributed.http.routing import RoutingApplication
+from distributed.utils_test import gen_test
 
 
 class OneHandler(web.RequestHandler):

@@ -29,6 +29,7 @@ from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
 from distributed.utils import get_ip, get_ipv6, mp_context
 from distributed.utils_test import (
+    gen_test,
     get_cert,
     get_client_ssl_context,
     get_server_ssl_context,
