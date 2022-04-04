@@ -180,7 +180,7 @@ async def test_separate_thread_false(c, s, a):
 
 
 @gen_cluster(client=True)
-@pytest.mark.parametrize('separate_thread', [True, False])
+@pytest.mark.parametrize("separate_thread", [True, False])
 async def test_client_executor(c, s, a, b, separate_thread):
     def mysum():
         with worker_client(separate_thread=separate_thread) as c:
@@ -342,7 +342,7 @@ async def test_secede_does_not_claim_worker(c, s, a, b):
     assert res[b.address] > 25
 
 
-@pytest.mark.parametrize('separate_thread', [True, False])
+@pytest.mark.parametrize("separate_thread", [True, False])
 def test_sync_func_on_main_thread(client, separate_thread):
     """A synchronous client running a worker that calls an async task which submits its own task to
     the scheduler should not fail"""
@@ -361,7 +361,7 @@ def test_sync_func_on_main_thread(client, separate_thread):
 
 
 @gen_cluster(client=True)
-@pytest.mark.parametrize('separate_thread', [True, False])
+@pytest.mark.parametrize("separate_thread", [True, False])
 async def test_async_func_on_main_thread(c, s, a, b, separate_thread):
     """An asynchronous client running a worker that calls an async task which submits its own task to
     the scheduler should not fail"""
