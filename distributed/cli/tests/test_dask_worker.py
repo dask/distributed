@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import os
 from multiprocessing import cpu_count
@@ -178,6 +180,25 @@ async def test_nanny_worker_ports(c, s):
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[])
 async def test_nanny_worker_port_range(c, s):
+    async def assert_ports(min_: int, max_: int, nanny: bool) -> None:
+        port_ranges = await c.run(
+            lambda dask_worker: dask_worker._start_port, nanny=nanny
+        )
+
+        for a in port_ranges.values():
+            assert isinstance(a, list)
+            assert len(a) in (333, 334)
+            assert all(min_ <= i <= max_ for i in a)
+
+            # Test no overlap
+            for b in port_ranges.values():
+                assert a is b or not set(a) & set(b)
+
+        ports = await c.run(lambda dask_worker: dask_worker.port, nanny=nanny)
+        assert all(min_ <= p <= max_ for p in ports.values())
+        for addr, range in port_ranges.items():
+            assert ports[addr] in range
+
     with popen(
         [
             "dask-worker",
@@ -194,10 +215,8 @@ async def test_nanny_worker_port_range(c, s):
         ]
     ):
         await c.wait_for_workers(3)
-        worker_ports = await c.run(lambda dask_worker: dask_worker.port)
-        assert all(10000 <= p <= 11000 for p in worker_ports.values())
-        nanny_ports = await c.run(lambda dask_worker: dask_worker.port, nanny=True)
-        assert all(11000 <= p <= 12000 for p in nanny_ports.values())
+        await assert_ports(10000, 10999, nanny=False)
+        await assert_ports(11000, 12000, nanny=True)
 
 
 @gen_cluster(nthreads=[])
