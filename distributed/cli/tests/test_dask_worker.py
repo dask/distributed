@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from multiprocessing import cpu_count
 from time import sleep
 
@@ -178,6 +179,11 @@ async def test_nanny_worker_ports(c, s):
 
 
 @pytest.mark.slow
+@pytest.mark.flaky(
+    LINUX and sys.version_info == (3, 9),
+    reason="Race condition in Nanny.process.start? "
+    "See https://github.com/dask/distributed/issues/6045",
+)
 @gen_cluster(client=True, nthreads=[])
 async def test_nanny_worker_port_range(c, s):
     async def assert_ports(min_: int, max_: int, nanny: bool) -> None:
