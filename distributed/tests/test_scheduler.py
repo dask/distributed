@@ -3565,10 +3565,10 @@ async def test_stimuli(c, s, a, b):
     )
 
     stimuli = [
-        "update-graph-hlg",
-        "update-graph-hlg",
+        "update_graph_hlg",
+        "update_graph_hlg",
         "task-finished",
-        "client-releases-keys",
+        "client_releases_keys",
     ]
 
     stories = s.story(key)

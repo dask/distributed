@@ -19,7 +19,7 @@ from distributed.utils import All
 logger = logging.getLogger(__name__)
 
 
-def stimulus_handler(*args, sync=True):
+def stimulus_handler(*args, sync: bool = True):
     """Decorator controlling injection into RPC Handlers
 
     RPC Handler functions are entrypoints into the distributed Scheduler.
@@ -52,16 +52,16 @@ def stimulus_handler(*args, sync=True):
     """
 
     def decorator(fn):
-        name = funcname(fn).replace("_", "-")
+        name = funcname(fn)
         params = list(inspect.signature(fn).parameters.values())
         if params[0].name != "self":
-            raise ValueError(f"{fn} must be a method")
+            raise ValueError(f"{fn} must be a method")  # pragma: nocover
 
         if sync:
 
             @wraps(fn)
-            def wrapper(*args, **kw):
-                STIMULUS_ID = args[0].STIMULUS_ID
+            def wrapper(self, *args, **kw):
+                STIMULUS_ID = self.STIMULUS_ID
 
                 try:
                     STIMULUS_ID.get()
@@ -72,7 +72,7 @@ def stimulus_handler(*args, sync=True):
                     token = None
 
                 try:
-                    return fn(*args, **kw)
+                    return fn(self, *args, **kw)
                 finally:
                     if token:
                         STIMULUS_ID.reset(token)
@@ -80,8 +80,8 @@ def stimulus_handler(*args, sync=True):
         else:
 
             @wraps(fn)
-            async def wrapper(*args, **kw):
-                STIMULUS_ID = args[0].STIMULUS_ID
+            async def wrapper(self, *args, **kw):
+                STIMULUS_ID = self.STIMULUS_ID
 
                 try:
                     STIMULUS_ID.get()
@@ -92,7 +92,7 @@ def stimulus_handler(*args, sync=True):
                     token = None
 
                 try:
-                    return await fn(*args, **kw)
+                    return await fn(self, *args, **kw)
                 finally:
                     if token:
                         STIMULUS_ID.reset(token)
