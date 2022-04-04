@@ -227,6 +227,7 @@ class SpecCluster(Cluster):
         scheduler_sync_interval=1,
     ):
         self._created = weakref.WeakSet()
+        self._spec_name_to_worker_names = {}
 
         self.scheduler_spec = copy.copy(scheduler)
         self.worker_spec = copy.copy(workers) or {}
@@ -318,7 +319,11 @@ class SpecCluster(Cluster):
             to_close = set(self.workers) - set(self.worker_spec)
             if to_close:
                 if self.scheduler.status == Status.running:
-                    await self.scheduler_comm.retire_workers(workers=list(to_close))
+                    names = []
+                    for name in to_close:
+                        for worker in self._spec_name_to_worker_names[name]:
+                            names.append(worker)
+                    await self.scheduler_comm.retire_workers(names=names)
                 tasks = [
                     asyncio.create_task(self.workers[w].close())
                     for w in to_close
@@ -329,6 +334,7 @@ class SpecCluster(Cluster):
                     with suppress(RuntimeError):
                         await task
             for name in to_close:
+                self._spec_name_to_worker_names.pop(name, None)
                 if name in self.workers:
                     del self.workers[name]
 
@@ -344,6 +350,7 @@ class SpecCluster(Cluster):
                     cls = import_term(cls)
                 worker = cls(self.scheduler.address, **opts)
                 self._created.add(worker)
+                self._spec_name_to_worker_names[name] = {opts["name"]} if 'group' not in d else {opts['name']+suffix for suffix in d['group']}
                 workers.append(worker)
             if workers:
                 await asyncio.wait(workers)
