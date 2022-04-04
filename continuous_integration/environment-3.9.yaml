@@ -13,12 +13,12 @@ dependencies:
   - cloudpickle
   - coverage
   - dask  # overridden by git tip below
-  - filesystem-spec  # overridden by git tip below
+  - filesystem-spec
   - h5py
   - ipykernel
   - ipywidgets
   - jinja2
-  - joblib  # overridden by git tip below
+  - joblib
   - lz4  # Only tested here
   - msgpack-python
   - netcdf4
@@ -38,21 +38,16 @@ dependencies:
   - python-snappy  # Only tested here
   - pytorch  # Only tested here
   - requests
-  - s3fs  # overridden by git tip below
+  - s3fs
   - scikit-learn
   - scipy
   - sortedcollections
   - tblib
   - toolz
   - torchvision  # Only tested here
-  - tornado=6
-  - zict  # overridden by git tip below
+  - tornado
+  - zict
   - zstandard
   - pip:
       - git+https://github.com/dask/dask
-      - git+https://github.com/dask/s3fs
-      - git+https://github.com/dask/zict
-      # FIXME https://github.com/dask/distributed/issues/5345
-      # - git+https://github.com/intake/filesystem_spec
-      - git+https://github.com/joblib/joblib
       - keras

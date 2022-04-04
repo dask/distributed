@@ -39,7 +39,7 @@ dependencies:
   - sortedcollections
   - tblib
   - toolz
-  - tornado=6
+  - tornado
   - zict
   - zstandard
   - pip:
