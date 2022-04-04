@@ -1480,8 +1480,8 @@ class TaskState:
     _nbytes: Py_ssize_t
     _type: str  # str | None
     _exception: object
-    _exception_text: str
     _traceback: object
+    _exception_text: str
     _traceback_text: str
     _exception_blame: "TaskState"  # TaskState | None"
     _erred_on: set
@@ -3829,7 +3829,6 @@ class Scheduler(SchedulerState, ServerNode):
         self.client_comms = {}
         self.stream_comms = {}
         self._worker_coroutines = []
-        self._ipython_kernel = None
 
         # Task state
         tasks = {}
@@ -3995,7 +3994,6 @@ class Scheduler(SchedulerState, ServerNode):
             "add_keys": self.add_keys,
             "rebalance": self.rebalance,
             "replicate": self.replicate,
-            "start_ipython": self.start_ipython,
             "run_function": self.run_function,
             "update_data": self.update_data,
             "set_resources": self.add_resources,
@@ -7827,19 +7825,6 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 out.update({ww for ww in parent._workers if w in ww})  # TODO: quadratic
         return list(out)
-
-    def start_ipython(self):
-        """Start an IPython kernel
-
-        Returns Jupyter connection info dictionary.
-        """
-        from distributed._ipython_utils import start_ipython
-
-        if self._ipython_kernel is None:
-            self._ipython_kernel = start_ipython(
-                ip=self.ip, ns={"scheduler": self}, log=logger
-            )
-        return self._ipython_kernel.get_connection_info()
 
     async def get_profile(
         self,

@@ -68,7 +68,7 @@ from distributed.http import get_handlers
 from distributed.metrics import time
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
-from distributed.protocol import pickle, to_serialize
+from distributed.protocol import Serialize, pickle, to_serialize
 from distributed.pubsub import PubSubWorkerExtension
 from distributed.security import Security
 from distributed.shuffle import ShuffleWorkerExtension
@@ -407,7 +407,6 @@ class Worker(ServerNode):
     stream_comms: dict[str, BatchedSend]
     heartbeat_interval: float
     heartbeat_active: bool
-    _ipython_kernel: Any | None = None
     services: dict[str, Any] = {}
     service_specs: dict[str, Any]
     metrics: dict[str, Callable[[Worker], Any]]
@@ -702,7 +701,6 @@ class Worker(ServerNode):
         self.scheduler_delay = 0
         self.stream_comms = {}
         self.heartbeat_active = False
-        self._ipython_kernel = None
 
         if self.local_directory not in sys.path:
             sys.path.insert(0, self.local_directory)
@@ -733,7 +731,6 @@ class Worker(ServerNode):
             "terminate": self.close,
             "ping": pingpong,
             "upload_file": self.upload_file,
-            "start_ipython": self.start_ipython,
             "call_stack": self.get_call_stack,
             "profile": self.get_profile,
             "profile_metadata": self.get_profile_metadata,
@@ -1194,19 +1191,6 @@ class Worker(ServerNode):
                 self.loop.add_callback(self.heartbeat)
             else:
                 await self.close(report=False)
-
-    def start_ipython(self, comm):
-        """Start an IPython kernel
-
-        Returns Jupyter connection info dictionary.
-        """
-        from distributed._ipython_utils import start_ipython
-
-        if self._ipython_kernel is None:
-            self._ipython_kernel = start_ipython(
-                ip=self.ip, ns={"worker": self}, log=logger
-            )
-        return self._ipython_kernel.get_connection_info()
 
     async def upload_file(self, comm, filename=None, data=None, load=True):
         out_filename = os.path.join(self.local_directory, filename)
@@ -2086,10 +2070,10 @@ class Worker(ServerNode):
     def transition_cancelled_error(
         self,
         ts: TaskState,
-        exception,
-        traceback,
-        exception_text,
-        traceback_text,
+        exception: Serialize,
+        traceback: Serialize | None,
+        exception_text: str,
+        traceback_text: str,
         *,
         stimulus_id: str,
     ) -> tuple[Recs, Instructions]:
@@ -2120,8 +2104,8 @@ class Worker(ServerNode):
     def transition_generic_error(
         self,
         ts: TaskState,
-        exception: Exception,
-        traceback: object,
+        exception: Serialize,
+        traceback: Serialize | None,
         exception_text: str,
         traceback_text: str,
         *,
@@ -2134,10 +2118,10 @@ class Worker(ServerNode):
         ts.state = "error"
         smsg = TaskErredMsg(
             key=ts.key,
-            exception=ts.exception,
-            traceback=ts.traceback,
-            exception_text=ts.exception_text,
-            traceback_text=ts.traceback_text,
+            exception=exception,
+            traceback=traceback,
+            exception_text=exception_text,
+            traceback_text=traceback_text,
             thread=self.threads.get(ts.key),
             startstops=ts.startstops,
             stimulus_id=stimulus_id,
@@ -2148,10 +2132,10 @@ class Worker(ServerNode):
     def transition_executing_error(
         self,
         ts: TaskState,
-        exception,
-        traceback,
-        exception_text,
-        traceback_text,
+        exception: Serialize,
+        traceback: Serialize | None,
+        exception_text: str,
+        traceback_text: str,
         *,
         stimulus_id: str,
     ) -> tuple[Recs, Instructions]:
@@ -2400,10 +2384,10 @@ class Worker(ServerNode):
     def transition_flight_error(
         self,
         ts: TaskState,
-        exception,
-        traceback,
-        exception_text,
-        traceback_text,
+        exception: Serialize,
+        traceback: Serialize | None,
+        exception_text: str,
+        traceback_text: str,
         *,
         stimulus_id: str,
     ) -> tuple[Recs, Instructions]:
@@ -3280,7 +3264,7 @@ class Worker(ServerNode):
                     if not catch_errors:
                         raise
                     msg = error_message(e)
-                    return msg
+                    return cast("dict[str, Any]", msg)
 
             return {"status": "OK"}
 
@@ -3295,7 +3279,7 @@ class Worker(ServerNode):
                         result = await result
             except Exception as e:
                 msg = error_message(e)
-                return msg
+                return cast("dict[str, Any]", msg)
 
             return {"status": "OK"}
 
@@ -3374,7 +3358,7 @@ class Worker(ServerNode):
             logger.error("Could not deserialize task", exc_info=True)
             self.log.append((ts.key, "deserialize-error", stimulus_id, time()))
             emsg = error_message(e)
-            emsg.pop("status")
+            del emsg["status"]  # type: ignore
             self.transition(
                 ts,
                 "error",
@@ -3556,7 +3540,7 @@ class Worker(ServerNode):
                 "Exception during execution of task %s.", ts.key, exc_info=True
             )
             emsg = error_message(exc)
-            emsg.pop("status")
+            del emsg["status"]  # type: ignore
             self.transition(
                 ts,
                 "error",
