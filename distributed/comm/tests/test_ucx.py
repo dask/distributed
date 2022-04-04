@@ -179,7 +179,6 @@ async def test_ucx_deserialize():
     await check_deserialize("tcp://")
 
 
-@gen_test()
 @pytest.mark.parametrize(
     "g",
     [
@@ -196,6 +195,7 @@ async def test_ucx_deserialize():
         lambda cudf: cudf.DataFrame({"a": ["Check", "str"], "b": ["Sup", "port"]}),
     ],
 )
+@gen_test()
 async def test_ping_pong_cudf(g):
     # if this test appears after cupy an import error arises
     # *** ImportError: /usr/lib/x86_64-linux-gnu/libstdc++.so.6: version `CXXABI_1.3.11'
@@ -219,8 +219,8 @@ async def test_ping_pong_cudf(g):
     await serv_com.close()
 
 
-@gen_test()
 @pytest.mark.parametrize("shape", [(100,), (10, 10), (4947,)])
+@gen_test()
 async def test_ping_pong_cupy(shape):
     cupy = pytest.importorskip("cupy")
     com, serv_com = await get_comm_pair()
@@ -238,8 +238,8 @@ async def test_ping_pong_cupy(shape):
 
 
 @pytest.mark.slow
-@gen_test()
 @pytest.mark.parametrize("n", [int(1e9), int(2.5e9)])
+@gen_test()
 async def test_large_cupy(n, cleanup):
     cupy = pytest.importorskip("cupy")
     com, serv_com = await get_comm_pair()
@@ -274,8 +274,8 @@ async def test_ping_pong_numba():
     assert result["op"] == "ping"
 
 
-@gen_test()
 @pytest.mark.parametrize("processes", [True, False])
+@gen_test()
 async def test_ucx_localcluster(processes, cleanup):
     async with LocalCluster(
         protocol="ucx",
@@ -356,8 +356,8 @@ async def test_transpose():
             await y
 
 
-@gen_test()
 @pytest.mark.parametrize("port", [0, 1234])
+@gen_test()
 async def test_ucx_protocol(cleanup, port):
     async with Scheduler(protocol="ucx", port=port, dashboard_address=":0") as s:
         assert s.address.startswith("ucx://")
