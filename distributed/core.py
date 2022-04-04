@@ -597,7 +597,7 @@ class Server:
                         "Failed while closing connection to %r: %s", address, e
                     )
 
-    async def handle_stream(self, comm, extra=None, every_cycle=[]):
+    async def handle_stream(self, comm, extra=None, every_cycle=()):
         extra = extra or {}
         logger.info("Starting established connection")
 
