@@ -1371,9 +1371,9 @@ class Client(SyncMethodMixin):
             self.refcount[key] -= 1
             if self.refcount[key] == 0:
                 del self.refcount[key]
-                self._release_key(key)
+                self._release_key(key, f"client-release-key-{time()}")
 
-    def _release_key(self, key, stimulus_id=None):
+    def _release_key(self, key, stimulus_id: str):
         """Release key from distributed memory"""
         logger.debug("Release key %s", key)
         st = self.futures.pop(key, None)
