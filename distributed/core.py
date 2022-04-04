@@ -12,7 +12,6 @@ import weakref
 from collections import defaultdict
 from collections.abc import Container
 from contextlib import suppress
-from contextvars import ContextVar
 from enum import Enum
 from functools import partial
 from typing import Callable, ClassVar
@@ -113,9 +112,6 @@ def _expects_comm(func: Callable) -> bool:
         )
         return True
     return False
-
-
-SERVER_STIMULUS_ID: ContextVar = ContextVar("stimulus_id")
 
 
 class Server:

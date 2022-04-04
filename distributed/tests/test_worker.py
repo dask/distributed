@@ -1689,12 +1689,10 @@ async def test_story_with_deps(c, s, a, b):
 
     # Story now includes randomized stimulus_ids and timestamps.
     stimulus_ids = {ev[-2] for ev in story}
-    # task-finished (new_stimulus_id) from Worker.execute is added
     assert {sid[: re.search(r"\d", sid).start()] for sid in stimulus_ids} == {
         "ensure-computing-",
-        "add-worker-",
-        "task-finished-",
         "ensure-communicating-",
+        "task-finished-",
     }
 
     # This is a simple transition log
@@ -2613,7 +2611,7 @@ async def test_gather_dep_exception_one_task(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_gather_dep_exception_one_task_2(c, s, a, b, set_stimulus):
+async def test_gather_dep_exception_one_task_2(c, s, a, b):
     """Ensure an exception in a single task does not tear down an entire batch of gather_dep
 
     The below triggers an fetch->memory transition

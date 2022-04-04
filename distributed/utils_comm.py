@@ -1,20 +1,94 @@
 import asyncio
+import inspect
 import logging
 import random
 from collections import defaultdict
-from functools import partial
+from functools import partial, wraps
 from itertools import cycle
 
 from tlz import concat, drop, groupby, merge
 
 import dask.config
 from dask.optimization import SubgraphCallable
-from dask.utils import parse_timedelta, stringify
+from dask.utils import funcname, parse_timedelta, stringify
 
 from distributed.core import rpc
+from distributed.metrics import time
 from distributed.utils import All
 
 logger = logging.getLogger(__name__)
+
+
+def stimulus_handler(*args):
+    """Decorator controlling injection into RPC Handlers
+
+    RPC Handler functions are entrypoints into the distributed Scheduler.
+    These entrypoints may receive stimuli from external entities such
+    as workers in the ``stimulus_id`` kwarg or the functinos
+    may generate the stimuli themselves.
+    A further complication is that RPC Handlers may call other RPC handler
+    functions.
+
+    Therefore, this decorator exists to simplify the setting of
+    the Scheduler STIMULUS_ID and encapsulates the following logic
+
+    1. If the STIMULUS_ID is already set, stimuli from other sources
+       are ignored.
+    2. If a ``stimulus_id`` kwargs is supplied by an external entity
+       such as a worker, the STIMULUS_ID is set to this value.
+    3. Otherwise, the STIMULUS_ID is from the function name and
+       current time.
+    """
+
+    def decorator(fn):
+        name = funcname(fn).replace("_", "-")
+        params = list(inspect.signature(fn).parameters.values())
+        if params[0].name != "self":
+            raise ValueError(f"{fn} must be a method")
+
+        if not inspect.iscoroutinefunction(fn):
+
+            @wraps(fn)
+            def wrapper(*args, **kw):
+                STIMULUS_ID = args[0].STIMULUS_ID
+
+                try:
+                    STIMULUS_ID.get()
+                except LookupError:
+                    stimulus_id = kw.get("stimulus_id", None) or f"{name}-{time()}"
+                    token = STIMULUS_ID.set(stimulus_id)
+                else:
+                    token = None
+
+                try:
+                    return fn(*args, **kw)
+                finally:
+                    if token:
+                        STIMULUS_ID.reset(token)
+
+        else:
+
+            @wraps(fn)
+            async def wrapper(*args, **kw):
+                STIMULUS_ID = args[0].STIMULUS_ID
+
+                try:
+                    STIMULUS_ID.get()
+                except LookupError:
+                    stimulus_id = kw.get("stimulus_id", None) or f"{name}-{time()}"
+                    token = STIMULUS_ID.set(stimulus_id)
+                else:
+                    token = None
+
+                try:
+                    return await fn(*args, **kw)
+                finally:
+                    if token:
+                        STIMULUS_ID.reset(token)
+
+        return wrapper
+
+    return decorator(args[0]) if args and callable(args[0]) else decorator
 
 
 async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=None):

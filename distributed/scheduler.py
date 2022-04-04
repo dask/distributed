@@ -25,6 +25,7 @@ from collections.abc import (
     Set,
 )
 from contextlib import suppress
+from contextvars import ContextVar
 from datetime import timedelta
 from functools import partial
 from numbers import Number
@@ -65,7 +66,7 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.addressing import addresses_from_user_args
-from distributed.core import SERVER_STIMULUS_ID, Status, clean_exception, rpc, send_recv
+from distributed.core import Status, clean_exception, rpc, send_recv
 from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
@@ -100,6 +101,7 @@ from distributed.utils_comm import (
     gather_from_workers,
     retry_operation,
     scatter_to_workers,
+    stimulus_handler,
 )
 from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.variable import VariableExtension
@@ -2370,17 +2372,18 @@ class SchedulerState:
             else:
                 raise RuntimeError("Impossible transition from %r to %r" % start_finish)
 
+            # FIXME downcast antipattern
+            scheduler = pep484_cast(Scheduler, self)
+
             try:
-                stimulus_id = SERVER_STIMULUS_ID.get()
+                stimulus_id = scheduler.STIMULUS_ID.get()
             except LookupError:
                 if self._validate:
-                    raise
+                    raise LookupError(scheduler.STIMULUS_ID.name)
                 else:
                     stimulus_id = "<stimulus_id unset>"
 
             finish2 = ts._state
-            # FIXME downcast antipattern
-            scheduler = pep484_cast(Scheduler, self)
             scheduler.transition_log.append(
                 (key, start, finish2, recommendations, stimulus_id, time())
             )
@@ -2769,7 +2772,9 @@ class SchedulerState:
 
             # logger.debug("Send job to worker: %s, %s", worker, key)
 
-            worker_msgs[worker] = [_task_to_msg(self, ts)]
+            worker_msgs[worker] = [
+                _task_to_msg(self, ts, self.STIMULUS_ID.get(f"compute-task-{time()}"))
+            ]
 
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
@@ -2862,11 +2867,15 @@ class SchedulerState:
                     ws,
                     key,
                 )
+
+                # FIXME downcast antipattern
+                scheduler = pep484_cast(Scheduler, self)
+
                 worker_msgs[ts._processing_on.address] = [
                     {
                         "op": "cancel-compute",
                         "key": key,
-                        "stimulus_id": SERVER_STIMULUS_ID.get(
+                        "stimulus_id": scheduler.STIMULUS_ID.get(
                             f"processing-memory-{time()}"
                         ),
                     }
@@ -2952,11 +2961,15 @@ class SchedulerState:
                 elif dts._state == "waiting":
                     dts._waiting_on.add(ts)
 
+            # FIXME downcast antipattern
+            scheduler = pep484_cast(Scheduler, self)
+
             # XXX factor this out?
+
             worker_msg = {
                 "op": "free-keys",
                 "keys": [key],
-                "stimulus_id": SERVER_STIMULUS_ID.get(f"memory-released-{time()}"),
+                "stimulus_id": scheduler.STIMULUS_ID.get(f"memory-released-{time()}"),
             }
             for ws in ts._who_has:
                 worker_msgs[ws._address] = [worker_msg]
@@ -3059,7 +3072,7 @@ class SchedulerState:
             w_msg = {
                 "op": "free-keys",
                 "keys": [key],
-                "stimulus_id": SERVER_STIMULUS_ID.get(f"erred-released-{time()}"),
+                "stimulus_id": self.STIMULUS_ID.get(f"erred-released-{time()}"),
             }
             for ws_addr in ts._erred_on:
                 worker_msgs[ws_addr] = [w_msg]
@@ -3138,7 +3151,7 @@ class SchedulerState:
                     {
                         "op": "free-keys",
                         "keys": [key],
-                        "stimulus_id": SERVER_STIMULUS_ID.get(
+                        "stimulus_id": self.STIMULUS_ID.get(
                             f"processing-released-{time()}"
                         ),
                     }
@@ -3331,7 +3344,13 @@ class SchedulerState:
                 for ws in ts._who_has:
                     ws._actors.discard(ts)
 
-            _propagate_forgotten(self, ts, recommendations, worker_msgs)
+            _propagate_forgotten(
+                self,
+                ts,
+                recommendations,
+                worker_msgs,
+                self.STIMULUS_ID.get(f"propagate-forgotten-{time()}"),
+            )
 
             client_msgs = _task_to_client_msgs(self, ts)
             self.remove_key(key)
@@ -3369,7 +3388,13 @@ class SchedulerState:
                 else:
                     assert 0, (ts,)
 
-            _propagate_forgotten(self, ts, recommendations, worker_msgs)
+            _propagate_forgotten(
+                self,
+                ts,
+                recommendations,
+                worker_msgs,
+                self.STIMULUS_ID.get(f"propagate-forgotten-{time()}"),
+            )
 
             client_msgs = _task_to_client_msgs(self, ts)
             self.remove_key(key)
@@ -3997,6 +4022,8 @@ class Scheduler(SchedulerState, ServerNode):
             "benchmark_hardware": self.benchmark_hardware,
         }
 
+        self.STIMULUS_ID = ContextVar(f"stimulus_id-{uuid.uuid4().hex}")
+
         connection_limit = get_fileno_limit() / 2
 
         super().__init__(
@@ -4472,14 +4499,9 @@ class Scheduler(SchedulerState, ServerNode):
         versions=None,
         nanny=None,
         extra=None,
-        stimulus_id=None,
     ):
         """Add a new worker to the cluster"""
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"add-worker-{time()}")
         with log_errors():
             address = self.coerce_address(address, resolve_address)
             address = normalize_address(address)
@@ -4568,50 +4590,53 @@ class Scheduler(SchedulerState, ServerNode):
             recommendations: dict = {}
             client_msgs: dict = {}
             worker_msgs: dict = {}
-            if nbytes:
-                assert isinstance(nbytes, dict)
-                already_released_keys = []
-                for key in nbytes:
-                    ts: TaskState = parent._tasks.get(key)  # type: ignore
-                    if ts is not None and ts.state != "released":
-                        if ts.state == "memory":
-                            self.add_keys(worker=address, keys=[key])
+            token = self.STIMULUS_ID.set(f"add-worker-{time()}")
+            try:
+                if nbytes:
+                    assert isinstance(nbytes, dict)
+                    already_released_keys = []
+                    for key in nbytes:
+                        ts: TaskState = parent._tasks.get(key)  # type: ignore
+                        if ts is not None and ts.state != "released":
+                            if ts.state == "memory":
+                                self.add_keys(worker=address, keys=[key])
+                            else:
+                                t: tuple = parent._transition(
+                                    key,
+                                    "memory",
+                                    worker=address,
+                                    nbytes=nbytes[key],
+                                    typename=types[key],
+                                )
+                                recommendations, client_msgs, worker_msgs = t
+                                parent._transitions(
+                                    recommendations, client_msgs, worker_msgs
+                                )
+                                recommendations = {}
                         else:
-                            t: tuple = parent._transition(
-                                key,
-                                "memory",
-                                worker=address,
-                                nbytes=nbytes[key],
-                                typename=types[key],
+                            already_released_keys.append(key)
+                    if already_released_keys:
+                        if address not in worker_msgs:
+                            worker_msgs[address] = []
+                            worker_msgs[address].append(
+                                {
+                                    "op": "remove-replicas",
+                                    "keys": already_released_keys,
+                                    "stimulus_id": f"reconnect-already-released-{time()}",
+                                }
                             )
-                            recommendations, client_msgs, worker_msgs = t
-                            parent._transitions(
-                                recommendations, client_msgs, worker_msgs
-                            )
-                            recommendations = {}
-                    else:
-                        already_released_keys.append(key)
-                if already_released_keys:
-                    if address not in worker_msgs:
-                        worker_msgs[address] = []
-                    worker_msgs[address].append(
-                        {
-                            "op": "remove-replicas",
-                            "keys": already_released_keys,
-                            "stimulus_id": SERVER_STIMULUS_ID.get(
-                                f"reconnect-already-released-{time()}"
-                            ),
-                        }
-                    )
 
-            if ws._status == Status.running:
-                for ts in parent._unrunnable:
-                    valid: set = self.valid_workers(ts)
-                    if valid is None or ws in valid:
-                        recommendations[ts._key] = "waiting"
+                if ws._status == Status.running:
+                    for ts in parent._unrunnable:
+                        valid: set = self.valid_workers(ts)
+                        if valid is None or ws in valid:
+                            recommendations[ts._key] = "waiting"
 
-            if recommendations:
-                parent._transitions(recommendations, client_msgs, worker_msgs)
+                if recommendations:
+                    parent._transitions(recommendations, client_msgs, worker_msgs)
+
+            finally:
+                self.STIMULUS_ID.reset(token)
 
             self.send_all(client_msgs, worker_msgs)
 
@@ -4652,6 +4677,7 @@ class Scheduler(SchedulerState, ServerNode):
         }
         return msg
 
+    @stimulus_handler
     def update_graph_hlg(
         self,
         client=None,
@@ -4670,11 +4696,6 @@ class Scheduler(SchedulerState, ServerNode):
         code=None,
         stimulus_id=None,
     ):
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"update-graph-hlg-{time()}")
-
         unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg)
         dsk = unpacked_graph["dsk"]
         dependencies = unpacked_graph["deps"]
@@ -4713,9 +4734,10 @@ class Scheduler(SchedulerState, ServerNode):
             fifo_timeout,
             annotations,
             code=code,
-            stimulus_id=SERVER_STIMULUS_ID.get(),
+            stimulus_id=self.STIMULUS_ID.get(),
         )
 
+    @stimulus_handler
     def update_graph(
         self,
         client=None,
@@ -4741,10 +4763,6 @@ class Scheduler(SchedulerState, ServerNode):
         This happens whenever the Client calls submit, map, get, or compute.
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"update-graph-hlg-{time()}")
         start = time()
         fifo_timeout = parse_timedelta(fifo_timeout)
         keys = set(keys)
@@ -5013,13 +5031,10 @@ class Scheduler(SchedulerState, ServerNode):
 
         # TODO: balance workers
 
+    @stimulus_handler
     def stimulus_task_finished(self, key=None, worker=None, stimulus_id=None, **kwargs):
         """Mark that a task has finished execution on a particular worker"""
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"stimulus-task-finished-{time()}")
         logger.debug("Stimulus task finished %s, %s", key, worker)
 
         recommendations: dict = {}
@@ -5041,7 +5056,7 @@ class Scheduler(SchedulerState, ServerNode):
                 {
                     "op": "free-keys",
                     "keys": [key],
-                    "stimulus_id": SERVER_STIMULUS_ID.get(
+                    "stimulus_id": self.STIMULUS_ID.get(
                         f"already-released-or-forgotten-{time()}"
                     ),
                 }
@@ -5057,6 +5072,7 @@ class Scheduler(SchedulerState, ServerNode):
                 assert ws in ts._who_has
         return recommendations, client_msgs, worker_msgs
 
+    @stimulus_handler
     def stimulus_task_erred(
         self,
         key=None,
@@ -5069,10 +5085,6 @@ class Scheduler(SchedulerState, ServerNode):
         """Mark that a task has erred on a particular worker"""
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("Stimulus task erred %s, %s", key, worker)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"stimulus-task-erred-{time()}")
 
         ts: TaskState = parent._tasks.get(key)
         if ts is None or ts._state != "processing":
@@ -5092,13 +5104,9 @@ class Scheduler(SchedulerState, ServerNode):
                 **kwargs,
             )
 
+    @stimulus_handler
     def stimulus_retry(self, keys, client=None, stimulus_id=None):
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"stimulus-retry-{time()}")
-
         logger.info("Client %s requests to retry %d keys", client, len(keys))
         if client:
             self.log_event(client, {"action": "retry", "count": len(keys)})
@@ -5127,6 +5135,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return tuple(seen)
 
+    @stimulus_handler
     async def remove_worker(self, address, safe=False, close=True, stimulus_id=None):
         """
         Remove worker from cluster
@@ -5136,12 +5145,6 @@ class Scheduler(SchedulerState, ServerNode):
         state.
         """
         parent: SchedulerState = cast(SchedulerState, self)
-
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"remove-worker-{time()}")
-
         with log_errors():
             if self.status == Status.closed:
                 return
@@ -5249,15 +5252,11 @@ class Scheduler(SchedulerState, ServerNode):
 
         return "OK"
 
+    @stimulus_handler
     def stimulus_cancel(
         self, comm, keys=None, client=None, force=False, stimulus_id=None
     ):
         """Stop execution on a list of keys"""
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"add-worker-{time()}")
-
         logger.info("Client %s requests to cancel %d keys", client, len(keys))
         if client:
             self.log_event(
@@ -5266,14 +5265,11 @@ class Scheduler(SchedulerState, ServerNode):
         for key in keys:
             self.cancel_key(key, client, force=force)
 
+    @stimulus_handler
     def cancel_key(self, key, client, retries=5, force=False, stimulus_id=None):
         """Cancel a particular key and all dependents"""
         # TODO: this should be converted to use the transition mechanism
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"cancel-key-{time()}")
         ts: TaskState = parent._tasks.get(key)
         dts: TaskState
         try:
@@ -5295,13 +5291,9 @@ class Scheduler(SchedulerState, ServerNode):
         for cs in clients:
             self.client_releases_keys(keys=[key], client=cs._client_key)
 
+    @stimulus_handler
     def client_desires_keys(self, keys=None, client=None, stimulus_id=None):
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"client-desires-keys-{time()}")
-
         cs: ClientState = parent._clients.get(client)
         if cs is None:
             # For publish, queues etc.
@@ -5318,15 +5310,11 @@ class Scheduler(SchedulerState, ServerNode):
             if ts._state in ("memory", "erred"):
                 self.report_on_key(ts=ts, client=client)
 
+    @stimulus_handler
     def client_releases_keys(self, keys=None, client=None, stimulus_id=None):
         """Remove keys from client desired list"""
 
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"client-releases-keys-{time()}")
-
         if not isinstance(keys, list):
             keys = list(keys)
         cs: ClientState = parent._clients[client]
@@ -5544,18 +5532,22 @@ class Scheduler(SchedulerState, ServerNode):
                         "Closed comm %r while trying to write %s", c, msg, exc_info=True
                     )
 
-    async def add_client(
-        self, comm: Comm, client: str, versions: dict, stimulus_id=None
-    ) -> None:
+    async def add_client(self, comm: Comm, client: str, versions: dict) -> None:
         """Add client to network
 
         We listen to all future messages from this Comm.
         """
         parent: SchedulerState = cast(SchedulerState, self)
         try:
-            SERVER_STIMULUS_ID.get()
+            stimulus_id = self.STIMULUS_ID.get()
         except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"add-client-{time()}")
+            pass
+        else:
+            if self._validate:
+                raise RuntimeError(
+                    f"STIMULUS_ID {stimulus_id} set in Scheduler.add_client"
+                )
+
         assert client is not None
         comm.name = "Scheduler->Client"
         logger.info("Receive client connection: %s", client)
@@ -5599,13 +5591,9 @@ class Scheduler(SchedulerState, ServerNode):
             except TypeError:  # comm becomes None during GC
                 pass
 
-    def remove_client(self, client: str, stimulus_id=None) -> None:
+    def remove_client(self, client: str) -> None:
         """Remove client from network"""
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"remove-client-{time()}")
         if self.status == Status.running:
             logger.info("Remove client %s", client)
         self.log_event(["all", client], {"action": "remove-client", "client": client})
@@ -5641,7 +5629,9 @@ class Scheduler(SchedulerState, ServerNode):
         """Send a single computational task to a worker"""
         parent: SchedulerState = cast(SchedulerState, self)
         try:
-            msg: dict = _task_to_msg(parent, ts, duration)
+            msg: dict = _task_to_msg(
+                parent, ts, self.STIMULUS_ID.get(f"compute-task-{time()}"), duration
+            )
             self.worker_send(worker, msg)
         except Exception as e:
             logger.exception(e)
@@ -5654,12 +5644,8 @@ class Scheduler(SchedulerState, ServerNode):
     def handle_uncaught_error(self, **msg):
         logger.exception(clean_exception(**msg)[1])
 
+    @stimulus_handler
     def handle_task_finished(self, key=None, worker=None, stimulus_id=None, **msg):
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"handle-task-finished-{time()}")
-
         parent: SchedulerState = cast(SchedulerState, self)
         if worker not in parent._workers_dv:
             return
@@ -5675,12 +5661,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.send_all(client_msgs, worker_msgs)
 
+    @stimulus_handler
     def handle_task_erred(self, key=None, stimulus_id=None, **msg):
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"handle-task-erred-{time()}")
         recommendations: dict
         client_msgs: dict
         worker_msgs: dict
@@ -5690,7 +5673,10 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.send_all(client_msgs, worker_msgs)
 
-    def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
+    @stimulus_handler
+    def handle_missing_data(
+        self, key=None, errant_worker=None, stimulus_id=None, **kwargs
+    ):
         """Signal that `errant_worker` does not hold `key`
 
         This may either indicate that `errant_worker` is dead or that we may be
@@ -5723,13 +5709,9 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 self.transitions({key: "forgotten"})
 
+    @stimulus_handler
     def release_worker_data(self, key, worker, stimulus_id=None):
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"release-worker-data-{time()}")
-
         ws: WorkerState = parent._workers_dv.get(worker)
         ts: TaskState = parent._tasks.get(key)
         if not ws or not ts:
@@ -5742,7 +5724,10 @@ class Scheduler(SchedulerState, ServerNode):
         if recommendations:
             self.transitions(recommendations)
 
-    def handle_long_running(self, key=None, worker=None, compute_duration=None):
+    @stimulus_handler
+    def handle_long_running(
+        self, key=None, worker=None, compute_duration=None, stimulus_id=None
+    ):
         """A task has seceded from the thread pool
 
         We stop the task from being stolen in the future, and change task
@@ -5784,17 +5769,11 @@ class Scheduler(SchedulerState, ServerNode):
         ws._long_running.add(ts)
         self.check_idle_saturated(ws)
 
+    @stimulus_handler
     def handle_worker_status_change(
         self, status: str, worker: str, stimulus_id=None
     ) -> None:
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(
-                stimulus_id or f"handle-worker-status-change-{time()}"
-            )
-
         ws: WorkerState = parent._workers_dv.get(worker)  # type: ignore
         if not ws:
             return
@@ -5830,7 +5809,7 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             parent._running.discard(ws)
 
-    async def handle_worker(self, comm=None, worker=None, stimulus_id=None):
+    async def handle_worker(self, comm=None, worker=None):
         """
         Listen to responses from a single worker
 
@@ -5841,9 +5820,14 @@ class Scheduler(SchedulerState, ServerNode):
         Scheduler.handle_client: Equivalent coroutine for clients
         """
         try:
-            SERVER_STIMULUS_ID.get()
+            stimulus_id = self.STIMULUS_ID.get()
         except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"handle-worker-{time()}")
+            pass
+        else:
+            if self._validate:
+                raise RuntimeError(
+                    f"STIMULUS_ID {stimulus_id} set in Scheduler.add_worker"
+                )
 
         comm.name = "Scheduler connection to worker"
         worker_comm = self.stream_comms[worker]
@@ -6043,6 +6027,7 @@ class Scheduler(SchedulerState, ServerNode):
     # Less common interactions #
     ############################
 
+    @stimulus_handler
     async def scatter(
         self,
         comm=None,
@@ -6060,11 +6045,6 @@ class Scheduler(SchedulerState, ServerNode):
         Scheduler.broadcast:
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"scatter-{time()}")
-
         ws: WorkerState
 
         start = time()
@@ -6101,14 +6081,10 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return keys
 
+    @stimulus_handler
     async def gather(self, keys, serializers=None, stimulus_id=None):
         """Collect data from workers to the scheduler"""
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"gather-{time()}")
-
         ws: WorkerState
         keys = list(keys)
         who_has = {}
@@ -6179,14 +6155,10 @@ class Scheduler(SchedulerState, ServerNode):
         for collection in self._task_state_collections:
             collection.clear()
 
+    @stimulus_handler
     async def restart(self, client=None, timeout=30, stimulus_id=None):
         """Restart all workers. Reset local state."""
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"restart-{time()}")
-
         with log_errors():
 
             n_workers = len(parent._workers_dv)
@@ -6400,6 +6372,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return keys_failed
 
+    @stimulus_handler
     async def delete_worker_data(
         self,
         worker_address: str,
@@ -6416,10 +6389,6 @@ class Scheduler(SchedulerState, ServerNode):
             List of keys to delete on the specified worker
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"delete-worker-data-{time()}")
 
         try:
             await retry_operation(
@@ -6451,6 +6420,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.log_event(ws._address, {"action": "remove-worker-data", "keys": keys})
 
+    @stimulus_handler
     async def rebalance(
         self,
         comm=None,
@@ -6526,11 +6496,6 @@ class Scheduler(SchedulerState, ServerNode):
             Stimulus ID that caused this function call
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"rebalance-{time()}")
-
         with log_errors():
             wss: "Collection[WorkerState]"
             if workers is not None:
@@ -6823,6 +6788,7 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             return {"status": "OK"}
 
+    @stimulus_handler
     async def replicate(
         self,
         comm=None,
@@ -6858,11 +6824,6 @@ class Scheduler(SchedulerState, ServerNode):
         Scheduler.rebalance
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"replicate-{time()}")
-
         ws: WorkerState
         wws: WorkerState
         ts: TaskState
@@ -7084,6 +7045,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             return result
 
+    @stimulus_handler
     async def retire_workers(
         self,
         comm=None,
@@ -7129,11 +7091,6 @@ class Scheduler(SchedulerState, ServerNode):
         Scheduler.workers_to_close
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"retire-workers-{time()}")
-
         ws: WorkerState
         ts: TaskState
         with log_errors():
@@ -7192,7 +7149,11 @@ class Scheduler(SchedulerState, ServerNode):
                         ws.status = Status.closing_gracefully
                         self.running.discard(ws)
                         self.stream_comms[ws.address].send(
-                            {"op": "worker-status-change", "status": ws.status.name}
+                            {
+                                "op": "worker-status-change",
+                                "status": ws.status.name,
+                                "stimulus_id": self.STIMULUS_ID.get(),
+                            }
                         )
 
                         coros.append(
@@ -7237,7 +7198,11 @@ class Scheduler(SchedulerState, ServerNode):
                 # conditions and we can wait for a scheduler->worker->scheduler
                 # round-trip.
                 self.stream_comms[ws.address].send(
-                    {"op": "worker-status-change", "status": prev_status.name}
+                    {
+                        "op": "worker-status-change",
+                        "status": prev_status.name,
+                        "stimulus_id": self.STIMULUS_ID.get(),
+                    }
                 )
                 return None, {}
 
@@ -7258,6 +7223,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Retired worker %s", ws._address)
         return ws._address, ws.identity()
 
+    @stimulus_handler
     def add_keys(self, worker=None, keys=(), stimulus_id=None):
         """
         Learn that a worker has certain keys
@@ -7284,7 +7250,7 @@ class Scheduler(SchedulerState, ServerNode):
                 {
                     "op": "remove-replicas",
                     "keys": redundant_replicas,
-                    "stimulus_id": SERVER_STIMULUS_ID.get(
+                    "stimulus_id": self.STIMULUS_ID.get(
                         stimulus_id or f"redundant-replicas-{time()}"
                     ),
                 },
@@ -7292,6 +7258,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return "OK"
 
+    @stimulus_handler
     def update_data(
         self, *, who_has: dict, nbytes: dict, client=None, stimulus_id=None
     ):
@@ -7303,10 +7270,6 @@ class Scheduler(SchedulerState, ServerNode):
         Scheduler.mark_key_in_memory
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"update-data-{time()}")
         with log_errors():
             who_has = {
                 k: [self.coerce_address(vv) for vv in v] for k, v in who_has.items()
@@ -7773,6 +7736,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     transition_story = story
 
+    @stimulus_handler
     def reschedule(self, key=None, worker=None, stimulus_id=None):
         """Reschedule a task
 
@@ -7780,11 +7744,6 @@ class Scheduler(SchedulerState, ServerNode):
         elsewhere
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            SERVER_STIMULUS_ID.get()
-        except LookupError:
-            SERVER_STIMULUS_ID.set(stimulus_id or f"reschedule-{time()}")
-
         ts: TaskState
         try:
             ts = parent._tasks[key]
@@ -8488,7 +8447,11 @@ def _add_to_memory(
 @cfunc
 @exceptval(check=False)
 def _propagate_forgotten(
-    state: SchedulerState, ts: TaskState, recommendations: dict, worker_msgs: dict
+    state: SchedulerState,
+    ts: TaskState,
+    recommendations: dict,
+    worker_msgs: dict,
+    stimulus_id: str,
 ):
     ts.state = "forgotten"
     key: str = ts._key
@@ -8521,9 +8484,7 @@ def _propagate_forgotten(
                 {
                     "op": "free-keys",
                     "keys": [key],
-                    "stimulus_id": SERVER_STIMULUS_ID.get(
-                        f"propagate-forgotten-{time()}"
-                    ),
+                    "stimulus_id": stimulus_id,
                 }
             ]
     state.remove_all_replicas(ts)
@@ -8552,7 +8513,9 @@ def _client_releases_keys(
 
 @cfunc
 @exceptval(check=False)
-def _task_to_msg(state: SchedulerState, ts: TaskState, duration: double = -1) -> dict:
+def _task_to_msg(
+    state: SchedulerState, ts: TaskState, stimulus_id: str, duration: double = -1
+) -> dict:
     """Convert a single computational task to a message"""
     ws: WorkerState
     dts: TaskState
@@ -8566,7 +8529,7 @@ def _task_to_msg(state: SchedulerState, ts: TaskState, duration: double = -1) ->
         "key": ts._key,
         "priority": ts._priority,
         "duration": duration,
-        "stimulus_id": SERVER_STIMULUS_ID.get(f"compute-task-{time()}"),
+        "stimulus_id": stimulus_id,
         "who_has": {},
     }
     if ts._resource_restrictions:
