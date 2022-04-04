@@ -750,6 +750,7 @@ class Worker(ServerNode):
             "benchmark_disk": self.benchmark_disk,
             "benchmark_memory": self.benchmark_memory,
             "benchmark_network": self.benchmark_network,
+            "get_story": self.get_story,
         }
 
         stream_handlers = {
@@ -2675,6 +2676,9 @@ class Worker(ServerNode):
     def story(self, *keys_or_tasks: str | TaskState) -> list[tuple]:
         keys = {e.key if isinstance(e, TaskState) else e for e in keys_or_tasks}
         return worker_story(keys, self.log)
+
+    async def get_story(self, keys=None):
+        return self.story(*keys)
 
     def ensure_communicating(self) -> None:
         stimulus_id = f"ensure-communicating-{time()}"
