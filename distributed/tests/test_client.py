@@ -6127,8 +6127,8 @@ async def test_wait_for_workers(c, s, a, b):
 
 
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
-@gen_test()
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
+@gen_test()
 async def test_file_descriptors_dont_leak(Worker):
     pytest.importorskip("pandas")
     df = dask.datasets.timeseries(freq="10s", dtypes={"x": int, "y": float})

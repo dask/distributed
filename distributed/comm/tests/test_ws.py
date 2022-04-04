@@ -125,7 +125,6 @@ async def test_large_transfer_with_no_compression():
                     await c.scatter(np.random.random(1_500_000))
 
 
-@gen_test()
 @pytest.mark.parametrize(
     "dashboard,protocol,security,port",
     [
@@ -139,6 +138,7 @@ async def test_large_transfer_with_no_compression():
         (False, "wss://", True, 8786),
     ],
 )
+@gen_test()
 async def test_http_and_comm_server(cleanup, dashboard, protocol, security, port):
     if security:
         xfail_ssl_issue5601()
@@ -157,8 +157,8 @@ async def test_http_and_comm_server(cleanup, dashboard, protocol, security, port
                 assert result == 11
 
 
-@gen_test()
 @pytest.mark.parametrize("protocol", ["ws://", "wss://"])
+@gen_test()
 async def test_connection_made_with_extra_conn_args(cleanup, protocol):
     if protocol == "ws://":
         security = Security(

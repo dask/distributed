@@ -62,6 +62,7 @@ async def test_BatchedSend():
         assert result == ("HELLO", "HELLO")
 
         assert b.byte_count > 1
+        await comm.close()
 
 
 @gen_test()
@@ -77,6 +78,7 @@ async def test_send_before_start():
         b.start(comm)
         result = await comm.read()
         assert result == ("hello", "world")
+        await comm.close()
 
 
 @gen_test()
@@ -93,6 +95,7 @@ async def test_send_after_stream_start():
         if len(result) < 2:
             result += await comm.read()
         assert result == ("hello", "world")
+        await comm.close()
 
 
 @gen_test()

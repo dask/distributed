@@ -5,6 +5,7 @@ import threading
 import weakref
 
 import pytest
+from tornado.ioloop import IOLoop
 
 import dask
 
@@ -458,7 +459,8 @@ async def test_identity_inproc():
 
 
 @gen_test()
-async def test_ports(loop):
+async def test_ports():
+    loop = IOLoop.current()
     for port in range(9877, 9887):
         server = Server({}, io_loop=loop)
         try:
@@ -859,12 +861,14 @@ async def test_deserialize_error():
     await server.listen(0)
 
     comm = await connect(server.address, deserialize=False)
-    with pytest.raises(Exception) as info:
+    with pytest.raises(Exception, match=r"RuntimeError\('hello!'\)") as info:
         await send_recv(comm, op="throws", x="foo")
 
     assert type(info.value) == Exception
     for c in str(info.value):
         assert c.isalpha() or c in "(',!)"  # no crazy bytestrings
+
+    await comm.close()
 
 
 @gen_test()

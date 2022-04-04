@@ -1323,9 +1323,9 @@ async def test_host_address(c, s):
     await n.close()
 
 
-@gen_test()
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
-async def test_interface_async(cleanup, loop, Worker):
+@gen_test()
+async def test_interface_async(Worker):
     from distributed.utils import get_ip_interface
 
     psutil = pytest.importorskip("psutil")
@@ -1356,9 +1356,9 @@ async def test_interface_async(cleanup, loop, Worker):
 
 
 @pytest.mark.gpu
-@gen_test()
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
-async def test_protocol_from_scheduler_address(cleanup, Worker):
+@gen_test()
+async def test_protocol_from_scheduler_address(Worker):
     pytest.importorskip("ucp")
 
     async with Scheduler(protocol="ucx", dashboard_address=":0") as s:
@@ -1390,9 +1390,9 @@ async def test_host_uses_scheduler_protocol(cleanup, monkeypatch):
                 pass
 
 
-@gen_test()
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
-async def test_worker_listens_on_same_interface_by_default(cleanup, Worker):
+@gen_test()
+async def test_worker_listens_on_same_interface_by_default(Worker):
     async with Scheduler(host="localhost", dashboard_address=":0") as s:
         assert s.ip in {"127.0.0.1", "localhost"}
         async with Worker(s.address) as w:
