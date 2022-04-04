@@ -916,12 +916,12 @@ class Worker(ServerNode):
         """
         prev_status = self.status
         ServerNode.status.__set__(self, value)
-        self._send_worker_status_change()
+        self._send_worker_status_change(f"worker-status-change-{time()}")
         if prev_status == Status.paused and value == Status.running:
             self.ensure_computing()
             self.ensure_communicating()
 
-    def _send_worker_status_change(self, stimulus_id=None) -> None:
+    def _send_worker_status_change(self, stimulus_id: str) -> None:
         if (
             self.batched_stream
             and self.batched_stream.comm
@@ -931,11 +931,11 @@ class Worker(ServerNode):
                 {
                     "op": "worker-status-change",
                     "status": self._status.name,
-                    "stimulus_id": stimulus_id or f"worker-status-changed-{time()}",
+                    "stimulus_id": stimulus_id,
                 }
             )
         elif self._status != Status.closed:
-            self.loop.call_later(0.05, self._send_worker_status_change)
+            self.loop.call_later(0.05, self._send_worker_status_change, stimulus_id)
 
     async def get_metrics(self) -> dict:
         try:
@@ -1885,7 +1885,9 @@ class Worker(ServerNode):
             pass
         elif ts.state == "memory":
             recommendations[ts] = "memory"
-            instructions.append(self._get_task_finished_msg(ts, stimulus_id))
+            instructions.append(
+                self._get_task_finished_msg(ts, stimulus_id=stimulus_id)
+            )
         elif ts.state in {
             "released",
             "fetch",
@@ -2013,7 +2015,7 @@ class Worker(ServerNode):
         recs, instructions = self.transition_generic_released(
             ts, stimulus_id=stimulus_id
         )
-        instructions.append(ReleaseWorkerDataMsg(ts.key, stimulus_id))
+        instructions.append(ReleaseWorkerDataMsg(key=ts.key, stimulus_id=stimulus_id))
         return recs, instructions
 
     def transition_waiting_constrained(
@@ -2309,7 +2311,7 @@ class Worker(ServerNode):
             return recs, []
         if self.validate:
             assert ts.key in self.data or ts.key in self.actors
-        smsg = self._get_task_finished_msg(ts, stimulus_id)
+        smsg = self._get_task_finished_msg(ts, stimulus_id=stimulus_id)
         return recs, [smsg]
 
     def transition_executing_memory(
