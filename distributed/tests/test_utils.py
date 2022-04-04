@@ -27,6 +27,7 @@ from distributed.utils import (
     TimeoutError,
     _maybe_complex,
     ensure_bytes,
+    ensure_cancellation,
     ensure_ip,
     format_dashboard_link,
     get_ip_interface,
@@ -782,3 +783,47 @@ def test_recursive_to_dict_no_nest():
         ],
     }
     assert recursive_to_dict(info) == expect
+
+
+def test_ensure_cancellation():
+    # Do not use gen_test to allow us to test on CancelledErrors
+    async def _():
+        ev = asyncio.Event()
+
+        async def f():
+            await asyncio.sleep(0)
+            ev.set()
+            raise ValueError("foo")
+
+        async def g():
+            ev.set()
+            await asyncio.sleep(1000000)
+
+        task = asyncio.create_task(f())
+        await ev.wait()
+        await asyncio.sleep(0)
+        with pytest.raises(ValueError, match="foo"):
+            await task
+        ev.clear()
+
+        task = asyncio.create_task(ensure_cancellation(f()))
+        await ev.wait()
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        ev.clear()
+        task = asyncio.create_task(ensure_cancellation(g()))
+        await ev.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        async def h():
+            await asyncio.sleep(0)
+            return 1
+
+        assert await ensure_cancellation(h()) == 1
+
+    asyncio.run(_())

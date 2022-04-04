@@ -27,9 +27,9 @@ from contextvars import ContextVar
 from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
-from types import ModuleType
+from types import CoroutineType, ModuleType
 from typing import Any as AnyType
-from typing import ClassVar
+from typing import ClassVar, TypeVar
 
 import click
 import tblib.pickling_support
@@ -1621,3 +1621,27 @@ def is_python_shutting_down() -> bool:
     from distributed import _python_shutting_down
 
     return _python_shutting_down
+
+
+T = TypeVar("T")
+
+
+async def ensure_cancellation(coro: CoroutineType[None, None, T]) -> T:
+    """Ensure that the wrapped coro will raise a CancelledError even if its
+    result is already set.
+
+    See https://github.com/python/cpython/issues/86296
+    """
+    watcher = asyncio.Event()
+
+    task = asyncio.create_task(coro)
+    task.add_done_callback(lambda _: watcher.set())
+
+    try:
+        await watcher.wait()
+    except asyncio.CancelledError:
+        task.cancel()
+        await watcher.wait()
+        raise
+
+    return task.result()

@@ -321,18 +321,17 @@ async def test_worker_port_range(s):
                     pass
 
 
-@pytest.mark.slow
-@gen_test(timeout=60)
-async def test_worker_waits_for_scheduler():
-    w = Worker("127.0.0.1:8724")
-    try:
-        await asyncio.wait_for(w, 3)
-    except TimeoutError:
-        pass
-    else:
-        assert False
-    assert w.status not in (Status.closed, Status.running, Status.paused)
-    await w.close(timeout=0.1)
+@pytest.mark.parametrize("connect_timeout", ["1s", "5s"])
+@gen_test()
+async def test_worker_waits_for_scheduler(connect_timeout):
+    with dask.config.set({"distributed.comm.timeouts.connect": connect_timeout}):
+        w = Worker("127.0.0.1:8724")
+
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(w, 3)
+
+        assert w.status not in (Status.closed, Status.running, Status.paused)
+        await w.close()
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])

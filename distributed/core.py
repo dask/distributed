@@ -1086,6 +1086,7 @@ class ConnectionPool:
                     deserialize=self.deserialize,
                     **self.connection_args,
                 )
+
                 comm.name = "ConnectionPool"
                 comm._pool = weakref.ref(self)
                 comm.allow_offload = self.allow_offload
@@ -1099,8 +1100,6 @@ class ConnectionPool:
                 raise
             finally:
                 self._connecting_count -= 1
-        except asyncio.CancelledError:
-            raise CommClosedError("ConnectionPool closing.")
         finally:
             self._pending_count -= 1
 
@@ -1121,30 +1120,15 @@ class ConnectionPool:
         if self.semaphore.locked():
             self.collect()
 
-        # This construction is there to ensure that cancellation requests from
-        # the outside can be distinguished from cancellations of our own.
-        # Once the CommPool closes, we'll cancel the connect_attempt which will
-        # raise an OSError
-        # If the ``connect`` is cancelled from the outside, the Event.wait will
-        # be cancelled instead which we'll reraise as a CancelledError and allow
-        # it to propagate
         connect_attempt = asyncio.create_task(self._connect(addr, timeout))
-        done = asyncio.Event()
         self._connecting.add(connect_attempt)
-        connect_attempt.add_done_callback(lambda _: done.set())
         connect_attempt.add_done_callback(self._connecting.discard)
-
         try:
-            await done.wait()
+            return await connect_attempt
         except asyncio.CancelledError:
-            # This is an outside cancel attempt
-            connect_attempt.cancel()
-            try:
-                await connect_attempt
-            except CommClosedError:
-                pass
+            if self.status == Status.closed:
+                raise CommClosedError("ConnectionPool closed.")
             raise
-        return await connect_attempt
 
     def reuse(self, addr, comm):
         """

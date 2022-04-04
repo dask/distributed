@@ -18,6 +18,7 @@ from distributed.comm.addressing import parse_address
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.protocol.compression import get_default_compression
+from distributed.utils import ensure_cancellation
 
 logger = logging.getLogger(__name__)
 
@@ -286,8 +287,11 @@ async def connect(
     active_exception = None
     while time_left() > 0:
         try:
+            task = ensure_cancellation(
+                connector.connect(loc, deserialize=deserialize, **connection_args)
+            )
             comm = await asyncio.wait_for(
-                connector.connect(loc, deserialize=deserialize, **connection_args),
+                task,
                 timeout=min(intermediate_cap, time_left()),
             )
             break

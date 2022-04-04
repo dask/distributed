@@ -11,6 +11,7 @@ from tornado.ioloop import IOLoop
 import dask
 
 from distributed.comm.core import CommClosedError
+from distributed.comm.tcp import TCPBackend, TCPConnector
 from distributed.core import (
     ConnectionPool,
     Server,
@@ -591,26 +592,50 @@ async def test_connection_pool():
     await asyncio.gather(*[server.close() for server in servers])
 
 
-@gen_test()
-async def test_connection_pool_close_while_connecting(monkeypatch):
-    """
-    Ensure a closed connection pool guarantees to have no connections left open
-    even if it is closed mid-connecting
-    """
-    from distributed.comm.registry import backends
-    from distributed.comm.tcp import TCPBackend, TCPConnector
-
-    class SlowConnector(TCPConnector):
-        async def connect(self, address, deserialize, **connection_args):
+class WrongCancelConnector(TCPConnector):
+    async def connect(self, address, deserialize, **connection_args):
+        try:
             await asyncio.sleep(10000)
-            return await super().connect(
-                address, deserialize=deserialize, **connection_args
-            )
+        except asyncio.CancelledError:
+            raise OSError("muhaha")
 
-    class SlowBackend(TCPBackend):
-        _connector_class = SlowConnector
 
-    monkeypatch.setitem(backends, "tcp", SlowBackend())
+class WrongCancelBackend(TCPBackend):
+    _connector_class = WrongCancelConnector
+
+
+class SlowConnector(TCPConnector):
+    async def connect(self, address, deserialize, **connection_args):
+        try:
+            await asyncio.sleep(10000)
+        except BaseException:
+            raise
+
+
+class SlowBackend(TCPBackend):
+    _connector_class = SlowConnector
+
+
+@pytest.mark.parametrize(
+    "backend",
+    [
+        SlowBackend,
+        WrongCancelBackend,
+    ],
+)
+@pytest.mark.parametrize(
+    "closing",
+    [
+        True,
+        False,
+    ],
+)
+@gen_test()
+async def test_connection_pool_cancellation(monkeypatch, closing, backend):
+    # Ensure cancellation errors are properly reraised
+    from distributed.comm.registry import backends
+
+    monkeypatch.setitem(backends, "tcp", backend())
 
     async with Server({}) as server:
         await server.listen("tcp://")
@@ -623,53 +648,59 @@ async def test_connection_pool_close_while_connecting(monkeypatch):
 
         # #tasks > limit
         tasks = [asyncio.create_task(connect_to_server()) for _ in range(5)]
-
-        while not pool._connecting:
+        # Ensure the pool is saturated and some connection attempts are pending to
+        # connect
+        while pool._pending_count != len(tasks):
             await asyncio.sleep(0.01)
 
-        await pool.close()
-        for t in tasks:
-            with pytest.raises(CommClosedError):
-                await t
+        if closing:
+            await pool.close()
+            for t in tasks:
+                with pytest.raises(CommClosedError):
+                    await t
+        else:
+            for t in tasks:
+                t.cancel()
+            await asyncio.wait(tasks)
+            assert all(t.cancelled() for t in tasks)
+
         assert not pool.open
         assert not pool._n_connecting
 
 
 @gen_test()
-async def test_connection_pool_outside_cancellation(monkeypatch):
-    # Ensure cancellation errors are properly reraised
-    from distributed.comm.registry import backends
-    from distributed.comm.tcp import TCPBackend, TCPConnector
+async def test_connect_properly_raising(monkeypatch):
+    _connecting = 0
 
     class SlowConnector(TCPConnector):
         async def connect(self, address, deserialize, **connection_args):
-            await asyncio.sleep(10000)
-            return await super().connect(
-                address, deserialize=deserialize, **connection_args
-            )
+            try:
+                nonlocal _connecting
+                _connecting += 1
+                await asyncio.sleep(10000)
+            except BaseException:
+                raise OSError
 
     class SlowBackend(TCPBackend):
         _connector_class = SlowConnector
+
+    # Ensure cancellation errors are properly reraised
+    from distributed.comm.registry import backends
 
     monkeypatch.setitem(backends, "tcp", SlowBackend())
 
     async with Server({}) as server:
         await server.listen("tcp://")
-        pool = await ConnectionPool(limit=2)
-
-        async def connect_to_server():
-            comm = await pool.connect(server.address)
-            pool.reuse(server.address, comm)
 
         # #tasks > limit
-        tasks = [asyncio.create_task(connect_to_server()) for _ in range(5)]
-        while not pool._connecting:
-            await asyncio.sleep(0.01)
+        tasks = [asyncio.create_task(connect(server.address)) for _ in range(5)]
+
+        while _connecting != len(tasks):
+            await asyncio.sleep(0.1)
 
         for t in tasks:
             t.cancel()
-
-        done, _ = await asyncio.wait(tasks)
+        await asyncio.wait(tasks)
         assert all(t.cancelled() for t in tasks)
 
 

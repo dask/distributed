@@ -5743,12 +5743,13 @@ async def test_client_active_bad_port():
     application = tornado.web.Application([(r"/", tornado.web.RequestHandler)])
     http_server = tornado.httpserver.HTTPServer(application)
     http_server.listen(8080)
-    with dask.config.set({"distributed.comm.timeouts.connect": "10ms"}):
-        c = Client("127.0.0.1:8080", asynchronous=True)
-        with pytest.raises((TimeoutError, IOError)):
-            await c
-        await c._close(fast=True)
-    http_server.stop()
+    try:
+        with dask.config.set({"distributed.comm.timeouts.connect": "10ms"}):
+            with pytest.raises((TimeoutError, IOError)):
+                async with Client("127.0.0.1:8080", asynchronous=True) as c:
+                    pass
+    finally:
+        http_server.stop()
 
 
 @pytest.mark.parametrize("direct", [True, False])
