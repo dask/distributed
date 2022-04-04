@@ -4676,7 +4676,7 @@ class Scheduler(SchedulerState, ServerNode):
         }
         return msg
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def update_graph_hlg(
         self,
         client=None,
@@ -4736,7 +4736,7 @@ class Scheduler(SchedulerState, ServerNode):
             stimulus_id=self.STIMULUS_ID.get(),
         )
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def update_graph(
         self,
         client=None,
@@ -5030,7 +5030,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         # TODO: balance workers
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def stimulus_task_finished(self, key=None, worker=None, stimulus_id=None, **kwargs):
         """Mark that a task has finished execution on a particular worker"""
         parent: SchedulerState = cast(SchedulerState, self)
@@ -5071,7 +5071,7 @@ class Scheduler(SchedulerState, ServerNode):
                 assert ws in ts._who_has
         return recommendations, client_msgs, worker_msgs
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def stimulus_task_erred(
         self,
         key=None,
@@ -5103,7 +5103,7 @@ class Scheduler(SchedulerState, ServerNode):
                 **kwargs,
             )
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def stimulus_retry(self, keys, client=None, stimulus_id=None):
         parent: SchedulerState = cast(SchedulerState, self)
         logger.info("Client %s requests to retry %d keys", client, len(keys))
@@ -5134,7 +5134,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return tuple(seen)
 
-    @stimulus_handler
+    @stimulus_handler(sync=False)
     async def remove_worker(self, address, safe=False, close=True, stimulus_id=None):
         """
         Remove worker from cluster
@@ -5251,7 +5251,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return "OK"
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def stimulus_cancel(
         self, comm, keys=None, client=None, force=False, stimulus_id=None
     ):
@@ -5264,7 +5264,7 @@ class Scheduler(SchedulerState, ServerNode):
         for key in keys:
             self.cancel_key(key, client, force=force)
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def cancel_key(self, key, client, retries=5, force=False, stimulus_id=None):
         """Cancel a particular key and all dependents"""
         # TODO: this should be converted to use the transition mechanism
@@ -5290,7 +5290,7 @@ class Scheduler(SchedulerState, ServerNode):
         for cs in clients:
             self.client_releases_keys(keys=[key], client=cs._client_key)
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def client_desires_keys(self, keys=None, client=None, stimulus_id=None):
         parent: SchedulerState = cast(SchedulerState, self)
         cs: ClientState = parent._clients.get(client)
@@ -5309,7 +5309,7 @@ class Scheduler(SchedulerState, ServerNode):
             if ts._state in ("memory", "erred"):
                 self.report_on_key(ts=ts, client=client)
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def client_releases_keys(self, keys=None, client=None, stimulus_id=None):
         """Remove keys from client desired list"""
 
@@ -5643,7 +5643,7 @@ class Scheduler(SchedulerState, ServerNode):
     def handle_uncaught_error(self, **msg):
         logger.exception(clean_exception(**msg)[1])
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def handle_task_finished(self, key=None, worker=None, stimulus_id=None, **msg):
         parent: SchedulerState = cast(SchedulerState, self)
         if worker not in parent._workers_dv:
@@ -5660,7 +5660,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.send_all(client_msgs, worker_msgs)
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def handle_task_erred(self, key=None, stimulus_id=None, **msg):
         parent: SchedulerState = cast(SchedulerState, self)
         recommendations: dict
@@ -5672,7 +5672,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.send_all(client_msgs, worker_msgs)
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def handle_missing_data(
         self, key=None, errant_worker=None, stimulus_id=None, **kwargs
     ):
@@ -5708,7 +5708,7 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 self.transitions({key: "forgotten"})
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def release_worker_data(self, key, worker, stimulus_id=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState = parent._workers_dv.get(worker)
@@ -5723,7 +5723,7 @@ class Scheduler(SchedulerState, ServerNode):
         if recommendations:
             self.transitions(recommendations)
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def handle_long_running(
         self, key=None, worker=None, compute_duration=None, stimulus_id=None
     ):
@@ -5768,7 +5768,7 @@ class Scheduler(SchedulerState, ServerNode):
         ws._long_running.add(ts)
         self.check_idle_saturated(ws)
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def handle_worker_status_change(
         self, status: str, worker: str, stimulus_id=None
     ) -> None:
@@ -6026,7 +6026,7 @@ class Scheduler(SchedulerState, ServerNode):
     # Less common interactions #
     ############################
 
-    @stimulus_handler
+    @stimulus_handler(sync=False)
     async def scatter(
         self,
         comm=None,
@@ -6080,7 +6080,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return keys
 
-    @stimulus_handler
+    @stimulus_handler(sync=False)
     async def gather(self, keys, serializers=None, stimulus_id=None):
         """Collect data from workers to the scheduler"""
         parent: SchedulerState = cast(SchedulerState, self)
@@ -6154,7 +6154,7 @@ class Scheduler(SchedulerState, ServerNode):
         for collection in self._task_state_collections:
             collection.clear()
 
-    @stimulus_handler
+    @stimulus_handler(sync=False)
     async def restart(self, client=None, timeout=30, stimulus_id=None):
         """Restart all workers. Reset local state."""
         parent: SchedulerState = cast(SchedulerState, self)
@@ -6371,7 +6371,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return keys_failed
 
-    @stimulus_handler
+    @stimulus_handler(sync=False)
     async def delete_worker_data(
         self,
         worker_address: str,
@@ -6419,7 +6419,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.log_event(ws._address, {"action": "remove-worker-data", "keys": keys})
 
-    @stimulus_handler
+    @stimulus_handler(sync=False)
     async def rebalance(
         self,
         comm=None,
@@ -6787,7 +6787,7 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             return {"status": "OK"}
 
-    @stimulus_handler
+    @stimulus_handler(sync=False)
     async def replicate(
         self,
         comm=None,
@@ -7044,7 +7044,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             return result
 
-    @stimulus_handler
+    @stimulus_handler(sync=False)
     async def retire_workers(
         self,
         comm=None,
@@ -7222,7 +7222,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Retired worker %s", ws._address)
         return ws._address, ws.identity()
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def add_keys(self, worker=None, keys=(), stimulus_id=None):
         """
         Learn that a worker has certain keys
@@ -7257,7 +7257,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return "OK"
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def update_data(
         self, *, who_has: dict, nbytes: dict, client=None, stimulus_id=None
     ):
@@ -7735,7 +7735,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     transition_story = story
 
-    @stimulus_handler
+    @stimulus_handler(sync=True)
     def reschedule(self, key=None, worker=None, stimulus_id=None):
         """Reschedule a task
 

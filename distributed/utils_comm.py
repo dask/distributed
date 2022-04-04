@@ -16,10 +16,15 @@ from distributed.core import rpc
 from distributed.metrics import time
 from distributed.utils import All
 
+try:
+    from cython import compiled
+except ImportError:
+    compiled = False
+
 logger = logging.getLogger(__name__)
 
 
-def stimulus_handler(*args):
+def stimulus_handler(*args, sync=True):
     """Decorator controlling injection into RPC Handlers
 
     RPC Handler functions are entrypoints into the distributed Scheduler.
@@ -46,7 +51,10 @@ def stimulus_handler(*args):
         if params[0].name != "self":
             raise ValueError(f"{fn} must be a method")
 
-        if not inspect.iscoroutinefunction(fn):
+        if not compiled:
+            assert sync is not inspect.iscoroutinefunction(fn)
+
+        if sync:
 
             @wraps(fn)
             def wrapper(*args, **kw):
