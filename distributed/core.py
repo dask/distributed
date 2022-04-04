@@ -6,6 +6,7 @@ import logging
 import sys
 import threading
 import traceback
+import types
 import uuid
 import warnings
 import weakref
@@ -14,7 +15,7 @@ from collections.abc import Container
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import Callable, ClassVar
+from typing import Callable, ClassVar, TypedDict, TypeVar
 
 import tblib
 from tlz import merge
@@ -556,7 +557,7 @@ class Server:
                             result = asyncio.ensure_future(result)
                             self._ongoing_coroutines.add(result)
                             result = await result
-                    except (CommClosedError, asyncio.CancelledError):
+                    except CommClosedError:
                         if self.status in Status.ANY_RUNNING:
                             logger.info("Lost connection to %r", address, exc_info=True)
                         break
@@ -1015,7 +1016,6 @@ class ConnectionPool:
         self.deserializers = deserializers if deserializers is not None else serializers
         self.connection_args = connection_args or {}
         self.timeout = timeout
-        self._n_connecting = 0
         self.server = weakref.ref(server) if server else None
         self._created = weakref.WeakSet()
         self._instances.add(self)
@@ -1024,6 +1024,8 @@ class ConnectionPool:
         # while the _n_connecting also accounts for connection attempts which
         # are waiting due to the connection limit
         self._connecting = set()
+        self._pending_count = 0
+        self._connecting_count = 0
         self.status = Status.init
 
     def _validate(self):
@@ -1046,7 +1048,7 @@ class ConnectionPool:
         return "<ConnectionPool: open=%d, active=%d, connecting=%d>" % (
             self.open,
             self.active,
-            self._n_connecting,
+            len(self._connecting),
         )
 
     def __call__(self, addr=None, ip=None, port=None):
@@ -1068,6 +1070,40 @@ class ConnectionPool:
         self.semaphore = asyncio.Semaphore(self.limit)
         self.status = Status.running
 
+    @property
+    def _n_connecting(self) -> int:
+        return self._connecting_count
+
+    async def _connect(self, addr, timeout=None):
+        self._pending_count += 1
+        try:
+            await self.semaphore.acquire()
+            try:
+                self._connecting_count += 1
+                comm = await connect(
+                    addr,
+                    timeout=timeout or self.timeout,
+                    deserialize=self.deserialize,
+                    **self.connection_args,
+                )
+                comm.name = "ConnectionPool"
+                comm._pool = weakref.ref(self)
+                comm.allow_offload = self.allow_offload
+                self._created.add(comm)
+
+                self.occupied[addr].add(comm)
+
+                return comm
+            except BaseException:
+                self.semaphore.release()
+                raise
+            finally:
+                self._connecting_count -= 1
+        except asyncio.CancelledError:
+            raise CommClosedError("ConnectionPool closing.")
+        finally:
+            self._pending_count -= 1
+
     async def connect(self, addr, timeout=None):
         """
         Get a Comm to the given address.  For internal use.
@@ -1085,44 +1121,30 @@ class ConnectionPool:
         if self.semaphore.locked():
             self.collect()
 
-        self._n_connecting += 1
-        await self.semaphore.acquire()
-        fut = None
+        # This construction is there to ensure that cancellation requests from
+        # the outside can be distinguished from cancellations of our own.
+        # Once the CommPool closes, we'll cancel the connect_attempt which will
+        # raise an OSError
+        # If the ``connect`` is cancelled from the outside, the Event.wait will
+        # be cancelled instead which we'll reraise as a CancelledError and allow
+        # it to propagate
+        connect_attempt = asyncio.create_task(self._connect(addr, timeout))
+        done = asyncio.Event()
+        self._connecting.add(connect_attempt)
+        connect_attempt.add_done_callback(lambda _: done.set())
+        connect_attempt.add_done_callback(self._connecting.discard)
+
         try:
-            if self.status != Status.running:
-                raise CommClosedError(
-                    f"ConnectionPool not running. Status: {self.status}"
-                )
-
-            fut = asyncio.create_task(
-                connect(
-                    addr,
-                    timeout=timeout or self.timeout,
-                    deserialize=self.deserialize,
-                    **self.connection_args,
-                )
-            )
-            self._connecting.add(fut)
-            comm = await fut
-            comm.name = "ConnectionPool"
-            comm._pool = weakref.ref(self)
-            comm.allow_offload = self.allow_offload
-            self._created.add(comm)
-
-            occupied.add(comm)
-
-            return comm
-        except asyncio.CancelledError as exc:
-            self.semaphore.release()
-            raise CommClosedError(
-                f"ConnectionPool not running. Status: {self.status}"
-            ) from exc
-        except Exception:
-            self.semaphore.release()
+            await done.wait()
+        except asyncio.CancelledError:
+            # This is an outside cancel attempt
+            connect_attempt.cancel()
+            try:
+                await connect_attempt
+            except CommClosedError:
+                pass
             raise
-        finally:
-            self._connecting.discard(fut)
-            self._n_connecting -= 1
+        return await connect_attempt
 
     def reuse(self, addr, comm):
         """
@@ -1140,7 +1162,7 @@ class ConnectionPool:
                 self.semaphore.release()
             else:
                 self.available[addr].add(comm)
-                if self.semaphore.locked() and self._n_connecting > 0:
+                if self.semaphore.locked() and self._pending_count:
                     self.collect()
 
     def collect(self):
@@ -1151,7 +1173,7 @@ class ConnectionPool:
             "Collecting unused comms.  open: %d, active: %d, connecting: %d",
             self.open,
             self.active,
-            self._n_connecting,
+            len(self._connecting),
         )
         for addr, comms in self.available.items():
             for comm in comms:
@@ -1180,6 +1202,8 @@ class ConnectionPool:
         Close all communications
         """
         self.status = Status.closed
+        for conn_fut in self._connecting:
+            conn_fut.cancel()
         for d in [self.available, self.occupied]:
             comms = set()
             while d:
@@ -1192,12 +1216,7 @@ class ConnectionPool:
             for _ in comms:
                 self.semaphore.release()
 
-        for conn_fut in self._connecting:
-            conn_fut.cancel()
-
-        # We might still have tasks haning in the semaphore. This will let them
-        # run into an exception and raise a commclosed
-        while self._n_connecting:
+        while self._connecting:
             await asyncio.sleep(0.005)
 
 
@@ -1208,7 +1227,7 @@ def coerce_to_address(o):
     return normalize_address(o)
 
 
-def collect_causes(e):
+def collect_causes(e: BaseException) -> list[BaseException]:
     causes = []
     while e.__cause__ is not None:
         causes.append(e.__cause__)
@@ -1216,7 +1235,15 @@ def collect_causes(e):
     return causes
 
 
-def error_message(e, status="error"):
+class ErrorMessage(TypedDict):
+    status: str
+    exception: protocol.Serialize
+    traceback: protocol.Serialize | None
+    exception_text: str
+    traceback_text: str
+
+
+def error_message(e: BaseException, status="error") -> ErrorMessage:
     """Produce message to send back given an exception has occurred
 
     This does the following:
@@ -1237,33 +1264,38 @@ def error_message(e, status="error"):
     tb_text = "".join(traceback.format_tb(tb))
     e = truncate_exception(e, MAX_ERROR_LEN)
     try:
-        e_serialized = protocol.pickle.dumps(e)
-        protocol.pickle.loads(e_serialized)
+        e_bytes = protocol.pickle.dumps(e)
+        protocol.pickle.loads(e_bytes)
     except Exception:
-        e_serialized = protocol.pickle.dumps(Exception(repr(e)))
-    e_serialized = protocol.to_serialize(e_serialized)
+        e_bytes = protocol.pickle.dumps(Exception(repr(e)))
+    e_serialized = protocol.to_serialize(e_bytes)
 
     try:
-        tb_serialized = protocol.pickle.dumps(tb)
-        protocol.pickle.loads(tb_serialized)
+        tb_bytes = protocol.pickle.dumps(tb)
+        protocol.pickle.loads(tb_bytes)
     except Exception:
-        tb_serialized = protocol.pickle.dumps(tb_text)
+        tb_bytes = protocol.pickle.dumps(tb_text)
 
-    if len(tb_serialized) > MAX_ERROR_LEN:
-        tb_result = None
+    if len(tb_bytes) > MAX_ERROR_LEN:
+        tb_serialized = None
     else:
-        tb_result = protocol.to_serialize(tb_serialized)
+        tb_serialized = protocol.to_serialize(tb_bytes)
 
     return {
         "status": status,
         "exception": e_serialized,
-        "traceback": tb_result,
+        "traceback": tb_serialized,
         "exception_text": repr(e),
         "traceback_text": tb_text,
     }
 
 
-def clean_exception(exception, traceback=None, **kwargs):
+E = TypeVar("E", bound=BaseException)
+
+
+def clean_exception(
+    exception: E, traceback: types.TracebackType | None = None, **kwargs
+) -> tuple[type[E], E, types.TracebackType | None]:
     """Reraise exception and traceback. Deserialize if necessary
 
     See Also

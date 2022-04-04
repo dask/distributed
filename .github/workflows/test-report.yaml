@@ -2,7 +2,8 @@ name: Test Report
 
 on:
   schedule:
-    - cron: "47 6 * * *"
+    # Run 2h after the daily tests.yaml
+    - cron: "0 8,20 * * *"
   workflow_dispatch:
 
 jobs:
@@ -38,9 +39,10 @@ jobs:
       - name: Generate report
         shell: bash -l {0}
         run: |
-          python continuous_integration/scripts/test_report.py
+          python continuous_integration/scripts/test_report.py --days 90 --nfails 1 -o test_report.html
+          python continuous_integration/scripts/test_report.py --days 7 --nfails 2 -o test_short_report.html
           mkdir deploy
-          mv test_report.html deploy/
+          mv test_report.html test_short_report.html deploy/
 
       - name: Deploy 🚀
         uses: JamesIves/github-pages-deploy-action@4.1.7
