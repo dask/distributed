@@ -14,7 +14,7 @@ from dask.utils import funcname, parse_timedelta, stringify
 
 from distributed.core import rpc
 from distributed.metrics import time
-from distributed.utils import All, is_coroutine_function
+from distributed.utils import All
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,17 @@ def stimulus_handler(*args, sync=True):
        such as a worker, the STIMULUS_ID is set to this value.
     3. Otherwise, the STIMULUS_ID is from the function name and
        current time.
+
+    Parameters
+    ----------
+    *args : tuple
+        If the decorator is called without keyword arguments it will
+        be assumed that the decorated function is in ``args[0]``.
+        Otherwise should be empty if call with keyword arguments.
+    sync : bool
+        Indicates whether function is sync or async.
+        Necessary to distinguish between sync and async stimulus handlers
+        in a cython environment. https://bugs.python.org/issue38225
     """
 
     def decorator(fn):
@@ -45,8 +56,6 @@ def stimulus_handler(*args, sync=True):
         params = list(inspect.signature(fn).parameters.values())
         if params[0].name != "self":
             raise ValueError(f"{fn} must be a method")
-
-        assert sync is not is_coroutine_function(fn)
 
         if sync:
 
