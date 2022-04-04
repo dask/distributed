@@ -1,6 +1,6 @@
+import threading
 import warnings
 from contextlib import contextmanager
-import threading
 
 import dask
 
