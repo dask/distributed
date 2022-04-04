@@ -14,12 +14,7 @@ from dask.utils import funcname, parse_timedelta, stringify
 
 from distributed.core import rpc
 from distributed.metrics import time
-from distributed.utils import All
-
-try:
-    from cython import compiled
-except ImportError:
-    compiled = False
+from distributed.utils import All, is_coroutine_function
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +46,7 @@ def stimulus_handler(*args, sync=True):
         if params[0].name != "self":
             raise ValueError(f"{fn} must be a method")
 
-        if not compiled:
-            assert sync is not inspect.iscoroutinefunction(fn)
+        assert sync is not is_coroutine_function(fn)
 
         if sync:
 
