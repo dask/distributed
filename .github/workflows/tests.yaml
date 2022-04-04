@@ -128,7 +128,7 @@ jobs:
             --leaks=fds,processes,threads \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \
             --cov=distributed --cov-report=xml \
-            -k test_remove_worker -s -v \
+            -k test_remove_worker \
           | tee reports/stdout
 
       - name: Generate junit XML report in case of pytest-timeout
