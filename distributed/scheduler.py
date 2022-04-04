@@ -5824,7 +5824,7 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             if self._validate:
                 raise RuntimeError(
-                    f"STIMULUS_ID {stimulus_id} set in Scheduler.add_worker"
+                    f"STIMULUS_ID {stimulus_id} set in Scheduler.handle_worker"
                 )
 
         comm.name = "Scheduler connection to worker"

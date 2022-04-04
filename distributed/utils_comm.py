@@ -24,19 +24,19 @@ def stimulus_handler(*args, sync=True):
 
     RPC Handler functions are entrypoints into the distributed Scheduler.
     These entrypoints may receive stimuli from external entities such
-    as workers in the ``stimulus_id`` kwarg or the functinos
-    may generate the stimuli themselves.
+    as workers in the ``stimulus_id`` kwarg or they
+    may generate stimuli themselves.
     A further complication is that RPC Handlers may call other RPC handler
     functions.
 
-    Therefore, this decorator exists to simplify the setting of
+    This decorator exists to simplify the setting of
     the Scheduler STIMULUS_ID and encapsulates the following logic
 
     1. If the STIMULUS_ID is already set, stimuli from other sources
        are ignored.
     2. If a ``stimulus_id`` kwargs is supplied by an external entity
        such as a worker, the STIMULUS_ID is set to this value.
-    3. Otherwise, the STIMULUS_ID is from the function name and
+    3. Otherwise, the STIMULUS_ID is generated from the function name and
        current time.
 
     Parameters
