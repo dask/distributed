@@ -42,13 +42,13 @@ def test_defaults(loop):
 
 
 def test_hostport(loop):
-    with popen(["dask-scheduler", "--no-dashboard", "--host", "127.0.0.1:8978"]):
+    with popen(["dask-scheduler", "--no-dashboard", "--host", "127.0.0.1:8786"]):
 
         async def f():
             # The scheduler's main port can't be contacted from the outside
-            await assert_can_connect_locally_4(8978, timeout=5.0)
+            await assert_can_connect_locally_4(8786, timeout=5.0)
 
-        with Client("127.0.0.1:8978", loop=loop) as c:
+        with Client("127.0.0.1:8786", loop=loop) as c:
             assert len(c.nthreads()) == 0
             c.sync(f)
 
