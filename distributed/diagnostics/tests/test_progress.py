@@ -1,4 +1,5 @@
 import asyncio
+import gc
 
 import pytest
 
@@ -122,9 +123,8 @@ async def test_AllProgress(c, s, a, b):
 
     keys = {x.key, y.key, z.key}
     del x, y, z
-    import gc
 
-    gc.collect()
+    gc.collect()  # Needed because of distributed.profile
 
     while any(k in s.who_has for k in keys):
         await asyncio.sleep(0.01)
@@ -141,9 +141,8 @@ async def test_AllProgress(c, s, a, b):
 
     tkey = t.key
     del xx, yy, zz, t
-    import gc
 
-    gc.collect()
+    gc.collect()  # Needed because of distributed.profile
 
     while tkey in s.tasks:
         await asyncio.sleep(0.01)
@@ -157,9 +156,8 @@ async def test_AllProgress(c, s, a, b):
 
     for i in range(4):
         future = c.submit(f, i)
-    import gc
 
-    gc.collect()
+    gc.collect()  # Needed because of distributed.profile
 
     await asyncio.sleep(1)
 

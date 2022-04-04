@@ -181,7 +181,7 @@ def test_pickle_functions(protocol):
         assert func3(1) == func(1)
 
         del func, func2, func3
-        gc.collect()
+        gc.collect()  # Needed because of distributed.profile
         assert wr() is None
         assert wr2() is None
         assert wr3() is None

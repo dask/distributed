@@ -52,7 +52,7 @@ def test_workdir_simple(tmpdir):
     a.release()
     assert_contents(["bb", "bb.dirlock"])
     del b
-    gc.collect()
+    gc.collect()  # Needed because of distributed.profile
     assert_contents([])
 
     # Generated temporary name with a prefix
@@ -87,7 +87,7 @@ def test_two_workspaces_in_same_directory(tmpdir):
 
     del ws
     del b
-    gc.collect()
+    gc.collect()  # Needed because of distributed.profile
     assert_contents(["aa", "aa.dirlock"], trials=5)
     del a
     gc.collect()
@@ -184,7 +184,7 @@ def test_locking_disabled(tmpdir):
             a.release()
             assert_contents(["bb"])
             del b
-            gc.collect()
+            gc.collect()  # Needed because of distributed.profile
             assert_contents([])
 
         lock_file.assert_not_called()

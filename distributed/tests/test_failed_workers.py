@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import os
 import random
 from contextlib import suppress
@@ -273,9 +274,8 @@ async def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
     await c.restart()
     y = c.submit(inc, 1)
     del x
-    import gc
 
-    gc.collect()
+    gc.collect()  # Needed because of distributed.profile
     await asyncio.sleep(0.1)
     await y
 

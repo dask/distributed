@@ -946,7 +946,7 @@ async def test_cleanup_repeated_tasks(c, s, a, b):
     assert not s.who_has
     assert not any(s.has_what.values())
 
-    gc.collect()
+    gc.collect()  # Needed because of distributed.profile
     assert not list(ws)
 
 

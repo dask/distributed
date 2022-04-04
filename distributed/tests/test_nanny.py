@@ -208,7 +208,7 @@ async def test_num_fds(s):
     w = await Nanny(s.address)
     await w.close()
     del w
-    gc.collect()
+    gc.collect()  # Needed because of distributed.profile
 
     before = proc.num_fds()
 

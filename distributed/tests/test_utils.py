@@ -460,22 +460,21 @@ async def test_loop_runner_gen():
 
 
 @gen_test()
-async def test_all_exceptions_logging():
-    async def throws():
-        raise Exception("foo1234")
+async def test_all_quiet_exceptions():
+    class CustomError(Exception):
+        pass
+
+    async def throws(msg):
+        raise CustomError(msg)
 
     with captured_logger("") as sio:
-        try:
-            await All([throws() for _ in range(5)], quiet_exceptions=Exception)
-        except Exception:
-            pass
+        with pytest.raises(CustomError):
+            await All([throws("foo") for _ in range(5)])
+        with pytest.raises(CustomError):
+            await All([throws("bar") for _ in range(5)], quiet_exceptions=CustomError)
 
-        import gc
-
-        gc.collect()
-        await asyncio.sleep(0.1)
-
-    assert "foo1234" not in sio.getvalue()
+    assert "bar" not in sio.getvalue()
+    assert "foo" in sio.getvalue()
 
 
 def test_warn_on_duration():

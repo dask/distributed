@@ -286,7 +286,6 @@ async def test_compute_retries_annotations(c, s, a, b):
     y = delayed(varying(yargs))()
 
     x, y = c.compute([x, y], optimize_graph=False)
-    gc.collect()
 
     assert await x == 30
     with pytest.raises(ZeroDivisionError, match="five"):
@@ -682,9 +681,7 @@ def test_no_future_references(c):
     futures = c.map(inc, range(10))
     ws.update(futures)
     del futures
-    import gc
-
-    gc.collect()
+    gc.collect()  # Needed because of distributed.profile
     start = time()
     while list(ws):
         sleep(0.01)
@@ -820,9 +817,7 @@ async def test_recompute_released_key(c, s, a, b):
     result1 = await x
     xkey = x.key
     del x
-    import gc
-
-    gc.collect()
+    gc.collect()  # Needed because of distributed.profile
     await asyncio.sleep(0)
     assert c.refcount[xkey] == 0
 
@@ -1231,9 +1226,8 @@ async def test_scatter_hash_2(c, s, a, b):
 @gen_cluster(client=True)
 async def test_get_releases_data(c, s, a, b):
     await c.gather(c.get({"x": (inc, 1)}, ["x"], sync=False))
-    import gc
 
-    gc.collect()
+    gc.collect()  # Needed because of distributed.profile
 
     while c.refcount["x"]:
         await asyncio.sleep(0.01)
@@ -3569,9 +3563,8 @@ async def test_Client_clears_references_after_restart(c, s, a, b):
 
     key = x.key
     del x
-    import gc
 
-    gc.collect()
+    gc.collect()  # Needed because of distributed.profile
     await asyncio.sleep(0)
 
     assert key not in c.refcount
@@ -3810,7 +3803,10 @@ def test_open_close_many_workers(loop, worker, count, repeat):
     proc = psutil.Process()
 
     with cluster(nworkers=0, active_rpc_timeout=2) as (s, _):
+        # Even in absence of circular references, this is needed because of
+        # distributed.profile
         gc.collect()
+
         before = proc.num_fds()
         done = Semaphore(0)
         running = weakref.WeakKeyDictionary()

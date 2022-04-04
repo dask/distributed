@@ -648,14 +648,10 @@ def test_adapt(loop):
 
         cluster.adapt(minimum=1, maximum=2, interval="10ms")
         assert cluster._adaptive.minimum == 1
-        gc.collect()
 
-        # the old Adaptive class sticks around, not sure why
-        # start = time()
-        # while ref():
-        #     sleep(0.01)
-        #     gc.collect()
-        #     assert time() < start + 5
+        # Even in absence of circular references, this is needed because of
+        # distributed.profile
+        gc.collect()
 
         start = time()
         while len(cluster.scheduler.workers) != 1:
