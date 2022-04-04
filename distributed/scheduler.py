@@ -2379,7 +2379,6 @@ class SchedulerState:
                 stimulus_id = scheduler.STIMULUS_ID.get()
             except LookupError:
                 if self._validate:
-                    # Can't pickle ContextVars
                     raise LookupError(scheduler.STIMULUS_ID.name)
                 else:
                     stimulus_id = "<stimulus_id unset>"
