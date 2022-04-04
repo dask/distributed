@@ -3,7 +3,7 @@ import pytest
 from distributed.deploy.cluster import Cluster
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_eq(cleanup):
     clusterA = Cluster(asynchronous=True, name="A")
     clusterA2 = Cluster(asynchronous=True, name="A2")
@@ -18,7 +18,7 @@ async def test_eq(cleanup):
     assert not (clusterA == clusterB)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_repr(cleanup):
     cluster = Cluster(asynchronous=True, name="A")
     assert cluster.scheduler_address == "<Not Connected>"
@@ -27,14 +27,14 @@ async def test_repr(cleanup):
     assert res == expected
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_logs_deprecated(cleanup):
     cluster = Cluster(asynchronous=True)
     with pytest.warns(FutureWarning, match="get_logs"):
         cluster.logs()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_cluster_info():
     class FooCluster(Cluster):
         def __init__(self):

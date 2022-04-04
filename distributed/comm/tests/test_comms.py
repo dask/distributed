@@ -210,7 +210,7 @@ def test_get_local_address_for(tcp):
 #
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tcp_listener_does_not_call_handler_on_handshake_error(tcp):
     handle_comm_called = False
 
@@ -232,7 +232,7 @@ async def test_tcp_listener_does_not_call_handler_on_handshake_error(tcp):
     await writer.wait_closed()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tcp_specific(tcp):
     """
     Test concrete TCP API.
@@ -275,7 +275,7 @@ async def test_tcp_specific(tcp):
     assert set(l) == {1234} | set(range(N))
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tls_specific(tcp):
     """
     Test concrete TLS API.
@@ -321,7 +321,7 @@ async def test_tls_specific(tcp):
     assert set(l) == {1234} | set(range(N))
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_comm_failure_threading(tcp):
     """
     When we fail to connect, make sure we don't make a lot
@@ -443,17 +443,17 @@ def run_coro_in_thread(func, *args, **kwargs):
     return fut
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_inproc_specific_same_thread():
     await check_inproc_specific(run_coro)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_inproc_specific_different_threads():
     await check_inproc_specific(run_coro_in_thread)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_inproc_continues_listening_after_handshake_error():
     async def handle_comm():
         pass
@@ -470,7 +470,7 @@ async def test_inproc_continues_listening_after_handshake_error():
         await comm.close()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_inproc_handshakes_concurrently():
     async def handle_comm():
         pass
@@ -567,7 +567,7 @@ async def check_client_server(
 
 
 @pytest.mark.gpu
-@pytest.mark.asyncio
+@gen_test()
 async def test_ucx_client_server():
     pytest.importorskip("distributed.comm.ucx")
     ucp = pytest.importorskip("ucp")
@@ -603,7 +603,7 @@ def inproc_check():
     return checker
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_default_client_server_ipv4(tcp):
     # Default scheme is (currently) TCP
     await check_client_server("127.0.0.1", tcp_eq("127.0.0.1"))
@@ -620,7 +620,7 @@ async def test_default_client_server_ipv4(tcp):
 
 
 @requires_ipv6
-@pytest.mark.asyncio
+@gen_test()
 async def test_default_client_server_ipv6(tcp):
     await check_client_server("[::1]", tcp_eq("::1"))
     await check_client_server("[::1]:3211", tcp_eq("::1", 3211))
@@ -630,7 +630,7 @@ async def test_default_client_server_ipv6(tcp):
     )
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tcp_client_server_ipv4(tcp):
     await check_client_server("tcp://127.0.0.1", tcp_eq("127.0.0.1"))
     await check_client_server("tcp://127.0.0.1:3221", tcp_eq("127.0.0.1", 3221))
@@ -645,7 +645,7 @@ async def test_tcp_client_server_ipv4(tcp):
 
 
 @requires_ipv6
-@pytest.mark.asyncio
+@gen_test()
 async def test_tcp_client_server_ipv6(tcp):
     await check_client_server("tcp://[::1]", tcp_eq("::1"))
     await check_client_server("tcp://[::1]:3231", tcp_eq("::1", 3231))
@@ -655,7 +655,7 @@ async def test_tcp_client_server_ipv6(tcp):
     )
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tls_client_server_ipv4(tcp):
     await check_client_server("tls://127.0.0.1", tls_eq("127.0.0.1"), **tls_kwargs)
     await check_client_server(
@@ -667,12 +667,12 @@ async def test_tls_client_server_ipv4(tcp):
 
 
 @requires_ipv6
-@pytest.mark.asyncio
+@gen_test()
 async def test_tls_client_server_ipv6(tcp):
     await check_client_server("tls://[::1]", tls_eq("::1"), **tls_kwargs)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_inproc_client_server():
     await check_client_server("inproc://", inproc_check())
     await check_client_server(inproc.new_address(), inproc_check())
@@ -683,7 +683,7 @@ async def test_inproc_client_server():
 #
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tls_reject_certificate(tcp):
     cli_ctx = get_client_ssl_context()
     serv_ctx = get_server_ssl_context()
@@ -755,17 +755,17 @@ async def check_comm_closed_implicit(addr, delay=None, listen_args={}, connect_a
             await comm.read()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tcp_comm_closed_implicit(tcp):
     await check_comm_closed_implicit("tcp://127.0.0.1")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tls_comm_closed_implicit(tcp):
     await check_comm_closed_implicit("tls://127.0.0.1", **tls_kwargs)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_inproc_comm_closed_implicit():
     await check_comm_closed_implicit(inproc.new_address())
 
@@ -793,22 +793,22 @@ async def check_comm_closed_explicit(addr, listen_args={}, connect_args={}):
     await b.close()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tcp_comm_closed_explicit(tcp):
     await check_comm_closed_explicit("tcp://127.0.0.1")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tls_comm_closed_explicit(tcp):
     await check_comm_closed_explicit("tls://127.0.0.1", **tls_kwargs)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_inproc_comm_closed_explicit():
     await check_comm_closed_explicit(inproc.new_address())
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_inproc_comm_closed_explicit_2():
     listener_errors = []
 
@@ -858,7 +858,7 @@ async def test_inproc_comm_closed_explicit_2():
     await comm.close()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_comm_closed_on_buffer_error(tcp):
     # Internal errors from comm.stream.write, such as
     # BufferError should lead to the stream being closed
@@ -890,7 +890,7 @@ async def echo(comm):
     await comm.write(message)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_retry_connect(tcp, monkeypatch):
     async def echo(comm):
         message = await comm.read()
@@ -925,7 +925,7 @@ async def test_retry_connect(tcp, monkeypatch):
         listener.stop()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_handshake_slow_comm(tcp, monkeypatch):
     class SlowComm(tcp.TCP):
         def __init__(self, *args, delay_in_comm=0.5, **kwargs):
@@ -976,12 +976,12 @@ async def check_connect_timeout(addr):
     assert 1 >= dt >= 0.1
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tcp_connect_timeout(tcp):
     await check_connect_timeout("tcp://127.0.0.1:44444")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_inproc_connect_timeout():
     await check_connect_timeout(inproc.new_address())
 
@@ -1004,14 +1004,14 @@ async def check_many_listeners(addr):
         listener.stop()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tcp_many_listeners(tcp):
     await check_many_listeners("tcp://127.0.0.1")
     await check_many_listeners("tcp://0.0.0.0")
     await check_many_listeners("tcp://")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_inproc_many_listeners():
     await check_many_listeners("inproc://")
 
@@ -1160,12 +1160,12 @@ async def check_deserialize(addr):
     await check_connector_deserialize(addr, True, msg, partial(check_out, True))
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tcp_deserialize(tcp):
     await check_deserialize("tcp://")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_inproc_deserialize():
     await check_deserialize("inproc://")
 
@@ -1203,12 +1203,12 @@ async def check_deserialize_roundtrip(addr):
             assert isinstance(got["ser"], Serialized)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_inproc_deserialize_roundtrip():
     await check_deserialize_roundtrip("inproc://")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tcp_deserialize_roundtrip(tcp):
     await check_deserialize_roundtrip("tcp://")
 
@@ -1238,7 +1238,7 @@ async def check_deserialize_eoferror(addr):
             await comm.read()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tcp_deserialize_eoferror(tcp):
     await check_deserialize_eoferror("tcp://")
 
@@ -1261,7 +1261,7 @@ async def check_repr(a, b):
     assert b.peer_address in repr(b)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tcp_repr(tcp):
     a, b = await get_tcp_comm_pair()
     assert a.local_address in repr(b)
@@ -1269,7 +1269,7 @@ async def test_tcp_repr(tcp):
     await check_repr(a, b)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tls_repr(tcp):
     a, b = await get_tls_comm_pair()
     assert a.local_address in repr(b)
@@ -1277,7 +1277,7 @@ async def test_tls_repr(tcp):
     await check_repr(a, b)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_inproc_repr():
     a, b = await get_inproc_comm_pair()
     assert a.local_address in repr(b)
@@ -1292,19 +1292,19 @@ async def check_addresses(a, b):
     b.abort()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tcp_adresses(tcp):
     a, b = await get_tcp_comm_pair()
     await check_addresses(a, b)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tls_adresses(tcp):
     a, b = await get_tls_comm_pair()
     await check_addresses(a, b)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_inproc_adresses():
     a, b = await get_inproc_comm_pair()
     await check_addresses(a, b)

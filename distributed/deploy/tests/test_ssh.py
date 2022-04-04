@@ -26,7 +26,7 @@ def test_ssh_hosts_empty_list():
         SSHCluster(hosts=[])
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_ssh_cluster_raises_if_asyncssh_not_installed(monkeypatch, cleanup):
     monkeypatch.setitem(sys.modules, "asyncssh", None)
     with pytest.raises(ImportError, match="SSHCluster requires the `asyncssh` package"):
@@ -40,7 +40,7 @@ async def test_ssh_cluster_raises_if_asyncssh_not_installed(monkeypatch, cleanup
             assert not cluster
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_basic():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
@@ -58,7 +58,7 @@ async def test_basic():
         assert "SSH" in repr(cluster)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_n_workers():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
@@ -77,7 +77,7 @@ async def test_n_workers():
         assert "SSH" in repr(cluster)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_nprocs_attribute_is_deprecated():
     async with SSHCluster(
         ["127.0.0.1"] * 2,
@@ -97,7 +97,7 @@ async def test_nprocs_attribute_is_deprecated():
         assert worker.n_workers == 3
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_ssh_nprocs_renamed_to_n_workers():
     with pytest.warns(FutureWarning, match="renamed to n_workers"):
         async with SSHCluster(
@@ -112,7 +112,7 @@ async def test_ssh_nprocs_renamed_to_n_workers():
                 await client.wait_for_workers(4)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_ssh_n_workers_with_nprocs_is_an_error():
     with pytest.raises(ValueError, match="Both nprocs and n_workers"):
         async with SSHCluster(
@@ -125,7 +125,7 @@ async def test_ssh_n_workers_with_nprocs_is_an_error():
             assert not cluster
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_keywords():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
@@ -179,7 +179,7 @@ def test_old_ssh_with_local_dir(loop):
                 assert result == 11
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_config_inherited_by_subprocess(loop):
     def f(x):
         return dask.config.get("foo") + 1
@@ -197,7 +197,7 @@ async def test_config_inherited_by_subprocess(loop):
                 assert result == 101
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_unimplemented_options():
     with pytest.raises(Exception):
         async with SSHCluster(
@@ -215,7 +215,7 @@ async def test_unimplemented_options():
             assert cluster
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_list_of_connect_options():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
@@ -233,7 +233,7 @@ async def test_list_of_connect_options():
         assert "SSH" in repr(cluster)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_list_of_connect_options_raises():
     with pytest.raises(RuntimeError):
         async with SSHCluster(
@@ -246,7 +246,7 @@ async def test_list_of_connect_options_raises():
             pass
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_remote_python():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
@@ -259,7 +259,7 @@ async def test_remote_python():
         assert cluster.workers[0].remote_python == sys.executable
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_remote_python_as_dict():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
@@ -272,7 +272,7 @@ async def test_remote_python_as_dict():
         assert cluster.workers[0].remote_python == sys.executable
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_list_of_remote_python_raises():
     with pytest.raises(RuntimeError):
         async with SSHCluster(

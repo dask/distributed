@@ -61,7 +61,7 @@ async def get_comm_pair(
         return (comm, serv_comm)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_ping_pong():
     com, serv_com = await get_comm_pair()
     msg = {"op": "ping"}
@@ -79,7 +79,7 @@ async def test_ping_pong():
     await serv_com.close()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_comm_objs():
     comm, serv_comm = await get_comm_pair()
 
@@ -92,7 +92,7 @@ async def test_comm_objs():
     assert comm.peer_address == serv_comm.local_address
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_ucx_specific():
     """
     Test concrete UCX API.
@@ -146,7 +146,7 @@ async def test_ucx_specific():
     listener.stop()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_ping_pong_data():
     np = pytest.importorskip("numpy")
 
@@ -169,7 +169,7 @@ async def test_ping_pong_data():
     await serv_com.close()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_ucx_deserialize():
     # Note we see this error on some systems with this test:
     # `socket.gaierror: [Errno -5] No address associated with hostname`
@@ -179,7 +179,7 @@ async def test_ucx_deserialize():
     await check_deserialize("tcp://")
 
 
-@pytest.mark.asyncio
+@gen_test()
 @pytest.mark.parametrize(
     "g",
     [
@@ -219,7 +219,7 @@ async def test_ping_pong_cudf(g):
     await serv_com.close()
 
 
-@pytest.mark.asyncio
+@gen_test()
 @pytest.mark.parametrize("shape", [(100,), (10, 10), (4947,)])
 async def test_ping_pong_cupy(shape):
     cupy = pytest.importorskip("cupy")
@@ -238,7 +238,7 @@ async def test_ping_pong_cupy(shape):
 
 
 @pytest.mark.slow
-@pytest.mark.asyncio
+@gen_test()
 @pytest.mark.parametrize("n", [int(1e9), int(2.5e9)])
 async def test_large_cupy(n, cleanup):
     cupy = pytest.importorskip("cupy")
@@ -256,7 +256,7 @@ async def test_large_cupy(n, cleanup):
     await serv_com.close()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_ping_pong_numba():
     np = pytest.importorskip("numpy")
     numba = pytest.importorskip("numba")
@@ -274,7 +274,7 @@ async def test_ping_pong_numba():
     assert result["op"] == "ping"
 
 
-@pytest.mark.asyncio
+@gen_test()
 @pytest.mark.parametrize("processes", [True, False])
 async def test_ucx_localcluster(processes, cleanup):
     async with LocalCluster(
@@ -296,7 +296,7 @@ async def test_ucx_localcluster(processes, cleanup):
 
 
 @pytest.mark.slow
-@pytest.mark.asyncio
+@gen_test()
 async def test_stress():
     da = pytest.importorskip("dask.array")
 
@@ -321,7 +321,7 @@ async def test_stress():
                 await wait(x)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_simple():
     async with LocalCluster(protocol="ucx", asynchronous=True) as cluster:
         async with Client(cluster, asynchronous=True) as client:
@@ -329,7 +329,7 @@ async def test_simple():
             assert await client.submit(lambda x: x + 1, 10) == 11
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_cuda_context():
     with dask.config.set({"distributed.comm.ucx.create-cuda-context": True}):
         async with LocalCluster(
@@ -343,7 +343,7 @@ async def test_cuda_context():
                 assert list(worker_cuda_context.values())[0] == 0
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_transpose():
     da = pytest.importorskip("dask.array")
 
@@ -356,7 +356,7 @@ async def test_transpose():
             await y
 
 
-@pytest.mark.asyncio
+@gen_test()
 @pytest.mark.parametrize("port", [0, 1234])
 async def test_ucx_protocol(cleanup, port):
     async with Scheduler(protocol="ucx", port=port, dashboard_address=":0") as s:

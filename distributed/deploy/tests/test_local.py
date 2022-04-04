@@ -931,7 +931,7 @@ async def test_scale_memory_cores():
         assert len(cluster.worker_spec) == 4
 
 
-@pytest.mark.asyncio
+@gen_test()
 @pytest.mark.parametrize("memory_limit", ["2 GiB", None])
 async def test_repr(memory_limit, cleanup):
     async with LocalCluster(
@@ -968,7 +968,7 @@ async def test_threads_per_worker_set_to_0():
             assert all(w.nthreads < CPU_COUNT for w in cluster.workers.values())
 
 
-@pytest.mark.asyncio
+@gen_test()
 @pytest.mark.parametrize("temporary", [True, False])
 async def test_capture_security(cleanup, temporary):
     if temporary:
@@ -1039,7 +1039,7 @@ async def test_cluster_names():
             assert unnamed_cluster2 != unnamed_cluster
 
 
-@pytest.mark.asyncio
+@gen_test()
 @pytest.mark.parametrize("nanny", [True, False])
 async def test_local_cluster_redundant_kwarg(nanny):
     with pytest.raises(TypeError, match="unexpected keyword argument"):
@@ -1060,7 +1060,7 @@ async def test_local_cluster_redundant_kwarg(nanny):
                 await f
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_cluster_info_sync():
     async with LocalCluster(
         processes=False, asynchronous=True, scheduler_sync_interval="1ms"
@@ -1087,7 +1087,7 @@ async def test_cluster_info_sync():
         assert info["foo"] == "bar"
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_cluster_info_sync_is_robust_to_network_blips(monkeypatch):
     async with LocalCluster(
         processes=False, asynchronous=True, scheduler_sync_interval="1ms"
@@ -1123,7 +1123,7 @@ async def test_cluster_info_sync_is_robust_to_network_blips(monkeypatch):
         assert info["foo"] == "bar"
 
 
-@pytest.mark.asyncio
+@gen_test()
 @pytest.mark.parametrize("host", [None, "127.0.0.1"])
 @pytest.mark.parametrize("use_nanny", [True, False])
 async def test_cluster_host_used_throughout_cluster(host, use_nanny):

@@ -37,7 +37,7 @@ class EchoServer:
         self.stop()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_BatchedSend():
     async with EchoServer() as e:
         comm = await connect(e.address)
@@ -64,7 +64,7 @@ async def test_BatchedSend():
         assert b.byte_count > 1
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_send_before_start():
     async with EchoServer() as e:
         comm = await connect(e.address)
@@ -79,7 +79,7 @@ async def test_send_before_start():
         assert result == ("hello", "world")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_send_after_stream_start():
     async with EchoServer() as e:
         comm = await connect(e.address)
@@ -95,7 +95,7 @@ async def test_send_after_stream_start():
         assert result == ("hello", "world")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_send_before_close():
     async with EchoServer() as e:
         comm = await connect(e.address)
@@ -117,7 +117,7 @@ async def test_send_before_close():
             b.send("123")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_close_closed():
     async with EchoServer() as e:
         comm = await connect(e.address)
@@ -133,13 +133,13 @@ async def test_close_closed():
         assert "closed" in str(b)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_close_not_started():
     b = BatchedSend(interval=10)
     await b.close()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_close_twice():
     async with EchoServer() as e:
         comm = await connect(e.address)
@@ -151,7 +151,7 @@ async def test_close_twice():
 
 
 @pytest.mark.slow
-@pytest.mark.asyncio
+@gen_test()
 async def test_stress():
     async with EchoServer() as e:
         comm = await connect(e.address)
@@ -215,18 +215,18 @@ async def run_traffic_jam(nsends, nbytes):
         await b.close()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_sending_traffic_jam():
     await run_traffic_jam(50, 300000)
 
 
 @pytest.mark.slow
-@pytest.mark.asyncio
+@gen_test()
 async def test_large_traffic_jam():
     await run_traffic_jam(500, 1500000)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_serializers():
     async with EchoServer() as e:
         comm = await connect(e.address)

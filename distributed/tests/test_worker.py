@@ -389,7 +389,7 @@ async def test_chained_error_message(c, s, a, b):
         assert "Bar" in str(e.__cause__)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_plugin_exception(cleanup):
     class MyPlugin:
         def setup(self, worker=None):
@@ -406,7 +406,7 @@ async def test_plugin_exception(cleanup):
                 pass
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_plugin_multiple_exceptions(cleanup):
     class MyPlugin1:
         def setup(self, worker=None):
@@ -434,7 +434,7 @@ async def test_plugin_multiple_exceptions(cleanup):
             assert "MyPlugin2 Error" in text
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_plugin_internal_exception(cleanup):
     async with Scheduler(port=0) as s:
         with pytest.raises(UnicodeDecodeError, match="codec can't decode"):
@@ -1323,7 +1323,7 @@ async def test_host_address(c, s):
     await n.close()
 
 
-@pytest.mark.asyncio
+@gen_test()
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
 async def test_interface_async(cleanup, loop, Worker):
     from distributed.utils import get_ip_interface
@@ -1356,7 +1356,7 @@ async def test_interface_async(cleanup, loop, Worker):
 
 
 @pytest.mark.gpu
-@pytest.mark.asyncio
+@gen_test()
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
 async def test_protocol_from_scheduler_address(cleanup, Worker):
     pytest.importorskip("ucp")
@@ -1370,7 +1370,7 @@ async def test_protocol_from_scheduler_address(cleanup, Worker):
                 assert info["address"].startswith("ucx://")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_host_uses_scheduler_protocol(cleanup, monkeypatch):
     # Ensure worker uses scheduler's protocol to determine host address, not the default scheme
     # See https://github.com/dask/distributed/pull/4883
@@ -1390,7 +1390,7 @@ async def test_host_uses_scheduler_protocol(cleanup, monkeypatch):
                 pass
 
 
-@pytest.mark.asyncio
+@gen_test()
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
 async def test_worker_listens_on_same_interface_by_default(cleanup, Worker):
     async with Scheduler(host="localhost", dashboard_address=":0") as s:

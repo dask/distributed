@@ -213,7 +213,7 @@ async def test_restart():
 # FIXME cleanup fails:
 #       some RPCs left active by test: {<rpc to 'tcp://10.19.0.6:35045', 1 comms>}
 # @gen_test()
-@pytest.mark.asyncio
+@gen_test()
 async def test_broken_worker():
     with pytest.raises(Exception) as info:
         async with SpecCluster(

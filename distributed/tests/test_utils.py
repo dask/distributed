@@ -563,13 +563,13 @@ def test_lru():
     assert list(l.keys()) == ["c", "a", "d"]
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_offload():
     assert (await offload(inc, 1)) == 2
     assert (await offload(lambda x, y: x + y, 1, y=2)) == 3
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_offload_preserves_contextvars():
     var = contextvars.ContextVar("var")
 

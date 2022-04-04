@@ -21,7 +21,7 @@ ucp = pytest.importorskip("ucp")
 rmm = pytest.importorskip("rmm")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_ucx_config(cleanup):
     ucx = {
         "nvlink": True,

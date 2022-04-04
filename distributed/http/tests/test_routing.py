@@ -15,7 +15,7 @@ class TwoHandler(web.RequestHandler):
         self.write("two")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_basic():
     application = RoutingApplication([(r"/one", OneHandler)])
     two = web.Application([(r"/two", TwoHandler)])

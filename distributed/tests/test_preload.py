@@ -142,7 +142,7 @@ async def dask_setup(worker):
         assert w.foo == "setup"
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_preload_import_time(cleanup):
     text = """
 from distributed.comm.registry import backends
@@ -207,7 +207,7 @@ def scheduler_preload():
 @pytest.mark.skipif(
     MACOS and PY_VERSION == (3, 7), reason="HTTP Server doesn't come up"
 )
-@pytest.mark.asyncio
+@gen_test()
 async def test_web_preload(cleanup, scheduler_preload):
     with captured_logger("distributed.preloading") as log:
         async with Scheduler(
@@ -284,7 +284,7 @@ def worker_preload():
 @pytest.mark.skipif(
     MACOS and PY_VERSION == (3, 7), reason="HTTP Server doesn't come up"
 )
-@pytest.mark.asyncio
+@gen_test()
 async def test_web_preload_worker(cleanup, worker_preload):
     async with Scheduler(port=8786, host="localhost") as s:
         async with Nanny(preload_nanny=["http://127.0.0.1:12346/preload"]) as nanny:

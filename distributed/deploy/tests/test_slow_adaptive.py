@@ -35,7 +35,7 @@ class SlowWorker:
 scheduler = {"cls": Scheduler, "options": {"dashboard_address": ":0"}}
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_startup(cleanup):
     start = time()
     async with SpecCluster(
@@ -55,7 +55,7 @@ async def test_startup(cleanup):
             await client.wait_for_workers(n_workers=2)
 
 
-@pytest.mark.asyncio
+@gen_test()
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
 async def test_scale_up_down(cleanup):
     start = time()
@@ -77,7 +77,7 @@ async def test_scale_up_down(cleanup):
         assert not cluster.worker_spec
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_adaptive(cleanup):
     start = time()
     async with SpecCluster(
