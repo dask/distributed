@@ -7581,6 +7581,7 @@ async def test_client_story(c, s, *workers):
             (f.key, "put-in-memory"),
             (f.key, "executing", "memory", "memory", {}),
         ],
+        ordered_timestamps=False,
     )
 
 
