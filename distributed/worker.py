@@ -68,7 +68,7 @@ from distributed.http import get_handlers
 from distributed.metrics import time
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
-from distributed.protocol import pickle, to_serialize
+from distributed.protocol import Serialize, pickle, to_serialize
 from distributed.pubsub import PubSubWorkerExtension
 from distributed.security import Security
 from distributed.shuffle import ShuffleWorkerExtension
@@ -2066,10 +2066,10 @@ class Worker(ServerNode):
     def transition_cancelled_error(
         self,
         ts: TaskState,
-        exception,
-        traceback,
-        exception_text,
-        traceback_text,
+        exception: Serialize,
+        traceback: Serialize | None,
+        exception_text: str,
+        traceback_text: str,
         *,
         stimulus_id: str,
     ) -> tuple[Recs, Instructions]:
@@ -2100,8 +2100,8 @@ class Worker(ServerNode):
     def transition_generic_error(
         self,
         ts: TaskState,
-        exception: Exception,
-        traceback: object,
+        exception: Serialize,
+        traceback: Serialize | None,
         exception_text: str,
         traceback_text: str,
         *,
@@ -2114,10 +2114,10 @@ class Worker(ServerNode):
         ts.state = "error"
         smsg = TaskErredMsg(
             key=ts.key,
-            exception=ts.exception,
-            traceback=ts.traceback,
-            exception_text=ts.exception_text,
-            traceback_text=ts.traceback_text,
+            exception=exception,
+            traceback=traceback,
+            exception_text=exception_text,
+            traceback_text=traceback_text,
             thread=self.threads.get(ts.key),
             startstops=ts.startstops,
         )
@@ -2127,10 +2127,10 @@ class Worker(ServerNode):
     def transition_executing_error(
         self,
         ts: TaskState,
-        exception,
-        traceback,
-        exception_text,
-        traceback_text,
+        exception: Serialize,
+        traceback: Serialize | None,
+        exception_text: str,
+        traceback_text: str,
         *,
         stimulus_id: str,
     ) -> tuple[Recs, Instructions]:
@@ -2379,10 +2379,10 @@ class Worker(ServerNode):
     def transition_flight_error(
         self,
         ts: TaskState,
-        exception,
-        traceback,
-        exception_text,
-        traceback_text,
+        exception: Serialize,
+        traceback: Serialize | None,
+        exception_text: str,
+        traceback_text: str,
         *,
         stimulus_id: str,
     ) -> tuple[Recs, Instructions]:
@@ -3249,7 +3249,7 @@ class Worker(ServerNode):
                     if not catch_errors:
                         raise
                     msg = error_message(e)
-                    return msg
+                    return cast("dict[str, Any]", msg)
 
             return {"status": "OK"}
 
@@ -3264,7 +3264,7 @@ class Worker(ServerNode):
                         result = await result
             except Exception as e:
                 msg = error_message(e)
-                return msg
+                return cast("dict[str, Any]", msg)
 
             return {"status": "OK"}
 
@@ -3343,7 +3343,7 @@ class Worker(ServerNode):
             logger.error("Could not deserialize task", exc_info=True)
             self.log.append((ts.key, "deserialize-error", stimulus_id, time()))
             emsg = error_message(e)
-            emsg.pop("status")
+            del emsg["status"]  # type: ignore
             self.transition(
                 ts,
                 "error",
@@ -3524,7 +3524,7 @@ class Worker(ServerNode):
                 "Exception during execution of task %s.", ts.key, exc_info=True
             )
             emsg = error_message(exc)
-            emsg.pop("status")
+            del emsg["status"]  # type: ignore
             self.transition(
                 ts,
                 "error",

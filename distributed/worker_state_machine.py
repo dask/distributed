@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict
 import dask
 from dask.utils import parse_bytes
 
+from distributed.protocol.serialize import Serialize
 from distributed.utils import recursive_to_dict
 
 if TYPE_CHECKING:
@@ -119,12 +120,12 @@ class TaskState:
     coming_from: str | None = None
     #: Abstract resources required to run a task
     resource_restrictions: dict[str, float] = field(default_factory=dict)
-    #: The exception caused by running a task if it erred
-    exception: Exception | None = None
+    #: The exception caused by running a task if it erred (serialized)
+    exception: Serialize | None = None
+    #: The traceback caused by running a task if it erred (serialized)
+    traceback: Serialize | None = None
     #: string representation of exception
     exception_text: str = ""
-    #: The traceback caused by running a task if it erred
-    traceback: object | None = None
     #: string representation of traceback
     traceback_text: str = ""
     #: The type of a particular piece of data
@@ -299,9 +300,9 @@ class TaskErredMsg(SendMessageToScheduler):
     op = "task-erred"
 
     key: str
-    exception: Exception
+    exception: Serialize
+    traceback: Serialize | None
     exception_text: str
-    traceback: object
     traceback_text: str
     thread: int | None
     startstops: list[StartStop]
