@@ -6294,11 +6294,11 @@ async def test_as_completed_async_for_results(c, s, a, b):
     assert not s.counters["op"].components[0]["gather"]
 
 
-@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_as_completed_async_for_cancel(c, s, a, b):
     x = c.submit(inc, 1)
-    y = c.submit(lambda: Event().wait())  # This task will never finish
+    ev = Event()
+    y = c.submit(lambda ev: ev.wait(), ev)
     ac = as_completed([x, y])
 
     await x
@@ -6306,6 +6306,7 @@ async def test_as_completed_async_for_cancel(c, s, a, b):
 
     futs = [future async for future in ac]
     assert futs == [x, y]
+    await ev.set()  # Allow for clean teardown
 
 
 @gen_test()
