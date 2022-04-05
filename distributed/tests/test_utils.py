@@ -527,9 +527,22 @@ def test_parse_ports():
     assert parse_ports(23) == [23]
     assert parse_ports("45") == [45]
     assert parse_ports("100:103") == [100, 101, 102, 103]
+    assert parse_ports([100, 101, 102, 103]) == [100, 101, 102, 103]
+
+    out = parse_ports((100, 101, 102, 103))
+    assert out == [100, 101, 102, 103]
+    assert isinstance(out, list)
 
     with pytest.raises(ValueError, match="port_stop must be greater than port_start"):
         parse_ports("103:100")
+    with pytest.raises(TypeError):
+        parse_ports(100.5)
+    with pytest.raises(TypeError):
+        parse_ports([100, 100.5])
+    with pytest.raises(ValueError):
+        parse_ports("foo")
+    with pytest.raises(ValueError):
+        parse_ports("100.5")
 
 
 def test_lru():

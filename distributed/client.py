@@ -2002,8 +2002,12 @@ class Client(SyncMethodMixin):
 
         async def wait(k):
             """Want to stop the All(...) early if we find an error"""
-            st = self.futures[k]
-            await st.wait()
+            try:
+                st = self.futures[k]
+            except KeyError:
+                raise AllExit()
+            else:
+                await st.wait()
             if st.status != "finished" and errors == "raise":
                 raise AllExit()
 
