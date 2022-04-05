@@ -5563,7 +5563,7 @@ class Scheduler(SchedulerState, ServerNode):
         """
         parent: SchedulerState = cast(SchedulerState, self)
 
-        if self._validate:
+        if parent._validate:
             try:
                 stimulus_id = self.STIMULUS_ID.get()
                 raise AssertionError(
@@ -5853,7 +5853,9 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Scheduler.handle_client: Equivalent coroutine for clients
         """
-        if self._validate:
+        parent: SchedulerState = cast(SchedulerState, self)
+
+        if parent._validate:
             try:
                 stimulus_id = self.STIMULUS_ID.get()
                 raise AssertionError(
