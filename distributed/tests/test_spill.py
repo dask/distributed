@@ -310,8 +310,6 @@ class SupportsWeakRef(NoWeakRef):
     __slots__ = ("__weakref__",)
 
 
-# FIXME REMOVE BEFORE MERGING
-@pytest.mark.parametrize("TEMPRUN", range(100))
 @pytest.mark.parametrize(
     "cls,expect_cached",
     [
@@ -320,7 +318,7 @@ class SupportsWeakRef(NoWeakRef):
     ],
 )
 @pytest.mark.parametrize("size", [60, 110])
-def test_weakref_cache(tmpdir, cls, expect_cached, size, TEMPRUN):
+def test_weakref_cache(tmpdir, cls, expect_cached, size):
     buf = SpillBuffer(str(tmpdir), target=100)
 
     # Run this test twice:
