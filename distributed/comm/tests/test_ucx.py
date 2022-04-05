@@ -296,7 +296,7 @@ async def test_ucx_localcluster(processes, cleanup):
 
 
 @pytest.mark.slow
-@gen_test()
+@gen_test(timeout=60)
 async def test_stress():
     da = pytest.importorskip("dask.array")
 
