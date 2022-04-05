@@ -353,7 +353,7 @@ class SpecCluster(Cluster):
                 self._spec_name_to_worker_names[name] = (
                     {opts["name"]}
                     if "group" not in d
-                    else {opts["name"] + suffix for suffix in d["group"]}
+                    else {str(opts["name"]) + str(suffix) for suffix in d["group"]}
                 )
                 workers.append(worker)
             if workers:
