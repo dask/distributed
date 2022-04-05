@@ -2768,9 +2768,7 @@ class SchedulerState:
 
             # logger.debug("Send job to worker: %s, %s", worker, key)
 
-            worker_msgs[worker] = [
-                _task_to_msg(self, ts, self.STIMULUS_ID.get(f"compute-task-{time()}"))
-            ]
+            worker_msgs[worker] = [_task_to_msg(self, ts, self.STIMULUS_ID.get())]
 
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
@@ -2871,9 +2869,7 @@ class SchedulerState:
                     {
                         "op": "cancel-compute",
                         "key": key,
-                        "stimulus_id": scheduler.STIMULUS_ID.get(
-                            f"processing-memory-{time()}"
-                        ),
+                        "stimulus_id": scheduler.STIMULUS_ID.get(),
                     }
                 ]
 
@@ -2965,7 +2961,7 @@ class SchedulerState:
             worker_msg = {
                 "op": "free-keys",
                 "keys": [key],
-                "stimulus_id": scheduler.STIMULUS_ID.get(f"memory-released-{time()}"),
+                "stimulus_id": scheduler.STIMULUS_ID.get(),
             }
             for ws in ts._who_has:
                 worker_msgs[ws._address] = [worker_msg]
@@ -3068,7 +3064,7 @@ class SchedulerState:
             w_msg = {
                 "op": "free-keys",
                 "keys": [key],
-                "stimulus_id": self.STIMULUS_ID.get(f"erred-released-{time()}"),
+                "stimulus_id": self.STIMULUS_ID.get(),
             }
             for ws_addr in ts._erred_on:
                 worker_msgs[ws_addr] = [w_msg]
@@ -3147,9 +3143,7 @@ class SchedulerState:
                     {
                         "op": "free-keys",
                         "keys": [key],
-                        "stimulus_id": self.STIMULUS_ID.get(
-                            f"processing-released-{time()}"
-                        ),
+                        "stimulus_id": self.STIMULUS_ID.get(),
                     }
                 ]
 
@@ -3345,7 +3339,7 @@ class SchedulerState:
                 ts,
                 recommendations,
                 worker_msgs,
-                self.STIMULUS_ID.get(f"propagate-forgotten-{time()}"),
+                self.STIMULUS_ID.get(),
             )
 
             client_msgs = _task_to_client_msgs(self, ts)
@@ -3389,7 +3383,7 @@ class SchedulerState:
                 ts,
                 recommendations,
                 worker_msgs,
-                self.STIMULUS_ID.get(f"propagate-forgotten-{time()}"),
+                self.STIMULUS_ID.get(),
             )
 
             client_msgs = _task_to_client_msgs(self, ts)
@@ -5568,12 +5562,13 @@ class Scheduler(SchedulerState, ServerNode):
         We listen to all future messages from this Comm.
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        try:
-            stimulus_id = self.STIMULUS_ID.get()
-        except LookupError:
-            pass
-        else:
-            if self._validate:
+
+        if self._validate:
+            try:
+                stimulus_id = self.STIMULUS_ID.get()
+            except LookupError:
+                pass
+            else:
                 raise RuntimeError(
                     f"STIMULUS_ID {stimulus_id} set in Scheduler.add_client"
                 )
@@ -5659,9 +5654,7 @@ class Scheduler(SchedulerState, ServerNode):
         """Send a single computational task to a worker"""
         parent: SchedulerState = cast(SchedulerState, self)
         try:
-            msg: dict = _task_to_msg(
-                parent, ts, self.STIMULUS_ID.get(f"compute-task-{time()}"), duration
-            )
+            msg: dict = _task_to_msg(parent, ts, self.STIMULUS_ID.get(), duration)
             self.worker_send(worker, msg)
         except Exception as e:
             logger.exception(e)
@@ -5860,12 +5853,12 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Scheduler.handle_client: Equivalent coroutine for clients
         """
-        try:
-            stimulus_id = self.STIMULUS_ID.get()
-        except LookupError:
-            pass
-        else:
-            if self._validate:
+        if self._validate:
+            try:
+                stimulus_id = self.STIMULUS_ID.get()
+            except LookupError:
+                pass
+            else:
                 raise RuntimeError(
                     f"STIMULUS_ID {stimulus_id} set in Scheduler.handle_worker"
                 )
@@ -6418,7 +6411,6 @@ class Scheduler(SchedulerState, ServerNode):
         self,
         worker_address: str,
         keys: "Collection[str]",
-        stimulus_id=None,
     ) -> None:
         """Delete data from a worker and update the corresponding worker/task states
 
@@ -6431,7 +6423,7 @@ class Scheduler(SchedulerState, ServerNode):
         """
         parent: SchedulerState = cast(SchedulerState, self)
 
-        with self.stimulus_id(stimulus_id or f"delete-worker-data-{time()}"):
+        with self.stimulus_id(f"delete-worker-data-{time()}"):
 
             try:
                 await retry_operation(

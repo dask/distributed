@@ -333,7 +333,8 @@ class WorkStealing(SchedulerPlugin):
                 self.scheduler.total_occupancy += d["thief_duration"]
                 self.put_key_in_stealable(ts)
 
-                self.scheduler.send_task_to_worker(thief.address, ts)
+                with self.scheduler.stimulus_id(stimulus_id):
+                    self.scheduler.send_task_to_worker(thief.address, ts)
                 self.log(("confirm", *_log_msg))
             else:
                 raise ValueError(f"Unexpected task state: {state}")
