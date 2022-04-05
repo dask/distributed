@@ -180,7 +180,7 @@ async def test_nanny_worker_ports(c, s):
 
 @pytest.mark.slow
 @pytest.mark.flaky(
-    LINUX and sys.version_info == (3, 9),
+    LINUX and sys.version_info[:2] == (3, 9),
     reason="Race condition in Nanny.process.start? "
     "See https://github.com/dask/distributed/issues/6045",
 )
