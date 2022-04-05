@@ -310,8 +310,6 @@ def _watch(
             return
 
         process(frame, None, recent, omit=omit)
-        del frame
-
         sleep(interval)
 
 
