@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import os
 import socket
 import threading
@@ -700,13 +701,16 @@ async def test_connection_pool_respects_limit():
         await pool(ip="127.0.0.1", port=port).ping()
         assert pool.open <= limit
 
-    servers = [Server({"ping": ping}) for i in range(10)]
-    for server in servers:
-        await server.listen(0)
+    async with contextlib.AsyncExitStack() as stack:
+        servers = [
+            await stack.enter_async_context(Server({"ping": ping})) for i in range(10)
+        ]
+        for server in servers:
+            await server.listen(0)
 
-    pool = await ConnectionPool(limit=limit)
-
-    await asyncio.gather(*(do_ping(pool, s.port) for s in servers))
+        pool = await ConnectionPool(limit=limit)
+        await asyncio.gather(*(do_ping(pool, s.port) for s in servers))
+        await pool.close()
 
 
 @gen_test()
