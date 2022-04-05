@@ -55,9 +55,9 @@ async def test_startup(cleanup):
             await client.wait_for_workers(n_workers=2)
 
 
-@gen_test()
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
-async def test_scale_up_down(cleanup):
+@gen_test()
+async def test_scale_up_down():
     start = time()
     async with SpecCluster(
         scheduler=scheduler,
