@@ -1,3 +1,4 @@
+# This is a minimal set of requirements
 name: dask-distributed
 channels:
   - conda-forge
@@ -6,7 +7,6 @@ dependencies:
   - python=3.8
   - packaging
   - pip
-  - asyncssh
   - bokeh
   - click
   - cloudpickle
@@ -14,14 +14,10 @@ dependencies:
   - cython  # Only tested here; also a dependency of crick
   - dask  # overridden by git tip below
   - filesystem-spec
-  - h5py
   - ipykernel
   - ipywidgets
   - jinja2
-  - joblib
   - msgpack-python
-  - netcdf4
-  - paramiko
   - pre-commit
   - prometheus_client
   - psutil
@@ -34,15 +30,11 @@ dependencies:
   - pytest-timeout
   - requests
   - s3fs
-  - scikit-learn
-  - scipy
   - sortedcollections
   - tblib
   - toolz
   - tornado
   - zict
-  - zstandard
   - pip:
       - git+https://github.com/dask/dask
       - git+https://github.com/jcrist/crick  # Only tested here
-      - keras
