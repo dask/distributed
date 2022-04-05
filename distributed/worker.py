@@ -1671,10 +1671,14 @@ class Worker(ServerNode):
                 try:
                     recs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
                 except Exception as e:
+                    # value is individually larger than target * memory_limit and was
+                    # immediately evicted; however for whatever reason it failed to
+                    # serialize on this Worker even if it successfully serialized on the
+                    # previous Worker or (if scattered data) on the Client.
                     msg = error_message(e)
-                    recommendations = {ts: tuple(msg.values())}
-                else:
-                    recommendations.update(recs)
+                    recs = {ts: tuple(msg.values())}
+
+                recommendations.update(recs)
 
             self.log.append((key, "receive-from-scatter", stimulus_id, time()))
 
