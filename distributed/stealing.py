@@ -17,7 +17,7 @@ from dask.utils import parse_timedelta
 from distributed.comm.addressing import get_address_host
 from distributed.core import CommClosedError, Status
 from distributed.diagnostics.plugin import SchedulerPlugin
-from distributed.utils import log_errors, recursive_to_dict
+from distributed.utils import default_stimulus_id, log_errors, recursive_to_dict
 
 # Stealing requires multiple network bounces and if successful also task
 # submission which may include code serialization. Therefore, be very
@@ -333,7 +333,7 @@ class WorkStealing(SchedulerPlugin):
                 self.scheduler.total_occupancy += d["thief_duration"]
                 self.put_key_in_stealable(ts)
 
-                with self.scheduler.stimulus_id(stimulus_id):
+                with default_stimulus_id(stimulus_id):
                     self.scheduler.send_task_to_worker(thief.address, ts)
                 self.log(("confirm", *_log_msg))
             else:

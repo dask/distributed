@@ -23,7 +23,7 @@ from collections import OrderedDict, UserDict, deque
 from collections.abc import Collection, Container, KeysView, ValuesView
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
@@ -1435,6 +1435,38 @@ def __getattr__(name):
         return import_term(use_instead)
     else:
         raise AttributeError(f"module {__name__} has no attribute {name}")
+
+
+STIMULUS_ID: ContextVar[str] = ContextVar("stimulus_id")
+
+
+@contextmanager
+def default_stimulus_id(name: str):
+    """Context manager for setting the Scheduler stimulus_id
+
+    If the stimulus_id has already been set further up the call stack,
+    this has no effect.
+
+    Parameters
+    ----------
+    name : str
+        The name of the stimulus.
+    """
+    token: Token[str] | None
+
+    try:
+        stimulus_id = STIMULUS_ID.get()
+    except LookupError:
+        token = STIMULUS_ID.set(name)
+        stimulus_id = name
+    else:
+        token = None
+
+    try:
+        yield stimulus_id
+    finally:
+        if token:
+            STIMULUS_ID.reset(token)
 
 
 # Used internally by recursive_to_dict to stop infinite recursion. If an object has

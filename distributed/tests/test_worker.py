@@ -42,7 +42,7 @@ from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
-from distributed.utils import TimeoutError
+from distributed.utils import TimeoutError, default_stimulus_id
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _LockedCommPool,
@@ -2548,7 +2548,7 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
         ts = s.tasks[fut.key]
         a.handle_steal_request(fut.key, stimulus_id="test")
 
-        with s.stimulus_id("test"):
+        with default_stimulus_id("test"):
             stealing_ext.scheduler.send_task_to_worker(b.address, ts)
 
         fut2 = c.submit(inc, fut, workers=[a.address])
@@ -2629,7 +2629,7 @@ async def test_gather_dep_exception_one_task_2(c, s, a, b):
     while fut1.key not in b.tasks or b.tasks[fut1.key].state == "flight":
         await asyncio.sleep(0)
 
-    s.handle_missing_data(key="f1", errant_worker=a.address)
+    s.handle_missing_data(key="f1", errant_worker=a.address, stimulus_id="test")
 
     await fut2
 
