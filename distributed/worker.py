@@ -4,6 +4,7 @@ import asyncio
 import bisect
 import builtins
 import errno
+import functools
 import heapq
 import logging
 import os
@@ -103,36 +104,38 @@ from distributed.worker_memory import (
     DeprecatedMemoryMonitor,
     WorkerMemoryManager,
 )
-from distributed.worker_state_machine import Instruction  # noqa: F401
 from distributed.worker_state_machine import (
     PROCESSING,
     READY,
     AddKeysMsg,
+    AlreadyCancelledEvent,
+    CancelComputeEvent,
+    Execute,
+    ExecuteFailureEvent,
+    ExecuteSuccessEvent,
+    Instructions,
     InvalidTransition,
     LongRunningMsg,
+    Recs,
+    RecsInstrs,
     ReleaseWorkerDataMsg,
+    RescheduleEvent,
     RescheduleMsg,
     SendMessageToScheduler,
     SerializedTask,
+    StateMachineEvent,
     TaskErredMsg,
     TaskFinishedMsg,
     TaskState,
+    TaskStateState,
     UniqueTaskHeap,
 )
 
 if TYPE_CHECKING:
-    # TODO move to typing (requires Python >=3.10)
-    from typing_extensions import TypeAlias
-
     from distributed.actor import Actor
     from distributed.client import Client
     from distributed.diagnostics.plugin import WorkerPlugin
     from distributed.nanny import Nanny
-    from distributed.worker_state_machine import TaskStateState
-
-    # {TaskState -> finish: TaskStateState | (finish: TaskStateState, transition *args)}
-    Recs: TypeAlias = "dict[TaskState, TaskStateState | tuple]"
-    Instructions: TypeAlias = "list[Instruction]"
 
 
 logger = logging.getLogger(__name__)
@@ -380,7 +383,7 @@ class Worker(ServerNode):
     bandwidth_types: defaultdict[type, tuple[float, int]]
     preloads: list[preloading.Preload]
     contact_address: str | None
-    _start_port: int | None
+    _start_port: int | str | Collection[int] | None = None
     _start_host: str | None
     _interface: str | None
     _protocol: str
@@ -446,7 +449,7 @@ class Worker(ServerNode):
         ] = DEFAULT_STARTUP_INFORMATION,
         interface: str | None = None,
         host: str | None = None,
-        port: int | None = None,
+        port: int | str | Collection[int] | None = None,
         protocol: str | None = None,
         dashboard_address: str | None = None,
         dashboard: bool = False,
@@ -1774,14 +1777,7 @@ class Worker(ServerNode):
         is in state `waiting` or `ready`.
         Nothing will happen otherwise.
         """
-        ts = self.tasks.get(key)
-        if ts and ts.state in READY | {"waiting"}:
-            self.log.append((key, "cancel-compute", stimulus_id, time()))
-            # All possible dependents of TS should not be in state Processing on
-            # scheduler side and therefore should not be assigned to a worker,
-            # yet.
-            assert not ts.dependents
-            self.transition(ts, "released", stimulus_id=stimulus_id)
+        self.handle_stimulus(CancelComputeEvent(key=key, stimulus_id=stimulus_id))
 
     def handle_acquire_replicas(
         self,
@@ -1910,7 +1906,7 @@ class Worker(ServerNode):
 
     def transition_missing_fetch(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         if self.validate:
             assert ts.state == "missing"
             assert ts.priority is not None
@@ -1923,7 +1919,7 @@ class Worker(ServerNode):
 
     def transition_missing_released(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         self._missing_dep_flight.discard(ts)
         recs, instructions = self.transition_generic_released(
             ts, stimulus_id=stimulus_id
@@ -1933,7 +1929,7 @@ class Worker(ServerNode):
 
     def transition_flight_missing(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         assert ts.done
         ts.state = "missing"
         self._missing_dep_flight.add(ts)
@@ -1942,7 +1938,7 @@ class Worker(ServerNode):
 
     def transition_released_fetch(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         if self.validate:
             assert ts.state == "released"
             assert ts.priority is not None
@@ -1955,7 +1951,7 @@ class Worker(ServerNode):
 
     def transition_generic_released(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         self.release_key(ts.key, stimulus_id=stimulus_id)
         recs: Recs = {}
         for dependency in ts.dependencies:
@@ -1972,7 +1968,7 @@ class Worker(ServerNode):
 
     def transition_released_waiting(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         if self.validate:
             assert ts.state == "released"
             assert all(d.key in self.tasks for d in ts.dependencies)
@@ -1998,7 +1994,7 @@ class Worker(ServerNode):
 
     def transition_fetch_flight(
         self, ts: TaskState, worker, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         if self.validate:
             assert ts.state == "fetch"
             assert ts.who_has
@@ -2011,7 +2007,7 @@ class Worker(ServerNode):
 
     def transition_memory_released(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         recs, instructions = self.transition_generic_released(
             ts, stimulus_id=stimulus_id
         )
@@ -2020,7 +2016,7 @@ class Worker(ServerNode):
 
     def transition_waiting_constrained(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         if self.validate:
             assert ts.state == "waiting"
             assert not ts.waiting_for_data
@@ -2036,14 +2032,14 @@ class Worker(ServerNode):
 
     def transition_long_running_rescheduled(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         recs: Recs = {ts: "released"}
         smsg = RescheduleMsg(key=ts.key, worker=self.address, stimulus_id=stimulus_id)
         return recs, [smsg]
 
     def transition_executing_rescheduled(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         for resource, quantity in ts.resource_restrictions.items():
             self.available_resources[resource] += quantity
         self._executing.discard(ts)
@@ -2054,7 +2050,7 @@ class Worker(ServerNode):
 
     def transition_waiting_ready(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         if self.validate:
             assert ts.state == "waiting"
             assert ts.key not in self.ready
@@ -2078,7 +2074,7 @@ class Worker(ServerNode):
         traceback_text: str,
         *,
         stimulus_id: str,
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         recs: Recs = {}
         instructions: Instructions = []
         if ts._previous == "executing":
@@ -2112,7 +2108,7 @@ class Worker(ServerNode):
         traceback_text: str,
         *,
         stimulus_id: str,
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         ts.exception = exception
         ts.traceback = traceback
         ts.exception_text = exception_text
@@ -2140,7 +2136,7 @@ class Worker(ServerNode):
         traceback_text: str,
         *,
         stimulus_id: str,
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         for resource, quantity in ts.resource_restrictions.items():
             self.available_resources[resource] += quantity
         self._executing.discard(ts)
@@ -2155,7 +2151,7 @@ class Worker(ServerNode):
 
     def _transition_from_resumed(
         self, ts: TaskState, finish: TaskStateState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         """`resumed` is an intermediate degenerate state which splits further up
         into two states depending on what the last signal / next state is
         intended to be. There are only two viable choices depending on whether
@@ -2193,7 +2189,7 @@ class Worker(ServerNode):
 
     def transition_resumed_fetch(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         """
         See Worker._transition_from_resumed
         """
@@ -2201,7 +2197,7 @@ class Worker(ServerNode):
 
     def transition_resumed_missing(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         """
         See Worker._transition_from_resumed
         """
@@ -2215,7 +2211,7 @@ class Worker(ServerNode):
 
     def transition_cancelled_fetch(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         if ts.done:
             return {ts: "released"}, []
         elif ts._previous == "flight":
@@ -2227,14 +2223,14 @@ class Worker(ServerNode):
 
     def transition_cancelled_resumed(
         self, ts: TaskState, next: TaskStateState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         ts._next = next
         ts.state = "resumed"
         return {}, []
 
     def transition_cancelled_waiting(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         if ts.done:
             return {ts: "released"}, []
         elif ts._previous == "executing":
@@ -2246,7 +2242,7 @@ class Worker(ServerNode):
 
     def transition_cancelled_forgotten(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         ts._next = "forgotten"
         if not ts.done:
             return {}, []
@@ -2254,7 +2250,7 @@ class Worker(ServerNode):
 
     def transition_cancelled_released(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         if not ts.done:
             ts._next = "released"
             return {}, []
@@ -2274,7 +2270,7 @@ class Worker(ServerNode):
 
     def transition_executing_released(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         ts._previous = ts.state
         ts._next = "released"
         # See https://github.com/dask/distributed/pull/5046#discussion_r685093940
@@ -2284,13 +2280,13 @@ class Worker(ServerNode):
 
     def transition_long_running_memory(
         self, ts: TaskState, value=no_value, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         self.executed_count += 1
         return self.transition_generic_memory(ts, value=value, stimulus_id=stimulus_id)
 
     def transition_generic_memory(
         self, ts: TaskState, value=no_value, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         if value is no_value and ts.key not in self.data:
             raise RuntimeError(
                 f"Tried to transition task {ts} to `memory` without data available"
@@ -2316,7 +2312,7 @@ class Worker(ServerNode):
 
     def transition_executing_memory(
         self, ts: TaskState, value=no_value, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         if self.validate:
             assert ts.state == "executing" or ts.key in self.long_running
             assert not ts.waiting_for_data
@@ -2328,7 +2324,7 @@ class Worker(ServerNode):
 
     def transition_constrained_executing(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         if self.validate:
             assert not ts.waiting_for_data
             assert ts.key not in self.data
@@ -2341,12 +2337,12 @@ class Worker(ServerNode):
             self.available_resources[resource] -= quantity
         ts.state = "executing"
         self._executing.add(ts)
-        self.loop.add_callback(self.execute, ts.key, stimulus_id=stimulus_id)
-        return {}, []
+        instr = Execute(key=ts.key, stimulus_id=stimulus_id)
+        return {}, [instr]
 
     def transition_ready_executing(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         if self.validate:
             assert not ts.waiting_for_data
             assert ts.key not in self.data
@@ -2359,12 +2355,10 @@ class Worker(ServerNode):
 
         ts.state = "executing"
         self._executing.add(ts)
-        self.loop.add_callback(self.execute, ts.key, stimulus_id=stimulus_id)
-        return {}, []
+        instr = Execute(key=ts.key, stimulus_id=stimulus_id)
+        return {}, [instr]
 
-    def transition_flight_fetch(
-        self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    def transition_flight_fetch(self, ts: TaskState, *, stimulus_id: str) -> RecsInstrs:
         # If this transition is called after the flight coroutine has finished,
         # we can reset the task and transition to fetch again. If it is not yet
         # finished, this should be a no-op
@@ -2392,7 +2386,7 @@ class Worker(ServerNode):
         traceback_text: str,
         *,
         stimulus_id: str,
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         self._in_flight_tasks.discard(ts)
         ts.coming_from = None
         return self.transition_generic_error(
@@ -2406,7 +2400,7 @@ class Worker(ServerNode):
 
     def transition_flight_released(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         if ts.done:
             # FIXME: Is this even possible? Would an assert instead be more
             # sensible?
@@ -2420,13 +2414,13 @@ class Worker(ServerNode):
 
     def transition_cancelled_memory(
         self, ts: TaskState, value, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         assert ts._next
         return {ts: ts._next}, []
 
     def transition_executing_long_running(
         self, ts: TaskState, compute_duration: float, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         ts.state = "long-running"
         self._executing.discard(ts)
         self.long_running.add(ts.key)
@@ -2438,7 +2432,7 @@ class Worker(ServerNode):
 
     def transition_released_memory(
         self, ts: TaskState, value, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         try:
             recs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
         except Exception as e:
@@ -2450,7 +2444,7 @@ class Worker(ServerNode):
 
     def transition_flight_memory(
         self, ts: TaskState, value, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         self._in_flight_tasks.discard(ts)
         ts.coming_from = None
         try:
@@ -2464,7 +2458,7 @@ class Worker(ServerNode):
 
     def transition_released_forgotten(
         self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         recommendations: Recs = {}
         # Dependents _should_ be released by the scheduler before this
         if self.validate:
@@ -2481,7 +2475,7 @@ class Worker(ServerNode):
 
     def _transition(
         self, ts: TaskState, finish: str | tuple, *args, stimulus_id: str, **kwargs
-    ) -> tuple[Recs, Instructions]:
+    ) -> RecsInstrs:
         if isinstance(finish, tuple):
             # the concatenated transition path might need to access the tuple
             assert not args
@@ -2601,12 +2595,35 @@ class Worker(ServerNode):
         else:
             self._handle_instructions(instructions)
 
-    def _handle_instructions(self, instructions: list[Instruction]) -> None:
+    def handle_stimulus(self, stim: StateMachineEvent) -> None:
+        with log_errors():
+            # self.stimulus_history.append(stim)  # TODO
+            recs, instructions = self.handle_event(stim)
+            self.transitions(recs, stimulus_id=stim.stimulus_id)
+            self._handle_instructions(instructions)
+            self.ensure_computing()
+            self.ensure_communicating()
+
+    def _handle_stimulus_from_future(
+        self, future: asyncio.Future[StateMachineEvent | None]
+    ) -> None:
+        with log_errors():
+            # This *should* never raise
+            stim = future.result()
+        if stim:
+            self.handle_stimulus(stim)
+
+    def _handle_instructions(self, instructions: Instructions) -> None:
         # TODO this method is temporary.
         #      See final design: https://github.com/dask/distributed/issues/5894
         for inst in instructions:
             if isinstance(inst, SendMessageToScheduler):
                 self.batched_stream.send(inst.to_dict())
+            elif isinstance(inst, Execute):
+                coro = self.execute(inst.key, stimulus_id=inst.stimulus_id)
+                task = asyncio.create_task(coro)
+                # TODO track task (at the moment it's fire-and-forget)
+                task.add_done_callback(self._handle_stimulus_from_future)
             else:
                 raise TypeError(inst)  # pragma: nocover
 
@@ -3406,24 +3423,20 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    async def execute(self, key: str, *, stimulus_id: str) -> None:
+    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent | None:
         if self.status in {Status.closing, Status.closed, Status.closing_gracefully}:
-            return
-        if key not in self.tasks:
-            return
-        ts = self.tasks[key]
+            return None
+        ts = self.tasks.get(key)
+        if not ts:
+            return None
+        if ts.state == "cancelled":
+            logger.debug(
+                "Trying to execute task %s which is not in executing state anymore",
+                ts,
+            )
+            return AlreadyCancelledEvent(key=ts.key, stimulus_id=stimulus_id)
 
         try:
-            if ts.state == "cancelled":
-                # This might happen if keys are canceled
-                logger.debug(
-                    "Trying to execute task %s which is not in executing state anymore",
-                    ts,
-                )
-                ts.done = True
-                self.transition(ts, "released", stimulus_id=stimulus_id)
-                return
-
             if self.validate:
                 assert not ts.waiting_for_data
                 assert ts.state == "executing"
@@ -3447,9 +3460,7 @@ class Worker(ServerNode):
                     f"expected one of: {sorted(self.executors)}"
                 )
 
-            self.active_keys.add(ts.key)
-
-            result: dict
+            self.active_keys.add(key)
             try:
                 ts.start_time = time()
                 if iscoroutinefunction(function):
@@ -3467,7 +3478,7 @@ class Worker(ServerNode):
                         args2,
                         kwargs2,
                         self.execution_state,
-                        ts.key,
+                        key,
                         self.active_threads,
                         self.active_threads_lock,
                         self.scheduler_delay,
@@ -3482,76 +3493,138 @@ class Worker(ServerNode):
                         self.scheduler_delay,
                     )
             finally:
-                self.active_keys.discard(ts.key)
+                self.active_keys.discard(key)
 
-            key = ts.key
-            # key *must* be still in tasks. Releasing it directly is forbidden
-            # without going through cancelled
-            ts = self.tasks.get(key)  # type: ignore
-            assert ts, self.story(key)
-            ts.done = True
-            result["key"] = ts.key
-            result["stimulus-id"] = new_stimulus_id = f"{result['op']}-{time()}"
-            value = result.pop("result", None)
-            ts.startstops.append(
-                {"action": "compute", "start": result["start"], "stop": result["stop"]}
-            )
-            self.threads[ts.key] = result["thread"]
-            recommendations: Recs = {}
+            self.threads[key] = result["thread"]
+
             if result["op"] == "task-finished":
-                ts.nbytes = result["nbytes"]
-                ts.type = result["type"]
-                recommendations[ts] = ("memory", value)
                 if self.digests is not None:
                     self.digests["task-duration"].add(result["stop"] - result["start"])
-            elif isinstance(result.pop("actual-exception"), Reschedule):
-                recommendations[ts] = "rescheduled"
-            else:
-                logger.warning(
-                    "Compute Failed\n"
-                    "Key:       %s\n"
-                    "Function:  %s\n"
-                    "args:      %s\n"
-                    "kwargs:    %s\n"
-                    "Exception: %r\n",
-                    ts.key,
-                    str(funcname(function))[:1000],
-                    convert_args_to_str(args2, max_len=1000),
-                    convert_kwargs_to_str(kwargs2, max_len=1000),
-                    result["exception_text"],
-                )
-                recommendations[ts] = (
-                    "error",
-                    result["exception"],
-                    result["traceback"],
-                    result["exception_text"],
-                    result["traceback_text"],
+                new_stimulus_id = f"{result['op']}-{time()}"
+                return ExecuteSuccessEvent(
+                    key=key,
+                    value=result["result"],
+                    start=result["start"],
+                    stop=result["stop"],
+                    nbytes=result["nbytes"],
+                    type=result["type"],
+                    stimulus_id=new_stimulus_id,
                 )
 
-            self.transitions(recommendations, stimulus_id=new_stimulus_id)
+            if isinstance(result["actual-exception"], Reschedule):
+                return RescheduleEvent(key=ts.key, stimulus_id=stimulus_id)
 
-            logger.debug("Send compute response to scheduler: %s, %s", ts.key, result)
-
-            if self.validate:
-                assert ts.state != "executing"
-                assert not ts.waiting_for_data
-
-        except Exception as exc:
-            assert ts
-            logger.error(
-                "Exception during execution of task %s.", ts.key, exc_info=True
+            logger.warning(
+                "Compute Failed\n"
+                "Key:       %s\n"
+                "Function:  %s\n"
+                "args:      %s\n"
+                "kwargs:    %s\n"
+                "Exception: %r\n",
+                key,
+                str(funcname(function))[:1000],
+                convert_args_to_str(args2, max_len=1000),
+                convert_kwargs_to_str(kwargs2, max_len=1000),
+                result["exception_text"],
             )
-            emsg = error_message(exc)
-            del emsg["status"]  # type: ignore
-            self.transition(
-                ts,
-                "error",
-                **emsg,
+            return ExecuteFailureEvent(
+                key=key,
+                start=result["start"],
+                stop=result["stop"],
+                exception=result["exception"],
+                traceback=result["traceback"],
+                exception_text=result["exception_text"],
+                traceback_text=result["traceback_text"],
                 stimulus_id=f"task-erred-{time()}",
             )
-        finally:
-            self.ensure_computing()
-            self.ensure_communicating()
+
+        except Exception as exc:
+            logger.error("Exception during execution of task %s.", key, exc_info=True)
+            msg = error_message(exc)
+            return ExecuteFailureEvent(
+                key=key,
+                start=None,
+                stop=None,
+                exception=msg["exception"],
+                traceback=msg["traceback"],
+                exception_text=msg["exception_text"],
+                traceback_text=msg["traceback_text"],
+                stimulus_id=f"task-erred-{time()}",
+            )
+
+    @functools.singledispatchmethod
+    def handle_event(self, ev: StateMachineEvent) -> RecsInstrs:
+        raise TypeError(ev)  # pragma: nocover
+
+    @handle_event.register
+    def _(self, ev: CancelComputeEvent) -> RecsInstrs:
+        """Scheduler requested to cancel a task"""
+        ts = self.tasks.get(ev.key)
+        if not ts or ts.state not in READY | {"waiting"}:
+            return {}, []
+
+        self.log.append((ev.key, "cancel-compute", ev.stimulus_id, time()))
+        # All possible dependents of ts should not be in state Processing on
+        # scheduler side and therefore should not be assigned to a worker, yet.
+        assert not ts.dependents
+        return {ts: "released"}, []
+
+    @handle_event.register
+    def _(self, ev: AlreadyCancelledEvent) -> RecsInstrs:
+        """Task is already cancelled by the time execute() runs"""
+        # key *must* be still in tasks. Releasing it directly is forbidden
+        # without going through cancelled
+        ts = self.tasks.get(ev.key)  # type: ignore
+        assert ts, self.story(ev.key)
+        ts.done = True
+        return {ts: "released"}, []
+
+    @handle_event.register
+    def _(self, ev: ExecuteSuccessEvent) -> RecsInstrs:
+        """Task completed successfully"""
+        # key *must* be still in tasks. Releasing it directly is forbidden
+        # without going through cancelled
+        ts = self.tasks.get(ev.key)  # type: ignore
+        assert ts, self.story(ev.key)
+
+        ts.done = True
+        ts.startstops.append({"action": "compute", "start": ev.start, "stop": ev.stop})
+        ts.nbytes = ev.nbytes
+        ts.type = ev.type
+        return {ts: ("memory", ev.value)}, []
+
+    @handle_event.register
+    def _(self, ev: ExecuteFailureEvent) -> RecsInstrs:
+        """Task execution failed"""
+        # key *must* be still in tasks. Releasing it directly is forbidden
+        # without going through cancelled
+        ts = self.tasks.get(ev.key)  # type: ignore
+        assert ts, self.story(ev.key)
+
+        ts.done = True
+        if ev.start is not None and ev.stop is not None:
+            ts.startstops.append(
+                {"action": "compute", "start": ev.start, "stop": ev.stop}
+            )
+
+        return {
+            ts: (
+                "error",
+                ev.exception,
+                ev.traceback,
+                ev.exception_text,
+                ev.traceback_text,
+            ),
+        }, []
+
+    @handle_event.register
+    def _(self, ev: RescheduleEvent) -> RecsInstrs:
+        """Task raised Reschedule exception while it was running"""
+        # key *must* be still in tasks. Releasing it directly is forbidden
+        # without going through cancelled
+        ts = self.tasks.get(ev.key)  # type: ignore
+        assert ts, self.story(ev.key)
+        return {ts: "rescheduled"}, []
 
     def _prepare_args_for_execution(
         self, ts: TaskState, args: tuple, kwargs: dict[str, Any]

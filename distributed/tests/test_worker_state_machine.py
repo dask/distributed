@@ -1,9 +1,13 @@
+from itertools import chain
+
 import pytest
 
 from distributed.utils import recursive_to_dict
 from distributed.worker_state_machine import (
+    Instruction,
     ReleaseWorkerDataMsg,
     SendMessageToScheduler,
+    StateMachineEvent,
     TaskState,
     UniqueTaskHeap,
 )
@@ -82,10 +86,23 @@ def test_unique_task_heap():
     assert repr(heap) == "<UniqueTaskHeap: 0 items>"
 
 
-@pytest.mark.parametrize("cls", SendMessageToScheduler.__subclasses__())
-def test_sendmsg_slots(cls):
-    smsg = cls(**dict.fromkeys(cls.__annotations__))
-    assert not hasattr(smsg, "__dict__")
+@pytest.mark.parametrize(
+    "cls",
+    chain(
+        [UniqueTaskHeap],
+        Instruction.__subclasses__(),
+        SendMessageToScheduler.__subclasses__(),
+        StateMachineEvent.__subclasses__(),
+    ),
+)
+def test_slots(cls):
+    params = [
+        k
+        for k in dir(cls)
+        if not k.startswith("_") and k != "op" and not callable(getattr(cls, k))
+    ]
+    inst = cls(**dict.fromkeys(params))
+    assert not hasattr(inst, "__dict__")
 
 
 def test_sendmsg_to_dict():

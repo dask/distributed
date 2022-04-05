@@ -1678,14 +1678,13 @@ async def test_story_with_deps(c, s, a, b):
     Assert that the structure of the story does not change unintentionally and
     expected subfields are actually filled
     """
-    dep = c.submit(inc, 1, workers=[a.address])
-    res = c.submit(inc, dep, workers=[b.address])
+    dep = c.submit(inc, 1, workers=[a.address], key="dep")
+    res = c.submit(inc, dep, workers=[b.address], key="res")
     await res
-    key = res.key
 
-    story = a.story(key)
+    story = a.story("res")
     assert story == []
-    story = b.story(key)
+    story = b.story("res")
 
     # Story now includes randomized stimulus_ids and timestamps.
     stimulus_ids = {ev[-2] for ev in story}
@@ -1697,27 +1696,27 @@ async def test_story_with_deps(c, s, a, b):
 
     # This is a simple transition log
     expected = [
-        (key, "compute-task"),
-        (key, "released", "waiting", "waiting", {dep.key: "fetch"}),
-        (key, "waiting", "ready", "ready", {}),
-        (key, "ready", "executing", "executing", {}),
-        (key, "put-in-memory"),
-        (key, "executing", "memory", "memory", {}),
+        ("res", "compute-task"),
+        ("res", "released", "waiting", "waiting", {"dep": "fetch"}),
+        ("res", "waiting", "ready", "ready", {}),
+        ("res", "ready", "executing", "executing", {}),
+        ("res", "put-in-memory"),
+        ("res", "executing", "memory", "memory", {}),
     ]
     assert_story(story, expected, strict=True)
 
-    story = b.story(dep.key)
+    story = b.story("dep")
     stimulus_ids = {ev[-2] for ev in story}
     assert len(stimulus_ids) == 2, stimulus_ids
     expected = [
-        (dep.key, "ensure-task-exists", "released"),
-        (dep.key, "released", "fetch", "fetch", {}),
-        ("gather-dependencies", a.address, {dep.key}),
-        (dep.key, "fetch", "flight", "flight", {}),
-        ("request-dep", a.address, {dep.key}),
-        ("receive-dep", a.address, {dep.key}),
-        (dep.key, "put-in-memory"),
-        (dep.key, "flight", "memory", "memory", {res.key: "ready"}),
+        ("dep", "ensure-task-exists", "released"),
+        ("dep", "released", "fetch", "fetch", {}),
+        ("gather-dependencies", a.address, {"dep"}),
+        ("dep", "fetch", "flight", "flight", {}),
+        ("request-dep", a.address, {"dep"}),
+        ("receive-dep", a.address, {"dep"}),
+        ("dep", "put-in-memory"),
+        ("dep", "flight", "memory", "memory", {"res": "ready"}),
     ]
     assert_story(story, expected, strict=True)
 
@@ -3063,11 +3062,11 @@ async def test_task_flight_compute_oserror(c, s, a, b):
     await wait(futs)
     assert a.data
     assert write_queue.empty()
-    f1 = c.submit(sum, futs, workers=[b.address])
+    f1 = c.submit(sum, futs, workers=[b.address], key="f1")
     peer, msg = await write_queue.get()
     assert peer == a.address
     assert msg["op"] == "get_data"
-    in_flight_tasks = [ts for ts in b.tasks.values() if ts.key != f1.key]
+    in_flight_tasks = [ts for ts in b.tasks.values() if ts.key != "f1"]
     assert all(ts.state == "flight" for ts in in_flight_tasks)
     await a.close()
     write_event.set()
@@ -3078,28 +3077,28 @@ async def test_task_flight_compute_oserror(c, s, a, b):
     # asserting a few internals to make sure that if things change this is done
     # deliberately
 
-    sum_story = b.story(f1.key)
+    sum_story = b.story("f1")
     expected_sum_story = [
-        (f1.key, "compute-task"),
+        ("f1", "compute-task"),
         (
-            f1.key,
+            "f1",
             "released",
             "waiting",
             "waiting",
             {ts.key: "fetch" for ts in in_flight_tasks},
         ),
         # inc is lost and needs to be recomputed. Therefore, sum is released
-        ("free-keys", (f1.key,)),
-        (f1.key, "release-key"),
-        (f1.key, "waiting", "released", "released", {f1.key: "forgotten"}),
-        (f1.key, "released", "forgotten", "forgotten", {}),
+        ("free-keys", ("f1",)),
+        ("f1", "release-key"),
+        ("f1", "waiting", "released", "released", {"f1": "forgotten"}),
+        ("f1", "released", "forgotten", "forgotten", {}),
         # Now, we actually compute the task *once*. This must not cycle back
-        (f1.key, "compute-task"),
-        (f1.key, "released", "waiting", "waiting", {f1.key: "ready"}),
-        (f1.key, "waiting", "ready", "ready", {}),
-        (f1.key, "ready", "executing", "executing", {}),
-        (f1.key, "put-in-memory"),
-        (f1.key, "executing", "memory", "memory", {}),
+        ("f1", "compute-task"),
+        ("f1", "released", "waiting", "waiting", {"f1": "ready"}),
+        ("f1", "waiting", "ready", "ready", {}),
+        ("f1", "ready", "executing", "executing", {}),
+        ("f1", "put-in-memory"),
+        ("f1", "executing", "memory", "memory", {}),
     ]
     assert_story(sum_story, expected_sum_story, strict=True)
 
