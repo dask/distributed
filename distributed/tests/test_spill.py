@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import gc
 import logging
 import os
 import uuid
@@ -10,6 +9,7 @@ import pytest
 from dask.sizeof import sizeof
 
 from distributed.compatibility import WINDOWS
+from distributed.profile import wait_profiler
 from distributed.protocol import serialize_bytelist
 from distributed.spill import SpillBuffer, has_zict_210, has_zict_220
 from distributed.utils_test import captured_logger
@@ -310,6 +310,7 @@ class SupportsWeakRef(NoWeakRef):
     __slots__ = ("__weakref__",)
 
 
+@pytest.mark.parametrize("TEMPRUN", range(100))
 @pytest.mark.parametrize(
     "cls,expect_cached",
     [
@@ -318,7 +319,7 @@ class SupportsWeakRef(NoWeakRef):
     ],
 )
 @pytest.mark.parametrize("size", [60, 110])
-def test_weakref_cache(tmpdir, cls, expect_cached, size):
+def test_weakref_cache(tmpdir, cls, expect_cached, size, TEMPRUN):
     buf = SpillBuffer(str(tmpdir), target=100)
 
     # Run this test twice:
@@ -338,7 +339,7 @@ def test_weakref_cache(tmpdir, cls, expect_cached, size):
     # the same id as a deleted one
     id_x = x.id
     del x
-    gc.collect()  # Needed because of distributed.profile
+    wait_profiler()
 
     if size < 100:
         buf["y"]

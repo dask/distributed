@@ -275,14 +275,28 @@ def plot_data(state, profile_interval=0.010):
     }
 
 
+_watch_running: set[int] = set()
+
+
+def wait_profiler() -> None:
+    """Wait until a moment when no instances of watch() are sampling the frames.
+    You must call this function whenever you would otherwise expect an object to be
+    immediately released after it's descoped.
+    """
+    while _watch_running:
+        sleep(0.0001)
+
+
 def _watch(thread_id, log, interval="20ms", cycle="2s", omit=None, stop=lambda: False):
     interval = parse_timedelta(interval)
     cycle = parse_timedelta(cycle)
 
     recent = create()
     last = time()
+    watch_id = threading.get_ident()
 
     while not stop():
+        _watch_running.add(watch_id)
         if time() > last + cycle:
             log.append((time(), recent))
             recent = create()
@@ -293,6 +307,10 @@ def _watch(thread_id, log, interval="20ms", cycle="2s", omit=None, stop=lambda: 
             return
 
         process(frame, None, recent, omit=omit)
+        del frame
+
+        _watch_running.remove(watch_id)
+
         sleep(interval)
 
 

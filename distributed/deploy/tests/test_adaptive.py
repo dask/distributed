@@ -1,5 +1,4 @@
 import asyncio
-import gc
 import math
 from time import sleep
 
@@ -151,7 +150,6 @@ async def test_min_max():
         assert len(adapt.log) == 2 and all(d["status"] == "up" for _, d in adapt.log)
 
         del futures
-        gc.collect()  # Needed because of distributed.profile
 
         start = time()
         while len(cluster.scheduler.workers) != 1:

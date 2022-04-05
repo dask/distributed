@@ -1,9 +1,7 @@
 import asyncio
-import gc
 import subprocess
 import sys
 import unittest
-import weakref
 from threading import Lock
 from time import sleep
 from urllib.parse import urlparse
@@ -644,14 +642,9 @@ def test_adapt(loop):
         cluster.adapt(minimum=0, maximum=2, interval="10ms")
         assert cluster._adaptive.minimum == 0
         assert cluster._adaptive.maximum == 2
-        ref = weakref.ref(cluster._adaptive)
 
         cluster.adapt(minimum=1, maximum=2, interval="10ms")
         assert cluster._adaptive.minimum == 1
-
-        # Even in absence of circular references, this is needed because of
-        # distributed.profile
-        gc.collect()
 
         start = time()
         while len(cluster.scheduler.workers) != 1:
