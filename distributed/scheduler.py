@@ -5566,12 +5566,12 @@ class Scheduler(SchedulerState, ServerNode):
         if self._validate:
             try:
                 stimulus_id = self.STIMULUS_ID.get()
-            except LookupError:
-                pass
-            else:
-                raise RuntimeError(
+                raise AssertionError(
                     f"STIMULUS_ID {stimulus_id} set in Scheduler.add_client"
                 )
+
+            except LookupError:
+                pass
 
         assert client is not None
         comm.name = "Scheduler->Client"
@@ -5856,12 +5856,11 @@ class Scheduler(SchedulerState, ServerNode):
         if self._validate:
             try:
                 stimulus_id = self.STIMULUS_ID.get()
+                raise AssertionError(
+                    f"STIMULUS_ID {stimulus_id} set in Scheduler.add_client"
+                )
             except LookupError:
                 pass
-            else:
-                raise RuntimeError(
-                    f"STIMULUS_ID {stimulus_id} set in Scheduler.handle_worker"
-                )
 
         comm.name = "Scheduler connection to worker"
         worker_comm = self.stream_comms[worker]
