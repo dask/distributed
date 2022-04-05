@@ -308,9 +308,7 @@ def _watch(thread_id, log, interval="20ms", cycle="2s", omit=None, stop=lambda: 
 
         process(frame, None, recent, omit=omit)
         del frame
-
         _watch_running.remove(watch_id)
-
         sleep(interval)
 
 

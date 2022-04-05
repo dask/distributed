@@ -676,17 +676,15 @@ def test_get_sync(c):
 
 
 def test_no_future_references(c):
-    from weakref import WeakSet
-
-    ws = WeakSet()
+    """Test that there are neither global references to Future objects nor circular
+    references that need to be collected by gc
+    """
+    ws = weakref.WeakSet()
     futures = c.map(inc, range(10))
     ws.update(futures)
     del futures
     wait_profiler()
-    start = time()
-    while list(ws):
-        sleep(0.01)
-        assert time() < start + 30
+    assert not list(ws)
 
 
 def test_get_sync_optimize_graph_passes_through(c):
@@ -3801,7 +3799,6 @@ def test_open_close_many_workers(loop, worker, count, repeat):
 
     with cluster(nworkers=0, active_rpc_timeout=2) as (s, _):
         gc.collect()
-
         before = proc.num_fds()
         done = Semaphore(0)
         running = weakref.WeakKeyDictionary()

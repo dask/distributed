@@ -210,7 +210,7 @@ async def test_num_fds(s):
     await w.close()
     del w
     wait_profiler()
-    gc.collect()  # Needed because of distributed.profile
+    gc.collect()
 
     before = proc.num_fds()
 
