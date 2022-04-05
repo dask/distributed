@@ -297,18 +297,20 @@ def _watch(thread_id, log, interval="20ms", cycle="2s", omit=None, stop=lambda: 
 
     while not stop():
         _watch_running.add(watch_id)
-        if time() > last + cycle:
-            log.append((time(), recent))
-            recent = create()
-            last = time()
         try:
-            frame = sys._current_frames()[thread_id]
-        except KeyError:
-            return
+            if time() > last + cycle:
+                log.append((time(), recent))
+                recent = create()
+                last = time()
+            try:
+                frame = sys._current_frames()[thread_id]
+            except KeyError:
+                return
 
-        process(frame, None, recent, omit=omit)
-        del frame
-        _watch_running.remove(watch_id)
+            process(frame, None, recent, omit=omit)
+            del frame
+        finally:
+            _watch_running.remove(watch_id)
         sleep(interval)
 
 
