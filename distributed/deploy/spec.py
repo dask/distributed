@@ -350,7 +350,11 @@ class SpecCluster(Cluster):
                     cls = import_term(cls)
                 worker = cls(self.scheduler.address, **opts)
                 self._created.add(worker)
-                self._spec_name_to_worker_names[name] = {opts["name"]} if 'group' not in d else {opts['name']+suffix for suffix in d['group']}
+                self._spec_name_to_worker_names[name] = (
+                    {opts["name"]}
+                    if "group" not in d
+                    else {opts["name"] + suffix for suffix in d["group"]}
+                )
                 workers.append(worker)
             if workers:
                 await asyncio.wait(workers)
