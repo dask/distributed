@@ -5,6 +5,7 @@ import dask
 
 from distributed.metrics import time
 from distributed.threadpoolexecutor import rejoin, secede
+from distributed.utils import set_default_stimulus
 from distributed.worker import get_client, get_worker, thread_state
 
 
@@ -53,13 +54,13 @@ def worker_client(timeout=None, separate_thread=True):
     if separate_thread:
         duration = time() - thread_state.start_time
         secede()  # have this thread secede from the thread pool
-        worker.loop.add_callback(
-            worker.transition,
-            worker.tasks[thread_state.key],
-            "long-running",
-            stimulus_id=f"worker-client-secede-{time()}",
-            compute_duration=duration,
-        )
+        with set_default_stimulus(f"worker-client-secede-{time()}"):
+            worker.loop.add_callback(
+                worker.transition,
+                worker.tasks[thread_state.key],
+                "long-running",
+                compute_duration=duration,
+            )
 
     yield client
 

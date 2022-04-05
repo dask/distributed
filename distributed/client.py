@@ -81,6 +81,7 @@ from distributed.security import Security
 from distributed.sizeof import sizeof
 from distributed.threadpoolexecutor import rejoin
 from distributed.utils import (
+    STIMULUS_ID,
     All,
     Any,
     CancelledError,
@@ -93,6 +94,7 @@ from distributed.utils import (
     import_term,
     log_errors,
     no_default,
+    set_default_stimulus,
     sync,
     thread_state,
 )
@@ -472,6 +474,7 @@ class Future(WrappedKey):
                 "tasks": {},
                 "keys": [stringify(self.key)],
                 "client": c.id,
+                "stimulus_id": f"client-update-graph-{time()}",
             }
         )
 
@@ -1367,13 +1370,13 @@ class Client(SyncMethodMixin):
             self.refcount[key] += 1
 
     def _dec_ref(self, key):
-        with self._refcount_lock:
+        with self._refcount_lock, set_default_stimulus(f"client-dec-ref-{time()}"):
             self.refcount[key] -= 1
             if self.refcount[key] == 0:
                 del self.refcount[key]
-                self._release_key(key, f"client-release-key-{time()}")
+                self._release_key(key)
 
-    def _release_key(self, key, stimulus_id: str):
+    def _release_key(self, key):
         """Release key from distributed memory"""
         logger.debug("Release key %s", key)
         st = self.futures.pop(key, None)
@@ -1385,7 +1388,7 @@ class Client(SyncMethodMixin):
                     "op": "client-releases-keys",
                     "keys": [key],
                     "client": self.id,
-                    "stimulus_id": stimulus_id,
+                    "stimulus_id": STIMULUS_ID.get(),
                 }
             )
 
@@ -1532,33 +1535,33 @@ class Client(SyncMethodMixin):
             ):
                 await self.scheduler_comm.close()
 
-            stimulus_id = f"client-close-{time()}"
+            with set_default_stimulus(f"client-close-{time()}"):
 
-            for key in list(self.futures):
-                self._release_key(key=key, stimulus_id=stimulus_id)
+                for key in list(self.futures):
+                    self._release_key(key=key)
 
-            if self._start_arg is None:
+                if self._start_arg is None:
+                    with suppress(AttributeError):
+                        await self.cluster.close()
+
+                await self.rpc.close()
+
+                self.status = "closed"
+
+                if _get_global_client() is self:
+                    _set_global_client(None)
+
+                if (
+                    handle_report_task is not None
+                    and handle_report_task is not current_task
+                ):
+                    with suppress(TimeoutError, asyncio.CancelledError):
+                        await asyncio.wait_for(handle_report_task, 0 if fast else 2)
+
                 with suppress(AttributeError):
-                    await self.cluster.close()
+                    await self.scheduler.close_rpc()
 
-            await self.rpc.close()
-
-            self.status = "closed"
-
-            if _get_global_client() is self:
-                _set_global_client(None)
-
-            if (
-                handle_report_task is not None
-                and handle_report_task is not current_task
-            ):
-                with suppress(TimeoutError, asyncio.CancelledError):
-                    await asyncio.wait_for(handle_report_task, 0 if fast else 2)
-
-            with suppress(AttributeError):
-                await self.scheduler.close_rpc()
-
-            self.scheduler = None
+                self.scheduler = None
 
         self.status = "closed"
 
@@ -2947,6 +2950,7 @@ class Client(SyncMethodMixin):
                     "fifo_timeout": fifo_timeout,
                     "actors": actors,
                     "code": self._get_computation_code(),
+                    "stimulus_id": f"client-update-graph-hlg-{time()}",
                 }
             )
             return futures

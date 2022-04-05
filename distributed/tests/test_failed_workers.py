@@ -15,7 +15,7 @@ from distributed.comm import CommClosedError
 from distributed.compatibility import MACOS
 from distributed.metrics import time
 from distributed.scheduler import COMPILED
-from distributed.utils import CancelledError, sync
+from distributed.utils import CancelledError, set_default_stimulus, sync
 from distributed.utils_test import (
     captured_logger,
     cluster,
@@ -492,7 +492,8 @@ async def test_forget_data_not_supposed_to_have(s, a, b):
     ts = TaskState("key", state="flight")
     a.tasks["key"] = ts
     recommendations = {ts: ("memory", 123)}
-    a.transitions(recommendations, stimulus_id="test")
+    with set_default_stimulus("test"):
+        a.transitions(recommendations)
 
     assert a.data
     while a.data:

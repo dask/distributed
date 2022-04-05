@@ -3565,8 +3565,8 @@ async def test_stimuli(c, s, a, b):
     )
 
     stimuli = [
-        "update-graph-hlg",
-        "update-graph-hlg",
+        "client-update-graph-hlg",
+        "client-update-graph-hlg",
         "task-finished",
         "client-releases-keys",
     ]

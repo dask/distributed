@@ -12,7 +12,7 @@ import dask
 from dask.utils import parse_bytes
 
 from distributed.protocol.serialize import Serialize
-from distributed.utils import recursive_to_dict
+from distributed.utils import STIMULUS_ID, recursive_to_dict
 
 if TYPE_CHECKING:
     # TODO move to typing and get out of TYPE_CHECKING (requires Python >=3.10)
@@ -67,6 +67,10 @@ class StartStop(TypedDict, total=False):
 
 class InvalidTransition(Exception):
     pass
+
+
+def stimulus_id_factory() -> str:
+    return STIMULUS_ID.get()
 
 
 @lru_cache
@@ -260,15 +264,14 @@ class Instruction:
 
 @dataclass
 class Execute(Instruction):
-    __slots__ = ("key", "stimulus_id")
     key: str
-    stimulus_id: str
+    stimulus_id: str = field(default_factory=stimulus_id_factory)
 
 
 class SendMessageToScheduler(Instruction):
-    __slots__ = ()
     #: Matches a key in Scheduler.stream_handlers
     op: ClassVar[str]
+    stimulus_id: str = field(default_factory=stimulus_id_factory)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert object to dict so that it can be serialized with msgpack"""
@@ -288,8 +291,8 @@ class TaskFinishedMsg(SendMessageToScheduler):
     metadata: dict
     thread: int | None
     startstops: list[StartStop]
-    stimulus_id: str
-    __slots__ = tuple(__annotations__)  # type: ignore
+    stimulus_id: str = field(default_factory=stimulus_id_factory)
+    # __slots__ = tuple(__annotations__)  # type: ignore
 
     def to_dict(self) -> dict[str, Any]:
         d = super().to_dict()
@@ -308,8 +311,7 @@ class TaskErredMsg(SendMessageToScheduler):
     traceback_text: str
     thread: int | None
     startstops: list[StartStop]
-    stimulus_id: str
-    __slots__ = tuple(__annotations__)  # type: ignore
+    stimulus_id: str = field(default_factory=stimulus_id_factory)
 
     def to_dict(self) -> dict[str, Any]:
         d = super().to_dict()
@@ -321,9 +323,8 @@ class TaskErredMsg(SendMessageToScheduler):
 class ReleaseWorkerDataMsg(SendMessageToScheduler):
     op = "release-worker-data"
 
-    __slots__ = ("key", "stimulus_id")
     key: str
-    stimulus_id: str
+    stimulus_id: str = field(default_factory=stimulus_id_factory)
 
 
 # Not to be confused with RescheduleEvent below or the distributed.Reschedule Exception
@@ -332,35 +333,34 @@ class RescheduleMsg(SendMessageToScheduler):
     op = "reschedule"
 
     # Not to be confused with the distributed.Reschedule Exception
-    __slots__ = ("key", "worker", "stimulus_id")
+    __slots__ = ("key", "worker")
     key: str
     worker: str
-    stimulus_id: str
+    stimulus_id: str = field(default_factory=stimulus_id_factory)
 
 
 @dataclass
 class LongRunningMsg(SendMessageToScheduler):
     op = "long-running"
 
-    __slots__ = ("key", "compute_duration", "stimulus_id")
+    __slots__ = ("key", "compute_duration")
     key: str
     compute_duration: float
-    stimulus_id: str
+    stimulus_id: str = field(default_factory=stimulus_id_factory)
 
 
 @dataclass
 class AddKeysMsg(SendMessageToScheduler):
     op = "add-keys"
 
-    __slots__ = ("keys", "stimulus_id")
+    __slots__ = "keys"
     keys: list[str]
-    stimulus_id: str
 
 
-@dataclass
+@dataclass()
 class StateMachineEvent:
-    __slots__ = ("stimulus_id",)
-    stimulus_id: str
+    key: str
+    # stimulus_id: str
 
 
 @dataclass
@@ -371,8 +371,8 @@ class ExecuteSuccessEvent(StateMachineEvent):
     stop: float
     nbytes: int
     type: type | None
-    stimulus_id: str
-    __slots__ = tuple(__annotations__)  # type: ignore
+    stimulus_id: str = field(default_factory=stimulus_id_factory)
+    # __slots__ = tuple(__annotations__)  # type: ignore
 
 
 @dataclass
@@ -384,20 +384,22 @@ class ExecuteFailureEvent(StateMachineEvent):
     traceback: Serialize | None
     exception_text: str
     traceback_text: str
-    stimulus_id: str
-    __slots__ = tuple(__annotations__)  # type: ignore
+    stimulus_id: str = field(default_factory=stimulus_id_factory)
+    # __slots__ = tuple(__annotations__)  # type: ignore
 
 
 @dataclass
 class CancelComputeEvent(StateMachineEvent):
     __slots__ = ("key",)
     key: str
+    stimulus_id: str = field(default_factory=stimulus_id_factory)
 
 
 @dataclass
 class AlreadyCancelledEvent(StateMachineEvent):
     __slots__ = ("key",)
     key: str
+    stimulus_id: str = field(default_factory=stimulus_id_factory)
 
 
 # Not to be confused with RescheduleMsg above or the distributed.Reschedule Exception
@@ -405,6 +407,7 @@ class AlreadyCancelledEvent(StateMachineEvent):
 class RescheduleEvent(StateMachineEvent):
     __slots__ = ("key",)
     key: str
+    stimulus_id: str = field(default_factory=stimulus_id_factory)
 
 
 if TYPE_CHECKING:

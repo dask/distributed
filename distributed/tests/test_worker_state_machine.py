@@ -86,6 +86,7 @@ def test_unique_task_heap():
     assert repr(heap) == "<UniqueTaskHeap: 0 items>"
 
 
+@pytest.mark.xfail("slots not compatible with defaultfactory")
 @pytest.mark.parametrize(
     "cls",
     chain(
