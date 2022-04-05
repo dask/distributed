@@ -896,6 +896,7 @@ async def test_retry_connect(tcp, monkeypatch):
     async def echo(comm):
         message = await comm.read()
         await comm.write(message)
+        await comm.close()
 
     class UnreliableConnector(tcp.TCPConnector):
         def __init__(self):
@@ -922,6 +923,7 @@ async def test_retry_connect(tcp, monkeypatch):
         await comm.write(b"test")
         msg = await comm.read()
         assert msg == b"test"
+        await comm.close()
     finally:
         listener.stop()
 
