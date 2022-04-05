@@ -25,6 +25,7 @@ from collections.abc import (
 )
 from concurrent.futures import Executor
 from contextlib import suppress
+from contextvars import copy_context
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
@@ -2737,14 +2738,15 @@ class Worker(ServerNode):
                     self.tasks[d]: ("flight", worker) for d in to_gather
                 }
                 self.transitions(recommendations)
-
+                ctx = copy_context()
                 self.loop.add_callback(
-                    self.gather_dep,
-                    worker=worker,
-                    to_gather=to_gather,
-                    total_nbytes=total_nbytes,
-                    # add_callback is not ctx sensitive
-                    stimulus_id=STIMULUS_ID.get(),
+                    ctx.run,
+                    functools.partial(
+                        self.gather_dep,
+                        worker=worker,
+                        to_gather=to_gather,
+                        total_nbytes=total_nbytes,
+                    ),
                 )
 
             for el in skipped_worker_in_flight:
@@ -2965,7 +2967,6 @@ class Worker(ServerNode):
         worker: str,
         to_gather: Iterable[str],
         total_nbytes: int,
-        stimulus_id: str,
     ) -> None:
         """Gather dependencies for a task from a worker who has them
 
@@ -2980,165 +2981,160 @@ class Worker(ServerNode):
         total_nbytes : int
             Total number of bytes for all the dependencies in to_gather combined
         """
-        with set_default_stimulus(stimulus_id):
-            if self.status not in Status.ANY_RUNNING:  # type: ignore
-                return
+        if self.status not in Status.ANY_RUNNING:  # type: ignore
+            return
 
-            recommendations: Recs = {}
-            with log_errors():
-                response = {}
-                to_gather_keys: set[str] = set()
-                cancelled_keys: set[str] = set()
-                try:
-                    to_gather_keys, cancelled_keys, cause = self._filter_deps_for_fetch(
-                        to_gather
-                    )
+        recommendations: Recs = {}
+        with log_errors():
+            response = {}
+            to_gather_keys: set[str] = set()
+            cancelled_keys: set[str] = set()
+            try:
+                to_gather_keys, cancelled_keys, cause = self._filter_deps_for_fetch(
+                    to_gather
+                )
 
-                    if not to_gather_keys:
-                        self.log.append(
-                            (
-                                "nothing-to-gather",
-                                worker,
-                                to_gather,
-                                STIMULUS_ID.get(),
-                                time(),
-                            )
-                        )
-                        return
-
-                    assert cause
-                    # Keep namespace clean since this func is long and has many
-                    # dep*, *ts* variables
-                    del to_gather
-
+                if not to_gather_keys:
                     self.log.append(
                         (
-                            "request-dep",
+                            "nothing-to-gather",
+                            worker,
+                            to_gather,
+                            STIMULUS_ID.get(),
+                            time(),
+                        )
+                    )
+                    return
+
+                assert cause
+                # Keep namespace clean since this func is long and has many
+                # dep*, *ts* variables
+                del to_gather
+
+                self.log.append(
+                    (
+                        "request-dep",
+                        worker,
+                        to_gather_keys,
+                        STIMULUS_ID.get(),
+                        time(),
+                    )
+                )
+                logger.debug(
+                    "Request %d keys for task %s from %s",
+                    len(to_gather_keys),
+                    cause,
+                    worker,
+                )
+
+                start = time()
+                response = await get_data_from_worker(
+                    self.rpc, to_gather_keys, worker, who=self.address
+                )
+                stop = time()
+                if response["status"] == "busy":
+                    return
+
+                self._update_metrics_received_data(
+                    start=start,
+                    stop=stop,
+                    data=response["data"],
+                    cause=cause,
+                    worker=worker,
+                )
+                self.log.append(
+                    (
+                        "receive-dep",
+                        worker,
+                        set(response["data"]),
+                        STIMULUS_ID.get(),
+                        time(),
+                    )
+                )
+
+            except OSError:
+                logger.exception("Worker stream died during communication: %s", worker)
+                has_what = self.has_what.pop(worker)
+                self.pending_data_per_worker.pop(worker)
+                self.log.append(
+                    (
+                        "receive-dep-failed",
+                        worker,
+                        has_what,
+                        STIMULUS_ID.get(),
+                        time(),
+                    )
+                )
+                for d in has_what:
+                    ts = self.tasks[d]
+                    ts.who_has.remove(worker)
+
+            except Exception as e:
+                logger.exception(e)
+                if self.batched_stream and LOG_PDB:
+                    import pdb
+
+                    pdb.set_trace()
+                msg = error_message(e)
+                for k in self.in_flight_workers[worker]:
+                    ts = self.tasks[k]
+                    recommendations[ts] = tuple(msg.values())
+                raise
+            finally:
+                self.comm_nbytes -= total_nbytes
+                busy = response.get("status", "") == "busy"
+                data = response.get("data", {})
+
+                if busy:
+                    self.log.append(
+                        (
+                            "busy-gather",
                             worker,
                             to_gather_keys,
                             STIMULUS_ID.get(),
                             time(),
                         )
                     )
-                    logger.debug(
-                        "Request %d keys for task %s from %s",
-                        len(to_gather_keys),
-                        cause,
-                        worker,
-                    )
 
-                    start = time()
-                    response = await get_data_from_worker(
-                        self.rpc, to_gather_keys, worker, who=self.address
-                    )
-                    stop = time()
-                    if response["status"] == "busy":
-                        return
-
-                    self._update_metrics_received_data(
-                        start=start,
-                        stop=stop,
-                        data=response["data"],
-                        cause=cause,
-                        worker=worker,
-                    )
-                    self.log.append(
-                        (
-                            "receive-dep",
-                            worker,
-                            set(response["data"]),
-                            STIMULUS_ID.get(),
-                            time(),
-                        )
-                    )
-
-                except OSError:
-                    logger.exception(
-                        "Worker stream died during communication: %s", worker
-                    )
-                    has_what = self.has_what.pop(worker)
-                    self.pending_data_per_worker.pop(worker)
-                    self.log.append(
-                        (
-                            "receive-dep-failed",
-                            worker,
-                            has_what,
-                            STIMULUS_ID.get(),
-                            time(),
-                        )
-                    )
-                    for d in has_what:
-                        ts = self.tasks[d]
-                        ts.who_has.remove(worker)
-
-                except Exception as e:
-                    logger.exception(e)
-                    if self.batched_stream and LOG_PDB:
-                        import pdb
-
-                        pdb.set_trace()
-                    msg = error_message(e)
-                    for k in self.in_flight_workers[worker]:
-                        ts = self.tasks[k]
-                        recommendations[ts] = tuple(msg.values())
-                    raise
-                finally:
-                    self.comm_nbytes -= total_nbytes
-                    busy = response.get("status", "") == "busy"
-                    data = response.get("data", {})
-
-                    if busy:
-                        self.log.append(
-                            (
-                                "busy-gather",
-                                worker,
-                                to_gather_keys,
-                                STIMULUS_ID.get(),
-                                time(),
-                            )
-                        )
-
-                    for d in self.in_flight_workers.pop(worker):
-                        ts = self.tasks[d]
-                        ts.done = True
-                        if d in cancelled_keys:
-                            if ts.state == "cancelled":
-                                recommendations[ts] = "released"
-                            else:
-                                recommendations[ts] = "fetch"
-                        elif d in data:
-                            recommendations[ts] = ("memory", data[d])
-                        elif busy:
+                for d in self.in_flight_workers.pop(worker):
+                    ts = self.tasks[d]
+                    ts.done = True
+                    if d in cancelled_keys:
+                        if ts.state == "cancelled":
+                            recommendations[ts] = "released"
+                        else:
                             recommendations[ts] = "fetch"
-                        elif ts not in recommendations:
-                            ts.who_has.discard(worker)
-                            self.has_what[worker].discard(ts.key)
-                            self.log.append(
-                                (d, "missing-dep", STIMULUS_ID.get(), time())
-                            )
-                            self.batched_stream.send(
-                                {
-                                    "op": "missing-data",
-                                    "errant_worker": worker,
-                                    "key": d,
-                                    "stimulus_id": STIMULUS_ID.get(),
-                                }
-                            )
-                            recommendations[ts] = "fetch" if ts.who_has else "missing"
-                    del data, response
-                    self.transitions(recommendations)
-                    self.ensure_computing()
+                    elif d in data:
+                        recommendations[ts] = ("memory", data[d])
+                    elif busy:
+                        recommendations[ts] = "fetch"
+                    elif ts not in recommendations:
+                        ts.who_has.discard(worker)
+                        self.has_what[worker].discard(ts.key)
+                        self.log.append((d, "missing-dep", STIMULUS_ID.get(), time()))
+                        self.batched_stream.send(
+                            {
+                                "op": "missing-data",
+                                "errant_worker": worker,
+                                "key": d,
+                                "stimulus_id": STIMULUS_ID.get(),
+                            }
+                        )
+                        recommendations[ts] = "fetch" if ts.who_has else "missing"
+                del data, response
+                self.transitions(recommendations)
+                self.ensure_computing()
 
-                    if not busy:
-                        self.repetitively_busy = 0
-                    else:
-                        # Exponential backoff to avoid hammering scheduler/worker
-                        self.repetitively_busy += 1
-                        await asyncio.sleep(0.100 * 1.5**self.repetitively_busy)
+                if not busy:
+                    self.repetitively_busy = 0
+                else:
+                    # Exponential backoff to avoid hammering scheduler/worker
+                    self.repetitively_busy += 1
+                    await asyncio.sleep(0.100 * 1.5**self.repetitively_busy)
 
-                        await self.query_who_has(*to_gather_keys)
+                    await self.query_who_has(*to_gather_keys)
 
-                    self.ensure_communicating()
+                self.ensure_communicating()
 
     async def find_missing(self) -> None:
         with log_errors(), set_default_stimulus(f"find-missing-{time()}"):
