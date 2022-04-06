@@ -34,6 +34,7 @@ import threading
 from collections import defaultdict, deque
 from collections.abc import Callable, Collection
 from time import sleep
+from types import FrameType
 from typing import Any
 
 import tlz as toolz
@@ -44,7 +45,7 @@ from distributed.metrics import time
 from distributed.utils import color_of
 
 
-def identifier(frame) -> str:
+def identifier(frame: FrameType | None) -> str:
     """A string identifier from a frame
 
     Strings are cheaper to use as indexes into dicts than tuples or dicts
@@ -61,7 +62,7 @@ def identifier(frame) -> str:
         )
 
 
-def _f_lineno(frame) -> int:
+def _f_lineno(frame: FrameType) -> int:
     """Work around some frames lacking an f_lineno
     See: https://bugs.python.org/issue47085
     """
@@ -81,7 +82,7 @@ def _f_lineno(frame) -> int:
     return prev_line
 
 
-def repr_frame(frame) -> str:
+def repr_frame(frame: FrameType) -> str:
     """Render a frame as a line for inclusion into a text traceback"""
     co = frame.f_code
     f_lineno = _f_lineno(frame)
@@ -90,7 +91,7 @@ def repr_frame(frame) -> str:
     return text + "\n\t" + line
 
 
-def info_frame(frame) -> dict[str, Any]:
+def info_frame(frame: FrameType) -> dict[str, Any]:
     co = frame.f_code
     f_lineno = _f_lineno(frame)
     line = linecache.getline(co.co_filename, f_lineno, frame.f_globals).lstrip()
@@ -103,7 +104,7 @@ def info_frame(frame) -> dict[str, Any]:
 
 
 def process(
-    frame,
+    frame: FrameType,
     child,
     state: dict[str, Any],
     *,
@@ -163,7 +164,7 @@ def process(
         return None
 
 
-def merge(*args):
+def merge(*args: dict[str, Any]) -> dict[str, Any]:
     """Merge multiple frame states together"""
     if not args:
         return create()
@@ -176,13 +177,13 @@ def merge(*args):
             children[child].append(arg["children"][child])
 
     try:
-        children = {k: merge(*v) for k, v in children.items()}
+        children_dict = {k: merge(*v) for k, v in children.items()}
     except RecursionError:  # pragma: no cover
-        children = {}
+        children_dict = {}
     count = sum(arg["count"] for arg in args)
     return {
         "description": args[0]["description"],
-        "children": dict(children),
+        "children": children_dict,
         "count": count,
         "identifier": args[0]["identifier"],
     }
@@ -197,7 +198,7 @@ def create() -> dict[str, Any]:
     }
 
 
-def call_stack(frame):
+def call_stack(frame: FrameType) -> list[str]:
     """Create a call text stack from a frame
 
     Returns
@@ -205,9 +206,10 @@ def call_stack(frame):
     list of strings
     """
     L = []
-    while frame:
-        L.append(repr_frame(frame))
-        frame = frame.f_back
+    cur_frame: FrameType | None = frame
+    while cur_frame:
+        L.append(repr_frame(cur_frame))
+        cur_frame = cur_frame.f_back
     return L[::-1]
 
 
