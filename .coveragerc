@@ -10,7 +10,6 @@ omit =
     distributed/_version.py
     distributed/pytest_resourceleaks.py
     distributed/comm/ucx.py
-    distributed/asyncio.py
 
 [report]
 show_missing = True

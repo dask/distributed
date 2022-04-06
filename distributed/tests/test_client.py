@@ -38,6 +38,7 @@ from dask.utils import parse_timedelta, stringify, tmpfile
 
 from distributed import (
     CancelledError,
+    Event,
     Executor,
     LocalCluster,
     Nanny,
@@ -69,6 +70,7 @@ from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import Server, Status
 from distributed.metrics import time
 from distributed.objects import HasWhat, WhoHas
+from distributed.profile import wait_profiler
 from distributed.scheduler import (
     COMPILED,
     CollectTaskMetaDataPlugin,
@@ -286,7 +288,6 @@ async def test_compute_retries_annotations(c, s, a, b):
     y = delayed(varying(yargs))()
 
     x, y = c.compute([x, y], optimize_graph=False)
-    gc.collect()
 
     assert await x == 30
     with pytest.raises(ZeroDivisionError, match="five"):
@@ -676,19 +677,15 @@ def test_get_sync(c):
 
 
 def test_no_future_references(c):
-    from weakref import WeakSet
-
-    ws = WeakSet()
+    """Test that there are neither global references to Future objects nor circular
+    references that need to be collected by gc
+    """
+    ws = weakref.WeakSet()
     futures = c.map(inc, range(10))
     ws.update(futures)
     del futures
-    import gc
-
-    gc.collect()
-    start = time()
-    while list(ws):
-        sleep(0.01)
-        assert time() < start + 30
+    wait_profiler()
+    assert not list(ws)
 
 
 def test_get_sync_optimize_graph_passes_through(c):
@@ -820,9 +817,7 @@ async def test_recompute_released_key(c, s, a, b):
     result1 = await x
     xkey = x.key
     del x
-    import gc
-
-    gc.collect()
+    wait_profiler()
     await asyncio.sleep(0)
     assert c.refcount[xkey] == 0
 
@@ -1231,10 +1226,6 @@ async def test_scatter_hash_2(c, s, a, b):
 @gen_cluster(client=True)
 async def test_get_releases_data(c, s, a, b):
     await c.gather(c.get({"x": (inc, 1)}, ["x"], sync=False))
-    import gc
-
-    gc.collect()
-
     while c.refcount["x"]:
         await asyncio.sleep(0.01)
 
@@ -3569,9 +3560,7 @@ async def test_Client_clears_references_after_restart(c, s, a, b):
 
     key = x.key
     del x
-    import gc
-
-    gc.collect()
+    wait_profiler()
     await asyncio.sleep(0)
 
     assert key not in c.refcount
@@ -6296,24 +6285,16 @@ async def test_as_completed_async_for_results(c, s, a, b):
 @gen_cluster(client=True)
 async def test_as_completed_async_for_cancel(c, s, a, b):
     x = c.submit(inc, 1)
-    y = c.submit(sleep, 0.3)
+    ev = Event()
+    y = c.submit(lambda ev: ev.wait(), ev)
     ac = as_completed([x, y])
 
-    async def _():
-        await asyncio.sleep(0.1)
-        await y.cancel(asynchronous=True)
+    await x
+    await y.cancel()
 
-    c.loop.add_callback(_)
-
-    L = []
-
-    async def f():
-        async for future in ac:
-            L.append(future)
-
-    await f()
-
-    assert L == [x, y]
+    futs = [future async for future in ac]
+    assert futs == [x, y]
+    await ev.set()  # Allow for clean teardown
 
 
 @gen_test()
