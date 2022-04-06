@@ -5628,36 +5628,35 @@ class Scheduler(SchedulerState, ServerNode):
 
     def handle_task_finished(self, key=None, worker=None, stimulus_id=None, **msg):
         parent: SchedulerState = cast(SchedulerState, self)
-        assert stimulus_id
-        STIMULUS_ID.set(stimulus_id)
 
-        if worker not in parent._workers_dv:
-            return
-        validate_key(key)
+        with default_stimulus_id(stimulus_id):
+            if worker not in parent._workers_dv:
+                return
+            validate_key(key)
 
-        recommendations: dict
-        client_msgs: dict
-        worker_msgs: dict
+            recommendations: dict
+            client_msgs: dict
+            worker_msgs: dict
 
-        r: tuple = self.stimulus_task_finished(key=key, worker=worker, **msg)
-        recommendations, client_msgs, worker_msgs = r
-        parent._transitions(recommendations, client_msgs, worker_msgs)
+            r: tuple = self.stimulus_task_finished(key=key, worker=worker, **msg)
+            recommendations, client_msgs, worker_msgs = r
+            parent._transitions(recommendations, client_msgs, worker_msgs)
 
-        self.send_all(client_msgs, worker_msgs)
+            self.send_all(client_msgs, worker_msgs)
 
     def handle_task_erred(self, key=None, stimulus_id=None, **msg):
         parent: SchedulerState = cast(SchedulerState, self)
-        assert stimulus_id
-        STIMULUS_ID.set(stimulus_id)
-        recommendations: dict
-        client_msgs: dict
-        worker_msgs: dict
 
-        r: tuple = self.stimulus_task_erred(key=key, **msg)
-        recommendations, client_msgs, worker_msgs = r
-        parent._transitions(recommendations, client_msgs, worker_msgs)
+        with default_stimulus_id(stimulus_id):
+            recommendations: dict
+            client_msgs: dict
+            worker_msgs: dict
 
-        self.send_all(client_msgs, worker_msgs)
+            r: tuple = self.stimulus_task_erred(key=key, **msg)
+            recommendations, client_msgs, worker_msgs = r
+            parent._transitions(recommendations, client_msgs, worker_msgs)
+
+            self.send_all(client_msgs, worker_msgs)
 
     def handle_missing_data(
         self, key=None, errant_worker=None, stimulus_id=None, **kwargs
@@ -5681,39 +5680,39 @@ class Scheduler(SchedulerState, ServerNode):
             Stimulus ID that generated this function call.
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        assert stimulus_id
-        STIMULUS_ID.set(stimulus_id)
-        logger.debug("handle missing data key=%s worker=%s", key, errant_worker)
 
-        self.log_event(errant_worker, {"action": "missing-data", "key": key})
-        ts: TaskState = parent._tasks.get(key)
-        if ts is None:
-            return
-        ws: WorkerState = parent._workers_dv.get(errant_worker)
+        with default_stimulus_id(stimulus_id):
+            logger.debug("handle missing data key=%s worker=%s", key, errant_worker)
 
-        if ws is not None and ws in ts._who_has:
-            parent.remove_replica(ts, ws)
-        if ts.state == "memory" and not ts._who_has:
-            if ts._run_spec:
-                self.transitions({key: "released"})
-            else:
-                self.transitions({key: "forgotten"})
+            self.log_event(errant_worker, {"action": "missing-data", "key": key})
+            ts: TaskState = parent._tasks.get(key)
+            if ts is None:
+                return
+            ws: WorkerState = parent._workers_dv.get(errant_worker)
+
+            if ws is not None and ws in ts._who_has:
+                parent.remove_replica(ts, ws)
+            if ts.state == "memory" and not ts._who_has:
+                if ts._run_spec:
+                    self.transitions({key: "released"})
+                else:
+                    self.transitions({key: "forgotten"})
 
     def release_worker_data(self, key, worker, stimulus_id=None):
         parent: SchedulerState = cast(SchedulerState, self)
-        assert stimulus_id
-        STIMULUS_ID.set(stimulus_id)
-        ws: WorkerState = parent._workers_dv.get(worker)
-        ts: TaskState = parent._tasks.get(key)
-        if not ws or not ts:
-            return
-        recommendations: dict = {}
-        if ws in ts._who_has:
-            parent.remove_replica(ts, ws)
-            if not ts._who_has:
-                recommendations[ts._key] = "released"
-        if recommendations:
-            self.transitions(recommendations)
+
+        with default_stimulus_id(stimulus_id):
+            ws: WorkerState = parent._workers_dv.get(worker)
+            ts: TaskState = parent._tasks.get(key)
+            if not ws or not ts:
+                return
+            recommendations: dict = {}
+            if ws in ts._who_has:
+                parent.remove_replica(ts, ws)
+                if not ts._who_has:
+                    recommendations[ts._key] = "released"
+            if recommendations:
+                self.transitions(recommendations)
 
     def handle_long_running(
         self, key=None, worker=None, compute_duration=None, stimulus_id=None
@@ -5724,85 +5723,87 @@ class Scheduler(SchedulerState, ServerNode):
         duration accounting as if the task has stopped.
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        assert stimulus_id
-        STIMULUS_ID.set(stimulus_id)
 
-        if key not in parent._tasks:
-            logger.debug("Skipping long_running since key %s was already released", key)
-            return
-        ts: TaskState = parent._tasks[key]
-        steal = parent._extensions.get("stealing")
-        if steal is not None:
-            steal.remove_key_from_stealable(ts)
+        with default_stimulus_id(stimulus_id):
+            if key not in parent._tasks:
+                logger.debug(
+                    "Skipping long_running since key %s was already released", key
+                )
+                return
+            ts: TaskState = parent._tasks[key]
+            steal = parent._extensions.get("stealing")
+            if steal is not None:
+                steal.remove_key_from_stealable(ts)
 
-        ws: WorkerState = ts._processing_on
-        if ws is None:
-            logger.debug("Received long-running signal from duplicate task. Ignoring.")
-            return
+            ws: WorkerState = ts._processing_on
+            if ws is None:
+                logger.debug(
+                    "Received long-running signal from duplicate task. Ignoring."
+                )
+                return
 
-        if compute_duration:
-            old_duration: double = ts._prefix._duration_average
-            new_duration: double = compute_duration
-            avg_duration: double
-            if old_duration < 0:
-                avg_duration = new_duration
-            else:
-                avg_duration = 0.5 * old_duration + 0.5 * new_duration
+            if compute_duration:
+                old_duration: double = ts._prefix._duration_average
+                new_duration: double = compute_duration
+                avg_duration: double
+                if old_duration < 0:
+                    avg_duration = new_duration
+                else:
+                    avg_duration = 0.5 * old_duration + 0.5 * new_duration
 
-            ts._prefix._duration_average = avg_duration
+                ts._prefix._duration_average = avg_duration
 
-        occ: double = ws._processing[ts]
-        ws._occupancy -= occ
-        parent._total_occupancy -= occ
-        # Cannot remove from processing since we're using this for things like
-        # idleness detection. Idle workers are typically targeted for
-        # downscaling but we should not downscale workers with long running
-        # tasks
-        ws._processing[ts] = 0
-        ws._long_running.add(ts)
-        self.check_idle_saturated(ws)
+            occ: double = ws._processing[ts]
+            ws._occupancy -= occ
+            parent._total_occupancy -= occ
+            # Cannot remove from processing since we're using this for things like
+            # idleness detection. Idle workers are typically targeted for
+            # downscaling but we should not downscale workers with long running
+            # tasks
+            ws._processing[ts] = 0
+            ws._long_running.add(ts)
+            self.check_idle_saturated(ws)
 
     def handle_worker_status_change(
         self, status: str, worker: str, stimulus_id: str
     ) -> None:
         parent: SchedulerState = cast(SchedulerState, self)
-        assert stimulus_id
-        STIMULUS_ID.set(stimulus_id)
 
-        ws: WorkerState = parent._workers_dv.get(worker)  # type: ignore
-        if not ws:
-            return
-        prev_status = ws._status
-        ws._status = Status.lookup[status]  # type: ignore
-        if ws._status == prev_status:
-            return
+        with default_stimulus_id(stimulus_id):
+            ws: WorkerState = parent._workers_dv.get(worker)  # type: ignore
+            if not ws:
+                return
+            prev_status = ws._status
+            ws._status = Status.lookup[status]  # type: ignore
+            if ws._status == prev_status:
+                return
 
-        self.log_event(
-            ws._address,
-            {
-                "action": "worker-status-change",
-                "prev-status": prev_status.name,
-                "status": status,
-            },
-        )
+            self.log_event(
+                ws._address,
+                {
+                    "action": "worker-status-change",
+                    "prev-status": prev_status.name,
+                    "status": status,
+                },
+            )
 
-        if ws._status == Status.running:
-            parent._running.add(ws)
+            if ws._status == Status.running:
+                parent._running.add(ws)
 
-            recs = {}
-            ts: TaskState
-            for ts in parent._unrunnable:
-                valid: set = self.valid_workers(ts)
-                if valid is None or ws in valid:
-                    recs[ts._key] = "waiting"
-            if recs:
-                client_msgs: dict = {}
-                worker_msgs: dict = {}
-                parent._transitions(recs, client_msgs, worker_msgs)
-                self.send_all(client_msgs, worker_msgs)
+                recs = {}
+                ts: TaskState
+                for ts in parent._unrunnable:
+                    valid: set = self.valid_workers(ts)
+                    if valid is None or ws in valid:
+                        recs[ts._key] = "waiting"
+                if recs:
+                    client_msgs: dict = {}
+                    worker_msgs: dict = {}
+                    parent._transitions(recs, client_msgs, worker_msgs)
+                    self.send_all(client_msgs, worker_msgs)
 
-        else:
-            parent._running.discard(ws)
+            else:
+                parent._running.discard(ws)
 
     async def handle_worker(self, comm=None, worker=None):
         """
