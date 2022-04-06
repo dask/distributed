@@ -13,6 +13,7 @@ import weakref
 from collections import defaultdict
 from collections.abc import Container
 from contextlib import suppress
+from contextvars import copy_context
 from enum import Enum
 from functools import partial
 from typing import Callable, ClassVar, TypedDict, TypeVar
@@ -619,7 +620,9 @@ class Server:
                                 break
                             handler = self.stream_handlers[op]
                             if is_coroutine_function(handler):
-                                self.loop.add_callback(handler, **merge(extra, msg))
+                                self.loop.add_callback(
+                                    copy_context().run, handler, **merge(extra, msg)
+                                )
                                 await gen.sleep(0)
                             else:
                                 handler(**merge(extra, msg))
@@ -629,7 +632,7 @@ class Server:
 
                 for func in every_cycle:
                     if is_coroutine_function(func):
-                        self.loop.add_callback(func)
+                        self.loop.add_callback(copy_context().run, func)
                     else:
                         func()
 

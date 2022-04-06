@@ -25,6 +25,7 @@ from collections.abc import (
     Set,
 )
 from contextlib import suppress
+from contextvars import copy_context
 from datetime import timedelta
 from functools import partial
 from numbers import Number
@@ -4216,8 +4217,6 @@ class Scheduler(SchedulerState, ServerNode):
         for k, v in self.services.items():
             logger.info("%11s at: %25s", k, "%s:%d" % (listen_ip, v.port))
 
-        from contextvars import copy_context
-
         self.loop.add_callback(copy_context().run, self.reevaluate_occupancy)
 
         if self.scheduler_file:
@@ -5973,7 +5972,9 @@ class Scheduler(SchedulerState, ServerNode):
         try:
             stream_comms[worker].send(msg)
         except (CommClosedError, AttributeError):
-            self.loop.add_callback(self.remove_worker, address=worker)
+            self.loop.add_callback(
+                copy_context().run, self.remove_worker, address=worker
+            )
 
     def client_send(self, client, msg):
         """Send message to client"""
@@ -6018,7 +6019,9 @@ class Scheduler(SchedulerState, ServerNode):
                 # worker already gone
                 pass
             except (CommClosedError, AttributeError):
-                self.loop.add_callback(self.remove_worker, address=worker)
+                self.loop.add_callback(
+                    copy_context().run, self.remove_worker, address=worker
+                )
 
     ############################
     # Less common interactions #
