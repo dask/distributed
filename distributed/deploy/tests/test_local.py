@@ -1050,7 +1050,7 @@ async def test_local_cluster_redundant_kwarg(nanny):
         asynchronous=True,
     )
     try:
-        with pytest.raises(TypeError, match="unexpected keyword argument") as exc_info:
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
             # Extra arguments are forwarded to the worker class. Depending on
             # whether we use the nanny or not, the error treatment is quite
             # different and we should assert that an exception is raised
@@ -1059,8 +1059,6 @@ async def test_local_cluster_redundant_kwarg(nanny):
     finally:
         # FIXME: LocalCluster leaks if LocalCluster.__aenter__ raises
         await cluster.close()
-
-    print(exc_info)
 
 
 @gen_test()
