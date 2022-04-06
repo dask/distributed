@@ -274,7 +274,7 @@ class FakeFrame:
     ],
 )
 def test_info_frame_f_lineno(f_lasti: int, f_lineno: int) -> None:
-    assert info_frame(FakeFrame(f_lasti=f_lasti, f_code=FAKE_CODE)) == {
+    assert info_frame(FakeFrame(f_lasti=f_lasti, f_code=FAKE_CODE)) == {  # type: ignore
         "filename": "<stdin>",
         "name": "example",
         "line_number": f_lineno,
@@ -301,6 +301,6 @@ def test_info_frame_f_lineno(f_lasti: int, f_lineno: int) -> None:
     ],
 )
 def test_call_stack_f_lineno(f_lasti: int, f_lineno: int) -> None:
-    assert call_stack(FakeFrame(f_lasti=f_lasti, f_code=FAKE_CODE)) == [
+    assert call_stack(FakeFrame(f_lasti=f_lasti, f_code=FAKE_CODE)) == [  # type: ignore
         f'  File "<stdin>", line {f_lineno}, in example\n\t'
     ]
