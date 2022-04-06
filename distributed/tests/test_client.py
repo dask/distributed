@@ -38,6 +38,7 @@ from dask.utils import parse_timedelta, stringify, tmpfile
 
 from distributed import (
     CancelledError,
+    Event,
     Executor,
     LocalCluster,
     Nanny,
@@ -6284,24 +6285,16 @@ async def test_as_completed_async_for_results(c, s, a, b):
 @gen_cluster(client=True)
 async def test_as_completed_async_for_cancel(c, s, a, b):
     x = c.submit(inc, 1)
-    y = c.submit(sleep, 0.3)
+    ev = Event()
+    y = c.submit(lambda ev: ev.wait(), ev)
     ac = as_completed([x, y])
 
-    async def _():
-        await asyncio.sleep(0.1)
-        await y.cancel(asynchronous=True)
+    await x
+    await y.cancel()
 
-    c.loop.add_callback(_)
-
-    L = []
-
-    async def f():
-        async for future in ac:
-            L.append(future)
-
-    await f()
-
-    assert L == [x, y]
+    futs = [future async for future in ac]
+    assert futs == [x, y]
+    await ev.set()  # Allow for clean teardown
 
 
 @gen_test()
