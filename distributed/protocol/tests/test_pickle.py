@@ -1,4 +1,3 @@
-import gc
 import pickle
 import weakref
 from functools import partial
@@ -6,6 +5,7 @@ from operator import add
 
 import pytest
 
+from distributed.profile import wait_profiler
 from distributed.protocol import deserialize, serialize
 from distributed.protocol.pickle import HIGHEST_PROTOCOL, dumps, loads
 
@@ -181,7 +181,7 @@ def test_pickle_functions(protocol):
         assert func3(1) == func(1)
 
         del func, func2, func3
-        gc.collect()
+        wait_profiler()
         assert wr() is None
         assert wr2() is None
         assert wr3() is None

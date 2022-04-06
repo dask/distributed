@@ -1,6 +1,5 @@
 import asyncio
 import contextlib
-import gc
 import itertools
 import logging
 import random
@@ -18,6 +17,7 @@ from distributed.compatibility import LINUX
 from distributed.config import config
 from distributed.core import Status
 from distributed.metrics import time
+from distributed.profile import wait_profiler
 from distributed.scheduler import key_split
 from distributed.system import MEMORY_LIMIT
 from distributed.utils_test import (
@@ -946,7 +946,7 @@ async def test_cleanup_repeated_tasks(c, s, a, b):
     assert not s.who_has
     assert not any(s.has_what.values())
 
-    gc.collect()
+    wait_profiler()
     assert not list(ws)
 
 

@@ -1,9 +1,7 @@
 import asyncio
-import gc
 import subprocess
 import sys
 import unittest
-import weakref
 from threading import Lock
 from time import sleep
 from urllib.parse import urlparse
@@ -644,18 +642,9 @@ def test_adapt(loop):
         cluster.adapt(minimum=0, maximum=2, interval="10ms")
         assert cluster._adaptive.minimum == 0
         assert cluster._adaptive.maximum == 2
-        ref = weakref.ref(cluster._adaptive)
 
         cluster.adapt(minimum=1, maximum=2, interval="10ms")
         assert cluster._adaptive.minimum == 1
-        gc.collect()
-
-        # the old Adaptive class sticks around, not sure why
-        # start = time()
-        # while ref():
-        #     sleep(0.01)
-        #     gc.collect()
-        #     assert time() < start + 5
 
         start = time()
         while len(cluster.scheduler.workers) != 1:
