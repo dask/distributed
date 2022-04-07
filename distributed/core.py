@@ -203,7 +203,7 @@ class Server:
         if not hasattr(self.io_loop, "profile"):
             ref = weakref.ref(self.io_loop)
 
-            def stop():
+            def stop() -> bool:
                 loop = ref()
                 return loop is None or loop.asyncio_loop.is_closed()
 

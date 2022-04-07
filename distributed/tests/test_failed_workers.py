@@ -464,20 +464,23 @@ async def test_restart_timeout_on_long_running_task(c, s, a):
 async def test_worker_time_to_live(c, s, a, b):
     from distributed.scheduler import heartbeat_interval
 
-    # worker removal is also controlled by 10 * heartbeat
     assert set(s.workers) == {a.address, b.address}
-    interval = 10 * heartbeat_interval(len(s.workers)) + 0.5
 
     a.periodic_callbacks["heartbeat"].stop()
-    await asyncio.sleep(0.010)
-    assert set(s.workers) == {a.address, b.address}
+    while a.heartbeat_active:
+        await asyncio.sleep(0.01)
 
     start = time()
     while set(s.workers) == {a.address, b.address}:
-        await asyncio.sleep(interval)
-        assert time() < start + interval + 0.1
+        await asyncio.sleep(0.01)
+    assert set(s.workers) == {b.address}
 
-    set(s.workers) == {b.address}
+    # Worker removal is triggered after 10 * heartbeat
+    # This is 10 * 0.5s at the moment of writing.
+    interval = 10 * heartbeat_interval(len(s.workers))
+    # Currently observing an extra 0.3~0.6s on top of the interval.
+    # Adding some padding to prevent flakiness.
+    assert time() - start < interval + 2.0
 
 
 @gen_cluster()
