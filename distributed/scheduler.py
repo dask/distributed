@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import heapq
 import inspect
 import itertools
@@ -6085,35 +6086,37 @@ class Scheduler(SchedulerState, ServerNode):
                     logger.exception(e)
 
             logger.debug("Send kill signal to nannies: %s", nannies)
-
-            nannies = [
-                rpc(nanny_address, connection_args=self.connection_args)
-                for nanny_address in nannies.values()
-                if nanny_address is not None
-            ]
-
-            resps = All(
-                [
-                    nanny.restart(
-                        close=True, timeout=timeout * 0.8, executor_wait=False
+            async with contextlib.AsyncExitStack() as stack:
+                nannies = [
+                    await stack.enter_async_context(
+                        rpc(nanny_address, connection_args=self.connection_args)
                     )
-                    for nanny in nannies
+                    for nanny_address in nannies.values()
+                    if nanny_address is not None
                 ]
-            )
-            try:
-                resps = await asyncio.wait_for(resps, timeout)
-            except TimeoutError:
-                logger.error(
-                    "Nannies didn't report back restarted within "
-                    "timeout.  Continuuing with restart process"
+
+                resps = All(
+                    [
+                        nanny.restart(
+                            close=True, timeout=timeout * 0.8, executor_wait=False
+                        )
+                        for nanny in nannies
+                    ]
                 )
-            else:
-                if not all(resp == "OK" for resp in resps):
+                try:
+                    resps = await asyncio.wait_for(resps, timeout)
+                except TimeoutError:
                     logger.error(
-                        "Not all workers responded positively: %s", resps, exc_info=True
+                        "Nannies didn't report back restarted within "
+                        "timeout.  Continuuing with restart process"
                     )
-            finally:
-                await asyncio.gather(*[nanny.close_rpc() for nanny in nannies])
+                else:
+                    if not all(resp == "OK" for resp in resps):
+                        logger.error(
+                            "Not all workers responded positively: %s",
+                            resps,
+                            exc_info=True,
+                        )
 
             self.clear_task_state()
 

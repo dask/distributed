@@ -16,7 +16,7 @@ import dask
 from dask.utils import parse_bytes, parse_timedelta
 from dask.widgets import get_template
 
-from distributed.core import CommClosedError, Status, rpc
+from distributed.core import Status, rpc
 from distributed.deploy.adaptive import Adaptive
 from distributed.deploy.cluster import Cluster
 from distributed.scheduler import Scheduler
@@ -404,16 +404,15 @@ class SpecCluster(Cluster):
             if isawaitable(f):
                 await f
             await self._correct_state()
-            for future in self._futures:
-                await future
-            async with self._lock:
-                with suppress(CommClosedError, OSError):
-                    if self.scheduler_comm:
-                        await self.scheduler_comm.close(close_workers=True)
-                    else:
-                        logger.warning("Cluster closed without starting up")
+            await asyncio.gather(*self._futures)
 
-            await self.scheduler.close()
+            if self.scheduler_comm:
+                await self.scheduler_comm.close_rpc()
+            else:
+                logger.warning("Cluster closed without starting up")
+
+            async with self._lock:
+                await self.scheduler.close(close_workers=True)
             for w in self._created:
                 assert w.status == Status.closed, w.status
 
