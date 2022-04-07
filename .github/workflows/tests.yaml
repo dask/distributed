@@ -28,9 +28,7 @@ jobs:
         partition: [ci1, not ci1]
         exclude:
           - os: macos-latest
-            python-version: 3.8
-          - os: macos-latest
-            python-version: 3.10
+            python-version: 3.9
         include:
           - partition: "ci1"
             partition-label: "ci1"

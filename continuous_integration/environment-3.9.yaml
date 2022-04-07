@@ -1,4 +1,3 @@
-# This includes a set of all optional dependencies
 name: dask-distributed
 channels:
   - conda-forge
@@ -8,25 +7,25 @@ dependencies:
   - python=3.9
   - packaging
   - pip
-  - asyncssh  # Only tested here
+  - asyncssh
   - bokeh
   - click
   - cloudpickle
   - coverage
   - dask  # overridden by git tip below
   - filesystem-spec
-  - h5py  # Only tested here
+  - h5py
   - ipykernel
   - ipywidgets
   - jinja2
+  - joblib
   - lz4  # Only tested here
   - msgpack-python
-  - netcdf4  # Only tested here
-  - paramiko  # Only tested here
+  - netcdf4
+  - paramiko
   - pre-commit
   - prometheus_client
   - psutil
-  - pynvml  # Only tested here
   - pytest
   - pytest-asyncio<0.14.0
   - pytest-cov
@@ -39,15 +38,15 @@ dependencies:
   - pytorch  # Only tested here
   - requests
   - s3fs
-  - scikit-learn  # Only tested here
-  - scipy  # Only tested here
+  - scikit-learn
+  - scipy
   - sortedcollections
   - tblib
   - toolz
   - torchvision  # Only tested here
   - tornado
   - zict
-  - zstandard  # Only tested here
+  - zstandard
   - pip:
       - git+https://github.com/dask/dask
-      - keras  # Only tested here
+      - keras
