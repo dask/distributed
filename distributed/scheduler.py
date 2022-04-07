@@ -3623,7 +3623,6 @@ class SchedulerState:
         for ts in self._unrunnable:
             valid: set = self.valid_workers(ts)
             if valid is None or ws in valid:
-                # id(ts) is to prevent calling TaskState.__gt__ given equal priority
                 tasks.append(ts)
         # These recommendations will generate {"op": "compute-task"} messages
         # to the worker in reversed order
