@@ -3611,6 +3611,25 @@ class SchedulerState:
             for ts in ws._processing:
                 steal.recalculate_cost(ts)
 
+    @ccall
+    def bulk_schedule_after_adding_worker(self, ws: WorkerState):
+        """Send tasks with ts.state=='no-worker' in bulk to a worker that just joined.
+        Return recommendations. As the worker will start executing the new tasks
+        immediately, without waiting for the batch to end, we can't rely on worker-side
+        ordering, so the recommendations are sorted by priority order here.
+        """
+        ts: TaskState
+        tasks = []
+        for ts in self._unrunnable:
+            valid: set = self.valid_workers(ts)
+            if valid is None or ws in valid:
+                # id(ts) is to prevent calling TaskState.__gt__ given equal priority
+                tasks.append(ts)
+        # These recommendations will generate {"op": "compute-task"} messages
+        # to the worker in reversed order
+        tasks.sort(key=operator.attrgetter("priority"), reverse=True)
+        return {ts._key: "waiting" for ts in tasks}
+
 
 class Scheduler(SchedulerState, ServerNode):
     """Dynamic distributed task scheduler
@@ -4583,10 +4602,7 @@ class Scheduler(SchedulerState, ServerNode):
                     )
 
             if ws._status == Status.running:
-                for ts in parent._unrunnable:
-                    valid: set = self.valid_workers(ts)
-                    if valid is None or ws in valid:
-                        recommendations[ts._key] = "waiting"
+                recommendations.update(self.bulk_schedule_after_adding_worker(ws))
 
             if recommendations:
                 parent._transitions(recommendations, client_msgs, worker_msgs)
@@ -5699,13 +5715,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         if ws._status == Status.running:
             parent._running.add(ws)
-
-            recs = {}
-            ts: TaskState
-            for ts in parent._unrunnable:
-                valid: set = self.valid_workers(ts)
-                if valid is None or ws in valid:
-                    recs[ts._key] = "waiting"
+            recs = self.bulk_schedule_after_adding_worker(ws)
             if recs:
                 client_msgs: dict = {}
                 worker_msgs: dict = {}
