@@ -91,19 +91,6 @@ _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
 
 
-@pytest.fixture(autouse=False)
-def test_stimulus(request):
-    from distributed.utils import STIMULUS_ID
-
-    stimulus_id = request.function.__name__.replace("_", "-")
-    token = STIMULUS_ID.set(stimulus_id)
-
-    try:
-        yield stimulus_id
-    finally:
-        STIMULUS_ID.reset(token)
-
-
 @pytest.fixture(scope="session")
 def valid_python_script(tmpdir_factory):
     local_file = tmpdir_factory.mktemp("data").join("file.py")
