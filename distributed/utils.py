@@ -1442,9 +1442,6 @@ STIMULUS_ID: ContextVar[str] = ContextVar("stimulus_id")
 
 def expect_stimulus(sync: bool = True):
     def decorator(fn):
-        assert sync is not inspect.iscoroutinefunction(
-            fn
-        ), f"{fn} sync: {sync} != inspect: {inspect.iscoroutinefunction(fn)}"
         if sync:
 
             @functools.wraps(fn)
