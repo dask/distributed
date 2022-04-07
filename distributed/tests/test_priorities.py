@@ -27,6 +27,7 @@ async def block_worker(
 ):
     """Make sure that no tasks submitted inside this context manager start running on
     the worker until the context manager exits.
+    Must be used together with the ``@gen_blockable_cluster`` test decorator.
 
     Parameters
     ----------
@@ -82,7 +83,7 @@ async def block_worker(
 
 def gen_blockable_cluster(test_func):
     """Generate a cluster with 1 worker and disabled memory monitor,
-    to be used with block_worker().
+    to be used together with ``async with block_worker(...):``.
     """
     return pytest.mark.parametrize(
         "pause",
