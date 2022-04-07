@@ -42,7 +42,7 @@ from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
-from distributed.utils import TimeoutError, default_stimulus_id
+from distributed.utils import STIMULUS_ID, TimeoutError
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _LockedCommPool,
@@ -2548,8 +2548,11 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
         ts = s.tasks[fut.key]
         a.handle_steal_request(fut.key, stimulus_id="test")
 
-        with default_stimulus_id("test"):
+        try:
+            token = STIMULUS_ID.set("test")
             stealing_ext.scheduler.send_task_to_worker(b.address, ts)
+        finally:
+            STIMULUS_ID.reset(token)
 
         fut2 = c.submit(inc, fut, workers=[a.address])
         fut3 = c.submit(inc, fut2, workers=[a.address])
@@ -3007,7 +3010,7 @@ async def test_worker_status_sync(s, a):
     while ws.status != Status.running:
         await asyncio.sleep(0.01)
 
-    await s.retire_workers()
+    await s.handle_retire_workers(stimulus_id="test")
     while ws.status != Status.closed:
         await asyncio.sleep(0.01)
 
@@ -3282,7 +3285,9 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
         while not mocked_gather.call_args:
             await asyncio.sleep(0)
 
-        await s.remove_worker(address=x.address, safe=True, close=close_worker)
+        await s.handle_remove_worker(
+            address=x.address, safe=True, close=close_worker, stimulus_id="test"
+        )
 
         await _wait_for_state(fut2_key, b, intermediate_state)
 

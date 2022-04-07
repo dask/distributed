@@ -19,6 +19,7 @@ from distributed.compatibility import MACOS, WINDOWS
 from distributed.metrics import time
 from distributed.utils import (
     LRU,
+    STIMULUS_ID,
     All,
     Log,
     Logs,
@@ -27,6 +28,7 @@ from distributed.utils import (
     _maybe_complex,
     ensure_bytes,
     ensure_ip,
+    expect_stimulus,
     format_dashboard_link,
     get_ip_interface,
     get_traceback,
@@ -784,15 +786,13 @@ def test_recursive_to_dict_no_nest():
 
 
 def test_expect_stimulus():
-    from distributed.utils import STIMULUS_ID, expect_stimulus
-
     @expect_stimulus(sync=True)
     def fn(x):
         return STIMULUS_ID.get()
 
     assert fn(1, stimulus_id="test") == "test"
 
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError):
         assert fn(1) == 1
 
     assert fn(**{"x": 1, "stimulus_id": "test"}) == "test"

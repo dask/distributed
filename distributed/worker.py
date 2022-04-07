@@ -935,7 +935,7 @@ class Worker(ServerNode):
                     "op": "worker-status-change",
                     "status": self._status.name,
                     "stimulus_id": stimulus_id,
-                }
+                },
             )
         elif self._status != Status.closed:
             self.loop.call_later(0.05, self._send_worker_status_change, stimulus_id)
@@ -1079,6 +1079,7 @@ class Worker(ServerNode):
                         versions=get_versions(),
                         metrics=await self.get_metrics(),
                         extra=await self.get_startup_information(),
+                        stimulus_id=f"worker-connect-{time()}",
                     ),
                     serializers=["msgpack"],
                 )

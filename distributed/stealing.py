@@ -17,7 +17,12 @@ from dask.utils import parse_timedelta
 from distributed.comm.addressing import get_address_host
 from distributed.core import CommClosedError, Status
 from distributed.diagnostics.plugin import SchedulerPlugin
-from distributed.utils import default_stimulus_id, log_errors, recursive_to_dict
+from distributed.utils import (
+    STIMULUS_ID,
+    expect_stimulus,
+    log_errors,
+    recursive_to_dict,
+)
 
 # Stealing requires multiple network bounces and if successful also task
 # submission which may include code serialization. Therefore, be very
@@ -79,7 +84,7 @@ class WorkStealing(SchedulerPlugin):
         self.in_flight_occupancy = defaultdict(lambda: 0)
         self._in_flight_event = asyncio.Event()
 
-        self.scheduler.stream_handlers["steal-response"] = self.move_task_confirm
+        self.scheduler.stream_handlers["steal-response"] = self.handle_move_task_confirm
 
     async def start(self, scheduler=None):
         """Start the background coroutine to balance the tasks on the cluster.
@@ -265,7 +270,7 @@ class WorkStealing(SchedulerPlugin):
                 pdb.set_trace()
             raise
 
-    async def move_task_confirm(self, *, key, state, stimulus_id, worker=None):
+    async def move_task_confirm(self, *, key, state, worker=None):
         try:
             ts = self.scheduler.tasks[key]
         except KeyError:
@@ -273,12 +278,12 @@ class WorkStealing(SchedulerPlugin):
             return
         try:
             d = self.in_flight.pop(ts)
-            if d["stimulus_id"] != stimulus_id:
-                self.log(("stale-response", key, state, worker, stimulus_id))
+            if d["stimulus_id"] != STIMULUS_ID.get():
+                self.log(("stale-response", key, state, worker, STIMULUS_ID.get()))
                 self.in_flight[ts] = d
                 return
         except KeyError:
-            self.log(("already-aborted", key, state, worker, stimulus_id))
+            self.log(("already-aborted", key, state, worker, STIMULUS_ID.get()))
             return
 
         thief = d["thief"]
@@ -297,7 +302,7 @@ class WorkStealing(SchedulerPlugin):
             assert ts.processing_on == victim
 
         try:
-            _log_msg = [key, state, victim.address, thief.address, stimulus_id]
+            _log_msg = [key, state, victim.address, thief.address, STIMULUS_ID.get()]
 
             if ts.state != "processing":
                 self.scheduler._reevaluate_occupancy_worker(thief)
@@ -333,8 +338,7 @@ class WorkStealing(SchedulerPlugin):
                 self.scheduler.total_occupancy += d["thief_duration"]
                 self.put_key_in_stealable(ts)
 
-                with default_stimulus_id(stimulus_id):
-                    self.scheduler.send_task_to_worker(thief.address, ts)
+                self.scheduler.send_task_to_worker(thief.address, ts)
                 self.log(("confirm", *_log_msg))
             else:
                 raise ValueError(f"Unexpected task state: {state}")
@@ -348,6 +352,8 @@ class WorkStealing(SchedulerPlugin):
         finally:
             self.scheduler.check_idle_saturated(thief)
             self.scheduler.check_idle_saturated(victim)
+
+    handle_move_task_confirm = expect_stimulus(sync=False)(move_task_confirm)
 
     def balance(self):
         s = self.scheduler

@@ -2060,15 +2060,15 @@ async def test_forget_simple(c, s, a, b):
 
     assert set(s.tasks) == {x.key, y.key, z.key}
 
-    s.client_releases_keys(keys=[x.key], client=c.id)
+    s.handle_client_releases_keys(keys=[x.key], client=c.id, stimulus_id="test")
     assert x.key in s.tasks
-    s.client_releases_keys(keys=[z.key], client=c.id)
+    s.handle_client_releases_keys(keys=[z.key], client=c.id, stimulus_id="test")
 
     assert x.key not in s.tasks
     assert z.key not in s.tasks
     assert not s.tasks[y.key].dependents
 
-    s.client_releases_keys(keys=[y.key], client=c.id)
+    s.handle_client_releases_keys(keys=[y.key], client=c.id, stimulus_id="test")
     assert not s.tasks
 
 
@@ -2084,20 +2084,20 @@ async def test_forget_complex(e, s, A, B):
 
     assert set(s.tasks) == {f.key for f in [ab, ac, cd, acab, a, b, c, d]}
 
-    s.client_releases_keys(keys=[ab.key], client=e.id)
+    s.handle_client_releases_keys(keys=[ab.key], client=e.id, stimulus_id="test")
     assert set(s.tasks) == {f.key for f in [ab, ac, cd, acab, a, b, c, d]}
 
-    s.client_releases_keys(keys=[b.key], client=e.id)
+    s.handle_client_releases_keys(keys=[b.key], client=e.id, stimulus_id="test")
     assert set(s.tasks) == {f.key for f in [ac, cd, acab, a, c, d]}
 
-    s.client_releases_keys(keys=[acab.key], client=e.id)
+    s.handle_client_releases_keys(keys=[acab.key], client=e.id, stimulus_id="test")
     assert set(s.tasks) == {f.key for f in [ac, cd, a, c, d]}
     assert b.key not in s.tasks
 
     while b.key in A.data or b.key in B.data:
         await asyncio.sleep(0.01)
 
-    s.client_releases_keys(keys=[ac.key], client=e.id)
+    s.handle_client_releases_keys(keys=[ac.key], client=e.id, stimulus_id="test")
     assert set(s.tasks) == {f.key for f in [cd, a, c, d]}
 
 
@@ -2117,7 +2117,7 @@ async def test_forget_in_flight(e, s, A, B):
         await asyncio.sleep(0.01)
         s.validate_state()
 
-    s.client_releases_keys(keys=[y.key], client=e.id)
+    s.handle_client_releases_keys(keys=[y.key], client=e.id, stimulus_id="test")
     s.validate_state()
 
     for k in [acab.key, ab.key, b.key]:
@@ -2136,21 +2136,21 @@ async def test_forget_errors(c, s, a, b):
     assert y.key in s.exceptions_blame
     assert z.key in s.exceptions_blame
 
-    s.client_releases_keys(keys=[z.key], client=c.id)
+    s.handle_client_releases_keys(keys=[z.key], client=c.id, stimulus_id="test")
 
     assert x.key in s.exceptions
     assert x.key in s.exceptions_blame
     assert y.key in s.exceptions_blame
     assert z.key not in s.exceptions_blame
 
-    s.client_releases_keys(keys=[x.key], client=c.id)
+    s.handle_client_releases_keys(keys=[x.key], client=c.id, stimulus_id="test")
 
     assert x.key in s.exceptions
     assert x.key in s.exceptions_blame
     assert y.key in s.exceptions_blame
     assert z.key not in s.exceptions_blame
 
-    s.client_releases_keys(keys=[y.key], client=c.id)
+    s.handle_client_releases_keys(keys=[y.key], client=c.id, stimulus_id="test")
 
     assert x.key not in s.exceptions
     assert x.key not in s.exceptions_blame
@@ -4355,7 +4355,7 @@ async def test_scatter_type(c, s, a, b):
 async def test_retire_workers_2(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
 
-    await s.retire_workers(workers=[a.address])
+    await s.handle_retire_workers(workers=[a.address], stimulus_id="test")
     assert b.data == {x.key: 1}
     assert s.who_has == {x.key: {b.address}}
     assert s.has_what == {b.address: {x.key}}
@@ -4367,7 +4367,9 @@ async def test_retire_workers_2(c, s, a, b):
 async def test_retire_many_workers(c, s, *workers):
     futures = await c.scatter(list(range(100)))
 
-    await s.retire_workers(workers=[w.address for w in workers[:7]])
+    await s.handle_retire_workers(
+        workers=[w.address for w in workers[:7]], stimulus_id="test"
+    )
 
     results = await c.gather(futures)
     assert results == list(range(100))

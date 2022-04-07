@@ -1267,6 +1267,7 @@ class Client(SyncMethodMixin):
                     "client": self.id,
                     "reply": False,
                     "versions": version_module.get_versions(),
+                    "stimulus_id": f"client-ensure-connected-{time()}",
                 }
             )
         except Exception:
@@ -2121,7 +2122,11 @@ class Client(SyncMethodMixin):
                 response = {"status": "OK", "data": data2}
                 if missing_keys:
                     keys2 = [key for key in keys if key not in data2]
-                    response = await retry_operation(self.scheduler.gather, keys=keys2)
+                    response = await retry_operation(
+                        self.scheduler.gather,
+                        keys=keys2,
+                        stimulus_id=f"client-gather-remote-{time()}",
+                    )
                     if response["status"] == "OK":
                         response["data"].update(data2)
 
@@ -4216,7 +4221,7 @@ class Client(SyncMethodMixin):
         dask.distributed.Scheduler.retire_workers
         """
         return self.sync(
-            self.scheduler.handle_retire_workers,
+            self.scheduler.retire_workers,
             workers=workers,
             close_workers=close_workers,
             stimulus_id=f"client-retire-workers-{time()}",

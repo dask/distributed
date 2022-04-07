@@ -89,7 +89,6 @@ from distributed.utils import (
     STIMULUS_ID,
     All,
     TimeoutError,
-    default_stimulus_id,
     empty_context,
     expect_stimulus,
     get_fileno_limit,
@@ -3935,14 +3934,14 @@ class Scheduler(SchedulerState, ServerNode):
         }
 
         self.handlers = {
-            "register-client": self.add_client,
+            "register-client": self.handle_add_client,
             "scatter": self.handle_scatter,
-            "register-worker": self.add_worker,
+            "register-worker": self.handle_add_worker,
             "register_nanny": self.add_nanny,
             "unregister": self.handle_remove_worker,
             "gather": self.handle_gather,
-            "cancel": self.handle_stimulus_cancel,
-            "retry": self.handle_stimulus_retry,
+            "cancel": self.stimulus_cancel,
+            "retry": self.stimulus_retry,
             "feed": self.feed,
             "terminate": self.close,
             "broadcast": self.broadcast,
@@ -4215,7 +4214,7 @@ class Scheduler(SchedulerState, ServerNode):
         for k, v in self.services.items():
             logger.info("%11s at: %25s", k, "%s:%d" % (listen_ip, v.port))
 
-        self.loop.add_callback(copy_context().run, self.reevaluate_occupancy)
+        self.loop.add_callback(self.reevaluate_occupancy)
 
         if self.scheduler_file:
             with open(self.scheduler_file, "w") as f:
@@ -4328,9 +4327,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.log_event(worker, {"action": "close-worker"})
             # FIXME: This does not handle nannies
             self.worker_send(worker, {"op": "close", "report": False})
-            await self.handle_remove_worker(
-                address=worker, safe=safe, stimulus_id=f"close-worker-{time()}"
-            )
+            await self.remove_worker(address=worker, safe=safe)
 
     ###########
     # Stimuli #
@@ -4560,49 +4557,48 @@ class Scheduler(SchedulerState, ServerNode):
             client_msgs: dict = {}
             worker_msgs: dict = {}
 
-            with default_stimulus_id(f"add-worker-{time()}"):
-                if nbytes:
-                    assert isinstance(nbytes, dict)
-                    already_released_keys = []
-                    for key in nbytes:
-                        ts: TaskState = parent._tasks.get(key)  # type: ignore
-                        if ts is not None and ts.state != "released":
-                            if ts.state == "memory":
-                                self.add_keys(worker=address, keys=[key])
-                            else:
-                                t: tuple = parent._transition(
-                                    key,
-                                    "memory",
-                                    worker=address,
-                                    nbytes=nbytes[key],
-                                    typename=types[key],
-                                )
-                                recommendations, client_msgs, worker_msgs = t
-                                parent._transitions(
-                                    recommendations, client_msgs, worker_msgs
-                                )
-                                recommendations = {}
+            if nbytes:
+                assert isinstance(nbytes, dict)
+                already_released_keys = []
+                for key in nbytes:
+                    ts: TaskState = parent._tasks.get(key)  # type: ignore
+                    if ts is not None and ts.state != "released":
+                        if ts.state == "memory":
+                            self.add_keys(worker=address, keys=[key])
                         else:
-                            already_released_keys.append(key)
-                    if already_released_keys:
-                        if address not in worker_msgs:
-                            worker_msgs[address] = []
-                            worker_msgs[address].append(
-                                {
-                                    "op": "remove-replicas",
-                                    "keys": already_released_keys,
-                                    "stimulus_id": f"reconnect-already-released-{time()}",
-                                }
+                            t: tuple = parent._transition(
+                                key,
+                                "memory",
+                                worker=address,
+                                nbytes=nbytes[key],
+                                typename=types[key],
                             )
+                            recommendations, client_msgs, worker_msgs = t
+                            parent._transitions(
+                                recommendations, client_msgs, worker_msgs
+                            )
+                            recommendations = {}
+                    else:
+                        already_released_keys.append(key)
+                if already_released_keys:
+                    if address not in worker_msgs:
+                        worker_msgs[address] = []
+                    worker_msgs[address].append(
+                        {
+                            "op": "remove-replicas",
+                            "keys": already_released_keys,
+                            "stimulus_id": STIMULUS_ID.get(),
+                        }
+                    )
 
-                if ws._status == Status.running:
-                    for ts in parent._unrunnable:
-                        valid: set = self.valid_workers(ts)
-                        if valid is None or ws in valid:
-                            recommendations[ts._key] = "waiting"
+            if ws._status == Status.running:
+                for ts in parent._unrunnable:
+                    valid: set = self.valid_workers(ts)
+                    if valid is None or ws in valid:
+                        recommendations[ts._key] = "waiting"
 
-                if recommendations:
-                    parent._transitions(recommendations, client_msgs, worker_msgs)
+            if recommendations:
+                parent._transitions(recommendations, client_msgs, worker_msgs)
 
             self.send_all(client_msgs, worker_msgs)
 
@@ -5055,6 +5051,7 @@ class Scheduler(SchedulerState, ServerNode):
                 **kwargs,
             )
 
+    @expect_stimulus(sync=True)
     def stimulus_retry(self, keys, client=None):
         parent: SchedulerState = cast(SchedulerState, self)
         logger.info("Client %s requests to retry %d keys", client, len(keys))
@@ -5094,7 +5091,6 @@ class Scheduler(SchedulerState, ServerNode):
         state.
         """
         parent: SchedulerState = cast(SchedulerState, self)
-
         with log_errors():
             if self.status == Status.closed:
                 return
@@ -5202,6 +5198,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return "OK"
 
+    @expect_stimulus(sync=True)
     def stimulus_cancel(self, comm, keys=None, client=None, force=False):
         """Stop execution on a list of keys"""
         logger.info("Client %s requests to cancel %d keys", client, len(keys))
@@ -5482,17 +5479,6 @@ class Scheduler(SchedulerState, ServerNode):
         We listen to all future messages from this Comm.
         """
         parent: SchedulerState = cast(SchedulerState, self)
-
-        if parent._validate:
-            try:
-                stimulus_id = STIMULUS_ID.get()
-                raise AssertionError(
-                    f"STIMULUS_ID {stimulus_id} set in Scheduler.add_client"
-                )
-
-            except LookupError:
-                pass
-
         assert client is not None
         comm.name = "Scheduler->Client"
         logger.info("Receive client connection: %s", client)
@@ -5522,9 +5508,7 @@ class Scheduler(SchedulerState, ServerNode):
             try:
                 await self.handle_stream(comm=comm, extra={"client": client})
             finally:
-                self.handle_remove_client(
-                    client=client, stimulus_id=f"remove-client-{time()}"
-                )
+                self.remove_client(client=client)
                 logger.debug("Finished handling client %s", client)
         finally:
             if not comm.closed():
@@ -5589,7 +5573,8 @@ class Scheduler(SchedulerState, ServerNode):
     def handle_uncaught_error(self, **msg):
         logger.exception(clean_exception(**msg)[1])
 
-    def worker_task_finished(self, key=None, worker=None, **msg):
+    @expect_stimulus(sync=True)
+    def handle_task_finished(self, key=None, worker=None, **msg):
         parent: SchedulerState = cast(SchedulerState, self)
         if worker not in parent._workers_dv:
             return
@@ -5605,7 +5590,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.send_all(client_msgs, worker_msgs)
 
-    def worker_task_erred(self, key=None, **msg):
+    @expect_stimulus(sync=True)
+    def handle_task_erred(self, key=None, **msg):
         parent: SchedulerState = cast(SchedulerState, self)
         recommendations: dict
         client_msgs: dict
@@ -5616,7 +5602,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.send_all(client_msgs, worker_msgs)
 
-    def worker_missing_data(self, key=None, errant_worker=None, **kwargs):
+    @expect_stimulus(sync=True)
+    def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
         """Signal that `errant_worker` does not hold `key`
 
         This may either indicate that `errant_worker` is dead or that we may be
@@ -5663,7 +5650,8 @@ class Scheduler(SchedulerState, ServerNode):
         if recommendations:
             self.transitions(recommendations)
 
-    def worker_long_running(self, key=None, worker=None, compute_duration=None):
+    @expect_stimulus(sync=True)
+    def handle_long_running(self, key=None, worker=None, compute_duration=None):
         """A task has seceded from the thread pool
 
         We stop the task from being stolen in the future, and change task
@@ -5705,7 +5693,8 @@ class Scheduler(SchedulerState, ServerNode):
         ws._long_running.add(ts)
         self.check_idle_saturated(ws)
 
-    def worker_status_change(self, status: str, worker: str) -> None:
+    @expect_stimulus(sync=True)
+    def handle_worker_status_change(self, status: str, worker: str) -> None:
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState = parent._workers_dv.get(worker)  # type: ignore
         if not ws:
@@ -5752,17 +5741,6 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Scheduler.handle_client: Equivalent coroutine for clients
         """
-        parent: SchedulerState = cast(SchedulerState, self)
-
-        if parent._validate:
-            try:
-                stimulus_id = STIMULUS_ID.get()
-                raise AssertionError(
-                    f"STIMULUS_ID {stimulus_id} set in Scheduler.handle_worker"
-                )
-            except LookupError:
-                pass
-
         comm.name = "Scheduler connection to worker"
         worker_comm = self.stream_comms[worker]
         worker_comm.start(comm)
@@ -5772,9 +5750,7 @@ class Scheduler(SchedulerState, ServerNode):
         finally:
             if worker in self.stream_comms:
                 worker_comm.abort()
-                await self.handle_remove_worker(
-                    address=worker, stimulus_id=f"worker-comm-abort-{time()}"
-                )
+                await self.remove_worker(address=worker)
 
     def add_plugin(
         self,
@@ -5913,10 +5889,7 @@ class Scheduler(SchedulerState, ServerNode):
             stream_comms[worker].send(msg)
         except (CommClosedError, AttributeError):
             self.loop.add_callback(
-                copy_context().run,
-                self.handle_remove_worker,
-                address=worker,
-                stimulus_id=f"worker-comm-closed-{time()}",
+                copy_context().run, self.remove_worker, address=worker
             )
 
     def client_send(self, client, msg):
@@ -5963,10 +5936,7 @@ class Scheduler(SchedulerState, ServerNode):
                 pass
             except (CommClosedError, AttributeError):
                 self.loop.add_callback(
-                    copy_context().run,
-                    self.handle_remove_worker,
-                    address=worker,
-                    stimulus_id=f"worker-comm-closed-{time()}",
+                    copy_context().run, self.remove_worker, address=worker
                 )
 
     ############################
@@ -8268,21 +8238,14 @@ class Scheduler(SchedulerState, ServerNode):
 
     handle_update_graph_hlg = expect_stimulus(sync=True)(update_graph_hlg)
     handle_update_graph = expect_stimulus(sync=True)(update_graph)
-    handle_stimulus_task_finished = expect_stimulus(sync=True)(stimulus_task_finished)
-    handle_stimulus_task_erred = expect_stimulus(sync=True)(stimulus_task_erred)
-    handle_stimulus_retry = expect_stimulus(sync=True)(stimulus_retry)
+    handle_add_worker = expect_stimulus(sync=False)(add_worker)
     handle_remove_worker = expect_stimulus(sync=False)(remove_worker)
-    handle_stimulus_cancel = expect_stimulus(sync=True)(stimulus_cancel)
     handle_cancel_key = expect_stimulus(sync=True)(cancel_key)
     handle_client_desires_keys = expect_stimulus(sync=True)(client_desires_keys)
     handle_client_releases_keys = expect_stimulus(sync=True)(client_releases_keys)
+    handle_add_client = expect_stimulus(sync=False)(add_client)
     handle_remove_client = expect_stimulus(sync=True)(remove_client)
-    handle_task_finished = expect_stimulus(sync=True)(worker_task_finished)
-    handle_task_erred = expect_stimulus(sync=True)(worker_task_erred)
-    handle_missing_data = expect_stimulus(sync=True)(worker_missing_data)
     handle_release_worker_data = expect_stimulus(sync=True)(release_worker_data)
-    handle_long_running = expect_stimulus(sync=True)(worker_long_running)
-    handle_worker_status_change = expect_stimulus(sync=True)(worker_status_change)
     handle_scatter = expect_stimulus(sync=False)(scatter)
     handle_gather = expect_stimulus(sync=False)(gather)
     handle_restart = expect_stimulus(sync=False)(restart)

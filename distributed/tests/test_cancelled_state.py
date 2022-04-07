@@ -4,6 +4,7 @@ from unittest import mock
 import distributed
 from distributed import Event
 from distributed.core import CommClosedError
+from distributed.utils import STIMULUS_ID
 from distributed.utils_test import (
     _LockedCommPool,
     assert_story,
@@ -160,7 +161,12 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, a, b):
         await wait_for_state(fut1.key, "flight", b)
 
         # Close in scheduler to ensure we transition and reschedule task properly
-        await s.close_worker(worker=a.address)
+        try:
+            token = STIMULUS_ID.set("test")
+            await s.close_worker(worker=a.address)
+        finally:
+            STIMULUS_ID.reset(token)
+
         await wait_for_state(fut1.key, "resumed", b)
 
     lock.release()

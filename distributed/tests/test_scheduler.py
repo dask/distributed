@@ -543,8 +543,12 @@ async def test_delete(c, s, a):
 async def test_filtered_communication(s, a, b):
     c = await connect(s.address)
     f = await connect(s.address)
-    await c.write({"op": "register-client", "client": "c", "versions": {}})
-    await f.write({"op": "register-client", "client": "f", "versions": {}})
+    await c.write(
+        {"op": "register-client", "client": "c", "versions": {}, "stimulus_id": "test"}
+    )
+    await f.write(
+        {"op": "register-client", "client": "f", "versions": {}, "stimulus_id": "test"}
+    )
     await c.read()
     await f.read()
 
@@ -1337,12 +1341,13 @@ async def test_scheduler_file():
 @gen_cluster(client=True, nthreads=[])
 async def test_non_existent_worker(c, s):
     with dask.config.set({"distributed.comm.timeouts.connect": "100ms"}):
-        await s.add_worker(
+        await s.handle_add_worker(
             address="127.0.0.1:5738",
             status="running",
             nthreads=2,
             nbytes={},
             host_info={},
+            stimulus_id="test",
         )
         futures = c.map(inc, range(10))
         await asyncio.sleep(0.300)
