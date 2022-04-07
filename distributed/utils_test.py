@@ -1226,7 +1226,7 @@ def popen(args: list[str], flush_output: bool = True, **kwargs):
                 print("-" * 80)
 
 
-def wait_for(predicate, timeout, fail_func=None, period=0.001):
+def wait_for(predicate, timeout, fail_func=None, period=0.05):
     deadline = time() + timeout
     while not predicate():
         sleep(period)
@@ -1236,7 +1236,7 @@ def wait_for(predicate, timeout, fail_func=None, period=0.001):
             pytest.fail(f"condition not reached until {timeout} seconds")
 
 
-async def async_wait_for(predicate, timeout, fail_func=None, period=0.001):
+async def async_wait_for(predicate, timeout, fail_func=None, period=0.05):
     deadline = time() + timeout
     while not predicate():
         await asyncio.sleep(period)
