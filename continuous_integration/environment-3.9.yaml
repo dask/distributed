@@ -18,7 +18,6 @@ dependencies:
   - ipykernel
   - ipywidgets
   - jinja2
-  - joblib
   - lz4  # Only tested here
   - msgpack-python
   - netcdf4

@@ -17,7 +17,6 @@ dependencies:
   - ipykernel
   - ipywidgets
   - jinja2
-  - joblib  # overridden by git tip below
   - msgpack-python
   - netcdf4
   - paramiko
@@ -45,6 +44,5 @@ dependencies:
       - git+https://github.com/dask/s3fs
       - git+https://github.com/dask/zict
       - git+https://github.com/fsspec/filesystem_spec
-      - git+https://github.com/joblib/joblib
       - keras
       - pytest-asyncio<0.14.0 # `pytest-asyncio<0.14.0` isn't available on conda-forge for Python 3.10
