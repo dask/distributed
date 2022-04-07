@@ -37,10 +37,6 @@ from distributed.utils_test import (
 )
 
 EXTERNAL_IP4 = get_ip()
-if has_ipv6():
-    with warnings.catch_warnings(record=True):
-        warnings.simplefilter("always")
-        EXTERNAL_IP6 = get_ipv6()
 
 
 @pytest.fixture(params=["tornado", "asyncio"])
@@ -622,11 +618,12 @@ async def test_default_client_server_ipv4(tcp):
 @requires_ipv6
 @gen_test()
 async def test_default_client_server_ipv6(tcp):
+    external_ip6 = get_ipv6()
     await check_client_server("[::1]", tcp_eq("::1"))
     await check_client_server("[::1]:3211", tcp_eq("::1", 3211))
-    await check_client_server("[::]", tcp_eq("::"), tcp_eq(EXTERNAL_IP6))
+    await check_client_server("[::]", tcp_eq("::"), tcp_eq(external_ip6))
     await check_client_server(
-        "[::]:3212", tcp_eq("::", 3212), tcp_eq(EXTERNAL_IP6, 3212)
+        "[::]:3212", tcp_eq("::", 3212), tcp_eq(external_ip6, 3212)
     )
 
 
@@ -647,11 +644,12 @@ async def test_tcp_client_server_ipv4(tcp):
 @requires_ipv6
 @gen_test()
 async def test_tcp_client_server_ipv6(tcp):
+    external_ip6 = get_ipv6()
     await check_client_server("tcp://[::1]", tcp_eq("::1"))
     await check_client_server("tcp://[::1]:3231", tcp_eq("::1", 3231))
-    await check_client_server("tcp://[::]", tcp_eq("::"), tcp_eq(EXTERNAL_IP6))
+    await check_client_server("tcp://[::]", tcp_eq("::"), tcp_eq(external_ip6))
     await check_client_server(
-        "tcp://[::]:3232", tcp_eq("::", 3232), tcp_eq(EXTERNAL_IP6, 3232)
+        "tcp://[::]:3232", tcp_eq("::", 3232), tcp_eq(external_ip6, 3232)
     )
 
 
