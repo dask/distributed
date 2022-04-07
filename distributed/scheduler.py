@@ -7115,11 +7115,7 @@ class Scheduler(SchedulerState, ServerNode):
         if close_workers and ws._address in parent._workers_dv:
             await self.close_worker(worker=ws._address, safe=True)
         if remove:
-            await self.handle_remove_worker(
-                address=ws._address,
-                safe=True,
-                stimulus_id=f"track-retire-worker-{time()}",
-            )
+            await self.remove_worker(address=ws._address, safe=True)
 
         logger.info("Retired worker %s", ws._address)
         return ws._address, ws.identity()
