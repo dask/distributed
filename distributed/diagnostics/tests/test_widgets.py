@@ -145,7 +145,7 @@ async def test_multi_progressbar_widget(c, s, a, b):
 
 @gen_cluster()
 async def test_multi_progressbar_widget_after_close(s, a, b):
-    s.update_graph(
+    s.handle_update_graph(
         tasks=valmap(
             dumps_task,
             {
@@ -166,6 +166,7 @@ async def test_multi_progressbar_widget_after_close(s, a, b):
             "y-2": {"y-1"},
             "e": {"y-2"},
         },
+        stimulus_id="test",
     )
 
     p = MultiProgressWidget(["x-1", "x-2", "x-3"], scheduler=s.address)
@@ -231,7 +232,7 @@ def test_progressbar_cancel(client):
 
 @gen_cluster()
 async def test_multibar_complete(s, a, b):
-    s.update_graph(
+    s.handle_update_graph(
         tasks=valmap(
             dumps_task,
             {
@@ -252,6 +253,7 @@ async def test_multibar_complete(s, a, b):
             "y-2": {"y-1"},
             "e": {"y-2"},
         },
+        stimulus_id="test",
     )
 
     p = MultiProgressWidget(["e"], scheduler=s.address, complete=True)

@@ -209,7 +209,7 @@ async def test_group_timing(c, s, a, b):
         ]
     )
 
-    await s.restart()
+    await s.handle_restart(stimulus_id="test")
     assert len(p.time) == 2
     assert len(p.nthreads) == 2
     assert len(p.compute) == 0
