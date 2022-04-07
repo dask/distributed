@@ -407,12 +407,14 @@ class SpecCluster(Cluster):
             await asyncio.gather(*self._futures)
 
             if self.scheduler_comm:
-                await self.scheduler_comm.close_rpc()
+                async with self._lock:
+                    with suppress(OSError):
+                        await self.scheduler_comm.terminate(close_workers=True)
+                    await self.scheduler_comm.close_rpc()
             else:
                 logger.warning("Cluster closed without starting up")
 
-            async with self._lock:
-                await self.scheduler.close(close_workers=True)
+            await self.scheduler.close()
             for w in self._created:
                 assert w.status == Status.closed, w.status
 
