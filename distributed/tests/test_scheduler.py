@@ -293,22 +293,23 @@ async def test_no_workers(client, s):
 
 @gen_cluster(nthreads=[])
 async def test_retire_workers_empty(s):
-    await s.retire_workers(workers=[])
+    await s.handle_retire_workers(workers=[], stimulus_id="test")
 
 
 @gen_cluster()
 async def test_remove_client(s, a, b):
-    s.update_graph(
+    s.handle_update_graph(
         tasks={"x": dumps_task((inc, 1)), "y": dumps_task((inc, "x"))},
         dependencies={"x": [], "y": ["x"]},
         keys=["y"],
         client="ident",
+        stimulus_id="test",
     )
 
     assert s.tasks
     assert s.dependencies
 
-    s.remove_client(client="ident")
+    s.handle_remove_client(client="ident", stimulus_id="test")
 
     assert not s.tasks
     assert not s.dependencies
@@ -325,14 +326,15 @@ async def test_server_listens_to_other_ops(s, a, b):
 @gen_cluster()
 async def test_remove_worker_from_scheduler(s, a, b):
     dsk = {("x-%d" % i): (inc, i) for i in range(20)}
-    s.update_graph(
+    s.handle_update_graph(
         tasks=valmap(dumps_task, dsk),
         keys=list(dsk),
         dependencies={k: set() for k in dsk},
+        stimulus_id="test",
     )
 
     assert a.address in s.stream_comms
-    await s.remove_worker(address=a.address)
+    await s.handle_remove_worker(address=a.address, stimulus_id="test")
     assert a.address not in s.nthreads
     assert len(s.workers[b.address].processing) == len(dsk)  # b owns everything
 
@@ -391,11 +393,12 @@ async def test_add_worker(s, a, b):
     w.data["y"] = 1
 
     dsk = {("x-%d" % i): (inc, i) for i in range(10)}
-    s.update_graph(
+    s.handle_update_graph(
         tasks=valmap(dumps_task, dsk),
         keys=list(dsk),
         client="client",
         dependencies={k: set() for k in dsk},
+        stimulus_id="test",
     )
     s.validate_state()
     await w
@@ -554,6 +557,7 @@ async def test_filtered_communication(s, a, b):
             "dependencies": {"x": [], "y": ["x"]},
             "client": "c",
             "keys": ["y"],
+            "stimulus_id": "test",
         }
     )
 
@@ -567,6 +571,7 @@ async def test_filtered_communication(s, a, b):
             "dependencies": {"x": [], "z": ["x"]},
             "client": "f",
             "keys": ["z"],
+            "stimulus_id": "test",
         }
     )
     (msg,) = await c.read()
@@ -606,16 +611,17 @@ def test_dumps_task():
 
 @gen_cluster()
 async def test_ready_remove_worker(s, a, b):
-    s.update_graph(
+    s.handle_update_graph(
         tasks={"x-%d" % i: dumps_task((inc, i)) for i in range(20)},
         keys=["x-%d" % i for i in range(20)],
         client="client",
         dependencies={"x-%d" % i: [] for i in range(20)},
+        stimulus_id="test",
     )
 
     assert all(len(w.processing) > w.nthreads for w in s.workers.values())
 
-    await s.remove_worker(address=a.address)
+    await s.handle_remove_worker(address=a.address, stimulus_id="test")
 
     assert set(s.workers) == {b.address}
     assert all(len(w.processing) > w.nthreads for w in s.workers.values())
@@ -626,7 +632,7 @@ async def test_restart(c, s, a, b):
     futures = c.map(inc, range(20))
     await wait(futures)
 
-    await s.restart()
+    await s.handle_restart(stimulus_id="test")
 
     assert len(s.workers) == 2
 
@@ -780,7 +786,7 @@ async def test_file_descriptors_dont_leak(s):
 
 @gen_cluster()
 async def test_update_graph_culls(s, a, b):
-    s.update_graph(
+    s.handle_update_graph(
         tasks={
             "x": dumps_task((inc, 1)),
             "y": dumps_task((inc, "x")),
@@ -789,6 +795,7 @@ async def test_update_graph_culls(s, a, b):
         keys=["y"],
         dependencies={"y": "x", "x": [], "z": []},
         client="client",
+        stimulus_id="test",
     )
     assert "z" not in s.tasks
     assert "z" not in s.dependencies
@@ -822,7 +829,9 @@ async def test_story(c, s, a, b):
 @gen_cluster(client=True, nthreads=[])
 async def test_scatter_no_workers(c, s, direct):
     with pytest.raises(TimeoutError):
-        await s.scatter(data={"x": 1}, client="alice", timeout=0.1)
+        await s.handle_scatter(
+            data={"x": 1}, client="alice", timeout=0.1, stimulus_id="test"
+        )
 
     start = time()
     with pytest.raises(TimeoutError):
@@ -857,7 +866,7 @@ async def test_retire_workers(c, s, a, b):
 
     assert s.workers_to_close() == [a.address]
 
-    workers = await s.retire_workers()
+    workers = await s.handle_retire_workers(stimulus_id="test")
     assert list(workers) == [a.address]
     assert workers[a.address]["nthreads"] == a.nthreads
     assert list(s.nthreads) == [b.address]
@@ -866,22 +875,22 @@ async def test_retire_workers(c, s, a, b):
 
     assert s.workers[b.address].has_what == {s.tasks[x.key], s.tasks[y.key]}
 
-    workers = await s.retire_workers()
+    workers = await s.handle_retire_workers(stimulus_id="test")
     assert not workers
 
 
 @gen_cluster(client=True)
 async def test_retire_workers_n(c, s, a, b):
-    await s.retire_workers(n=1, close_workers=True)
+    await s.handle_retire_workers(n=1, close_workers=True, stimulus_id="test")
     assert len(s.workers) == 1
 
-    await s.retire_workers(n=0, close_workers=True)
+    await s.handle_retire_workers(n=0, close_workers=True, stimulus_id="test")
     assert len(s.workers) == 1
 
-    await s.retire_workers(n=1, close_workers=True)
+    await s.handle_retire_workers(n=1, close_workers=True, stimulus_id="test")
     assert len(s.workers) == 0
 
-    await s.retire_workers(n=0, close_workers=True)
+    await s.handle_retire_workers(n=0, close_workers=True, stimulus_id="test")
     assert len(s.workers) == 0
 
     while not (
@@ -945,7 +954,7 @@ async def test_retire_workers_no_suspicious_tasks(c, s, a, b):
         slowinc, 100, delay=0.5, workers=a.address, allow_other_workers=True
     )
     await asyncio.sleep(0.2)
-    await s.retire_workers(workers=[a.address])
+    await s.handle_retire_workers(workers=[a.address], stimulus_id="test")
 
     assert all(ts.suspicious == 0 for ts in s.tasks.values())
     assert all(tp.suspicious == 0 for tp in s.task_prefixes.values())
@@ -1278,7 +1287,7 @@ async def test_close_nanny(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_retire_workers_close(c, s, a, b):
-    await s.retire_workers(close_workers=True)
+    await s.handle_retire_workers(close_workers=True, stimulus_id="test")
     assert not s.workers
     while a.status != Status.closed and b.status != Status.closed:
         await asyncio.sleep(0.01)
@@ -1287,7 +1296,7 @@ async def test_retire_workers_close(c, s, a, b):
 @gen_cluster(client=True, Worker=Nanny)
 async def test_retire_nannies_close(c, s, a, b):
     nannies = [a, b]
-    await s.retire_workers(close_workers=True, remove=True)
+    await s.handle_retire_workers(close_workers=True, remove=True, stimulus_id="test")
     assert not s.workers
 
     start = time()
@@ -1482,7 +1491,7 @@ async def test_reschedule(c, s, a, b):
         await asyncio.sleep(0.001)
 
     for future in x:
-        s.reschedule(key=future.key)
+        s.handle_reschedule(key=future.key, stimulus_id="test")
 
     # Worker b gets more of the original tasks
     await wait(x)
@@ -1493,7 +1502,7 @@ async def test_reschedule(c, s, a, b):
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
 async def test_reschedule_warns(c, s, a, b):
     with captured_logger(logging.getLogger("distributed.scheduler")) as sched:
-        s.reschedule(key="__this-key-does-not-exist__")
+        s.handle_reschedule(key="__this-key-does-not-exist__", stimulus_id="test")
 
     assert "not found on the scheduler" in sched.getvalue()
     assert "Aborting reschedule" in sched.getvalue()
@@ -1795,7 +1804,7 @@ async def test_bandwidth_clear(c, s, a, b):
 
     assert s.bandwidth_workers
 
-    await s.restart()
+    await s.handle_restart(stimulus_id="test")
     assert not s.bandwidth_workers
 
 
@@ -1915,7 +1924,7 @@ async def test_retire_names_str(c, s):
         futures = c.map(inc, range(10))
         await wait(futures)
         assert a.data and b.data
-        await s.retire_workers(names=[0])
+        await s.handle_retire_workers(names=[0], stimulus_id="test")
         assert all(f.done() for f in futures)
         assert len(b.data) == 10
 
@@ -2151,7 +2160,7 @@ async def test_gather_failing_cnn_error(c, s, a, b):
     x = await c.scatter({"x": 1}, workers=a.address)
 
     s.rpc = await FlakyConnectionPool(failing_connections=10)
-    res = await s.gather(keys=["x"])
+    res = await s.handle_gather(keys=["x"], stimulus_id="test")
     assert res["status"] == "error"
     assert list(res["keys"]) == ["x"]
 
@@ -3118,7 +3127,7 @@ async def test_delete_worker_data(c, s, a, b):
     assert b.data == {y.key: "y"}
     assert s.tasks.keys() == {x.key, y.key, z.key}
 
-    await s.delete_worker_data(a.address, [x.key, y.key])
+    await s.handle_delete_worker_data(a.address, [x.key, y.key], stimulus_id="test")
     assert a.data == {z.key: "z"}
     assert b.data == {y.key: "y"}
     assert s.tasks.keys() == {y.key, z.key}
@@ -3132,8 +3141,8 @@ async def test_delete_worker_data_double_delete(c, s, a):
     """
     x, y = await c.scatter(["x", "y"])
     await asyncio.gather(
-        s.delete_worker_data(a.address, [x.key]),
-        s.delete_worker_data(a.address, [x.key]),
+        s.handle_delete_worker_data(a.address, [x.key], stimulus_id="test"),
+        s.handle_delete_worker_data(a.address, [x.key], stimulus_id="test"),
     )
     assert a.data == {y.key: "y"}
     a_ws = s.workers[a.address]
@@ -3148,7 +3157,7 @@ async def test_delete_worker_data_bad_worker(s, a, b):
     """
     await a.close()
     assert s.workers.keys() == {b.address}
-    await s.delete_worker_data(a.address, ["x"])
+    await s.handle_delete_worker_data(a.address, ["x"], stimulus_id="test")
 
 
 @pytest.mark.parametrize("bad_first", [False, True])
@@ -3163,7 +3172,7 @@ async def test_delete_worker_data_bad_task(c, s, a, bad_first):
     assert s.tasks.keys() == {x.key, y.key}
 
     keys = ["notexist", x.key] if bad_first else [x.key, "notexist"]
-    await s.delete_worker_data(a.address, keys)
+    await s.handle_delete_worker_data(a.address, keys, stimulus_id="test")
     assert a.data == {y.key: "y"}
     assert s.tasks.keys() == {y.key}
     assert s.workers[a.address].nbytes == s.tasks[y.key].nbytes
@@ -3248,7 +3257,7 @@ async def test_worker_reconnect_task_memory(c, s, a):
     while not a.executing_count and not a.data:
         await asyncio.sleep(0.001)
 
-    await s.remove_worker(address=a.address, close=False)
+    await s.handle_remove_worker(address=a.address, close=False, stimulus_id="test")
     while not res.done():
         await a.heartbeat()
 
@@ -3272,7 +3281,7 @@ async def test_worker_reconnect_task_memory_with_resources(c, s, a):
         while not b.executing_count and not b.data:
             await asyncio.sleep(0.001)
 
-        await s.remove_worker(address=b.address, close=False)
+        await s.handle_remove_worker(address=b.address, close=False, stimulus_id="test")
         while not res.done():
             await b.heartbeat()
 
@@ -3565,10 +3574,10 @@ async def test_stimuli(c, s, a, b):
     )
 
     stimuli = [
-        "update-graph-hlg",
-        "update-graph-hlg",
+        "client-update-graph-hlg",
+        "client-update-graph-hlg",
         "task-finished",
-        "client-releases-keys",
+        "client-close",
     ]
 
     stories = s.story(key)

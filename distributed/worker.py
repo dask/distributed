@@ -1461,7 +1461,9 @@ class Worker(ServerNode):
                 if report and self.contact_address is not None:
                     await asyncio.wait_for(
                         self.scheduler.unregister(
-                            address=self.contact_address, safe=safe
+                            address=self.contact_address,
+                            safe=safe,
+                            stimulus_id=f"worker-close-{time()}",
                         ),
                         timeout,
                     )
@@ -1526,7 +1528,10 @@ class Worker(ServerNode):
         # Scheduler.retire_workers will set the status to closing_gracefully and push it
         # back to this worker.
         await self.scheduler.retire_workers(
-            workers=[self.address], close_workers=False, remove=False
+            workers=[self.address],
+            close_workers=False,
+            remove=False,
+            stimulus_id=f"worker-close-gracefully-{time()}",
         )
         await self.close(safe=True, nanny=not restart)
 

@@ -209,6 +209,7 @@ class Future(WrappedKey):
                     "op": "client-desires-keys",
                     "keys": [stringify(key)],
                     "client": self.client.id,
+                    "stimulus_id": f"client-desires-keys-{time()}",
                 }
             )
 
@@ -472,6 +473,7 @@ class Future(WrappedKey):
                 "tasks": {},
                 "keys": [stringify(self.key)],
                 "client": c.id,
+                "stimulus_id": f"stimulus-id-{time()}",
             }
         )
 
@@ -1511,7 +1513,9 @@ class Client(SyncMethodMixin):
                 and self.scheduler_comm.comm
                 and not self.scheduler_comm.comm.closed()
             ):
-                self._send_to_scheduler({"op": "close-client"})
+                self._send_to_scheduler(
+                    {"op": "close-client", "stimulus_id": f"client-close-{time()}"}
+                )
                 self._send_to_scheduler({"op": "close-stream"})
 
             current_task = asyncio.current_task()
@@ -2947,6 +2951,7 @@ class Client(SyncMethodMixin):
                     "fifo_timeout": fifo_timeout,
                     "actors": actors,
                     "code": self._get_computation_code(),
+                    "stimulus_id": f"client-update-graph-hlg-{time()}",
                 }
             )
             return futures
@@ -3372,7 +3377,13 @@ class Client(SyncMethodMixin):
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
 
-        self._send_to_scheduler({"op": "restart", "timeout": timeout})
+        self._send_to_scheduler(
+            {
+                "op": "restart",
+                "timeout": timeout,
+                "stimulus_id": f"client-restart-{time()}",
+            }
+        )
         self._restart_event = asyncio.Event()
         try:
             await asyncio.wait_for(self._restart_event.wait(), timeout)
@@ -4205,7 +4216,7 @@ class Client(SyncMethodMixin):
         dask.distributed.Scheduler.retire_workers
         """
         return self.sync(
-            self.scheduler.retire_workers,
+            self.scheduler.handle_retire_workers,
             workers=workers,
             close_workers=close_workers,
             stimulus_id=f"client-retire-workers-{time()}",
@@ -5170,6 +5181,7 @@ def fire_and_forget(obj):
                 "op": "client-desires-keys",
                 "keys": [stringify(future.key)],
                 "client": "fire-and-forget",
+                "stimulus_id": f"client-fire-and-forget-{time()}",
             }
         )
 

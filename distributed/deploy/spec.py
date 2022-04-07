@@ -19,6 +19,7 @@ from dask.widgets import get_template
 from distributed.core import CommClosedError, Status, rpc
 from distributed.deploy.adaptive import Adaptive
 from distributed.deploy.cluster import Cluster
+from distributed.metrics import time
 from distributed.scheduler import Scheduler
 from distributed.security import Security
 from distributed.utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
@@ -318,7 +319,10 @@ class SpecCluster(Cluster):
             to_close = set(self.workers) - set(self.worker_spec)
             if to_close:
                 if self.scheduler.status == Status.running:
-                    await self.scheduler_comm.retire_workers(workers=list(to_close))
+                    await self.scheduler_comm.retire_workers(
+                        workers=list(to_close),
+                        stimulus_id=f"spec-cluster-correct-internal-state-{time()}",
+                    )
                 tasks = [
                     asyncio.create_task(self.workers[w].close())
                     for w in to_close

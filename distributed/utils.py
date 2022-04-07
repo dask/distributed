@@ -1440,6 +1440,45 @@ def __getattr__(name):
 STIMULUS_ID: ContextVar[str] = ContextVar("stimulus_id")
 
 
+def expect_stimulus(sync: bool = True):
+    def decorator(fn):
+        assert sync is not inspect.iscoroutinefunction(
+            fn
+        ), f"{fn} sync: {sync} != inspect: {inspect.iscoroutinefunction(fn)}"
+        if sync:
+
+            @functools.wraps(fn)
+            def wrapper(*args, **kwargs):
+                try:
+                    token = STIMULUS_ID.set(kwargs.pop("stimulus_id"))
+                except KeyError:
+                    raise ValueError(f"{fn} missing stimulus_id")
+
+                try:
+                    return fn(*args, **kwargs)
+                finally:
+                    STIMULUS_ID.reset(token)
+
+        else:
+
+            @functools.wraps(fn)
+            # async def wrapper(*args, stimulus_id: str, **kwargs):
+            async def wrapper(*args, **kwargs):
+                try:
+                    token = STIMULUS_ID.set(kwargs.pop("stimulus_id"))
+                except KeyError:
+                    raise ValueError(f"{fn} missing stimulus_id")
+
+                try:
+                    return await fn(*args, **kwargs)
+                finally:
+                    STIMULUS_ID.reset(token)
+
+        return wrapper
+
+    return decorator
+
+
 @contextmanager
 def default_stimulus_id(name: str):
     """Context manager for setting the Scheduler stimulus_id

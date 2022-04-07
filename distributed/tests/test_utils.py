@@ -781,3 +781,18 @@ def test_recursive_to_dict_no_nest():
         ],
     }
     assert recursive_to_dict(info) == expect
+
+
+def test_expect_stimulus():
+    from distributed.utils import STIMULUS_ID, expect_stimulus
+
+    @expect_stimulus(sync=True)
+    def fn(x):
+        return STIMULUS_ID.get()
+
+    assert fn(1, stimulus_id="test") == "test"
+
+    with pytest.raises(TypeError):
+        assert fn(1) == 1
+
+    assert fn(**{"x": 1, "stimulus_id": "test"}) == "test"

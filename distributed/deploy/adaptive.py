@@ -7,6 +7,7 @@ import dask.config
 from dask.utils import parse_timedelta
 
 from distributed.deploy.adaptive_core import AdaptiveCore
+from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.utils import log_errors
 
@@ -193,6 +194,7 @@ class Adaptive(AdaptiveCore):
                 names=workers,
                 remove=True,
                 close_workers=True,
+                stimulus_id=f"scale-down-{time()}",
             )
 
             # close workers more forcefully
