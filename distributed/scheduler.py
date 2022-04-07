@@ -6108,7 +6108,7 @@ class Scheduler(SchedulerState, ServerNode):
                 except TimeoutError:
                     logger.error(
                         "Nannies didn't report back restarted within "
-                        "timeout.  Continuuing with restart process"
+                        "timeout.  Continuing with restart process"
                     )
                 else:
                     if not all(resp == "OK" for resp in resps):
