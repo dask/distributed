@@ -11,10 +11,11 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict
 import dask
 from dask.utils import parse_bytes
 
+from distributed.protocol.serialize import Serialize
 from distributed.utils import recursive_to_dict
 
 if TYPE_CHECKING:
-    # TODO move to typing (requires Python >=3.10)
+    # TODO move to typing and get out of TYPE_CHECKING (requires Python >=3.10)
     from typing_extensions import TypeAlias
 
     TaskStateState: TypeAlias = Literal[
@@ -34,7 +35,8 @@ if TYPE_CHECKING:
         "resumed",
         "waiting",
     ]
-
+else:
+    TaskStateState = str
 
 # TaskState.state subsets
 PROCESSING: set[TaskStateState] = {
@@ -119,12 +121,12 @@ class TaskState:
     coming_from: str | None = None
     #: Abstract resources required to run a task
     resource_restrictions: dict[str, float] = field(default_factory=dict)
-    #: The exception caused by running a task if it erred
-    exception: Exception | None = None
+    #: The exception caused by running a task if it erred (serialized)
+    exception: Serialize | None = None
+    #: The traceback caused by running a task if it erred (serialized)
+    traceback: Serialize | None = None
     #: string representation of exception
     exception_text: str = ""
-    #: The traceback caused by running a task if it erred
-    traceback: object | None = None
     #: string representation of traceback
     traceback_text: str = ""
     #: The type of a particular piece of data
@@ -256,11 +258,11 @@ class Instruction:
 #    __slots__ = ()
 
 
-# @dataclass
-# class Execute(Instruction):
-#    __slots__ = ("key", "stimulus_id")
-#    key: str
-#    stimulus_id: str
+@dataclass
+class Execute(Instruction):
+    __slots__ = ("key", "stimulus_id")
+    key: str
+    stimulus_id: str
 
 
 class SendMessageToScheduler(Instruction):
@@ -299,9 +301,9 @@ class TaskErredMsg(SendMessageToScheduler):
     op = "task-erred"
 
     key: str
-    exception: Exception
+    exception: Serialize
+    traceback: Serialize | None
     exception_text: str
-    traceback: object
     traceback_text: str
     thread: int | None
     startstops: list[StartStop]
@@ -321,11 +323,11 @@ class ReleaseWorkerDataMsg(SendMessageToScheduler):
     key: str
 
 
+# Not to be confused with RescheduleEvent below or the distributed.Reschedule Exception
 @dataclass
 class RescheduleMsg(SendMessageToScheduler):
     op = "reschedule"
 
-    # Not to be confused with the distributed.Reschedule Exception
     __slots__ = ("key", "worker")
     key: str
     worker: str
@@ -347,3 +349,86 @@ class AddKeysMsg(SendMessageToScheduler):
     __slots__ = ("keys", "stimulus_id")
     keys: list[str]
     stimulus_id: str
+
+
+@dataclass
+class StateMachineEvent:
+    __slots__ = ("stimulus_id",)
+    stimulus_id: str
+
+
+@dataclass
+class UnpauseEvent(StateMachineEvent):
+    __slots__ = ()
+
+
+@dataclass
+class ExecuteSuccessEvent(StateMachineEvent):
+    key: str
+    value: object
+    start: float
+    stop: float
+    nbytes: int
+    type: type | None
+    __slots__ = tuple(__annotations__)  # type: ignore
+
+
+@dataclass
+class ExecuteFailureEvent(StateMachineEvent):
+    key: str
+    start: float | None
+    stop: float | None
+    exception: Serialize
+    traceback: Serialize | None
+    exception_text: str
+    traceback_text: str
+    __slots__ = tuple(__annotations__)  # type: ignore
+
+
+@dataclass
+class CancelComputeEvent(StateMachineEvent):
+    __slots__ = ("key",)
+    key: str
+
+
+@dataclass
+class AlreadyCancelledEvent(StateMachineEvent):
+    __slots__ = ("key",)
+    key: str
+
+
+# Not to be confused with RescheduleMsg above or the distributed.Reschedule Exception
+@dataclass
+class RescheduleEvent(StateMachineEvent):
+    __slots__ = ("key",)
+    key: str
+
+
+if TYPE_CHECKING:
+    # TODO remove quotes (requires Python >=3.9)
+    # TODO get out of TYPE_CHECKING (requires Python >=3.10)
+    # {TaskState -> finish: TaskStateState | (finish: TaskStateState, transition *args)}
+    Recs: TypeAlias = "dict[TaskState, TaskStateState | tuple]"
+    Instructions: TypeAlias = "list[Instruction]"
+    RecsInstrs: TypeAlias = "tuple[Recs, Instructions]"
+else:
+    Recs = dict
+    Instructions = list
+    RecsInstrs = tuple
+
+
+def merge_recs_instructions(*args: RecsInstrs) -> RecsInstrs:
+    """Merge multiple (recommendations, instructions) tuples.
+    Collisions in recommendations are only allowed if identical.
+    """
+    recs: Recs = {}
+    instr: Instructions = []
+    for recs_i, instr_i in args:
+        for k, v in recs_i.items():
+            if k in recs and recs[k] != v:
+                raise ValueError(
+                    f"Mismatched recommendations for {k}: {recs[k]} vs. {v}"
+                )
+            recs[k] = v
+        instr += instr_i
+    return recs, instr

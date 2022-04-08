@@ -1,9 +1,7 @@
 import asyncio
-import gc
 import subprocess
 import sys
 import unittest
-import weakref
 from threading import Lock
 from time import sleep
 from urllib.parse import urlparse
@@ -644,18 +642,9 @@ def test_adapt(loop):
         cluster.adapt(minimum=0, maximum=2, interval="10ms")
         assert cluster._adaptive.minimum == 0
         assert cluster._adaptive.maximum == 2
-        ref = weakref.ref(cluster._adaptive)
 
         cluster.adapt(minimum=1, maximum=2, interval="10ms")
         assert cluster._adaptive.minimum == 1
-        gc.collect()
-
-        # the old Adaptive class sticks around, not sure why
-        # start = time()
-        # while ref():
-        #     sleep(0.01)
-        #     gc.collect()
-        #     assert time() < start + 5
 
         start = time()
         while len(cluster.scheduler.workers) != 1:
@@ -942,8 +931,8 @@ async def test_scale_memory_cores():
         assert len(cluster.worker_spec) == 4
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("memory_limit", ["2 GiB", None])
+@gen_test()
 async def test_repr(memory_limit, cleanup):
     async with LocalCluster(
         n_workers=2,
@@ -979,8 +968,8 @@ async def test_threads_per_worker_set_to_0():
             assert all(w.nthreads < CPU_COUNT for w in cluster.workers.values())
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("temporary", [True, False])
+@gen_test()
 async def test_capture_security(cleanup, temporary):
     if temporary:
         xfail_ssl_issue5601()
@@ -1050,28 +1039,29 @@ async def test_cluster_names():
             assert unnamed_cluster2 != unnamed_cluster
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("nanny", [True, False])
+@gen_test()
 async def test_local_cluster_redundant_kwarg(nanny):
-    with pytest.raises(TypeError, match="unexpected keyword argument"):
-        # Extra arguments are forwarded to the worker class. Depending on
-        # whether we use the nanny or not, the error treatment is quite
-        # different and we should assert that an exception is raised
-        async with await LocalCluster(
-            typo_kwarg="foo",
-            processes=nanny,
-            n_workers=1,
-            dashboard_address=":0",
-        ) as cluster:
+    cluster = LocalCluster(
+        typo_kwarg="foo",
+        processes=nanny,
+        n_workers=1,
+        dashboard_address=":0",
+        asynchronous=True,
+    )
+    try:
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
+            # Extra arguments are forwarded to the worker class. Depending on
+            # whether we use the nanny or not, the error treatment is quite
+            # different and we should assert that an exception is raised
+            async with cluster:
+                pass
+    finally:
+        # FIXME: LocalCluster leaks if LocalCluster.__aenter__ raises
+        await cluster.close()
 
-            # This will never work but is a reliable way to block without hard
-            # coding any sleep values
-            async with Client(cluster) as c:
-                f = c.submit(sleep, 0)
-                await f
 
-
-@pytest.mark.asyncio
+@gen_test()
 async def test_cluster_info_sync():
     async with LocalCluster(
         processes=False, asynchronous=True, scheduler_sync_interval="1ms"
@@ -1098,7 +1088,7 @@ async def test_cluster_info_sync():
         assert info["foo"] == "bar"
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_cluster_info_sync_is_robust_to_network_blips(monkeypatch):
     async with LocalCluster(
         processes=False, asynchronous=True, scheduler_sync_interval="1ms"
@@ -1134,9 +1124,9 @@ async def test_cluster_info_sync_is_robust_to_network_blips(monkeypatch):
         assert info["foo"] == "bar"
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("host", [None, "127.0.0.1"])
 @pytest.mark.parametrize("use_nanny", [True, False])
+@gen_test()
 async def test_cluster_host_used_throughout_cluster(host, use_nanny):
     """Ensure that the `host` kwarg is propagated through scheduler, nanny, and workers"""
     async with LocalCluster(host=host, asynchronous=True) as cluster:

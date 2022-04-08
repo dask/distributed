@@ -9,6 +9,7 @@ import threading
 import uuid
 import warnings
 import weakref
+from collections.abc import Collection
 from contextlib import suppress
 from inspect import isawaitable
 from queue import Empty
@@ -24,7 +25,7 @@ from dask.system import CPU_COUNT
 from dask.utils import parse_timedelta
 
 from distributed import preloading
-from distributed.comm import get_address_host, unparse_host_port
+from distributed.comm import get_address_host
 from distributed.comm.addressing import address_from_user_args
 from distributed.core import (
     CommClosedError,
@@ -96,12 +97,16 @@ class Nanny(ServerNode):
     status = Status.undefined
     memory_manager: NannyMemoryManager
 
+    # Inputs to parse_ports()
+    _given_worker_port: int | str | Collection[int] | None
+    _start_port: int | str | Collection[int] | None
+
     def __init__(
         self,
         scheduler_ip=None,
         scheduler_port=None,
         scheduler_file=None,
-        worker_port=0,
+        worker_port: int | str | Collection[int] | None = 0,
         nthreads=None,
         loop=None,
         local_dir=None,
@@ -126,7 +131,7 @@ class Nanny(ServerNode):
         env=None,
         interface=None,
         host=None,
-        port=None,
+        port: int | str | Collection[int] | None = None,
         protocol=None,
         config=None,
         **worker_kwargs,
@@ -373,14 +378,6 @@ class Nanny(ServerNode):
 
         Blocks until the process is up and the scheduler is properly informed
         """
-        if self._listen_address:
-            start_arg = self._listen_address
-        else:
-            host = self.listener.bound_address[0]
-            start_arg = self.listener.prefix + unparse_host_port(
-                host, self._given_worker_port
-            )
-
         if self.process is None:
             worker_kwargs = dict(
                 scheduler_ip=self.scheduler_addr,
@@ -403,7 +400,6 @@ class Nanny(ServerNode):
             worker_kwargs.update(self.worker_kwargs)
             self.process = WorkerProcess(
                 worker_kwargs=worker_kwargs,
-                worker_start_args=(start_arg,),
                 silence_logs=self.silence_logs,
                 on_exit=self._on_exit_sync,
                 worker=self.Worker,
@@ -617,7 +613,6 @@ class WorkerProcess:
     def __init__(
         self,
         worker_kwargs,
-        worker_start_args,
         silence_logs,
         on_exit,
         worker,
@@ -627,7 +622,6 @@ class WorkerProcess:
         self.status = Status.init
         self.silence_logs = silence_logs
         self.worker_kwargs = worker_kwargs
-        self.worker_start_args = worker_start_args
         self.on_exit = on_exit
         self.process = None
         self.Worker = worker
@@ -658,7 +652,6 @@ class WorkerProcess:
             name="Dask Worker process (from Nanny)",
             kwargs=dict(
                 worker_kwargs=self.worker_kwargs,
-                worker_start_args=self.worker_start_args,
                 silence_logs=self.silence_logs,
                 init_result_q=self.init_result_q,
                 child_stop_q=self.child_stop_q,
@@ -808,7 +801,6 @@ class WorkerProcess:
     def _run(
         cls,
         worker_kwargs,
-        worker_start_args,
         silence_logs,
         init_result_q,
         child_stop_q,

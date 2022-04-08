@@ -25,12 +25,11 @@ optional_packages = [
     ("numpy", lambda p: p.__version__),
     ("pandas", lambda p: p.__version__),
     ("lz4", lambda p: p.__version__),
-    ("blosc", lambda p: p.__version__),
 ]
 
 
 # only these scheduler packages will be checked for version mismatch
-scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {"lz4", "blosc"}
+scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {"lz4"}
 
 
 # notes to be displayed for mismatch packages

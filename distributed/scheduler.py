@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import heapq
 import inspect
 import itertools
@@ -1480,8 +1481,8 @@ class TaskState:
     _nbytes: Py_ssize_t
     _type: str  # str | None
     _exception: object
-    _exception_text: str
     _traceback: object
+    _exception_text: str
     _traceback_text: str
     _exception_blame: "TaskState"  # TaskState | None"
     _erred_on: set
@@ -3613,6 +3614,24 @@ class SchedulerState:
             for ts in ws._processing:
                 steal.recalculate_cost(ts)
 
+    @ccall
+    def bulk_schedule_after_adding_worker(self, ws: WorkerState):
+        """Send tasks with ts.state=='no-worker' in bulk to a worker that just joined.
+        Return recommendations. As the worker will start executing the new tasks
+        immediately, without waiting for the batch to end, we can't rely on worker-side
+        ordering, so the recommendations are sorted by priority order here.
+        """
+        ts: TaskState
+        tasks = []
+        for ts in self._unrunnable:
+            valid: set = self.valid_workers(ts)
+            if valid is None or ws in valid:
+                tasks.append(ts)
+        # These recommendations will generate {"op": "compute-task"} messages
+        # to the worker in reversed order
+        tasks.sort(key=operator.attrgetter("priority"), reverse=True)
+        return {ts._key: "waiting" for ts in tasks}
+
 
 class Scheduler(SchedulerState, ServerNode):
     """Dynamic distributed task scheduler
@@ -3793,7 +3812,6 @@ class Scheduler(SchedulerState, ServerNode):
         self.client_comms = {}
         self.stream_comms = {}
         self._worker_coroutines = []
-        self._ipython_kernel = None
 
         # Task state
         tasks = {}
@@ -3959,7 +3977,6 @@ class Scheduler(SchedulerState, ServerNode):
             "add_keys": self.add_keys,
             "rebalance": self.rebalance,
             "replicate": self.replicate,
-            "start_ipython": self.start_ipython,
             "run_function": self.run_function,
             "update_data": self.update_data,
             "set_resources": self.add_resources,
@@ -4587,10 +4604,7 @@ class Scheduler(SchedulerState, ServerNode):
                     )
 
             if ws._status == Status.running:
-                for ts in parent._unrunnable:
-                    valid: set = self.valid_workers(ts)
-                    if valid is None or ws in valid:
-                        recommendations[ts._key] = "waiting"
+                recommendations.update(self.bulk_schedule_after_adding_worker(ws))
 
             if recommendations:
                 parent._transitions(recommendations, client_msgs, worker_msgs)
@@ -5703,13 +5717,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         if ws._status == Status.running:
             parent._running.add(ws)
-
-            recs = {}
-            ts: TaskState
-            for ts in parent._unrunnable:
-                valid: set = self.valid_workers(ts)
-                if valid is None or ws in valid:
-                    recs[ts._key] = "waiting"
+            recs = self.bulk_schedule_after_adding_worker(ws)
             if recs:
                 client_msgs: dict = {}
                 worker_msgs: dict = {}
@@ -6089,35 +6097,37 @@ class Scheduler(SchedulerState, ServerNode):
                     logger.exception(e)
 
             logger.debug("Send kill signal to nannies: %s", nannies)
-
-            nannies = [
-                rpc(nanny_address, connection_args=self.connection_args)
-                for nanny_address in nannies.values()
-                if nanny_address is not None
-            ]
-
-            resps = All(
-                [
-                    nanny.restart(
-                        close=True, timeout=timeout * 0.8, executor_wait=False
+            async with contextlib.AsyncExitStack() as stack:
+                nannies = [
+                    await stack.enter_async_context(
+                        rpc(nanny_address, connection_args=self.connection_args)
                     )
-                    for nanny in nannies
+                    for nanny_address in nannies.values()
+                    if nanny_address is not None
                 ]
-            )
-            try:
-                resps = await asyncio.wait_for(resps, timeout)
-            except TimeoutError:
-                logger.error(
-                    "Nannies didn't report back restarted within "
-                    "timeout.  Continuuing with restart process"
+
+                resps = All(
+                    [
+                        nanny.restart(
+                            close=True, timeout=timeout * 0.8, executor_wait=False
+                        )
+                        for nanny in nannies
+                    ]
                 )
-            else:
-                if not all(resp == "OK" for resp in resps):
+                try:
+                    resps = await asyncio.wait_for(resps, timeout)
+                except TimeoutError:
                     logger.error(
-                        "Not all workers responded positively: %s", resps, exc_info=True
+                        "Nannies didn't report back restarted within "
+                        "timeout.  Continuing with restart process"
                     )
-            finally:
-                await asyncio.gather(*[nanny.close_rpc() for nanny in nannies])
+                else:
+                    if not all(resp == "OK" for resp in resps):
+                        logger.error(
+                            "Not all workers responded positively: %s",
+                            resps,
+                            exc_info=True,
+                        )
 
             self.clear_task_state()
 
@@ -7701,19 +7711,6 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 out.update({ww for ww in parent._workers if w in ww})  # TODO: quadratic
         return list(out)
-
-    def start_ipython(self):
-        """Start an IPython kernel
-
-        Returns Jupyter connection info dictionary.
-        """
-        from distributed._ipython_utils import start_ipython
-
-        if self._ipython_kernel is None:
-            self._ipython_kernel = start_ipython(
-                ip=self.ip, ns={"scheduler": self}, log=logger
-            )
-        return self._ipython_kernel.get_connection_info()
 
     async def get_profile(
         self,
