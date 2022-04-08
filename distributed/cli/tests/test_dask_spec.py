@@ -39,7 +39,6 @@ async def test_text():
 
 
 @pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
-@pytest.mark.asyncio
 @gen_cluster(client=True, nthreads=[])
 async def test_file(c, s, tmp_path):
     fn = str(tmp_path / "foo.yaml")

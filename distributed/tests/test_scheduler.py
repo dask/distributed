@@ -1350,7 +1350,7 @@ async def test_non_existent_worker(c, s):
         ("127.0.0.1:0", ("127.0.0.1",)),
     ],
 )
-@pytest.mark.asyncio
+@gen_test()
 async def test_dashboard_host(host, dashboard_address, expect):
     """Dashboard is accessible from any host by default, but it can be also bound to
     localhost.
