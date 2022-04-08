@@ -22,6 +22,7 @@ from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
 
 from distributed import (
     Client,
+    Event,
     Lock,
     Nanny,
     SchedulerPlugin,
@@ -1447,19 +1448,30 @@ async def test_statistical_profiling_failure(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_cancel_fire_and_forget(c, s, a, b):
-    x = delayed(slowinc)(1, delay=0.05)
-    y = delayed(slowinc)(x, delay=0.05)
-    z = delayed(slowinc)(y, delay=0.05)
-    w = delayed(slowinc)(z, delay=0.05)
-    future = c.compute(w)
-    fire_and_forget(future)
+    ev1 = Event()
+    ev2 = Event()
 
-    await asyncio.sleep(0.05)
+    @delayed
+    def f(_):
+        pass
+
+    @delayed
+    def g(_, ev1, ev2):
+        ev1.set()
+        ev2.wait()
+
+    x = f(None, dask_key_name="x")
+    y = g(x, ev1, ev2, dask_key_name="y")
+    z = f(y, dask_key_name="z")
+    future = c.compute(z)
+
+    fire_and_forget(future)
+    await ev1.wait()
     await future.cancel(force=True)
     assert future.status == "cancelled"
-    while s.tasks:  # in rare conditions this can take a little while
+    while s.tasks:
         await asyncio.sleep(0.01)
-    assert not s.tasks
+    await ev2.set()
 
 
 @gen_cluster(
