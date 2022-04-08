@@ -6,7 +6,7 @@ from distributed import Event
 from distributed.core import CommClosedError
 from distributed.utils_test import (
     _LockedCommPool,
-    assert_worker_story,
+    assert_story,
     gen_cluster,
     inc,
     slowinc,
@@ -82,7 +82,7 @@ async def test_abort_execution_to_fetch(c, s, a, b):
     while "f1" in a.tasks:
         await asyncio.sleep(0.01)
 
-    assert_worker_story(
+    assert_story(
         a.story("f1"),
         [
             ("f1", "compute-task"),

@@ -46,7 +46,7 @@ from distributed.utils import TimeoutError
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _LockedCommPool,
-    assert_worker_story,
+    assert_story,
     captured_logger,
     dec,
     div,
@@ -1404,7 +1404,7 @@ def assert_amm_transfer_story(key: str, w_from: Worker, w_to: Worker) -> None:
     """Test that an in-memory key was transferred from worker w_from to worker w_to by
     the Active Memory Manager and it was not recalculated on w_to
     """
-    assert_worker_story(
+    assert_story(
         w_to.story(key),
         [
             (key, "ensure-task-exists", "released"),
@@ -1705,7 +1705,7 @@ async def test_story_with_deps(c, s, a, b):
         ("res", "put-in-memory"),
         ("res", "executing", "memory", "memory", {}),
     ]
-    assert_worker_story(story, expected, strict=True)
+    assert_story(story, expected, strict=True)
 
     story = b.story("dep")
     stimulus_ids = {ev[-2] for ev in story}
@@ -1720,7 +1720,7 @@ async def test_story_with_deps(c, s, a, b):
         ("dep", "put-in-memory"),
         ("dep", "flight", "memory", "memory", {"res": "ready"}),
     ]
-    assert_worker_story(story, expected, strict=True)
+    assert_story(story, expected, strict=True)
 
 
 @gen_cluster(client=True)
@@ -2674,7 +2674,7 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
     # same communication channel
 
     for fut in (futA, futB):
-        assert_worker_story(
+        assert_story(
             b.story(fut.key),
             [
                 ("gather-dependencies", a.address, {fut.key}),
@@ -2733,7 +2733,7 @@ async def test_acquire_replicas_already_in_flight(c, s, *nannies):
     assert await y == 123
 
     story = await c.run(lambda dask_worker: dask_worker.story("x"))
-    assert_worker_story(
+    assert_story(
         story[b],
         [
             ("x", "ensure-task-exists", "released"),
@@ -2910,7 +2910,7 @@ async def test_who_has_consistent_remove_replicas(c, s, *workers):
 
     await f2
 
-    assert_worker_story(a.story(f1.key), [(f1.key, "missing-dep")])
+    assert_story(a.story(f1.key), [(f1.key, "missing-dep")])
     assert a.tasks[f1.key].suspicious_count == 0
     assert s.tasks[f1.key].suspicious == 0
 
@@ -2990,7 +2990,7 @@ async def test_missing_released_zombie_tasks_2(c, s, a, b):
         while b.tasks:
             await asyncio.sleep(0.01)
 
-        assert_worker_story(
+        assert_story(
             b.story(ts),
             [("f1", "missing", "released", "released", {"f1": "forgotten"})],
         )
@@ -3102,7 +3102,7 @@ async def test_task_flight_compute_oserror(c, s, a, b):
         ("f1", "put-in-memory"),
         ("f1", "executing", "memory", "memory", {}),
     ]
-    assert_worker_story(sum_story, expected_sum_story, strict=True)
+    assert_story(sum_story, expected_sum_story, strict=True)
 
 
 @gen_cluster(client=True)

@@ -1875,7 +1875,7 @@ def xfail_ssl_issue5601():
         raise
 
 
-def assert_worker_story(
+def assert_story(
     story: list[tuple], expect: list[tuple], *, strict: bool = False
 ) -> None:
     """Test the output of ``Worker.story``
@@ -1941,7 +1941,7 @@ def assert_worker_story(
                     break
     except StopIteration:
         raise AssertionError(
-            f"assert_worker_story({strict=}) failed\n"
+            f"assert_story({strict=}) failed\n"
             f"story:\n{_format_story(story)}\n"
             f"expect:\n{_format_story(expect)}"
         ) from None
