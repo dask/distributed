@@ -18,13 +18,13 @@ dependencies:
   - ipykernel
   - ipywidgets
   - jinja2
-  - joblib
   - msgpack-python
   - netcdf4
   - paramiko
   - pre-commit
   - prometheus_client
   - psutil
+  - pynvml  # Only tested here
   - pytest
   - pytest-asyncio<0.14.0
   - pytest-cov
