@@ -3164,12 +3164,9 @@ class Worker(ServerNode):
         stimulus_id: str,
     ) -> None:
         try:
-            ts = self.tasks[key]
-
             if self.validate:
-                assert ts.state != "executing"
-                assert ts not in self._executing
-
+                assert not isinstance(key, TaskState)
+            ts = self.tasks[key]
             # needed for legacy notification support
             state_before = ts.state
             ts.state = "released"
@@ -3184,19 +3181,25 @@ class Worker(ServerNode):
                 )
             else:
                 self.log.append((key, "release-key", stimulus_id, time()))
-
-            try:
-                self.data.pop(key, None)
-            except FileNotFoundError:
-                logger.error("Tried to delete %s but no file found", exc_info=True)
-
-            self.actors.pop(key, None)
-            self.threads.pop(key, None)
-            self._in_flight_tasks.discard(ts)
+            if key in self.data:
+                try:
+                    del self.data[key]
+                except FileNotFoundError:
+                    logger.error("Tried to delete %s but no file found", exc_info=True)
+            if key in self.actors:
+                del self.actors[key]
 
             for worker in ts.who_has:
                 self.has_what[worker].discard(ts.key)
             ts.who_has.clear()
+
+            if key in self.threads:
+                del self.threads[key]
+
+            if ts.resource_restrictions is not None:
+                if ts.state == "executing":
+                    for resource, quantity in ts.resource_restrictions.items():
+                        self.available_resources[resource] += quantity
 
             for d in ts.dependencies:
                 ts.waiting_for_data.discard(d)
@@ -3207,6 +3210,10 @@ class Worker(ServerNode):
             ts._previous = None
             ts._next = None
             ts.done = False
+
+            self._executing.discard(ts)
+            self._in_flight_tasks.discard(ts)
+            self.ensure_communicating()
 
             self._notify_plugins(
                 "release_key", key, state_before, cause, stimulus_id, report
