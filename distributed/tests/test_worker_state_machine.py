@@ -6,10 +6,12 @@ from distributed.utils import recursive_to_dict
 from distributed.worker_state_machine import (
     Instruction,
     ReleaseWorkerDataMsg,
+    RescheduleMsg,
     SendMessageToScheduler,
     StateMachineEvent,
     TaskState,
     UniqueTaskHeap,
+    merge_recs_instructions,
 )
 
 
@@ -109,3 +111,25 @@ def test_sendmsg_to_dict():
     # Arbitrary sample class
     smsg = ReleaseWorkerDataMsg(key="x")
     assert smsg.to_dict() == {"op": "release-worker-data", "key": "x"}
+
+
+def test_merge_recs_instructions():
+    x = TaskState("x")
+    y = TaskState("y")
+    instr1 = RescheduleMsg(key="foo", worker="a")
+    instr2 = RescheduleMsg(key="bar", worker="b")
+    assert merge_recs_instructions(
+        ({x: "memory"}, [instr1]),
+        ({y: "released"}, [instr2]),
+    ) == (
+        {x: "memory", y: "released"},
+        [instr1, instr2],
+    )
+
+    # Identical recommendations are silently ignored; incompatible ones raise
+    assert merge_recs_instructions(({x: "memory"}, []), ({x: "memory"}, [])) == (
+        {x: "memory"},
+        [],
+    )
+    with pytest.raises(ValueError):
+        merge_recs_instructions(({x: "memory"}, []), ({x: "released"}, []))
