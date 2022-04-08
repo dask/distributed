@@ -219,6 +219,7 @@ async def test_head(c, s, a, b):
 
     assert not a.extensions["shuffle"].shuffles  # cleaned up metadata?
     assert not b.extensions["shuffle"].shuffles
+    assert not s.extensions["shuffle"].worker_for  # cleaned up metadata?
 
     assert list(os.walk(a.local_directory)) == a_files  # cleaned up files?
     assert list(os.walk(b.local_directory)) == b_files
@@ -245,3 +246,25 @@ async def test_tail(c, s, a, b):
     persisted = await shuffled.persist()  # Only ask for one key
 
     assert len(s.tasks) < df.npartitions * 2
+
+
+@gen_cluster(client=True)
+async def test_repeat(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="100 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    await c.compute(out.head(compute=False))
+
+    assert not a.extensions["shuffle"].shuffles
+    assert not s.extensions["shuffle"].worker_for
+
+    await c.compute(out.tail(compute=False))
+
+    assert not s.extensions["shuffle"].worker_for
+    assert not a.extensions["shuffle"].shuffles
+
+    await c.compute(out.head(compute=False))

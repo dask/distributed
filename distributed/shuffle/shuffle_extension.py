@@ -313,6 +313,12 @@ class ShuffleWorkerExtension:
         output = shuffle.get_output_partition(output_partition)
         if shuffle.done():
             self.shuffles.pop(shuffle_id, None)
+            sync(
+                self.worker.loop,
+                self.worker.scheduler.shuffle_register_complete,
+                id=shuffle_id,
+                worker=self.worker.address,
+            )
             # key missing if another thread got to it first
         return output
 
@@ -382,13 +388,16 @@ class ShuffleSchedulerExtension:
         self.scheduler.handlers.update(
             {
                 "shuffle_get": self.get,
+                "shuffle_register_complete": self.register_complete,
             }
         )
         self.heartbeats = defaultdict(lambda: defaultdict(dict))
         self.worker_for = dict()
         self.schemas = dict()
         self.columns = dict()
-        self.workers = dict()
+        self.input_workers = dict()
+        self.output_workers = dict()
+        self.completed_workers = dict()
 
     def heartbeat(self, ws, data):
         for shuffle_id, d in data.items():
@@ -402,6 +411,7 @@ class ShuffleSchedulerExtension:
             assert column is not None
             assert npartitions is not None
             workers = list(self.scheduler.workers)
+            output_workers = set()
 
             name = "shuffle-barrier-" + id  # TODO single-source task name
             mapping = {}
@@ -413,19 +423,36 @@ class ShuffleSchedulerExtension:
                 else:
                     worker = worker_for(part, workers, npartitions)
                 mapping[part] = worker
+                output_workers.add(worker)
                 ts._worker_restrictions = {worker}
 
             self.worker_for[id] = mapping
             self.schemas[id] = schema
             self.columns[id] = column
-            self.workers[id] = workers
+            self.input_workers[id] = workers
+            self.output_workers[id] = output_workers
+            self.completed_workers[id] = set()
 
         return {
             "worker_for": self.worker_for[id],
-            "workers": self.workers[id],
+            "workers": self.input_workers[id],
             "column": self.columns[id],
             "schema": self.schemas[id],
         }
+
+    def register_complete(self, id: ShuffleId, worker: str):
+        """Learn from a worker that it has completed all reads of a shuffle"""
+        self.completed_workers[id].add(worker)
+
+        if self.completed_workers[id] == self.output_workers[id]:
+            del self.worker_for[id]
+            del self.schemas[id]
+            del self.columns[id]
+            del self.input_workers[id]
+            del self.output_workers[id]
+            with contextlib.suppress(KeyError):
+                del self.heartbeats[id]
+            del self.completed_workers[id]
 
 
 def worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
