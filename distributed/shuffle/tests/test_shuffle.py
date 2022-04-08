@@ -248,7 +248,7 @@ async def test_tail(c, s, a, b):
     assert len(s.tasks) < df.npartitions * 2
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 4)] * 2)
 async def test_repeat(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",

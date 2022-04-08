@@ -442,6 +442,8 @@ class ShuffleSchedulerExtension:
 
     def register_complete(self, id: ShuffleId, worker: str):
         """Learn from a worker that it has completed all reads of a shuffle"""
+        if id not in self.completed_workers:
+            return
         self.completed_workers[id].add(worker)
 
         if self.completed_workers[id] == self.output_workers[id]:
@@ -450,9 +452,9 @@ class ShuffleSchedulerExtension:
             del self.columns[id]
             del self.input_workers[id]
             del self.output_workers[id]
+            del self.completed_workers[id]
             with contextlib.suppress(KeyError):
                 del self.heartbeats[id]
-            del self.completed_workers[id]
 
 
 def worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
