@@ -1021,6 +1021,7 @@ class Worker(ServerNode):
             "in_flight_tasks": self.in_flight_tasks,
             "in_flight_workers": self.in_flight_workers,
             "log": self.log,
+            "stimulus_log": self.stimulus_log,
             "tasks": self.tasks,
             "logs": self.get_logs(),
             "config": dask.config.config,

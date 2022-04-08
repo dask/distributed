@@ -3334,6 +3334,7 @@ async def test_Worker__to_dict(c, s, a):
         "in_flight_tasks",
         "in_flight_workers",
         "log",
+        "stimulus_log",
         "tasks",
         "logs",
         "config",
