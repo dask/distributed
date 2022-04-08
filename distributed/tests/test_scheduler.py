@@ -37,6 +37,7 @@ from distributed.scheduler import MemoryState, Scheduler
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
     BrokenComm,
+    assert_story,
     captured_logger,
     cluster,
     dec,
@@ -3543,3 +3544,40 @@ async def test_repr(s, a):
             repr(ws_b)
             == f"<WorkerState {b.address!r}, status: running, memory: 0, processing: 0>"
         )
+
+
+@gen_cluster(client=True)
+async def test_stimuli(c, s, a, b):
+    f = c.submit(inc, 1)
+    key = f.key
+
+    await f
+    await c.close()
+
+    assert_story(
+        s.story(key),
+        [
+            (key, "released", "waiting", {key: "processing"}),
+            (key, "waiting", "processing", {}),
+            (key, "processing", "memory", {}),
+            (
+                key,
+                "memory",
+                "forgotten",
+                {},
+            ),
+        ],
+    )
+
+    stimuli = [
+        "update-graph-hlg",
+        "update-graph-hlg",
+        "task-finished",
+        "client-releases-keys",
+    ]
+
+    stories = s.story(key)
+    assert len(stories) == len(stimuli)
+
+    for stimulus_id, story in zip(stimuli, stories):
+        assert story[-2].startswith(stimulus_id), (story[-2], stimulus_id)
