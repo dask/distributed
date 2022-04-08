@@ -263,7 +263,7 @@ def test_tls_cluster(tls_client):
     assert tls_client.security
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_tls_scheduler(security, cleanup):
     async with Scheduler(
         security=security, host="localhost", dashboard_address=":0"
@@ -289,7 +289,7 @@ class MyServer(Server):
         return "pong"
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_locked_comm_drop_in_replacement(loop):
 
     async with MyServer({}) as a, await MyServer({}) as b:
@@ -318,7 +318,7 @@ async def test_locked_comm_drop_in_replacement(loop):
         assert await read_queue.get() == (b.address, "pong")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_locked_comm_intercept_read(loop):
 
     async with MyServer({}) as a, MyServer({}) as b:
@@ -347,7 +347,7 @@ async def test_locked_comm_intercept_read(loop):
         assert await fut == "pong"
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_locked_comm_intercept_write(loop):
 
     async with MyServer({}) as a, MyServer({}) as b:

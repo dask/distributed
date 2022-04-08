@@ -9,21 +9,11 @@ import logging
 import random
 from collections.abc import Callable
 from contextlib import suppress
-from functools import partial
 from typing import Literal
 
 from tlz import identity
 
 import dask
-
-try:
-    import blosc
-
-    n = blosc.set_nthreads(2)
-    if hasattr("blosc", "releasegil"):
-        blosc.set_releasegil(True)
-except ImportError:
-    blosc = False
 
 from distributed.utils import ensure_bytes
 
@@ -122,15 +112,6 @@ with suppress(ImportError):
     compressions["zstd"] = {"compress": zstd_compress, "decompress": zstd_decompress}
 
 
-with suppress(ImportError):
-    import blosc
-
-    compressions["blosc"] = {
-        "compress": partial(blosc.compress, clevel=5, cname="lz4"),
-        "decompress": blosc.decompress,
-    }
-
-
 def get_default_compression():
     default = dask.config.get("distributed.comm.compression")
     if default != "auto":
@@ -212,14 +193,7 @@ def maybe_compress(
     else:
         nbytes = len(payload)
 
-    if default_compression and blosc and type(payload) is memoryview:
-        # Blosc does itemsize-aware shuffling, resulting in better compression
-        compressed = blosc.compress(
-            payload, typesize=payload.itemsize, cname="lz4", clevel=5
-        )
-        compression = "blosc"
-    else:
-        compressed = compress(ensure_bytes(payload))
+    compressed = compress(ensure_bytes(payload))
 
     if len(compressed) > 0.9 * nbytes:  # full data not very compressible
         return None, payload

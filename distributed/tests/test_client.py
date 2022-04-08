@@ -18,7 +18,7 @@ import weakref
 import zipfile
 from collections import deque
 from collections.abc import Generator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from functools import partial
 from operator import add
 from threading import Semaphore
@@ -3530,21 +3530,24 @@ def test_close_idempotent(c):
     c.close()
 
 
-@nodebug
 def test_get_returns_early(c):
-    start = time()
-    with suppress(RuntimeError):
-        result = c.get({"x": (throws, 1), "y": (sleep, 1)}, ["x", "y"])
-    assert time() < start + 0.5
-    # Futures should be released and forgotten
-    wait_for(lambda: not c.futures, timeout=0.1)
+    event = Event()
 
+    def block(ev):
+        ev.wait()
+
+    with pytest.raises(RuntimeError):
+        result = c.get({"x": (throws, 1), "y": (block, event)}, ["x", "y"])
+
+    # Futures should be released and forgotten
+    wait_for(lambda: not c.futures, timeout=1)
+    event.set()
     wait_for(lambda: not any(c.processing().values()), timeout=3)
 
     x = c.submit(inc, 1)
     x.result()
 
-    with suppress(RuntimeError):
+    with pytest.raises(RuntimeError):
         result = c.get({"x": (throws, 1), x.key: (inc, 1)}, ["x", x.key])
     assert x.key in c.futures
 
@@ -6127,8 +6130,8 @@ async def test_wait_for_workers(c, s, a, b):
 
 
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
-@pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
+@gen_test()
 async def test_file_descriptors_dont_leak(Worker):
     pytest.importorskip("pandas")
     df = dask.datasets.timeseries(freq="10s", dtypes={"x": int, "y": float})
@@ -6173,7 +6176,7 @@ async def test_shutdown():
                 assert w.status == Status.closed
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_shutdown_localcluster(cleanup):
     async with LocalCluster(
         n_workers=1, asynchronous=True, processes=False, dashboard_address=":0"
@@ -7402,7 +7405,7 @@ class TestClientSecurityLoader:
             ):
                 yield
 
-    @pytest.mark.asyncio
+    @gen_test()
     async def test_security_loader(self, monkeypatch):
         security = tls_only_security()
 
@@ -7418,7 +7421,7 @@ class TestClientSecurityLoader:
                 async with Client(scheduler.address, asynchronous=True) as client:
                     assert client.security is security
 
-    @pytest.mark.asyncio
+    @gen_test()
     async def test_security_loader_ignored_if_explicit_security_provided(
         self, monkeypatch
     ):
@@ -7436,7 +7439,7 @@ class TestClientSecurityLoader:
                 ) as client:
                     assert client.security is security
 
-    @pytest.mark.asyncio
+    @gen_test()
     async def test_security_loader_ignored_if_returns_none(self, monkeypatch):
         """Test that if a security loader is configured, but it returns `None`,
         then the default security configuration is used"""
@@ -7469,7 +7472,7 @@ class TestClientSecurityLoader:
 
         assert loader.called
 
-    @pytest.mark.asyncio
+    @gen_test()
     async def test_security_loader_import_failed(self):
         security = tls_only_security()
 
