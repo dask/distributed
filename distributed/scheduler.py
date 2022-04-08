@@ -5116,7 +5116,7 @@ class Scheduler(SchedulerState, ServerNode):
                 roots.append(key)
 
         recommendations: dict = {key: "waiting" for key in roots}
-        self.transitions(recommendations)
+        self.transitions(recommendations, f"stimulus-retry-{time()}")
 
         if parent._validate:
             for key in seen:
@@ -5133,7 +5133,7 @@ class Scheduler(SchedulerState, ServerNode):
         state.
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        assert stimulus_id
+        stimulus_id = stimulus_id or f"remove-worker-{time()}"
         with log_errors():
             if self.status == Status.closed:
                 return
@@ -5700,13 +5700,18 @@ class Scheduler(SchedulerState, ServerNode):
         if recommendations:
             self.transitions(recommendations, stimulus_id)
 
-    def handle_long_running(self, key=None, worker=None, compute_duration=None):
+    def handle_long_running(
+        self, key=None, worker=None, compute_duration=None, stimulus_id=None
+    ):
         """A task has seceded from the thread pool
 
         We stop the task from being stolen in the future, and change task
         duration accounting as if the task has stopped.
         """
         parent: SchedulerState = cast(SchedulerState, self)
+        # TODO(sjperkins): This stimulus isn't passed anywhere, so
+        # could probably be removed from the signature before the PR is merged
+        assert stimulus_id
         if key not in parent._tasks:
             logger.debug("Skipping long_running since key %s was already released", key)
             return
@@ -5939,7 +5944,11 @@ class Scheduler(SchedulerState, ServerNode):
         try:
             stream_comms[worker].send(msg)
         except (CommClosedError, AttributeError):
-            self.loop.add_callback(self.remove_worker, address=worker)
+            self.loop.add_callback(
+                self.remove_worker,
+                address=worker,
+                stimulus_id=f"worker-send-comm-fail-{time()}",
+            )
 
     def client_send(self, client, msg):
         """Send message to client"""
@@ -5984,7 +5993,11 @@ class Scheduler(SchedulerState, ServerNode):
                 # worker already gone
                 pass
             except (CommClosedError, AttributeError):
-                self.loop.add_callback(self.remove_worker, address=worker)
+                self.loop.add_callback(
+                    self.remove_worker,
+                    address=worker,
+                    stimulus_id=f"send-all-comm-fail-{time()}",
+                )
 
     ############################
     # Less common interactions #
@@ -6121,6 +6134,7 @@ class Scheduler(SchedulerState, ServerNode):
     async def restart(self, client=None, timeout=30):
         """Restart all workers. Reset local state."""
         parent: SchedulerState = cast(SchedulerState, self)
+        stimulus_id = f"restart-{time()}"
         with log_errors():
 
             n_workers = len(parent._workers_dv)
@@ -6140,7 +6154,9 @@ class Scheduler(SchedulerState, ServerNode):
                 try:
                     # Ask the worker to close if it doesn't have a nanny,
                     # otherwise the nanny will kill it anyway
-                    await self.remove_worker(address=addr, close=addr not in nannies)
+                    await self.remove_worker(
+                        address=addr, close=addr not in nannies, stimulus_id=stimulus_id
+                    )
                 except Exception:
                     logger.info(
                         "Exception while restarting.  This is normal", exc_info=True

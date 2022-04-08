@@ -160,7 +160,7 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, a, b):
         await wait_for_state(fut1.key, "flight", b)
 
         # Close in scheduler to ensure we transition and reschedule task properly
-        await s.close_worker(worker=a.address)
+        await s.close_worker(worker=a.address, stimulus_id="test")
         await wait_for_state(fut1.key, "resumed", b)
 
     lock.release()
