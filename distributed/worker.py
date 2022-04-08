@@ -362,6 +362,7 @@ class Worker(ServerNode):
     executed_count: int
     long_running: set[str]
     log: deque[tuple]  # [(..., stimulus_id: str | None, timestamp: float), ...]
+    stimulus_log: deque[StateMachineEvent]
     incoming_transfer_log: deque[dict[str, Any]]
     outgoing_transfer_log: deque[dict[str, Any]]
     target_message_size: int
@@ -517,7 +518,8 @@ class Worker(ServerNode):
 
         self.target_message_size = int(50e6)  # 50 MB
 
-        self.log = deque(maxlen=100000)
+        self.log = deque(maxlen=100_000)
+        self.stimulus_log = deque(maxlen=10_000)
         if validate is None:
             validate = dask.config.get("distributed.scheduler.validate")
         self.validate = validate
@@ -2588,7 +2590,7 @@ class Worker(ServerNode):
 
     def handle_stimulus(self, stim: StateMachineEvent) -> None:
         with log_errors():
-            # self.stimulus_history.append(stim)  # TODO
+            self.stimulus_log.append(stim.log(handled=time()))
             recs, instructions = self.handle_event(stim)
             self.transitions(recs, stimulus_id=stim.stimulus_id)
             self._handle_instructions(instructions)
@@ -2640,8 +2642,16 @@ class Worker(ServerNode):
         }
 
     def story(self, *keys_or_tasks: str | TaskState) -> list[tuple]:
+        """Return all transitions involving one or more tasks"""
         keys = {e.key if isinstance(e, TaskState) else e for e in keys_or_tasks}
         return worker_story(keys, self.log)
+
+    def stimulus_story(
+        self, *keys_or_tasks: str | TaskState
+    ) -> list[StateMachineEvent]:
+        """Return all state machine events involving one or more tasks"""
+        keys = {e.key if isinstance(e, TaskState) else e for e in keys_or_tasks}
+        return [ev for ev in self.stimulus_log if getattr(ev, "key", None) in keys]
 
     def ensure_communicating(self) -> None:
         stimulus_id = f"ensure-communicating-{time()}"
