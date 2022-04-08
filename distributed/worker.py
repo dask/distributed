@@ -919,22 +919,26 @@ class Worker(ServerNode):
         """
         prev_status = self.status
         ServerNode.status.__set__(self, value)
-        self._send_worker_status_change()
+        self._send_worker_status_change(f"worker-status-change-{time()}")
         if prev_status == Status.paused and value == Status.running:
             self.ensure_computing()
             self.ensure_communicating()
 
-    def _send_worker_status_change(self) -> None:
+    def _send_worker_status_change(self, stimulus_id: str) -> None:
         if (
             self.batched_stream
             and self.batched_stream.comm
             and not self.batched_stream.comm.closed()
         ):
             self.batched_stream.send(
-                {"op": "worker-status-change", "status": self._status.name}
+                {
+                    "op": "worker-status-change",
+                    "status": self._status.name,
+                    "stimulus_id": stimulus_id,
+                },
             )
         elif self._status != Status.closed:
-            self.loop.call_later(0.05, self._send_worker_status_change)
+            self.loop.call_later(0.05, self._send_worker_status_change, stimulus_id)
 
     async def get_metrics(self) -> dict:
         try:
@@ -1075,6 +1079,7 @@ class Worker(ServerNode):
                         versions=get_versions(),
                         metrics=await self.get_metrics(),
                         extra=await self.get_startup_information(),
+                        stimulus_id=f"worker-connect-{time()}",
                     ),
                     serializers=["msgpack"],
                 )
@@ -1457,7 +1462,9 @@ class Worker(ServerNode):
                 if report and self.contact_address is not None:
                     await asyncio.wait_for(
                         self.scheduler.unregister(
-                            address=self.contact_address, safe=safe
+                            address=self.contact_address,
+                            safe=safe,
+                            stimulus_id=f"worker-close-{time()}",
                         ),
                         timeout,
                     )
@@ -1522,7 +1529,10 @@ class Worker(ServerNode):
         # Scheduler.retire_workers will set the status to closing_gracefully and push it
         # back to this worker.
         await self.scheduler.retire_workers(
-            workers=[self.address], close_workers=False, remove=False
+            workers=[self.address],
+            close_workers=False,
+            remove=False,
+            stimulus_id=f"worker-close-gracefully-{time()}",
         )
         await self.close(safe=True, nanny=not restart)
 
@@ -1877,7 +1887,9 @@ class Worker(ServerNode):
             pass
         elif ts.state == "memory":
             recommendations[ts] = "memory"
-            instructions.append(self._get_task_finished_msg(ts))
+            instructions.append(
+                self._get_task_finished_msg(ts, stimulus_id=stimulus_id)
+            )
         elif ts.state in {
             "released",
             "fetch",
@@ -2005,7 +2017,7 @@ class Worker(ServerNode):
         recs, instructions = self.transition_generic_released(
             ts, stimulus_id=stimulus_id
         )
-        instructions.append(ReleaseWorkerDataMsg(ts.key))
+        instructions.append(ReleaseWorkerDataMsg(key=ts.key, stimulus_id=stimulus_id))
         return recs, instructions
 
     def transition_waiting_constrained(
@@ -2028,7 +2040,7 @@ class Worker(ServerNode):
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         recs: Recs = {ts: "released"}
-        smsg = RescheduleMsg(key=ts.key, worker=self.address)
+        smsg = RescheduleMsg(key=ts.key, worker=self.address, stimulus_id=stimulus_id)
         return recs, [smsg]
 
     def transition_executing_rescheduled(
@@ -2039,7 +2051,7 @@ class Worker(ServerNode):
         self._executing.discard(ts)
 
         recs: Recs = {ts: "released"}
-        smsg = RescheduleMsg(key=ts.key, worker=self.address)
+        smsg = RescheduleMsg(key=ts.key, worker=self.address, stimulus_id=stimulus_id)
         return recs, [smsg]
 
     def transition_waiting_ready(
@@ -2116,6 +2128,7 @@ class Worker(ServerNode):
             traceback_text=traceback_text,
             thread=self.threads.get(ts.key),
             startstops=ts.startstops,
+            stimulus_id=stimulus_id,
         )
 
         return {}, [smsg]
@@ -2300,7 +2313,7 @@ class Worker(ServerNode):
             return recs, []
         if self.validate:
             assert ts.key in self.data or ts.key in self.actors
-        smsg = self._get_task_finished_msg(ts)
+        smsg = self._get_task_finished_msg(ts, stimulus_id=stimulus_id)
         return recs, [smsg]
 
     def transition_executing_memory(
@@ -2417,7 +2430,9 @@ class Worker(ServerNode):
         ts.state = "long-running"
         self._executing.discard(ts)
         self.long_running.add(ts.key)
-        smsg = LongRunningMsg(key=ts.key, compute_duration=compute_duration)
+        smsg = LongRunningMsg(
+            key=ts.key, compute_duration=compute_duration, stimulus_id=stimulus_id
+        )
         self.io_loop.add_callback(self.ensure_computing)
         return {}, [smsg]
 
@@ -2701,7 +2716,9 @@ class Worker(ServerNode):
         for el in skipped_worker_in_flight:
             self.data_needed.push(el)
 
-    def _get_task_finished_msg(self, ts: TaskState) -> TaskFinishedMsg:
+    def _get_task_finished_msg(
+        self, ts: TaskState, stimulus_id: str
+    ) -> TaskFinishedMsg:
         if ts.key not in self.data and ts.key not in self.actors:
             raise RuntimeError(f"Task {ts} not ready")
         typ = ts.type
@@ -2727,6 +2744,7 @@ class Worker(ServerNode):
             metadata=ts.metadata,
             thread=self.threads.get(ts.key),
             startstops=ts.startstops,
+            stimulus_id=stimulus_id,
         )
 
     def _put_key_in_memory(self, ts: TaskState, value, *, stimulus_id: str) -> Recs:
@@ -3030,7 +3048,12 @@ class Worker(ServerNode):
                         self.has_what[worker].discard(ts.key)
                         self.log.append((d, "missing-dep", stimulus_id, time()))
                         self.batched_stream.send(
-                            {"op": "missing-data", "errant_worker": worker, "key": d}
+                            {
+                                "op": "missing-data",
+                                "errant_worker": worker,
+                                "key": d,
+                                "stimulus_id": stimulus_id,
+                            }
                         )
                         recommendations[ts] = "fetch" if ts.who_has else "missing"
                 del data, response
@@ -3135,7 +3158,7 @@ class Worker(ServerNode):
             # `transition_constrained_executing`
             self.transition(ts, "released", stimulus_id=stimulus_id)
 
-    def handle_worker_status_change(self, status: str) -> None:
+    def handle_worker_status_change(self, status: str, stimulus_id: str) -> None:
         new_status = Status.lookup[status]  # type: ignore
 
         if (
@@ -3146,7 +3169,7 @@ class Worker(ServerNode):
                 "Invalid Worker.status transition: %s -> %s", self._status, new_status
             )
             # Reiterate the current status to the scheduler to restore sync
-            self._send_worker_status_change()
+            self._send_worker_status_change(stimulus_id)
         else:
             # Update status and send confirmation to the Scheduler (see status.setter)
             self.status = new_status
@@ -3490,7 +3513,7 @@ class Worker(ServerNode):
                     stop=result["stop"],
                     nbytes=result["nbytes"],
                     type=result["type"],
-                    stimulus_id=stimulus_id,
+                    stimulus_id=f"task-finished-{time()}",
                 )
 
             if isinstance(result["actual-exception"], Reschedule):
@@ -3517,7 +3540,7 @@ class Worker(ServerNode):
                 traceback=result["traceback"],
                 exception_text=result["exception_text"],
                 traceback_text=result["traceback_text"],
-                stimulus_id=stimulus_id,
+                stimulus_id=f"task-erred-{time()}",
             )
 
         except Exception as exc:
@@ -3531,7 +3554,7 @@ class Worker(ServerNode):
                 traceback=msg["traceback"],
                 exception_text=msg["exception_text"],
                 traceback_text=msg["traceback_text"],
-                stimulus_id=stimulus_id,
+                stimulus_id=f"task-erred-{time()}",
             )
 
     @functools.singledispatchmethod

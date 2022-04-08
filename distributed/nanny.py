@@ -290,7 +290,10 @@ class Nanny(ServerNode):
         allowed_errors = (TimeoutError, CommClosedError, EnvironmentError, RPCClosed)
         with suppress(allowed_errors):
             await asyncio.wait_for(
-                self.scheduler.unregister(address=self.worker_address), timeout
+                self.scheduler.unregister(
+                    address=self.worker_address, stimulus_id=f"nanny-close-{time()}"
+                ),
+                timeout,
             )
 
     @property

@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import logging
 import os
+import re
 import sys
 import threading
 import traceback
@@ -1687,7 +1688,14 @@ async def test_story_with_deps(c, s, a, b):
 
     # Story now includes randomized stimulus_ids and timestamps.
     stimulus_ids = {ev[-2] for ev in story}
-    assert len(stimulus_ids) == 3, stimulus_ids
+
+    assert {sid[: re.search(r"\d", sid).start()] for sid in stimulus_ids} == {
+        "compute-task-",
+        "ensure-computing-",
+        "ensure-communicating-",
+        "task-finished-",
+    }
+
     # This is a simple transition log
     expected = [
         ("res", "compute-task"),
@@ -2621,7 +2629,7 @@ async def test_gather_dep_exception_one_task_2(c, s, a, b):
     while fut1.key not in b.tasks or b.tasks[fut1.key].state == "flight":
         await asyncio.sleep(0)
 
-    s.handle_missing_data(key="f1", errant_worker=a.address)
+    s.handle_missing_data(key="f1", errant_worker=a.address, stimulus_id="test")
 
     await fut2
 
@@ -3274,7 +3282,9 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
         while not mocked_gather.call_args:
             await asyncio.sleep(0)
 
-        await s.remove_worker(address=x.address, safe=True, close=close_worker)
+        await s.remove_worker(
+            address=x.address, safe=True, close=close_worker, stimulus_id="test"
+        )
 
         await _wait_for_state(fut2_key, b, intermediate_state)
 
