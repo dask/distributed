@@ -24,7 +24,11 @@ from distributed.utils import sync
 
 if TYPE_CHECKING:
     import pandas as pd
-    import pyarrow as pa
+
+    try:
+        import pyarrow as pa
+    except ImportError:
+        raise ImportError("PyArrow is needed for fast shuffling")
 
     from distributed.worker import Worker
 
@@ -90,6 +94,7 @@ class Shuffle:
         self.transferred = False
         self.total_recvd = 0
         self.start_time = time.time()
+        self._exception: Exception | None = None
 
     @contextlib.contextmanager
     def time(self, name: str):
@@ -135,6 +140,8 @@ class Shuffle:
         # but barriers on other workers might still be running and sending us
         # data
         # assert not self.transferred, "`receive` called after barrier task"
+        if self._exception:
+            raise self._exception
 
         self.total_recvd += sum(map(len, data))
         # An ugly way of turning these batches back into an arrow table
@@ -157,7 +164,10 @@ class Shuffle:
                     for k, v in groups.items()
                 }
             )
-        await self.multi_file.put(groups)
+        try:
+            await self.multi_file.put(groups)
+        except Exception as e:
+            self._exception = e
 
     def add_partition(self, data: pd.DataFrame) -> None:
         with self.time("cpu"):
@@ -351,7 +361,7 @@ class ShuffleWorkerExtension:
             self.worker.loop, self._get_shuffle, shuffle_id, empty, column, npartitions
         )
 
-    async def close(self):
+    def close(self):
         self.executor.shutdown()
 
 
@@ -490,7 +500,5 @@ def split_by_partition(
     ]
     shards.append(t.slice(offset=splits[-1], length=None))
     assert len(t) == sum(map(len, shards))
-    if len(partitions) != len(shards):
-        breakpoint()
     assert len(partitions) == len(shards)
     return dict(zip(partitions, shards))

@@ -460,22 +460,21 @@ async def test_loop_runner_gen():
 
 
 @gen_test()
-async def test_all_exceptions_logging():
-    async def throws():
-        raise Exception("foo1234")
+async def test_all_quiet_exceptions():
+    class CustomError(Exception):
+        pass
+
+    async def throws(msg):
+        raise CustomError(msg)
 
     with captured_logger("") as sio:
-        try:
-            await All([throws() for _ in range(5)], quiet_exceptions=Exception)
-        except Exception:
-            pass
+        with pytest.raises(CustomError):
+            await All([throws("foo") for _ in range(5)])
+        with pytest.raises(CustomError):
+            await All([throws("bar") for _ in range(5)], quiet_exceptions=CustomError)
 
-        import gc
-
-        gc.collect()
-        await asyncio.sleep(0.1)
-
-    assert "foo1234" not in sio.getvalue()
+    assert "bar" not in sio.getvalue()
+    assert "foo" in sio.getvalue()
 
 
 def test_warn_on_duration():
@@ -528,9 +527,22 @@ def test_parse_ports():
     assert parse_ports(23) == [23]
     assert parse_ports("45") == [45]
     assert parse_ports("100:103") == [100, 101, 102, 103]
+    assert parse_ports([100, 101, 102, 103]) == [100, 101, 102, 103]
+
+    out = parse_ports((100, 101, 102, 103))
+    assert out == [100, 101, 102, 103]
+    assert isinstance(out, list)
 
     with pytest.raises(ValueError, match="port_stop must be greater than port_start"):
         parse_ports("103:100")
+    with pytest.raises(TypeError):
+        parse_ports(100.5)
+    with pytest.raises(TypeError):
+        parse_ports([100, 100.5])
+    with pytest.raises(ValueError):
+        parse_ports("foo")
+    with pytest.raises(ValueError):
+        parse_ports("100.5")
 
 
 def test_lru():
@@ -551,13 +563,13 @@ def test_lru():
     assert list(l.keys()) == ["c", "a", "d"]
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_offload():
     assert (await offload(inc, 1)) == 2
     assert (await offload(lambda x, y: x + y, 1, y=2)) == 3
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_offload_preserves_contextvars():
     var = contextvars.ContextVar("var")
 

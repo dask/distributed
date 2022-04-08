@@ -3,7 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import pyarrow as pa
+    try:
+        import pyarrow as pa
+    except ImportError:
+        raise ImportError("PyArrow is needed for fast shuffling")
 
 
 def dump_batch(batch, file, schema=None) -> None:

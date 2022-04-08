@@ -2,10 +2,13 @@ import asyncio
 import io
 import os
 import random
+import shutil
 from collections import defaultdict
 
 import pandas as pd
-import pyarrow as pa
+import pytest
+
+pa = pytest.importorskip("pyarrow")
 
 import dask
 import dask.dataframe as dd
@@ -52,6 +55,62 @@ async def test_concurrent(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_bad_disk(c, s, a, b):
+
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = out.persist()
+    while not a.extensions["shuffle"].shuffles:
+        await asyncio.sleep(0.01)
+    shutil.rmtree(a.local_directory)
+
+    while not b.extensions["shuffle"].shuffles:
+        await asyncio.sleep(0.01)
+    shutil.rmtree(b.local_directory)
+    with pytest.raises(FileNotFoundError) as e:
+        out = await c.compute(out)
+
+    assert a.local_directory in str(e.value) or b.local_directory in str(e.value)
+
+
+@pytest.mark.slow
+@gen_cluster(client=True)
+async def test_crashed_worker(c, s, a, b):
+
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = out.persist()
+
+    while (
+        len(
+            [
+                ts
+                for ts in s.tasks.values()
+                if "shuffle_transfer" in ts.key and ts.state == "memory"
+            ]
+        )
+        < 3
+    ):
+        await asyncio.sleep(0.01)
+    await b.close()
+
+    with pytest.raises(Exception) as e:
+        out = await c.compute(out)
+
+    assert a.address in str(e.value) or b.address in str(e.value)
+
+
+@gen_cluster(client=True)
 async def test_heartbeat(c, s, a, b):
     await a.heartbeat()
     assert not s.extensions["shuffle"].heartbeats
@@ -69,6 +128,7 @@ async def test_heartbeat(c, s, a, b):
         await a.heartbeat()
 
     [s] = s.extensions["shuffle"].heartbeats.values()
+    await out
 
 
 def test_processing_chain():

@@ -65,9 +65,10 @@ class MultiComm:
         self._futures = set()
         self._done = False
         self.diagnostics = defaultdict(float)
-        self._loop = loop or self
+        self._loop = loop or asyncio.get_event_loop()
 
-        self._communicate_future = asyncio.ensure_future(self.communicate())
+        self._communicate_future = asyncio.create_task(self.communicate())
+        self._exception = None
 
     @property
     def queue(self):
@@ -89,6 +90,8 @@ class MultiComm:
 
         If we're out of space then we block in order to enforce backpressure.
         """
+        if self._exception:
+            raise self._exception
         with self.lock:
             for address, shards in data.items():
                 size = sum(map(len, shards))
@@ -150,7 +153,7 @@ class MultiComm:
 
                 assert set(self.sizes) == set(self.shards)
                 assert shards
-                future = asyncio.ensure_future(self.process(address, shards, size))
+                future = asyncio.create_task(self.process(address, shards, size))
                 del shards
                 self._futures.add(future)
 
@@ -164,8 +167,12 @@ class MultiComm:
                 # while (time.time() // 5 % 4) == 0:
                 #     await asyncio.sleep(0.1)
                 start = time.time()
-                with self.time("send"):
-                    await self.send(address, [b"".join(shards)])
+                try:
+                    with self.time("send"):
+                        await self.send(address, [b"".join(shards)])
+                except Exception as e:
+                    self._exception = e
+                    self._done = True
                 stop = time.time()
                 self.diagnostics["avg_size"] = (
                     0.95 * self.diagnostics["avg_size"] + 0.05 * size
@@ -184,6 +191,11 @@ class MultiComm:
         """
         We don't expect any more data, wait until everything is flushed through
         """
+        if self._exception:
+            await self._communicate_future
+            await asyncio.gather(*self._futures)
+            raise self._exception
+
         while self.shards:
             await asyncio.sleep(0.05)
 
@@ -193,7 +205,6 @@ class MultiComm:
         assert not self.total_size
 
         self._done = True
-
         await self._communicate_future
 
     @contextlib.contextmanager
