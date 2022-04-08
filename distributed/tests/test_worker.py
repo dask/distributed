@@ -1713,12 +1713,12 @@ async def test_story_with_deps(c, s, a, b):
 
     # Story now includes randomized stimulus_ids and timestamps.
     stimulus_ids = {ev[-2] for ev in story}
-    assert len(stimulus_ids) == 3, stimulus_ids
+    assert len(stimulus_ids) == 2, stimulus_ids
     # This is a simple transition log
     expected = [
         ("res", "compute-task"),
         ("res", "released", "waiting", "waiting", {"dep": "fetch"}),
-        ("res", "waiting", "ready", "ready", {}),
+        ("res", "waiting", "ready", "ready", {"res": "executing"}),
         ("res", "ready", "executing", "executing", {}),
         ("res", "put-in-memory"),
         ("res", "executing", "memory", "memory", {}),
@@ -3115,7 +3115,7 @@ async def test_task_flight_compute_oserror(c, s, a, b):
         # Now, we actually compute the task *once*. This must not cycle back
         ("f1", "compute-task"),
         ("f1", "released", "waiting", "waiting", {"f1": "ready"}),
-        ("f1", "waiting", "ready", "ready", {}),
+        ("f1", "waiting", "ready", "ready", {"f1": "executing"}),
         ("f1", "ready", "executing", "executing", {}),
         ("f1", "put-in-memory"),
         ("f1", "executing", "memory", "memory", {}),
