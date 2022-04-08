@@ -124,9 +124,9 @@ class SystemMonitor:
                     read_bytes_disk = (disk_ioc.read_bytes - last_disk.read_bytes) / (
                         duration_disk or 0.5
                     )
-                    write_bytes_disk = (disk_ioc.write_bytes - last_disk.write_bytes) / (
-                        duration_disk or 0.5
-                    )
+                    write_bytes_disk = (
+                        disk_ioc.write_bytes - last_disk.write_bytes
+                    ) / (duration_disk or 0.5)
                     self.last_time_disk = now
                     self._last_disk_io_counters = disk_ioc
                     self.read_bytes_disk.append(read_bytes_disk)
