@@ -13,6 +13,7 @@ import sys
 import threading
 import traceback
 import types
+import warnings
 import weakref
 import zipfile
 from collections import deque
@@ -5653,15 +5654,18 @@ async def test_config_scheduler_address(s, a, b):
 async def test_warn_when_submitting_large_values(c, s, a, b):
     with pytest.warns(
         UserWarning,
-        match=r"Large object of size (2\.00 MB|1.91 MiB) detected in task graph:\s+"
-        r"\(b'0+ \.\.\. 0+',\)\s+"
-        r"Consider scattering large objects ahead of time.*",
-    ) as exc_info:
+        match=r"Large object of size (2\.00 MB|1.91 MiB) detected in task graph:"
+        r" \n  \(b'00000000000000000000000000000000000000000000000 \.\.\. 000000000000',\)"
+        r"\nConsider scattering large objects ahead of time.*",
+    ):
         future = c.submit(lambda x: x + 1, b"0" * 2000000)
 
-    data = b"0" * 2000000
-    for i in range(10):
-        future = c.submit(lambda x, y: x, data, i)
+    with warnings.catch_warnings(record=True) as record:
+        data = b"0" * 2000000
+        for i in range(10):
+            future = c.submit(lambda x, y: x, data, i)
+
+    assert not record
 
 
 @gen_cluster(client=True)
