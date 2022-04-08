@@ -419,6 +419,7 @@ class Worker(ServerNode):
     execution_state: dict[str, Any]
     plugins: dict[str, WorkerPlugin]
     _pending_plugins: tuple[WorkerPlugin, ...]
+    _async_instructions: set[asyncio.Task]
 
     def __init__(
         self,
@@ -835,6 +836,8 @@ class Worker(ServerNode):
         if self.lifetime:
             self.lifetime += (random.random() * 2 - 1) * lifetime_stagger
             self.io_loop.call_later(self.lifetime, self.close_gracefully)
+
+        self._async_instructions = set()
 
         Worker._instances.add(self)
 
@@ -1406,6 +1409,11 @@ class Worker(ServerNode):
             if self.status not in Status.ANY_RUNNING:
                 logger.info("Closed worker has not yet started: %s", self.status)
             self.status = Status.closing
+
+            for task in self._async_instructions:
+                task.cancel("Worker.close()")
+            while self._async_instructions:
+                await asyncio.sleep(0)
 
             for preload in self.preloads:
                 await preload.teardown()
@@ -2595,12 +2603,16 @@ class Worker(ServerNode):
             self.ensure_computing()
             self.ensure_communicating()
 
-    def _handle_stimulus_from_future(
-        self, future: asyncio.Future[StateMachineEvent | None]
+    def _handle_stimulus_from_task(
+        self, task: asyncio.Task[StateMachineEvent | None]
     ) -> None:
+        self._async_instructions.remove(task)
         with log_errors():
-            # This *should* never raise
-            stim = future.result()
+            try:
+                # This *should* never raise any other exceptions
+                stim = task.result()
+            except asyncio.CancelledError:
+                return
         if stim:
             self.handle_stimulus(stim)
 
@@ -2611,10 +2623,12 @@ class Worker(ServerNode):
             if isinstance(inst, SendMessageToScheduler):
                 self.batched_stream.send(inst.to_dict())
             elif isinstance(inst, Execute):
-                coro = self.execute(inst.key, stimulus_id=inst.stimulus_id)
-                task = asyncio.create_task(coro)
-                # TODO track task (at the moment it's fire-and-forget)
-                task.add_done_callback(self._handle_stimulus_from_future)
+                task = asyncio.create_task(
+                    self.execute(inst.key, stimulus_id=inst.stimulus_id),
+                    name=f"execute({inst.key})",
+                )
+                self._async_instructions.add(task)
+                task.add_done_callback(self._handle_stimulus_from_task)
             else:
                 raise TypeError(inst)  # pragma: nocover
 
