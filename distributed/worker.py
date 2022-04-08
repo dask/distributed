@@ -1410,7 +1410,7 @@ class Worker(ServerNode):
             self.status = Status.closing
 
             for task in self._async_instructions:
-                task.cancel("Worker.close()")
+                task.cancel()
             while self._async_instructions:
                 await asyncio.sleep(0)
 
