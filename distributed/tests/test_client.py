@@ -3530,7 +3530,6 @@ def test_close_idempotent(c):
     c.close()
 
 
-@pytest.mark.repeat(1000)
 def test_get_returns_early(c):
     event = Event()
 
