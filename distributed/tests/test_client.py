@@ -18,7 +18,7 @@ import weakref
 import zipfile
 from collections import deque
 from collections.abc import Generator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from functools import partial
 from operator import add
 from threading import Semaphore
@@ -3530,21 +3530,25 @@ def test_close_idempotent(c):
     c.close()
 
 
-@nodebug
+@pytest.mark.repeat(1000)
 def test_get_returns_early(c):
-    start = time()
-    with suppress(RuntimeError):
-        result = c.get({"x": (throws, 1), "y": (sleep, 1)}, ["x", "y"])
-    assert time() < start + 0.5
-    # Futures should be released and forgotten
-    wait_for(lambda: not c.futures, timeout=0.1)
+    event = Event()
 
+    def block(ev):
+        ev.wait()
+
+    with pytest.raises(RuntimeError):
+        result = c.get({"x": (throws, 1), "y": (block, event)}, ["x", "y"])
+
+    # Futures should be released and forgotten
+    wait_for(lambda: not c.futures, timeout=1)
+    event.set()
     wait_for(lambda: not any(c.processing().values()), timeout=3)
 
     x = c.submit(inc, 1)
     x.result()
 
-    with suppress(RuntimeError):
+    with pytest.raises(RuntimeError):
         result = c.get({"x": (throws, 1), x.key: (inc, 1)}, ["x", x.key])
     assert x.key in c.futures
 
