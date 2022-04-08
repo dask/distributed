@@ -1959,8 +1959,6 @@ class Worker(ServerNode):
 
         return merge_recs_instructions(
             (recs, []),
-            # FIXME this is only necessary if transitioning from executing, which
-            #       should not be possible but it happens - see note in release_key().
             self._ensure_computing(),
         )
 
@@ -3186,29 +3184,25 @@ class Worker(ServerNode):
                 )
             else:
                 self.log.append((key, "release-key", stimulus_id, time()))
-
-            try:
-                self.data.pop(key, None)
-            except OSError:
-                logger.error("Failed to delete %s", key, exc_info=True)
-
-            self.actors.pop(key, None)
-            self.threads.pop(key, None)
-            self._in_flight_tasks.discard(ts)
-
-            if ts.state == "executing":
-                # FIXME this should never happen, but it does.
-                #       e.g. replacing this block with `assert ts.state != "executing"
-                #       makes test_occupancy_cleardown become flaky.
-                #       Need to investigate and improve test coverage.
-                self._executing.discard(ts)
-                if ts.resource_restrictions is not None:
-                    for resource, quantity in ts.resource_restrictions.items():
-                        self.available_resources[resource] += quantity
+            if key in self.data:
+                try:
+                    del self.data[key]
+                except FileNotFoundError:
+                    logger.error("Tried to delete %s but no file found", exc_info=True)
+            if key in self.actors:
+                del self.actors[key]
 
             for worker in ts.who_has:
                 self.has_what[worker].discard(ts.key)
             ts.who_has.clear()
+
+            if key in self.threads:
+                del self.threads[key]
+
+            if ts.resource_restrictions is not None:
+                if ts.state == "executing":
+                    for resource, quantity in ts.resource_restrictions.items():
+                        self.available_resources[resource] += quantity
 
             for d in ts.dependencies:
                 ts.waiting_for_data.discard(d)
@@ -3219,6 +3213,9 @@ class Worker(ServerNode):
             ts._previous = None
             ts._next = None
             ts.done = False
+
+            self._executing.discard(ts)
+            self._in_flight_tasks.discard(ts)
 
             self._notify_plugins(
                 "release_key", key, state_before, cause, stimulus_id, report
