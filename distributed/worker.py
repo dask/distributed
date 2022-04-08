@@ -2265,7 +2265,6 @@ class Worker(ServerNode):
         return merge_recs_instructions(
             self.transition_generic_released(ts, stimulus_id=stimulus_id),
             ({ts: next_state} if next_state != "released" else {}, []),
-            self._ensure_computing(),
         )
 
     def transition_executing_released(
