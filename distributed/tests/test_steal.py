@@ -1182,17 +1182,25 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
     await ev.set()
     await c.gather(futs1)
 
-    # If this turns out to be overly flaky, the following may be relaxed or
-    # removed. The point of this test is to not deadlock but verifying expected
-    # state is still a nice thing
+    assert victim_ts.who_has != {wsC}
+    msgs = steal.story(victim_ts)
+    msgs = [msg[:-1] for msg in msgs]  # Remove random IDs
 
-    # Either the last request goes through or both have been rejected since the
-    # computation was already done by the time the request comes in. This is
-    # unfortunately not stable.
-    if victim_ts.who_has != {wsC}:
-        msgs = steal.story(victim_ts)
-        assert len(msgs) == 2
-        assert all(msg[0] == "already-aborted" for msg in msgs), msgs
+    # There are three possible outcomes
+    expect1 = [
+        ("stale-response", victim_key, "executing", wsA.address),
+        ("already-computing", victim_key, "executing", wsB.address, wsC.address),
+    ]
+    expect2 = [
+        ("already-computing", victim_key, "executing", wsB.address, wsC.address),
+        ("already-aborted", victim_key, "executing", wsA.address),
+    ]
+    # This outcome appears only in ~2% of the runs
+    expect3 = [
+        ("already-computing", victim_key, "executing", wsB.address, wsC.address),
+        ("already-aborted", victim_key, "memory", wsA.address),
+    ]
+    assert msgs in (expect1, expect2, expect3)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
