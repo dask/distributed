@@ -877,11 +877,11 @@ class rpc:
 
         return send_recv_from_rpc
 
-    def close_rpc(self):
+    async def close_rpc(self):
         if self.status != Status.closed:
             rpc.active.discard(self)
         self.status = Status.closed
-        return asyncio.gather(*self.close_comms())
+        return await asyncio.gather(*self.close_comms())
 
     def __enter__(self):
         return self
