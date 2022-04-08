@@ -3378,10 +3378,11 @@ class Worker(ServerNode):
                 self.constrained.popleft()
                 continue
 
-            # FIXME We should never have duplicates in self.constrained or self.ready;
-            #       however replacing the block below and the matching ones later in
-            #       this function for the ready queue with just 'assert ts not in recs'
-            #       causes *sporadic* failures in the test suite.
+            # There may be duplicates in the self.constrained and self.ready queues.
+            # This happens if a task:
+            # 1. is assigned to a Worker and transitioned to ready (heappush)
+            # 2. is stolen (no way to pop from heap, the task stays there)
+            # 3. is assigned to the worker again (heappush again)
             if ts in recs:
                 continue
 
@@ -3409,12 +3410,12 @@ class Worker(ServerNode):
                 continue
 
             if key in self.data:
-                # FIXME see comment above about duplicates
+                # See comment above about duplicates
                 if self.validate:
                     assert ts not in recs or recs[ts] == "memory"
                 recs[ts] = "memory"
             elif ts.state in READY:
-                # FIXME see comment above about duplicates
+                # See comment above about duplicates
                 if self.validate:
                     assert ts not in recs or recs[ts] == "executing"
                 recs[ts] = "executing"
