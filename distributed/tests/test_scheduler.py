@@ -1255,7 +1255,7 @@ async def test_close_nanny(c, s, a, b):
     assert a.process.is_alive()
     a_worker_address = a.worker_address
     start = time()
-    await s.close_worker(worker=a_worker_address)
+    await s.close_worker(worker=a_worker_address, stimulus_id="test")
 
     assert len(s.workers) == 1
     assert a_worker_address not in s.workers

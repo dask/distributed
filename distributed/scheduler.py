@@ -8184,7 +8184,7 @@ class Scheduler(SchedulerState, ServerNode):
                     ws,
                 )
                 await self.remove_worker(
-                    address=ws._address, stimulus=f"check-worker-ttl-{time()}"
+                    address=ws._address, stimulus_id=f"check-worker-ttl-{time()}"
                 )
 
     def check_idle(self):
