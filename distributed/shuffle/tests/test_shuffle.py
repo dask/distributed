@@ -25,12 +25,14 @@ from distributed.utils_test import gen_cluster
 
 
 def clean_worker(worker):
+    """Assert that the worker has no shuffle state"""
     assert not worker.extensions["shuffle"].shuffles
     for fn in os.walk(worker.local_directory):
         assert "shuffle" not in fn
 
 
 def clean_scheduler(scheduler):
+    """Assert that the scheduler has no shuffle state"""
     assert not scheduler.extensions["shuffle"].worker_for
     assert not scheduler.extensions["shuffle"].heartbeats
     assert not scheduler.extensions["shuffle"].schemas
@@ -146,7 +148,7 @@ async def test_crashed_worker(c, s, a, b):
 @gen_cluster(client=True)
 async def test_heartbeat(c, s, a, b):
     await a.heartbeat()
-    assert not s.extensions["shuffle"].heartbeats
+    clean_scheduler(s)
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -300,13 +302,15 @@ async def test_repeat(c, s, a, b):
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     await c.compute(out.head(compute=False))
 
-    assert not a.extensions["shuffle"].shuffles
-    assert not s.extensions["shuffle"].worker_for
+    clean_worker(a)
+    clean_worker(b)
+    clean_scheduler(s)
 
     await c.compute(out.tail(compute=False))
 
-    assert not s.extensions["shuffle"].worker_for
-    assert not a.extensions["shuffle"].shuffles
+    clean_worker(a)
+    clean_worker(b)
+    clean_scheduler(s)
 
     await c.compute(out.head(compute=False))
 
