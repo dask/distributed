@@ -373,9 +373,9 @@ async def test_multi(c, s, a, b):
 async def test_restrictions(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
-        end="2000-01-30",
+        end="2000-01-10",
         dtypes={"x": float, "y": float},
-        freq="1 s",
+        freq="10 s",
     ).persist(workers=a.address)
     await df
     assert a.data
@@ -383,14 +383,11 @@ async def test_restrictions(c, s, a, b):
 
     x = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     x = x.persist(workers=b.address)
+    y = dd.shuffle.shuffle(df, "y", shuffle="p2p")
+    y = y.persist(workers=a.address)
 
     await x
+    assert all(stringify(key) in b.data for key in x.__dask_keys__())
 
-    assert all(stringify(key) in b.data for key in df.__dask_keys__())
-
-    del x
-    x = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    x = x.persist(workers=a.address)
-
-    await x
-    assert all(stringify(key) in b.data for key in df.__dask_keys__())
+    await y
+    assert all(stringify(key) in a.data for key in y.__dask_keys__())
