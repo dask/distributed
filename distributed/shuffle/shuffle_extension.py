@@ -41,7 +41,6 @@ class Shuffle:
     def __init__(
         self,
         column,
-        workers: list[str],
         worker_for: dict[int, str],
         schema: pa.Schema,
         id: ShuffleId,
@@ -354,7 +353,6 @@ class ShuffleWorkerExtension:
                     shuffle = Shuffle(
                         column=result["column"],
                         worker_for=result["worker_for"],
-                        workers=result["workers"],
                         worker=self.worker,
                         schema=deserialize_schema(result["schema"]),
                         id=shuffle_id,
@@ -402,7 +400,6 @@ class ShuffleSchedulerExtension:
         self.worker_for = dict()
         self.schemas = dict()
         self.columns = dict()
-        self.input_workers = dict()
         self.output_workers = dict()
         self.completed_workers = dict()
 
@@ -436,13 +433,11 @@ class ShuffleSchedulerExtension:
             self.worker_for[id] = mapping
             self.schemas[id] = schema
             self.columns[id] = column
-            self.input_workers[id] = workers
             self.output_workers[id] = output_workers
             self.completed_workers[id] = set()
 
         return {
             "worker_for": self.worker_for[id],
-            "workers": self.input_workers[id],
             "column": self.columns[id],
             "schema": self.schemas[id],
         }
@@ -457,7 +452,6 @@ class ShuffleSchedulerExtension:
             del self.worker_for[id]
             del self.schemas[id]
             del self.columns[id]
-            del self.input_workers[id]
             del self.output_workers[id]
             del self.completed_workers[id]
             with contextlib.suppress(KeyError):

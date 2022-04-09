@@ -38,7 +38,6 @@ def clean_scheduler(scheduler):
     assert not scheduler.extensions["shuffle"].heartbeats
     assert not scheduler.extensions["shuffle"].schemas
     assert not scheduler.extensions["shuffle"].columns
-    assert not scheduler.extensions["shuffle"].input_workers
     assert not scheduler.extensions["shuffle"].output_workers
     assert not scheduler.extensions["shuffle"].completed_workers
 
