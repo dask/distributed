@@ -364,6 +364,11 @@ class StateMachineEvent:
 
 
 @dataclass
+class UnpauseEvent(StateMachineEvent):
+    __slots__ = ()
+
+
+@dataclass
 class ExecuteSuccessEvent(StateMachineEvent):
     key: str
     value: object
@@ -418,3 +423,20 @@ else:
     Recs = dict
     Instructions = list
     RecsInstrs = tuple
+
+
+def merge_recs_instructions(*args: RecsInstrs) -> RecsInstrs:
+    """Merge multiple (recommendations, instructions) tuples.
+    Collisions in recommendations are only allowed if identical.
+    """
+    recs: Recs = {}
+    instr: Instructions = []
+    for recs_i, instr_i in args:
+        for k, v in recs_i.items():
+            if k in recs and recs[k] != v:
+                raise ValueError(
+                    f"Mismatched recommendations for {k}: {recs[k]} vs. {v}"
+                )
+            recs[k] = v
+        instr += instr_i
+    return recs, instr

@@ -145,7 +145,7 @@ async def test_cluster_dump_story(c, s, a, b, tmp_path):
             [
                 (k, "compute-task"),
                 (k, "released", "waiting", "waiting", {k: "ready"}),
-                (k, "waiting", "ready", "ready", {}),
+                (k, "waiting", "ready", "ready", {k: "executing"}),
                 (k, "ready", "executing", "executing", {}),
                 (k, "put-in-memory"),
                 (k, "executing", "memory", "memory", {}),
