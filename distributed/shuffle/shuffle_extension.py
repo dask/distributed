@@ -70,7 +70,7 @@ class Shuffle:
                 schema=self.schema,
             ),
             load=load_arrow,
-            directory=os.path.join(self.worker.local_directory, str(self.id)),
+            directory=os.path.join(self.worker.local_directory, "shuffle-%s" % self.id),
             sizeof=lambda L: sum(map(len, L)),
             loop=self.worker.io_loop,
         )
@@ -212,6 +212,9 @@ class Shuffle:
     def done(self) -> bool:
         return self.transferred and self.output_partitions_left == 0
 
+    def close(self):
+        self.multi_file.close()
+
 
 class ShuffleWorkerExtension:
     "Extend the Worker with routes and state for peer-to-peer shuffles"
@@ -265,6 +268,7 @@ class ShuffleWorkerExtension:
             # `get_output_partition` will never be called.
             # This happens when there are fewer output partitions than workers.
             del self.shuffles[shuffle_id]
+            shuffle.close()
 
     def add_partition(
         self,
@@ -312,7 +316,9 @@ class ShuffleWorkerExtension:
         shuffle = self.get_shuffle(shuffle_id)
         output = shuffle.get_output_partition(output_partition)
         if shuffle.done():
-            self.shuffles.pop(shuffle_id, None)
+            shuffle = self.shuffles.pop(shuffle_id, None)
+            if shuffle:
+                shuffle.close()
             sync(
                 self.worker.loop,
                 self.worker.scheduler.shuffle_register_complete,
