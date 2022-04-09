@@ -12,7 +12,7 @@ pa = pytest.importorskip("pyarrow")
 
 import dask
 import dask.dataframe as dd
-from dask.distributed import Worker, Scheduler
+from dask.distributed import Worker
 
 from distributed.shuffle.shuffle_extension import (
     dump_batch,
@@ -332,7 +332,33 @@ async def test_new_worker(c, s, a, b):
 
         out = await c.compute(persisted)
 
-        assert not s.extensions["shuffle"].worker_for
-        assert not a.extensions["shuffle"].shuffles
-        assert not b.extensions["shuffle"].shuffles
-        assert not w.extensions["shuffle"].shuffles
+        clean_worker(a)
+        clean_worker(b)
+        clean_worker(w)
+        clean_scheduler(s)
+
+
+@gen_cluster(client=True, timeout=10)
+async def test_multi(c, s, a, b):
+    left = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-20",
+        freq="10s",
+        dtypes={"id": float, "x": float},
+    )
+    right = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        freq="10s",
+        dtypes={"id": float, "y": float},
+    )
+    left["id"] = (left["id"] * 1000000).astype(int)
+    right["id"] = (right["id"] * 1000000).astype(int)
+
+    out = left.merge(right, on="id", shuffle="p2p")
+    out = await c.compute(out.size)
+    assert out
+
+    clean_worker(a)
+    clean_worker(b)
+    clean_scheduler(s)
