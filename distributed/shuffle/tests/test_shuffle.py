@@ -12,6 +12,7 @@ pa = pytest.importorskip("pyarrow")
 
 import dask
 import dask.dataframe as dd
+from dask.distributed import Worker
 
 from distributed.shuffle.shuffle_extension import (
     dump_batch,
@@ -268,3 +269,26 @@ async def test_repeat(c, s, a, b):
     assert not a.extensions["shuffle"].shuffles
 
     await c.compute(out.head(compute=False))
+
+
+@gen_cluster(client=True, timeout=10)
+async def test_new_worker(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-30",
+        dtypes={"x": float, "y": float},
+        freq="1 s",
+    )
+    shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    persisted = shuffled.persist()
+    while not s.extensions["shuffle"].worker_for:
+        await asyncio.sleep(0.001)
+
+    async with Worker(s.address) as w:
+
+        out = await c.compute(persisted)
+
+        assert not s.extensions["shuffle"].worker_for
+        assert not a.extensions["shuffle"].shuffles
+        assert not b.extensions["shuffle"].shuffles
+        assert not w.extensions["shuffle"].shuffles

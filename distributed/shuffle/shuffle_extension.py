@@ -55,7 +55,6 @@ class Shuffle:
         self.id = id
         self.schema = schema
         self.worker = worker
-        self.all_workers = workers
         self.executor = executor
 
         partitions_of = defaultdict(list)
@@ -267,6 +266,8 @@ class ShuffleWorkerExtension:
             # If the shuffle has no output partitions, remove it now;
             # `get_output_partition` will never be called.
             # This happens when there are fewer output partitions than workers.
+            assert not shuffle.multi_file.shards
+            await shuffle.multi_file.flush()
             del self.shuffles[shuffle_id]
             shuffle.close()
 
@@ -292,16 +293,10 @@ class ShuffleWorkerExtension:
         Using an unknown ``shuffle_id`` is an error. Calling this before all partitions have been
         added is undefined.
         """
-
-        shuffle = await self._get_shuffle(shuffle_id)
-
         # Tell all peers that we've reached the barrier
         # Note that this will call `shuffle_inputs_done` on our own worker as well
-        await asyncio.gather(
-            *(
-                self.worker.rpc(worker).shuffle_inputs_done(shuffle_id=shuffle_id)
-                for worker in shuffle.all_workers
-            ),
+        await self.worker.scheduler.broadcast(
+            msg={"op": "shuffle_inputs_done", "shuffle_id": shuffle_id}
         )
         # TODO handle errors from workers and scheduler, and cancellation.
 
@@ -341,26 +336,32 @@ class ShuffleWorkerExtension:
         try:
             return self.shuffles[shuffle_id]
         except KeyError:
-            result = await self.worker.scheduler.shuffle_get(
-                id=shuffle_id,
-                schema=pa.Schema.from_pandas(empty).serialize().to_pybytes()
-                if empty is not None
-                else None,
-                npartitions=npartitions,
-                column=column,
-            )
-            if shuffle_id not in self.shuffles:
-                shuffle = Shuffle(
-                    column=result["column"],
-                    worker_for=result["worker_for"],
-                    workers=result["workers"],
-                    worker=self.worker,
-                    schema=deserialize_schema(result["schema"]),
+            try:
+                result = await self.worker.scheduler.shuffle_get(
                     id=shuffle_id,
-                    executor=self.executor,
+                    schema=pa.Schema.from_pandas(empty).serialize().to_pybytes()
+                    if empty is not None
+                    else None,
+                    npartitions=npartitions,
+                    column=column,
                 )
-                self.shuffles[shuffle_id] = shuffle
-            return self.shuffles[shuffle_id]
+            except KeyError:
+                from distributed.worker import Reschedule
+
+                raise Reschedule()
+            else:
+                if shuffle_id not in self.shuffles:
+                    shuffle = Shuffle(
+                        column=result["column"],
+                        worker_for=result["worker_for"],
+                        workers=result["workers"],
+                        worker=self.worker,
+                        schema=deserialize_schema(result["schema"]),
+                        id=shuffle_id,
+                        executor=self.executor,
+                    )
+                    self.shuffles[shuffle_id] = shuffle
+                return self.shuffles[shuffle_id]
 
     def get_shuffle(
         self,
