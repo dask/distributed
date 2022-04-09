@@ -12,7 +12,7 @@ pa = pytest.importorskip("pyarrow")
 
 import dask
 import dask.dataframe as dd
-from dask.distributed import Worker
+from dask.distributed import Worker, Scheduler
 
 from distributed.shuffle.shuffle_extension import (
     dump_batch,
@@ -22,6 +22,22 @@ from distributed.shuffle.shuffle_extension import (
     split_by_worker,
 )
 from distributed.utils_test import gen_cluster
+
+
+def clean_worker(worker):
+    assert not worker.extensions["shuffle"].shuffles
+    for fn in os.walk(worker.local_directory):
+        assert "shuffle" not in fn
+
+
+def clean_scheduler(scheduler):
+    assert not scheduler.extensions["shuffle"].worker_for
+    assert not scheduler.extensions["shuffle"].heartbeats
+    assert not scheduler.extensions["shuffle"].schemas
+    assert not scheduler.extensions["shuffle"].columns
+    assert not scheduler.extensions["shuffle"].input_workers
+    assert not scheduler.extensions["shuffle"].output_workers
+    assert not scheduler.extensions["shuffle"].completed_workers
 
 
 @gen_cluster(client=True, timeout=1000000)
@@ -38,6 +54,10 @@ async def test_basic(c, s, a, b):
     y = await y
     assert x == y
 
+    clean_worker(a)
+    clean_worker(b)
+    clean_scheduler(s)
+
 
 @gen_cluster(client=True, timeout=1000000)
 async def test_concurrent(c, s, a, b):
@@ -53,6 +73,10 @@ async def test_concurrent(c, s, a, b):
     x = await x
     y = await y
     assert x == y
+
+    clean_worker(a)
+    clean_worker(b)
+    clean_scheduler(s)
 
 
 @gen_cluster(client=True)
@@ -77,6 +101,10 @@ async def test_bad_disk(c, s, a, b):
         out = await c.compute(out)
 
     assert a.local_directory in str(e.value) or b.local_directory in str(e.value)
+
+    # clean_worker(a)  # TODO: clean up on exception
+    # clean_worker(b)  # TODO: clean up on exception
+    # clean_scheduler(s)
 
 
 @pytest.mark.slow
@@ -110,6 +138,10 @@ async def test_crashed_worker(c, s, a, b):
 
     assert a.address in str(e.value) or b.address in str(e.value)
 
+    clean_worker(a)
+    clean_worker(b)
+    clean_scheduler(s)
+
 
 @gen_cluster(client=True)
 async def test_heartbeat(c, s, a, b):
@@ -128,8 +160,12 @@ async def test_heartbeat(c, s, a, b):
         await asyncio.sleep(0.001)
         await a.heartbeat()
 
-    [s] = s.extensions["shuffle"].heartbeats.values()
+    assert s.extensions["shuffle"].heartbeats.values()
     await out
+
+    clean_worker(a)
+    clean_worker(b)
+    clean_scheduler(s)
 
 
 def test_processing_chain():
@@ -218,12 +254,12 @@ async def test_head(c, s, a, b):
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = await out.head(compute=False).persist()  # Only ask for one key
 
-    assert not a.extensions["shuffle"].shuffles  # cleaned up metadata?
-    assert not b.extensions["shuffle"].shuffles
-    assert not s.extensions["shuffle"].worker_for  # cleaned up metadata?
-
     assert list(os.walk(a.local_directory)) == a_files  # cleaned up files?
     assert list(os.walk(b.local_directory)) == b_files
+
+    clean_worker(a)
+    clean_worker(b)
+    clean_scheduler(s)
 
 
 def test_split_by_worker():
@@ -248,6 +284,10 @@ async def test_tail(c, s, a, b):
 
     assert len(s.tasks) < df.npartitions * 2
 
+    clean_worker(a)
+    clean_worker(b)
+    clean_scheduler(s)
+
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 4)] * 2)
 async def test_repeat(c, s, a, b):
@@ -269,6 +309,10 @@ async def test_repeat(c, s, a, b):
     assert not a.extensions["shuffle"].shuffles
 
     await c.compute(out.head(compute=False))
+
+    clean_worker(a)
+    clean_worker(b)
+    clean_scheduler(s)
 
 
 @gen_cluster(client=True, timeout=10)
