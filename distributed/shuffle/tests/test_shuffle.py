@@ -13,6 +13,7 @@ pa = pytest.importorskip("pyarrow")
 import dask
 import dask.dataframe as dd
 from dask.distributed import Worker
+from dask.utils import stringify
 
 from distributed.shuffle.shuffle_extension import (
     dump_batch,
@@ -42,7 +43,7 @@ def clean_scheduler(scheduler):
     assert not scheduler.extensions["shuffle"].completed_workers
 
 
-@gen_cluster(client=True, timeout=1000000)
+@gen_cluster(client=True)
 async def test_basic(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -61,7 +62,7 @@ async def test_basic(c, s, a, b):
     clean_scheduler(s)
 
 
-@gen_cluster(client=True, timeout=1000000)
+@gen_cluster(client=True)
 async def test_concurrent(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -319,7 +320,7 @@ async def test_repeat(c, s, a, b):
     clean_scheduler(s)
 
 
-@gen_cluster(client=True, timeout=10)
+@gen_cluster(client=True)
 async def test_new_worker(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -342,7 +343,7 @@ async def test_new_worker(c, s, a, b):
         clean_scheduler(s)
 
 
-@gen_cluster(client=True, timeout=10)
+@gen_cluster(client=True)
 async def test_multi(c, s, a, b):
     left = dask.datasets.timeseries(
         start="2000-01-01",
@@ -366,3 +367,30 @@ async def test_multi(c, s, a, b):
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
+
+
+@gen_cluster(client=True)
+async def test_restrictions(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-30",
+        dtypes={"x": float, "y": float},
+        freq="1 s",
+    ).persist(workers=a.address)
+    await df
+    assert a.data
+    assert not b.data
+
+    x = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    x = x.persist(workers=b.address)
+
+    await x
+
+    assert all(stringify(key) in b.data for key in df.__dask_keys__())
+
+    del x
+    x = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    x = x.persist(workers=a.address)
+
+    await x
+    assert all(stringify(key) in b.data for key in df.__dask_keys__())
