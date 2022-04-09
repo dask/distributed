@@ -138,11 +138,11 @@ async def test_crashed_worker(c, s, a, b):
     with pytest.raises(Exception) as e:
         out = await c.compute(out)
 
-    assert a.address in str(e.value) or b.address in str(e.value)
+    assert b.address in str(e.value)
 
-    clean_worker(a)
-    clean_worker(b)
-    clean_scheduler(s)
+    # clean_worker(a)  # TODO: clean up on exception
+    # clean_worker(b)
+    # clean_scheduler(s)
 
 
 @gen_cluster(client=True)

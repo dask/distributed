@@ -20,7 +20,7 @@ from distributed.shuffle.arrow import (
 )
 from distributed.shuffle.multi_comm import MultiComm
 from distributed.shuffle.multi_file import MultiFile
-from distributed.utils import sync
+from distributed.utils import log_errors, sync
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -42,6 +42,7 @@ class Shuffle:
         self,
         column,
         worker_for: dict[int, str],
+        output_workers: set,
         schema: pa.Schema,
         id: ShuffleId,
         worker: Worker,
@@ -54,6 +55,7 @@ class Shuffle:
         self.id = id
         self.schema = schema
         self.worker = worker
+        self.output_workers = output_workers
         self.executor = executor
 
         partitions_of = defaultdict(list)
@@ -258,17 +260,18 @@ class ShuffleWorkerExtension:
         Hander: Inform the extension that all input partitions have been handed off to extensions.
         Using an unknown ``shuffle_id`` is an error.
         """
-        shuffle = await self._get_shuffle(shuffle_id)
-        await shuffle.multi_comm.flush()
-        shuffle.inputs_done()
-        if shuffle.done():
-            # If the shuffle has no output partitions, remove it now;
-            # `get_output_partition` will never be called.
-            # This happens when there are fewer output partitions than workers.
-            assert not shuffle.multi_file.shards
-            await shuffle.multi_file.flush()
-            del self.shuffles[shuffle_id]
-            shuffle.close()
+        with log_errors():
+            shuffle = await self._get_shuffle(shuffle_id)
+            await shuffle.multi_comm.flush()
+            shuffle.inputs_done()
+            if shuffle.done():
+                # If the shuffle has no output partitions, remove it now;
+                # `get_output_partition` will never be called.
+                # This happens when there are fewer output partitions than workers.
+                assert not shuffle.multi_file.shards
+                await shuffle.multi_file.flush()
+                del self.shuffles[shuffle_id]
+                shuffle.close()
 
     def add_partition(
         self,
@@ -294,9 +297,15 @@ class ShuffleWorkerExtension:
         """
         # Tell all peers that we've reached the barrier
         # Note that this will call `shuffle_inputs_done` on our own worker as well
-        await self.worker.scheduler.broadcast(
+        out = await self.worker.scheduler.broadcast(
             msg={"op": "shuffle_inputs_done", "shuffle_id": shuffle_id}
         )
+        shuffle = self.shuffles[shuffle_id]
+        if not shuffle.output_workers.issubset(set(out)):
+            raise ValueError(
+                "Some critical workers have left",
+                set(shuffle.output_workers) - set(out),
+            )
         # TODO handle errors from workers and scheduler, and cancellation.
 
     def get_output_partition(
@@ -353,6 +362,7 @@ class ShuffleWorkerExtension:
                     shuffle = Shuffle(
                         column=result["column"],
                         worker_for=result["worker_for"],
+                        output_workers=result["output_workers"],
                         worker=self.worker,
                         schema=deserialize_schema(result["schema"]),
                         id=shuffle_id,
@@ -440,6 +450,7 @@ class ShuffleSchedulerExtension:
             "worker_for": self.worker_for[id],
             "column": self.columns[id],
             "schema": self.schemas[id],
+            "output_workers": self.output_workers[id],
         }
 
     def register_complete(self, id: ShuffleId, worker: str):
