@@ -2894,7 +2894,7 @@ class Client(SyncMethodMixin):
             out = pickle.dumps(dsk, buffer_callback=buffers.append)
             buffers = [buffer.raw() for buffer in buffers]
             nbytes = len(out) + sum(map(len, buffers))
-            if nbytes > 10_000_000:
+            if nbytes > 2_000_000:
                 warnings.warn(
                     f"Sending large graph of {format_bytes(nbytes)}.\n"
                     "This may cause some slowdown\n."

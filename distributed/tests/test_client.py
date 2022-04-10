@@ -4274,7 +4274,7 @@ async def test_persist_workers_annotate2(e, s, a, b, c):
         assert all(layer.annotations is None for layer in x.dask.layers.values())
 
     for v in L1:
-        assert s.worker_restrictions[v.key] == {a.address}
+        assert s.tasks[v.key].worker_restrictions == {a.address}
 
 
 @nodebug  # test timing is fragile
@@ -5670,9 +5670,6 @@ async def test_warn_when_submitting_large_values(c, s, a, b):
     text = str(record[0].message)
     assert "2.00 MB" in text or "1.91 MiB" in text
     assert "large" in text
-    assert "..." in text
-    assert "'000" in text
-    assert "000'" in text
     assert len(text) < 2000
 
     with warnings.catch_warnings(record=True) as record:
@@ -6641,6 +6638,7 @@ async def test_annotations_task_state(c, s, a, b):
     )
 
 
+@pytest.mark.xfail(reason="Do we want dask.annotate to affect pre-made layers?")
 @pytest.mark.parametrize("fn", ["compute", "persist"])
 @gen_cluster(client=True)
 async def test_annotations_compute_time(c, s, a, b, fn):
