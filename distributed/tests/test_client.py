@@ -2335,8 +2335,8 @@ async def test_proxy(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_cancel(c, s, a, b):
-    x = c.submit(slowinc, 1)
-    y = c.submit(slowinc, x)
+    x = c.submit(slowinc, 1, key="x")
+    y = c.submit(slowinc, x, key="y")
 
     while y.key not in s.tasks:
         await asyncio.sleep(0.01)
@@ -5942,17 +5942,12 @@ def test_direct_sync(c):
 
 @gen_cluster()
 async def test_mixing_clients(s, a, b):
-    c1 = await Client(s.address, asynchronous=True)
-    c2 = await Client(s.address, asynchronous=True)
+    async with Client(s.address, asynchronous=True) as c1:
+        async with Client(s.address, asynchronous=True) as c2:
 
-    future = c1.submit(inc, 1)
-    with pytest.raises(ValueError):
-        c2.submit(inc, future)
-
-    assert not c2.futures  # Don't create Futures on second Client
-
-    await c1.close()
-    await c2.close()
+            future = c1.submit(inc, 1)
+            out = await c2.submit(inc, future)
+            assert out == 3
 
 
 @gen_cluster(client=True)

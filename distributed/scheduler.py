@@ -67,6 +67,7 @@ from distributed import cluster_dump, preloading, profile
 from distributed import versions as version_module
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
+from distributed.client import _current_client
 from distributed.comm import (
     Comm,
     CommClosedError,
@@ -4674,9 +4675,12 @@ class Scheduler(SchedulerState, ServerNode):
         allow_other_workers=None,
         annotations=None,
     ):
+        tok = _current_client.set(False)  # type: ignore
         try:
+
             graph: HighLevelGraph = pickle.loads(graph_header, buffers=graph_frames)
         except Exception as e:
+            _current_client.reset(tok)
             text = str(e)
             exc = pickle.dumps(e)
             parent: SchedulerState = cast(SchedulerState, self)

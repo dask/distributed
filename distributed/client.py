@@ -192,9 +192,9 @@ class Future(WrappedKey):
     def __init__(self, key, client=None, inform=True, state=None):
         self.key = key
         self._cleared = False
-        if client is None:
+        if client is None and _current_client.get() is not False:
             try:
-                client = Client.current(allow_global=False)
+                client = Client.current()
             except ValueError:
                 pass
         self.client = client
