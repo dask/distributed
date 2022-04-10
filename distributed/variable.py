@@ -8,10 +8,10 @@ from tlz import merge
 
 from dask.utils import parse_timedelta, stringify
 
-from distributed.client import Client, Future
+from distributed.client import Client, Future, _current_client
 from distributed.metrics import time
 from distributed.utils import TimeoutError, log_errors
-from distributed.worker import get_client, get_worker
+from distributed.worker import get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -163,12 +163,13 @@ class Variable:
     Queue: shared multi-producer/multi-consumer queue between clients
     """
 
-    def __init__(self, name=None, client=None, maxsize=0):
-        try:
-            self.client = client or Client.current()
-        except ValueError:
-            # Initialise new client
-            self.client = get_worker().client
+    def __init__(self, name=None, client=None):
+        if client is None and _current_client.get() is not False:
+            try:
+                client = Client.current()
+            except ValueError:
+                client = get_worker().client
+        self.client = client
         self.name = name or "variable-" + uuid.uuid4().hex
 
     async def _set(self, value):
@@ -231,13 +232,15 @@ class Variable:
             self.client._send_to_scheduler({"op": "variable_delete", "name": self.name})
 
     def __getstate__(self):
-        return (self.name, self.client.scheduler.address)
+        if self.client:
+            return (self.name, self.client.scheduler.address)
+        else:
+            return (self.name, self._scheduler_address)
 
     def __setstate__(self, state):
         name, address = state
-        try:
-            client = get_client(address)
-            assert client.scheduler.address == address
-        except (AttributeError, AssertionError):
-            client = Client(address, set_as_default=False)
-        self.__init__(name=name, client=client)
+        self.__init__(name=name)
+        if self.client is None:
+            self._scheduler_address = address
+        else:
+            assert self.client.scheduler.address == address
