@@ -195,15 +195,16 @@ class Shuffle:
         assert (
             self.output_partitions_left > 0
         ), f"No outputs remaining, but requested output partition {i} on {self.worker.address}."
-        self.output_partitions_left -= 1
 
         sync(self.worker.loop, self.multi_file.flush)  # type: ignore
         try:
             df = self.multi_file.read(i)
             with self.time("cpu"):
-                return df.to_pandas()
+                out = df.to_pandas()
         except KeyError:
-            return self.schema.empty_table().to_pandas()
+            out = self.schema.empty_table().to_pandas()
+        self.output_partitions_left -= 1
+        return out
 
     def inputs_done(self) -> None:
         assert not self.transferred, "`inputs_done` called multiple times"
