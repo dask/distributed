@@ -4,6 +4,7 @@ import os
 import pytest
 
 from distributed.shuffle.multi_file import MultiFile
+from distributed.utils_test import gen_test
 
 
 def dump(data, f):
@@ -17,7 +18,7 @@ def load(f):
     return out
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_basic(tmp_path):
     with MultiFile(directory=tmp_path, dump=dump, load=load) as mf:
         await mf.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
@@ -34,7 +35,7 @@ async def test_basic(tmp_path):
     assert not os.path.exists(tmp_path)
 
 
-@pytest.mark.asyncio
+@gen_test()
 @pytest.mark.parametrize("count", [2, 100, 1000])
 async def test_many(tmp_path, count):
     with MultiFile(directory=tmp_path, dump=dump, load=load) as mf:
@@ -52,7 +53,7 @@ async def test_many(tmp_path, count):
     assert not os.path.exists(tmp_path)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_exceptions(tmp_path):
     def dump(data, f):
         raise Exception(123)

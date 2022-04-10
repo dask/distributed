@@ -4,9 +4,10 @@ from collections import defaultdict
 import pytest
 
 from distributed.shuffle.multi_comm import MultiComm
+from distributed.utils_test import gen_test
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_basic(tmp_path):
     d = defaultdict(list)
 
@@ -23,7 +24,7 @@ async def test_basic(tmp_path):
     assert b"".join(d["y"]) == b"1" * 1000
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_exceptions(tmp_path):
     d = defaultdict(list)
 
