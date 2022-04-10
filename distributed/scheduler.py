@@ -4705,9 +4705,9 @@ class Scheduler(SchedulerState, ServerNode):
         dsk = dict(graph)
 
         if allow_other_workers:
-            loose_restrictions = list(dsk)
+            loose_restrictions = set(dsk)
         else:
-            loose_restrictions = []
+            loose_restrictions = set()
 
         from distributed.utils_comm import unpack_remotedata
 
@@ -4771,6 +4771,10 @@ class Scheduler(SchedulerState, ServerNode):
                 _restrictions = _restrictions or {}
                 d = process(layer.annotations["workers"], keys=layer, string_keys=None)
                 _restrictions.update(d)  # TODO: there is an implicit ordering here
+
+            if layer.annotations and "allow_other_workers" in layer.annotations:
+                if layer.annotations["allow_other_workers"] is True:
+                    loose_restrictions.update(set(map(stringify, layer)))
 
             if layer.annotations:
                 d = process(layer.annotations, keys=layer, string_keys=None)
@@ -4957,7 +4961,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         annotations = annotations or {}
         restrictions = restrictions or {}
-        loose_restrictions = loose_restrictions or []
+        loose_restrictions = loose_restrictions or set()
         resources = resources or {}
         retries = retries or {}
 
@@ -4967,7 +4971,7 @@ class Scheduler(SchedulerState, ServerNode):
                 restrictions.update(annotations["workers"])
 
             if "allow_other_workers" in annotations:
-                loose_restrictions.extend(
+                loose_restrictions.update(
                     k for k, v in annotations["allow_other_workers"].items() if v
                 )
 

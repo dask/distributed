@@ -2624,6 +2624,7 @@ async def test_dont_delete_recomputed_results(c, s, w):
         await asyncio.sleep(0.01)
 
 
+@pytest.mark.skip(reason="We no longer support this")
 @gen_cluster(nthreads=[], client=True)
 async def test_fatally_serialized_input(c, s):
     o = FatallySerializedObject()
@@ -4251,7 +4252,9 @@ async def test_persist_workers_annotate(e, s, a, b, c):
     assert all(v.key in a.data for v in L1)
     assert total.key in b.data
 
-    assert s.loose_restrictions == {total2.key} | {v.key for v in L2}
+    for v in L2:
+        assert s.tasks[v.key].loose_restrictions
+    assert s.tasks[total2.key].loose_restrictions
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
