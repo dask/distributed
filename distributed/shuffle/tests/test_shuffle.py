@@ -104,7 +104,9 @@ async def test_bad_disk(c, s, a, b):
     with pytest.raises(FileNotFoundError) as e:
         out = await c.compute(out)
 
-    assert a.local_directory in str(e.value) or b.local_directory in str(e.value)
+    assert os.path.split(a.local_directory)[-1] in str(e.value) or os.path.split(
+        b.local_directory
+    )[-1] in str(e.value)
 
     # clean_worker(a)  # TODO: clean up on exception
     # clean_worker(b)  # TODO: clean up on exception
