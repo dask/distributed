@@ -24,6 +24,7 @@ from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
+from distributed.profile import wait_profiler
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, parse_ports
 from distributed.utils_test import captured_logger, gen_cluster, gen_test
@@ -208,6 +209,7 @@ async def test_num_fds(s):
     w = await Nanny(s.address)
     await w.close()
     del w
+    wait_profiler()
     gc.collect()
 
     before = proc.num_fds()
@@ -497,7 +499,7 @@ class KeyboardInterruptWorker(worker.Worker):
 
 
 @pytest.mark.parametrize("protocol", ["tcp", "ucx"])
-@pytest.mark.asyncio
+@gen_test()
 async def test_nanny_closed_by_keyboard_interrupt(cleanup, protocol):
     if protocol == "ucx":  # Skip if UCX isn't available
         pytest.importorskip("ucp")

@@ -4,7 +4,20 @@ import dask.config
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 
 from distributed.client import Client
+from distributed.protocol import dumps, loads
+from distributed.protocol.serialize import ToPickle
 from distributed.utils_test import gen_cluster
+
+
+def test_ToPickle():
+    class Foo:
+        def __init__(self, data):
+            self.data = data
+
+    msg = {"x": ToPickle(Foo(123))}
+    frames = dumps(msg)
+    out = loads(frames)
+    assert out["x"].data == 123
 
 
 class NonMsgPackSerializableLayer(MaterializedLayer):

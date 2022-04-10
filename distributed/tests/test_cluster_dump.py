@@ -115,19 +115,15 @@ async def test_cluster_dump_state(c, s, a, b, tmp_path):
 @gen_cluster(client=True)
 async def test_cluster_dump_story(c, s, a, b, tmp_path):
     filename = tmp_path / "dump"
-    futs = c.map(inc, range(2))
-    fut_keys = {f.key for f in futs}
-    await c.gather(futs)
+    f1 = c.submit(inc, 0, key="f1")
+    f2 = c.submit(inc, 1, key="f2")
+    await c.gather([f1, f2])
     await c.dump_cluster_state(filename, format="msgpack")
 
     dump = DumpArtefact.from_url(f"{filename}.msgpack.gz")
-    task_key = next(iter(fut_keys))
 
-    def _expected_story(task_key):
-        return
-
-    story = dump.scheduler_story(*fut_keys)
-    assert len(story) == len(fut_keys)
+    story = dump.scheduler_story("f1", "f2")
+    assert story.keys() == {"f1", "f2"}
 
     for k, task_story in story.items():
         expected = [
@@ -140,8 +136,8 @@ async def test_cluster_dump_story(c, s, a, b, tmp_path):
             for e1, e2 in zip(event, expected_event):
                 assert e1 == e2
 
-    story = dump.worker_story(*fut_keys)
-    assert len(story) == len(fut_keys)
+    story = dump.worker_story("f1", "f2")
+    assert story.keys() == {"f1", "f2"}
 
     for k, task_story in story.items():
         assert_worker_story(
@@ -149,7 +145,7 @@ async def test_cluster_dump_story(c, s, a, b, tmp_path):
             [
                 (k, "compute-task"),
                 (k, "released", "waiting", "waiting", {k: "ready"}),
-                (k, "waiting", "ready", "ready", {}),
+                (k, "waiting", "ready", "ready", {k: "executing"}),
                 (k, "ready", "executing", "executing", {}),
                 (k, "put-in-memory"),
                 (k, "executing", "memory", "memory", {}),

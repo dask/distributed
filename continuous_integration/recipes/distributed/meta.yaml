@@ -54,11 +54,12 @@ outputs:
       build:
         - {{ compiler('c') }}                     # [cython_enabled]
       host:
-        - python
+        - python >=3.8
         - pip
+        - setuptools
         - cython                                  # [cython_enabled]
       run:
-        - python
+        - python >=3.8
         - click >=6.6
         - cloudpickle >=1.5.0
         - cytoolz >=0.8.2

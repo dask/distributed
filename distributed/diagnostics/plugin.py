@@ -61,6 +61,9 @@ class SchedulerPlugin:
         This runs at the end of the Scheduler startup process
         """
 
+    async def before_close(self) -> None:
+        """Runs prior to any Scheduler shutdown logic"""
+
     async def close(self) -> None:
         """Run when the scheduler closes down
 

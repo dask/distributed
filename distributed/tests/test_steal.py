@@ -12,11 +12,12 @@ from tlz import concat, sliding_window
 
 import dask
 
-from distributed import Lock, Nanny, Worker, wait, worker_client
+from distributed import Event, Lock, Nanny, Worker, wait, worker_client
 from distributed.compatibility import LINUX
 from distributed.config import config
 from distributed.core import Status
 from distributed.metrics import time
+from distributed.profile import wait_profiler
 from distributed.scheduler import key_split
 from distributed.system import MEMORY_LIMIT
 from distributed.utils_test import (
@@ -945,6 +946,7 @@ async def test_cleanup_repeated_tasks(c, s, a, b):
     assert not s.who_has
     assert not any(s.has_what.values())
 
+    wait_profiler()
     assert not list(ws)
 
 
@@ -1146,9 +1148,11 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
     # https://github.com/dask/distributed/issues/5370
     steal = s.extensions["stealing"]
     w0 = workers[0]
+    ev = Event()
     futs1 = c.map(
-        slowinc,
+        lambda _, ev: ev.wait(),
         range(10),
+        ev=ev,
         key=[f"f1-{ix}" for ix in range(10)],
         workers=[w0.address],
         allow_other_workers=True,
@@ -1173,19 +1177,30 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
     assert wsB == victim_ts.processing_on
     # move_task_request is not responsible for respecting worker restrictions
     steal.move_task_request(victim_ts, wsB, wsC)
+
+    # Let tasks finish
+    await ev.set()
     await c.gather(futs1)
 
-    # If this turns out to be overly flaky, the following may be relaxed or
-    # removed. The point of this test is to not deadlock but verifying expected
-    # state is still a nice thing
+    assert victim_ts.who_has != {wsC}
+    msgs = steal.story(victim_ts)
+    msgs = [msg[:-1] for msg in msgs]  # Remove random IDs
 
-    # Either the last request goes through or both have been rejected since the
-    # computation was already done by the time the request comes in. This is
-    # unfortunately not stable even if we increase the compute time
-    if victim_ts.who_has != {wsC}:
-        msgs = steal.story(victim_ts)
-        assert len(msgs) == 2
-        assert all(msg[0] == "already-aborted" for msg in msgs), msgs
+    # There are three possible outcomes
+    expect1 = [
+        ("stale-response", victim_key, "executing", wsA.address),
+        ("already-computing", victim_key, "executing", wsB.address, wsC.address),
+    ]
+    expect2 = [
+        ("already-computing", victim_key, "executing", wsB.address, wsC.address),
+        ("already-aborted", victim_key, "executing", wsA.address),
+    ]
+    # This outcome appears only in ~2% of the runs
+    expect3 = [
+        ("already-computing", victim_key, "executing", wsB.address, wsC.address),
+        ("already-aborted", victim_key, "memory", wsA.address),
+    ]
+    assert msgs in (expect1, expect2, expect3)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)

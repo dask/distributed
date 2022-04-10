@@ -1,11 +1,17 @@
+from itertools import chain
+
 import pytest
 
 from distributed.utils import recursive_to_dict
 from distributed.worker_state_machine import (
+    Instruction,
     ReleaseWorkerDataMsg,
+    RescheduleMsg,
     SendMessageToScheduler,
+    StateMachineEvent,
     TaskState,
     UniqueTaskHeap,
+    merge_recs_instructions,
 )
 
 
@@ -82,13 +88,48 @@ def test_unique_task_heap():
     assert repr(heap) == "<UniqueTaskHeap: 0 items>"
 
 
-@pytest.mark.parametrize("cls", SendMessageToScheduler.__subclasses__())
-def test_sendmsg_slots(cls):
-    smsg = cls(**dict.fromkeys(cls.__annotations__))
-    assert not hasattr(smsg, "__dict__")
+@pytest.mark.parametrize(
+    "cls",
+    chain(
+        [UniqueTaskHeap],
+        Instruction.__subclasses__(),
+        SendMessageToScheduler.__subclasses__(),
+        StateMachineEvent.__subclasses__(),
+    ),
+)
+def test_slots(cls):
+    params = [
+        k
+        for k in dir(cls)
+        if not k.startswith("_") and k != "op" and not callable(getattr(cls, k))
+    ]
+    inst = cls(**dict.fromkeys(params))
+    assert not hasattr(inst, "__dict__")
 
 
 def test_sendmsg_to_dict():
     # Arbitrary sample class
     smsg = ReleaseWorkerDataMsg(key="x")
     assert smsg.to_dict() == {"op": "release-worker-data", "key": "x"}
+
+
+def test_merge_recs_instructions():
+    x = TaskState("x")
+    y = TaskState("y")
+    instr1 = RescheduleMsg(key="foo", worker="a")
+    instr2 = RescheduleMsg(key="bar", worker="b")
+    assert merge_recs_instructions(
+        ({x: "memory"}, [instr1]),
+        ({y: "released"}, [instr2]),
+    ) == (
+        {x: "memory", y: "released"},
+        [instr1, instr2],
+    )
+
+    # Identical recommendations are silently ignored; incompatible ones raise
+    assert merge_recs_instructions(({x: "memory"}, []), ({x: "memory"}, [])) == (
+        {x: "memory"},
+        [],
+    )
+    with pytest.raises(ValueError):
+        merge_recs_instructions(({x: "memory"}, []), ({x: "released"}, []))
