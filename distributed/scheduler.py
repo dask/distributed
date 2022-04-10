@@ -4673,6 +4673,8 @@ class Scheduler(SchedulerState, ServerNode):
         actors=None,
         fifo_timeout=0,
         code=None,
+        workers=None,
+        allow_other_workers=None,
     ):
         try:
             graph: HighLevelGraph = pickle.loads(graph_header, buffers=graph_frames)
@@ -4692,7 +4694,21 @@ class Scheduler(SchedulerState, ServerNode):
             self.client_desires_keys(keys=keys, client=client)
             return
 
+        if isinstance(workers, (str, Number)):
+            workers = [workers]
+        if isinstance(workers, tuple):
+            workers = list(workers)
+        if isinstance(workers, (list, set)):
+            restrictions = workers
+        elif workers is None:
+            restrictions = {}
+        else:
+            raise TypeError("Workers must be a list or set of workers or None")
+
         dsk = dict(graph)
+
+        if allow_other_workers:
+            loose_restrictions = set(dsk)
 
         from distributed.utils_comm import unpack_remotedata
 
