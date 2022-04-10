@@ -297,10 +297,10 @@ class ShuffleWorkerExtension:
         """
         # Tell all peers that we've reached the barrier
         # Note that this will call `shuffle_inputs_done` on our own worker as well
+        shuffle = await self._get_shuffle(shuffle_id)
         out = await self.worker.scheduler.broadcast(
             msg={"op": "shuffle_inputs_done", "shuffle_id": shuffle_id}
         )
-        shuffle = self.shuffles[shuffle_id]
         if not shuffle.output_workers.issubset(set(out)):
             raise ValueError(
                 "Some critical workers have left",

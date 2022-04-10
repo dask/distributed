@@ -28,8 +28,10 @@ from distributed.utils_test import gen_cluster
 def clean_worker(worker):
     """Assert that the worker has no shuffle state"""
     assert not worker.extensions["shuffle"].shuffles
-    for fn in os.walk(worker.local_directory):
-        assert "shuffle" not in fn
+    for dirpath, dirnames, filenames in os.walk(worker.local_directory):
+        assert "shuffle" not in dirpath
+        for fn in dirnames + filenames:
+            assert "shuffle" not in fn
 
 
 def clean_scheduler(scheduler):
@@ -277,7 +279,7 @@ def test_split_by_worker():
 async def test_tail(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
-        end="2000-01-30",
+        end="2000-01-10",
         dtypes={"x": float, "y": float},
         freq="1 s",
     )
@@ -323,7 +325,7 @@ async def test_repeat(c, s, a, b):
 async def test_new_worker(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
-        end="2000-01-30",
+        end="2000-01-20",
         dtypes={"x": float, "y": float},
         freq="1 s",
     )
