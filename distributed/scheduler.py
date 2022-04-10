@@ -4661,7 +4661,7 @@ class Scheduler(SchedulerState, ServerNode):
         client: str,
         graph_header: bytes,
         graph_frames: list[bytes],
-        keys=None,
+        keys: list[str],
         dependencies=None,
         restrictions=None,
         priority=None,
