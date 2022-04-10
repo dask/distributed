@@ -432,13 +432,15 @@ class ShuffleSchedulerExtension:
 
             for ts in self.scheduler.tasks[name].dependents:
                 part = ts.annotations["shuffle"]
-                if ts._worker_restrictions:
-                    worker = list(ts._worker_restrictions)[0]
+                if ts.worker_restrictions:
+                    worker = list(ts.worker_restrictions)[0]
                 else:
                     worker = worker_for(part, workers, npartitions)
                 mapping[part] = worker
                 output_workers.add(worker)
-                ts._worker_restrictions = {worker}
+                self.scheduler.set_restrictions({ts.key: {worker}})
+                # ts.worker_restrictions = {worker}  # TODO: once cython is
+                # gone
 
             self.worker_for[id] = mapping
             self.schemas[id] = schema
