@@ -5,7 +5,7 @@ from collections import defaultdict, deque
 
 from dask.utils import parse_timedelta
 
-from distributed.client import Client
+from distributed.client import Client, _current_client
 from distributed.utils import TimeoutError, log_errors
 from distributed.worker import get_worker
 
@@ -93,11 +93,15 @@ class Lock:
     """
 
     def __init__(self, name=None, client=None):
-        try:
-            self.client = client or Client.current()
-        except ValueError:
-            # Initialise new client
-            self.client = get_worker().client
+        if client is None and _current_client.get() is not False:
+            try:
+                self.client = client or Client.current()
+            except ValueError:
+                # Initialise new client
+                self.client = get_worker().client
+        else:
+            self.client = None
+
         self.name = name or "lock-" + uuid.uuid4().hex
         self.id = uuid.uuid4().hex
         self._locked = False
