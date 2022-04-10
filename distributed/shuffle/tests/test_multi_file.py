@@ -35,8 +35,8 @@ async def test_basic(tmp_path):
     assert not os.path.exists(tmp_path)
 
 
-@gen_test()
 @pytest.mark.parametrize("count", [2, 100, 1000])
+@gen_test()
 async def test_many(tmp_path, count):
     with MultiFile(directory=tmp_path, dump=dump, load=load) as mf:
         d = {i: [str(i).encode() * 100] for i in range(count)}
