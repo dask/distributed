@@ -5,8 +5,8 @@ from collections import defaultdict
 
 from dask.utils import parse_timedelta, stringify
 
-from distributed.client import Client, Future
-from distributed.worker import get_client, get_worker
+from distributed.client import Client, Future, _current_client
+from distributed.worker import get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -164,18 +164,20 @@ class Queue:
     """
 
     def __init__(self, name=None, client=None, maxsize=0):
-        try:
-            self.client = client or Client.current()
-        except ValueError:
-            # Initialise new client
-            self.client = get_worker().client
+        if client is None and _current_client.get() is not False:
+            try:
+                client = Client.current()
+            except ValueError:
+                client = get_worker().client
+        self.client = client
         self.name = name or "queue-" + uuid.uuid4().hex
         self.maxsize = maxsize
 
-        if self.client.asynchronous:
-            self._started = asyncio.ensure_future(self._start())
-        else:
-            self.client.sync(self._start)
+        if self.client is not None:
+            if self.client.asynchronous:
+                self._started = asyncio.ensure_future(self._start())
+            else:
+                self.client.sync(self._start)
 
     async def _start(self):
         await self.client.scheduler.queue_create(name=self.name, maxsize=self.maxsize)
@@ -269,13 +271,15 @@ class Queue:
             self.client._send_to_scheduler({"op": "queue_release", "name": self.name})
 
     def __getstate__(self):
-        return (self.name, self.client.scheduler.address)
+        if self.client:
+            return (self.name, self.client.scheduler.address, self.maxsize)
+        else:
+            return (self.name, self._scheduler_address, self.maxsize)
 
     def __setstate__(self, state):
-        name, address = state
-        try:
-            client = get_client(address)
-            assert client.scheduler.address == address
-        except (AttributeError, AssertionError):
-            client = Client(address, set_as_default=False)
-        self.__init__(name=name, client=client)
+        name, address, maxsize = state
+        self.__init__(name=name, maxsize=maxsize)
+        if self.client is None:
+            self._scheduler_address = address
+        else:
+            assert self.client.scheduler.address == address
