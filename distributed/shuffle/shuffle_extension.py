@@ -320,15 +320,15 @@ class ShuffleWorkerExtension:
         output = shuffle.get_output_partition(output_partition)
         if shuffle.done():
             shuffle = self.shuffles.pop(shuffle_id, None)
+            # key missing if another thread got to it first
             if shuffle:
                 shuffle.close()
-            sync(
-                self.worker.loop,
-                self.worker.scheduler.shuffle_register_complete,
-                id=shuffle_id,
-                worker=self.worker.address,
-            )
-            # key missing if another thread got to it first
+                sync(
+                    self.worker.loop,
+                    self.worker.scheduler.shuffle_register_complete,
+                    id=shuffle_id,
+                    worker=self.worker.address,
+                )
         return output
 
     async def _get_shuffle(
