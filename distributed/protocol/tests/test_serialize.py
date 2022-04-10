@@ -169,6 +169,10 @@ from distributed.utils_test import gen_cluster
 
 @gen_cluster(client=True)
 async def test_object_in_graph(c, s, a, b):
+    class MyObj:
+        def __init__(self, data):
+            self.data = data
+
     o = MyObj(123)
     v = delayed(o)
     v2 = delayed(identity)(v)
