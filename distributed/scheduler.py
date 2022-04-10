@@ -4662,10 +4662,7 @@ class Scheduler(SchedulerState, ServerNode):
         graph_header: bytes,
         graph_frames: list[bytes],
         keys: list[str],
-        dependencies=None,
-        restrictions=None,
         priority=None,
-        loose_restrictions=None,
         resources=None,
         submitting_task=None,
         retries=None,
@@ -4696,19 +4693,21 @@ class Scheduler(SchedulerState, ServerNode):
 
         if isinstance(workers, (str, Number)):
             workers = [workers]
-        if isinstance(workers, tuple):
+        if isinstance(workers, (tuple, set)):
             workers = list(workers)
-        if isinstance(workers, (list, set)):
+        if isinstance(workers, list):
             restrictions = workers
         elif workers is None:
-            restrictions = {}
+            restrictions = []
         else:
             raise TypeError("Workers must be a list or set of workers or None")
 
         dsk = dict(graph)
 
         if allow_other_workers:
-            loose_restrictions = set(dsk)
+            loose_restrictions = list(dsk)
+        else:
+            loose_restrictions = []
 
         from distributed.utils_comm import unpack_remotedata
 
@@ -4747,7 +4746,9 @@ class Scheduler(SchedulerState, ServerNode):
         if user_priority:
             user_priority = process(user_priority)
         if restrictions:
-            restrictions = process(restrictions)
+            _restrictions = process(restrictions)
+        else:
+            _restrictions = {}
 
         for layer in graph.layers.values():
             if layer.annotations and "retries" in layer.annotations:
@@ -4767,9 +4768,9 @@ class Scheduler(SchedulerState, ServerNode):
             if layer.annotations and "workers" in layer.annotations:
                 if isinstance(layer.annotations["workers"], (str, int)):
                     layer.annotations["workers"] = (layer.annotations["workers"],)
-                restrictions = restrictions or {}
+                _restrictions = _restrictions or {}
                 d = process(layer.annotations["workers"], keys=layer, string_keys=None)
-                restrictions.update(d)  # TODO: there is an implicit ordering here
+                _restrictions.update(d)  # TODO: there is an implicit ordering here
 
             if layer.annotations:
                 d = process(layer.annotations, keys=layer, string_keys=None)
@@ -4806,7 +4807,7 @@ class Scheduler(SchedulerState, ServerNode):
             dsk,
             keys,
             dependencies,
-            restrictions,
+            _restrictions,
             priority,
             loose_restrictions,
             resources,
