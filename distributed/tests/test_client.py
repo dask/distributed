@@ -1906,10 +1906,10 @@ async def test_allow_restrictions(c, s, a, b):
         c.map(inc, [1], allow_other_workers=True)
 
     with pytest.raises(TypeError):
-        c.submit(inc, 20, workers="127.0.0.1", allow_other_workers="Hello!")
+        c.submit(inc, 40, workers="127.0.0.1", allow_other_workers="Hello!")
 
     with pytest.raises(TypeError):
-        c.map(inc, [20], workers="127.0.0.1", allow_other_workers="Hello!")
+        c.map(inc, [40], workers="127.0.0.1", allow_other_workers="Hello!")
 
 
 def test_bad_address():
