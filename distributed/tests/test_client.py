@@ -4259,14 +4259,11 @@ async def test_persist_workers_annotate(e, s, a, b, c):
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
 async def test_persist_workers_annotate2(e, s, a, b, c):
-    def key_to_worker(key):
-        return a.address
-
     L1 = [delayed(inc)(i) for i in range(4)]
     for x in L1:
         assert all(layer.annotations is None for layer in x.dask.layers.values())
 
-    with dask.annotate(workers=key_to_worker):
+    with dask.annotate(workers=a.address):
         out = e.persist(L1, optimize_graph=False)
         await wait(out)
 
@@ -6638,7 +6635,6 @@ async def test_annotations_task_state(c, s, a, b):
     )
 
 
-@pytest.mark.xfail(reason="Do we want dask.annotate to affect pre-made layers?")
 @pytest.mark.parametrize("fn", ["compute", "persist"])
 @gen_cluster(client=True)
 async def test_annotations_compute_time(c, s, a, b, fn):

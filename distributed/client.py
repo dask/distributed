@@ -2917,6 +2917,7 @@ class Client(SyncMethodMixin):
                     "user_priority": user_priority,
                     "workers": workers,
                     "allow_other_workers": allow_other_workers,
+                    "annotations": annotations,
                 }
             )
             return futures

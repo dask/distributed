@@ -4672,6 +4672,7 @@ class Scheduler(SchedulerState, ServerNode):
         code=None,
         workers=None,
         allow_other_workers=None,
+        annotations=None,
     ):
         try:
             graph: HighLevelGraph = pickle.loads(graph_header, buffers=graph_frames)
@@ -4690,6 +4691,19 @@ class Scheduler(SchedulerState, ServerNode):
 
             self.client_desires_keys(keys=keys, client=client)
             return
+
+        if annotations is None:
+            annotations = {}
+
+        workers = workers or annotations.pop("workers", None)
+        allow_other_workers = allow_other_workers or annotations.pop(
+            "allow_other_workers", None
+        )
+        if retries is None:
+            retries = annotations.pop("retries", None)
+        resources = resources or annotations.pop("resources", None)
+        if user_priority is None:
+            user_priority = annotations.pop("priority", None)
 
         if isinstance(workers, (str, Number)):
             workers = [workers]
@@ -4712,7 +4726,6 @@ class Scheduler(SchedulerState, ServerNode):
         from distributed.utils_comm import unpack_remotedata
 
         dependencies, dependents = get_deps(dsk)
-        annotations: dict = {}
 
         # Remove `Future` objects from graph and note any future     dependencies
         dsk2 = {}
@@ -4739,6 +4752,8 @@ class Scheduler(SchedulerState, ServerNode):
                 return keymap(stringify, x)
             raise TypeError()
 
+        if annotations:
+            annotations = process(annotations)
         if retries:
             retries = process(retries)
         if resources:
