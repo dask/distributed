@@ -1,10 +1,8 @@
 #!/usr/bin/env python
 
 import os
-import sys
 
 from setuptools import find_packages, setup
-from setuptools.extension import Extension
 
 import versioneer
 
@@ -22,47 +20,6 @@ for r in requires:
         cond_reqs.append(req)
     else:
         install_requires.append(r)
-
-# To enable Cython, add to pip install one of the following:
-# --install-option="--with-cython"
-# --install-option="--with-cython=annotate"
-# --install-option="--with-cython=profile"
-# --install-option="--with-cython=annotate,profile"
-
-cython_arg = None
-for i in range(len(sys.argv)):
-    if sys.argv[i].startswith("--with-cython"):
-        cython_arg = sys.argv[i]
-        del sys.argv[i]
-        break
-
-ext_modules = []
-if cython_arg:
-    try:
-        import cython  # noqa: F401
-    except ImportError:
-        setup_requires.append("cython")
-
-    _, _, params_str = cython_arg.partition("=")
-    params = params_str.split(",")
-    profile = "profile" in params
-    if "annotate" in params:
-        import Cython.Compiler.Options
-
-        Cython.Compiler.Options.annotate = True
-
-    cyext_modules = [
-        Extension("distributed.scheduler", sources=["distributed/scheduler.py"]),
-    ]
-    for e in cyext_modules:
-        e.cython_directives = {  # type: ignore
-            "annotation_typing": True,
-            "binding": False,
-            "embedsignature": True,
-            "language_level": 3,
-            "profile": profile,
-        }
-    ext_modules.extend(cyext_modules)
 
 
 setup(
@@ -87,7 +44,6 @@ setup(
     install_requires=install_requires,
     extras_require=extras_require,
     packages=find_packages(exclude=["*tests*"]),
-    ext_modules=ext_modules,
     long_description=(
         open("README.rst").read() if os.path.exists("README.rst") else ""
     ),
