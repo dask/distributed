@@ -332,7 +332,7 @@ async def test_remove_worker_from_scheduler(s, a, b):
     )
 
     assert a.address in s.stream_comms
-    await s.remove_worker(address=a.address, stimulus_id="test")
+    await s.remove_worker(address=a.address)
     assert a.address not in s.nthreads
     assert len(s.workers[b.address].processing) == len(dsk)  # b owns everything
 
@@ -340,12 +340,9 @@ async def test_remove_worker_from_scheduler(s, a, b):
 @gen_cluster()
 async def test_remove_worker_by_name_from_scheduler(s, a, b):
     assert a.address in s.stream_comms
-    assert await s.remove_worker(address=a.name, stimulus_id="test") == "OK"
+    assert await s.remove_worker(address=a.name) == "OK"
     assert a.address not in s.nthreads
-    assert (
-        await s.remove_worker(address=a.address, stimulus_id="test")
-        == "already-removed"
-    )
+    assert await s.remove_worker(address=a.address) == "already-removed"
 
 
 @gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "10 ms"})
@@ -355,7 +352,7 @@ async def test_clear_events_worker_removal(s, a, b):
     assert b.address in s.events
     assert b.address in s.nthreads
 
-    await s.remove_worker(address=a.address, stimulus_id="test")
+    await s.remove_worker(address=a.address)
     # Shortly after removal, the events should still be there
     assert a.address in s.events
     assert a.address not in s.nthreads
@@ -618,7 +615,7 @@ async def test_ready_remove_worker(s, a, b):
 
     assert all(len(w.processing) > w.nthreads for w in s.workers.values())
 
-    await s.remove_worker(address=a.address, stimulus_id="test")
+    await s.remove_worker(address=a.address)
 
     assert set(s.workers) == {b.address}
     assert all(len(w.processing) > w.nthreads for w in s.workers.values())
@@ -3253,7 +3250,7 @@ async def test_worker_reconnect_task_memory(c, s, a):
     while not a.executing_count and not a.data:
         await asyncio.sleep(0.001)
 
-    await s.remove_worker(address=a.address, close=False, stimulus_id="test")
+    await s.remove_worker(address=a.address, close=False)
     while not res.done():
         await a.heartbeat()
 
@@ -3277,7 +3274,7 @@ async def test_worker_reconnect_task_memory_with_resources(c, s, a):
         while not b.executing_count and not b.data:
             await asyncio.sleep(0.001)
 
-        await s.remove_worker(address=b.address, close=False, stimulus_id="test")
+        await s.remove_worker(address=b.address, close=False)
         while not res.done():
             await b.heartbeat()
 

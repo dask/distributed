@@ -174,6 +174,7 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 DEFAULT_DATA_SIZE = declare(
     Py_ssize_t, parse_bytes(dask.config.get("distributed.scheduler.default-data-size"))
 )
+STIMULUS_ID_UNSET = "<stimulus_id unset>"
 
 DEFAULT_EXTENSIONS = {
     "locks": LockExtension,
@@ -2321,15 +2322,9 @@ class SchedulerState:
             start_finish = (start, finish)
             func = self._transitions_table.get(start_finish)
             if func is not None:
-
-                try:
-                    recommendations, client_msgs, worker_msgs = func(
-                        key, stimulus_id, *args, **kwargs
-                    )
-                except Exception as e:
-                    # TODO(sjperkins): Remove from PR when ready to merge
-                    raise Exception(f"{func} {args} {kwargs}") from e
-
+                recommendations, client_msgs, worker_msgs = func(
+                    key, stimulus_id, *args, **kwargs
+                )
                 self._transition_counter += 1
             elif "released" not in start_finish:
                 assert not args and not kwargs, (args, kwargs, start_finish)
@@ -2379,6 +2374,9 @@ class SchedulerState:
             else:
                 raise RuntimeError("Impossible transition from %r to %r" % start_finish)
 
+            if not stimulus_id:
+                stimulus_id = STIMULUS_ID_UNSET
+
             finish2 = ts._state
             # FIXME downcast antipattern
             scheduler = pep484_cast(Scheduler, self)
@@ -2386,7 +2384,7 @@ class SchedulerState:
                 (key, start, finish2, recommendations, stimulus_id, time())
             )
             if parent._validate:
-                if not stimulus_id:
+                if stimulus_id == STIMULUS_ID_UNSET:
                     raise RuntimeError(
                         "stimulus_id not set during Scheduler transition"
                     )

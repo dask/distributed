@@ -622,14 +622,7 @@ class Server:
                                 self.loop.add_callback(handler, **merge(extra, msg))
                                 await gen.sleep(0)
                             else:
-                                try:
-                                    handler(**merge(extra, msg))
-                                except Exception as e:
-                                    # TODO(sjperkins): Remove when PR is ready to merge
-                                    raise Exception(
-                                        f"{handler.__name__} {msg} {extra}"
-                                    ) from e
-
+                                handler(**merge(extra, msg))
                         else:
                             logger.error("odd message %s", msg)
                     await asyncio.sleep(0)

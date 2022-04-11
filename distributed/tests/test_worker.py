@@ -3280,9 +3280,7 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
         while not mocked_gather.call_args:
             await asyncio.sleep(0)
 
-        await s.remove_worker(
-            address=x.address, safe=True, close=close_worker, stimulus_id="test"
-        )
+        await s.remove_worker(address=x.address, safe=True, close=close_worker)
 
         await _wait_for_state(fut2_key, b, intermediate_state)
 
