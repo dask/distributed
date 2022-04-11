@@ -4680,7 +4680,6 @@ class Scheduler(SchedulerState, ServerNode):
 
             graph: HighLevelGraph = pickle.loads(graph_header, buffers=graph_frames)
         except Exception as e:
-            _current_client.reset(tok)
             text = str(e)
             exc = pickle.dumps(e)
             parent: SchedulerState = cast(SchedulerState, self)
@@ -4695,6 +4694,8 @@ class Scheduler(SchedulerState, ServerNode):
 
             self.client_desires_keys(keys=keys, client=client)
             return
+        finally:
+            _current_client.reset(tok)
 
         if annotations is None:
             annotations = {}
