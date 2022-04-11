@@ -7576,7 +7576,7 @@ async def test_client_story(c, s, *workers):
             (f.key, "processing", "memory", {}),
             (f.key, "compute-task"),
             (f.key, "released", "waiting", "waiting", {f.key: "ready"}),
-            (f.key, "waiting", "ready", "ready", {}),
+            (f.key, "waiting", "ready", "ready", {f.key: "executing"}),
             (f.key, "ready", "executing", "executing", {}),
             (f.key, "put-in-memory"),
             (f.key, "executing", "memory", "memory", {}),
