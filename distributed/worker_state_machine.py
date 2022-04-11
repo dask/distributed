@@ -331,7 +331,6 @@ class ReleaseWorkerDataMsg(SendMessageToScheduler):
 class RescheduleMsg(SendMessageToScheduler):
     op = "reschedule"
 
-    # Not to be confused with the distributed.Reschedule Exception
     __slots__ = ("key", "worker", "stimulus_id")
     key: str
     worker: str
