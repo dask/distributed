@@ -247,6 +247,7 @@ class SpecCluster(Cluster):
         self._correct_state_waiting = None
         self._name = name or type(self).__name__
         self.shutdown_on_close = shutdown_on_close
+        self._old_specs = {}
 
         super().__init__(
             asynchronous=asynchronous,
@@ -317,20 +318,53 @@ class SpecCluster(Cluster):
 
             to_close = set(self.workers) - set(self.worker_spec)
             if to_close:
+                retired = {}
                 if self.scheduler.status == Status.running:
-                    await self.scheduler_comm.retire_workers(workers=list(to_close))
+                    retire_list = []
+                    for w_name in to_close:
+                        retire_list.append(w_name)
+                        spec = self._old_specs.get(w_name, None)
+                        if spec and "group" in spec:
+                            retire_list.extend(
+                                (str(w_name) + suffix) for suffix in spec["group"]
+                            )
+                    # This removes workers the Scheduler knows about
+                    # (ie, observed and registered Worker processes)
+                    retired_w = await self.scheduler_comm.retire_workers(
+                        names=list(retire_list), remove=False, close_workers=True
+                    )
+                    retired.update(retired_w)
+                # closing a worker via retire_workers will also close its
+                # corresponding Nanny if it has one. So mark it as retired too
+                retired_nannies = { w.address: w
+                    for r_addr, r in retired.items() for w_id, w in self.workers.items()
+                    if r.get("nanny", "") == w.address
+                }
+                retired.update(retired_nannies)
+
+                # This removes workers the SpecCluster knows about
+                # Eg, Nannies, SSH workers, Distributed/VM Workers
                 tasks = [
                     asyncio.create_task(self.workers[w].close())
                     for w in to_close
                     if w in self.workers
+                       and self.workers[w].address not in retired
                 ]
-                await asyncio.wait(tasks)
-                for task in tasks:  # for tornado gen.coroutine support
-                    with suppress(RuntimeError):
-                        await task
+                tasks.extend(
+                    asyncio.create_task(r.process.stopped.wait()) for r in retired_nannies.values() if r.process
+                )
+                if tasks:
+                    await asyncio.wait(tasks)
+                    for task in tasks:  # for tornado gen.coroutine support
+                        with suppress(RuntimeError):
+                            await task
+                else:
+                    await asyncio.sleep(0)
             for name in to_close:
                 if name in self.workers:
                     del self.workers[name]
+                if name in self._old_specs:
+                    del self._old_specs[name]
 
             to_open = set(self.worker_spec) - set(self.workers)
             workers = []
@@ -470,14 +504,34 @@ class SpecCluster(Cluster):
             n = max(n, int(math.ceil(cores / self._threads_per_worker())))
 
         if len(self.worker_spec) > n:
-            not_yet_launched = set(self.worker_spec) - {
+            group_map = {}
+            names_map = {}
+            for name, spec in self.worker_spec.items():
+                if "group" in spec:
+                    w_names = {(str(name) + suffix) for suffix in spec["group"]}
+                else:
+                    w_names = {name}
+                group_map[name] = w_names
+                for w_name in w_names:
+                    names_map[w_name] = name
+            launched_names = {
                 v["name"] for v in self.scheduler_info["workers"].values()
             }
-            while len(self.worker_spec) > n and not_yet_launched:
-                del self.worker_spec[not_yet_launched.pop()]
+            not_launched_names = set(names_map) - launched_names
+            not_launched_workers = set()
+            for w_name in not_launched_names:
+                g_name = names_map[w_name]
+                group_members = group_map[g_name]
+                if group_members.issubset(not_launched_names):
+                    not_launched_workers.add(g_name)
+            while len(self.worker_spec) > n and not_launched_workers:
+                w_name = not_launched_workers.pop()
+                self._old_specs[w_name] = self.worker_spec[w_name]
+                del self.worker_spec[w_name]
 
         while len(self.worker_spec) > n:
-            self.worker_spec.popitem()
+            w_name, spec = self.worker_spec.popitem()
+            self._old_specs[w_name] = spec
 
         if self.status not in (Status.closing, Status.closed):
             while len(self.worker_spec) < n:
@@ -533,6 +587,7 @@ class SpecCluster(Cluster):
 
         for w in workers:
             if w in self.worker_spec:
+                self._old_specs[w] = self.worker_spec[w]
                 del self.worker_spec[w]
         await self
 
