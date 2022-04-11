@@ -5713,18 +5713,13 @@ class Scheduler(SchedulerState, ServerNode):
         if recommendations:
             self.transitions(recommendations, stimulus_id)
 
-    def handle_long_running(
-        self, key=None, worker=None, compute_duration=None, stimulus_id=None
-    ):
+    def handle_long_running(self, key=None, worker=None, compute_duration=None):
         """A task has seceded from the thread pool
 
         We stop the task from being stolen in the future, and change task
         duration accounting as if the task has stopped.
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        # TODO(sjperkins): This stimulus isn't passed anywhere, so
-        # could probably be removed from the signature before the PR is merged
-        assert stimulus_id
         if key not in parent._tasks:
             logger.debug("Skipping long_running since key %s was already released", key)
             return

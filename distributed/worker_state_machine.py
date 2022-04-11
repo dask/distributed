@@ -342,10 +342,9 @@ class RescheduleMsg(SendMessageToScheduler):
 class LongRunningMsg(SendMessageToScheduler):
     op = "long-running"
 
-    __slots__ = ("key", "compute_duration", "stimulus_id")
+    __slots__ = ("key", "compute_duration")
     key: str
     compute_duration: float
-    stimulus_id: str
 
 
 @dataclass

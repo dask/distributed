@@ -2451,13 +2451,7 @@ class Worker(ServerNode):
         return merge_recs_instructions(
             (
                 {},
-                [
-                    LongRunningMsg(
-                        key=ts.key,
-                        compute_duration=compute_duration,
-                        stimulus_id=stimulus_id,
-                    )
-                ],
+                [LongRunningMsg(key=ts.key, compute_duration=compute_duration)],
             ),
             self._ensure_computing(),
         )
