@@ -410,14 +410,33 @@ async def test_delete_some_results(c, s, a, b):
     while not s.tasks or not any(ts.state == "memory" for ts in s.tasks.values()):
         await asyncio.sleep(0.01)
 
-    n = len(s.tasks)
-
     x = x.partitions[: x.npartitions // 2].persist()
 
-    while len(s.tasks) == n:
-        await asyncio.sleep(0.1)
+    await c.compute(x.size)
 
-    await x
+    clean_worker(a)
+    clean_worker(b)
+    clean_scheduler(s)
+
+
+@pytest.mark.xfail(reason="Don't update ongoing shuffles")
+@gen_cluster(client=True)
+async def test_add_some_results(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    x = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    y = x.partitions[: x.npartitions // 2].persist()
+
+    while not s.tasks or not any(ts.state == "memory" for ts in s.tasks.values()):
+        await asyncio.sleep(0.01)
+
+    x = x.persist()
+
+    await c.compute(x.size)
 
     clean_worker(a)
     clean_worker(b)
