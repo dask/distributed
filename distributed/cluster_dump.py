@@ -367,6 +367,11 @@ class DumpArtefact(Mapping):
 
         workers = self.dump["workers"]
         for i, (addr, info) in enumerate(workers.items()):
+            if not isinstance(info, dict):
+                if log:
+                    print(f"Skipping worker {i+1:>3}/{len(workers)} - {info}")
+                continue
+
             log_dir = root_dir / self._slugify_addr(addr)
             log_dir.mkdir(parents=True, exist_ok=True)
 
