@@ -3012,6 +3012,8 @@ class Worker(ServerNode):
                 for d in has_what:
                     ts = self.tasks[d]
                     ts.who_has.remove(worker)
+                    if not ts.who_has:
+                        recommendations[ts] = "missing"
 
             except Exception as e:
                 logger.exception(e)
