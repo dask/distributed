@@ -25,7 +25,7 @@ outputs:
     version: {{ version }}
     build:
       number: {{ GIT_DESCRIBE_NUMBER }}
-      string: {{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}_{{ build_ext }}
+      string: {{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
       noarch: generic
     test:
       commands:
@@ -41,7 +41,7 @@ outputs:
     version: {{ version }}
     build:
       number: {{ GIT_DESCRIBE_NUMBER }}
-      string: py_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}_{{ build_ext }}
+      string: py_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
       noarch: python
       script: >
         python -m pip install . -vv --no-deps
