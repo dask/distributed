@@ -3441,7 +3441,7 @@ class SchedulerState:
         """
         duration: double = ts._prefix._duration_average
         if duration >= 0:
-            return duration
+            return max(0.005, duration)
 
         s: set = self._unknown_durations.get(ts._prefix._name)  # type: ignore
         if s is None:
