@@ -7564,7 +7564,7 @@ async def test_stimulus_flow_retry(c, s, *workers):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_client_story(c, s, *workers):
-    f = c.submit(inc, 1, workers=workers[0].name)
+    f = c.submit(inc, 1)
     assert await f == 2
     story = await c.story(f.key)
 
@@ -7583,6 +7583,22 @@ async def test_client_story(c, s, *workers):
         ],
         ordered_timestamps=False,
     )
+
+    expected_stimulus_prefix = [
+        "update-graph-hlg-",
+        "update-graph-hlg-",
+        "task-finished-",
+        "compute-task-",
+        "compute-task-",
+        "compute-task-",
+        "compute-task-",
+        "task-finished-",
+        "task-finished-",
+    ]
+
+    stimulus_ids = [ev[-2] for ev in story]
+    assert len(expected_stimulus_prefix) == len(stimulus_ids)
+    assert all(ev[-2].startswith(p) for ev, p in zip(story, expected_stimulus_prefix))
 
 
 class WorkerBrokenStory(Worker):
