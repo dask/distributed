@@ -1409,10 +1409,18 @@ class Worker(ServerNode):
                 logger.info("Closed worker has not yet started: %s", self.status)
             self.status = Status.closing
 
-            for task in self._async_instructions:
-                task.cancel()
-            while self._async_instructions:
-                await asyncio.sleep(0)
+            if self._async_instructions:
+                for task in self._async_instructions:
+                    task.cancel()
+                # async tasks can handle cancellation and could take an arbitrary amount
+                # of time to terminate
+                _, pending = await asyncio.wait(
+                    self._async_instructions, timeout=timeout
+                )
+                for task in pending:
+                    logger.error(
+                        f"Failed to cancel asyncio task after {timeout} seconds: {task}"
+                    )
 
             for preload in self.preloads:
                 await preload.teardown()

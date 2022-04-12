@@ -1484,6 +1484,34 @@ async def test_close_while_executing(c, s, a, sync):
 
 
 @pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_close_async_task_handles_cancellation(c, s, a):
+    ev = Event()
+
+    async def f(ev):
+        await ev.set()
+        try:
+            await asyncio.Event().wait()  # Block indefinitely
+        except asyncio.CancelledError:
+            await asyncio.Event().wait()  # Ignore the first cancel()
+
+    f1 = c.submit(f, ev, key="f1")
+    await ev.wait()
+    task = next(
+        task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
+    )
+    start = time()
+    with captured_logger("distributed.worker", level=logging.ERROR) as logger:
+        await a.close(timeout=1)
+    assert "Failed to cancel asyncio task" in logger.getvalue()
+    assert time() - start < 5
+    assert not task.cancelled()
+    assert s.tasks["f1"].state == "no-worker"
+    task.cancel()
+    await asyncio.wait({task})
+
+
+@pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)], timeout=10)
 async def test_lifetime(c, s, a):
     # Note: test was occasionally failing with lifetime="1 seconds"
