@@ -7,7 +7,6 @@ from setuptools import find_packages, setup
 import versioneer
 
 requires = open("requirements.txt").read().strip().split("\n")
-setup_requires = []
 install_requires = []
 extras_require: dict = {}
 for r in requires:
@@ -40,7 +39,6 @@ setup(
         "distributed": ["http/templates/*.html"],
     },
     include_package_data=True,
-    setup_requires=setup_requires,
     install_requires=install_requires,
     extras_require=extras_require,
     packages=find_packages(exclude=["*tests*"]),

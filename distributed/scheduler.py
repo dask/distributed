@@ -29,7 +29,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import Any, ClassVar, Dict, Literal
+from typing import Any, ClassVar, Deque, Dict, Literal, Tuple
 from typing import cast as pep484_cast
 
 import psutil
@@ -445,7 +445,7 @@ class WorkerState:
         self.nbytes = 0
         self.occupancy = 0
         self.memory_unmanaged_old = 0
-        self.memory_other_history = deque()
+        self.memory_other_history: "Deque[Tuple[int, int]]" = deque()
         self.metrics = {}
         self.last_seen = 0
         self.time_delay = 0
@@ -783,16 +783,16 @@ class TaskGroup:
 
     def __init__(self, name: str):
         self.name = name
-        self.prefix = None  # type: ignore
-        self.states = {state: 0 for state in ALL_TASK_STATES}
+        self.prefix: "TaskPrefix | None" = None
+        self.states: "Dict[str, int]" = {state: 0 for state in ALL_TASK_STATES}
         self.states["forgotten"] = 0
         self.dependencies = set()
-        self.nbytes_total = 0
-        self.duration = 0
+        self.nbytes_total: int = 0
+        self.duration: float = 0
         self.types = set()
-        self.start = 0.0
-        self.stop = 0.0
-        self.all_durations = defaultdict(float)
+        self.start: float = 0.0
+        self.stop: float = 0.0
+        self.all_durations: "defaultdict[str, float]" = defaultdict(float)
         self.last_worker = None  # type: ignore
         self.last_worker_tasks_left = 0
 
@@ -804,6 +804,7 @@ class TaskGroup:
                 self.stop = stop
             self.start = self.start or start
         self.duration += duration
+        assert self.prefix is not None
         self.prefix.add_duration(action, start, stop)
 
     def add(self, other: "TaskState"):
@@ -1164,6 +1165,7 @@ class TaskState:
         self.resource_restrictions = None  # type: ignore
         self.loose_restrictions = False
         self.actor = False
+        self.prefix = None
         self.type = None  # type: ignore
         self.group_key = key_split_group(key)
         self.group = None  # type: ignore
@@ -1184,7 +1186,7 @@ class TaskState:
             return False
 
     @property
-    def state(self) -> "str | None":
+    def state(self) -> str:
         return self._state
 
     @state.setter
@@ -1631,14 +1633,14 @@ class SchedulerState:
                 return recommendations, client_msgs, worker_msgs
 
             if self.plugins:
-                dependents = set(ts._dependents)
-                dependencies = set(ts._dependencies)
+                dependents = set(ts.dependents)
+                dependencies = set(ts.dependencies)
 
             start_finish = (start, finish)
-            func = self._transitions_table.get(start_finish)
+            func = self.transitions_table.get(start_finish)
             if func is not None:
                 recommendations, client_msgs, worker_msgs = func(key, *args, **kwargs)
-                self._transition_counter += 1
+                self.transition_counter += 1
             elif "released" not in start_finish:
                 assert not args and not kwargs, (args, kwargs, start_finish)
                 a_recs: dict
@@ -1648,7 +1650,7 @@ class SchedulerState:
                 a_recs, a_cmsgs, a_wmsgs = a
 
                 v = a_recs.get(key, finish)
-                func = self._transitions_table["released", v]
+                func = self.transitions_table["released", v]
                 b_recs: dict
                 b_cmsgs: dict
                 b_wmsgs: dict
@@ -1705,28 +1707,28 @@ class SchedulerState:
             if self.plugins:
                 # Temporarily put back forgotten key for plugin to retrieve it
                 if ts._state == "forgotten":
-                    ts._dependents = dependents
-                    ts._dependencies = dependencies
-                    self._tasks[ts.key] = ts
+                    ts.dependents = dependents
+                    ts.dependencies = dependencies
+                    self.tasks[ts.key] = ts
                 for plugin in list(self.plugins.values()):
                     try:
                         plugin.transition(key, start, finish2, *args, **kwargs)
                     except Exception:
                         logger.info("Plugin failed with exception", exc_info=True)
-                if ts._state == "forgotten":
-                    del self._tasks[ts.key]
+                if ts.state == "forgotten":
+                    del self.tasks[ts.key]
 
             tg: TaskGroup = ts._group
-            if ts._state == "forgotten" and tg._name in self._task_groups:
+            if ts.state == "forgotten" and tg.name in self.task_groups:
                 # Remove TaskGroup if all tasks are in the forgotten state
                 all_forgotten: bool = True
                 for s in ALL_TASK_STATES:
-                    if tg._states.get(s):
+                    if tg.states.get(s):
                         all_forgotten = False
                         break
                 if all_forgotten:
-                    ts._prefix._groups.remove(tg)
-                    del self._task_groups[tg._name]
+                    ts.prefix.groups.remove(tg)
+                    del self.task_groups[tg.name]
 
             return recommendations, client_msgs, worker_msgs
         except Exception:
@@ -1933,7 +1935,7 @@ class SchedulerState:
             return None  # type: ignore
 
         ws: WorkerState
-        tg: TaskGroup = ts._group
+        tg: TaskGroup = ts.group
         valid_workers: set = self.valid_workers(ts)
 
         if (
@@ -2019,7 +2021,7 @@ class SchedulerState:
 
         See also ``_remove_from_processing``
         """
-        exec_time: float = ws._executing.get(ts, 0)
+        exec_time: float = ws.executing.get(ts, 0)
         duration: float = self.get_task_duration(ts)
         total_duration: float
         if exec_time > 2 * duration:
@@ -2162,7 +2164,7 @@ class SchedulerState:
                     ws,
                     key,
                 )
-                worker_msgs[ts._processing_on.address] = [
+                worker_msgs[ts.processing_on.address] = [
                     {
                         "op": "cancel-compute",
                         "key": key,
@@ -2764,7 +2766,7 @@ class SchedulerState:
         """
         s: set = None  # type: ignore
 
-        if ts._worker_restrictions:
+        if ts.worker_restrictions:
             s = {addr for addr in ts.worker_restrictions if addr in self.workers}
 
         if ts.host_restrictions:
@@ -2784,12 +2786,12 @@ class SchedulerState:
             else:
                 s |= ss
 
-        if ts._resource_restrictions:
+        if ts.resource_restrictions:
             dw: dict = {}
-            for resource, required in ts._resource_restrictions.items():
-                dr: dict = self._resources.get(resource)  # type: ignore
+            for resource, required in ts.resource_restrictions.items():
+                dr: dict = self.resources.get(resource)  # type: ignore
                 if dr is None:
-                    self._resources[resource] = dr = {}
+                    self.resources[resource] = dr = {}
 
                 sw: set = set()
                 for addr, supplied in dr.items():
@@ -2805,12 +2807,12 @@ class SchedulerState:
                 s &= ww
 
         if s is None:
-            if len(self._running) < len(self.workers):
+            if len(self.running) < len(self.workers):
                 return self._running.copy()
         else:
             s = {self.workers[addr] for addr in s}
-            if len(self._running) < len(self.workers):
-                s &= self._running
+            if len(self.running) < len(self.workers):
+                s &= self.running
 
         return s
 
@@ -2854,7 +2856,7 @@ class SchedulerState:
         if ts.actor:
             return (len(ws.actors), start_time, ws.nbytes)
         else:
-            return (start_time, ws._nbytes)
+            return (start_time, ws.nbytes)
 
     def add_replica(self, ts: TaskState, ws: WorkerState):
         """Note that a worker holds a replica of a task with state='memory'"""
@@ -2863,7 +2865,7 @@ class SchedulerState:
             assert ts not in ws.has_what
 
         ws.nbytes += ts.get_nbytes()
-        ws.has_what[ts] = None
+        ws._has_what[ts] = None
         ts.who_has.add(ws)
         if len(ts.who_has) == 2:
             self.replicated_tasks.add(ts)
@@ -2871,7 +2873,7 @@ class SchedulerState:
     def remove_replica(self, ts: TaskState, ws: WorkerState):
         """Note that a worker no longer holds a replica of a task"""
         ws.nbytes -= ts.get_nbytes()
-        del ws.has_what[ts]
+        del ws._has_what[ts]
         ts.who_has.remove(ws)
         if len(ts.who_has) == 1:
             self.replicated_tasks.remove(ts)
@@ -2882,7 +2884,7 @@ class SchedulerState:
         nbytes: int = ts.get_nbytes()
         for ws in ts.who_has:
             ws.nbytes -= nbytes
-            del ws._as_what[ts]
+            del ws._has_what[ts]
         if len(ts.who_has) > 1:
             self.replicated_tasks.remove(ts)
         ts.who_has.clear()
@@ -2898,8 +2900,8 @@ class SchedulerState:
         steal = self.extensions.get("stealing")
         if steal is None:
             return
-        if ws.occupancy > old * 1.3 or old > ws._occupancy * 1.3:
-            for ts in ws._processing:
+        if ws.occupancy > old * 1.3 or old > ws.occupancy * 1.3:
+            for ts in ws.processing:
                 steal.recalculate_cost(ts)
 
     def bulk_schedule_after_adding_worker(self, ws: WorkerState):
@@ -7329,7 +7331,7 @@ def _remove_from_processing(
 
     See also ``Scheduler.set_duration_estimate``
     """
-    ws: WorkerState = ts._processing_on
+    ws: WorkerState = ts.processing_on
     ts.processing_on = None  # type: ignore
     w: str = ws.address
 
@@ -7616,7 +7618,7 @@ def validate_task_state(ts: TaskState):
             "not in dependency's dependents",
             str(ts),
             str(dts),
-            str(dts._dependents),
+            str(dts.dependents),
         )
         if ts.state in ("waiting", "processing"):
             assert dts in ts.waiting_on or dts.who_has, (
