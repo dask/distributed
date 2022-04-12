@@ -19,10 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 async def send_message(
-    msg, rpc, addr, serializers=None, on_error="raise", sentinel=None
+    msg, rpc, addr, serializers=None, on_error="raise", default=None
 ):
-    sentinel = sentinel or object()
-
     try:
         comm = await rpc.connect(addr)
         comm.name = "Scheduler Broadcast"
@@ -40,7 +38,7 @@ async def send_message(
         elif on_error == "return_pickle":
             return dumps(e, protocol=4)
         elif on_error == "ignore":
-            return sentinel
+            return default
         else:
             raise ValueError(
                 f"on_error must be 'raise', 'return', 'return_pickle', "

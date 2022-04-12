@@ -4305,10 +4305,17 @@ class Client(SyncMethodMixin):
 
         coros = [
             send_message(
-                msg, self.rpc, self.scheduler.address, None, on_error, SERVER_SENTINEL
+                msg,
+                self.rpc,
+                self.scheduler.address,
+                None,
+                on_error,
+                default=SERVER_SENTINEL,
             )
         ] + [
-            send_message(msg, self.rpc, address, None, on_error, WORKER_SENTINEL)
+            send_message(
+                msg, self.rpc, address, None, on_error, default=WORKER_SENTINEL
+            )
             for address in info["workers"]
         ]
 

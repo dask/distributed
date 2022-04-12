@@ -6260,7 +6260,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         results = await All(
             [
-                send_message(msg, self.rpc, address, serializers, on_error, ERROR)
+                send_message(
+                    msg, self.rpc, address, serializers, on_error, default=ERROR
+                )
                 for address in addresses
                 if address is not None
             ]
