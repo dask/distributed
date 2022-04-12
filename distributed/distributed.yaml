@@ -71,6 +71,21 @@ distributed:
         # Policies that should be executed at every cycle. Any additional keys in each
         # object are passed as keyword arguments to the policy constructor.
         - class: distributed.active_memory_manager.ReduceReplicas
+        - class: distributed.active_memory_manager.Rebalance
+          # Fraction of worker process memory at which we start potentially sending
+          # data to other workers. Ignored when max_memory is not set.
+          sender_min: 0.3
+          # Fraction of worker process memory at which we stop potentially accepting
+          # data from other workers. Ignored when max_memory is not set.
+          recipient_max: 0.6
+          # Fraction of worker process memory, around the cluster mean, where a worker
+          # is neither a sender nor a recipient of data during a rebalance operation.
+          # E.g. if the mean cluster occupation is 50%, sender_recipient_gap=0.1 means
+          # that only nodes above 55% will donate data and only nodes below 45% will
+          # receive them. This helps avoid data from bouncing around the cluster
+          # repeatedly. Ignored when max_memory is not set.
+          sender_recipient_gap: 0.1
+
 
   worker:
     blocked-handlers: []
@@ -102,6 +117,7 @@ distributed:
       # This should be set to be longer than the duration of most dask tasks.
       recent-to-old-time: 30s
 
+      # TODO move to AMM
       rebalance:
         # Memory measure to rebalance upon. Possible choices are:
         # process
@@ -124,19 +140,6 @@ distributed:
         #     Only consider data allocated by dask, including that spilled to disk.
         #     Recommended if disk occupation of the spill file is an issue.
         measure: optimistic
-        # Fraction of worker process memory at which we start potentially sending
-        # data to other workers. Ignored when max_memory is not set.
-        sender-min: 0.30
-        # Fraction of worker process memory at which we stop potentially accepting
-        # data from other workers. Ignored when max_memory is not set.
-        recipient-max: 0.60
-        # Fraction of worker process memory, around the cluster mean, where a worker is
-        # neither a sender nor a recipient of data during a rebalance operation. E.g. if
-        # the mean cluster occupation is 50%, sender-recipient-gap=0.10 means that only
-        # nodes above 55% will donate data and only nodes below 45% will receive them.
-        # This helps avoid data from bouncing around the cluster repeatedly.
-        # Ignored when max_memory is not set.
-        sender-recipient-gap: 0.10
 
       # Fractions of worker process memory at which we take action to avoid memory
       # blowup. Set any of the values to False to turn off the behavior entirely.
