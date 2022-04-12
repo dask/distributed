@@ -172,22 +172,22 @@ class ClientState:
         self.versions = versions or {}
 
     def __hash__(self):
-        return self._hash
+        return self.hash
 
     def __eq__(self, other):
         typ_self: type = type(self)
         typ_other: type = type(other)
         if typ_self == typ_other:
             other_cs: ClientState = other
-            return self._client_key == other_cs._client_key
+            return self.client_key == other_cs.client_key
         else:
             return False
 
     def __repr__(self):
-        return "<Client '%s'>" % self._client_key
+        return "<Client '%s'>" % self.client_key
 
     def __str__(self):
-        return self._client_key
+        return self.client_key
 
     def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
         """Dictionary representation for debugging purposes.
@@ -601,7 +601,7 @@ class Computation:
 
     def __repr__(self):
         return (
-            f"<Computation {self._id}: "
+            f"<Computation {self.id}: "
             + "Tasks: "
             + ", ".join(
                 "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
@@ -814,10 +814,10 @@ class TaskGroup:
     def __repr__(self):
         return (
             "<"
-            + (self._name or "no-group")
+            + (self.name or "no-group")
             + ": "
             + ", ".join(
-                "%s: %d" % (k, v) for (k, v) in sorted(self._states.items()) if v
+                "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
             )
             + ">"
         )
@@ -1193,7 +1193,7 @@ class TaskState:
     def state(self, value: str):
         self.group.states[self._state] -= 1
         self.group.states[value] += 1
-        self.state = value
+        self._state = value
 
     def add_dependency(self, other: "TaskState"):
         """Add another task as a dependency of this task"""
@@ -1472,6 +1472,7 @@ class SchedulerState:
         plugins: "Iterable[SchedulerPlugin]" = (),
         **kwargs,  # Passed verbatim to Server.__init__()
     ):
+        logger.info("State start")
         self.aliases = aliases
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
         self.clients = clients
@@ -1543,8 +1544,7 @@ class SchedulerState:
         )
         self.transition_counter = 0
 
-        # Call Server.__init__()
-        super().__init__(**kwargs)  # type: ignore
+        logger.info("state end")
 
     @property
     def memory(self) -> MemoryState:
@@ -1577,7 +1577,7 @@ class SchedulerState:
     ) -> TaskState:
         """Create a new task, and associated states"""
         ts: TaskState = TaskState(key, spec)
-        ts.state = state
+        ts._state = state
 
         tp: TaskPrefix
         prefix_key = key_split(key)
@@ -1625,7 +1625,7 @@ class SchedulerState:
             worker_msgs = {}
             client_msgs = {}
 
-            ts = self.tasks.get(key)  # type: ignore
+            ts: TaskState = self.tasks.get(key)  # type: ignore
             if ts is None:
                 return recommendations, client_msgs, worker_msgs
             start = ts._state
@@ -1718,7 +1718,7 @@ class SchedulerState:
                 if ts.state == "forgotten":
                     del self.tasks[ts.key]
 
-            tg: TaskGroup = ts._group
+            tg: TaskGroup = ts.group
             if ts.state == "forgotten" and tg.name in self.task_groups:
                 # Remove TaskGroup if all tasks are in the forgotten state
                 all_forgotten: bool = True
@@ -1782,7 +1782,7 @@ class SchedulerState:
 
     def transition_released_waiting(self, key):
         try:
-            ts: TaskState = self._tasks[key]
+            ts: TaskState = self.tasks[key]
             dts: TaskState
             recommendations: dict = {}
             client_msgs: dict = {}
@@ -1997,7 +1997,7 @@ class SchedulerState:
                     i: int
                     for i in range(n_workers):
                         wp_i = wp_vals[(i + start) % n_workers]
-                        if wp_i._occupancy == 0:
+                        if wp_i.occupancy == 0:
                             ws = wp_i
                             break
             else:  # dumb but fast in large case
@@ -2314,8 +2314,8 @@ class SchedulerState:
             report_msg = {
                 "op": "task-erred",
                 "key": key,
-                "exception": failing_ts._exception,
-                "traceback": failing_ts._traceback,
+                "exception": failing_ts.exception,
+                "traceback": failing_ts.traceback,
             }
             cs: ClientState
             for cs in ts.who_wants:
@@ -2361,7 +2361,7 @@ class SchedulerState:
                 "keys": [key],
                 "stimulus_id": f"erred-released-{time()}",
             }
-            for ws_addr in ts._erred_on:
+            for ws_addr in ts.erred_on:
                 worker_msgs[ws_addr] = [w_msg]
             ts.erred_on.clear()
 
@@ -2404,10 +2404,10 @@ class SchedulerState:
 
             if ts.has_lost_dependencies:
                 recommendations[key] = "forgotten"
-            elif not ts._exception_blame and (ts.who_wants or ts.waiters):
+            elif not ts.exception_blame and (ts.who_wants or ts.waiters):
                 recommendations[key] = "waiting"
             else:
-                ts._waiters.clear()
+                ts.waiters.clear()
 
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
@@ -2750,7 +2750,7 @@ class SchedulerState:
 
         s: set = self.unknown_durations.get(ts.prefix.name)  # type: ignore
         if s is None:
-            self._unknown_durations[ts.prefix.name] = s = set()
+            self.unknown_durations[ts.prefix.name] = s = set()
         s.add(ts)
         return self.UNKNOWN_TASK_DURATION
 
@@ -2808,7 +2808,7 @@ class SchedulerState:
 
         if s is None:
             if len(self.running) < len(self.workers):
-                return self._running.copy()
+                return self.running.copy()
         else:
             s = {self.workers[addr] for addr in s}
             if len(self.running) < len(self.workers):
@@ -2819,12 +2819,12 @@ class SchedulerState:
     def consume_resources(self, ts: TaskState, ws: WorkerState):
         if ts.resource_restrictions:
             for r, required in ts.resource_restrictions.items():
-                ws._used_resources[r] += required
+                ws.used_resources[r] += required
 
     def release_resources(self, ts: TaskState, ws: WorkerState):
         if ts.resource_restrictions:
             for r, required in ts.resource_restrictions.items():
-                ws._used_resources[r] -= required
+                ws.used_resources[r] -= required
 
     def coerce_hostname(self, host):
         """
@@ -3294,8 +3294,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         connection_limit = get_fileno_limit() / 2
 
-        super().__init__(
-            # Arguments to SchedulerState
+        SchedulerState.__init__(
+            self,
             aliases=aliases,
             clients=clients,
             workers=workers,
@@ -3305,7 +3305,9 @@ class Scheduler(SchedulerState, ServerNode):
             unrunnable=unrunnable,
             validate=validate,
             plugins=plugins,
-            # Arguments to ServerNode
+        )
+        ServerNode.__init__(
+            self,
             handlers=self.handlers,
             stream_handlers=merge(worker_handlers, client_handlers),
             io_loop=self.loop,
@@ -4024,7 +4026,7 @@ class Scheduler(SchedulerState, ServerNode):
             computation = Computation()
             self.computations.append(computation)
 
-        if code and code not in computation._code:  # add new code blocks
+        if code and code not in computation.code:  # add new code blocks
             computation.code.add(code)
 
         n = 0
@@ -4045,7 +4047,7 @@ class Scheduler(SchedulerState, ServerNode):
         # Avoid computation that is already finished
         already_in_memory = set()  # tasks that are already done
         for k, v in dependencies.items():
-            if v and k in self._tasks:
+            if v and k in self.tasks:
                 ts = self.tasks[k]
                 if ts.state in ("memory", "erred"):
                     already_in_memory.add(k)
@@ -4087,7 +4089,7 @@ class Scheduler(SchedulerState, ServerNode):
             ts = self.tasks.get(k)
             if ts is None:
                 ts = self.new_task(k, tasks.get(k), "released", computation=computation)
-            elif not ts._run_spec:
+            elif not ts.run_spec:
                 ts.run_spec = tasks.get(k)
 
             touched_keys.add(k)
@@ -4923,7 +4925,7 @@ class Scheduler(SchedulerState, ServerNode):
         if not ws:
             return
         prev_status = ws.status
-        ws._status = Status.lookup[status]  # type: ignore
+        ws.status = Status.lookup[status]  # type: ignore
         if ws.status == prev_status:
             return
 
@@ -6478,14 +6480,14 @@ class Scheduler(SchedulerState, ServerNode):
             while stack:
                 key = stack.pop()
                 ts = self.tasks[key]
-                if ts._state == "waiting":
+                if ts.state == "waiting":
                     stack.extend([dts.key for dts in ts.dependencies])
-                elif ts._state == "processing":
+                elif ts.state == "processing":
                     processing.add(ts)
 
             workers = defaultdict(list)
             for ts in processing:
-                if ts._processing_on:
+                if ts.processing_on:
                     workers[ts.processing_on.address].append(ts.key)
         else:
             workers = {w: None for w in self.workers}
@@ -7241,7 +7243,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         # CPU
         cpu = math.ceil(
-            self._total_occupancy / target_duration
+            self.total_occupancy / target_duration
         )  # TODO: threads per worker
 
         # Avoid a few long tasks from asking for many cores
@@ -7396,7 +7398,7 @@ def _add_to_memory(
             report_msg["type"] = type
 
         for cs in ts.who_wants:
-            client_msgs[cs._client_key] = [report_msg]
+            client_msgs[cs.client_key] = [report_msg]
 
     ts.state = "memory"
     ts.type = typename  # type: ignore
@@ -7465,7 +7467,7 @@ def _client_releases_keys(
                 if not ts.dependents:
                     # No live dependents, can forget
                     recommendations[ts.key] = "forgotten"
-                elif ts._state != "erred" and not ts.waiters:
+                elif ts.state != "erred" and not ts.waiters:
                     recommendations[ts.key] = "released"
 
 
