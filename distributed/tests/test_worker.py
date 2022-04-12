@@ -1742,7 +1742,7 @@ async def test_stimulus_story(c, s, a):
 
     prev_handled = story[0].handled
     for ev in story[1:]:
-        assert ev.handled > prev_handled
+        assert ev.handled >= prev_handled
         prev_handled = ev.handled
 
 

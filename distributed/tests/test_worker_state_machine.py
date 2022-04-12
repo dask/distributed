@@ -143,7 +143,7 @@ def test_merge_recs_instructions():
 
 def test_event_to_dict():
     ev = RescheduleEvent(stimulus_id="test", key="x")
-    ev2 = ev.log(handled=11.22)
+    ev2 = ev.to_loggable(handled=11.22)
     assert ev2 == ev
     d = recursive_to_dict(ev2)
     assert d == {
@@ -167,7 +167,7 @@ def test_executesuccess_to_dict():
         nbytes=890,
         type=int,
     )
-    ev2 = ev.log(handled=11.22)
+    ev2 = ev.to_loggable(handled=11.22)
     assert ev2.value is None
     assert ev.value == 123
     d = recursive_to_dict(ev2)
@@ -205,7 +205,7 @@ def test_executefailure_to_dict():
         exception_text="exc text",
         traceback_text="tb text",
     )
-    ev2 = ev.log(handled=11.22)
+    ev2 = ev.to_loggable(handled=11.22)
     assert ev2 == ev
     d = recursive_to_dict(ev2)
     assert d == {

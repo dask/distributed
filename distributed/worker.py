@@ -2601,7 +2601,7 @@ class Worker(ServerNode):
 
     def handle_stimulus(self, stim: StateMachineEvent) -> None:
         with log_errors():
-            self.stimulus_log.append(stim.log(handled=time()))
+            self.stimulus_log.append(stim.to_loggable(handled=time()))
             recs, instructions = self.handle_event(stim)
             self.transitions(recs, stimulus_id=stim.stimulus_id)
             self._handle_instructions(instructions)

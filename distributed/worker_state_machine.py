@@ -357,7 +357,8 @@ class StateMachineEvent:
     __slots__ = ("stimulus_id", "handled")
     stimulus_id: str
     #: timestamp of when the event was handled by the worker
-    # TODO switch to @dataclass(slots=True) and uncomment (requires Python >=3.10)
+    # TODO Switch to @dataclass(slots=True), uncomment the line below, and remove the
+    #      __new__ method (requires Python >=3.10)
     # handled: float | None = field(init=False, default=None)
     _classes: ClassVar[dict[str, type[StateMachineEvent]]] = {}
 
@@ -369,7 +370,7 @@ class StateMachineEvent:
     def __init_subclass__(cls):
         StateMachineEvent._classes[cls.__name__] = cls
 
-    def log(self, *, handled: float) -> StateMachineEvent:
+    def to_loggable(self, *, handled: float) -> StateMachineEvent:
         """Produce a variant version of self that is small enough to be stored in memory
         in the medium term and contains meaningful information for debugging
         """
@@ -425,7 +426,7 @@ class ExecuteSuccessEvent(StateMachineEvent):
     type: type | None
     __slots__ = tuple(__annotations__)  # type: ignore
 
-    def log(self, *, handled: float) -> StateMachineEvent:
+    def to_loggable(self, *, handled: float) -> StateMachineEvent:
         out = copy(self)
         out.handled = handled
         out.value = None
