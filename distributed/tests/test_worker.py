@@ -569,13 +569,13 @@ async def test_memory_limit_auto(s):
     async with Worker(s.address, nthreads=1) as a, Worker(
         s.address, nthreads=2
     ) as b, Worker(s.address, nthreads=100) as c, Worker(s.address, nthreads=200) as d:
-        assert isinstance(a.memory_limit, Number)
-        assert isinstance(b.memory_limit, Number)
+        assert isinstance(a.memory_manager.memory_limit, Number)
+        assert isinstance(b.memory_manager.memory_limit, Number)
 
         if CPU_COUNT > 1:
-            assert a.memory_limit < b.memory_limit
+            assert a.memory_manager.memory_limit < b.memory_manager.memory_limit
 
-        assert c.memory_limit == d.memory_limit
+        assert c.memory_manager.memory_limit == d.memory_manager.memory_limit
 
 
 @gen_cluster(client=True)
