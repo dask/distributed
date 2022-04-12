@@ -1471,11 +1471,13 @@ async def test_close_while_executing(c, s, a, sync):
 
         async def f(ev):
             await ev.set()
-            await asyncio.Future()  # Block indefinitely
+            await asyncio.Event().wait()  # Block indefinitely
 
     f1 = c.submit(f, ev, key="f1")
     await ev.wait()
-    task = next(task for task in asyncio.all_tasks() if "execute(f1)" in str(task))
+    task = next(
+        task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
+    )
     await a.close()
     assert task.cancelled()
     assert s.tasks["f1"].state == "no-worker"
