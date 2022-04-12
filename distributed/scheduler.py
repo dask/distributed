@@ -4480,6 +4480,27 @@ class Scheduler(SchedulerState, ServerNode):
         """Add a new worker to the cluster"""
         parent: SchedulerState = cast(SchedulerState, self)
         with log_errors():
+            if (
+                versions["host"]["python"].split(".")[:2]
+                != self.versions()["host"]["python"].split(".")[:2]
+            ):
+                error_message = f"""
+    Python version mismatch.  Trying to connect ...
+
+    Worker with Python {versions["host"]["python"]}
+    and
+    Scheduler with Python {self.versions()["host"]["python"]}
+
+    Dask requires major.minor version numbers, like "3.10" to match exactly.
+                """
+
+                await comm.write(
+                    {
+                        "error": error_message,
+                    }
+                )
+                logger.error(error_message)
+                return
             address = self.coerce_address(address, resolve_address)
             address = normalize_address(address)
             host = get_address_host(address)
@@ -4492,9 +4513,7 @@ class Scheduler(SchedulerState, ServerNode):
                     "Worker tried to connect with a duplicate name: %s", name
                 )
                 msg = {
-                    "status": "error",
-                    "message": "name taken, %s" % name,
-                    "time": time(),
+                    "error": "name taken, %s" % name,
                 }
                 if comm:
                     await comm.write(msg)
@@ -5508,7 +5527,24 @@ class Scheduler(SchedulerState, ServerNode):
                 versions,
             )
             msg.update(version_warning)
-            bcomm.send(msg)
+            if (
+                versions["host"]["python"].split(".")[:2]
+                != self.versions()["host"]["python"].split(".")[:2]
+            ):
+                error_message = f"""
+        Python version mismatch.  Trying to connect
+        Client with Python {versions["host"]["python"]}
+        and
+        Scheduler with Python {self.versions()["host"]["python"]}
+
+        Dask requires major.minor version numbers, like "3.10" to match exactly.
+            """
+                msg["error"] = error_message
+                bcomm.send(msg)
+                logger.error(error_message)
+                return
+            else:
+                bcomm.send(msg)
 
             try:
                 await self.handle_stream(comm=comm, extra={"client": client})

@@ -1084,6 +1084,8 @@ class Worker(ServerNode):
                 response = await future
                 if response.get("warning"):
                     logger.warning(response["warning"])
+                if response.get("error"):
+                    raise Exception(response["error"])
 
                 _end = time()
                 middle = (_start + _end) / 2
