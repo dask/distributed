@@ -70,6 +70,7 @@ outputs:
         - tblib >=1.6.0
         - toolz >=0.8.2
         - tornado >=6.0.3
+        - urllib3
         - zict >=0.1.3
       run_constrained:
         - distributed-impl >={{ version }} *{{ build_ext }}

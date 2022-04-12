@@ -352,7 +352,7 @@ async def test_worker_params():
         memory_limit=500,
         asynchronous=True,
     ) as c:
-        assert [w.memory_limit for w in c.workers.values()] == [500] * 2
+        assert [w.memory_manager.memory_limit for w in c.workers.values()] == [500] * 2
 
 
 @gen_test()
@@ -367,7 +367,7 @@ async def test_memory_limit_none():
     ) as c:
         w = c.workers[0]
         assert type(w.data) is dict
-        assert w.memory_limit is None
+        assert w.memory_manager.memory_limit is None
 
 
 def test_cleanup():
@@ -499,7 +499,10 @@ def test_memory(loop, n_workers):
         dashboard_address=":0",
         loop=loop,
     ) as cluster:
-        assert sum(w.memory_limit for w in cluster.workers.values()) <= MEMORY_LIMIT
+        assert (
+            sum(w.memory_manager.memory_limit for w in cluster.workers.values())
+            <= MEMORY_LIMIT
+        )
 
 
 @pytest.mark.parametrize("n_workers", [None, 3])

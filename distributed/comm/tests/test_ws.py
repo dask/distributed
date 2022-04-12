@@ -187,9 +187,6 @@ async def test_quiet_close():
         ):
             pass
 
-    # For some reason unrelated @coroutine warnings are showing up
-    record = [warning for warning in record if "coroutine" not in str(warning.message)]
-
     assert not record, record[0].message
 
 
