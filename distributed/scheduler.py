@@ -551,7 +551,7 @@ class WorkerState:
             **self.extra,
         }
 
-    def to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
+    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
