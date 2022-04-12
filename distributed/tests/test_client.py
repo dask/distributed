@@ -5399,11 +5399,11 @@ def test_quiet_quit_when_cluster_leaves(loop_in_thread):
 
 
 def test_warn_executor(loop, s, a, b):
-    with warnings.catch_warnings(record=True) as record:
-        with Executor(s["address"], loop=loop) as c:
-            pass
+    with pytest.warns(UserWarning, match=r"Executor has been renamed to Client"):
+        c = Executor(s["address"], loop=loop)
 
-    assert any("Client" in str(r.message) for r in record)
+    with c:
+        pass
 
 
 @gen_cluster([("127.0.0.1", 4)] * 2, client=True)
@@ -5652,23 +5652,20 @@ async def test_config_scheduler_address(s, a, b):
 
 @gen_cluster(client=True)
 async def test_warn_when_submitting_large_values(c, s, a, b):
-    with warnings.catch_warnings(record=True) as record:
+    with pytest.warns(
+        UserWarning,
+        match=r"Large object of size (2\.00 MB|1.91 MiB) detected in task graph:"
+        r" \n  \(b'00000000000000000000000000000000000000000000000 \.\.\. 000000000000',\)"
+        r"\nConsider scattering large objects ahead of time.*",
+    ):
         future = c.submit(lambda x: x + 1, b"0" * 2000000)
-
-    text = str(record[0].message)
-    assert "2.00 MB" in text or "1.91 MiB" in text
-    assert "large" in text
-    assert "..." in text
-    assert "'000" in text
-    assert "000'" in text
-    assert len(text) < 2000
 
     with warnings.catch_warnings(record=True) as record:
         data = b"0" * 2000000
         for i in range(10):
             future = c.submit(lambda x, y: x, data, i)
 
-    assert len(record) < 2
+    assert not record
 
 
 @gen_cluster(client=True)

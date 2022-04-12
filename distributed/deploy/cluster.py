@@ -194,7 +194,7 @@ class Cluster(SyncMethodMixin):
             return self.sync(self._close, callback_timeout=timeout)
 
     def __del__(self):
-        if self.status != Status.closed:
+        if getattr(self, "status", Status.closed) != Status.closed:
             with suppress(AttributeError, RuntimeError):  # during closing
                 self.loop.add_callback(self.close)
 
