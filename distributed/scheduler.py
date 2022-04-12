@@ -1388,9 +1388,7 @@ class SchedulerState:
 
     All events are handled quickly, in linear time with respect to their
     input (which is often of constant size) and generally within a
-    millisecond. Additionally when Cythonized, this can be faster still.
-    To accomplish this the scheduler tracks a lot of state.  Every
-    operation maintains the consistency of this state.
+    millisecond.
 
     Users typically do not interact with ``Transitions`` directly. Instead
     users interact with the ``Client``, which in turn engages the
@@ -1480,7 +1478,6 @@ class SchedulerState:
         self.extensions = {}
         self.host_info = host_info
         self.idle = SortedDict()
-        # Note: cython.cast, not typing.cast!
         self.n_tasks = 0
         self.resources = resources
         self.saturated = set()
