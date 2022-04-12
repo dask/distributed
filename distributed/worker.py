@@ -3014,7 +3014,11 @@ class Worker(ServerNode):
                     ts.who_has.remove(worker)
                     if not ts.who_has:
                         recommendations[ts] = "missing"
-
+                        logger.info(
+                            "Lost worker connection to %s caused task %s to go missing",
+                            worker,
+                            ts.key,
+                        )
             except Exception as e:
                 logger.exception(e)
                 if self.batched_stream and LOG_PDB:
