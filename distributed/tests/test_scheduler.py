@@ -3544,7 +3544,7 @@ async def test_repr(s, a):
 
 
 @gen_cluster(client=True)
-async def test_stimuli(c, s, a, b):
+async def test_stimulus_success(c, s, a, b):
     f = c.submit(inc, 1)
     key = f.key
 
@@ -3578,3 +3578,61 @@ async def test_stimuli(c, s, a, b):
 
     for stimulus_id, story in zip(stimuli, stories):
         assert story[-2].startswith(stimulus_id), (story[-2], stimulus_id)
+
+
+@gen_cluster(client=True)
+async def test_stimulus_retry(c, s, a, b):
+    def task():
+        assert dask.config.get("foo")
+
+    with dask.config.set(foo=False):
+        f = c.submit(task)
+        with pytest.raises(AssertionError):
+            await f
+
+    with dask.config.set(foo=True):
+        await f.retry()
+        await f
+
+    story = s.story(f.key)
+    stimulus_ids = list(s[-2] for s in story)
+
+    assert {sid[: re.search(r"\d", sid).start()] for sid in stimulus_ids} == {
+        "update-graph-hlg-",
+        "task-erred-",
+        "task-finished-",
+        "stimulus-retry-",
+    }
+
+    assert_story(
+        story,
+        [
+            (f.key, "released", "waiting", {f.key: "processing"}),
+            (f.key, "waiting", "processing", {}),
+            (
+                f.key,
+                "processing",
+                "erred",
+                {},
+            ),
+            (
+                f.key,
+                "erred",
+                "released",
+                {},
+            ),
+            (
+                f.key,
+                "released",
+                "waiting",
+                {f.key: "processing"},
+            ),
+            (
+                f.key,
+                "waiting",
+                "processing",
+                {},
+            ),
+            (f.key, "processing", "memory", {}),
+        ],
+    )
