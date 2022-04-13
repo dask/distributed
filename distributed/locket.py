@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import os
 import threading
+import warnings
 import weakref
 from time import sleep
 
@@ -169,8 +171,9 @@ class _LockFile:
                 )
 
     def release(self):
-        with open(self._path, "wb") as fd:
-            _unlock_file(fd)
+        if os.path.exists(self._path):
+            with open(self._path, "wb") as fd:
+                _unlock_file(fd)
 
 
 class _Locker:
