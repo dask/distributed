@@ -108,7 +108,7 @@ def has_cuda_context():
     index of the device for which there's a CUDA context.
     """
     init_once()
-    if nvmlLibraryNotFound or not nvmlInitialized:
+    if not nvmlInitialized:
         return False
     for index in range(device_get_count()):
         handle = pynvml.nvmlDeviceGetHandleByIndex(index)
