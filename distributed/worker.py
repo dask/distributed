@@ -3013,10 +3013,8 @@ class Worker(ServerNode):
                     ts.who_has.remove(worker)
                     if not ts.who_has:
                         recommendations[ts] = "missing"
-                        logger.info(
-                            "Lost worker connection to %s caused task %s to go missing",
-                            worker,
-                            ts.key,
+                        self.log.append(
+                            ("missing-who-has", worker, ts.key, stimulus_id, time())
                         )
             except Exception as e:
                 logger.exception(e)
