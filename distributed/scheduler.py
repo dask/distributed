@@ -415,6 +415,36 @@ class WorkerState:
 
     """
 
+    __slots__ = [
+        "address",
+        "pid",
+        "name",
+        "nthreads",
+        "memory_limit",
+        "local_directory",
+        "services",
+        "versions",
+        "nanny",
+        "status",
+        "hash",
+        "nbytes",
+        "occupancy",
+        "memory_unmanaged_old",
+        "memory_other_history",
+        "metrics",
+        "last_seen",
+        "time_delay",
+        "bandwidth",
+        "actors",
+        "_has_what",
+        "processing",
+        "long_running",
+        "executing",
+        "resources",
+        "used_resources",
+        "extra",
+    ]
+
     def __init__(
         self,
         *,
