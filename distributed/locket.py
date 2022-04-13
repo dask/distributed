@@ -154,26 +154,23 @@ class _ThreadLock:
 class _LockFile:
     def __init__(self, path):
         self._path = path
-        self._file = None
         self._thread_lock = threading.Lock()
 
     def acquire(self, timeout=None, retry_period=None):
-        if self._file is None:
-            self._file = open(self._path, "wb")
-        if timeout is None and _lock_file_blocking_available:
-            _lock_file_blocking(self._file)
-        else:
-            _acquire_non_blocking(
-                acquire=lambda: _lock_file_non_blocking(self._file),
-                timeout=timeout,
-                retry_period=retry_period,
-                path=self._path,
-            )
+        with open(self._path, "wb") as fd:
+            if timeout is None and _lock_file_blocking_available:
+                _lock_file_blocking(fd)
+            else:
+                _acquire_non_blocking(
+                    acquire=lambda: _lock_file_non_blocking(fd),
+                    timeout=timeout,
+                    retry_period=retry_period,
+                    path=self._path,
+                )
 
-    def release(self):
-        _unlock_file(self._file)
-        self._file.close()
-        self._file = None
+        def release(self):
+            with open(self._path, "wb") as fd:
+                _unlock_file(fd)
 
 
 class _Locker:
