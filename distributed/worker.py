@@ -546,7 +546,6 @@ class Worker(ServerNode):
             ("executing", "released"): self.transition_executing_released,
             ("executing", "rescheduled"): self.transition_executing_rescheduled,
             ("fetch", "flight"): self.transition_fetch_flight,
-            ("fetch", "missing"): self.transition_fetch_missing,
             ("fetch", "released"): self.transition_generic_released,
             ("flight", "error"): self.transition_flight_error,
             ("flight", "fetch"): self.transition_flight_fetch,
@@ -1930,14 +1929,6 @@ class Worker(ServerNode):
         ts.done = False
         return {}, []
 
-    def transition_fetch_missing(
-        self, ts: TaskState, *, stimulus_id: str
-    ) -> RecsInstrs:
-        ts.state = "missing"
-        self._missing_dep_flight.add(ts)
-        ts.done = False
-        return {}, []
-
     def transition_released_fetch(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
@@ -2680,9 +2671,8 @@ class Worker(ServerNode):
             if ts.state != "fetch":
                 continue
 
-            if not ts.who_has:
-                self.transition(ts, "missing", stimulus_id=stimulus_id)
-                continue
+            if self.validate:
+                assert ts.who_has
 
             workers = [w for w in ts.who_has if w not in self.in_flight_workers]
             if not workers:
