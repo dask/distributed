@@ -7,6 +7,7 @@ import os
 import queue
 import socket
 import traceback
+import warnings
 from collections import deque
 from time import sleep
 
@@ -478,12 +479,12 @@ async def test_all_quiet_exceptions():
 
 
 def test_warn_on_duration():
-    with pytest.warns(None) as record:
+    with warnings.catch_warnings(record=True) as record:
         with warn_on_duration("10s", "foo"):
             pass
     assert not record
 
-    with pytest.warns(None) as record:
+    with pytest.warns(UserWarning, match=r"foo") as record:
         with warn_on_duration("1ms", "foo"):
             sleep(0.100)
 
