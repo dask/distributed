@@ -1559,8 +1559,6 @@ class SchedulerState:
         )
         self.transition_counter = 0
 
-        logger.info("state end")
-
     @property
     def memory(self) -> MemoryState:
         return MemoryState.sum(*(w.memory for w in self.workers.values()))
