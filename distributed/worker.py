@@ -2680,9 +2680,8 @@ class Worker(ServerNode):
             if ts.state != "fetch":
                 continue
 
-            if not ts.who_has:
-                self.transition(ts, "missing", stimulus_id=stimulus_id)
-                continue
+            if self.validate:
+                assert ts.who_has
 
             workers = [w for w in ts.who_has if w not in self.in_flight_workers]
             if not workers:
