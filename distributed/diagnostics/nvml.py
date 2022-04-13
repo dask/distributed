@@ -14,6 +14,7 @@ nvmlInitialized = False
 nvmlLibraryNotFound = False
 nvmlWslInsufficientDriver = False
 nvmlOwnerPID = None
+minimumWslVersion = "512.15"
 
 
 def _in_wsl():
@@ -53,7 +54,7 @@ def init_once():
     if (
         not nvmlLibraryNotFound
         and parse_version(pynvml.nvmlSystemGetDriverVersion().decode())
-        < parse_version("512.15")
+        < parse_version(minimumWslVersion)
         and _in_wsl()
     ):
         nvmlWslInsufficientDriver = True
@@ -81,7 +82,8 @@ def _pynvml_handles():
             )
         if nvmlWslInsufficientDriver:
             raise RuntimeError(
-                "NVML is installed, but NVIDIA drivers are outdated for WSL"
+                "Outdated NVIDIA drivers for WSL, please upgrade to "
+                f"{minimumWslVersion} or newer"
             )
         else:
             raise RuntimeError("No GPUs available")
