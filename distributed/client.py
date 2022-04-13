@@ -102,6 +102,7 @@ from distributed.utils_comm import (
     pack_data,
     retry_operation,
     scatter_to_workers,
+    send_message,
     unpack_remotedata,
 )
 from distributed.worker import get_client, get_worker, secede
@@ -4293,6 +4294,44 @@ class Client(SyncMethodMixin):
     def collections_to_dsk(collections, *args, **kwargs):
         """Convert many collections into a single dask graph, after optimization"""
         return collections_to_dsk(collections, *args, **kwargs)
+
+    async def _story(self, keys=(), on_error="raise"):
+        stimulus_id = f"client-story-{time()}"
+        info = self.scheduler_info()
+
+        msg = {"op": "get_story", "keys": keys}
+        WORKER_SENTINEL = [("worker-story-retrieval-failure", stimulus_id, time())]
+        SERVER_SENTINEL = [("scheduler-story-retrieval-failure", stimulus_id, time())]
+
+        coros = [
+            send_message(
+                msg,
+                self.rpc,
+                self.scheduler.address,
+                None,
+                on_error,
+                default=SERVER_SENTINEL,
+            )
+        ] + [
+            send_message(
+                msg, self.rpc, address, None, on_error, default=WORKER_SENTINEL
+            )
+            for address in info["workers"]
+        ]
+
+        flat_stories = []
+
+        for stories in await asyncio.gather(*coros):
+            if isinstance(stories, (tuple, list)):
+                flat_stories.extend(s for s in stories)
+            else:
+                flat_stories.append(stories)
+
+        return flat_stories
+
+    def story(self, *keys_or_stimulus_ids, on_error="return"):
+        """Returns a cluster-wide story for the given keys or simtulus_id's"""
+        return self.sync(self._story, keys=keys_or_stimulus_ids, on_error=on_error)
 
     def get_task_stream(
         self,

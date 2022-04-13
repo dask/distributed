@@ -1994,7 +1994,11 @@ def assert_stimulus_flow(key, scheduler, *workers, flow):
 
 
 def assert_story(
-    story: list[tuple], expect: list[tuple], *, strict: bool = False
+    story: list[tuple],
+    expect: list[tuple],
+    *,
+    strict: bool = False,
+    ordered_timestamps: bool = True,
 ) -> None:
     """Test the output of ``Worker.story``
 
@@ -2024,6 +2028,10 @@ def assert_story(
         If True, the story must contain exactly as many events as expect.
         If False (the default), the story may contain more events than expect; extra
         events are ignored.
+    ordered_timestamps: bool, optional
+        If False, timestamps are not required to be monotically increasing.
+        Useful for asserting stories composed from the scheduler and
+        multiple workers
     """
     now = time()
     prev_ts = 0.0
@@ -2033,7 +2041,8 @@ def assert_story(
             assert isinstance(ev, tuple)
             assert isinstance(ev[-2], str) and ev[-2]  # stimulus_id
             assert isinstance(ev[-1], float)  # timestamp
-            assert prev_ts <= ev[-1]  # Timestamps are monotonic ascending
+            if ordered_timestamps:
+                assert prev_ts <= ev[-1]  # Timestamps are monotonic ascending
             # Timestamps are within the last hour. It's been observed that a timestamp
             # generated in a Nanny process can be a few milliseconds in the future.
             assert now - 3600 < ev[-1] <= now + 1

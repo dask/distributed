@@ -82,7 +82,11 @@ from distributed.utils import is_valid_xml, mp_context, sync, tmp_text
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _UnhashableCallable,
+<<<<<<< HEAD
     assert_stimulus_flow,
+=======
+    assert_story,
+>>>>>>> Client Story rebased on #6095
     async_wait_for,
     asyncinc,
     captured_logger,
@@ -7557,3 +7561,88 @@ async def test_stimulus_flow_retry(c, s, *workers):
             ("c", "worker", "stimulus-retry"): None,
         },
     )
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_client_story(c, s, *workers):
+    f = c.submit(inc, 1)
+    assert await f == 2
+    story = await c.story(f.key)
+
+    assert_story(
+        story,
+        [
+            (f.key, "released", "waiting", {f.key: "processing"}),
+            (f.key, "waiting", "processing", {}),
+            (f.key, "processing", "memory", {}),
+            (f.key, "compute-task"),
+            (f.key, "released", "waiting", "waiting", {f.key: "ready"}),
+            (f.key, "waiting", "ready", "ready", {f.key: "executing"}),
+            (f.key, "ready", "executing", "executing", {}),
+            (f.key, "put-in-memory"),
+            (f.key, "executing", "memory", "memory", {}),
+        ],
+        ordered_timestamps=False,
+    )
+
+    expected_stimulus_prefix = [
+        "update-graph-hlg-",
+        "update-graph-hlg-",
+        "task-finished-",
+        "compute-task-",
+        "compute-task-",
+        "compute-task-",
+        "compute-task-",
+        "task-finished-",
+        "task-finished-",
+    ]
+
+    stimulus_ids = [ev[-2] for ev in story]
+    assert len(expected_stimulus_prefix) == len(stimulus_ids)
+    assert all(ev[-2].startswith(p) for ev, p in zip(story, expected_stimulus_prefix))
+
+
+class WorkerBrokenStory(Worker):
+    async def get_story(self, *args, **kw):
+        raise CommClosedError
+
+
+@gen_cluster(client=True, Worker=WorkerBrokenStory)
+@pytest.mark.parametrize("on_error", ["ignore", "return", "raise"])
+async def test_client_story_failed_worker(c, s, a, b, on_error):
+    f = c.submit(inc, 1)
+    coro = c.story(f.key, on_error=on_error)
+    await f
+
+    if on_error == "raise":
+        with pytest.raises(CommClosedError) as e:
+            await coro
+    elif on_error == "ignore":
+        story = await coro
+        assert_story(
+            story,
+            [
+                (f.key, "released", "waiting", {f.key: "processing"}),
+                (f.key, "waiting", "processing", {}),
+                (f.key, "processing", "memory", {}),
+                ("worker-story-retrieval-failure",),
+                ("worker-story-retrieval-failure",),
+            ],
+        )
+
+    elif on_error == "return":
+        story = await coro
+
+        # Scheduler story is intact
+        assert_story(
+            story[:3],
+            [
+                (f.key, "released", "waiting", {f.key: "processing"}),
+                (f.key, "waiting", "processing", {}),
+                (f.key, "processing", "memory", {}),
+            ],
+        )
+
+        assert all(isinstance(event, CommClosedError) for event in story[3:])
+
+    else:
+        raise ValueError(on_error)
