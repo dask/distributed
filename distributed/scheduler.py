@@ -106,15 +106,6 @@ from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.variable import VariableExtension
 
 logger = logging.getLogger(__name__)
-
-
-def declare(*a, **k):
-    if len(a) == 2:
-        return a[1]
-    else:
-        pass
-
-
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 DEFAULT_DATA_SIZE = parse_bytes(
     dask.config.get("distributed.scheduler.default-data-size")
