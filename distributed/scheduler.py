@@ -3855,7 +3855,7 @@ class Scheduler(SchedulerState, ServerNode):
                 metrics=metrics,
             )
 
-            # Do not need to adjust self._total_occupancy as self.occupancy[ws] cannot
+            # Do not need to adjust self.total_occupancy as self.occupancy[ws] cannot
             # exist before this.
             self.check_idle_saturated(ws)
 
