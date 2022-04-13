@@ -446,7 +446,7 @@ class WorkerState:
         self.occupancy: int = 0
         self.memory_unmanaged_old = 0
         self.memory_other_history: "Deque[Tuple[float, int]]" = deque()
-        self.metrics = {}
+        self.metrics = {}  # type: ignore
         self.last_seen: float = 0
         self.time_delay: float = 0
         self.bandwidth = float(
@@ -454,12 +454,12 @@ class WorkerState:
         )
 
         self.actors: "set[TaskState]" = set()
-        self._has_what = {}
-        self.processing = {}
+        self._has_what = {}  # type: ignore
+        self.processing = {}  # type: ignore
         self.long_running: "set[TaskState]" = set()
-        self.executing = {}
-        self.resources = {}
-        self.used_resources = {}
+        self.executing = {}  # type: ignore
+        self.resources = {}  # type: ignore
+        self.used_resources = {}  # type: ignore
 
         self.extra = extra or {}
 
@@ -1169,8 +1169,8 @@ class TaskState:
         self.type: str = None  # type: ignore
         self.group_key = key_split_group(key)
         self.group: TaskGroup = None  # type: ignore
-        self.metadata = {}
-        self.annotations = {}
+        self.metadata = {}  # type: ignore
+        self.annotations = {}  # type: ignore
         self.erred_on: "set[str]" = set()
 
     def __hash__(self):
@@ -1475,7 +1475,7 @@ class SchedulerState:
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
         self.clients = clients
         self.clients["fire-and-forget"] = ClientState("fire-and-forget")
-        self.extensions = {}
+        self.extensions = {}  # type: ignore
         self.host_info = host_info
         self.idle = SortedDict()
         self.n_tasks = 0
@@ -1488,9 +1488,9 @@ class SchedulerState:
         self.computations: "deque[Computation]" = deque(
             maxlen=dask.config.get("distributed.diagnostics.computations.max-history")
         )
-        self.task_groups = {}
-        self.task_prefixes = {}
-        self.task_metadata = {}
+        self.task_groups: "dict[str, TaskGroup]" = {}
+        self.task_prefixes: "dict[str, TaskPrefix]" = {}
+        self.task_metadata = {}  # type: ignore
         self.total_nthreads = 0
         self.total_occupancy = 0
         self.transitions_table = {
@@ -1510,7 +1510,7 @@ class SchedulerState:
             ("memory", "released"): self.transition_memory_released,
             ("released", "erred"): self.transition_released_erred,
         }
-        self.unknown_durations = {}
+        self.unknown_durations: "dict[str, set[TaskState]]" = {}
         self.unrunnable = unrunnable
         self.validate = validate
         self.workers = workers
@@ -1618,9 +1618,9 @@ class SchedulerState:
         Scheduler.transitions : transitive version of this function
         """
         try:
-            recommendations = {}
-            worker_msgs = {}
-            client_msgs = {}
+            recommendations = {}  # type: ignore
+            worker_msgs = {}  # type: ignore
+            client_msgs = {}  # type: ignore
 
             ts: TaskState = self.tasks.get(key)  # type: ignore
             if ts is None:
