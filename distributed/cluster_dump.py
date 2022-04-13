@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Mapping
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
@@ -190,22 +189,15 @@ class DumpArtefact(Mapping):
 
         return tasks
 
-    def scheduler_story(self, *key_or_stimulus_id: str) -> dict:
+    def scheduler_story(self, *key_or_stimulus_id: str) -> list:
         """
         Returns
         -------
-        stories : dict
-            A list of stories for the keys/stimulus ID's in ``*key_or_stimulus_id``.
+        story : list
+            A list of events for the keys/stimulus ID's in ``*key_or_stimulus_id``.
         """
-        stories = defaultdict(list)
-
-        log = self.dump["scheduler"]["transition_log"]
         keys = set(key_or_stimulus_id)
-
-        for story in _scheduler_story(keys, log):
-            stories[story[0]].append(tuple(story))
-
-        return dict(stories)
+        return _scheduler_story(keys, self.dump["scheduler"]["transition_log"])
 
     def worker_stories(self, *key_or_stimulus_id: str) -> dict:
         """
