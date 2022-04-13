@@ -1,19 +1,19 @@
-import atexit
 import logging
 import math
 import warnings
-import weakref
 
 import toolz
 
 from dask.system import CPU_COUNT
+from dask.widgets import get_template
 
-from ..nanny import Nanny
-from ..scheduler import Scheduler
-from ..security import Security
-from ..worker import Worker, parse_memory_limit
-from .spec import SpecCluster
-from .utils import nprocesses_nthreads
+from distributed.deploy.spec import SpecCluster
+from distributed.deploy.utils import nprocesses_nthreads
+from distributed.nanny import Nanny
+from distributed.scheduler import Scheduler
+from distributed.security import Security
+from distributed.worker import Worker
+from distributed.worker_memory import parse_memory_limit
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +57,8 @@ class LocalCluster(SpecCluster):
         Set to True if using this cluster within async/await functions or within
         Tornado gen.coroutines.  This should remain False for normal use.
     blocked_handlers: List[str]
-        A list of strings specifying a blacklist of handlers to disallow on the Scheduler,
-        like ``['feed', 'run_function']``
+        A list of strings specifying a blocklist of handlers to disallow on the
+        Scheduler, like ``['feed', 'run_function']``
     service_kwargs: Dict[str, Dict]
         Extra keywords to hand to the running services
     security : Security or bool, optional
@@ -120,6 +120,7 @@ class LocalCluster(SpecCluster):
         interface=None,
         worker_class=None,
         scheduler_kwargs=None,
+        scheduler_sync_interval=1,
         **worker_kwargs,
     ):
         if ip is not None:
@@ -136,8 +137,8 @@ class LocalCluster(SpecCluster):
 
         if threads_per_worker == 0:
             warnings.warn(
-                "Setting `threads_per_worker` to 0 is discouraged. "
-                "Please set to None or to a specific int to get best behavior."
+                "Setting `threads_per_worker` to 0 has been deprecated. "
+                "Please set to None or to a specific int."
             )
             threads_per_worker = None
 
@@ -198,6 +199,7 @@ class LocalCluster(SpecCluster):
 
         worker_kwargs.update(
             {
+                "host": host,
                 "nthreads": threads_per_worker,
                 "services": worker_services,
                 "dashboard_address": worker_dashboard_address,
@@ -240,6 +242,7 @@ class LocalCluster(SpecCluster):
             asynchronous=asynchronous,
             silence_logs=silence_logs,
             security=security,
+            scheduler_sync_interval=scheduler_sync_interval,
         )
 
     def start_worker(self, *args, **kwargs):
@@ -249,21 +252,9 @@ class LocalCluster(SpecCluster):
         )
 
     def _repr_html_(self, cluster_status=None):
-        if cluster_status is None:
-            cluster_status = ""
-        cluster_status += f"""
-            <tr>
-                <td style="text-align: left;"><strong>Status:</strong> {self.status.name}</td>
-                <td style="text-align: left;"><strong>Using processes:</strong> {self.processes}</td>
-            </tr>
-        """
+        cluster_status = get_template("local_cluster.html.j2").render(
+            status=self.status.name,
+            processes=self.processes,
+            cluster_status=cluster_status,
+        )
         return super()._repr_html_(cluster_status=cluster_status)
-
-
-clusters_to_close = weakref.WeakSet()
-
-
-@atexit.register
-def close_clusters():
-    for cluster in list(clusters_to_close):
-        cluster.close(timeout=10)

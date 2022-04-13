@@ -1,33 +1,33 @@
 import asyncio
 import datetime
 import logging
-import threading
 import uuid
-import warnings
 from contextlib import suppress
 from inspect import isawaitable
 
 from tornado.ioloop import PeriodicCallback
 
 import dask.config
-from dask.utils import format_bytes
+from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
+from dask.widgets import get_template
 
-from ..core import Status
-from ..objects import SchedulerInfo
-from ..utils import (
-    MultiLogs,
+from distributed.core import Status
+from distributed.deploy.adaptive import Adaptive
+from distributed.objects import SchedulerInfo
+from distributed.utils import (
+    Log,
+    Logs,
+    LoopRunner,
+    NoOpAwaitable,
+    SyncMethodMixin,
     format_dashboard_link,
     log_errors,
-    parse_timedelta,
-    sync,
-    thread_state,
 )
-from .adaptive import Adaptive
 
 logger = logging.getLogger(__name__)
 
 
-class Cluster:
+class Cluster(SyncMethodMixin):
     """Superclass for cluster objects
 
     This class contains common functionality for Dask Cluster manager classes.
@@ -51,38 +51,115 @@ class Cluster:
     """
 
     _supports_scaling = True
-    name = None
+    _cluster_info: dict = {}
 
-    def __init__(self, asynchronous, quiet=False, name=None):
+    def __init__(
+        self,
+        asynchronous=False,
+        loop=None,
+        quiet=False,
+        name=None,
+        scheduler_sync_interval=1,
+    ):
+        self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
+        self.loop = self._loop_runner.loop
+
         self.scheduler_info = {"workers": {}}
         self.periodic_callbacks = {}
-        self._asynchronous = asynchronous
         self._watch_worker_status_comm = None
         self._watch_worker_status_task = None
         self._cluster_manager_logs = []
         self.quiet = quiet
         self.scheduler_comm = None
         self._adaptive = None
+        self._sync_interval = parse_timedelta(
+            scheduler_sync_interval, default="seconds"
+        )
+        self._sync_cluster_info_task = None
 
-        if name is not None:
-            self.name = name
-        elif self.name is None:
-            self.name = str(uuid.uuid4())[:8]
+        if name is None:
+            name = str(uuid.uuid4())[:8]
+
+        # Mask class attribute with instance attribute
+        self._cluster_info = {
+            "name": name,
+            "type": typename(type(self)),
+            **type(self)._cluster_info,
+        }
         self.status = Status.created
+
+    @property
+    def name(self):
+        return self._cluster_info["name"]
+
+    @name.setter
+    def name(self, name):
+        self._cluster_info["name"] = name
 
     async def _start(self):
         comm = await self.scheduler_comm.live_comm()
+        comm.name = "Cluster worker status"
         await comm.write({"op": "subscribe_worker_status"})
         self.scheduler_info = SchedulerInfo(await comm.read())
         self._watch_worker_status_comm = comm
         self._watch_worker_status_task = asyncio.ensure_future(
             self._watch_worker_status(comm)
         )
+
+        info = await self.scheduler_comm.get_metadata(
+            keys=["cluster-manager-info"], default={}
+        )
+        self._cluster_info.update(info)
+
+        # Start a background task for syncing cluster info with the scheduler
+        self._sync_cluster_info_task = asyncio.ensure_future(self._sync_cluster_info())
+
+        for pc in self.periodic_callbacks.values():
+            pc.start()
         self.status = Status.running
+
+    async def _sync_cluster_info(self):
+        err_count = 0
+        warn_at = 5
+        max_interval = 10 * self._sync_interval
+        # Loop until the cluster is shutting down. We shouldn't really need
+        # this check (the `CancelledError` should be enough), but something
+        # deep in the comms code is silencing `CancelledError`s _some_ of the
+        # time, resulting in a cancellation not always bubbling back up to
+        # here. Relying on the status is fine though, not worth changing.
+        while self.status == Status.running:
+            try:
+                await self.scheduler_comm.set_metadata(
+                    keys=["cluster-manager-info"],
+                    value=self._cluster_info.copy(),
+                )
+                err_count = 0
+            except asyncio.CancelledError:
+                # Task is being closed. When we drop Python < 3.8 we can drop
+                # this check (since CancelledError is not a subclass of
+                # Exception then).
+                break
+            except Exception:
+                err_count += 1
+                # Only warn if multiple subsequent attempts fail, and only once
+                # per set of subsequent failed attempts. This way we're not
+                # excessively noisy during a connection blip, but we also don't
+                # silently fail.
+                if err_count == warn_at:
+                    logger.warning(
+                        "Failed to sync cluster info multiple times - perhaps "
+                        "there's a connection issue? Error:",
+                        exc_info=True,
+                    )
+            # Sleep, with error backoff
+            interval = min(max_interval, self._sync_interval * 1.5**err_count)
+            await asyncio.sleep(interval)
 
     async def _close(self):
         if self.status == Status.closed:
             return
+
+        self.status = Status.closing
 
         with suppress(AttributeError):
             self._adaptive.stop()
@@ -92,11 +169,16 @@ class Cluster:
         if self._watch_worker_status_task:
             await self._watch_worker_status_task
 
-        for pc in self.periodic_callbacks.values():
-            pc.stop()
+        if self._sync_cluster_info_task:
+            self._sync_cluster_info_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._sync_cluster_info_task
 
         if self.scheduler_comm:
             await self.scheduler_comm.close_rpc()
+
+        for pc in self.periodic_callbacks.values():
+            pc.stop()
 
         self.status = Status.closed
 
@@ -104,9 +186,7 @@ class Cluster:
         # If the cluster is already closed, we're already done
         if self.status == Status.closed:
             if self.asynchronous:
-                future = asyncio.Future()
-                future.set_result(None)
-                return future
+                return NoOpAwaitable()
             else:
                 return
 
@@ -114,7 +194,7 @@ class Cluster:
             return self.sync(self._close, callback_timeout=timeout)
 
     def __del__(self):
-        if self.status != Status.closed:
+        if getattr(self, "status", Status.closed) != Status.closed:
             with suppress(AttributeError, RuntimeError):  # during closing
                 self.loop.add_callback(self.close)
 
@@ -139,7 +219,7 @@ class Cluster:
             self.scheduler_info.update(msg)
         elif op == "remove":
             del self.scheduler_info["workers"][msg]
-        else:
+        else:  # pragma: no cover
             raise ValueError("Invalid op", op, msg)
 
     def adapt(self, Adaptive=Adaptive, **kwargs) -> Adaptive:
@@ -173,25 +253,6 @@ class Cluster:
         """
         raise NotImplementedError()
 
-    @property
-    def asynchronous(self):
-        return (
-            self._asynchronous
-            or getattr(thread_state, "asynchronous", False)
-            or hasattr(self.loop, "_thread_identity")
-            and self.loop._thread_identity == threading.get_ident()
-        )
-
-    def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
-        asynchronous = asynchronous or self.asynchronous
-        if asynchronous:
-            future = func(*args, **kwargs)
-            if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
-            return future
-        else:
-            return sync(self.loop, func, *args, **kwargs)
-
     def _log(self, log):
         """Log a message.
 
@@ -209,19 +270,23 @@ class Cluster:
             print(log)
 
     async def _get_logs(self, cluster=True, scheduler=True, workers=True):
-        logs = MultiLogs()
+        logs = Logs()
 
         if cluster:
-            logs["Cluster"] = self._cluster_manager_logs
+            logs["Cluster"] = Log(
+                "\n".join(line[1] for line in self._cluster_manager_logs)
+            )
 
         if scheduler:
             L = await self.scheduler_comm.get_logs()
-            logs["Scheduler"] = L
+            logs["Scheduler"] = Log("\n".join(line for level, line in L))
 
         if workers:
+            if workers is True:
+                workers = None
             d = await self.scheduler_comm.worker_logs(workers=workers)
             for k, v in d.items():
-                logs[k] = v
+                logs[k] = Log("\n".join(line for level, line in v))
 
         return logs
 
@@ -248,8 +313,8 @@ class Cluster:
             self._get_logs, cluster=cluster, scheduler=scheduler, workers=workers
         )
 
+    @_deprecated(use_instead="get_logs")
     def logs(self, *args, **kwargs):
-        warnings.warn("logs is deprecated, use get_logs instead", DeprecationWarning)
         return self.get_logs(*args, **kwargs)
 
     @property
@@ -343,7 +408,7 @@ class Cluster:
                     update()
 
             scale.on_click(scale_cb)
-        else:
+        else:  # pragma: no cover
             accordion = HTML("")
 
         scale_status = HTML(self._scaling_status())
@@ -370,54 +435,19 @@ class Cluster:
 
     def _repr_html_(self, cluster_status=None):
 
-        if not cluster_status:
-            cluster_status = ""
-
-        cluster_status += f"""
-            <tr>
-                <td style="text-align: left;">
-                    <strong>Dashboard:</strong> <a href="{self.dashboard_link}">{self.dashboard_link}</a>
-                </td>
-                <td style="text-align: left;"><strong>Workers:</strong> {len(self.scheduler_info["workers"])}</td>
-            </tr>
-            <tr>
-                <td style="text-align: left;">
-                    <strong>Total threads:</strong>
-                    {sum([w["nthreads"] for w in self.scheduler_info["workers"].values()])}
-                </td>
-                <td style="text-align: left;">
-                    <strong>Total memory:</strong>
-                    {format_bytes(sum([w["memory_limit"] for w in self.scheduler_info["workers"].values()]))}
-                </td>
-            </tr>
-        """
         try:
             scheduler_info_repr = self.scheduler_info._repr_html_()
         except AttributeError:
             scheduler_info_repr = "Scheduler not started yet."
 
-        return f"""
-            <div class="jp-RenderedHTMLCommon jp-RenderedHTML jp-mod-trusted jp-OutputArea-output">
-                <div style="
-                    width: 24px;
-                    height: 24px;
-                    background-color: #e1e1e1;
-                    border: 3px solid #9D9D9D;
-                    border-radius: 5px;
-                    position: absolute;"> </div>
-                <div style="margin-left: 48px;">
-                    <h3 style="margin-bottom: 0px; margin-top: 0px;">{type(self).__name__}</h3>
-                    <p style="color: #9D9D9D; margin-bottom: 0px;">{self.name}</p>
-                    <table style="width: 100%; text-align: left;">
-                    {cluster_status}
-                    </table>
-                    <details>
-                    <summary style="margin-bottom: 20px;"><h3 style="display: inline;">Scheduler Info</h3></summary>
-                    {scheduler_info_repr}
-                    </details>
-                </div>
-            </div>
-        """
+        return get_template("cluster.html.j2").render(
+            type=type(self).__name__,
+            name=self.name,
+            workers=self.scheduler_info["workers"],
+            dashboard_link=self.dashboard_link,
+            scheduler_info_repr=scheduler_info_repr,
+            cluster_status=cluster_status,
+        )
 
     def _ipython_display_(self, **kwargs):
         widget = self._widget()

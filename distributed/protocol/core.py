@@ -2,21 +2,37 @@ import logging
 
 import msgpack
 
-from .compression import decompress, maybe_compress
-from .serialize import (
+import dask.config
+
+from distributed.protocol import pickle
+from distributed.protocol.compression import decompress, maybe_compress
+from distributed.protocol.serialize import (
+    Pickled,
     Serialize,
     Serialized,
+    ToPickle,
     merge_and_deserialize,
     msgpack_decode_default,
     msgpack_encode_default,
     serialize_and_split,
 )
-from .utils import msgpack_opts
+from distributed.protocol.utils import msgpack_opts
 
 logger = logging.getLogger(__name__)
 
 
-def dumps(msg, serializers=None, on_error="message", context=None) -> list:
+def ensure_memoryview(obj):
+    """Ensure `obj` is a memoryview of datatype bytes"""
+    ret = memoryview(obj)
+    if ret.nbytes:
+        return ret.cast("B")
+    else:
+        return ret
+
+
+def dumps(
+    msg, serializers=None, on_error="message", context=None, frame_split_size=None
+) -> list:
     """Transform Python message to bytestream suitable for communication
 
     Developer Notes
@@ -43,27 +59,59 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
 
             header["compression"] = tuple(compression)
 
+        def create_serialized_sub_frames(obj) -> list:
+            typ = type(obj)
+            if typ is Serialized:
+                sub_header, sub_frames = obj.header, obj.frames
+            else:
+                sub_header, sub_frames = serialize_and_split(
+                    obj,
+                    serializers=serializers,
+                    on_error=on_error,
+                    context=context,
+                    size=frame_split_size,
+                )
+                _inplace_compress_frames(sub_header, sub_frames)
+            sub_header["num-sub-frames"] = len(sub_frames)
+            sub_header = msgpack.dumps(
+                sub_header, default=msgpack_encode_default, use_bin_type=True
+            )
+            return [sub_header] + sub_frames
+
+        def create_pickled_sub_frames(obj) -> list:
+            typ = type(obj)
+            if typ is Pickled:
+                sub_header, sub_frames = obj.header, obj.frames
+            else:
+                sub_frames = []
+                sub_header = {
+                    "pickled-obj": pickle.dumps(
+                        obj.data,
+                        # In to support len() and slicing, we convert `PickleBuffer`
+                        # objects to memoryviews of bytes.
+                        buffer_callback=lambda x: sub_frames.append(
+                            ensure_memoryview(x)
+                        ),
+                    )
+                }
+                _inplace_compress_frames(sub_header, sub_frames)
+
+            sub_header["num-sub-frames"] = len(sub_frames)
+            sub_header = msgpack.dumps(sub_header)
+            return [sub_header] + sub_frames
+
         frames = [None]
 
         def _encode_default(obj):
             typ = type(obj)
             if typ is Serialize or typ is Serialized:
                 offset = len(frames)
-                if typ is Serialized:
-                    sub_header, sub_frames = obj.header, obj.frames
-                else:
-                    sub_header, sub_frames = serialize_and_split(
-                        obj, serializers=serializers, on_error=on_error, context=context
-                    )
-                    _inplace_compress_frames(sub_header, sub_frames)
-                sub_header["num-sub-frames"] = len(sub_frames)
-                frames.append(
-                    msgpack.dumps(
-                        sub_header, default=msgpack_encode_default, use_bin_type=True
-                    )
-                )
-                frames.extend(sub_frames)
+                frames.extend(create_serialized_sub_frames(obj))
                 return {"__Serialized__": offset}
+            elif typ is ToPickle or typ is Pickled:
+                offset = len(frames)
+                frames.extend(create_pickled_sub_frames(obj))
+                return {"__Pickled__": offset}
             else:
                 return msgpack_encode_default(obj)
 
@@ -78,6 +126,8 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
 def loads(frames, deserialize=True, deserializers=None):
     """Transform bytestream back into Python value"""
 
+    allow_pickle = dask.config.get("distributed.scheduler.pickle")
+
     try:
 
         def _decode_default(obj):
@@ -87,7 +137,7 @@ def loads(frames, deserialize=True, deserializers=None):
                     frames[offset],
                     object_hook=msgpack_decode_default,
                     use_list=False,
-                    **msgpack_opts
+                    **msgpack_opts,
                 )
                 offset += 1
                 sub_frames = frames[offset : offset + sub_header["num-sub-frames"]]
@@ -99,8 +149,20 @@ def loads(frames, deserialize=True, deserializers=None):
                     )
                 else:
                     return Serialized(sub_header, sub_frames)
-            else:
-                return msgpack_decode_default(obj)
+
+            offset = obj.get("__Pickled__", 0)
+            if offset > 0:
+                sub_header = msgpack.loads(frames[offset])
+                offset += 1
+                sub_frames = frames[offset : offset + sub_header["num-sub-frames"]]
+                if allow_pickle:
+                    return pickle.loads(sub_header["pickled-obj"], buffers=sub_frames)
+                else:
+                    raise ValueError(
+                        "Unpickle on the Scheduler isn't allowed, set `distributed.scheduler.pickle=true`"
+                    )
+
+            return msgpack_decode_default(obj)
 
         return msgpack.loads(
             frames[0], object_hook=_decode_default, use_list=False, **msgpack_opts

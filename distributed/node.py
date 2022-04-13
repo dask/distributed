@@ -8,11 +8,11 @@ from tornado.httpserver import HTTPServer
 
 import dask
 
-from .comm import get_address_host, get_tcp_server_addresses
-from .core import Server
-from .http.routing import RoutingApplication
-from .utils import DequeHandler, clean_dashboard_address
-from .versions import get_versions
+from distributed.comm import get_address_host, get_tcp_server_addresses
+from distributed.core import Server
+from distributed.http.routing import RoutingApplication
+from distributed.utils import DequeHandler, clean_dashboard_address
+from distributed.versions import get_versions
 
 
 class ServerNode(Server):
@@ -25,7 +25,7 @@ class ServerNode(Server):
     # XXX avoid inheriting from Server? there is some large potential for confusion
     # between base and derived attribute namespaces...
 
-    def versions(self, comm=None, packages=None):
+    def versions(self, packages=None):
         return get_versions(packages=packages)
 
     def start_services(self, default_listen_ip):
@@ -63,7 +63,7 @@ class ServerNode(Server):
                 self.services[k] = service
             except Exception as e:
                 warnings.warn(
-                    "\nCould not launch service '%s' on port %s. " % (k, port)
+                    f"\nCould not launch service '{k}' on port {port}. "
                     + "Got the following message:\n\n"
                     + str(e),
                     stacklevel=3,
@@ -87,14 +87,34 @@ class ServerNode(Server):
         logger.addHandler(self._deque_handler)
         weakref.finalize(self, logger.removeHandler, self._deque_handler)
 
-    def get_logs(self, comm=None, n=None):
+    def get_logs(self, start=0, n=None, timestamps=False):
+        """
+        Fetch log entries for this node
+
+        Parameters
+        ----------
+        start : float, optional
+            A time (in seconds) to begin filtering log entries from
+        n : int, optional
+            Maximum number of log entries to return from filtered results
+        timestamps : bool, default False
+            Do we want log entries to include the time they were generated?
+
+        Returns
+        -------
+        List of tuples containing the log level, message, and (optional) timestamp for each filtered entry
+        """
         deque_handler = self._deque_handler
-        if n is None:
-            L = list(deque_handler.deque)
-        else:
-            L = deque_handler.deque
-            L = [L[-i] for i in range(min(n, len(L)))]
-        return [(msg.levelname, deque_handler.format(msg)) for msg in L]
+
+        L = []
+        for count, msg in enumerate(deque_handler.deque):
+            if n and count >= n or msg.created < start:
+                break
+            if timestamps:
+                L.append((msg.created, msg.levelname, deque_handler.format(msg)))
+            else:
+                L.append((msg.levelname, deque_handler.format(msg)))
+        return L
 
     def start_http_server(
         self, routes, dashboard_address, default_port=0, ssl_options=None
@@ -111,12 +131,9 @@ class ServerNode(Server):
             import ssl
 
             ssl_options = ssl.create_default_context(
-                cafile=tls_ca_file, purpose=ssl.Purpose.SERVER_AUTH
+                cafile=tls_ca_file, purpose=ssl.Purpose.CLIENT_AUTH
             )
             ssl_options.load_cert_chain(tls_cert, keyfile=tls_key)
-            # We don't care about auth here, just encryption
-            ssl_options.check_hostname = False
-            ssl_options.verify_mode = ssl.CERT_NONE
 
         self.http_server = HTTPServer(self.http_application, ssl_options=ssl_options)
 
@@ -158,9 +175,7 @@ class ServerNode(Server):
         ):
             if expected != actual and expected > 0:
                 warnings.warn(
-                    "Port {} is already in use.\n"
+                    f"Port {expected} is already in use.\n"
                     "Perhaps you already have a cluster running?\n"
-                    "Hosting the HTTP server on port {} instead".format(
-                        expected, actual
-                    )
+                    f"Hosting the HTTP server on port {actual} instead"
                 )

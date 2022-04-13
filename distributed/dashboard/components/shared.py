@@ -3,6 +3,7 @@ import weakref
 from statistics import mean
 
 import tlz as toolz
+from bokeh.core.properties import without_property_validation
 from bokeh.layouts import column, row
 from bokeh.models import (
     Button,
@@ -23,21 +24,17 @@ import dask
 from distributed import profile
 from distributed.compatibility import WINDOWS
 from distributed.dashboard.components import DashboardComponent
-from distributed.dashboard.utils import (
-    BOKEH_VERSION,
-    update,
-    without_property_validation,
-)
-from distributed.utils import log_errors, parse_timedelta
+from distributed.dashboard.utils import update
+from distributed.utils import log_errors
 
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
 else:
-    ExportTool = None
+    ExportTool = None  # type: ignore
 
 
 profile_interval = dask.config.get("distributed.worker.profile.interval")
-profile_interval = parse_timedelta(profile_interval, default="ms")
+profile_interval = dask.utils.parse_timedelta(profile_interval, default="ms")
 
 
 class Processing(DashboardComponent):
@@ -57,7 +54,7 @@ class Processing(DashboardComponent):
             tools="",
             x_range=x_range,
             id="bk-processing-stacks-plot",
-            **kwargs
+            **kwargs,
         )
         fig.quad(
             source=self.source,
@@ -146,11 +143,7 @@ class ProfilePlot(DashboardComponent):
         def cb(attr, old, new):
             with log_errors():
                 try:
-                    selected = new.indices
-                except AttributeError:
-                    selected = new["1d"]["indices"]
-                try:
-                    ind = selected[0]
+                    ind = new.indices[0]
                 except IndexError:
                     return
                 data = profile.plot_data(self.states[ind], profile_interval)
@@ -159,10 +152,7 @@ class ProfilePlot(DashboardComponent):
                 update(self.source, data)
                 self.source.selected = old
 
-        if BOKEH_VERSION >= "1.0.0":
-            self.source.selected.on_change("indices", cb)
-        else:
-            self.source.on_change("selected", cb)
+        self.source.selected.on_change("indices", cb)
 
     @without_property_validation
     def update(self, state):
@@ -208,32 +198,18 @@ class ProfileTimePlot(DashboardComponent):
 
         @without_property_validation
         def cb(attr, old, new):
-            if changing[0]:
+            if changing[0] or len(new) == 0:
                 return
             with log_errors():
-                if isinstance(new, list):  # bokeh >= 1.0
-                    selected = new
-                else:
-                    selected = new["1d"]["indices"]
-                try:
-                    ind = selected[0]
-                except IndexError:
-                    return
-                data = profile.plot_data(self.states[ind], profile_interval)
+                data = profile.plot_data(self.states[new[0]], profile_interval)
                 del self.states[:]
                 self.states.extend(data.pop("states"))
                 changing[0] = True  # don't recursively trigger callback
                 update(self.source, data)
-                if isinstance(new, list):  # bokeh >= 1.0
-                    self.source.selected.indices = old
-                else:
-                    self.source.selected = old
+                self.source.selected.indices = old
                 changing[0] = False
 
-        if BOKEH_VERSION >= "1.0.0":
-            self.source.selected.on_change("indices", cb)
-        else:
-            self.source.on_change("selected", cb)
+        self.source.selected.on_change("indices", cb)
 
         self.ts_source = ColumnDataSource({"time": [], "count": []})
         self.ts_plot = figure(
@@ -254,10 +230,7 @@ class ProfileTimePlot(DashboardComponent):
 
         def ts_change(attr, old, new):
             with log_errors():
-                try:
-                    selected = self.ts_source.selected.indices
-                except AttributeError:
-                    selected = self.ts_source.selected["1d"]["indices"]
+                selected = self.ts_source.selected.indices
                 if selected:
                     start = self.ts_source.data["time"][min(selected)] / 1000
                     stop = self.ts_source.data["time"][max(selected)] / 1000
@@ -266,10 +239,7 @@ class ProfileTimePlot(DashboardComponent):
                     self.start = self.stop = None
                 self.trigger_update(update_metadata=False)
 
-        if BOKEH_VERSION >= "1.0.0":
-            self.ts_source.selected.on_change("indices", ts_change)
-        else:
-            self.ts_source.on_change("selected", ts_change)
+        self.ts_source.selected.on_change("indices", ts_change)
 
         self.reset_button = Button(label="Reset", button_type="success")
         self.reset_button.on_click(lambda: self.update(self.state))
@@ -297,7 +267,7 @@ class ProfileTimePlot(DashboardComponent):
             ),
             self.profile_plot,
             self.ts_plot,
-            **kwargs
+            **kwargs,
         )
 
     @without_property_validation
@@ -361,32 +331,18 @@ class ProfileServer(DashboardComponent):
 
         @without_property_validation
         def cb(attr, old, new):
-            if changing[0]:
+            if changing[0] or len(new) == 0:
                 return
             with log_errors():
-                if isinstance(new, list):  # bokeh >= 1.0
-                    selected = new
-                else:
-                    selected = new["1d"]["indices"]
-                try:
-                    ind = selected[0]
-                except IndexError:
-                    return
-                data = profile.plot_data(self.states[ind], profile_interval)
+                data = profile.plot_data(self.states[new[0]], profile_interval)
                 del self.states[:]
                 self.states.extend(data.pop("states"))
                 changing[0] = True  # don't recursively trigger callback
                 update(self.source, data)
-                if isinstance(new, list):  # bokeh >= 1.0
-                    self.source.selected.indices = old
-                else:
-                    self.source.selected = old
+                self.source.selected.indices = old
                 changing[0] = False
 
-        if BOKEH_VERSION >= "1.0.0":
-            self.source.selected.on_change("indices", cb)
-        else:
-            self.source.on_change("selected", cb)
+        self.source.selected.on_change("indices", cb)
 
         self.ts_source = ColumnDataSource({"time": [], "count": []})
         self.ts_plot = figure(
@@ -407,10 +363,7 @@ class ProfileServer(DashboardComponent):
 
         def ts_change(attr, old, new):
             with log_errors():
-                try:
-                    selected = self.ts_source.selected.indices
-                except AttributeError:
-                    selected = self.ts_source.selected["1d"]["indices"]
+                selected = self.ts_source.selected.indices
                 if selected:
                     start = self.ts_source.data["time"][min(selected)] / 1000
                     stop = self.ts_source.data["time"][max(selected)] / 1000
@@ -419,10 +372,7 @@ class ProfileServer(DashboardComponent):
                     self.start = self.stop = None
                 self.trigger_update()
 
-        if BOKEH_VERSION >= "1.0.0":
-            self.ts_source.selected.on_change("indices", ts_change)
-        else:
-            self.ts_source.on_change("selected", ts_change)
+        self.ts_source.selected.on_change("indices", ts_change)
 
         self.reset_button = Button(label="Reset", button_type="success")
         self.reset_button.on_click(lambda: self.update(self.state))
@@ -434,7 +384,7 @@ class ProfileServer(DashboardComponent):
             row(self.reset_button, self.update_button, sizing_mode="scale_width"),
             self.profile_plot,
             self.ts_plot,
-            **kwargs
+            **kwargs,
         )
 
     @without_property_validation
@@ -485,8 +435,9 @@ class SystemMonitor(DashboardComponent):
             x_axis_type="datetime",
             height=height,
             tools=tools,
+            toolbar_location="above",
             x_range=x_range,
-            **kwargs
+            **kwargs,
         )
         self.cpu.line(source=self.source, x="time", y="cpu")
         self.cpu.yaxis.axis_label = "Percentage"
@@ -498,7 +449,6 @@ class SystemMonitor(DashboardComponent):
                 y_units="screen",
                 text="cpu",
                 text_font_size="1em",
-                render_mode="css",
                 source=self.label_source,
             )
         )
@@ -507,8 +457,9 @@ class SystemMonitor(DashboardComponent):
             x_axis_type="datetime",
             height=height,
             tools=tools,
+            toolbar_location="above",
             x_range=x_range,
-            **kwargs
+            **kwargs,
         )
         self.mem.line(source=self.source, x="time", y="memory")
         self.mem.yaxis.axis_label = "Bytes"
@@ -520,7 +471,6 @@ class SystemMonitor(DashboardComponent):
                 y_units="screen",
                 text="memory",
                 text_font_size="1em",
-                render_mode="css",
                 source=self.label_source,
             )
         )
@@ -530,10 +480,23 @@ class SystemMonitor(DashboardComponent):
             height=height,
             x_range=x_range,
             tools=tools,
-            **kwargs
+            toolbar_location="above",
+            **kwargs,
         )
-        self.bandwidth.line(source=self.source, x="time", y="read_bytes", color="red")
-        self.bandwidth.line(source=self.source, x="time", y="write_bytes", color="blue")
+        self.bandwidth.line(
+            source=self.source,
+            x="time",
+            y="read_bytes",
+            color="red",
+            legend_label="read",
+        )
+        self.bandwidth.line(
+            source=self.source,
+            x="time",
+            y="write_bytes",
+            color="blue",
+            legend_label="write",
+        )
         self.bandwidth.yaxis.axis_label = "Bytes / second"
 
         # self.cpu.yaxis[0].formatter = NumeralTickFormatter(format='0%')
@@ -549,7 +512,8 @@ class SystemMonitor(DashboardComponent):
                 height=height,
                 x_range=x_range,
                 tools=tools,
-                **kwargs
+                toolbar_location="above",
+                **kwargs,
             )
 
             self.num_fds.line(source=self.source, x="time", y="num_fds")
@@ -579,13 +543,13 @@ class SystemMonitor(DashboardComponent):
     def update(self):
         with log_errors():
             self.source.stream(self.get_data(), 1000)
-            self.label_source.data["cpu"] = list(
+            self.label_source.data["cpu"] = [
                 "{}: {:.1f}%".format(f.__name__, f(self.source.data["cpu"]))
                 for f in [min, max, mean]
-            )
-            self.label_source.data["memory"] = list(
+            ]
+            self.label_source.data["memory"] = [
                 "{}: {}".format(
                     f.__name__, dask.utils.format_bytes(f(self.source.data["memory"]))
                 )
                 for f in [min, max, mean]
-            )
+            ]

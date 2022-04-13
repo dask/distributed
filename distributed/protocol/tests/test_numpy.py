@@ -4,6 +4,8 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
+from dask.utils import tmpfile
+
 from distributed.protocol import (
     decompress,
     deserialize,
@@ -18,7 +20,7 @@ from distributed.protocol.numpy import itemsize
 from distributed.protocol.pickle import HIGHEST_PROTOCOL
 from distributed.protocol.utils import BIG_BYTES_SHARD_SIZE
 from distributed.system import MEMORY_LIMIT
-from distributed.utils import ensure_bytes, nbytes, tmpfile
+from distributed.utils import ensure_bytes, nbytes
 from distributed.utils_test import gen_cluster
 
 
@@ -185,11 +187,13 @@ def test_dumps_serialize_numpy_large():
     frames = dumps([to_serialize(x)])
     dtype, shape = x.dtype, x.shape
     checksum = crc32(x)
-    del x
     [y] = loads(frames)
 
     assert (y.dtype, y.shape) == (dtype, shape)
     assert crc32(y) == checksum, "Arrays are unequal"
+
+    x[:] = 2  # shared buffer; serialization is zero-copy
+    assert (x == y).all(), "Data was copied"
 
 
 @pytest.mark.parametrize(
@@ -221,12 +225,6 @@ def test_compress_numpy():
     assert sum(map(nbytes, frames)) < x.nbytes
 
     header = msgpack.loads(frames[1], raw=False, use_list=False, strict_map_key=False)
-    try:
-        import blosc  # noqa: F401
-    except ImportError:
-        pass
-    else:
-        assert all(c == "blosc" for c in header["compression"])
 
 
 def test_compress_memoryview():
@@ -236,47 +234,10 @@ def test_compress_memoryview():
         assert len(compressed) < len(mv)
 
 
-@pytest.mark.skip
-def test_dont_compress_uncompressable_data():
-    blosc = pytest.importorskip("blosc")
-    x = np.random.randint(0, 255, size=100000).astype("uint8")
-    header, [data] = serialize(x)
-    assert "compression" not in header
-    assert data == x.data
-
-    x = np.ones(1000000)
-    header, [data] = serialize(x)
-    assert header["compression"] == ["blosc"]
-    assert data != x.data
-
-    x = np.ones(100)
-    header, [data] = serialize(x)
-    assert "compression" not in header
-    if isinstance(data, memoryview):
-        assert data.obj.ctypes.data == x.ctypes.data
-
-
 @gen_cluster(client=True, timeout=60)
-async def test_dumps_large_blosc(c, s, a, b):
+async def test_dumps_large(c, s, a, b):
     x = c.submit(np.ones, BIG_BYTES_SHARD_SIZE * 2, dtype="u1")
     await x
-
-
-def test_compression_takes_advantage_of_itemsize():
-    pytest.importorskip("lz4")
-    blosc = pytest.importorskip("blosc")
-    x = np.arange(1000000, dtype="i8")
-
-    assert len(blosc.compress(x.data, typesize=8)) < len(
-        blosc.compress(x.data, typesize=1)
-    )
-
-    _, a = serialize(x)
-    aa = [maybe_compress(frame)[1] for frame in a]
-    _, b = serialize(x.view("u1"))
-    bb = [maybe_compress(frame)[1] for frame in b]
-
-    assert sum(map(nbytes, aa)) < sum(map(nbytes, bb))
 
 
 @pytest.mark.parametrize(

@@ -1,12 +1,13 @@
 # Vendored up-to-date copy of locket.py
 # Based on https://github.com/mwilliamson/locket.py/pull/8
 
-# flake8: noqa
+from __future__ import annotations
 
-import errno
 import threading
-import time
 import weakref
+from time import sleep
+
+from distributed.metrics import time
 
 __all__ = ["lock_file"]
 
@@ -23,17 +24,17 @@ except ImportError:
             "Platform not supported (failed to import fcntl, ctypes, msvcrt)"
         )
     else:
-        _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore
         _WinAPI_LockFile = _kernel32.LockFile
         _WinAPI_LockFile.restype = ctypes.wintypes.BOOL
         _WinAPI_LockFile.argtypes = [ctypes.wintypes.HANDLE] + [
-            ctypes.wintypes.DWORD
+            ctypes.wintypes.DWORD  # type: ignore
         ] * 4
 
         _WinAPI_UnlockFile = _kernel32.UnlockFile
         _WinAPI_UnlockFile.restype = ctypes.wintypes.BOOL
         _WinAPI_UnlockFile.argtypes = [ctypes.wintypes.HANDLE] + [
-            ctypes.wintypes.DWORD
+            ctypes.wintypes.DWORD  # type: ignore
         ] * 4
 
         _lock_file_blocking_available = False
@@ -52,7 +53,6 @@ except ImportError:
         def _unlock_file(file_):
             _WinAPI_UnlockFile(msvcrt.get_osfhandle(file_.fileno()), 0, 0, 1, 0)
 
-
 else:
     _lock_file_blocking_available = True
 
@@ -63,33 +63,28 @@ else:
         try:
             fcntl.flock(file_.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             return True
-        except IOError as error:
-            if error.errno in [errno.EACCES, errno.EAGAIN]:
-                return False
-            else:
-                raise
+        except (PermissionError, BlockingIOError):
+            return False
 
     def _unlock_file(file_):
         fcntl.flock(file_.fileno(), fcntl.LOCK_UN)
 
 
 _locks_lock = threading.Lock()
-_locks = weakref.WeakValueDictionary()
+_locks: weakref.WeakValueDictionary[str, _LockSet] = weakref.WeakValueDictionary()
 
 
 def lock_file(path, **kwargs):
-    _locks_lock.acquire()
-    try:
+    with _locks_lock:
         lock = _locks.get(path)
         if lock is None:
             lock = _create_lock_file(path)
             _locks[path] = lock
-    finally:
-        _locks_lock.release()
+
     return _Locker(lock, **kwargs)
 
 
-def _create_lock_file(path):
+def _create_lock_file(path: str):
     thread_lock = _ThreadLock(path)
     file_lock = _LockFile(path)
     return _LockSet([thread_lock, file_lock])
@@ -103,15 +98,15 @@ def _acquire_non_blocking(acquire, timeout, retry_period, path):
     if retry_period is None:
         retry_period = 0.05
 
-    start_time = time.time()
+    start_time = time()
     while True:
         success = acquire()
         if success:
             return
-        elif timeout is not None and time.time() - start_time > timeout:
-            raise LockError("Couldn't lock {0}".format(path))
+        elif timeout is not None and time() - start_time > timeout:
+            raise LockError(f"Couldn't lock {path}")
         else:
-            time.sleep(retry_period)
+            sleep(retry_period)
 
 
 class _LockSet:
@@ -124,7 +119,7 @@ class _LockSet:
             for lock in self._locks:
                 lock.acquire(timeout, retry_period)
                 acquired_locks.append(lock)
-        except:
+        except Exception:
             for acquired_lock in reversed(acquired_locks):
                 # TODO: handle exceptions
                 acquired_lock.release()

@@ -168,8 +168,8 @@ words, the results will exist on each worker. This operation required about
 and 16 GB RAM.
 
 Note that because the previous computation is bound by the GIL in Python, we
-can speed it up by starting the ``distributed`` workers with the ``--nprocs 4``
-option.
+can speed it up by starting the ``distributed`` workers with the
+``--nworkers 4`` option.
 
 To sum the word counts for all of the text files, we need to gather some
 information from the ``distributed`` workers. To reduce the amount of data
@@ -237,7 +237,8 @@ The complete Python script for this example is shown below:
 
    import hdfs3
    from collections import defaultdict, Counter
-   from distributed import Client, progress
+   from distributed import Client
+   from distributed.diagnostics.progressbar import progress
 
    hdfs = hdfs3.HDFileSystem('NAMENODE_HOSTNAME', port=NAMENODE_PORT)
    client = Client('SCHEDULER_IP:SCHEDULER:PORT')

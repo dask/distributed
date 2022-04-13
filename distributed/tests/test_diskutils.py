@@ -12,9 +12,10 @@ import pytest
 
 import dask
 
-from distributed.compatibility import MACOS, WINDOWS
+from distributed.compatibility import WINDOWS
 from distributed.diskutils import WorkSpace
 from distributed.metrics import time
+from distributed.profile import wait_profiler
 from distributed.utils import mp_context
 from distributed.utils_test import captured_logger
 
@@ -52,6 +53,7 @@ def test_workdir_simple(tmpdir):
     a.release()
     assert_contents(["bb", "bb.dirlock"])
     del b
+    wait_profiler()
     gc.collect()
     assert_contents([])
 
@@ -87,9 +89,11 @@ def test_two_workspaces_in_same_directory(tmpdir):
 
     del ws
     del b
+    wait_profiler()
     gc.collect()
     assert_contents(["aa", "aa.dirlock"], trials=5)
     del a
+    wait_profiler()
     gc.collect()
     assert_contents([], trials=5)
 
@@ -162,7 +166,7 @@ def test_workspace_rmtree_failure(tmpdir):
     # shutil.rmtree() may call its onerror callback several times
     assert lines
     for line in lines:
-        assert line.startswith("Failed to remove %r" % (a.dir_path,))
+        assert line.startswith(f"Failed to remove {a.dir_path!r}")
 
 
 def test_locking_disabled(tmpdir):
@@ -184,13 +188,15 @@ def test_locking_disabled(tmpdir):
             a.release()
             assert_contents(["bb"])
             del b
+            wait_profiler()
             gc.collect()
             assert_contents([])
 
         lock_file.assert_not_called()
 
 
-def _workspace_concurrency(base_dir, purged_q, err_q, stop_evt):
+def _workspace_concurrency(base_dir, purged_q, err_q, stop_evt, barrier):
+    barrier.wait()
     ws = WorkSpace(base_dir)
     n_purged = 0
     with captured_logger("distributed.diskutils", "ERROR") as sio:
@@ -213,9 +219,9 @@ def _workspace_concurrency(base_dir, purged_q, err_q, stop_evt):
     purged_q.put(n_purged)
 
 
-def _test_workspace_concurrency(tmpdir, timeout, max_procs):
-    """
-    WorkSpace concurrency test.  We merely check that no exception or
+@pytest.mark.slow
+def test_workspace_concurrency(tmpdir):
+    """WorkSpace concurrency test. We merely check that no exception or
     deadlock happens.
     """
     base_dir = str(tmpdir)
@@ -227,29 +233,36 @@ def _test_workspace_concurrency(tmpdir, timeout, max_procs):
     # Make sure purging only happens in the child processes
     ws._purge_leftovers = lambda: None
 
+    # Windows (or at least Windows GitHub CI) has been observed to be exceptionally
+    # slow. Don't stress it too much.
+    max_procs = 2 if WINDOWS else 16
+
     # Run a bunch of child processes that will try to purge concurrently
-    NPROCS = 2 if sys.platform == "win32" else max_procs
+    barrier = mp_context.Barrier(parties=max_procs + 1)
     processes = [
         mp_context.Process(
-            target=_workspace_concurrency, args=(base_dir, purged_q, err_q, stop_evt)
+            target=_workspace_concurrency,
+            args=(base_dir, purged_q, err_q, stop_evt, barrier),
         )
-        for i in range(NPROCS)
+        for _ in range(max_procs)
     ]
     for p in processes:
         p.start()
-
+    barrier.wait()
     n_created = 0
     n_purged = 0
+    t1 = time()
     try:
-        t1 = time()
-        while time() - t1 < timeout:
-            # Add a bunch of locks, and simulate forgetting them.
+        # On Linux, you will typically end with n_created > 10.000
+        # On Windows, it can take 60 seconds to create 50 locks!
+        while time() - t1 < 10:
+            # Add a bunch of locks and simulate forgetting them.
             # The concurrent processes should try to purge them.
-            for i in range(50):
+            for _ in range(100):
                 d = ws.new_work_dir(prefix="workspace-concurrency-")
                 d._finalizer.detach()
                 n_created += 1
-            sleep(1e-2)
+
     finally:
         stop_evt.set()
         for p in processes:
@@ -268,21 +281,6 @@ def _test_workspace_concurrency(tmpdir, timeout, max_procs):
             n_purged += purged_q.get_nowait()
     except queue.Empty:
         pass
+
     # We attempted to purge most directories at some point
     assert n_purged >= 0.5 * n_created > 0
-    return n_created, n_purged
-
-
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
-@pytest.mark.slow
-def test_workspace_concurrency(tmpdir):
-    if WINDOWS:
-        raise pytest.xfail.Exception("TODO: unknown failure on windows")
-    _test_workspace_concurrency(tmpdir, 5.0, 6)
-
-
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
-@pytest.mark.slow
-def test_workspace_concurrency_intense(tmpdir):
-    n_created, n_purged = _test_workspace_concurrency(tmpdir, 8.0, 16)
-    assert n_created >= 100

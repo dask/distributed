@@ -3,43 +3,45 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.7
+  - python=3.10
+  - packaging
   - pip
   - asyncssh
   - bokeh
   - click
   - cloudpickle
-  - cython  # Only tested here; also a dependency of crick
+  - coverage<6.3  # https://github.com/nedbat/coveragepy/issues/1310
   - dask  # overridden by git tip below
-  - filesystem-spec
+  - filesystem-spec  # overridden by git tip below
   - h5py
   - ipykernel
   - ipywidgets
-  - joblib
-  - jupyter_client
+  - jinja2
   - msgpack-python
   - netcdf4
   - paramiko
-  - pickle5  # Backport from Python 3.8
+  - pre-commit
   - prometheus_client
   - psutil
   - pytest
-  - pytest-asyncio<0.14.0
+  - pytest-cov
   - pytest-faulthandler
   - pytest-repeat
   - pytest-rerunfailures
   - pytest-timeout
   - requests
-  - s3fs
+  - s3fs  # overridden by git tip below
   - scikit-learn
   - scipy
   - sortedcollections
   - tblib
   - toolz
-  - tornado=5 # Only tested here
-  - zict
+  - tornado
+  - zict  # overridden by git tip below
   - zstandard
   - pip:
       - git+https://github.com/dask/dask
-      - git+https://github.com/jcrist/crick  # Only tested here
+      - git+https://github.com/dask/s3fs
+      - git+https://github.com/dask/zict
+      - git+https://github.com/fsspec/filesystem_spec
       - keras

@@ -4,13 +4,12 @@ Most are taken from other test files and adapted.
 """
 import asyncio
 
-import pytest
-
 from distributed import Client, Nanny, Queue, Scheduler, Worker, wait, worker_client
 from distributed.core import Status
 from distributed.metrics import time
 from distributed.utils_test import (
     double,
+    gen_test,
     gen_tls_cluster,
     inc,
     slowadd,
@@ -42,7 +41,7 @@ async def test_Queue(c, s, a, b):
     assert future.key == future2.key
 
 
-@gen_tls_cluster(client=True, timeout=None)
+@gen_tls_cluster(client=True)
 async def test_client_submit(c, s, a, b):
     assert s.address.startswith("tls://")
 
@@ -100,34 +99,24 @@ async def test_nanny(c, s, a, b):
 
 @gen_tls_cluster(
     client=True,
-    Worker=Nanny,
-    worker_kwargs={"memory_limit": "1 GiB"},
-    config={"distributed.worker.memory.rebalance.sender-min": 0.3},
+    config={
+        "distributed.worker.memory.rebalance.measure": "managed",
+        "distributed.worker.memory.rebalance.sender-min": 0,
+        "distributed.worker.memory.rebalance.sender-recipient-gap": 0,
+    },
 )
-async def test_rebalance(c, s, *_):
-    # We used nannies to have separate processes for each worker
-    a, b = s.workers
-    assert a.startswith("tls://")
+async def test_rebalance(c, s, a, b):
+    """Test Client.rebalance(). This test is just to test the TLS Client wrapper around
+    Scheduler.rebalance(); for more thorough tests on the latter see test_scheduler.py.
+    """
+    assert a.address.startswith("tls://")
 
-    # Generate 10 buffers worth 512 MiB total on worker a. This sends its memory
-    # utilisation slightly above 50% (after counting unmanaged) which is above the
-    # distributed.worker.memory.rebalance.sender-min threshold.
-    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
-    await wait(futures)
-
-    # Wait for heartbeats
-    while s.memory.process < 2 ** 29:
-        await asyncio.sleep(0.1)
-
-    assert await c.run(lambda dask_worker: len(dask_worker.data)) == {a: 10, b: 0}
-
+    futures = await c.scatter(range(100), workers=[a.address])
+    assert len(a.data) == 100
+    assert len(b.data) == 0
     await c.rebalance()
-
-    ndata = await c.run(lambda dask_worker: len(dask_worker.data))
-    # Allow for some uncertainty as the unmanaged memory is not stable
-    assert sum(ndata.values()) == 10
-    assert 3 <= ndata[a] <= 7
-    assert 3 <= ndata[b] <= 7
+    assert len(a.data) == 50
+    assert len(b.data) == 50
 
 
 @gen_tls_cluster(client=True, nthreads=[("tls://127.0.0.1", 2)] * 2)
@@ -202,17 +191,17 @@ async def test_retire_workers(c, s, a, b):
         assert time() < start + 5
 
 
-@pytest.mark.asyncio
-async def test_security_dict_input_no_security(cleanup):
-    async with Scheduler(security={}) as s:
-        async with Worker(s.address, security={}) as w:
+@gen_test()
+async def test_security_dict_input_no_security():
+    async with Scheduler(dashboard_address=":0", security={}) as s:
+        async with Worker(s.address, security={}):
             async with Client(s.address, security={}, asynchronous=True) as c:
                 result = await c.submit(inc, 1)
                 assert result == 2
 
 
-@pytest.mark.asyncio
-async def test_security_dict_input(cleanup):
+@gen_test()
+async def test_security_dict_input():
     conf = tls_config()
     ca_file = conf["distributed"]["comm"]["tls"]["ca-file"]
     client = conf["distributed"]["comm"]["tls"]["client"]["cert"]
@@ -221,6 +210,7 @@ async def test_security_dict_input(cleanup):
 
     async with Scheduler(
         host="localhost",
+        dashboard_address=":0",
         security={"tls_ca_file": ca_file, "tls_scheduler_cert": scheduler},
     ) as s:
         assert s.address.startswith("tls://")

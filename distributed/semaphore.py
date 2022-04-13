@@ -5,15 +5,15 @@ import warnings
 from asyncio import TimeoutError
 from collections import defaultdict, deque
 
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import PeriodicCallback
 
 import dask
+from dask.utils import parse_timedelta
 
+from distributed.metrics import time
+from distributed.utils import SyncMethodMixin, log_errors
 from distributed.utils_comm import retry_operation
-
-from .metrics import time
-from .utils import log_errors, parse_timedelta, sync, thread_state
-from .worker import get_client, get_worker
+from distributed.worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +69,6 @@ class SemaphoreExtension:
             }
         )
 
-        self.scheduler.extensions["semaphores"] = self
-
         # {metric_name: {semaphore_name: metric}}
         self.metrics = {
             "acquire_total": defaultdict(int),  # counter
@@ -91,11 +89,11 @@ class SemaphoreExtension:
             dask.config.get("distributed.scheduler.locks.lease-timeout"), default="s"
         )
 
-    async def get_value(self, comm=None, name=None):
+    async def get_value(self, name=None):
         return len(self.leases[name])
 
     # `comm` here is required by the handler interface
-    def create(self, comm=None, name=None, max_leases=None):
+    def create(self, name=None, max_leases=None):
         # We use `self.max_leases` as the point of truth to find out if a semaphore with a specific
         # `name` has been created.
         if name not in self.max_leases:
@@ -108,7 +106,7 @@ class SemaphoreExtension:
                     % (max_leases, self.max_leases[name])
                 )
 
-    def refresh_leases(self, comm=None, name=None, lease_ids=None):
+    def refresh_leases(self, name=None, lease_ids=None):
         with log_errors():
             now = time()
             logger.debug(
@@ -144,7 +142,7 @@ class SemaphoreExtension:
             return False
         return True
 
-    async def acquire(self, comm=None, name=None, timeout=None, lease_id=None):
+    async def acquire(self, name=None, timeout=None, lease_id=None):
         with log_errors():
             if not self._semaphore_exists(name):
                 raise RuntimeError(f"Semaphore `{name}` not known or already closed.")
@@ -194,7 +192,7 @@ class SemaphoreExtension:
 
                 return result
 
-    def release(self, comm=None, name=None, lease_id=None):
+    def release(self, name=None, lease_id=None):
         with log_errors():
             if not self._semaphore_exists(name):
                 logger.warning(
@@ -207,8 +205,9 @@ class SemaphoreExtension:
                 self._release_value(name, lease_id)
             else:
                 logger.warning(
-                    f"Tried to release semaphore but it was already released: "
-                    f"name={name}, lease_id={lease_id}. This can happen if the semaphore timed out before."
+                    "Tried to release semaphore but it was already released: "
+                    f"{name=}, {lease_id=}. "
+                    "This can happen if the semaphore timed out before."
                 )
 
     def _release_value(self, name, lease_id):
@@ -240,7 +239,7 @@ class SemaphoreExtension:
                     )
                     self._release_value(name=name, lease_id=_id)
 
-    def close(self, comm=None, name=None):
+    def close(self, name=None):
         """Hard close the semaphore without warning clients which still hold a lease."""
         with log_errors():
             if not self._semaphore_exists(name):
@@ -268,7 +267,7 @@ class SemaphoreExtension:
                     del metric_dict[name]
 
 
-class Semaphore:
+class Semaphore(SyncMethodMixin):
     """Semaphore
 
     This `semaphore <https://en.wikipedia.org/wiki/Semaphore_(programming)>`_
@@ -409,10 +408,6 @@ class Semaphore:
         # PC uses the correct event loop.
         self.loop.add_callback(pc.start)
 
-    @property
-    def asynchronous(self):
-        return self.loop is IOLoop.current()
-
     async def _register(self):
         await retry_operation(
             self.scheduler.semaphore_register,
@@ -431,22 +426,6 @@ class Semaphore:
             return self
 
         return create_semaphore().__await__()
-
-    def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
-        callback_timeout = parse_timedelta(callback_timeout)
-        if (
-            asynchronous
-            or self.asynchronous
-            or getattr(thread_state, "asynchronous", False)
-        ):
-            future = func(*args, **kwargs)
-            if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
-            return future
-        else:
-            return sync(
-                self.loop, func, *args, callback_timeout=callback_timeout, **kwargs
-            )
 
     async def _refresh_leases(self):
         if self.refresh_leases and self._leases:

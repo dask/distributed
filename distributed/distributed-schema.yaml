@@ -131,14 +131,14 @@ properties:
               Run custom modules during the lifetime of the scheduler
 
               You can run custom modules when the scheduler starts up and closes down.
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           preload-argv:
             type: array
             description: |
               Arguments to pass into the preload scripts described above
 
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           unknown-task-duration:
             type: string
@@ -226,7 +226,7 @@ properties:
 
           http:
             type: object
-            decription: Settings for Dask's embedded HTTP Server
+            description: Settings for Dask's embedded HTTP Server
             properties:
               routes:
                 type: array
@@ -242,6 +242,30 @@ properties:
               A list of trusted root modules the schedular is allowed to import (incl. submodules). For security reasons, the
               scheduler does not import arbitrary Python modules.
 
+          active-memory-manager:
+            type: object
+            required: [start, interval, policies]
+            additionalProperties: false
+            properties:
+              start:
+                type: boolean
+                description: set to true to auto-start the AMM on Scheduler init
+              interval:
+                type: string
+                description:
+                  Time expression, e.g. "2s". Run the AMM cycle every <interval>.
+              policies:
+                type: array
+                items:
+                  type: object
+                  required: [class]
+                  properties:
+                    class:
+                      type: string
+                      description: fully qualified name of an ActiveMemoryManagerPolicy
+                        subclass
+                  additionalProperties:
+                    description: keyword arguments to the policy constructor, if any
 
       worker:
         type: object
@@ -262,7 +286,10 @@ properties:
               For a list of handlers see the `dask.distributed.Scheduler.handlers` attribute.
 
           multiprocessing-method:
-            type: string
+            enum:
+              - spawn
+              - fork
+              - forkserver
             description: |
               How we create new workers, one of "spawn", "forkserver", or "fork"
 
@@ -297,14 +324,14 @@ properties:
               Run custom modules during the lifetime of the worker
 
               You can run custom modules when the worker starts up and closes down.
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           preload-argv:
             type: array
             description: |
               Arguments to pass into the preload scripts described above
 
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           daemon:
             type: boolean
@@ -477,9 +504,22 @@ properties:
                   When the process memory reaches this level the nanny process will kill
                   the worker (if a nanny is present)
 
+              max-spill:
+                oneOf:
+                  - type: string
+                  - {type: number, minimum: 0}
+                  - enum: [false]
+                description: >-
+                  Limit of number of bytes to be spilled on disk.
+
+              monitor-interval:
+                type: string
+                description: >-
+                  Interval between checks for the spill, pause, and terminate thresholds
+
           http:
             type: object
-            decription: Settings for Dask's embedded HTTP Server
+            description: Settings for Dask's embedded HTTP Server
             properties:
               routes:
                 type: array
@@ -498,17 +538,22 @@ properties:
           preload:
             type: array
             description: |
-              Run custom modules during the lifetime of the scheduler
+              Run custom modules during the lifetime of the nanny
 
-              You can run custom modules when the scheduler starts up and closes down.
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              You can run custom modules when the nanny starts up and closes down.
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           preload-argv:
             type: array
             description: |
               Arguments to pass into the preload scripts described above
 
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
+
+          environ:
+            type: object
+            description: |
+              Environment variables to set on all worker processes started by nannies
 
       client:
         type: object
@@ -527,6 +572,32 @@ properties:
           scheduler-info-interval:
             type: string
             description: Interval between scheduler-info updates
+
+          security-loader:
+            type: [string, 'null']
+            description: |
+              A fully qualified name (e.g. ``module.submodule.function``) of
+              a callback to use for loading security credentials for the
+              client. If no security object is explicitly passed when creating
+              a ``Client``, this callback is called with a dict containing
+              client information (currently just ``address``), and should
+              return a ``Security`` object to use for this client, or ``None``
+              to fallback to the default security configuration.
+          preload:
+            type: array
+            description: |
+              Run custom modules during the lifetime of the client
+
+              You can run custom modules when the client starts up and closes down.
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
+
+          preload-argv:
+            type: array
+            description: |
+              Arguments to pass into the preload scripts described above
+
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
+
 
       deploy:
         type: object
@@ -616,7 +687,7 @@ properties:
             description: |
               The compression algorithm to use
 
-              This could be one of lz4, snappy, zstd, or blosc
+              This could be one of lz4, snappy, zstd
 
           offload:
             type:
@@ -628,6 +699,15 @@ properties:
               In some cases, you may also choose to disable this altogether with the value false
               This is useful if you want to include serialization in profiling data,
               or if you have data types that are particularly sensitive to deserialization
+
+          shard:
+            type: string
+            description: |
+              The maximum size of a frame to send through a comm
+
+              Some network infrastructure doesn't like sending through very large messages.
+              Dask comms will cut up these large messages into many small ones.
+              This attribute determines the maximum size of such a shard.
 
           socket-backlog:
             type: integer
@@ -685,7 +765,17 @@ properties:
                 type:
                 - string
                 - "null"
-                descsription: Allowed ciphers, specified as an OpenSSL cipher string.
+                description: Allowed ciphers, specified as an OpenSSL cipher string.
+
+              min-version:
+                enum: [null, 1.2, 1.3]
+                description: The minimum TLS version to support. Defaults to TLS 1.2.
+
+              max-version:
+                enum: [null, 1.2, 1.3]
+                description: |
+                  The maximum TLS version to support. Defaults to the maximum
+                  version supported by the platform.
 
               ca-file:
                 type:
@@ -750,6 +840,66 @@ properties:
                       Alternatively, the key can be appended to the cert file
                       above, and this field left blank
 
+          ucx:
+            type: object
+            description: |
+              UCX provides access to other transport methods including NVLink and InfiniBand.
+            properties:
+              cuda-copy:
+                type: [boolean, 'null']
+                description: |
+                  Set environment variables to enable CUDA support over UCX. This may be used even if
+                  InfiniBand and NVLink are not supported or disabled, then transferring data over TCP.
+              tcp:
+                type: [boolean, 'null']
+                description: |
+                  Set environment variables to enable TCP over UCX, even if InfiniBand and NVLink
+                  are not supported or disabled.
+              nvlink:
+                type: [boolean, 'null']
+                description: |
+                  Set environment variables to enable UCX over NVLink, implies ``distributed.comm.ucx.tcp=True``.
+              infiniband:
+                type: [boolean, 'null']
+                description: |
+                  Set environment variables to enable UCX over InfiniBand, implies ``distributed.comm.ucx.tcp=True``.
+              rdmacm:
+                type: [boolean, 'null']
+                description: |
+                  Set environment variables to enable UCX RDMA connection manager support,
+                  requires ``distributed.comm.ucx.infiniband=True``.
+              create-cuda-context:
+                type: [boolean, 'null']
+                description: |
+                  Creates a CUDA context before UCX is initialized. This is necessary to enable UCX to
+                  properly identify connectivity of GPUs with specialized networking hardware, such as
+                  InfiniBand. This permits UCX to choose transports automatically, without specifying
+                  additional variables for each transport, while ensuring optimal connectivity. When
+                  ``True``, a CUDA context will be created on the first device listed in
+                  ``CUDA_VISIBLE_DEVICES``.
+
+          tcp:
+            type: object
+            properties:
+              backend:
+                type: string
+                description: |
+                  The TCP backend implementation to use. Must be either `tornado` or `asyncio`.
+
+          websockets:
+            type: object
+            properties:
+              shard:
+                type:
+                - string
+                description: |
+                  The maximum size of a websocket frame to send through a comm.
+
+                  This is somewhat duplicative of distributed.comm.shard, but websockets
+                  often have much smaller maximum message sizes than othe protocols, so
+                  this attribute is used to set a smaller default shard size and to
+                  allow separate control of websocket message sharding.
+
       diagnostics:
         type: object
         properties:
@@ -760,6 +910,20 @@ properties:
               not a problem and will be automatically disabled if no GPUs are found in the
               system, but in certain cases it may be desirable to completely disable NVML
               diagnostics.
+          computations:
+            type: object
+            properties:
+              max-history:
+                type: integer
+                minimum: 0
+                description: |
+                  The maximum number of Computations to remember.
+              ignore-modules:
+                type: array
+                description: |
+                  A list of modules which are ignored when trying to collect the
+                  code context when submitting a computation. Accepts regular
+                  expressions.
 
       dashboard:
         type: object
@@ -812,6 +976,9 @@ properties:
               limit :
                 type: string
                 description: The time allowed before triggering a warning
+              cycle :
+                type: string
+                description: The time in between verifying event loop speed
 
           max-error-length:
             type: integer
@@ -858,58 +1025,12 @@ properties:
                 type: string
                 description: Polling time to query cpu/memory statistics default 500ms
 
-  rmm:
-    type: object
-    description: |
-      Configuration options for the RAPIDS Memory Manager.
-    properties:
-      pool-size:
-        type: [integer, 'null']
+      rmm:
+        type: object
         description: |
-          The size of the memory pool in bytes.
-  ucx:
-    type: object
-    description: |
-      UCX provides access to other transport methods including NVLink and InfiniBand.
-    properties:
-      cuda_copy:
-        type: boolean
-        description: |
-          Set environment variables to enable CUDA support over UCX. This may be used even if
-          InfiniBand and NVLink are not supported or disabled, then transferring data over TCP.
-      tcp:
-        type: boolean
-        description: |
-          Set environment variables to enable TCP over UCX, even if InfiniBand and NVLink
-          are not supported or disabled.
-      nvlink:
-        type: boolean
-        description: |
-          Set environment variables to enable UCX over NVLink, implies ``ucx.tcp=True``.
-      infiniband:
-        type: boolean
-        description: |
-          Set environment variables to enable UCX over InfiniBand, implies ``ucx.tcp=True``.
-      rdmacm:
-        type: boolean
-        description: |
-          Set environment variables to enable UCX RDMA connection manager support,
-          requires ``ucx.infiniband=True``.
-      net-devices:
-        type: [string, 'null']
-        description: |
-          Interface(s) used by workers for UCX communication. Can be a string (like
-          ``"eth0"`` for NVLink or ``"mlx5_0:1"``/``"ib0"`` for InfiniBand), ``"auto"``
-          (requires ``ucx.infiniband=True``) to pick the optimal interface per-worker based on
-          the system's topology, or ``None`` to stay with the default value of ``"all"`` (use
-          all available interfaces). Setting to ``"auto"`` requires UCX-Py to be installed
-          and compiled with hwloc support. Unexpected errors can occur when using
-          ``"auto"`` if any interfaces are disconnected or improperly configured.
-      reuse-endpoints:
-        type: [boolean, 'null']
-        description: |
-          Enable UCX-Py reuse endpoints mechanism if ``True`` or if it's not specified and
-          UCX < 1.11 is installed, otherwise disable reuse endpoints. This was primarily
-          introduced to resolve an issue with CUDA IPC that has been fixed in UCX 1.10, but
-          can cause establishing endpoints to be very slow, this is particularly noticeable in
-          clusters of more than a few dozen workers.
+          Configuration options for the RAPIDS Memory Manager.
+        properties:
+          pool-size:
+            type: [integer, 'null']
+            description: |
+              The size of the memory pool in bytes.

@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -89,9 +90,18 @@ def test_logging_default():
 
         distributed_log = distributed_log.getvalue().splitlines()
         foreign_log = foreign_log.getvalue().splitlines()
+        # Filter out asctime
+        pattern = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d* - (.*)$")
+        without_timestamps = []
+        for msg in distributed_log:
+            m = re.match(pattern, msg)
+            if m:
+                without_timestamps.append(m.group(1))
+            else:
+                raise AssertionError(f"Unknown format encountered {msg}")
 
         # distributed log is configured at INFO level by default
-        assert distributed_log == [
+        assert without_timestamps == [
             "distributed - INFO - 2: info",
             "distributed.foo.bar - INFO - 3: info",
         ]
@@ -139,10 +149,7 @@ def test_logging_simple_under_distributed():
 
             distributed_log = distributed_log.getvalue().splitlines()
 
-            assert distributed_log == [
-                "distributed.foo - INFO - 1: info",
-                "distributed.foo.bar - ERROR - 3: error",
-                ], (dask.config.config, distributed_log)
+            assert len(distributed_log) == 2, (dask.config.config, distributed_log)
             """
 
         subprocess.check_call([sys.executable, "-c", code])
@@ -174,10 +181,7 @@ def test_logging_simple():
 
             distributed_log = distributed_log.getvalue().splitlines()
 
-            assert distributed_log == [
-                "distributed.foo - INFO - 1: info",
-                "distributed.foo.bar - ERROR - 3: error",
-                ], (dask.config.config, distributed_log)
+            assert len(distributed_log) == 2, (dask.config.config, distributed_log)
             """
 
         subprocess.check_call([sys.executable, "-c", code])
@@ -203,11 +207,11 @@ def test_logging_extended():
             "loggers": {
                 "distributed.foo": {
                     "level": "INFO",
-                    #'handlers': ['console'],
+                    # 'handlers': ['console'],
                 },
                 "distributed.foo.bar": {
                     "level": "ERROR",
-                    #'handlers': ['console'],
+                    # 'handlers': ['console'],
                 },
             },
             "root": {"level": "WARNING", "handlers": ["console"]},
@@ -331,7 +335,7 @@ def test_schema_is_complete():
     with open(schema_fn) as f:
         schema = yaml.safe_load(f)
 
-    skip = {"default-task-durations", "bokeh-application"}
+    skip = {"default-task-durations", "bokeh-application", "environ"}
 
     def test_matches(c, s):
         if set(c) != set(s["properties"]):
@@ -352,3 +356,16 @@ def test_schema_is_complete():
                 test_matches(c[k], s["properties"][k])
 
     test_matches(config, schema)
+
+
+def test_uvloop_event_loop():
+    """Check that configuring distributed to use uvloop actually sets the event loop policy"""
+    pytest.importorskip("uvloop")
+    script = (
+        "import distributed, asyncio, uvloop\n"
+        "assert isinstance(asyncio.get_event_loop_policy(), uvloop.EventLoopPolicy)"
+    )
+    subprocess.check_call(
+        [sys.executable, "-c", script],
+        env={"DASK_DISTRIBUTED__ADMIN__EVENT_LOOP": "uvloop"},
+    )

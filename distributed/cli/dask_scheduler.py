@@ -10,7 +10,7 @@ import click
 from tornado.ioloop import IOLoop
 
 from distributed import Scheduler
-from distributed.cli.utils import check_python_3, install_signal_handlers
+from distributed.cli.utils import install_signal_handlers
 from distributed.preloading import validate_preload_argv
 from distributed.proctitle import (
     enable_proctitle_on_children,
@@ -130,7 +130,7 @@ def main(
     tls_cert,
     tls_key,
     dashboard_address,
-    **kwargs
+    **kwargs,
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
     gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)
@@ -194,7 +194,7 @@ def main(
         dashboard=dashboard,
         dashboard_address=dashboard_address,
         http_prefix=dashboard_prefix,
-        **kwargs
+        **kwargs,
     )
     logger.info("-" * 47)
 
@@ -212,10 +212,5 @@ def main(
         logger.info("End scheduler at %r", scheduler.address)
 
 
-def go():
-    check_python_3()
-    main()
-
-
 if __name__ == "__main__":
-    go()
+    main()  # pragma: no cover

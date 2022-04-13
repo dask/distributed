@@ -3,11 +3,10 @@ import logging
 import uuid
 from collections import defaultdict
 
-from dask.utils import stringify
+from dask.utils import parse_timedelta, stringify
 
-from .client import Client, Future
-from .utils import parse_timedelta, sync, thread_state
-from .worker import get_client, get_worker
+from distributed.client import Client, Future
+from distributed.worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -43,17 +42,15 @@ class QueueExtension:
             {"queue-future-release": self.future_release, "queue_release": self.release}
         )
 
-        self.scheduler.extensions["queues"] = self
-
-    def create(self, comm=None, name=None, client=None, maxsize=0):
-        logger.debug("Queue name: {}".format(name))
+    def create(self, name=None, client=None, maxsize=0):
+        logger.debug(f"Queue name: {name}")
         if name not in self.queues:
             self.queues[name] = asyncio.Queue(maxsize=maxsize)
             self.client_refcount[name] = 1
         else:
             self.client_refcount[name] += 1
 
-    def release(self, comm=None, name=None, client=None):
+    def release(self, name=None, client=None):
         if name not in self.queues:
             return
 
@@ -66,9 +63,7 @@ class QueueExtension:
             if keys:
                 self.scheduler.client_releases_keys(keys=keys, client="queue-%s" % name)
 
-    async def put(
-        self, comm=None, name=None, key=None, data=None, client=None, timeout=None
-    ):
+    async def put(self, name=None, key=None, data=None, client=None, timeout=None):
         if key is not None:
             record = {"type": "Future", "value": key}
             self.future_refcount[name, key] += 1
@@ -83,7 +78,7 @@ class QueueExtension:
             self.scheduler.client_releases_keys(keys=[key], client="queue-%s" % name)
             del self.future_refcount[name, key]
 
-    async def get(self, comm=None, name=None, client=None, timeout=None, batch=False):
+    async def get(self, name=None, client=None, timeout=None, batch=False):
         def process(record):
             """Add task status if known"""
             if record["type"] == "Future":
@@ -123,7 +118,7 @@ class QueueExtension:
             record = process(record)
             return record
 
-    def qsize(self, comm=None, name=None, client=None):
+    def qsize(self, name=None, client=None):
         return self.queues[name].qsize()
 
 
@@ -141,7 +136,7 @@ class Queue:
 
     .. warning::
 
-       This object is experimental and has known issues in Python 2
+       This object is experimental
 
     Parameters
     ----------
@@ -175,33 +170,26 @@ class Queue:
             # Initialise new client
             self.client = get_worker().client
         self.name = name or "queue-" + uuid.uuid4().hex
-        self._event_started = asyncio.Event()
-        if self.client.asynchronous or getattr(
-            thread_state, "on_event_loop_thread", False
-        ):
+        self.maxsize = maxsize
 
-            async def _create_queue():
-                await self.client.scheduler.queue_create(
-                    name=self.name, maxsize=maxsize
-                )
-                self._event_started.set()
-
-            self.client.loop.add_callback(_create_queue)
+        if self.client.asynchronous:
+            self._started = asyncio.ensure_future(self._start())
         else:
-            sync(
-                self.client.loop,
-                self.client.scheduler.queue_create,
-                name=self.name,
-                maxsize=maxsize,
-            )
-            self._event_started.set()
+            self.client.sync(self._start)
+
+    async def _start(self):
+        await self.client.scheduler.queue_create(name=self.name, maxsize=self.maxsize)
+        return self
 
     def __await__(self):
-        async def _():
-            await self._event_started.wait()
-            return self
+        if hasattr(self, "_started"):
+            return self._started.__await__()
+        else:
 
-        return _().__await__()
+            async def _():
+                return self
+
+            return _().__await__()
 
     async def _put(self, value, timeout=None):
         if isinstance(value, Future):

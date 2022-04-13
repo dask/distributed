@@ -6,11 +6,12 @@ from contextlib import suppress
 
 from tlz import merge
 
-from dask.utils import stringify
+from dask.utils import parse_timedelta, stringify
 
-from .client import Client, Future
-from .utils import TimeoutError, log_errors, parse_timedelta
-from .worker import get_client, get_worker
+from distributed.client import Client, Future
+from distributed.metrics import time
+from distributed.utils import TimeoutError, log_errors
+from distributed.worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +40,7 @@ class VariableExtension:
         self.scheduler.stream_handlers["variable-future-release"] = self.future_release
         self.scheduler.stream_handlers["variable_delete"] = self.delete
 
-        self.scheduler.extensions["variables"] = self
-
-    async def set(self, comm=None, name=None, key=None, data=None, client=None):
+    async def set(self, name=None, key=None, data=None, client=None):
         if key is not None:
             record = {"type": "Future", "value": key}
             self.scheduler.client_desires_keys(keys=[key], client="variable-%s" % name)
@@ -73,11 +72,11 @@ class VariableExtension:
             async with self.waiting_conditions[name]:
                 self.waiting_conditions[name].notify_all()
 
-    async def get(self, comm=None, name=None, client=None, timeout=None):
-        start = self.scheduler.loop.time()
+    async def get(self, name=None, client=None, timeout=None):
+        start = time()
         while name not in self.variables:
             if timeout is not None:
-                left = timeout - (self.scheduler.loop.time() - start)
+                left = timeout - (time() - start)
             else:
                 left = None
             if left and left < 0:
@@ -106,7 +105,7 @@ class VariableExtension:
             self.waiting[key, name].add(token)
         return record
 
-    async def delete(self, comm=None, name=None, client=None):
+    async def delete(self, name=None, client=None):
         with log_errors():
             try:
                 old = self.variables[name]

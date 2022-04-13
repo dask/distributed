@@ -14,6 +14,7 @@ from distributed.utils_test import div, gen_cluster, inc, slowinc
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_TaskStreamPlugin(c, s, *workers):
     es = TaskStreamPlugin(s)
+    s.add_plugin(es)
     assert not es.buffer
 
     futures = c.map(div, [1] * 10, range(10))
@@ -46,6 +47,7 @@ async def test_TaskStreamPlugin(c, s, *workers):
 @gen_cluster(client=True)
 async def test_maxlen(c, s, a, b):
     tasks = TaskStreamPlugin(s, maxlen=5)
+    s.add_plugin(tasks)
     futures = c.map(inc, range(10))
     await wait(futures)
     assert len(tasks.buffer) == 5
@@ -54,6 +56,7 @@ async def test_maxlen(c, s, a, b):
 @gen_cluster(client=True)
 async def test_collect(c, s, a, b):
     tasks = TaskStreamPlugin(s)
+    s.add_plugin(tasks)
     start = time()
     futures = c.map(slowinc, range(10), delay=0.1)
     await wait(futures)
@@ -81,6 +84,29 @@ async def test_collect(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_no_startstops(c, s, a, b):
+    tasks = TaskStreamPlugin(s)
+    s.add_plugin(tasks)
+    # just to create the key on the scheduler
+    future = c.submit(inc, 1)
+    await wait(future)
+    assert len(tasks.buffer) == 1
+
+    tasks.transition(future.key, "processing", "erred")
+    # Transition was not recorded because it didn't contain `startstops`
+    assert len(tasks.buffer) == 1
+
+    tasks.transition(future.key, "processing", "erred", startstops=[])
+    # Transition was not recorded because `startstops` was empty
+    assert len(tasks.buffer) == 1
+
+    tasks.transition(
+        future.key, "processing", "erred", startstops=[dict(start=time(), stop=time())]
+    )
+    assert len(tasks.buffer) == 2
+
+
+@gen_cluster(client=True)
 async def test_client(c, s, a, b):
     L = await c.get_task_stream()
     assert L == ()
@@ -88,7 +114,7 @@ async def test_client(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.1)
     await wait(futures)
 
-    tasks = [p for p in s.plugins if isinstance(p, TaskStreamPlugin)][0]
+    tasks = s.plugins[TaskStreamPlugin.name]
     L = await c.get_task_stream()
     assert L == tuple(tasks.buffer)
 

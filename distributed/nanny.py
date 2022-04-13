@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import errno
 import logging
@@ -7,35 +9,56 @@ import threading
 import uuid
 import warnings
 import weakref
+from collections.abc import Collection
 from contextlib import suppress
-from multiprocessing.queues import Empty
+from inspect import isawaitable
+from queue import Empty
 from time import sleep as sync_sleep
+from typing import TYPE_CHECKING, ClassVar
 
 import psutil
 from tornado import gen
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 
 import dask
 from dask.system import CPU_COUNT
+from dask.utils import parse_timedelta
 
-from . import preloading
-from .comm import get_address_host, unparse_host_port
-from .comm.addressing import address_from_user_args
-from .core import CommClosedError, RPCClosed, Status, coerce_to_address
-from .node import ServerNode
-from .process import AsyncProcess
-from .proctitle import enable_proctitle_on_children
-from .security import Security
-from .utils import (
+from distributed import preloading
+from distributed.comm import get_address_host
+from distributed.comm.addressing import address_from_user_args
+from distributed.core import (
+    CommClosedError,
+    RPCClosed,
+    Status,
+    coerce_to_address,
+    error_message,
+)
+from distributed.diagnostics.plugin import _get_plugin_name
+from distributed.metrics import time
+from distributed.node import ServerNode
+from distributed.process import AsyncProcess
+from distributed.proctitle import enable_proctitle_on_children
+from distributed.protocol import pickle
+from distributed.security import Security
+from distributed.utils import (
     TimeoutError,
     get_ip,
     json_load_robust,
+    log_errors,
     mp_context,
     parse_ports,
-    parse_timedelta,
     silence_logging,
 )
-from .worker import Worker, parse_memory_limit, run
+from distributed.worker import Worker, run
+from distributed.worker_memory import (
+    DeprecatedMemoryManagerAttribute,
+    DeprecatedMemoryMonitor,
+    NannyMemoryManager,
+)
+
+if TYPE_CHECKING:
+    from distributed.diagnostics.plugin import NannyPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -46,27 +69,45 @@ class Nanny(ServerNode):
     The nanny spins up Worker processes, watches then, and kills or restarts
     them as necessary. It is necessary if you want to use the
     ``Client.restart`` method, or to restart the worker automatically if
-    it gets to the terminate fractiom of its memory limit.
+    it gets to the terminate fraction of its memory limit.
 
-    The parameters for the Nanny are mostly the same as those for the Worker.
+    The parameters for the Nanny are mostly the same as those for the Worker
+    with exceptions listed below.
+
+    Parameters
+    ----------
+    env: dict, optional
+        Environment variables set at time of Nanny initialization will be
+        ensured to be set in the Worker process as well. This argument allows to
+        overwrite or otherwise set environment variables for the Worker. It is
+        also possible to set environment variables using the option
+        `distributed.nanny.environ`. Precedence as follows
+
+            1. Nanny arguments
+            2. Existing environment variables
+            3. Dask configuration
 
     See Also
     --------
     Worker
     """
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[Nanny]] = weakref.WeakSet()
     process = None
     status = Status.undefined
+    memory_manager: NannyMemoryManager
+
+    # Inputs to parse_ports()
+    _given_worker_port: int | str | Collection[int] | None
+    _start_port: int | str | Collection[int] | None
 
     def __init__(
         self,
         scheduler_ip=None,
         scheduler_port=None,
         scheduler_file=None,
-        worker_port=0,
+        worker_port: int | str | Collection[int] | None = 0,
         nthreads=None,
-        ncores=None,
         loop=None,
         local_dir=None,
         local_directory=None,
@@ -90,7 +131,7 @@ class Nanny(ServerNode):
         env=None,
         interface=None,
         host=None,
-        port=None,
+        port: int | str | Collection[int] | None = None,
         protocol=None,
         config=None,
         **worker_kwargs,
@@ -103,6 +144,37 @@ class Nanny(ServerNode):
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
+
+        if local_dir is not None:
+            warnings.warn("The local_dir keyword has moved to local_directory")
+            local_directory = local_dir
+
+        if local_directory is None:
+            local_directory = dask.config.get("temporary-directory") or os.getcwd()
+            self._original_local_dir = local_directory
+            local_directory = os.path.join(local_directory, "dask-worker-space")
+        else:
+            self._original_local_dir = local_directory
+
+        self.local_directory = local_directory
+        if not os.path.exists(self.local_directory):
+            os.makedirs(self.local_directory, exist_ok=True)
+
+        self.preload = preload
+        if self.preload is None:
+            self.preload = dask.config.get("distributed.worker.preload")
+        self.preload_argv = preload_argv
+        if self.preload_argv is None:
+            self.preload_argv = dask.config.get("distributed.worker.preload-argv")
+
+        if preload_nanny is None:
+            preload_nanny = dask.config.get("distributed.nanny.preload")
+        if preload_nanny_argv is None:
+            preload_nanny_argv = dask.config.get("distributed.nanny.preload-argv")
+
+        self.preloads = preloading.process_preloads(
+            self, preload_nanny, preload_nanny_argv, file_dir=self.local_directory
+        )
 
         if scheduler_file:
             cfg = json_load_robust(scheduler_file)
@@ -119,10 +191,6 @@ class Nanny(ServerNode):
             if len(protocol_address) == 2:
                 protocol = protocol_address[0]
 
-        if ncores is not None:
-            warnings.warn("the ncores= parameter has moved to nthreads=")
-            nthreads = ncores
-
         self._given_worker_port = worker_port
         self.nthreads = nthreads or CPU_COUNT
         self.reconnect = reconnect
@@ -130,20 +198,20 @@ class Nanny(ServerNode):
         self.resources = resources
         self.death_timeout = parse_timedelta(death_timeout)
 
-        self.preload = preload
-        if self.preload is None:
-            self.preload = dask.config.get("distributed.worker.preload")
-        self.preload_argv = preload_argv
-        if self.preload_argv is None:
-            self.preload_argv = dask.config.get("distributed.worker.preload-argv")
-
-        if preload_nanny is None:
-            preload_nanny = dask.config.get("distributed.nanny.preload")
-        if preload_nanny_argv is None:
-            preload_nanny_argv = dask.config.get("distributed.nanny.preload-argv")
-
         self.Worker = Worker if worker_class is None else worker_class
-        self.env = env or {}
+        config_environ = dask.config.get("distributed.nanny.environ", {})
+        if not isinstance(config_environ, dict):
+            raise TypeError(
+                "distributed.nanny.environ configuration must be of type dict. "
+                f"Instead got {type(config_environ)}"
+            )
+        self.env = config_environ.copy()
+        for k in self.env:
+            if k in os.environ:
+                self.env[k] = os.environ[k]
+        if env:
+            self.env.update(env)
+        self.env = {k: str(v) for k, v in self.env.items()}
         self.config = config or dask.config.config
         worker_kwargs.update(
             {
@@ -156,35 +224,11 @@ class Nanny(ServerNode):
         self.worker_kwargs = worker_kwargs
 
         self.contact_address = contact_address
-        self.memory_terminate_fraction = dask.config.get(
-            "distributed.worker.memory.terminate"
-        )
-
-        if local_dir is not None:
-            warnings.warn("The local_dir keyword has moved to local_directory")
-            local_directory = local_dir
-
-        if local_directory is None:
-            local_directory = dask.config.get("temporary-directory") or os.getcwd()
-            if not os.path.exists(local_directory):
-                os.makedirs(local_directory)
-            self._original_local_dir = local_directory
-            local_directory = os.path.join(local_directory, "dask-worker-space")
-        else:
-            self._original_local_dir = local_directory
-
-        self.local_directory = local_directory
-
-        self.preloads = preloading.process_preloads(
-            self, preload_nanny, preload_nanny_argv, file_dir=self.local_directory
-        )
 
         self.services = services
         self.name = name
         self.quiet = quiet
         self.auto_restart = True
-
-        self.memory_limit = parse_memory_limit(memory_limit, self.nthreads)
 
         if silence_logs:
             silence_logging(level=silence_logs)
@@ -199,17 +243,18 @@ class Nanny(ServerNode):
             "terminate": self.close,
             "close_gracefully": self.close_gracefully,
             "run": self.run,
+            "plugin_add": self.plugin_add,
+            "plugin_remove": self.plugin_remove,
         }
+
+        self.plugins: dict[str, NannyPlugin] = {}
 
         super().__init__(
             handlers=handlers, io_loop=self.loop, connection_args=self.connection_args
         )
 
         self.scheduler = self.rpc(self.scheduler_addr)
-
-        if self.memory_limit:
-            pc = PeriodicCallback(self.memory_monitor, 100)
-            self.periodic_callbacks["memory"] = pc
+        self.memory_manager = NannyMemoryManager(self, memory_limit=memory_limit)
 
         if (
             not host
@@ -226,6 +271,11 @@ class Nanny(ServerNode):
         self._listen_address = listen_address
         Nanny._instances.add(self)
         self.status = Status.init
+
+    # Deprecated attributes; use Nanny.memory_manager.<name> instead
+    memory_limit = DeprecatedMemoryManagerAttribute()
+    memory_terminate_fraction = DeprecatedMemoryManagerAttribute()
+    memory_monitor = DeprecatedMemoryMonitor()
 
     def __repr__(self):
         return "<Nanny: %s, threads: %d>" % (self.worker_address, self.nthreads)
@@ -279,7 +329,7 @@ class Nanny(ServerNode):
                 if len(ports) > 1 and e.errno == errno.EADDRINUSE:
                     continue
                 else:
-                    raise e
+                    raise
             else:
                 self._start_address = start_address
                 break
@@ -294,6 +344,10 @@ class Nanny(ServerNode):
         for preload in self.preloads:
             await preload.start()
 
+        msg = await self.scheduler.register_nanny()
+        for name, plugin in msg["nanny-plugins"].items():
+            await self.plugin_add(plugin=plugin, name=name)
+
         logger.info("        Start Nanny at: %r", self.address)
         response = await self.instantiate()
         if response == Status.running:
@@ -306,7 +360,7 @@ class Nanny(ServerNode):
 
         return self
 
-    async def kill(self, comm=None, timeout=2):
+    async def kill(self, timeout=2):
         """Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
@@ -316,22 +370,14 @@ class Nanny(ServerNode):
         if self.process is None:
             return "OK"
 
-        deadline = self.loop.time() + timeout
-        await self.process.kill(timeout=0.8 * (deadline - self.loop.time()))
+        deadline = time() + timeout
+        await self.process.kill(timeout=0.8 * (deadline - time()))
 
-    async def instantiate(self, comm=None) -> Status:
+    async def instantiate(self) -> Status:
         """Start a local worker process
 
         Blocks until the process is up and the scheduler is properly informed
         """
-        if self._listen_address:
-            start_arg = self._listen_address
-        else:
-            host = self.listener.bound_address[0]
-            start_arg = self.listener.prefix + unparse_host_port(
-                host, self._given_worker_port
-            )
-
         if self.process is None:
             worker_kwargs = dict(
                 scheduler_ip=self.scheduler_addr,
@@ -340,7 +386,7 @@ class Nanny(ServerNode):
                 services=self.services,
                 nanny=self.address,
                 name=self.name,
-                memory_limit=self.memory_limit,
+                memory_limit=self.memory_manager.memory_limit,
                 reconnect=self.reconnect,
                 resources=self.resources,
                 validate=self.validate,
@@ -354,7 +400,6 @@ class Nanny(ServerNode):
             worker_kwargs.update(self.worker_kwargs)
             self.process = WorkerProcess(
                 worker_kwargs=worker_kwargs,
-                worker_start_args=(start_arg,),
                 silence_logs=self.silence_logs,
                 on_exit=self._on_exit_sync,
                 worker=self.Worker,
@@ -384,7 +429,48 @@ class Nanny(ServerNode):
                 raise
         return result
 
-    async def restart(self, comm=None, timeout=2, executor_wait=True):
+    async def plugin_add(self, plugin=None, name=None):
+        with log_errors(pdb=False):
+            if isinstance(plugin, bytes):
+                plugin = pickle.loads(plugin)
+
+            if name is None:
+                name = _get_plugin_name(plugin)
+
+            assert name
+
+            self.plugins[name] = plugin
+
+            logger.info("Starting Nanny plugin %s" % name)
+            if hasattr(plugin, "setup"):
+                try:
+                    result = plugin.setup(nanny=self)
+                    if isawaitable(result):
+                        result = await result
+                except Exception as e:
+                    msg = error_message(e)
+                    return msg
+            if getattr(plugin, "restart", False):
+                await self.restart()
+
+            return {"status": "OK"}
+
+    async def plugin_remove(self, name=None):
+        with log_errors(pdb=False):
+            logger.info(f"Removing Nanny plugin {name}")
+            try:
+                plugin = self.plugins.pop(name)
+                if hasattr(plugin, "teardown"):
+                    result = plugin.teardown(nanny=self)
+                    if isawaitable(result):
+                        result = await result
+            except Exception as e:
+                msg = error_message(e)
+                return msg
+
+            return {"status": "OK"}
+
+    async def restart(self, timeout=30, executor_wait=True):
         async def _():
             if self.process is not None:
                 await self.kill()
@@ -393,7 +479,9 @@ class Nanny(ServerNode):
         try:
             await asyncio.wait_for(_(), timeout)
         except TimeoutError:
-            logger.error("Restart timed out, returning before finished")
+            logger.error(
+                f"Restart timed out after {timeout}s; returning before finished"
+            )
             return "timed out"
         else:
             return "OK"
@@ -411,33 +499,11 @@ class Nanny(ServerNode):
 
         return self._psutil_process_obj
 
-    def memory_monitor(self):
-        """Track worker's memory.  Restart if it goes above terminate fraction"""
-        if self.status != Status.running:
-            return
-        if self.process is None or self.process.process is None:
-            return None
-        process = self.process.process
-
-        try:
-            proc = self._psutil_process
-            memory = proc.memory_info().rss
-        except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
-            return
-        frac = memory / self.memory_limit
-
-        if self.memory_terminate_fraction and frac > self.memory_terminate_fraction:
-            logger.warning(
-                "Worker exceeded %d%% memory budget. Restarting",
-                100 * self.memory_terminate_fraction,
-            )
-            process.terminate()
-
     def is_alive(self):
         return self.process is not None and self.process.is_alive()
 
-    def run(self, *args, **kwargs):
-        return run(self, *args, **kwargs)
+    def run(self, comm, *args, **kwargs):
+        return run(self, comm, *args, **kwargs)
 
     def _on_exit_sync(self, exitcode):
         self.loop.add_callback(self._on_exit, exitcode)
@@ -451,7 +517,7 @@ class Nanny(ServerNode):
         ):
             try:
                 await self._unregister()
-            except (EnvironmentError, CommClosedError):
+            except OSError:
                 if not self.reconnect:
                     await self.close()
                     return
@@ -481,7 +547,7 @@ class Nanny(ServerNode):
         warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
         return self.close(*args, **kwargs)
 
-    def close_gracefully(self, comm=None):
+    def close_gracefully(self):
         """
         A signal that we shouldn't try to restart workers if they go away
 
@@ -506,6 +572,14 @@ class Nanny(ServerNode):
         for preload in self.preloads:
             await preload.teardown()
 
+        teardowns = [
+            plugin.teardown(self)
+            for plugin in self.plugins.values()
+            if hasattr(plugin, "teardown")
+        ]
+
+        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
+
         self.stop()
         try:
             if self.process is not None:
@@ -517,17 +591,28 @@ class Nanny(ServerNode):
         self.status = Status.closed
         if comm:
             await comm.write("OK")
-        await ServerNode.close(self)
+        await super().close()
+
+    async def _log_event(self, topic, msg):
+        await self.scheduler.log_event(
+            topic=topic,
+            msg=msg,
+        )
+
+    def log_event(self, topic, msg):
+        self.loop.add_callback(self._log_event, topic, msg)
 
 
 class WorkerProcess:
+    running: asyncio.Event
+    stopped: asyncio.Event
+
     # The interval how often to check the msg queue for init
     _init_msg_interval = 0.05
 
     def __init__(
         self,
         worker_kwargs,
-        worker_start_args,
         silence_logs,
         on_exit,
         worker,
@@ -537,7 +622,6 @@ class WorkerProcess:
         self.status = Status.init
         self.silence_logs = silence_logs
         self.worker_kwargs = worker_kwargs
-        self.worker_start_args = worker_start_args
         self.on_exit = on_exit
         self.process = None
         self.Worker = worker
@@ -568,7 +652,6 @@ class WorkerProcess:
             name="Dask Worker process (from Nanny)",
             kwargs=dict(
                 worker_kwargs=self.worker_kwargs,
-                worker_start_args=self.worker_start_args,
                 silence_logs=self.silence_logs,
                 init_result_q=self.init_result_q,
                 child_stop_q=self.child_stop_q,
@@ -653,13 +736,12 @@ class WorkerProcess:
             if self.on_exit is not None:
                 self.on_exit(r)
 
-    async def kill(self, timeout=2, executor_wait=True):
+    async def kill(self, timeout: float = 2, executor_wait: bool = True):
         """
         Ensure the worker process is stopped, waiting at most
         *timeout* seconds before terminating it abruptly.
         """
-        loop = IOLoop.current()
-        deadline = loop.time() + timeout
+        deadline = time() + timeout
 
         if self.status == Status.stopped:
             return
@@ -673,19 +755,19 @@ class WorkerProcess:
         self.child_stop_q.put(
             {
                 "op": "stop",
-                "timeout": max(0, deadline - loop.time()) * 0.8,
+                "timeout": max(0, deadline - time()) * 0.8,
                 "executor_wait": executor_wait,
             }
         )
         await asyncio.sleep(0)  # otherwise we get broken pipe errors
         self.child_stop_q.close()
 
-        while process.is_alive() and loop.time() < deadline:
+        while process.is_alive() and time() < deadline:
             await asyncio.sleep(0.05)
 
         if process.is_alive():
             logger.warning(
-                "Worker process still alive after %d seconds, killing", timeout
+                f"Worker process still alive after {timeout} seconds, killing"
             )
             try:
                 await process.terminate()
@@ -719,7 +801,6 @@ class WorkerProcess:
     def _run(
         cls,
         worker_kwargs,
-        worker_start_args,
         silence_logs,
         init_result_q,
         child_stop_q,
@@ -763,16 +844,10 @@ class WorkerProcess:
                 Wait for an incoming stop message and then stop the
                 worker cleanly.
                 """
-                while True:
-                    try:
-                        msg = child_stop_q.get(timeout=1000)
-                    except Empty:
-                        pass
-                    else:
-                        child_stop_q.close()
-                        assert msg.pop("op") == "stop"
-                        loop.add_callback(do_stop, **msg)
-                        break
+                msg = child_stop_q.get()
+                child_stop_q.close()
+                assert msg.pop("op") == "stop"
+                loop.add_callback(do_stop, **msg)
 
             t = threading.Thread(target=watch_stop_q, name="Nanny stop queue watch")
             t.daemon = True

@@ -3,27 +3,24 @@ Record known compressors
 
 Includes utilities for determining whether or not to compress
 """
+from __future__ import annotations
+
 import logging
 import random
+from collections.abc import Callable
 from contextlib import suppress
-from functools import partial
+from typing import Literal
 
 from tlz import identity
 
 import dask
 
-try:
-    import blosc
+from distributed.utils import ensure_bytes
 
-    n = blosc.set_nthreads(2)
-    if hasattr("blosc", "releasegil"):
-        blosc.set_releasegil(True)
-except ImportError:
-    blosc = False
-
-from ..utils import ensure_bytes
-
-compressions = {None: {"compress": identity, "decompress": identity}}
+compressions: dict[
+    str | None | Literal[False],
+    dict[Literal["compress", "decompress"], Callable[[bytes], bytes]],
+] = {None: {"compress": identity, "decompress": identity}}
 
 compressions[False] = compressions[None]  # alias
 
@@ -115,15 +112,6 @@ with suppress(ImportError):
     compressions["zstd"] = {"compress": zstd_compress, "decompress": zstd_decompress}
 
 
-with suppress(ImportError):
-    import blosc
-
-    compressions["blosc"] = {
-        "compress": partial(blosc.compress, clevel=5, cname="lz4"),
-        "decompress": blosc.decompress,
-    }
-
-
 def get_default_compression():
     default = dask.config.get("distributed.comm.compression")
     if default != "auto":
@@ -187,7 +175,7 @@ def maybe_compress(
         return None, payload
     if len(payload) < min_size:
         return None, payload
-    if len(payload) > 2 ** 31:  # Too large, compression libraries often fail
+    if len(payload) > 2**31:  # Too large, compression libraries often fail
         return None, payload
 
     min_size = int(min_size)
@@ -205,14 +193,7 @@ def maybe_compress(
     else:
         nbytes = len(payload)
 
-    if default_compression and blosc and type(payload) is memoryview:
-        # Blosc does itemsize-aware shuffling, resulting in better compression
-        compressed = blosc.compress(
-            payload, typesize=payload.itemsize, cname="lz4", clevel=5
-        )
-        compression = "blosc"
-    else:
-        compressed = compress(ensure_bytes(payload))
+    compressed = compress(ensure_bytes(payload))
 
     if len(compressed) > 0.9 * nbytes:  # full data not very compressible
         return None, payload

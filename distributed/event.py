@@ -4,9 +4,11 @@ import uuid
 from collections import defaultdict
 from contextlib import suppress
 
-from .client import Client
-from .utils import TimeoutError, log_errors, parse_timedelta
-from .worker import get_worker
+from dask.utils import parse_timedelta
+
+from distributed.client import Client
+from distributed.utils import TimeoutError, log_errors
+from distributed.worker import get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +58,7 @@ class EventExtension:
             }
         )
 
-        self.scheduler.extensions["events"] = self
-
-    async def event_wait(self, comm=None, name=None, timeout=None):
+    async def event_wait(self, name=None, timeout=None):
         """Wait until the event is set to true.
         Returns false, when this did not happen in the given time
         and true otherwise.
@@ -87,7 +87,7 @@ class EventExtension:
 
             return True
 
-    def event_set(self, comm=None, name=None):
+    def event_set(self, name=None):
         """Set the event with the given name to true.
 
         All waiters on this event will be notified.
@@ -98,7 +98,7 @@ class EventExtension:
             # we set the event to true
             self._events[name].set()
 
-    def event_clear(self, comm=None, name=None):
+    def event_clear(self, name=None):
         """Set the event with the given name to false."""
         with log_errors():
             name = self._normalize_name(name)
@@ -119,7 +119,7 @@ class EventExtension:
                 event = self._events[name]
                 event.clear()
 
-    def event_is_set(self, comm=None, name=None):
+    def event_is_set(self, name=None):
         with log_errors():
             name = self._normalize_name(name)
             # the default flag value is false

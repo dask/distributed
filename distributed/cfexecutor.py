@@ -4,8 +4,10 @@ import weakref
 from tlz import merge
 from tornado import gen
 
-from .metrics import time
-from .utils import TimeoutError, parse_timedelta, sync
+from dask.utils import parse_timedelta
+
+from distributed.metrics import time
+from distributed.utils import TimeoutError, sync
 
 
 @gen.coroutine
@@ -111,9 +113,11 @@ class ClientExecutor(cf.Executor):
 
         Raises
         ------
-        TimeoutError: If the entire result iterator could not be generated
-            before the given timeout.
-        Exception: If ``fn(*args)`` raises for any values.
+        concurrent.futures.TimeoutError:
+            If the entire result iterator could not be generated before the given
+            timeout.
+        Exception:
+            If ``fn(*args)`` raises for any values.
         """
         timeout = kwargs.pop("timeout", None)
         if timeout is not None:
@@ -125,6 +129,10 @@ class ClientExecutor(cf.Executor):
             raise TypeError("unexpected arguments to map(): %s" % sorted(kwargs))
 
         fs = self._client.map(fn, *iterables, **self._kwargs)
+
+        # Below iterator relies on fs being an iterator itself, and not just an iterable
+        # (such as a list), in order to cancel remaining futures
+        fs = iter(fs)
 
         # Yield must be hidden in closure so that the tasks are submitted
         # before the first iterator value is required.
@@ -141,8 +149,7 @@ class ClientExecutor(cf.Executor):
                         yield future.result()
             finally:
                 remaining = list(fs)
-                for future in remaining:
-                    self._futures.add(future)
+                self._futures.update(remaining)
                 self._client.cancel(remaining)
 
         return result_iterator()

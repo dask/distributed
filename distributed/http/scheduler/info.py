@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -8,12 +10,12 @@ from tlz import first, merge
 from tornado import escape
 from tornado.websocket import WebSocketHandler
 
-from dask.utils import format_bytes
+from dask.utils import format_bytes, format_time
 
-from ...diagnostics.websocket import WebsocketPlugin
-from ...metrics import time
-from ...utils import format_time, log_errors
-from ..utils import RequestHandler, redirect
+from distributed.diagnostics.websocket import WebsocketPlugin
+from distributed.http.utils import RequestHandler, redirect
+from distributed.metrics import time
+from distributed.utils import log_errors
 
 ns = {
     func.__name__: func
@@ -204,10 +206,10 @@ class EventstreamHandler(WebSocketHandler):
             self.send("pong", {"timestamp": str(datetime.now())})
 
     def on_close(self):
-        self.server.remove_plugin(self.plugin)
+        self.server.remove_plugin(name=self.plugin.name)
 
 
-routes = [
+routes: list[tuple] = [
     (r"info", redirect("info/main/workers.html"), {}),
     (r"info/main/workers.html", Workers, {}),
     (r"info/worker/(.*).html", Worker, {}),

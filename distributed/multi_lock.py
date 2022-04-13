@@ -1,12 +1,16 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import uuid
 from collections import defaultdict
-from typing import Hashable, List
+from collections.abc import Hashable
 
-from .client import Client
-from .utils import TimeoutError, log_errors, parse_timedelta
-from .worker import get_worker
+from dask.utils import parse_timedelta
+
+from distributed.client import Client
+from distributed.utils import TimeoutError, log_errors
+from distributed.worker import get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +46,7 @@ class MultiLockExtension:
             {"multi_lock_acquire": self.acquire, "multi_lock_release": self.release}
         )
 
-        self.scheduler.extensions["multi_locks"] = self
-
-    def _request_locks(self, locks: List[str], id: Hashable, num_locks: int):
+    def _request_locks(self, locks: list[str], id: Hashable, num_locks: int) -> bool:
         """Request locks
 
         Parameters
@@ -108,9 +110,7 @@ class MultiLockExtension:
         for waiter in waiters_ready:
             self.scheduler.loop.add_callback(self.events[waiter].set)
 
-    async def acquire(
-        self, comm=None, locks=None, id=None, timeout=None, num_locks=None
-    ):
+    async def acquire(self, locks=None, id=None, timeout=None, num_locks=None):
         with log_errors():
             if not self._request_locks(locks, id, num_locks):
                 assert id not in self.events
@@ -130,7 +130,7 @@ class MultiLockExtension:
             assert self.requests_left[id] == 0
             return True
 
-    def release(self, comm=None, id=None):
+    def release(self, id=None):
         with log_errors():
             self._refain_locks(self.requests[id], id)
 

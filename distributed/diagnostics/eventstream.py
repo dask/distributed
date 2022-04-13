@@ -1,8 +1,8 @@
 import logging
 
-from ..core import coerce_to_address, connect
-from ..worker import dumps_function
-from .plugin import SchedulerPlugin
+from distributed.core import coerce_to_address, connect
+from distributed.diagnostics.plugin import SchedulerPlugin
+from distributed.worker import dumps_function
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +11,7 @@ class EventStream(SchedulerPlugin):
     """Maintain a copy of worker events"""
 
     def __init__(self, scheduler=None):
+        self.name = "EventStream"
         self.buffer = []
         if scheduler:
             scheduler.add_plugin(self)
@@ -28,7 +29,7 @@ def swap_buffer(scheduler, es):
 
 
 def teardown(scheduler, es):
-    scheduler.remove_plugin(es)
+    scheduler.remove_plugin(name=es.name)
 
 
 async def eventstream(address, interval):

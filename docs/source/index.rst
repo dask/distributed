@@ -100,6 +100,7 @@ Contents
    scheduling-policies
    scheduling-state
    worker
+   worker-memory
    work-stealing
    killed
 
@@ -109,14 +110,12 @@ Contents
 
    actors
    asynchronous
-   configuration
-   ipython
-   prometheus
    http_services
    publish
    resources
    task-launch
    tls
+   active_memory_manager
 
 .. toctree::
    :maxdepth: 1

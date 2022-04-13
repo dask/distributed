@@ -11,7 +11,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from .utils import TimeoutError, mp_context
+from distributed.utils import TimeoutError, mp_context
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ class AsyncProcess:
 
     def __init__(self, loop=None, target=None, name=None, args=(), kwargs={}):
         if not callable(target):
-            raise TypeError("`target` needs to be callable, not %r" % (type(target),))
+            raise TypeError(f"`target` needs to be callable, not {type(target)!r}")
         self._state = _ProcessState()
         self._loop = loop or IOLoop.current(instance=False)
 
@@ -91,7 +91,7 @@ class AsyncProcess:
         self._start_threads()
 
     def __repr__(self):
-        return "<%s %s>" % (self.__class__.__name__, self._name)
+        return f"<{self.__class__.__name__} {self._name}>"
 
     def _check_closed(self):
         if self._closed:
@@ -160,26 +160,10 @@ class AsyncProcess:
         t.daemon = True
         t.start()
 
-    @staticmethod
-    def reset_logger_locks():
-        """Python 2's logger's locks don't survive a fork event
-
-        https://github.com/dask/distributed/issues/1491
-        """
-        for name in logging.Logger.manager.loggerDict.keys():
-            for handler in logging.getLogger(name).handlers:
-                handler.createLock()
-
     @classmethod
     def _run(
         cls, target, args, kwargs, parent_alive_pipe, _keep_child_alive, inherit_config
     ):
-        # On Python 2 with the fork method, we inherit the _keep_child_alive fd,
-        # whether it is passed or not. Therefore, pass it unconditionally and
-        # close it here, so that there are no other references to the pipe lying
-        # around.
-        cls.reset_logger_locks()
-
         _keep_child_alive.close()
 
         # Child process entry point
@@ -211,11 +195,11 @@ class AsyncProcess:
 
             state.is_alive = True
             state.pid = process.pid
-            logger.debug("[%s] created process with pid %r" % (r, state.pid))
+            logger.debug(f"[{r}] created process with pid {state.pid!r}")
 
         while True:
             msg = q.get()
-            logger.debug("[%s] got message %r" % (r, msg))
+            logger.debug(f"[{r}] got message {msg!r}")
             op = msg["op"]
             if op == "start":
                 _call_and_set_future(loop, msg["future"], _start)
@@ -249,7 +233,7 @@ class AsyncProcess:
         """
         Start the child process.
 
-        This method is a coroutine.
+        This method returns a future.
         """
         self._check_closed()
         fut = Future()
@@ -260,7 +244,7 @@ class AsyncProcess:
         """
         Terminate the child process.
 
-        This method is a coroutine.
+        This method returns a future.
         """
         self._check_closed()
         fut = Future()
@@ -271,7 +255,7 @@ class AsyncProcess:
         """
         Wait for the child process to exit.
 
-        This method is a coroutine.
+        This method returns a coroutine.
         """
         self._check_closed()
         assert self._state.pid is not None, "can only join a started process"
@@ -338,7 +322,7 @@ class AsyncProcess:
 def _asyncprocess_finalizer(proc):
     if proc.is_alive():
         try:
-            logger.info("reaping stray process %s" % (proc,))
+            logger.info(f"reaping stray process {proc}")
             proc.terminate()
         except OSError:
             pass

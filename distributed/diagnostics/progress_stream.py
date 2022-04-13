@@ -2,11 +2,10 @@ import logging
 
 from tlz import merge, valmap
 
-from ..core import coerce_to_address, connect
-from ..scheduler import Scheduler
-from ..utils import color_of, key_split
-from ..worker import dumps_function
-from .progress import AllProgress
+from distributed.core import coerce_to_address, connect
+from distributed.diagnostics.progress import AllProgress
+from distributed.utils import color_of, key_split
+from distributed.worker import dumps_function
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +20,10 @@ def counts(scheduler, allprogress):
     )
 
 
-def remove_plugin(*args, **kwargs):
+def _remove_all_progress_plugin(self, *args, **kwargs):
     # Wrapper function around `Scheduler.remove_plugin` to avoid raising a
     # `PicklingError` when using a cythonized scheduler
-    return Scheduler.remove_plugin(*args, **kwargs)
+    self.remove_plugin(name=AllProgress.name)
 
 
 async def progress_stream(address, interval):
@@ -53,7 +52,7 @@ async def progress_stream(address, interval):
             "setup": dumps_function(AllProgress),
             "function": dumps_function(counts),
             "interval": interval,
-            "teardown": dumps_function(remove_plugin),
+            "teardown": dumps_function(_remove_all_progress_plugin),
         }
     )
     return comm

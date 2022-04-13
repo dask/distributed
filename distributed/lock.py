@@ -3,9 +3,11 @@ import logging
 import uuid
 from collections import defaultdict, deque
 
-from .client import Client
-from .utils import TimeoutError, log_errors, parse_timedelta
-from .worker import get_worker
+from dask.utils import parse_timedelta
+
+from distributed.client import Client
+from distributed.utils import TimeoutError, log_errors
+from distributed.worker import get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +30,7 @@ class LockExtension:
             {"lock_acquire": self.acquire, "lock_release": self.release}
         )
 
-        self.scheduler.extensions["locks"] = self
-
-    async def acquire(self, comm=None, name=None, id=None, timeout=None):
+    async def acquire(self, name=None, id=None, timeout=None):
         with log_errors():
             if isinstance(name, list):
                 name = tuple(name)
@@ -58,7 +58,7 @@ class LockExtension:
                 self.ids[name] = id
             return result
 
-    def release(self, comm=None, name=None, id=None):
+    def release(self, name=None, id=None):
         with log_errors():
             if isinstance(name, list):
                 name = tuple(name)

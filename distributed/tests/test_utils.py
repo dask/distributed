@@ -1,13 +1,14 @@
 import array
 import asyncio
-import datetime
+import contextvars
+import functools
 import io
 import os
 import queue
 import socket
-import sys
 import traceback
-from functools import partial
+import warnings
+from collections import deque
 from time import sleep
 
 import pytest
@@ -15,30 +16,30 @@ from tornado.ioloop import IOLoop
 
 import dask
 
+from distributed.compatibility import MACOS, WINDOWS
 from distributed.metrics import time
 from distributed.utils import (
     LRU,
     All,
+    Log,
+    Logs,
     LoopRunner,
-    MultiLogs,
     TimeoutError,
     _maybe_complex,
-    deprecated,
     ensure_bytes,
     ensure_ip,
     format_dashboard_link,
-    funcname,
     get_ip_interface,
     get_traceback,
     is_kernel,
     is_valid_xml,
+    iscoroutinefunction,
     nbytes,
     offload,
     open_port,
-    parse_bytes,
     parse_ports,
-    parse_timedelta,
     read_block,
+    recursive_to_dict,
     seek_delimiter,
     set_thread_state,
     sync,
@@ -46,7 +47,15 @@ from distributed.utils import (
     truncate_exception,
     warn_on_duration,
 )
-from distributed.utils_test import captured_logger, div, gen_test, has_ipv6, inc, throws
+from distributed.utils_test import (
+    _UnhashableCallable,
+    captured_logger,
+    div,
+    gen_test,
+    has_ipv6,
+    inc,
+    throws,
+)
 
 
 def test_All(loop):
@@ -145,23 +154,12 @@ def test_ensure_ip():
         assert ensure_ip("::1") == "::1"
 
 
+@pytest.mark.skipif(WINDOWS, reason="TODO")
 def test_get_ip_interface():
-    if sys.platform == "darwin":
-        assert get_ip_interface("lo0") == "127.0.0.1"
-    elif sys.platform.startswith("linux"):
-        assert get_ip_interface("lo") == "127.0.0.1"
-    else:
-        pytest.skip("test needs to be enhanced for platform %r" % (sys.platform,))
-
-    non_existent_interface = "__non-existent-interface"
-    expected_error_message = "{!r}.+network interface.+".format(non_existent_interface)
-
-    if sys.platform == "darwin":
-        expected_error_message += "'lo0'"
-    elif sys.platform.startswith("linux"):
-        expected_error_message += "'lo'"
-    with pytest.raises(ValueError, match=expected_error_message):
-        get_ip_interface(non_existent_interface)
+    iface = "lo0" if MACOS else "lo"
+    assert get_ip_interface(iface) == "127.0.0.1"
+    with pytest.raises(ValueError, match=f"'__notexist'.+network interface.+'{iface}'"):
+        get_ip_interface("__notexist")
 
 
 def test_truncate_exception():
@@ -248,15 +246,6 @@ def test_seek_delimiter_endline():
     f.seek(5)
     seek_delimiter(f, b"\n", 5)
     assert f.tell() == 7
-
-
-def test_funcname():
-    def f():
-        pass
-
-    assert funcname(f) == "f"
-    assert funcname(partial(f)) == "f"
-    assert funcname(partial(partial(f))) == "f"
 
 
 def test_ensure_bytes():
@@ -471,71 +460,31 @@ async def test_loop_runner_gen():
     await asyncio.sleep(0.01)
 
 
-def test_parse_bytes():
-    assert parse_bytes("100") == 100
-    assert parse_bytes("100 MB") == 100000000
-    assert parse_bytes("100M") == 100000000
-    assert parse_bytes("5kB") == 5000
-    assert parse_bytes("5.4 kB") == 5400
-    assert parse_bytes("1kiB") == 1024
-    assert parse_bytes("1Mi") == 2 ** 20
-    assert parse_bytes("1e6") == 1000000
-    assert parse_bytes("1e6 kB") == 1000000000
-    assert parse_bytes("MB") == 1000000
-
-
-def test_parse_timedelta():
-    for text, value in [
-        ("1s", 1),
-        ("100ms", 0.1),
-        ("5S", 5),
-        ("5.5s", 5.5),
-        ("5.5 s", 5.5),
-        ("1 second", 1),
-        ("3.3 seconds", 3.3),
-        ("3.3 milliseconds", 0.0033),
-        ("3500 us", 0.0035),
-        ("1 ns", 1e-9),
-        ("2m", 120),
-        ("2 minutes", 120),
-        (datetime.timedelta(seconds=2), 2),
-        (datetime.timedelta(milliseconds=100), 0.1),
-    ]:
-        result = parse_timedelta(text)
-        assert abs(result - value) < 1e-14
-
-    assert parse_timedelta("1ms", default="seconds") == 0.001
-    assert parse_timedelta("1", default="seconds") == 1
-    assert parse_timedelta("1", default="ms") == 0.001
-    assert parse_timedelta(1, default="ms") == 0.001
-
-
 @gen_test()
-async def test_all_exceptions_logging():
-    async def throws():
-        raise Exception("foo1234")
+async def test_all_quiet_exceptions():
+    class CustomError(Exception):
+        pass
+
+    async def throws(msg):
+        raise CustomError(msg)
 
     with captured_logger("") as sio:
-        try:
-            await All([throws() for _ in range(5)], quiet_exceptions=Exception)
-        except Exception:
-            pass
+        with pytest.raises(CustomError):
+            await All([throws("foo") for _ in range(5)])
+        with pytest.raises(CustomError):
+            await All([throws("bar") for _ in range(5)], quiet_exceptions=CustomError)
 
-        import gc
-
-        gc.collect()
-        await asyncio.sleep(0.1)
-
-    assert "foo1234" not in sio.getvalue()
+    assert "bar" not in sio.getvalue()
+    assert "foo" in sio.getvalue()
 
 
 def test_warn_on_duration():
-    with pytest.warns(None) as record:
+    with warnings.catch_warnings(record=True) as record:
         with warn_on_duration("10s", "foo"):
             pass
     assert not record
 
-    with pytest.warns(None) as record:
+    with pytest.warns(UserWarning, match=r"foo") as record:
         with warn_on_duration("1ms", "foo"):
             sleep(0.100)
 
@@ -543,13 +492,11 @@ def test_warn_on_duration():
     assert any("foo" in str(rec.message) for rec in record)
 
 
-def test_format_bytes_compat():
-    # moved to dask, but exported here for compatibility
-    from distributed.utils import format_bytes  # noqa
-
-
 def test_logs():
-    d = MultiLogs({"123": [("INFO", "Hello")], "456": [("INFO", "World!")]})
+    log = Log("Hello")
+    assert isinstance(log, str)
+    d = Logs({"123": log, "456": Log("World!")})
+    assert isinstance(d, dict)
     text = d._repr_html_()
     assert is_valid_xml("<div>" + text + "</div>")
     assert "Hello" in text
@@ -581,9 +528,22 @@ def test_parse_ports():
     assert parse_ports(23) == [23]
     assert parse_ports("45") == [45]
     assert parse_ports("100:103") == [100, 101, 102, 103]
+    assert parse_ports([100, 101, 102, 103]) == [100, 101, 102, 103]
+
+    out = parse_ports((100, 101, 102, 103))
+    assert out == [100, 101, 102, 103]
+    assert isinstance(out, list)
 
     with pytest.raises(ValueError, match="port_stop must be greater than port_start"):
         parse_ports("103:100")
+    with pytest.raises(TypeError):
+        parse_ports(100.5)
+    with pytest.raises(TypeError):
+        parse_ports([100, 100.5])
+    with pytest.raises(ValueError):
+        parse_ports("foo")
+    with pytest.raises(ValueError):
+        parse_ports("100.5")
 
 
 def test_lru():
@@ -604,24 +564,221 @@ def test_lru():
     assert list(l.keys()) == ["c", "a", "d"]
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_offload():
     assert (await offload(inc, 1)) == 2
     assert (await offload(lambda x, y: x + y, 1, y=2)) == 3
 
 
-def test_deprecated():
-    @deprecated()
-    def foo():
-        return "bar"
+@gen_test()
+async def test_offload_preserves_contextvars():
+    var = contextvars.ContextVar("var")
 
-    with pytest.warns(DeprecationWarning, match="foo is deprecated"):
-        assert foo() == "bar"
+    async def set_var(v: str):
+        var.set(v)
+        r = await offload(var.get)
+        assert r == v
 
-    # Explicit version specified
-    @deprecated(version_removed="1.2.3")
-    def foo():
-        return "bar"
+    await asyncio.gather(set_var("foo"), set_var("bar"))
 
-    with pytest.warns(DeprecationWarning, match="removed in version 1.2.3"):
-        assert foo() == "bar"
+
+def test_serialize_for_cli_deprecated():
+    with pytest.warns(FutureWarning, match="serialize_for_cli is deprecated"):
+        from distributed.utils import serialize_for_cli
+    assert serialize_for_cli is dask.config.serialize
+
+
+def test_deserialize_for_cli_deprecated():
+    with pytest.warns(FutureWarning, match="deserialize_for_cli is deprecated"):
+        from distributed.utils import deserialize_for_cli
+    assert deserialize_for_cli is dask.config.deserialize
+
+
+def test_parse_bytes_deprecated():
+    with pytest.warns(FutureWarning, match="parse_bytes is deprecated"):
+        from distributed.utils import parse_bytes
+    assert parse_bytes is dask.utils.parse_bytes
+
+
+def test_format_bytes_deprecated():
+    with pytest.warns(FutureWarning, match="format_bytes is deprecated"):
+        from distributed.utils import format_bytes
+    assert format_bytes is dask.utils.format_bytes
+
+
+def test_format_time_deprecated():
+    with pytest.warns(FutureWarning, match="format_time is deprecated"):
+        from distributed.utils import format_time
+    assert format_time is dask.utils.format_time
+
+
+def test_funcname_deprecated():
+    with pytest.warns(FutureWarning, match="funcname is deprecated"):
+        from distributed.utils import funcname
+    assert funcname is dask.utils.funcname
+
+
+def test_parse_timedelta_deprecated():
+    with pytest.warns(FutureWarning, match="parse_timedelta is deprecated"):
+        from distributed.utils import parse_timedelta
+    assert parse_timedelta is dask.utils.parse_timedelta
+
+
+def test_typename_deprecated():
+    with pytest.warns(FutureWarning, match="typename is deprecated"):
+        from distributed.utils import typename
+    assert typename is dask.utils.typename
+
+
+def test_tmpfile_deprecated():
+    with pytest.warns(FutureWarning, match="tmpfile is deprecated"):
+        from distributed.utils import tmpfile
+    assert tmpfile is dask.utils.tmpfile
+
+
+def test_iscoroutinefunction_unhashable_input():
+    # Ensure iscoroutinefunction can handle unhashable callables
+    assert not iscoroutinefunction(_UnhashableCallable())
+
+
+def test_iscoroutinefunction_nested_partial():
+    async def my_async_callable(x, y, z):
+        pass
+
+    assert iscoroutinefunction(
+        functools.partial(functools.partial(my_async_callable, 1), 2)
+    )
+
+
+def test_recursive_to_dict():
+    class C:
+        def __init__(self, x):
+            self.x = x
+
+        def __repr__(self):
+            return "<C>"
+
+        def _to_dict(self, *, exclude):
+            assert exclude == ["foo"]
+            return ["C:", recursive_to_dict(self.x, exclude=exclude)]
+
+    class D:
+        def __repr__(self):
+            return "<D>"
+
+    class E:
+        def __init__(self):
+            self.x = 1  # Public attribute; dump
+            self._y = 2  # Private attribute; don't dump
+            self.foo = 3  # In exclude; don't dump
+
+        @property
+        def z(self):  # Public property; dump
+            return 4
+
+        def f(self):  # Callable; don't dump
+            return 5
+
+        def _to_dict(self, *, exclude):
+            # Output: {"x": 1, "z": 4}
+            return recursive_to_dict(self, exclude=exclude, members=True)
+
+    inp = [
+        1,
+        1.1,
+        True,
+        False,
+        None,
+        "foo",
+        b"bar",
+        C,
+        C(1),
+        D(),
+        (1, 2),
+        [3, 4],
+        {5, 6},
+        frozenset([7, 8]),
+        deque([9, 10]),
+        {3: 4, 1: 2}.keys(),
+        {3: 4, 1: 2}.values(),
+        E(),
+    ]
+    expect = [
+        1,
+        1.1,
+        True,
+        False,
+        None,
+        "foo",
+        "b'bar'",
+        "<class 'test_utils.test_recursive_to_dict.<locals>.C'>",
+        ["C:", 1],
+        "<D>",
+        [1, 2],
+        [3, 4],
+        list({5, 6}),
+        list(frozenset([7, 8])),
+        [9, 10],
+        [3, 1],
+        [4, 2],
+        {"x": 1, "z": 4},
+    ]
+    assert recursive_to_dict(inp, exclude=["foo"]) == expect
+
+    # Test recursion
+    a = []
+    c = C(a)
+    a += [c, c]
+    # The blocklist of already-seen objects is reentrant: a is converted to string when
+    # found inside itself; c must *not* be converted to string the second time it's
+    # found, because it's outside of itself.
+    assert recursive_to_dict(a, exclude=["foo"]) == [
+        ["C:", "[<C>, <C>]"],
+        ["C:", "[<C>, <C>]"],
+    ]
+
+
+def test_recursive_to_dict_no_nest():
+    class Person:
+        def __init__(self, name):
+            self.name = name
+            self.children = []
+            self.pets = []
+            ...
+
+        def _to_dict_no_nest(self, exclude=()):
+            return recursive_to_dict(self.__dict__, exclude=exclude)
+
+        def __repr__(self):
+            return self.name
+
+    class Pet:
+        def __init__(self, name):
+            self.name = name
+            self.owners = []
+            ...
+
+        def _to_dict_no_nest(self, exclude=()):
+            return recursive_to_dict(self.__dict__, exclude=exclude)
+
+        def __repr__(self):
+            return self.name
+
+    alice = Person("Alice")
+    bob = Person("Bob")
+    charlie = Pet("Charlie")
+    alice.children.append(bob)
+    alice.pets.append(charlie)
+    bob.pets.append(charlie)
+    charlie.owners[:] = [alice, bob]
+    info = {"people": [alice, bob], "pets": [charlie]}
+    expect = {
+        "people": [
+            {"name": "Alice", "children": ["Bob"], "pets": ["Charlie"]},
+            {"name": "Bob", "children": [], "pets": ["Charlie"]},
+        ],
+        "pets": [
+            {"name": "Charlie", "owners": ["Alice", "Bob"]},
+        ],
+    }
+    assert recursive_to_dict(info) == expect

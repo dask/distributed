@@ -3,9 +3,9 @@ from contextlib import contextmanager
 
 import dask
 
-from .threadpoolexecutor import rejoin, secede
-from .utils import parse_timedelta
-from .worker import get_client, get_worker, thread_state
+from distributed.metrics import time
+from distributed.threadpoolexecutor import rejoin, secede
+from distributed.worker import get_client, get_worker, thread_state
 
 
 @contextmanager
@@ -46,14 +46,19 @@ def worker_client(timeout=None, separate_thread=True):
     if timeout is None:
         timeout = dask.config.get("distributed.comm.timeouts.connect")
 
-    timeout = parse_timedelta(timeout, "s")
+    timeout = dask.utils.parse_timedelta(timeout, "s")
 
     worker = get_worker()
     client = get_client(timeout=timeout)
     if separate_thread:
+        duration = time() - thread_state.start_time
         secede()  # have this thread secede from the thread pool
         worker.loop.add_callback(
-            worker.transition, worker.tasks[thread_state.key], "long-running"
+            worker.transition,
+            worker.tasks[thread_state.key],
+            "long-running",
+            stimulus_id=f"worker-client-secede-{time()}",
+            compute_duration=duration,
         )
 
     yield client
