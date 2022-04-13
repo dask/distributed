@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 import traceback
+import weakref
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from numbers import Number
@@ -39,6 +40,7 @@ from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
+from distributed.profile import wait_profiler
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
 from distributed.utils import TimeoutError
@@ -1715,6 +1717,35 @@ async def test_story_with_deps(c, s, a, b):
     assert_worker_story(story, expected, strict=True)
 
 
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_stimulus_story(c, s, a):
+    class C:
+        pass
+
+    f = c.submit(C, key="f")  # Test that substrings aren't matched by story()
+    f2 = c.submit(inc, 2, key="f2")
+    f3 = c.submit(inc, 3, key="f3")
+    await wait([f, f2, f3])
+
+    # Test that ExecuteSuccessEvent.value is not stored in the the event log
+    assert isinstance(a.data["f"], C)
+    ref = weakref.ref(a.data["f"])
+    del f
+    while "f" in a.data:
+        await asyncio.sleep(0.01)
+    wait_profiler()
+    assert ref() is None
+
+    story = a.stimulus_story("f", "f2")
+    assert {ev.key for ev in story} == {"f", "f2"}
+    assert {ev.type for ev in story} == {C, int}
+
+    prev_handled = story[0].handled
+    for ev in story[1:]:
+        assert ev.handled >= prev_handled
+        prev_handled = ev.handled
+
+
 @gen_cluster(client=True)
 async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     # Ensure that both dependencies for H are on another worker than H itself.
@@ -3303,6 +3334,7 @@ async def test_Worker__to_dict(c, s, a):
         "in_flight_tasks",
         "in_flight_workers",
         "log",
+        "stimulus_log",
         "tasks",
         "logs",
         "config",
