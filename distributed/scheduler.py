@@ -4085,7 +4085,6 @@ class Scheduler(SchedulerState, ServerNode):
             done = set(already_in_memory)
             while stack:  # remove unnecessary dependencies
                 key = stack.pop()
-                # ts = self._tasks[key]  # unused line
                 try:
                     deps = dependencies[key]
                 except KeyError:
