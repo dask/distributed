@@ -135,7 +135,7 @@ async def dask_setup(worker):
 
 
 @gen_test()
-async def test_preload_import_time(cleanup):
+async def test_preload_import_time():
     text = """
 from distributed.comm.registry import backends
 from distributed.comm.tcp import TCPBackend

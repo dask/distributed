@@ -500,7 +500,7 @@ class KeyboardInterruptWorker(worker.Worker):
 
 @pytest.mark.parametrize("protocol", ["tcp", "ucx"])
 @gen_test()
-async def test_nanny_closed_by_keyboard_interrupt(cleanup, protocol):
+async def test_nanny_closed_by_keyboard_interrupt(protocol):
     if protocol == "ucx":  # Skip if UCX isn't available
         pytest.importorskip("ucp")
 
