@@ -29,7 +29,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import Any, ClassVar, Dict, Literal, Optional
+from typing import Any, ClassVar, Dict, Literal
 from typing import cast as pep484_cast
 
 import psutil
@@ -5583,9 +5583,10 @@ class Scheduler(SchedulerState, ServerNode):
             except TypeError:  # comm becomes None during GC
                 pass
 
-    def remove_client(self, client: str, stimulus_id: Optional[str] = None) -> None:
+    def remove_client(self, client: str, stimulus_id: str = None) -> None:
         """Remove client from network"""
         parent: SchedulerState = cast(SchedulerState, self)
+        stimulus_id = stimulus_id or f"remove-client-{time()}"
         if self.status == Status.running:
             logger.info("Remove client %s", client)
         self.log_event(["all", client], {"action": "remove-client", "client": client})

@@ -82,7 +82,6 @@ from distributed.utils import is_valid_xml, mp_context, sync, tmp_text
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _UnhashableCallable,
-    assert_stimulus_flow,
     assert_story,
     async_wait_for,
     asyncinc,
@@ -7504,59 +7503,6 @@ async def test_wait_for_workers_updates_info(c, s):
         assert c.scheduler_info()["workers"]
 
 
-@gen_cluster(client=True)
-async def test_stimulus_flow_simple(c, s, *workers):
-    f = c.submit(inc, 1)
-    assert await f == 2
-
-    assert_stimulus_flow(
-        f.key,
-        s,
-        *workers,
-        flow={
-            ("a", "scheduler", "update-graph-hlg"): ("a", "worker", "compute-task"),
-            ("a", "worker", "compute-task"): ("a", "worker", "task-finished"),
-            ("a", "worker", "task-finished"): ("a", "scheduler", "task-finished"),
-            ("a", "scheduler", "task-finished"): None,
-        },
-    )
-
-
-@gen_cluster(client=True)
-async def test_stimulus_flow_retry(c, s, *workers):
-    def task():
-        assert dask.config.get("foo")
-
-    with dask.config.set(foo=False):
-        f = c.submit(task)
-        with pytest.raises(AssertionError):
-            await f
-
-    with dask.config.set(foo=True):
-        await f.retry()
-        await f
-
-    assert_stimulus_flow(
-        f.key,
-        s,
-        *workers,
-        flow={
-            ("a", "scheduler", "update-graph-hlg"): ("a", "worker", "compute-task"),
-            ("a", "worker", "compute-task"): ("a", "worker", "task-erred"),
-            ("a", "worker", "task-erred"): ("a", "scheduler", "task-erred"),
-            ("a", "scheduler", "task-erred"): ("a", "scheduler", "stimulus-retry"),
-            ("a", "scheduler", "stimulus-retry"): [
-                ("b", "worker", "compute-task"),
-                ("c", "worker", "stimulus-retry"),
-            ],
-            ("b", "worker", "compute-task"): ("b", "worker", "task-finished"),
-            ("b", "worker", "task-finished"): ("b", "scheduler", "task-finished"),
-            ("b", "scheduler", "task-finished"): None,
-            ("c", "worker", "stimulus-retry"): None,
-        },
-    )
-
-
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_client_story(c, s, *workers):
     f = c.submit(inc, 1)
@@ -7579,21 +7525,8 @@ async def test_client_story(c, s, *workers):
         ordered_timestamps=False,
     )
 
-    expected_stimulus_prefix = [
-        "update-graph-hlg-",
-        "update-graph-hlg-",
-        "task-finished-",
-        "compute-task-",
-        "compute-task-",
-        "compute-task-",
-        "compute-task-",
-        "task-finished-",
-        "task-finished-",
-    ]
-
-    stimulus_ids = [ev[-2] for ev in story]
-    assert len(expected_stimulus_prefix) == len(stimulus_ids)
-    assert all(ev[-2].startswith(p) for ev, p in zip(story, expected_stimulus_prefix))
+    stimulus_ids = {ev[-2] for ev in story}
+    assert len(stimulus_ids) == 3
 
 
 class WorkerBrokenStory(Worker):

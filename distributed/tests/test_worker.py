@@ -4,7 +4,6 @@ import asyncio
 import importlib
 import logging
 import os
-import re
 import sys
 import threading
 import traceback
@@ -1690,11 +1689,7 @@ async def test_story_with_deps(c, s, a, b):
 
     # Story now includes randomized stimulus_ids and timestamps.
     stimulus_ids = {ev[-2] for ev in story}
-    assert {sid[: re.search(r"\d", sid).start()] for sid in stimulus_ids} == {
-        "compute-task-",
-        "ensure-communicating-",
-        "task-finished-",
-    }
+    assert len(stimulus_ids) == 3
 
     # This is a simple transition log
     expected = [

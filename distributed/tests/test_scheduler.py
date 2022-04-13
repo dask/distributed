@@ -3551,8 +3551,10 @@ async def test_stimulus_success(c, s, a, b):
     await f
     await c.close()
 
+    stories = s.story(key)
+
     assert_story(
-        s.story(key),
+        stories,
         [
             (key, "released", "waiting", {key: "processing"}),
             (key, "waiting", "processing", {}),
@@ -3566,18 +3568,8 @@ async def test_stimulus_success(c, s, a, b):
         ],
     )
 
-    stimuli = [
-        "update-graph-hlg",
-        "update-graph-hlg",
-        "task-finished",
-        "client-releases-keys",
-    ]
-
-    stories = s.story(key)
-    assert len(stories) == len(stimuli)
-
-    for stimulus_id, story in zip(stimuli, stories):
-        assert story[-2].startswith(stimulus_id), (story[-2], stimulus_id)
+    stimulus_ids = {s[-2] for s in stories}
+    assert len(stimulus_ids) == 3
 
 
 @gen_cluster(client=True)
@@ -3595,14 +3587,8 @@ async def test_stimulus_retry(c, s, a, b):
         await f
 
     story = s.story(f.key)
-    stimulus_ids = list(s[-2] for s in story)
-
-    assert {sid[: re.search(r"\d", sid).start()] for sid in stimulus_ids} == {
-        "update-graph-hlg-",
-        "task-erred-",
-        "task-finished-",
-        "stimulus-retry-",
-    }
+    stimulus_ids = {s[-2] for s in story}
+    assert len(stimulus_ids) == 4
 
     assert_story(
         story,
