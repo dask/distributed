@@ -1608,3 +1608,10 @@ def recursive_to_dict(
         return repr(obj)
     finally:
         tok.var.reset(tok)
+
+
+def is_python_shutting_down() -> bool:
+    """Is the interpreter shutting down now?"""
+    from distributed import _python_shutting_down
+
+    return _python_shutting_down

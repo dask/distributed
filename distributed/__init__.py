@@ -1,6 +1,4 @@
-from distributed import config  # isort:skip; load distributed configuration first
-from distributed import widgets  # isort:skip; load distributed widgets second
-
+import atexit
 
 import dask
 from dask.config import config  # type: ignore
@@ -56,6 +54,9 @@ from distributed.worker import (
 )
 from distributed.worker_client import local_client, worker_client
 
+from distributed import config  # isort:skip; load distributed configuration first
+from distributed import widgets  # isort:skip; load distributed widgets second
+
 
 def __getattr__(name):
     global __version__, __git_revision__
@@ -73,3 +74,18 @@ def __getattr__(name):
         return __git_revision__
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+_python_shutting_down = False
+
+
+@atexit.register
+def _():
+    """Set a global when Python shuts down
+
+    See Also
+    --------
+    distributed.utils.is_python_shutting_down
+    """
+    global _python_shutting_down
+    _python_shutting_down = True
