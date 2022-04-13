@@ -150,17 +150,17 @@ class ClientState:
 
     """
 
-    __slots__ = ("client_key", "hash", "wants_what", "last_seen", "versions")
+    __slots__ = ("client_key", "_hash", "wants_what", "last_seen", "versions")
 
     def __init__(self, client: str, versions: dict = None):
         self.client_key = client
-        self.hash = hash(client)
+        self._hash = hash(client)
         self.wants_what: "set[TaskState]" = set()
         self.last_seen = time()
         self.versions = versions or {}
 
     def __hash__(self):
-        return self.hash
+        return self._hash
 
     def __eq__(self, other):
         typ_self: type = type(self)
@@ -414,7 +414,7 @@ class WorkerState:
         "versions",
         "nanny",
         "status",
-        "hash",
+        "_hash",
         "nbytes",
         "occupancy",
         "memory_unmanaged_old",
@@ -459,7 +459,7 @@ class WorkerState:
         self.nanny = nanny
         self.status = status
 
-        self.hash = hash(address)
+        self._hash = hash(address)
         self.nbytes = 0
         self.occupancy: int = 0
         self.memory_unmanaged_old = 0
@@ -482,7 +482,7 @@ class WorkerState:
         self.extra = extra or {}
 
     def __hash__(self):
-        return self.hash
+        return self._hash
 
     def __eq__(self, other):
         typ_self: type = type(self)
@@ -1109,7 +1109,7 @@ class TaskState:
         # Key name
         "key",
         # Hash of the key name
-        "hash",
+        "_hash",
         # Key prefix (see key_split())
         "prefix",
         # How to run the task (None if pure data)
@@ -1158,7 +1158,7 @@ class TaskState:
 
     def __init__(self, key: str, run_spec: object):
         self.key = key
-        self.hash = hash(key)
+        self._hash = hash(key)
         self.run_spec = run_spec
         self._state: str = None  # type: ignore
         self.exception: str = None  # type: ignore
@@ -1192,7 +1192,7 @@ class TaskState:
         self.erred_on: "set[str]" = set()
 
     def __hash__(self):
-        return self.hash
+        return self._hash
 
     def __eq__(self, other):
         typ_self: type = type(self)
