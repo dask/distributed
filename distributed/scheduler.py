@@ -4182,7 +4182,7 @@ class Scheduler(SchedulerState, ServerNode):
             tasks
         )  # TODO: define order wrt old graph
 
-        if submitting_task:  # sub-tasks get better priority than self tasks
+        if submitting_task:  # sub-tasks get better priority than parent tasks
             ts = self.tasks.get(submitting_task)
             if ts is not None:
                 generation = ts.priority[0] - 0.01
