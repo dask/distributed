@@ -82,11 +82,8 @@ from distributed.utils import is_valid_xml, mp_context, sync, tmp_text
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _UnhashableCallable,
-<<<<<<< HEAD
     assert_stimulus_flow,
-=======
     assert_story,
->>>>>>> Client Story rebased on #6095
     async_wait_for,
     asyncinc,
     captured_logger,
@@ -7561,6 +7558,7 @@ async def test_stimulus_flow_retry(c, s, *workers):
             ("c", "worker", "stimulus-retry"): None,
         },
     )
+
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_client_story(c, s, *workers):
