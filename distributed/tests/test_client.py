@@ -6174,7 +6174,7 @@ async def test_shutdown():
 
 
 @gen_test()
-async def test_shutdown_localcluster(cleanup):
+async def test_shutdown_localcluster():
     async with LocalCluster(
         n_workers=1, asynchronous=True, processes=False, dashboard_address=":0"
     ) as lc:
