@@ -139,7 +139,7 @@ async def test_large_transfer_with_no_compression():
     ],
 )
 @gen_test()
-async def test_http_and_comm_server(cleanup, dashboard, protocol, security, port):
+async def test_http_and_comm_server(dashboard, protocol, security, port):
     if security:
         xfail_ssl_issue5601()
         pytest.importorskip("cryptography")
@@ -159,7 +159,7 @@ async def test_http_and_comm_server(cleanup, dashboard, protocol, security, port
 
 @pytest.mark.parametrize("protocol", ["ws://", "wss://"])
 @gen_test()
-async def test_connection_made_with_extra_conn_args(cleanup, protocol):
+async def test_connection_made_with_extra_conn_args(protocol):
     if protocol == "ws://":
         security = Security(
             extra_conn_args={"headers": {"Authorization": "Token abcd"}}
