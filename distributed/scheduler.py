@@ -116,8 +116,8 @@ def declare(*a, **k):
 
 
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
-DEFAULT_DATA_SIZE = declare(
-    int, parse_bytes(dask.config.get("distributed.scheduler.default-data-size"))
+DEFAULT_DATA_SIZE = parse_bytes(
+    dask.config.get("distributed.scheduler.default-data-size")
 )
 
 DEFAULT_EXTENSIONS = {
@@ -135,10 +135,7 @@ DEFAULT_EXTENSIONS = {
     "stealing": WorkStealing,
 }
 
-ALL_TASK_STATES = declare(
-    set, {"released", "waiting", "no-worker", "processing", "erred", "memory"}
-)
-globals()["ALL_TASK_STATES"] = ALL_TASK_STATES
+ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
 
 
 class ClientState:
