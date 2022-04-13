@@ -76,10 +76,12 @@ def device_get_count():
 def _pynvml_handles():
     count = device_get_count()
     if count == 0:
-        if pynvml is None or nvmlLibraryNotFound:
+        if pynvml is None:
             raise RuntimeError(
                 "NVML monitoring requires PyNVML and NVML to be installed"
             )
+        if nvmlLibraryNotFound:
+            raise RuntimeError("PyNVML is installed, but NVML is not")
         if nvmlWslInsufficientDriver:
             raise RuntimeError(
                 "Outdated NVIDIA drivers for WSL, please upgrade to "
