@@ -168,9 +168,9 @@ class _LockFile:
                     path=self._path,
                 )
 
-        def release(self):
-            with open(self._path, "wb") as fd:
-                _unlock_file(fd)
+    def release(self):
+        with open(self._path, "wb") as fd:
+            _unlock_file(fd)
 
 
 class _Locker:
