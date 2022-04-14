@@ -12,6 +12,22 @@ from distributed.diagnostics.plugin import WorkerPlugin
 
 
 class KillWorker(WorkerPlugin):
+    """Kill Workers Randomly
+
+    This kills workers in a cluster randomly.  It is intended to be used in
+    stress testing.
+
+    Parameters
+    ----------
+    delay: str
+        The expected amount of time for a worker to live.
+        The actual time will vary, treating worker death as a poisson process.
+    mode: str
+        or "graceful" which calls worker.close(...)
+        Either "sys.exit" which calls sys.exit(0)
+        or "segfault" which triggers a segfault
+    """
+
     def __init__(
         self,
         delay: str | int | float = "100 s",
