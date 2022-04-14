@@ -168,7 +168,6 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, a, b):
 
     b_story = b.story(fut1.key)
     assert any("receive-dep-failed" in msg for msg in b_story)
-    assert any("missing-dep" in msg for msg in b_story)
     assert any("cancelled" in msg for msg in b_story)
     assert any("resumed" in msg for msg in b_story)
 

@@ -36,7 +36,7 @@ scheduler = {"cls": Scheduler, "options": {"dashboard_address": ":0"}}
 
 
 @gen_test()
-async def test_startup(cleanup):
+async def test_startup():
     start = time()
     async with SpecCluster(
         scheduler=scheduler,
@@ -78,7 +78,7 @@ async def test_scale_up_down():
 
 
 @gen_test()
-async def test_adaptive(cleanup):
+async def test_adaptive():
     start = time()
     async with SpecCluster(
         scheduler=scheduler,

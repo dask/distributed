@@ -47,6 +47,27 @@ pre_existing_cuda_context = False
 cuda_context_created = False
 
 
+_warning_suffix = (
+    "This is often the result of a CUDA-enabled library calling a CUDA runtime function before "
+    "Dask-CUDA can spawn worker processes. Please make sure any such function calls don't happen "
+    "at import time or in the global scope of a program."
+)
+
+
+def _warn_existing_cuda_context(ctx, pid):
+    warnings.warn(
+        f"A CUDA context for device {ctx} already exists on process ID {pid}. {_warning_suffix}"
+    )
+
+
+def _warn_cuda_context_wrong_device(ctx_expected, ctx_actual, pid):
+    warnings.warn(
+        f"Worker with process ID {pid} should have a CUDA context assigned to device "
+        f"{ctx_expected}, but instead the CUDA context is on device {ctx_actual}. "
+        f"{_warning_suffix}"
+    )
+
+
 def synchronize_stream(stream=0):
     import numba.cuda
 
@@ -85,13 +106,7 @@ def init_once():
         )
         pre_existing_cuda_context = has_cuda_context()
         if pre_existing_cuda_context is not False:
-            warnings.warn(
-                f"A CUDA context for device {pre_existing_cuda_context} already exists on process "
-                f"ID {os.getpid()}. This is often the result of a CUDA-enabled library calling a "
-                "CUDA runtime function before Dask-CUDA can spawn worker processes. Please make "
-                "sure any such function calls don't happen at import time or in the global scope "
-                "of a program."
-            )
+            _warn_existing_cuda_context(pre_existing_cuda_context, os.getpid())
 
         numba.cuda.current_context()
 
@@ -100,13 +115,8 @@ def init_once():
             cuda_context_created is not False
             and cuda_context_created != cuda_visible_device
         ):
-            warnings.warn(
-                f"Worker with process ID {os.getpid()} should have a CUDA context assigned to "
-                f"device {cuda_visible_device}, but instead the CUDA context is on device "
-                "{cuda_context_created}. This is often the result of a CUDA-enabled library "
-                "calling a CUDA runtime function before Dask-CUDA can spawn worker processes. "
-                "Please make sure any such function calls don't happen at import time or in "
-                "the global scope of a program."
+            _warn_cuda_context_wrong_device(
+                cuda_visible_device, cuda_context_created, os.getpid()
             )
 
     import ucp as _ucp

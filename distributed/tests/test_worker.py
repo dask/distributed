@@ -393,7 +393,7 @@ async def test_chained_error_message(c, s, a, b):
 
 
 @gen_test()
-async def test_plugin_exception(cleanup):
+async def test_plugin_exception():
     class MyPlugin:
         def setup(self, worker=None):
             raise ValueError("Setup failed")
@@ -410,7 +410,7 @@ async def test_plugin_exception(cleanup):
 
 
 @gen_test()
-async def test_plugin_multiple_exceptions(cleanup):
+async def test_plugin_multiple_exceptions():
     class MyPlugin1:
         def setup(self, worker=None):
             raise ValueError("MyPlugin1 Error")
@@ -438,7 +438,7 @@ async def test_plugin_multiple_exceptions(cleanup):
 
 
 @gen_test()
-async def test_plugin_internal_exception(cleanup):
+async def test_plugin_internal_exception():
     async with Scheduler(port=0) as s:
         with pytest.raises(UnicodeDecodeError, match="codec can't decode"):
             async with Worker(
@@ -1374,7 +1374,7 @@ async def test_protocol_from_scheduler_address(Worker):
 
 
 @gen_test()
-async def test_host_uses_scheduler_protocol(cleanup, monkeypatch):
+async def test_host_uses_scheduler_protocol(monkeypatch):
     # Ensure worker uses scheduler's protocol to determine host address, not the default scheme
     # See https://github.com/dask/distributed/pull/4883
     from distributed.comm.tcp import TCPBackend
@@ -3478,3 +3478,24 @@ async def test_tick_interval(c, s, a, b):
     while s.workers[a.address].metrics["event_loop_interval"] < 0.100:
         await asyncio.sleep(0.01)
         time.sleep(0.200)
+
+
+class BreakingWorker(Worker):
+    broke_once = False
+
+    def get_data(self, comm, **kwargs):
+        if not self.broke_once:
+            self.broke_once = True
+            raise OSError("fake error")
+        return super().get_data(comm, **kwargs)
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=BreakingWorker)
+async def test_broken_comm(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+    )
+    s = df.shuffle("id", shuffle="tasks")
+    await c.compute(s.size)

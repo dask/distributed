@@ -264,7 +264,7 @@ def test_tls_cluster(tls_client):
 
 
 @gen_test()
-async def test_tls_scheduler(security, cleanup):
+async def test_tls_scheduler(security):
     async with Scheduler(
         security=security, host="localhost", dashboard_address=":0"
     ) as s:
