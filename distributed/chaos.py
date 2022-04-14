@@ -40,7 +40,9 @@ class KillWorker(WorkerPlugin):
         )
 
     def graceful(self):
-        asyncio.create_task(self.worker.close(report=False))
+        asyncio.create_task(
+            self.worker.close(report=False, nanny=False, executor_wait=False)
+        )
 
     def sys_exit(self):
         sys.exit(0)
