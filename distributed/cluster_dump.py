@@ -201,6 +201,28 @@ class DumpArtefact(Mapping):
             keys, self.dump["scheduler"]["transition_log"], datetimes=True
         )
 
+    def scheduler_short_story(self, *key_or_stimulus_id: str) -> list[str]:
+        """
+        Returns
+        -------
+        story : list
+            A list of just the final states for the keys/stimulus ID's in ``*key_or_stimulus_id``.
+        """
+        return [x[2] for x in self.scheduler_story(*key_or_stimulus_id)]
+
+    def scheduler_short_stories(self, *key_or_stimulus_id: str) -> dict[str, list[str]]:
+        """
+        Returns
+        -------
+        stories : dict
+            A dict of the short story for each key or stimulus ID. Keys missing from the logs are dropped.
+        """
+        return {
+            k: s
+            for k, s in ((k, self.scheduler_short_story(k)) for k in key_or_stimulus_id)
+            if s
+        }
+
     def worker_stories(self, *key_or_stimulus_id: str) -> dict:
         """
         Returns
