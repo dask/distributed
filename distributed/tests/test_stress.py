@@ -9,7 +9,8 @@ from tlz import concat, sliding_window
 
 from dask import delayed
 
-from distributed import Client, Nanny, wait
+from distributed import Client, LocalCluster, Nanny, wait
+from distributed.chaos import KillWorker
 from distributed.compatibility import WINDOWS
 from distributed.config import config
 from distributed.metrics import time
@@ -18,6 +19,7 @@ from distributed.utils_test import (
     bump_rlimit,
     cluster,
     gen_cluster,
+    gen_test,
     inc,
     nodebug_setup_module,
     nodebug_teardown_module,
@@ -284,3 +286,35 @@ async def test_no_delay_during_large_transfer(c, s, w):
     nbytes -= nbytes[0]
     assert nbytes.max() < (x_nbytes * 2) / 1e6
     assert nbytes[-1] < (x_nbytes * 1.2) / 1e6
+
+
+@gen_test()
+async def test_chaos_rechunk():
+    async with LocalCluster(
+        processes=False,
+        threads_per_worker=2,
+        asynchronous=True,
+        dashboard_address=10000,
+        silence_logs=False,
+    ) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            cluster.adapt(interval="10 ms", minimum=6, maximum=6)
+            cluster.scheduler.allowed_failures = 10000
+
+            plugin = KillWorker(delay="4 s", mode="graceful")
+
+            await client.register_worker_plugin(plugin, name="kill")
+
+            da = pytest.importorskip("dask.array")
+
+            x = da.random.random((10000, 10000))
+            y = x.rechunk((10000, 20)).rechunk((20, 10000)).sum()
+            z = client.compute(y)
+
+            start = time()
+            while time() < start + 10:
+                if z.status == "error":
+                    await z
+                await asyncio.sleep(0.1)
+
+            await z.cancel()
