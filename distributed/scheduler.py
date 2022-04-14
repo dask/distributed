@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import heapq
@@ -29,8 +31,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import Any, ClassVar, Deque, Dict, Literal, Tuple
-from typing import cast as pep484_cast
+from typing import Any, ClassVar, Literal, cast
 
 import psutil
 from sortedcontainers import SortedDict, SortedSet
@@ -155,7 +156,7 @@ class ClientState:
     def __init__(self, client: str, versions: dict = None):
         self.client_key = client
         self._hash = hash(client)
-        self.wants_what: "set[TaskState]" = set()
+        self.wants_what: set[TaskState] = set()
         self.last_seen = time()
         self.versions = versions or {}
 
@@ -177,7 +178,7 @@ class ClientState:
     def __str__(self):
         return self.client_key
 
-    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
+    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -256,7 +257,7 @@ class MemoryState:
         self.unmanaged_old = min(unmanaged_old, process - self.managed_in_memory)
 
     @classmethod
-    def sum(cls, *infos: "MemoryState") -> "MemoryState":
+    def sum(cls, *infos: MemoryState) -> MemoryState:
         process = 0
         unmanaged_old = 0
         managed_in_memory = 0
@@ -301,7 +302,7 @@ class MemoryState:
             f"Spilled to disk       : {format_bytes(self.managed_spilled)}\n"
         )
 
-    def _to_dict(self, *, exclude: "Container[str]" = ()) -> dict:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -444,9 +445,9 @@ class WorkerState:
         memory_limit: int,
         local_directory: str,
         nanny: str,
-        services: "dict | None" = None,
-        versions: "dict | None" = None,
-        extra: "dict | None" = None,
+        services: dict | None = None,
+        versions: dict | None = None,
+        extra: dict | None = None,
     ):
         self.address = address
         self.pid = pid
@@ -463,7 +464,7 @@ class WorkerState:
         self.nbytes = 0
         self.occupancy: int = 0
         self.memory_unmanaged_old = 0
-        self.memory_other_history: "Deque[Tuple[float, int]]" = deque()
+        self.memory_other_history: deque[tuple[float, int]] = deque()
         self.metrics = {}  # type: ignore
         self.last_seen: float = 0
         self.time_delay: float = 0
@@ -471,10 +472,10 @@ class WorkerState:
             parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
         )
 
-        self.actors: "set[TaskState]" = set()
+        self.actors: set[TaskState] = set()
         self._has_what = {}  # type: ignore
         self.processing = {}  # type: ignore
-        self.long_running: "set[TaskState]" = set()
+        self.long_running: set[TaskState] = set()
         self.executing = {}  # type: ignore
         self.resources = {}  # type: ignore
         self.used_resources = {}  # type: ignore
@@ -494,7 +495,7 @@ class WorkerState:
             return False
 
     @property
-    def has_what(self) -> "Set[TaskState]":
+    def has_what(self) -> Set[TaskState]:
         return self._has_what.keys()
 
     @property
@@ -569,7 +570,7 @@ class WorkerState:
             **self.extra,
         }
 
-    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
+    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -601,7 +602,7 @@ class Computation:
 
     def __init__(self):
         self.start = time()
-        self.groups: "set[TaskGroup]" = set()
+        self.groups: set[TaskGroup] = set()
         self.code = SortedSet()
         self.id = uuid.uuid4()
 
@@ -649,7 +650,7 @@ class TaskPrefix:
        The name of a group of tasks.
        For a task like ``("x-123", 0)`` this is the text ``"x"``
 
-    .. attribute:: states: Dict[str, int]
+    .. attribute:: states: dict[str, int]
 
        The number of tasks in each state,
        like ``{"memory": 10, "processing": 3, "released": 4, ...}``
@@ -672,10 +673,10 @@ class TaskPrefix:
 
     def __init__(self, name: str):
         self.name = name
-        self.groups: "list[TaskGroup]" = []
+        self.groups: list[TaskGroup] = []
 
         # store timings for each prefix-action
-        self.all_durations: "defaultdict[str, float]" = defaultdict(float)
+        self.all_durations: defaultdict[str, float] = defaultdict(float)
 
         task_durations = dask.config.get("distributed.scheduler.default-task-durations")
         if self.name in task_durations:
@@ -699,7 +700,7 @@ class TaskPrefix:
         return merge_with(sum, [tg.states for tg in self.groups])
 
     @property
-    def active(self) -> "list[TaskGroup]":
+    def active(self) -> list[TaskGroup]:
         return [
             tg
             for tg in self.groups
@@ -748,7 +749,7 @@ class TaskGroup:
        The name of a group of tasks.
        For a task like ``("x-123", 0)`` this is the text ``"x-123"``
 
-    .. attribute:: states: Dict[str, int]
+    .. attribute:: states: dict[str, int]
 
        The number of tasks in each state,
        like ``{"memory": 10, "processing": 3, "released": 4, ...}``
@@ -801,16 +802,16 @@ class TaskGroup:
 
     def __init__(self, name: str):
         self.name = name
-        self.prefix: "TaskPrefix | None" = None
-        self.states: "Dict[str, int]" = {state: 0 for state in ALL_TASK_STATES}
+        self.prefix: TaskPrefix | None = None
+        self.states: dict[str, int] = {state: 0 for state in ALL_TASK_STATES}
         self.states["forgotten"] = 0
-        self.dependencies: "set[TaskGroup]" = set()
+        self.dependencies: set[TaskGroup] = set()
         self.nbytes_total: int = 0
         self.duration: float = 0
-        self.types: "set[str]" = set()
+        self.types: set[str] = set()
         self.start: float = 0.0
         self.stop: float = 0.0
-        self.all_durations: "defaultdict[str, float]" = defaultdict(float)
+        self.all_durations: defaultdict[str, float] = defaultdict(float)
         self.last_worker = None  # type: ignore
         self.last_worker_tasks_left = 0
 
@@ -825,7 +826,7 @@ class TaskGroup:
         assert self.prefix is not None
         self.prefix.add_duration(action, start, stop)
 
-    def add(self, other: "TaskState"):
+    def add(self, other: TaskState):
         self.states[other.state] += 1
         other.group = self
 
@@ -843,7 +844,7 @@ class TaskGroup:
     def __len__(self):
         return sum(self.states.values())
 
-    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
+    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -1170,12 +1171,12 @@ class TaskState:
         self.retries = 0
         self.nbytes = -1
         self.priority = None  # type: ignore
-        self.who_wants: "set[ClientState]" = set()
-        self.dependencies: "set[TaskState]" = set()
-        self.dependents: "set[TaskState]" = set()
-        self.waiting_on: "set[TaskState]" = set()
-        self.waiters: "set[TaskState]" = set()
-        self.who_has: "set[WorkerState]" = set()
+        self.who_wants: set[ClientState] = set()
+        self.dependencies: set[TaskState] = set()
+        self.dependents: set[TaskState] = set()
+        self.waiting_on: set[TaskState] = set()
+        self.waiters: set[TaskState] = set()
+        self.who_has: set[WorkerState] = set()
         self.processing_on: WorkerState = None  # type: ignore
         self.has_lost_dependencies = False
         self.host_restrictions = None  # type: ignore
@@ -1189,7 +1190,7 @@ class TaskState:
         self.group: TaskGroup = None  # type: ignore
         self.metadata = {}  # type: ignore
         self.annotations = {}  # type: ignore
-        self.erred_on: "set[str]" = set()
+        self.erred_on: set[str] = set()
 
     def __hash__(self):
         return self._hash
@@ -1213,7 +1214,7 @@ class TaskState:
         self.group.states[value] += 1
         self._state = value
 
-    def add_dependency(self, other: "TaskState"):
+    def add_dependency(self, other: TaskState):
         """Add another task as a dependency of this task"""
         self.dependencies.add(other)
         self.group.dependencies.add(other.group)
@@ -1267,7 +1268,7 @@ class TaskState:
             nbytes += ts.get_nbytes()
         return nbytes
 
-    def _to_dict_no_nest(self, *, exclude: "Container[str]" = ()) -> dict:
+    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -1478,14 +1479,14 @@ class SchedulerState:
     def __init__(
         self,
         aliases: dict,
-        clients: "dict[str, ClientState]",
-        workers: "SortedDict[str, WorkerState]",
+        clients: dict[str, ClientState],
+        workers: SortedDict[str, WorkerState],
         host_info: dict,
         resources: dict,
         tasks: dict,
         unrunnable: set,
         validate: bool,
-        plugins: "Iterable[SchedulerPlugin]" = (),
+        plugins: Iterable[SchedulerPlugin] = (),
         **kwargs,  # Passed verbatim to Server.__init__()
     ):
         logger.info("State start")
@@ -1498,16 +1499,16 @@ class SchedulerState:
         self.idle = SortedDict()
         self.n_tasks = 0
         self.resources = resources
-        self.saturated: "set[WorkerState]" = set()
+        self.saturated: set[WorkerState] = set()
         self.tasks = tasks
         self.replicated_tasks = {
             ts for ts in self.tasks.values() if len(ts.who_has) > 1
         }
-        self.computations: "deque[Computation]" = deque(
+        self.computations: deque[Computation] = deque(
             maxlen=dask.config.get("distributed.diagnostics.computations.max-history")
         )
-        self.task_groups: "dict[str, TaskGroup]" = {}
-        self.task_prefixes: "dict[str, TaskPrefix]" = {}
+        self.task_groups: dict[str, TaskGroup] = {}
+        self.task_prefixes: dict[str, TaskPrefix] = {}
         self.task_metadata = {}  # type: ignore
         self.total_nthreads = 0
         self.total_occupancy = 0
@@ -1528,7 +1529,7 @@ class SchedulerState:
             ("memory", "released"): self.transition_memory_released,
             ("released", "erred"): self.transition_released_erred,
         }
-        self.unknown_durations: "dict[str, set[TaskState]]" = {}
+        self.unknown_durations: dict[str, set[TaskState]] = {}
         self.unrunnable = unrunnable
         self.validate = validate
         self.workers = workers
@@ -1704,7 +1705,7 @@ class SchedulerState:
 
             finish2 = ts._state
             # FIXME downcast antipattern
-            scheduler = pep484_cast(Scheduler, self)
+            scheduler = cast(Scheduler, self)
             scheduler.transition_log.append(
                 (key, start, finish2, recommendations, time())
             )
@@ -1789,7 +1790,7 @@ class SchedulerState:
 
         if self.validate:
             # FIXME downcast antipattern
-            scheduler = pep484_cast(Scheduler, self)
+            scheduler = cast(Scheduler, self)
             for key in keys:
                 scheduler.validate_key(key)
 
@@ -3006,7 +3007,7 @@ class Scheduler(SchedulerState, ServerNode):
     """
 
     default_port = 8786
-    _instances: "ClassVar[weakref.WeakSet[Scheduler]]" = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[Scheduler]] = weakref.WeakSet()
 
     def __init__(
         self,
@@ -3386,7 +3387,7 @@ class Scheduler(SchedulerState, ServerNode):
         }
         return d
 
-    def _to_dict(self, *, exclude: "Container[str]" = ()) -> dict:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -3455,7 +3456,7 @@ class Scheduler(SchedulerState, ServerNode):
         url: str,
         exclude: "Collection[str]",
         format: Literal["msgpack", "yaml"],
-        **storage_options: Dict[str, Any],
+        **storage_options: dict[str, Any],
     ) -> None:
         "Write a cluster state dump to an fsspec-compatible URL."
         await cluster_dump.write_state(
@@ -4988,7 +4989,7 @@ class Scheduler(SchedulerState, ServerNode):
         plugin: SchedulerPlugin,
         *,
         idempotent: bool = False,
-        name: "str | None" = None,
+        name: str | None = None,
         **kwargs,
     ):
         """Add external plugin to scheduler.
@@ -5035,8 +5036,8 @@ class Scheduler(SchedulerState, ServerNode):
 
     def remove_plugin(
         self,
-        name: "str | None" = None,
-        plugin: "SchedulerPlugin | None" = None,
+        name: str | None = None,
+        plugin: SchedulerPlugin | None = None,
     ) -> None:
         """Remove external plugin from scheduler
 
@@ -5645,9 +5646,9 @@ class Scheduler(SchedulerState, ServerNode):
 
     def _rebalance_find_msgs(
         self,
-        keys: "Set[Hashable] | None",
-        workers: "Iterable[WorkerState]",
-    ) -> "list[tuple[WorkerState, WorkerState, TaskState]]":
+        keys: Set[Hashable] | None,
+        workers: Iterable[WorkerState],
+    ) -> list[tuple[WorkerState, WorkerState, TaskState]]:
         """Identify workers that need to lose keys and those that can receive them,
         together with how many bytes each needs to lose/receive. Then, pair a sender
         worker with a recipient worker for each key, until the cluster is rebalanced.
@@ -5692,11 +5693,11 @@ class Scheduler(SchedulerState, ServerNode):
         #   Note that this iterator will typically *not* be exhausted. It will only be
         #   exhausted if, after moving away from the worker all keys that can be moved,
         #   is insufficient to drop snd_bytes_min above 0.
-        senders: "list[tuple[int, int, int, WorkerState, Iterator[TaskState]]]" = []
-        recipients: "list[tuple[int, int, int, WorkerState]]" = []
+        senders: list[tuple[int, int, int, WorkerState, Iterator[TaskState]]] = []
+        recipients: list[tuple[int, int, int, WorkerState]] = []
 
         # Output: [(sender, recipient, task), ...]
-        msgs: "list[tuple[WorkerState, WorkerState, TaskState]]" = []
+        msgs: list[tuple[WorkerState, WorkerState, TaskState]] = []
 
         # By default, this is the optimistic memory, meaning total process memory minus
         # unmanaged memory that appeared over the last 30 seconds
@@ -5845,7 +5846,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         FIXME this method is not robust when the cluster is not idle.
         """
-        to_recipients: "defaultdict[str, defaultdict[str, list[str]]]" = defaultdict(
+        to_recipients: defaultdict[str, defaultdict[str, list[str]]] = defaultdict(
             lambda: defaultdict(list)
         )
         for snd_ws, rec_ws, ts in msgs:
@@ -6006,13 +6007,13 @@ class Scheduler(SchedulerState, ServerNode):
     def workers_to_close(
         self,
         comm=None,
-        memory_ratio: "int | float | None" = None,
-        n: "int | None" = None,
-        key: "Callable[[WorkerState], Hashable] | None" = None,
-        minimum: "int | None" = None,
-        target: "int | None" = None,
+        memory_ratio: int | float | None = None,
+        n: int | None = None,
+        key: Callable[[WorkerState], Hashable] | None = None,
+        minimum: int | None = None,
+        target: int | None = None,
         attribute: str = "address",
-    ) -> "list[str]":
+    ) -> list[str]:
         """
         Find workers that we can close with low cost
 
@@ -6524,7 +6525,7 @@ class Scheduler(SchedulerState, ServerNode):
             dictionaries mapping sizes to bandwidths.  These bandwidths are
             averaged over many workers running computations across the cluster.
         """
-        out: "dict[str, defaultdict[str, list[float]]]" = {
+        out: dict[str, defaultdict[str, list[float]]] = {
             name: defaultdict(list) for name in ["disk", "memory", "network"]
         }
 
@@ -6624,7 +6625,7 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 raise
 
-    def set_restrictions(self, worker: "dict[str, Collection[str] | str]"):
+    def set_restrictions(self, worker: dict[str, Collection[str] | str]):
         for key, restrictions in worker.items():
             ts = self.tasks[key]
             if isinstance(restrictions, str):
@@ -6963,7 +6964,7 @@ class Scheduler(SchedulerState, ServerNode):
         # Task stream
         task_stream = self.get_task_stream(start=start)
         total_tasks = len(task_stream)
-        timespent: "defaultdict[str, float]" = defaultdict(float)
+        timespent: defaultdict[str, float] = defaultdict(float)
         for d in task_stream:
             for x in d["startstops"]:
                 timespent[x["action"]] += x["stop"] - x["start"]
@@ -7552,7 +7553,7 @@ def _task_to_client_msgs(state: SchedulerState, ts: TaskState) -> dict:
 
 
 def decide_worker(
-    ts: TaskState, all_workers, valid_workers: "set | None", objective
+    ts: TaskState, all_workers, valid_workers: set | None, objective
 ) -> WorkerState:  # -> WorkerState | None
     """
     Decide which worker should take task *ts*.
