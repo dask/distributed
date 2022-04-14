@@ -102,7 +102,6 @@ from distributed.utils_comm import (
     pack_data,
     retry_operation,
     scatter_to_workers,
-    send_message,
     unpack_remotedata,
 )
 from distributed.worker import get_client, get_worker, secede
@@ -4296,32 +4295,23 @@ class Client(SyncMethodMixin):
         return collections_to_dsk(collections, *args, **kwargs)
 
     async def _story(self, keys=(), on_error="raise"):
-        stimulus_id = f"client-story-{time()}"
-        info = self.scheduler_info()
+        assert on_error in ("raise", "ignore")
 
-        msg = {"op": "get_story", "keys": keys}
-        WORKER_SENTINEL = [("worker-story-retrieval-failure", stimulus_id, time())]
-        SERVER_SENTINEL = [("scheduler-story-retrieval-failure", stimulus_id, time())]
+        try:
+            flat_stories = list(await self.scheduler.get_story(keys=keys))
+        except Exception:
+            if on_error == "raise":
+                raise
+            elif on_error == "ignore":
+                flat_stories = []
+            else:
+                raise ValueError(f"on_error not in {'raise', 'ignore'}")
 
-        coros = [
-            send_message(
-                msg,
-                self.rpc,
-                self.scheduler.address,
-                None,
-                on_error,
-                default=SERVER_SENTINEL,
-            )
-        ] + [
-            send_message(
-                msg, self.rpc, address, None, on_error, default=WORKER_SENTINEL
-            )
-            for address in info["workers"]
-        ]
+        responses = await self.scheduler.broadcast(
+            msg={"op": "get_story", "keys": keys}, on_error=on_error
+        )
 
-        flat_stories = []
-
-        for stories in await asyncio.gather(*coros):
+        for stories in responses.values():
             if isinstance(stories, (tuple, list)):
                 flat_stories.extend(s for s in stories)
             else:
@@ -4329,7 +4319,7 @@ class Client(SyncMethodMixin):
 
         return flat_stories
 
-    def story(self, *keys_or_stimulus_ids, on_error="return"):
+    def story(self, *keys_or_stimulus_ids, on_error="raise"):
         """Returns a cluster-wide story for the given keys or simtulus_id's"""
         return self.sync(self._story, keys=keys_or_stimulus_ids, on_error=on_error)
 

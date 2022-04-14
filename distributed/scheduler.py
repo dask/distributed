@@ -66,7 +66,7 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.addressing import addresses_from_user_args
-from distributed.core import Status, clean_exception, rpc
+from distributed.core import Status, clean_exception, rpc, send_recv
 from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
@@ -76,7 +76,7 @@ from distributed.metrics import time
 from distributed.multi_lock import MultiLockExtension
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
-from distributed.protocol.pickle import loads
+from distributed.protocol.pickle import dumps, loads
 from distributed.publish import PublishExtension
 from distributed.pubsub import PubSubSchedulerExtension
 from distributed.queues import QueueExtension
@@ -101,7 +101,6 @@ from distributed.utils_comm import (
     gather_from_workers,
     retry_operation,
     scatter_to_workers,
-    send_message,
 )
 from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.variable import VariableExtension
@@ -5485,14 +5484,35 @@ class Scheduler(SchedulerState, ServerNode):
 
         ERROR = object()
 
+        async def send_message(addr):
+            try:
+                comm = await self.rpc.connect(addr)
+                comm.name = "Scheduler Broadcast"
+                try:
+                    resp = await send_recv(
+                        comm, close=True, serializers=serializers, **msg
+                    )
+                finally:
+                    self.rpc.reuse(addr, comm)
+                return resp
+            except Exception as e:
+                logger.error(f"broadcast to {addr} failed: {e.__class__.__name__}: {e}")
+                if on_error == "raise":
+                    raise
+                elif on_error == "return":
+                    return e
+                elif on_error == "return_pickle":
+                    return dumps(e, protocol=4)
+                elif on_error == "ignore":
+                    return ERROR
+                else:
+                    raise ValueError(
+                        "on_error must be 'raise', 'return', 'return_pickle', "
+                        f"or 'ignore'; got {on_error!r}"
+                    )
+
         results = await All(
-            [
-                send_message(
-                    msg, self.rpc, address, serializers, on_error, default=ERROR
-                )
-                for address in addresses
-                if address is not None
-            ]
+            [send_message(address) for address in addresses if address is not None]
         )
 
         return {k: v for k, v in zip(workers, results) if v is not ERROR}

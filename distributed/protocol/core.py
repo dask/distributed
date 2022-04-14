@@ -116,6 +116,7 @@ def dumps(
                 return msgpack_encode_default(obj)
 
         frames[0] = msgpack.dumps(msg, default=_encode_default, use_bin_type=True)
+
         return frames
 
     except Exception:

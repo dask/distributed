@@ -7525,11 +7525,11 @@ async def test_client_story(c, s, *workers):
 
 class WorkerBrokenStory(Worker):
     async def get_story(self, *args, **kw):
-        raise CommClosedError
+        await asyncio.Future()
 
 
 @gen_cluster(client=True, Worker=WorkerBrokenStory)
-@pytest.mark.parametrize("on_error", ["ignore", "return", "raise"])
+@pytest.mark.parametrize("on_error", ["ignore", "raise"])
 async def test_client_story_failed_worker(c, s, a, b, on_error):
     f = c.submit(inc, 1)
     coro = c.story(f.key, on_error=on_error)
@@ -7546,25 +7546,7 @@ async def test_client_story_failed_worker(c, s, a, b, on_error):
                 (f.key, "released", "waiting", {f.key: "processing"}),
                 (f.key, "waiting", "processing", {}),
                 (f.key, "processing", "memory", {}),
-                ("worker-story-retrieval-failure",),
-                ("worker-story-retrieval-failure",),
             ],
         )
-
-    elif on_error == "return":
-        story = await coro
-
-        # Scheduler story is intact
-        assert_story(
-            story[:3],
-            [
-                (f.key, "released", "waiting", {f.key: "processing"}),
-                (f.key, "waiting", "processing", {}),
-                (f.key, "processing", "memory", {}),
-            ],
-        )
-
-        assert all(isinstance(event, CommClosedError) for event in story[3:])
-
     else:
         raise ValueError(on_error)
