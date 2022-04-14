@@ -288,13 +288,14 @@ async def test_no_delay_during_large_transfer(c, s, w):
     assert nbytes[-1] < (x_nbytes * 1.2) / 1e6
 
 
+@pytest.mark.slow
 @gen_test()
 async def test_chaos_rechunk():
     async with LocalCluster(
         processes=False,
         threads_per_worker=2,
         asynchronous=True,
-        dashboard_address=10000,
+        dashboard_address=":0",
         silence_logs=False,
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
