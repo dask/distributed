@@ -197,7 +197,9 @@ class DumpArtefact(Mapping):
             A list of events for the keys/stimulus ID's in ``*key_or_stimulus_id``.
         """
         keys = set(key_or_stimulus_id)
-        return _scheduler_story(keys, self.dump["scheduler"]["transition_log"])
+        return _scheduler_story(
+            keys, self.dump["scheduler"]["transition_log"], datetimes=True
+        )
 
     def worker_stories(self, *key_or_stimulus_id: str) -> dict:
         """

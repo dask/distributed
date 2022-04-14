@@ -4,7 +4,9 @@ from datetime import datetime
 from typing import Iterable, TypeVar
 
 
-def scheduler_story(keys: set, transition_log: Iterable) -> list:
+def scheduler_story(
+    keys: set, transition_log: Iterable, datetimes: bool = False
+) -> list:
     """Creates a story from the scheduler transition log given a set of keys
     describing tasks or stimuli.
 
@@ -14,12 +16,19 @@ def scheduler_story(keys: set, transition_log: Iterable) -> list:
         A set of task `keys` or `stimulus_id`'s
     log : iterable
         The scheduler transition log
+    datetimes : bool
+        Whether to convert timestamps into `datetime.datetime` objects
+        (default False)
 
     Returns
     -------
     story : list
     """
-    return [t for t in transition_log if t[0] in keys or keys.intersection(t[3])]
+    return [
+        msg_with_datetime(t) if datetimes else t
+        for t in transition_log
+        if t[0] in keys or keys.intersection(t[3])
+    ]
 
 
 def worker_story(keys: set, log: Iterable, datetimes: bool = False) -> list:
