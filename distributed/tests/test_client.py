@@ -7525,7 +7525,7 @@ async def test_client_story(c, s, *workers):
 
 class WorkerBrokenStory(Worker):
     async def get_story(self, *args, **kw):
-        await asyncio.Future()
+        raise CommClosedError
 
 
 @gen_cluster(client=True, Worker=WorkerBrokenStory)
