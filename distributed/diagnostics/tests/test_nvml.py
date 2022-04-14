@@ -150,3 +150,9 @@ async def test_gpu_monitoring_range_query(s, a, b):
         assert all(res[w.address]["range_query"][m] is not None for m in ms)
         assert res[w.address]["count"] is not None
         assert res[w.address]["last_time"] is not None
+
+
+@gen_cluster()
+async def test_wsl_monitoring_enabled(s, a, b):
+    assert nvml.nvmlInitialized is True
+    assert nvml.nvmlWslInsufficientDriver is False
