@@ -1612,8 +1612,10 @@ def recursive_to_dict(
 
 def is_python_shutting_down() -> bool:
     """Is the interpreter shutting down now?
+
     This is a variant of ``sys.is_finalizing`` which can return True inside the ``__del__``
     method of classes defined inside the distributed package.
+    """
     # This import must remain local for the global variable to be
     # properly evaluated
     from distributed import _python_shutting_down
