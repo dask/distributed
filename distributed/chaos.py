@@ -8,12 +8,12 @@ from distributed.diagnostics.plugin import WorkerPlugin
 
 
 class KillWorker(WorkerPlugin):
-    def __init__(self, delay="100 s", mode="sys.exit"):
+    def __init__(self, delay: str | int | float = "100 s", mode: Literal["sys.exit", "graceful", "segfault"] = "sys.exit"):
         self.delay = parse_timedelta(delay)
         if mode not in ("sys.exit", "graceful", "segfault"):
             raise ValueError(
                 f"Three modes supported, 'sys.exit', 'graceful', and 'segfault'. "
-                f"got {mode}"
+                f"got {mode!r}"
             )
         self.mode = mode
 
