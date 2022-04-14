@@ -3046,7 +3046,9 @@ class Worker(ServerNode):
                 for d in has_what:
                     ts = self.tasks[d]
                     ts.who_has.remove(worker)
-                    if not ts.who_has and ts.state in ("fetch", "flight"):
+                    if ts.state == "released":
+                        continue
+                    if not ts.who_has:
                         recommendations[ts] = "missing"
                         self.log.append(
                             ("missing-who-has", worker, ts.key, stimulus_id, time())
@@ -3091,8 +3093,8 @@ class Worker(ServerNode):
                         self.batched_stream.send(
                             {"op": "missing-data", "errant_worker": worker, "key": d}
                         )
-                    elif ts not in recommendations and ts.state in ("fetch", "flight"):
-                        recommendations[ts] = "fetch" if ts.who_has else "missing"
+                        if ts.state != "released":
+                            recommendations[ts] = "fetch" if ts.who_has else "missing"
                 del data, response
                 self.transitions(recommendations, stimulus_id=stimulus_id)
 
