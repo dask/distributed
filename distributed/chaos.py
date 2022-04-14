@@ -1,6 +1,10 @@
+from __future__ import annotations
+
 import asyncio
+import ctypes
 import random
 import sys
+from typing import Literal
 
 from dask.utils import parse_timedelta
 
@@ -8,7 +12,11 @@ from distributed.diagnostics.plugin import WorkerPlugin
 
 
 class KillWorker(WorkerPlugin):
-    def __init__(self, delay: str | int | float = "100 s", mode: Literal["sys.exit", "graceful", "segfault"] = "sys.exit"):
+    def __init__(
+        self,
+        delay: str | int | float = "100 s",
+        mode: Literal["sys.exit", "graceful", "segfault"] = "sys.exit",
+    ):
         self.delay = parse_timedelta(delay)
         if mode not in ("sys.exit", "graceful", "segfault"):
             raise ValueError(
@@ -41,4 +49,4 @@ class KillWorker(WorkerPlugin):
         """
         Magic, from https://gist.github.com/coolreader18/6dbe0be2ae2192e90e1a809f1624c694?permalink_comment_id=3874116#gistcomment-3874116
         """
-        eval((lambda: 0).__code__.replace(co_consts=()))
+        ctypes.string_at(0)
