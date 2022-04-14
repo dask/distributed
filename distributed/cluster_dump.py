@@ -420,7 +420,13 @@ class DumpArtefact(Mapping):
                 print(f"    Dumping {i+1:>2}/{len(scheduler_state)} {filename}")
 
             if name == "transition_log":
-                _logs = list(map(msg_with_datetime, _logs))
+                _logs = [msg_with_datetime(e) for e in _logs]
+
+            if name == "events":
+                _logs = {
+                    k: [msg_with_datetime(e, idx=0) for e in events]
+                    for k, events in _logs.items()
+                }
 
             with open(filename, "w") as fd:
                 with _block_literals(dumper) if name == "logs" else nullcontext():

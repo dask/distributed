@@ -62,10 +62,12 @@ def worker_story(keys: set, log: Iterable, datetimes: bool = False) -> list:
 T = TypeVar("T", list, tuple)
 
 
-def msg_with_datetime(msg: T) -> T:
-    dt = msg[-1]
+def msg_with_datetime(msg: T, idx: int = -1) -> T:
+    if idx < 0:
+        idx = len(msg) + idx
+    dt = msg[idx]
     try:
         dt = datetime.fromtimestamp(dt)
     except (TypeError, ValueError):
         pass
-    return msg[:-1] + type(msg)((dt,))
+    return msg[:idx] + type(msg)((dt,)) + msg[idx + 1 :]
