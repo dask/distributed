@@ -864,6 +864,7 @@ async def start_cluster(
         await asyncio.sleep(0.01)
         if time() > start + 30:
             await asyncio.gather(*(w.close(timeout=1) for w in workers))
+            assert not s.events["invalid-worker-transition"]
             await s.close(fast=True)
             raise TimeoutError("Cluster creation timeout")
     return s, workers
@@ -877,6 +878,7 @@ async def end_cluster(s, workers):
             await w.close(report=False)
 
     await asyncio.gather(*(end_worker(w) for w in workers))
+    assert not s.events["invalid-worker-transition"]
     await s.close()  # wait until scheduler stops completely
     s.stop()
 
