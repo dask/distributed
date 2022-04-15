@@ -27,6 +27,7 @@ from dask.utils import tmpfile
 import distributed
 from distributed import (
     Client,
+    Event,
     Nanny,
     Reschedule,
     default_client,
@@ -392,7 +393,7 @@ async def test_chained_error_message(c, s, a, b):
 
 
 @gen_test()
-async def test_plugin_exception(cleanup):
+async def test_plugin_exception():
     class MyPlugin:
         def setup(self, worker=None):
             raise ValueError("Setup failed")
@@ -409,7 +410,7 @@ async def test_plugin_exception(cleanup):
 
 
 @gen_test()
-async def test_plugin_multiple_exceptions(cleanup):
+async def test_plugin_multiple_exceptions():
     class MyPlugin1:
         def setup(self, worker=None):
             raise ValueError("MyPlugin1 Error")
@@ -437,7 +438,7 @@ async def test_plugin_multiple_exceptions(cleanup):
 
 
 @gen_test()
-async def test_plugin_internal_exception(cleanup):
+async def test_plugin_internal_exception():
     async with Scheduler(port=0) as s:
         with pytest.raises(UnicodeDecodeError, match="codec can't decode"):
             async with Worker(
@@ -1373,7 +1374,7 @@ async def test_protocol_from_scheduler_address(Worker):
 
 
 @gen_test()
-async def test_host_uses_scheduler_protocol(cleanup, monkeypatch):
+async def test_host_uses_scheduler_protocol(monkeypatch):
     # Ensure worker uses scheduler's protocol to determine host address, not the default scheme
     # See https://github.com/dask/distributed/pull/4883
     from distributed.comm.tcp import TCPBackend
@@ -1455,6 +1456,61 @@ async def test_close_gracefully(c, s, a, b):
     # they have not been recomputed
     for key in mem:
         assert_amm_transfer_story(key, b, a)
+
+
+@pytest.mark.parametrize("sync", [False, pytest.param(True, marks=[pytest.mark.slow])])
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_close_while_executing(c, s, a, sync):
+    ev = Event()
+
+    if sync:
+
+        def f(ev):
+            ev.set()
+            sleep(2)
+
+    else:
+
+        async def f(ev):
+            await ev.set()
+            await asyncio.Event().wait()  # Block indefinitely
+
+    f1 = c.submit(f, ev, key="f1")
+    await ev.wait()
+    task = next(
+        task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
+    )
+    await a.close()
+    assert task.cancelled()
+    assert s.tasks["f1"].state == "no-worker"
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_close_async_task_handles_cancellation(c, s, a):
+    ev = Event()
+
+    async def f(ev):
+        await ev.set()
+        try:
+            await asyncio.Event().wait()  # Block indefinitely
+        except asyncio.CancelledError:
+            await asyncio.Event().wait()  # Ignore the first cancel()
+
+    f1 = c.submit(f, ev, key="f1")
+    await ev.wait()
+    task = next(
+        task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
+    )
+    start = time()
+    with captured_logger("distributed.worker", level=logging.ERROR) as logger:
+        await a.close(timeout=1)
+    assert "Failed to cancel asyncio task" in logger.getvalue()
+    assert time() - start < 5
+    assert not task.cancelled()
+    assert s.tasks["f1"].state == "no-worker"
+    task.cancel()
+    await asyncio.wait({task})
 
 
 @pytest.mark.slow
@@ -3421,3 +3477,24 @@ async def test_tick_interval(c, s, a, b):
     while s.workers[a.address].metrics["event_loop_interval"] < 0.100:
         await asyncio.sleep(0.01)
         time.sleep(0.200)
+
+
+class BreakingWorker(Worker):
+    broke_once = False
+
+    def get_data(self, comm, **kwargs):
+        if not self.broke_once:
+            self.broke_once = True
+            raise OSError("fake error")
+        return super().get_data(comm, **kwargs)
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=BreakingWorker)
+async def test_broken_comm(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+    )
+    s = df.shuffle("id", shuffle="tasks")
+    await c.compute(s.size)

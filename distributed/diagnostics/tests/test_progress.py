@@ -12,7 +12,6 @@ from distributed.diagnostics.progress import (
     Progress,
     SchedulerPlugin,
 )
-from distributed.scheduler import COMPILED
 from distributed.utils_test import dec, div, gen_cluster, inc, nodebug, slowdec, slowinc
 
 
@@ -93,8 +92,7 @@ def check_bar_completed(capsys, width=40):
     assert percent == "100% Completed"
 
 
-@pytest.mark.flaky(condition=not COMPILED and LINUX, reruns=10, reruns_delay=5)
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
+@pytest.mark.flaky(condition=LINUX, reruns=10, reruns_delay=5)
 @gen_cluster(client=True, Worker=Nanny)
 async def test_AllProgress(c, s, a, b):
     x, y, z = c.map(inc, [1, 2, 3])

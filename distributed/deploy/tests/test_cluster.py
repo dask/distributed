@@ -5,7 +5,7 @@ from distributed.utils_test import gen_test
 
 
 @gen_test()
-async def test_eq(cleanup):
+async def test_eq():
     clusterA = Cluster(asynchronous=True, name="A")
     clusterA2 = Cluster(asynchronous=True, name="A2")
     clusterB = Cluster(asynchronous=True, name="B")
@@ -20,7 +20,7 @@ async def test_eq(cleanup):
 
 
 @gen_test()
-async def test_repr(cleanup):
+async def test_repr():
     cluster = Cluster(asynchronous=True, name="A")
     assert cluster.scheduler_address == "<Not Connected>"
     res = repr(cluster)
@@ -29,7 +29,7 @@ async def test_repr(cleanup):
 
 
 @gen_test()
-async def test_logs_deprecated(cleanup):
+async def test_logs_deprecated():
     cluster = Cluster(asynchronous=True)
     with pytest.warns(FutureWarning, match="get_logs"):
         cluster.logs()

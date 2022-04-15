@@ -18,7 +18,6 @@ from distributed.core import Status
 from distributed.deploy.local import LocalCluster
 from distributed.deploy.utils_test import ClusterTest
 from distributed.metrics import time
-from distributed.scheduler import COMPILED
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import TimeoutError, sync
 from distributed.utils_test import (
@@ -762,7 +761,6 @@ async def test_scale_retires_workers():
     await cluster.close()
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 def test_local_tls_restart(loop):
     from distributed.utils_test import tls_only_security
 
@@ -936,7 +934,7 @@ async def test_scale_memory_cores():
 
 @pytest.mark.parametrize("memory_limit", ["2 GiB", None])
 @gen_test()
-async def test_repr(memory_limit, cleanup):
+async def test_repr(memory_limit):
     async with LocalCluster(
         n_workers=2,
         processes=False,
@@ -973,7 +971,7 @@ async def test_threads_per_worker_set_to_0():
 
 @pytest.mark.parametrize("temporary", [True, False])
 @gen_test()
-async def test_capture_security(cleanup, temporary):
+async def test_capture_security(temporary):
     if temporary:
         xfail_ssl_issue5601()
         pytest.importorskip("cryptography")
@@ -1145,7 +1143,7 @@ async def test_cluster_host_used_throughout_cluster(host, use_nanny):
 
 
 @gen_test()
-async def test_connect_to_closed_cluster(cleanup):
+async def test_connect_to_closed_cluster():
     async with LocalCluster(processes=False, asynchronous=True) as cluster:
         async with Client(cluster, asynchronous=True) as c1:
             assert await c1.submit(inc, 1) == 2

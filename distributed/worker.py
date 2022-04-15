@@ -422,6 +422,7 @@ class Worker(ServerNode):
     execution_state: dict[str, Any]
     plugins: dict[str, WorkerPlugin]
     _pending_plugins: tuple[WorkerPlugin, ...]
+    _async_instructions: set[asyncio.Task]
 
     def __init__(
         self,
@@ -548,6 +549,7 @@ class Worker(ServerNode):
             ("executing", "released"): self.transition_executing_released,
             ("executing", "rescheduled"): self.transition_executing_rescheduled,
             ("fetch", "flight"): self.transition_fetch_flight,
+            ("fetch", "missing"): self.transition_fetch_missing,
             ("fetch", "released"): self.transition_generic_released,
             ("flight", "error"): self.transition_flight_error,
             ("flight", "fetch"): self.transition_flight_fetch,
@@ -839,6 +841,8 @@ class Worker(ServerNode):
         if self.lifetime:
             self.lifetime += (random.random() * 2 - 1) * lifetime_stagger
             self.io_loop.call_later(self.lifetime, self.close_gracefully)
+
+        self._async_instructions = set()
 
         Worker._instances.add(self)
 
@@ -1409,6 +1413,19 @@ class Worker(ServerNode):
                 logger.info("Closed worker has not yet started: %s", self.status)
             self.status = Status.closing
 
+            if self._async_instructions:
+                for task in self._async_instructions:
+                    task.cancel()
+                # async tasks can handle cancellation and could take an arbitrary amount
+                # of time to terminate
+                _, pending = await asyncio.wait(
+                    self._async_instructions, timeout=timeout
+                )
+                for task in pending:
+                    logger.error(
+                        f"Failed to cancel asyncio task after {timeout} seconds: {task}"
+                    )
+
             for preload in self.preloads:
                 await preload.teardown()
 
@@ -1927,6 +1944,14 @@ class Worker(ServerNode):
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         assert ts.done
+        ts.state = "missing"
+        self._missing_dep_flight.add(ts)
+        ts.done = False
+        return {}, []
+
+    def transition_fetch_missing(
+        self, ts: TaskState, *, stimulus_id: str
+    ) -> RecsInstrs:
         ts.state = "missing"
         self._missing_dep_flight.add(ts)
         ts.done = False
@@ -2606,12 +2631,16 @@ class Worker(ServerNode):
             self.transitions(recs, stimulus_id=stim.stimulus_id)
             self._handle_instructions(instructions)
 
-    def _handle_stimulus_from_future(
-        self, future: asyncio.Future[StateMachineEvent | None]
+    def _handle_stimulus_from_task(
+        self, task: asyncio.Task[StateMachineEvent | None]
     ) -> None:
+        self._async_instructions.remove(task)
         with log_errors():
-            # This *should* never raise
-            stim = future.result()
+            try:
+                # This *should* never raise any other exceptions
+                stim = task.result()
+            except asyncio.CancelledError:
+                return
         if stim:
             self.handle_stimulus(stim)
 
@@ -2622,10 +2651,12 @@ class Worker(ServerNode):
             if isinstance(inst, SendMessageToScheduler):
                 self.batched_stream.send(inst.to_dict())
             elif isinstance(inst, Execute):
-                coro = self.execute(inst.key, stimulus_id=inst.stimulus_id)
-                task = asyncio.create_task(coro)
-                # TODO track task (at the moment it's fire-and-forget)
-                task.add_done_callback(self._handle_stimulus_from_future)
+                task = asyncio.create_task(
+                    self.execute(inst.key, stimulus_id=inst.stimulus_id),
+                    name=f"execute({inst.key})",
+                )
+                self._async_instructions.add(task)
+                task.add_done_callback(self._handle_stimulus_from_task)
             else:
                 raise TypeError(inst)  # pragma: nocover
 
@@ -2681,6 +2712,9 @@ class Worker(ServerNode):
 
             if ts.state != "fetch":
                 continue
+
+            if self.validate:
+                assert ts.who_has
 
             workers = [w for w in ts.who_has if w not in self.in_flight_workers]
             if not workers:
@@ -3010,7 +3044,11 @@ class Worker(ServerNode):
                 for d in has_what:
                     ts = self.tasks[d]
                     ts.who_has.remove(worker)
-
+                    if not ts.who_has:
+                        recommendations[ts] = "missing"
+                        self.log.append(
+                            ("missing-who-has", worker, ts.key, stimulus_id, time())
+                        )
             except Exception as e:
                 logger.exception(e)
                 if self.batched_stream and LOG_PDB:
