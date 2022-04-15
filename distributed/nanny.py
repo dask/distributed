@@ -567,9 +567,7 @@ class Nanny(ServerNode):
             return "OK"
 
         self.status = Status.closing
-        logger.info("Closing Nanny at %r", self.address)
-        if not report:
-            logger.info("Not reporting closure to scheduler")
+        logger.info(f"Closing Nanny at {self.address!r}. Report closure to scheduler: {report}")
 
         for preload in self.preloads:
             await preload.teardown()
