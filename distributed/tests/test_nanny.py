@@ -50,31 +50,31 @@ async def test_str(s, a, b):
 
 @gen_cluster(nthreads=[], client=True)
 async def test_nanny_process_failure(c, s):
-    n = await Nanny(s.address, nthreads=2)
-    first_dir = n.worker_dir
+    async with Nanny(s.address, nthreads=2) as n:
+        first_dir = n.worker_dir
 
-    assert os.path.exists(first_dir)
+        assert os.path.exists(first_dir)
 
-    ww = rpc(n.worker_address)
-    await ww.update_data(data=valmap(dumps, {"x": 1, "y": 2}))
-    pid = n.pid
-    assert pid is not None
-    with suppress(CommClosedError):
-        await c.run(os._exit, 0, workers=[n.worker_address])
+        ww = rpc(n.worker_address)
+        await ww.update_data(data=valmap(dumps, {"x": 1, "y": 2}))
+        pid = n.pid
+        assert pid is not None
+        with suppress(CommClosedError):
+            await c.run(os._exit, 0, workers=[n.worker_address])
 
-    while n.pid == pid:  # wait while process dies and comes back
-        await asyncio.sleep(0.01)
+        while n.pid == pid:  # wait while process dies and comes back
+            await asyncio.sleep(0.01)
 
-    await asyncio.sleep(1)
-    while not n.is_alive():  # wait while process comes back
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(1)
+        while not n.is_alive():  # wait while process comes back
+            await asyncio.sleep(0.01)
 
-    # assert n.worker_address != original_address  # most likely
+        # assert n.worker_address != original_address  # most likely
 
-    while n.worker_address not in s.nthreads or n.worker_dir is None:
-        await asyncio.sleep(0.01)
+        while n.worker_address not in s.nthreads or n.worker_dir is None:
+            await asyncio.sleep(0.01)
 
-    second_dir = n.worker_dir
+        second_dir = n.worker_dir
 
     await n.close()
     assert not os.path.exists(second_dir)
@@ -86,14 +86,11 @@ async def test_nanny_process_failure(c, s):
 
 @gen_cluster(nthreads=[])
 async def test_run(s):
-    n = await Nanny(s.address, nthreads=2, loop=s.loop)
-
-    with rpc(n.address) as nn:
-        response = await nn.run(function=dumps(lambda: 1))
-        assert response["status"] == "OK"
-        assert response["result"] == 1
-
-    await n.close()
+    async with Nanny(s.address, nthreads=2) as n:
+        with rpc(n.address) as nn:
+            response = await nn.run(function=dumps(lambda: 1))
+            assert response["status"] == "OK"
+            assert response["result"] == 1
 
 
 @pytest.mark.slow
@@ -174,18 +171,16 @@ async def test_num_fds(s):
     proc = psutil.Process()
 
     # Warm up
-    w = await Nanny(s.address)
-    await w.close()
-    del w
+    async with Nanny(s.address):
+        pass
     wait_profiler()
     gc.collect()
 
     before = proc.num_fds()
 
     for i in range(3):
-        w = await Nanny(s.address)
-        await asyncio.sleep(0.1)
-        await w.close()
+        async with Nanny(s.address):
+            await asyncio.sleep(0.1)
 
     while proc.num_fds() > before:
         print("fds:", before, proc.num_fds())
@@ -196,23 +191,21 @@ async def test_num_fds(s):
 @gen_cluster(client=True, nthreads=[])
 async def test_worker_uses_same_host_as_nanny(c, s):
     for host in ["tcp://0.0.0.0", "tcp://127.0.0.2"]:
-        n = await Nanny(s.address, host=host)
+        async with Nanny(s.address, host=host):
 
-        def func(dask_worker):
-            return dask_worker.listener.listen_address
+            def func(dask_worker):
+                return dask_worker.listener.listen_address
 
-        result = await c.run(func)
-        assert host in first(result.values())
-        await n.close()
+            result = await c.run(func)
+            assert host in first(result.values())
 
 
 @gen_test()
 async def test_scheduler_file():
     with tmpfile() as fn:
         s = await Scheduler(scheduler_file=fn, dashboard_address=":0")
-        w = await Nanny(scheduler_file=fn)
-        assert set(s.workers) == {w.worker_address}
-        await w.close()
+        async with Nanny(scheduler_file=fn) as n:
+            assert set(s.workers) == {n.worker_address}
         s.stop()
 
 
@@ -341,11 +334,10 @@ async def test_environment_variable_config(c, s, monkeypatch):
 async def test_local_directory(s):
     with tmpfile() as fn:
         with dask.config.set(temporary_directory=fn):
-            w = await Nanny(s.address)
-            assert w.local_directory.startswith(fn)
-            assert "dask-worker-space" in w.local_directory
-            assert w.process.worker_dir.count("dask-worker-space") == 1
-            await w.close()
+            async with Nanny(s.address) as n:
+                assert n.local_directory.startswith(fn)
+                assert "dask-worker-space" in n.local_directory
+                assert n.process.worker_dir.count("dask-worker-space") == 1
 
 
 def _noop(x):
