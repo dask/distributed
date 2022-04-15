@@ -126,7 +126,7 @@ def process(
     state:
         The profile state to accumulate this frame onto, see ``create``
     stop:
-        Filenames that should stop processing if we enounter them
+        Filename suffix that should stop processing if we encounter it
     omit:
         Filenames that we should omit from processing
     depth:
