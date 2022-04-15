@@ -91,6 +91,7 @@ from distributed.utils import (
     format_dashboard_link,
     has_keyword,
     import_term,
+    is_python_shutting_down,
     log_errors,
     no_default,
     sync,
@@ -1231,6 +1232,7 @@ class Client(SyncMethodMixin):
                 except ImportError:
                     await self._close()
                     break
+
             else:
                 logger.error(
                     "Failed to reconnect to scheduler after %.2f "
@@ -1394,6 +1396,8 @@ class Client(SyncMethodMixin):
                     try:
                         msgs = await self.scheduler_comm.comm.read()
                     except CommClosedError:
+                        if is_python_shutting_down():
+                            return
                         if self.status == "running":
                             logger.info("Client report stream closed to scheduler")
                             logger.info("Reconnecting...")
