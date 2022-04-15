@@ -32,44 +32,12 @@ from distributed.utils_test import captured_logger, gen_cluster, gen_test
 pytestmark = pytest.mark.ci1
 
 
-@pytest.mark.slow
-@gen_cluster(nthreads=[], timeout=120)
-async def test_nanny(s):
-    async with Nanny(s.address, nthreads=2, loop=s.loop) as n:
-        async with rpc(n.address) as nn:
-            assert n.is_alive()
-            [ws] = s.workers.values()
-            assert ws.nthreads == 2
-            assert ws.nanny == n.address
-
-            await nn.kill()
-            assert not n.is_alive()
-            start = time()
-            while n.worker_address in s.workers:
-                assert time() < start + 1
-                await asyncio.sleep(0.01)
-
-            await nn.kill()
-            assert not n.is_alive()
-            assert n.worker_address not in s.workers
-
-            await nn.instantiate()
-            assert n.is_alive()
-            [ws] = s.workers.values()
-            assert ws.nthreads == 2
-            assert ws.nanny == n.address
-
-            await nn.terminate()
-            assert not n.is_alive()
-
-
 @gen_cluster(nthreads=[])
 async def test_many_kills(s):
-    n = await Nanny(s.address, nthreads=2, loop=s.loop)
-    assert n.is_alive()
-    await asyncio.gather(*(n.kill() for _ in range(5)))
-    await asyncio.gather(*(n.kill() for _ in range(5)))
-    await n.close()
+    async with Nanny(s.address, nthreads=2) as n:
+        assert n.is_alive()
+        await asyncio.gather(*(n.kill() for _ in range(5)))
+        await asyncio.gather(*(n.kill() for _ in range(5)))
 
 
 @gen_cluster(Worker=Nanny)
@@ -577,3 +545,35 @@ async def test_no_unnecessary_imports_on_worker(c, s, a, modname):
 
     await c.wait_for_workers(1)
     await c.run(assert_no_import)
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny)
+async def test_repeated_restarts(c, s, a, b):
+    for _ in range(3):
+        await c.restart()
+        assert len(s.workers) == 2
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1 GiB"},
+    nthreads=[("127.0.0.1", 1)],
+)
+async def test_restart_memory(c, s, n):
+    # First kill nanny with restart
+    await c.restart()
+
+    # then kill nanny with memory
+    from dask.distributed import KilledWorker
+
+    np = pytest.importorskip("numpy")
+    s.allowed_failures = 1
+    future = c.submit(np.ones, 300_000_000, dtype="f8")
+    with pytest.raises(KilledWorker):
+        await future
+
+    while not s.workers:
+        await asyncio.sleep(0.1)
