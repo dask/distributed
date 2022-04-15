@@ -756,6 +756,7 @@ class WorkerProcess:
             return
         assert self.status in (Status.starting, Status.running)
         self.status = Status.stopping
+        logger.info("Nanny asking worker to close")
 
         process = self.process
         self.child_stop_q.put(
