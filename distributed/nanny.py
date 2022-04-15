@@ -228,7 +228,6 @@ class Nanny(ServerNode):
         self.services = services
         self.name = name
         self.quiet = quiet
-        self.auto_restart = True
 
         if silence_logs:
             silence_logging(level=silence_logs)
@@ -366,7 +365,6 @@ class Nanny(ServerNode):
         Blocks until both the process is down and the scheduler is properly
         informed
         """
-        self.auto_restart = False
         if self.process is None:
             return "OK"
 
@@ -531,9 +529,8 @@ class Nanny(ServerNode):
                     Status.closed,
                     Status.closing_gracefully,
                 ):
-                    if self.auto_restart:
-                        logger.warning("Restarting worker")
-                        await self.instantiate()
+                    logger.warning("Restarting worker")
+                    await self.instantiate()
                 elif self.status == Status.closing_gracefully:
                     await self.close()
 
