@@ -3687,8 +3687,11 @@ async def test_scatter_raises_if_no_workers(c, s):
         await c.scatter(1, timeout=0.5)
 
 
+@pytest.mark.flaky(reruns=2)
 @gen_test()
 async def test_reconnect():
+    port = random.randint(10000, 50000)
+
     async def hard_stop(s):
         for pc in s.periodic_callbacks.values():
             pc.stop()
@@ -3703,7 +3706,6 @@ async def test_reconnect():
         s.stop()
         await Server.close(s)
 
-    port = 9393
     futures = []
     w = Worker(f"127.0.0.1:{port}")
     futures.append(asyncio.ensure_future(w.start()))
@@ -4633,17 +4635,19 @@ async def test_scatter_dict_workers(c, s, a, b):
     assert "a" in a.data or "a" in b.data
 
 
+@pytest.mark.flaky(reruns=2)
 @pytest.mark.slow
 @gen_test()
 async def test_client_timeout():
     """`await Client(...)` keeps retrying for 10 seconds if it can't find the Scheduler
     straight away
     """
+    port = random.randint(10000, 50000)
     with dask.config.set({"distributed.comm.timeouts.connect": "10s"}):
-        c = Client("127.0.0.1:57484", asynchronous=True)
+        c = Client(f"127.0.0.1:{port}", asynchronous=True)
         client_start_fut = asyncio.ensure_future(c)
         await asyncio.sleep(2)
-        async with Scheduler(port=57484, dashboard_address=":0"):
+        async with Scheduler(port=port, dashboard_address=":0"):
             await client_start_fut
             assert await c.run_on_scheduler(lambda: 123) == 123
             await c.close()
@@ -5715,11 +5719,13 @@ async def test_dashboard_link_inproc():
             assert "/" not in c.dashboard_link
 
 
+@pytest.mark.flaky(reruns=2)
 @gen_test()
 async def test_client_timeout_2():
+    port = random.randint(10000, 50000)
     with dask.config.set({"distributed.comm.timeouts.connect": "10ms"}):
         start = time()
-        c = Client("127.0.0.1:3755", asynchronous=True)
+        c = Client(f"127.0.0.1:{port}", asynchronous=True)
         with pytest.raises((TimeoutError, IOError)):
             await c
         stop = time()
