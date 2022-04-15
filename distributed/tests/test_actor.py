@@ -363,7 +363,10 @@ async def test_many_computations(c, s, a, b):
     done = c.submit(lambda x: None, futures)
 
     while not done.done():
-        assert len(s.processing) <= a.nthreads + b.nthreads
+        assert (
+            len([ws for ws in s.workers.values() if ws.processing])
+            <= a.nthreads + b.nthreads
+        )
         await asyncio.sleep(0.01)
 
     await done

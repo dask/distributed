@@ -2720,7 +2720,7 @@ async def test_acquire_replicas(c, s, a, b):
 
     s.request_acquire_replicas(b.address, [fut.key], stimulus_id=f"test-{time()}")
 
-    while len(s.who_has[fut.key]) != 2:
+    while len(s.tasks[fut.key].who_has) != 2:
         await asyncio.sleep(0.005)
 
     for w in (a, b):
@@ -2746,7 +2746,7 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
     while futA.key not in b.tasks or not b.tasks[futA.key].state == "memory":
         await asyncio.sleep(0.005)
 
-    while len(s.who_has[futA.key]) != 2:
+    while len(s.tasks[futA.key].who_has) != 2:
         await asyncio.sleep(0.005)
 
     # Ensure that both the replica and an ordinary dependency pass through the
