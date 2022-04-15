@@ -3046,7 +3046,7 @@ class Worker(ServerNode):
                 for d in has_what:
                     ts = self.tasks[d]
                     ts.who_has.remove(worker)
-                    if not ts.who_has and ts.state in ("fetch", "flight"):
+                    if not ts.who_has and ts.state != "released":
                         recommendations[ts] = "missing"
                         self.log.append(
                             ("missing-who-has", worker, ts.key, stimulus_id, time())
