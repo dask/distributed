@@ -110,26 +110,51 @@ def process(
     *,
     stop: str | None = None,
     omit: Collection[str] = (),
+    depth: int | None = None,
 ) -> dict[str, Any] | None:
     """Add counts from a frame stack onto existing state
 
     This recursively adds counts to the existing state dictionary and creates
     new entries for new functions.
 
+    Parameters
+    ----------
+    frame:
+        The frame to process onto the state
+    child:
+        For internal use only
+    state:
+        The profile state to accumulate this frame onto, see ``create``
+    stop:
+        Filenames that should stop processing if we enounter them
+    omit:
+        Filenames that we should omit from processing
+    depth:
+        For internal use only, how deep we are in the call stack
+        Used to prevent stack overflow
+
     Examples
     --------
     >>> import sys, threading
     >>> ident = threading.get_ident()  # replace with your thread of interest
     >>> frame = sys._current_frames()[ident]
-    >>> state = {'children': {}, 'count': 0, 'description': 'root',
-    ...          'identifier': 'root'}
+    >>> state = create()
     >>> process(frame, None, state)
     >>> state
     {'count': 1,
      'identifier': 'root',
      'description': 'root',
      'children': {'...'}}
+
+    See also
+    --------
+    create
+    merge
     """
+    if depth is None:
+        depth = sys.getrecursionlimit() - 50
+    if depth <= 0:
+        return None
     if any(frame.f_code.co_filename.endswith(o) for o in omit):
         return None
 
@@ -137,7 +162,7 @@ def process(
     if prev is not None and (
         stop is None or not prev.f_code.co_filename.endswith(stop)
     ):
-        new_state = process(prev, frame, state, stop=stop)
+        new_state = process(prev, frame, state, stop=stop, depth=depth - 1)
         if new_state is None:
             return None
         state = new_state
