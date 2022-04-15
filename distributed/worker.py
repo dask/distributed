@@ -2541,12 +2541,14 @@ class Worker(ServerNode):
                 instructions += b_instructions
             except InvalidTransition:
                 raise InvalidTransition(
-                    f"Impossible transition from {start} to {finish} for {ts.key}"
-                ) from None
+                    f"Impossible transition from {start} to {finish} for {ts.key}",
+                    self.story(ts),
+                )
 
         else:
             raise InvalidTransition(
-                f"Impossible transition from {start} to {finish} for {ts.key}"
+                f"Impossible transition from {start} to {finish} for {ts.key}",
+                self.story(ts),
             )
 
         self.log.append(
@@ -3044,7 +3046,7 @@ class Worker(ServerNode):
                 for d in has_what:
                     ts = self.tasks[d]
                     ts.who_has.remove(worker)
-                    if not ts.who_has:
+                    if not ts.who_has and ts.state not in ("released", "memory"):
                         recommendations[ts] = "missing"
                         self.log.append(
                             ("missing-who-has", worker, ts.key, stimulus_id, time())
@@ -3089,7 +3091,10 @@ class Worker(ServerNode):
                         self.batched_stream.send(
                             {"op": "missing-data", "errant_worker": worker, "key": d}
                         )
-                        recommendations[ts] = "fetch" if ts.who_has else "missing"
+                        if ts.who_has:
+                            recommendations[ts] = "fetch"
+                        elif ts.state not in ("released", "memory"):
+                            recommendations[ts] = "missing"
                 del data, response
                 self.transitions(recommendations, stimulus_id=stimulus_id)
 

@@ -1457,6 +1457,8 @@ async def test_cancel_fire_and_forget(c, s, a, b):
     await asyncio.sleep(0.05)
     await future.cancel(force=True)
     assert future.status == "cancelled"
+    while s.tasks:  # in rare conditions this can take a little while
+        await asyncio.sleep(0.01)
     assert not s.tasks
 
 
