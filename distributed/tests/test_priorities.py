@@ -109,7 +109,7 @@ async def test_submit(c, s, a, pause):
         high = c.submit(inc, 2, key="high", priority=1)
 
     await wait(high)
-    assert all(s.processing.values())
+    assert all(ws.processing for ws in s.workers.values())
     assert s.tasks[low.key].state == "processing"
     await ev.set()
     await wait(low)
@@ -124,7 +124,7 @@ async def test_map(c, s, a, pause):
         high = c.map(inc, [4, 5, 6], key=["h1", "h2", "h3"], priority=1)
 
     await wait(high)
-    assert all(s.processing.values())
+    assert all(ws.processing for ws in s.workers.values())
     assert all(s.tasks[fut.key].state == "processing" for fut in low)
     await ev.set()
     await clog
@@ -140,7 +140,7 @@ async def test_compute(c, s, a, pause):
         high = c.compute(dinc(2, dask_key_name="high"), priority=1)
 
     await wait(high)
-    assert all(s.processing.values())
+    assert all(ws.processing for ws in s.workers.values())
     assert s.tasks[low.key].state == "processing"
     await ev.set()
     await clog
@@ -156,7 +156,7 @@ async def test_persist(c, s, a, pause):
         high = dinc(2, dask_key_name="high").persist(priority=1)
 
     await wait(high)
-    assert all(s.processing.values())
+    assert all(ws.processing for ws in s.workers.values())
     assert s.tasks[low.key].state == "processing"
     await ev.set()
     await wait(clog)

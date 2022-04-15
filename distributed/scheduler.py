@@ -22,7 +22,6 @@ from collections.abc import (
     Hashable,
     Iterable,
     Iterator,
-    Mapping,
     Set,
 )
 from contextlib import suppress
@@ -35,7 +34,6 @@ from typing import cast as pep484_cast
 import psutil
 from sortedcontainers import SortedDict, SortedSet
 from tlz import (
-    compose,
     first,
     groupby,
     merge,
@@ -1287,112 +1285,6 @@ class TaskState:
         chain of ~200+ tasks.
         """
         return recursive_to_dict(self, exclude=exclude, members=True)
-
-
-class _StateLegacyMapping(Mapping):
-    """
-    A mapping interface mimicking the former Scheduler state dictionaries.
-    """
-
-    def __init__(self, states, accessor):
-        self._states = states
-        self._accessor = accessor
-
-    def __iter__(self):
-        return iter(self._states)
-
-    def __len__(self):
-        return len(self._states)
-
-    def __getitem__(self, key):
-        return self._accessor(self._states[key])
-
-    def __repr__(self):
-        return f"{self.__class__}({dict(self)})"
-
-
-class _OptionalStateLegacyMapping(_StateLegacyMapping):
-    """
-    Similar to _StateLegacyMapping, but a false-y value is interpreted
-    as a missing key.
-    """
-
-    # For tasks etc.
-
-    def __iter__(self):
-        accessor = self._accessor
-        for k, v in self._states.items():
-            if accessor(v):
-                yield k
-
-    def __len__(self):
-        accessor = self._accessor
-        return sum(bool(accessor(v)) for v in self._states.values())
-
-    def __getitem__(self, key):
-        v = self._accessor(self._states[key])
-        if v:
-            return v
-        else:
-            raise KeyError
-
-
-class _StateLegacySet(Set):
-    """
-    Similar to _StateLegacyMapping, but exposes a set containing
-    all values with a true value.
-    """
-
-    # For loose_restrictions
-
-    def __init__(self, states, accessor):
-        self._states = states
-        self._accessor = accessor
-
-    def __iter__(self):
-        return (k for k, v in self._states.items() if self._accessor(v))
-
-    def __len__(self):
-        return sum(map(bool, map(self._accessor, self._states.values())))
-
-    def __contains__(self, k):
-        st = self._states.get(k)
-        return st is not None and bool(self._accessor(st))
-
-    def __repr__(self):
-        return f"{self.__class__}({set(self)})"
-
-
-def _legacy_task_key_set(tasks):
-    """
-    Transform a set of task states into a set of task keys.
-    """
-    return {ts.key for ts in tasks}
-
-
-def _legacy_client_key_set(clients):
-    """
-    Transform a set of client states into a set of client keys.
-    """
-    return {cs.client_key for cs in clients}
-
-
-def _legacy_worker_key_set(workers):
-    """
-    Transform a set of worker states into a set of worker keys.
-    """
-    return {ws.address for ws in workers}
-
-
-def _legacy_task_key_dict(task_dict: dict):
-    """
-    Transform a dict of {task state: value} into a dict of {task key: value}.
-    """
-    return {ts.key: value for ts, value in task_dict.items()}
-
-
-def _task_key_or_none(task: TaskState):
-    return task.key if task is not None else None
 
 
 class SchedulerState:
@@ -3117,44 +3009,6 @@ class Scheduler(SchedulerState, ServerNode):
 
         # Task state
         tasks = {}
-        for old_attr, new_attr, wrap in [
-            ("priority", "priority", None),
-            ("dependencies", "dependencies", _legacy_task_key_set),
-            ("dependents", "dependents", _legacy_task_key_set),
-            ("retries", "retries", None),
-        ]:
-            func = operator.attrgetter(new_attr)
-            if wrap is not None:
-                func = compose(wrap, func)
-            setattr(self, old_attr, _StateLegacyMapping(tasks, func))
-
-        for old_attr, new_attr, wrap in [
-            ("nbytes", "nbytes", None),
-            ("who_wants", "who_wants", _legacy_client_key_set),
-            ("who_has", "who_has", _legacy_worker_key_set),
-            ("waiting", "waiting_on", _legacy_task_key_set),
-            ("waiting_data", "waiters", _legacy_task_key_set),
-            ("rprocessing", "processing_on", None),
-            ("host_restrictions", "host_restrictions", None),
-            ("worker_restrictions", "worker_restrictions", None),
-            ("resource_restrictions", "resource_restrictions", None),
-            ("suspicious_tasks", "suspicious", None),
-            ("exceptions", "exception", None),
-            ("tracebacks", "traceback", None),
-            ("exceptions_blame", "exception_blame", _task_key_or_none),
-        ]:
-            func = operator.attrgetter(new_attr)
-            if wrap is not None:
-                func = compose(wrap, func)
-            setattr(self, old_attr, _OptionalStateLegacyMapping(tasks, func))
-
-        for old_attr, new_attr, wrap in [
-            ("loose_restrictions", "loose_restrictions", None)
-        ]:
-            func = operator.attrgetter(new_attr)
-            if wrap is not None:
-                func = compose(wrap, func)
-            setattr(self, old_attr, _StateLegacySet(tasks, func))
 
         self.generation = 0
         self._last_client = None
@@ -3167,30 +3021,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         # Client state
         clients = {}
-        for old_attr, new_attr, wrap in [
-            ("wants_what", "wants_what", _legacy_task_key_set)
-        ]:
-            func = operator.attrgetter(new_attr)
-            if wrap is not None:
-                func = compose(wrap, func)
-            setattr(self, old_attr, _StateLegacyMapping(clients, func))
 
         # Worker state
         workers = SortedDict()
-        for old_attr, new_attr, wrap in [
-            ("nthreads", "nthreads", None),
-            ("worker_bytes", "nbytes", None),
-            ("worker_resources", "resources", None),
-            ("used_resources", "used_resources", None),
-            ("occupancy", "occupancy", None),
-            ("worker_info", "metrics", None),
-            ("processing", "processing", _legacy_task_key_dict),
-            ("has_what", "has_what", _legacy_task_key_set),
-        ]:
-            func = operator.attrgetter(new_attr)
-            if wrap is not None:
-                func = compose(wrap, func)
-            setattr(self, old_attr, _StateLegacyMapping(workers, func))
 
         host_info = {}
         resources = {}
@@ -4074,12 +3907,14 @@ class Scheduler(SchedulerState, ServerNode):
                 try:
                     deps = dependencies[key]
                 except KeyError:
-                    deps = self.dependencies[key]
+                    deps = self.tasks[key].dependencies
                 for dep in deps:
                     if dep in dependents:
                         child_deps = dependents[dep]
+                    elif dep in self.tasks:
+                        child_deps = self.tasks[dep].dependencies
                     else:
-                        child_deps = self.dependencies[dep]
+                        child_deps = set()
                     if all(d in done for d in child_deps):
                         if dep in self.tasks and dep not in done:
                             done.add(dep)

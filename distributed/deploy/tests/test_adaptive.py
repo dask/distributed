@@ -29,22 +29,22 @@ def test_adaptive_local_cluster(loop):
     ) as cluster:
         alc = cluster.adapt(interval="100 ms")
         with Client(cluster, loop=loop) as c:
-            assert not c.nthreads()
+            assert not cluster.scheduler.workers
             future = c.submit(lambda x: x + 1, 1)
             assert future.result() == 2
-            assert c.nthreads()
+            assert cluster.scheduler.workers
 
             sleep(0.1)
-            assert c.nthreads()  # still there after some time
+            assert cluster.scheduler.workers
 
             del future
 
             start = time()
-            while cluster.scheduler.nthreads:
+            while cluster.scheduler.workers:
                 sleep(0.01)
                 assert time() < start + 30
 
-            assert not c.nthreads()
+            assert not cluster.scheduler.workers
 
 
 @gen_test()

@@ -104,14 +104,14 @@ async def test_gather_then_submit_after_failed_workers(c, s, w, x, y, z):
 
 @gen_cluster(Worker=Nanny, client=True, timeout=60)
 async def test_restart(c, s, a, b):
-    assert s.nthreads == {a.worker_address: 1, b.worker_address: 2}
-
     x = c.submit(inc, 1)
     y = c.submit(inc, x)
     z = c.submit(div, 1, 0)
     await y
 
-    assert set(s.who_has) == {x.key, y.key}
+    assert s.tasks[x.key].state == "memory"
+    assert s.tasks[y.key].state == "memory"
+    assert s.tasks[z.key].state != "memory"
 
     f = await c.restart()
     assert f is c
@@ -119,14 +119,13 @@ async def test_restart(c, s, a, b):
     assert len(s.workers) == 2
     assert not any(ws.occupancy for ws in s.workers.values())
 
-    assert not s.who_has
+    assert not s.tasks
 
     assert x.cancelled()
     assert y.cancelled()
     assert z.cancelled()
-    assert z.key not in s.exceptions
 
-    assert not s.who_wants
+    assert not s.tasks
     assert not any(cs.wants_what for cs in s.clients.values())
 
 
@@ -168,7 +167,7 @@ async def test_restart_fast(c, s, a, b):
     start = time()
     await c.restart()
     assert time() - start < 10
-    assert len(s.nthreads) == 2
+    assert len(s.workers) == 2
 
     assert all(x.status == "cancelled" for x in L)
 
@@ -245,14 +244,14 @@ async def test_multiple_clients_restart(s, a, b):
 
 @gen_cluster(Worker=Nanny, timeout=60)
 async def test_restart_scheduler(s, a, b):
-    assert len(s.nthreads) == 2
+    assert len(s.workers) == 2
     pids = (a.pid, b.pid)
     assert pids[0]
     assert pids[1]
 
     await s.restart()
 
-    assert len(s.nthreads) == 2
+    assert len(s.workers) == 2
     pids2 = (a.pid, b.pid)
     assert pids2[0]
     assert pids2[1]
@@ -278,7 +277,7 @@ async def test_broken_worker_during_computation(c, s, a, b):
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
 
     start = time()
-    while len(s.nthreads) < 3:
+    while len(s.workers) < 3:
         await asyncio.sleep(0.01)
         assert time() < start + 5
 
@@ -323,11 +322,10 @@ async def test_restart_during_computation(c, s, a, b):
     result = c.compute(total)
 
     await asyncio.sleep(0.5)
-    assert s.rprocessing
+    assert any(ws.processing for ws in s.workers.values())
     await c.restart()
-    assert not s.rprocessing
+    assert not any(ws.processing for ws in s.workers.values())
 
-    assert len(s.nthreads) == 2
     assert not s.tasks
 
 
@@ -356,7 +354,7 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     indicate subtle deadlocks. Be mindful when marking flaky/repeat/etc."""
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
 
-    while len(s.nthreads) < 3:
+    while len(s.workers) < 3:
         await asyncio.sleep(0.01)
 
     def slow_ser(x, delay):
