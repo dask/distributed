@@ -195,7 +195,10 @@ class ClientState:
 
 class MemoryState:
     """Memory readings on a worker or on the whole cluster.
+
     See :doc:`worker-memory`.
+
+    Attributes / properties:
 
     managed
         Sum of the output of sizeof() for all dask keys held by the worker in memory,
