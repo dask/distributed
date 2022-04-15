@@ -71,12 +71,7 @@ from distributed.core import Server, Status
 from distributed.metrics import time
 from distributed.objects import HasWhat, WhoHas
 from distributed.profile import wait_profiler
-from distributed.scheduler import (
-    COMPILED,
-    CollectTaskMetaDataPlugin,
-    KilledWorker,
-    Scheduler,
-)
+from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
 from distributed.sizeof import sizeof
 from distributed.utils import is_valid_xml, mp_context, sync, tmp_text
 from distributed.utils_test import (
@@ -5329,7 +5324,6 @@ def test_dynamic_workloads_sync_random(c):
     assert future.result(timeout=20) == 52
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(client=True)
 async def test_bytes_keys(c, s, a, b):
     key = b"inc-123"
@@ -6174,7 +6168,7 @@ async def test_shutdown():
 
 
 @gen_test()
-async def test_shutdown_localcluster(cleanup):
+async def test_shutdown_localcluster():
     async with LocalCluster(
         n_workers=1, asynchronous=True, processes=False, dashboard_address=":0"
     ) as lc:

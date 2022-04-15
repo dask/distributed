@@ -393,7 +393,7 @@ async def test_chained_error_message(c, s, a, b):
 
 
 @gen_test()
-async def test_plugin_exception(cleanup):
+async def test_plugin_exception():
     class MyPlugin:
         def setup(self, worker=None):
             raise ValueError("Setup failed")
@@ -410,7 +410,7 @@ async def test_plugin_exception(cleanup):
 
 
 @gen_test()
-async def test_plugin_multiple_exceptions(cleanup):
+async def test_plugin_multiple_exceptions():
     class MyPlugin1:
         def setup(self, worker=None):
             raise ValueError("MyPlugin1 Error")
@@ -438,7 +438,7 @@ async def test_plugin_multiple_exceptions(cleanup):
 
 
 @gen_test()
-async def test_plugin_internal_exception(cleanup):
+async def test_plugin_internal_exception():
     async with Scheduler(port=0) as s:
         with pytest.raises(UnicodeDecodeError, match="codec can't decode"):
             async with Worker(
@@ -1374,7 +1374,7 @@ async def test_protocol_from_scheduler_address(Worker):
 
 
 @gen_test()
-async def test_host_uses_scheduler_protocol(cleanup, monkeypatch):
+async def test_host_uses_scheduler_protocol(monkeypatch):
     # Ensure worker uses scheduler's protocol to determine host address, not the default scheme
     # See https://github.com/dask/distributed/pull/4883
     from distributed.comm.tcp import TCPBackend
