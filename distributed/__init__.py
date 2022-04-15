@@ -40,7 +40,7 @@ from distributed.multi_lock import MultiLock
 from distributed.nanny import Nanny
 from distributed.pubsub import Pub, Sub
 from distributed.queues import Queue
-from distributed.scheduler import Scheduler
+from distributed.scheduler import KilledWorker, Scheduler
 from distributed.security import Security
 from distributed.semaphore import Semaphore
 from distributed.threadpoolexecutor import rejoin
