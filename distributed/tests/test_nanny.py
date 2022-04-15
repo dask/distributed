@@ -32,14 +32,6 @@ from distributed.utils_test import captured_logger, gen_cluster, gen_test
 pytestmark = pytest.mark.ci1
 
 
-@gen_cluster(nthreads=[])
-async def test_many_kills(s):
-    async with Nanny(s.address, nthreads=2) as n:
-        assert n.is_alive()
-        await asyncio.gather(*(n.kill() for _ in range(5)))
-        await asyncio.gather(*(n.kill() for _ in range(5)))
-
-
 @gen_cluster(Worker=Nanny)
 async def test_str(s, a, b):
     assert a.worker_address in str(a)
@@ -468,10 +460,9 @@ async def test_nanny_closed_by_keyboard_interrupt(protocol):
         async with Nanny(
             s.address, nthreads=1, worker_class=KeyboardInterruptWorker
         ) as n:
-            n.auto_restart = False
             await n.process.stopped.wait()
             # Check that the scheduler has been notified about the closed worker
-            assert len(s.workers) == 0
+            assert "remove-worker" in str(s.events)
 
 
 class StartException(Exception):
