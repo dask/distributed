@@ -2552,10 +2552,7 @@ class Worker(ServerNode):
                         "worker": self.address,
                     },
                 )
-                raise InvalidTransition(
-                    f"Impossible transition from {start} to {finish} for {ts.key}",
-                    self.story(ts),
-                )
+                raise InvalidTransition(ts.key, start, finish, self.story(ts))
 
         else:
             self.log_event(
@@ -2568,10 +2565,7 @@ class Worker(ServerNode):
                     "worker": self.address,
                 },
             )
-            raise InvalidTransition(
-                f"Impossible transition from {start} to {finish} for {ts.key}",
-                self.story(ts),
-            )
+            raise InvalidTransition(ts.key, start, finish, self.story(ts))
 
         self.log.append(
             (

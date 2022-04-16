@@ -67,7 +67,21 @@ class StartStop(TypedDict, total=False):
 
 
 class InvalidTransition(Exception):
-    pass
+    def __init__(self, key, start, finish, story):
+        self.key = key
+        self.start = start
+        self.finish = finish
+        self.story = story
+
+    def __repr__(self):
+        return (
+            f"InvalidTransition: {self.key} :: {self.start}->{self.finish}"
+            + "\n"
+            + "  Story:\n    "
+            + "\n    ".join(map(str, self.story))
+        )
+
+    __str__ = __repr__
 
 
 @lru_cache
