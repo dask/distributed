@@ -11,7 +11,6 @@ from distributed.actor import Actor, ActorFuture, BaseActorFuture
 from distributed.client import (
     Client,
     CompatibleExecutor,
-    Executor,
     Future,
     as_completed,
     default_client,

@@ -34,7 +34,6 @@ from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph
 from dask.optimization import SubgraphCallable
 from dask.utils import (
-    _deprecated,
     apply,
     ensure_dict,
     format_bytes,
@@ -2792,27 +2791,6 @@ class Client(SyncMethodMixin):
             **kwargs,
         )
 
-    @_deprecated(use_instead="Client.run which detects async functions automatically")
-    def run_coroutine(self, function, *args, **kwargs):
-        """
-        Spawn a coroutine on all workers.
-
-        This spawns a coroutine on all currently known workers and then waits
-        for the coroutine on each worker.  The coroutines' results are returned
-        as a dictionary keyed by worker address.
-
-        Parameters
-        ----------
-        function : a coroutine function
-            (typically a function wrapped in gen.coroutine or
-             a Python 3.5+ async function)
-        *args : tuple
-            Optional arguments for the remote function
-        **kwargs : dict
-            Optional keyword arguments for the remote function
-        """
-        return self.run(function, *args, **kwargs)
-
     @staticmethod
     def _get_computation_code(stacklevel=None) -> str:
         """Walk up the stack to the user code and extract the code surrounding
@@ -4414,7 +4392,7 @@ class Client(SyncMethodMixin):
             name=name,
         )
 
-    def register_scheduler_plugin(self, plugin, name=None, **kwargs):
+    def register_scheduler_plugin(self, plugin, name=None):
         """Register a scheduler plugin.
 
         See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
@@ -4426,21 +4404,7 @@ class Client(SyncMethodMixin):
         name : str
             Name for the plugin; if None, a name is taken from the
             plugin instance or automatically generated if not present.
-        **kwargs : Any
-            deprecated; Arguments passed to the Plugin class (if Plugin is an
-            instance kwargs are unused).
-
         """
-        if isinstance(plugin, type):
-            warnings.warn(
-                "Adding plugins by class is deprecated and will be disabled in a "
-                "future release. Please add plugins by instance instead.",
-                category=FutureWarning,
-            )
-            # note: plugin is constructed in async def _register_scheduler_plugin
-        elif kwargs:
-            raise ValueError("kwargs provided but plugin is already an instance")
-
         if name is None:
             name = _get_plugin_name(plugin)
 
@@ -4448,7 +4412,6 @@ class Client(SyncMethodMixin):
             self._register_scheduler_plugin,
             plugin=plugin,
             name=name,
-            **kwargs,
         )
 
     def register_worker_callbacks(self, setup=None):
@@ -4486,7 +4449,7 @@ class Client(SyncMethodMixin):
                 raise exc.with_traceback(tb)
         return responses
 
-    def register_worker_plugin(self, plugin=None, name=None, nanny=None, **kwargs):
+    def register_worker_plugin(self, plugin=None, name=None, nanny=None):
         """
         Registers a lifecycle worker plugin for all current and future workers.
 
@@ -4518,10 +4481,6 @@ class Client(SyncMethodMixin):
             If plugin has no name attribute a random name is used.
         nanny : bool, optional
             Whether to register the plugin with workers or nannies.
-        **kwargs : optional
-            Deprecated; If you pass a class as the plugin, instead of a class
-            instance, then the class will be instantiated with any extra
-            keyword arguments.
 
         Examples
         --------
@@ -4556,16 +4515,6 @@ class Client(SyncMethodMixin):
         distributed.WorkerPlugin
         unregister_worker_plugin
         """
-        if isinstance(plugin, type):
-            warnings.warn(
-                "Adding plugins by class is deprecated and will be disabled in a "
-                "future release. Please add plugins by instance instead.",
-                category=FutureWarning,
-            )
-            plugin = plugin(**kwargs)
-        elif kwargs:
-            raise ValueError("kwargs provided but plugin is already an instance")
-
         if name is None:
             name = _get_plugin_name(plugin)
 
@@ -4643,14 +4592,6 @@ class _WorkerSetupPlugin(WorkerPlugin):
             return self._setup(dask_worker=worker)
         else:
             return self._setup()
-
-
-class Executor(Client):
-    """Deprecated: see Client"""
-
-    def __init__(self, *args, **kwargs):
-        warnings.warn("Executor has been renamed to Client")
-        super().__init__(*args, **kwargs)
 
 
 def CompatibleExecutor(*args, **kwargs):
@@ -5371,16 +5312,3 @@ def _close_global_client():
 
 
 atexit.register(_close_global_client)
-
-
-def __getattr__(name):
-    if name == "ensure_default_get":
-        warnings.warn(
-            "`ensure_default_get` is deprecated and will be removed in a future release. "
-            "Please use `distributed.client.ensure_default_client` instead.",
-            category=FutureWarning,
-            stacklevel=2,
-        )
-        return ensure_default_client
-    else:
-        raise AttributeError(f"module {__name__} has no attribute {name}")

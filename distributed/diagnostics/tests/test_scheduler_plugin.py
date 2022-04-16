@@ -112,33 +112,6 @@ async def test_async_add_remove_worker(s):
         pass
     assert events == []
 
-    class UnnamedPlugin(SchedulerPlugin):
-        async def start(self, scheduler):
-            self.scheduler = scheduler
-
-    plugin = UnnamedPlugin()
-    s.add_plugin(plugin)
-    s.add_plugin(plugin, name="another")
-    with pytest.warns(FutureWarning, match="Removing scheduler plugins by value"):
-        with pytest.raises(ValueError) as excinfo:
-            s.remove_plugin(plugin)
-
-    msg = str(excinfo.value)
-    assert "Multiple instances of" in msg
-
-
-@gen_cluster(client=True)
-async def test_add_by_type(c, s, a, b):
-    class MyPlugin(SchedulerPlugin):
-        def __init__(self, scheduler):
-            self.scheduler = scheduler
-
-    with pytest.warns(FutureWarning, match="Adding plugins by class is deprecated"):
-        s.add_plugin(MyPlugin)
-
-    inst = next(iter(p for p in s.plugins.values() if isinstance(p, MyPlugin)))
-    assert inst.scheduler is s
-
 
 @gen_test()
 async def test_lifecycle():
@@ -205,23 +178,3 @@ async def test_register_scheduler_plugin_pickle_disabled(c, s, a, b):
     assert "distributed.scheduler.pickle" in msg
 
     assert n_plugins == len(s.plugins)
-
-
-@gen_cluster(nthreads=[], client=True)
-async def test_plugin_class_warns(c, s):
-    class EmptyPlugin(SchedulerPlugin):
-        pass
-
-    with pytest.warns(FutureWarning, match=r"Adding plugins by class is deprecated"):
-        await c.register_scheduler_plugin(EmptyPlugin)
-
-
-@gen_cluster(nthreads=[], client=True)
-async def test_unused_kwargs_throws(c, s):
-    class EmptyPlugin(SchedulerPlugin):
-        pass
-
-    with pytest.raises(
-        ValueError, match=r"kwargs provided but plugin is already an instance"
-    ):
-        await c.register_scheduler_plugin(EmptyPlugin(), data=789)

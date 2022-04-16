@@ -39,7 +39,6 @@ from dask.utils import parse_timedelta, stringify, tmpfile
 from distributed import (
     CancelledError,
     Event,
-    Executor,
     LocalCluster,
     Nanny,
     TimeoutError,
@@ -2703,16 +2702,6 @@ def test_run_coroutine_sync(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_run_coroutine_deprecated(c, s, a, b):
-    async def foo():
-        return "bar"
-
-    with pytest.warns(FutureWarning, match="Client.run "):
-        results = await c.run_coroutine(foo)
-    assert results == {a.address: "bar", b.address: "bar"}
-
-
-@gen_cluster(client=True)
 async def test_run_exception(c, s, a, b):
     class MyError(Exception):
         pass
@@ -3360,12 +3349,6 @@ async def test_ensure_default_client(c, s, a, b):
         ensure_default_client(c2)
         assert c is not default_client()
         assert c2 is default_client()
-
-
-def test_ensure_default_get_deprecated():
-    with pytest.warns(FutureWarning, match="`ensure_default_get` is deprecated"):
-        from distributed.client import ensure_default_get
-    assert ensure_default_get is ensure_default_client
 
 
 @gen_cluster()
@@ -5394,14 +5377,6 @@ def test_quiet_quit_when_cluster_leaves(loop_in_thread):
 
         text = sio.getvalue()
         assert not text
-
-
-def test_warn_executor(loop, s, a, b):
-    with pytest.warns(UserWarning, match=r"Executor has been renamed to Client"):
-        c = Executor(s["address"], loop=loop)
-
-    with c:
-        pass
 
 
 @gen_cluster([("127.0.0.1", 4)] * 2, client=True)

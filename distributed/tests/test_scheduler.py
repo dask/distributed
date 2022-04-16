@@ -699,8 +699,7 @@ async def test_broadcast_on_error(s, a, b):
 
 @gen_cluster()
 async def test_broadcast_deprecation(s, a, b):
-    with pytest.warns(FutureWarning):
-        out = await s.broadcast(msg={"op": "ping"}, workers=True)
+    out = await s.broadcast(msg={"op": "ping"})
     assert out == {a.address: b"pong", b.address: b"pong"}
 
 

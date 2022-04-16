@@ -5006,20 +5006,7 @@ class Scheduler(SchedulerState, ServerNode):
             A name for the plugin, if None, the name attribute is
             checked on the Plugin instance and generated if not
             discovered.
-        **kwargs
-            Deprecated; additional arguments passed to the `plugin` class if it is
-            not already an instance
         """
-        if isinstance(plugin, type):
-            warnings.warn(
-                "Adding plugins by class is deprecated and will be disabled in a "
-                "future release. Please add plugins by instance instead.",
-                category=FutureWarning,
-            )
-            plugin = plugin(self, **kwargs)  # type: ignore
-        elif kwargs:
-            raise ValueError("kwargs provided but plugin is already an instance")
-
         if name is None:
             name = _get_plugin_name(plugin)
 
@@ -5036,7 +5023,6 @@ class Scheduler(SchedulerState, ServerNode):
     def remove_plugin(
         self,
         name: "str | None" = None,
-        plugin: "SchedulerPlugin | None" = None,
     ) -> None:
         """Remove external plugin from scheduler
 
@@ -5044,39 +5030,8 @@ class Scheduler(SchedulerState, ServerNode):
         ----------
         name : str
             Name of the plugin to remove
-        plugin : SchedulerPlugin
-            Deprecated; use `name` argument instead. Instance of a
-            SchedulerPlugin class to remove;
         """
-        # TODO: Remove this block of code once removing plugins by value is disabled
-        if bool(name) == bool(plugin):
-            raise ValueError("Must provide plugin or name (mutually exclusive)")
-        if isinstance(name, SchedulerPlugin):
-            # Backwards compatibility - the sig used to be (plugin, name)
-            plugin = name
-            name = None
-        if plugin is not None:
-            warnings.warn(
-                "Removing scheduler plugins by value is deprecated and will be disabled "
-                "in a future release. Please remove scheduler plugins by name instead.",
-                category=FutureWarning,
-            )
-            if hasattr(plugin, "name"):
-                name = plugin.name  # type: ignore
-            else:
-                names = [k for k, v in self.plugins.items() if v is plugin]
-                if not names:
-                    raise ValueError(
-                        f"Could not find {plugin} among the current scheduler plugins"
-                    )
-                if len(names) > 1:
-                    raise ValueError(
-                        f"Multiple instances of {plugin} were found in the current "
-                        "scheduler plugins; we cannot remove this plugin."
-                    )
-                name = names[0]
         assert name is not None
-        # End deprecated code
 
         try:
             del self.plugins[name]
@@ -5378,12 +5333,6 @@ class Scheduler(SchedulerState, ServerNode):
         on_error: "Literal['raise', 'return', 'return_pickle', 'ignore']" = "raise",
     ) -> dict:  # dict[str, Any]
         """Broadcast message to workers, return all results"""
-        if workers is True:
-            warnings.warn(
-                "workers=True is deprecated; pass workers=None or omit instead",
-                category=FutureWarning,
-            )
-            workers = None
         if workers is None:
             if hosts is None:
                 workers = list(self.workers)
