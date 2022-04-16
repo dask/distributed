@@ -126,19 +126,19 @@ define two methods:
 ``run``
     This method accepts no parameters and is invoked by the AMM every 2 seconds (or
     whatever the AMM interval is).
-    It must yield zero or more of the following *suggestion* tuples:
+    It must yield zero or more of the following :class:`~distributed.active_memory_manager.Suggestion` namedtuples:
 
-    ``yield "replicate", <TaskState>, None``
+    ``yield Suggestion("replicate", <TaskState>)``
         Create one replica of the target task on the worker with the lowest memory usage
         that doesn't hold a replica yet. To create more than one replica, you need to
         yield the same command more than once.
-    ``yield "replicate", <TaskState>, {<WorkerState>, <WorkerState>, ...}``
+    ``yield Suggestion("replicate", <TaskState>, {<WorkerState>, <WorkerState>, ...})``
         Create one replica of the target task on the worker with the lowest memory among
         the listed candidates.
-    ``yield "drop", <TaskState>, None``
+    ``yield Suggestion("drop", <TaskState>)``
         Delete one replica of the target task on the worker with the highest memory
         usage across the whole cluster.
-    ``yield "drop", <TaskState>, {<WorkerState>, <WorkerState>, ...}``
+    ``yield Suggestion("drop", <TaskState>, {<WorkerState>, <WorkerState>, ...})``
         Delete one replica of the target task on the worker with the highest memory
         among the listed candidates.
 
@@ -160,7 +160,7 @@ define two methods:
 
     .. code-block:: python
 
-        ws = (yield "drop", ts, None)
+        ws = (yield Suggestion("drop", ts))
 
 The ``run`` method can access the following attributes:
 
@@ -201,7 +201,7 @@ In mymodule.py (it must be accessible by the scheduler):
 
 .. code-block:: python
 
-    from distributed.active_memory_manager import ActiveMemoryManagerPolicy
+    from distributed.active_memory_manager import ActiveMemoryManagerPolicy, Suggestion
 
 
     class EnsureBroadcast(ActiveMemoryManagerPolicy):
@@ -213,7 +213,7 @@ In mymodule.py (it must be accessible by the scheduler):
             if not ts:
                 return
             for _ in range(len(self.manager.scheduler.workers) - len(ts.who_has)):
-                yield "replicate", ts, None
+                yield Suggestion("replicate", ts)
 
 Note that the policy doesn't bother testing for edge cases such as paused workers or
 other policies also requesting replicas; the AMM takes care of it. In theory you could
@@ -222,7 +222,7 @@ rewrite the last two lines as follows (at the cost of some wasted CPU cycles):
 .. code-block:: python
 
     for _ in range(1000):
-        yield "replicate", ts, None
+        yield Suggestion("replicate", ts)
 
 In distributed.yaml:
 
@@ -250,6 +250,9 @@ API reference
    :members:
 
 .. autoclass:: distributed.active_memory_manager.ActiveMemoryManagerPolicy
+   :members:
+
+.. autoclass:: distributed.active_memory_manager.Suggestion
    :members:
 
 .. autoclass:: distributed.active_memory_manager.AMMClientProxy
