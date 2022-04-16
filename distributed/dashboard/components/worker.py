@@ -111,7 +111,8 @@ class CommunicatingStream(DashboardComponent):
                 "duration",
                 "who",
                 "y",
-                "hover",
+                "transfer",
+                "keys",
                 "alpha",
                 "bandwidth",
                 "total",
@@ -135,24 +136,45 @@ class CommunicatingStream(DashboardComponent):
 
             fig.rect(
                 source=self.incoming,
+                name="Incoming",
                 x="middle",
                 y="y",
                 width="duration",
                 height=0.9,
                 color="red",
                 alpha="alpha",
+                legend_label="Incoming",
             )
             fig.rect(
                 source=self.outgoing,
+                name="Outgoing",
                 x="middle",
                 y="y",
                 width="duration",
                 height=0.9,
                 color="blue",
                 alpha="alpha",
+                legend_label="Outgoing",
             )
 
-            hover = HoverTool(point_policy="follow_mouse", tooltips="""@hover""")
+            hover = HoverTool(
+                point_policy="follow_mouse",
+                tooltips="""
+                <div>
+                    <span style="font-size: 12px; font-weight: bold;">Transfer:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@transfer</span>
+                </div>
+                <div>
+                    <span style="font-size: 12px; font-weight: bold;">Keys:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@keys{safe}</span>
+                </div>
+                <div>
+                    <span style="font-size: 12px; font-weight: bold;">Direction:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">$name</span>
+                </div>
+                """,
+            )
+
             fig.add_tools(
                 hover,
                 ResetTool(),
@@ -160,6 +182,7 @@ class CommunicatingStream(DashboardComponent):
                 WheelZoomTool(dimensions="width"),
             )
 
+            fig.legend.location = "top_left"
             self.root = fig
 
             self.last_incoming = 0
@@ -187,7 +210,6 @@ class CommunicatingStream(DashboardComponent):
                 for msg in msgs:
                     if "compressed" in msg:
                         del msg["compressed"]
-                    del msg["keys"]
 
                     bandwidth = msg["total"] / (msg["duration"] or 0.5)
                     bw = max(min(bandwidth / 500e6, 1), 0.3)
@@ -198,10 +220,13 @@ class CommunicatingStream(DashboardComponent):
                         self.who[msg["who"]] = len(self.who)
                         msg["y"] = self.who[msg["who"]]
 
-                    msg["hover"] = "{} / {} = {}/s".format(
+                    msg["transfer"] = "{} / {} = {}/s".format(
                         format_bytes(msg["total"]),
                         format_time(msg["duration"]),
                         format_bytes(msg["total"] / msg["duration"]),
+                    )
+                    msg["keys"] = "<br>".join(
+                        f"{k}: {format_bytes(v)}" for k, v in msg["keys"].items()
                     )
 
                     for k in ["middle", "duration", "start", "stop"]:
@@ -234,9 +259,14 @@ class CommunicatingTimeSeries(DashboardComponent):
             x_range=x_range,
             **kwargs,
         )
-        fig.line(source=self.source, x="x", y="in", color="red")
-        fig.line(source=self.source, x="x", y="out", color="blue")
+        fig.line(
+            source=self.source, x="x", y="in", color="red", legend_label="Incoming"
+        )
+        fig.line(
+            source=self.source, x="x", y="out", color="blue", legend_label="Outgoing"
+        )
 
+        fig.legend.location = "top_left"
         fig.add_tools(
             ResetTool(), PanTool(dimensions="width"), WheelZoomTool(dimensions="width")
         )
