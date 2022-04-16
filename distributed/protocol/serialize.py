@@ -87,10 +87,6 @@ def pickle_loads(header, frames):
                 mv = memoryview(bytearray(mv))
             else:
                 mv = memoryview(bytes(mv))
-            if mv.nbytes > 0:
-                mv = mv.cast(mv.format, mv.shape)
-            else:
-                mv = mv.cast(mv.format)
         new.append(mv)
 
     return pickle.loads(x, buffers=new)
