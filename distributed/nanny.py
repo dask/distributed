@@ -411,18 +411,19 @@ class Nanny(ServerNode):
                     self.process.start(), self.death_timeout
                 )
             except TimeoutError:
-                await self.close(timeout=self.death_timeout)
                 logger.error(
                     "Timed out connecting Nanny '%s' to scheduler '%s'",
                     self,
                     self.scheduler_addr,
                 )
+                await self.close(timeout=self.death_timeout)
                 raise
 
         else:
             try:
                 result = await self.process.start()
             except Exception:
+                logger.error("Failed to start process", exc_info=True)
                 await self.close()
                 raise
         return result
@@ -507,34 +508,36 @@ class Nanny(ServerNode):
         self.loop.add_callback(self._on_exit, exitcode)
 
     async def _on_exit(self, exitcode):
-        if self.status not in (
-            Status.init,
-            Status.closing,
-            Status.closed,
-            Status.closing_gracefully,
-        ):
-            try:
-                await self._unregister()
-            except OSError:
-                if not self.reconnect:
-                    await self.close()
-                    return
-
-        try:
+        with log_errors():
             if self.status not in (
+                Status.init,
                 Status.closing,
                 Status.closed,
                 Status.closing_gracefully,
             ):
-                logger.warning("Restarting worker")
-                await self.instantiate()
-            elif self.status == Status.closing_gracefully:
-                await self.close()
+                try:
+                    await self._unregister()
+                except OSError:
+                    logger.exception("Failed to unregister")
+                    if not self.reconnect:
+                        await self.close()
+                        return
 
-        except Exception:
-            logger.error(
-                "Failed to restart worker after its process exited", exc_info=True
-            )
+            try:
+                if self.status not in (
+                    Status.closing,
+                    Status.closed,
+                    Status.closing_gracefully,
+                ):
+                    logger.warning("Restarting worker")
+                    await self.instantiate()
+                elif self.status == Status.closing_gracefully:
+                    await self.close()
+
+            except Exception:
+                logger.error(
+                    "Failed to restart worker after its process exited", exc_info=True
+                )
 
     @property
     def pid(self):
@@ -564,7 +567,9 @@ class Nanny(ServerNode):
             return "OK"
 
         self.status = Status.closing
-        logger.info("Closing Nanny at %r", self.address)
+        logger.info(
+            f"Closing Nanny at {self.address!r}. Report closure to scheduler: {report}"
+        )
 
         for preload in self.preloads:
             await preload.teardown()
@@ -674,6 +679,7 @@ class WorkerProcess:
         try:
             msg = await self._wait_until_connected(uid)
         except Exception:
+            logger.exception("Failed to connect to process")
             self.status = Status.failed
             self.process.terminate()
             raise
@@ -747,6 +753,7 @@ class WorkerProcess:
             return
         assert self.status in (Status.starting, Status.running)
         self.status = Status.stopping
+        logger.info("Nanny asking worker to close")
 
         process = self.process
         self.child_stop_q.put(
