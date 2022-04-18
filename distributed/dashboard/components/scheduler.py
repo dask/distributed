@@ -2138,6 +2138,8 @@ class TaskGraph(DashboardComponent):
         )
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
+        self.root.xaxis.visible = False
+        self.root.yaxis.visible = False
 
         hover = HoverTool(
             point_policy="follow_mouse",

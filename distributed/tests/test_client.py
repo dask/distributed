@@ -2992,9 +2992,8 @@ async def test_unrunnable_task_runs(c, s, a, b):
 @gen_cluster(client=True, nthreads=[])
 async def test_add_worker_after_tasks(c, s):
     futures = c.map(inc, range(10))
-    n = await Nanny(s.address, nthreads=2, loop=s.loop)
-    await c.gather(futures)
-    await n.close()
+    async with Nanny(s.address, nthreads=2):
+        await c.gather(futures)
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")

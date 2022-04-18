@@ -31,6 +31,7 @@ from distributed.utils_test import (
     new_config,
     tls_only_security,
 )
+from distributed.worker import InvalidTransition
 
 
 def test_bare_cluster(loop):
@@ -606,3 +607,33 @@ def test_start_failure_scheduler():
     with pytest.raises(TypeError):
         with cluster(scheduler_kwargs={"foo": "bar"}):
             return
+
+
+def test_invalid_transitions(capsys):
+    @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+    async def test_log_invalid_transitions(c, s, a):
+        x = c.submit(inc, 1, key="task-name")
+        y = c.submit(inc, x)
+        xkey = x.key
+        del x
+        await y
+        while a.tasks[xkey].state != "released":
+            await asyncio.sleep(0.01)
+        ts = a.tasks[xkey]
+        with pytest.raises(InvalidTransition):
+            a.transition(ts, "foo", stimulus_id="bar")
+
+        while not s.events["invalid-worker-transition"]:
+            await asyncio.sleep(0.01)
+
+    with pytest.raises(Exception) as info:
+        test_log_invalid_transitions()
+
+    assert "invalid" in str(info).lower()
+    assert "worker" in str(info).lower()
+    assert "transition" in str(info).lower()
+
+    out, err = capsys.readouterr()
+
+    assert "foo" in out + err
+    assert "task-name" in out + err

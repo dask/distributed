@@ -44,19 +44,17 @@ def test_submit_after_failed_worker_sync(loop):
 @pytest.mark.slow()
 @gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
 async def test_submit_after_failed_worker_async(c, s, a, b):
-    n = await Nanny(s.address, nthreads=2, loop=s.loop)
-    while len(s.workers) < 3:
-        await asyncio.sleep(0.1)
+    async with Nanny(s.address, nthreads=2) as n:
+        while len(s.workers) < 3:
+            await asyncio.sleep(0.1)
 
-    L = c.map(inc, range(10))
-    await wait(L)
+        L = c.map(inc, range(10))
+        await wait(L)
 
-    s.loop.add_callback(n.kill)
-    total = c.submit(sum, L)
-    result = await total
-    assert result == sum(map(inc, range(10)))
-
-    await n.close()
+        s.loop.add_callback(n.kill)
+        total = c.submit(sum, L)
+        result = await total
+        assert result == sum(map(inc, range(10)))
 
 
 @gen_cluster(client=True, timeout=60)
@@ -274,43 +272,40 @@ async def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
 @gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
 async def test_broken_worker_during_computation(c, s, a, b):
     s.allowed_failures = 100
-    n = await Nanny(s.address, nthreads=2, loop=s.loop)
+    async with Nanny(s.address, nthreads=2) as n:
+        start = time()
+        while len(s.workers) < 3:
+            await asyncio.sleep(0.01)
+            assert time() < start + 5
 
-    start = time()
-    while len(s.workers) < 3:
-        await asyncio.sleep(0.01)
-        assert time() < start + 5
+        N = 256
+        expected_result = N * (N + 1) // 2
+        i = 0
+        L = c.map(inc, range(N), key=["inc-%d-%d" % (i, j) for j in range(N)])
+        while len(L) > 1:
+            i += 1
+            L = c.map(
+                slowadd,
+                *zip(*partition_all(2, L)),
+                key=["add-%d-%d" % (i, j) for j in range(len(L) // 2)],
+            )
 
-    N = 256
-    expected_result = N * (N + 1) // 2
-    i = 0
-    L = c.map(inc, range(N), key=["inc-%d-%d" % (i, j) for j in range(N)])
-    while len(L) > 1:
-        i += 1
-        L = c.map(
-            slowadd,
-            *zip(*partition_all(2, L)),
-            key=["add-%d-%d" % (i, j) for j in range(len(L) // 2)],
-        )
+        await asyncio.sleep(random.random() / 20)
+        with suppress(CommClosedError):  # comm will be closed abrupty
+            await c.run(os._exit, 1, workers=[n.worker_address])
 
-    await asyncio.sleep(random.random() / 20)
-    with suppress(CommClosedError):  # comm will be closed abrupty
-        await c._run(os._exit, 1, workers=[n.worker_address])
+        await asyncio.sleep(random.random() / 20)
+        while len(s.workers) < 3:
+            await asyncio.sleep(0.01)
 
-    await asyncio.sleep(random.random() / 20)
-    while len(s.workers) < 3:
-        await asyncio.sleep(0.01)
+        with suppress(
+            CommClosedError, EnvironmentError
+        ):  # perhaps new worker can't be contacted yet
+            await c.run(os._exit, 1, workers=[n.worker_address])
 
-    with suppress(
-        CommClosedError, EnvironmentError
-    ):  # perhaps new worker can't be contacted yet
-        await c._run(os._exit, 1, workers=[n.worker_address])
-
-    [result] = await c.gather(L)
-    assert isinstance(result, int)
-    assert result == expected_result
-
-    await n.close()
+        [result] = await c.gather(L)
+        assert isinstance(result, int)
+        assert result == expected_result
 
 
 @gen_cluster(client=True, Worker=Nanny, timeout=60)
@@ -352,42 +347,41 @@ class SlowTransmitData:
 async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     """This test is very sensitive to cluster state consistency. Timeouts often
     indicate subtle deadlocks. Be mindful when marking flaky/repeat/etc."""
-    n = await Nanny(s.address, nthreads=2, loop=s.loop)
+    async with Nanny(s.address, nthreads=2) as n:
+        while len(s.workers) < 3:
+            await asyncio.sleep(0.01)
 
-    while len(s.workers) < 3:
-        await asyncio.sleep(0.01)
+        def slow_ser(x, delay):
+            return SlowTransmitData(x, delay=delay)
 
-    def slow_ser(x, delay):
-        return SlowTransmitData(x, delay=delay)
+        n_worker_address = n.worker_address
+        futures = c.map(
+            slow_ser,
+            range(20),
+            delay=0.1,
+            key=["f%d" % i for i in range(20)],
+            workers=[n_worker_address],
+            allow_other_workers=True,
+        )
 
-    n_worker_address = n.worker_address
-    futures = c.map(
-        slow_ser,
-        range(20),
-        delay=0.1,
-        key=["f%d" % i for i in range(20)],
-        workers=[n_worker_address],
-        allow_other_workers=True,
-    )
+        def sink(*args):
+            pass
 
-    def sink(*args):
-        pass
+        await wait(futures)
+        result_fut = c.submit(sink, futures, workers=a.address)
 
-    await wait(futures)
-    result_fut = c.submit(sink, futures, workers=a.address)
+        with suppress(CommClosedError):
+            await c.run(os._exit, 1, workers=[n_worker_address])
 
-    with suppress(CommClosedError):
-        await c._run(os._exit, 1, workers=[n_worker_address])
+        while len(s.workers) > 2:
+            await asyncio.sleep(0.01)
 
-    while len(s.workers) > 2:
-        await asyncio.sleep(0.01)
+        await result_fut
 
-    await result_fut
-
-    assert not a.has_what.get(n_worker_address)
-    assert not any(n_worker_address in s for ts in a.tasks.values() for s in ts.who_has)
-
-    await n.close()
+        assert not a.has_what.get(n_worker_address)
+        assert not any(
+            n_worker_address in s for ts in a.tasks.values() for s in ts.who_has
+        )
 
 
 @gen_cluster(
