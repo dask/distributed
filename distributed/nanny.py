@@ -853,9 +853,11 @@ class WorkerProcess:
                 assert msg.pop("op") == "stop"
                 loop.add_callback(do_stop, **msg)
 
-            t = threading.Thread(target=watch_stop_q, name="Nanny stop queue watch")
-            t.daemon = True
-            t.start()
+            thread = threading.Thread(
+                target=watch_stop_q, name="Nanny stop queue watch"
+            )
+            thread.daemon = True
+            thread.start()
 
             async def run():
                 """
@@ -912,3 +914,10 @@ class WorkerProcess:
                 # At this point the loop is not running thus we have to run
                 # do_stop() explicitly.
                 loop.run_sync(do_stop)
+            finally:
+                with suppress(ValueError):
+                    child_stop_q.put({"op": "close"})  # probably redundant
+                with suppress(ValueError):
+                    child_stop_q.close()  # probably redundant
+                child_stop_q.join_thread()
+                thread.join(timeout=2)
