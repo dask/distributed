@@ -45,6 +45,18 @@ def test_enable_disable_nvml():
         )
 
 
+def test_wsl_monitoring_enabled():
+    try:
+        pynvml.nvmlShutdown()
+    except pynvml.NVMLError_Uninitialized:
+        pass
+    else:
+        nvml.nvmlInitialized = False
+
+    nvml.init_once()
+    assert nvml.nvmlWslInsufficientDriver is False
+
+
 def run_has_cuda_context(queue):
     try:
         assert not nvml.has_cuda_context()

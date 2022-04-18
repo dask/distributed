@@ -14,7 +14,7 @@ nvmlInitialized = False
 nvmlLibraryNotFound = False
 nvmlWslInsufficientDriver = False
 nvmlOwnerPID = None
-minimumWslVersion = "512.15"
+minimumWslVersion = "513.15"
 
 
 def _in_wsl():
