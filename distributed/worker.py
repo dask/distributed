@@ -2542,16 +2542,30 @@ class Worker(ServerNode):
                 recs.update(b_recs)
                 instructions += b_instructions
             except InvalidTransition:
-                raise InvalidTransition(
-                    f"Impossible transition from {start} to {finish} for {ts.key}",
-                    self.story(ts),
+                self.log_event(
+                    "invalid-worker-transition",
+                    {
+                        "key": ts.key,
+                        "start": start,
+                        "finish": finish,
+                        "story": self.story(ts),
+                        "worker": self.address,
+                    },
                 )
+                raise InvalidTransition(ts.key, start, finish, self.story(ts))
 
         else:
-            raise InvalidTransition(
-                f"Impossible transition from {start} to {finish} for {ts.key}",
-                self.story(ts),
+            self.log_event(
+                "invalid-worker-transition",
+                {
+                    "key": ts.key,
+                    "start": start,
+                    "finish": finish,
+                    "story": self.story(ts),
+                    "worker": self.address,
+                },
             )
+            raise InvalidTransition(ts.key, start, finish, self.story(ts))
 
         self.log.append(
             (
