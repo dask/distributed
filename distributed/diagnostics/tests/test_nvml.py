@@ -39,9 +39,9 @@ def test_enable_disable_nvml():
     with dask.config.set({"distributed.diagnostics.nvml": True}):
         nvml.init_once()
         assert (
-            nvml.nvmlInitialized is True
-            or nvml.nvmlLibraryNotFound is True
-            or nvml.nvmlWslInsufficientDriver is True
+            nvml.nvmlInitialized
+            ^ nvml.nvmlLibraryNotFound
+            ^ nvml.nvmlWslInsufficientDriver
         )
 
 
