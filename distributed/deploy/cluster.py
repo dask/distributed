@@ -11,9 +11,10 @@ import dask.config
 from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
 from dask.widgets import get_template
 
-from ..core import Status
-from ..objects import SchedulerInfo
-from ..utils import (
+from distributed.core import Status
+from distributed.deploy.adaptive import Adaptive
+from distributed.objects import SchedulerInfo
+from distributed.utils import (
     Log,
     Logs,
     LoopRunner,
@@ -22,7 +23,6 @@ from ..utils import (
     format_dashboard_link,
     log_errors,
 )
-from .adaptive import Adaptive
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +98,7 @@ class Cluster(SyncMethodMixin):
 
     async def _start(self):
         comm = await self.scheduler_comm.live_comm()
+        comm.name = "Cluster worker status"
         await comm.write({"op": "subscribe_worker_status"})
         self.scheduler_info = SchedulerInfo(await comm.read())
         self._watch_worker_status_comm = comm
@@ -193,7 +194,7 @@ class Cluster(SyncMethodMixin):
             return self.sync(self._close, callback_timeout=timeout)
 
     def __del__(self):
-        if self.status != Status.closed:
+        if getattr(self, "status", Status.closed) != Status.closed:
             with suppress(AttributeError, RuntimeError):  # during closing
                 self.loop.add_callback(self.close)
 

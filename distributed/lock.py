@@ -5,9 +5,9 @@ from collections import defaultdict, deque
 
 from dask.utils import parse_timedelta
 
-from .client import Client
-from .utils import TimeoutError, log_errors
-from .worker import get_worker
+from distributed.client import Client
+from distributed.utils import TimeoutError, log_errors
+from distributed.worker import get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +29,6 @@ class LockExtension:
         self.scheduler.handlers.update(
             {"lock_acquire": self.acquire, "lock_release": self.release}
         )
-
-        self.scheduler.extensions["locks"] = self
 
     async def acquire(self, name=None, id=None, timeout=None):
         with log_errors():

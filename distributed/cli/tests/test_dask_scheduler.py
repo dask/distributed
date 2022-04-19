@@ -63,13 +63,13 @@ def test_no_dashboard(loop):
 def test_dashboard(loop):
     pytest.importorskip("bokeh")
 
-    with popen(["dask-scheduler"]) as proc:
-        for line in proc.stderr:
+    with popen(["dask-scheduler"], flush_output=False) as proc:
+        for line in proc.stdout:
             if b"dashboard at" in line:
                 dashboard_port = int(line.decode().split(":")[-1].strip())
                 break
         else:
-            raise Exception("dashboard not found")
+            assert False  # pragma: nocover
 
         with Client(f"127.0.0.1:{Scheduler.default_port}", loop=loop):
             pass
@@ -217,14 +217,17 @@ def test_scheduler_port_zero(loop):
 
 def test_dashboard_port_zero(loop):
     pytest.importorskip("bokeh")
-    with popen(["dask-scheduler", "--dashboard-address", ":0"]) as proc:
-        count = 0
-        while count < 1:
-            line = proc.stderr.readline()
-            if b"dashboard" in line.lower():
-                sleep(0.01)
-                count += 1
-                assert b":0" not in line
+    with popen(
+        ["dask-scheduler", "--dashboard-address", ":0"],
+        flush_output=False,
+    ) as proc:
+        for line in proc.stdout:
+            if b"dashboard at" in line:
+                dashboard_port = int(line.decode().split(":")[-1].strip())
+                assert dashboard_port != 0
+                break
+        else:
+            assert False  # pragma: nocover
 
 
 PRELOAD_TEXT = """

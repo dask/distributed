@@ -8,11 +8,11 @@ from tornado.httpserver import HTTPServer
 
 import dask
 
-from .comm import get_address_host, get_tcp_server_addresses
-from .core import Server
-from .http.routing import RoutingApplication
-from .utils import DequeHandler, clean_dashboard_address
-from .versions import get_versions
+from distributed.comm import get_address_host, get_tcp_server_addresses
+from distributed.core import Server
+from distributed.http.routing import RoutingApplication
+from distributed.utils import DequeHandler, clean_dashboard_address
+from distributed.versions import get_versions
 
 
 class ServerNode(Server):
@@ -131,12 +131,9 @@ class ServerNode(Server):
             import ssl
 
             ssl_options = ssl.create_default_context(
-                cafile=tls_ca_file, purpose=ssl.Purpose.SERVER_AUTH
+                cafile=tls_ca_file, purpose=ssl.Purpose.CLIENT_AUTH
             )
             ssl_options.load_cert_chain(tls_cert, keyfile=tls_key)
-            # We don't care about auth here, just encryption
-            ssl_options.check_hostname = False
-            ssl_options.verify_mode = ssl.CERT_NONE
 
         self.http_server = HTTPServer(self.http_application, ssl_options=ssl_options)
 

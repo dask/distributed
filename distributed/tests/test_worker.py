@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 import traceback
+import weakref
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from numbers import Number
@@ -16,7 +17,6 @@ from unittest import mock
 
 import psutil
 import pytest
-from packaging.version import parse as parse_version
 from tlz import first, pluck, sliding_window
 
 import dask
@@ -27,6 +27,7 @@ from dask.utils import tmpfile
 import distributed
 from distributed import (
     Client,
+    Event,
     Nanny,
     Reschedule,
     default_client,
@@ -40,6 +41,7 @@ from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
+from distributed.profile import wait_profiler
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
 from distributed.utils import TimeoutError
@@ -59,26 +61,16 @@ from distributed.utils_test import (
     slowsum,
 )
 from distributed.worker import (
-    TaskState,
-    UniqueTaskHeap,
+    InvalidTransition,
     Worker,
+    benchmark_disk,
+    benchmark_memory,
+    benchmark_network,
     error_message,
     logger,
-    parse_memory_limit,
 )
 
 pytestmark = pytest.mark.ci1
-
-try:
-    import zict
-except ImportError:
-    zict = None
-
-requires_zict = pytest.mark.skipif(not zict, reason="requires zict")
-requires_zict_210 = pytest.mark.skipif(
-    not zict or parse_version(zict.__version__) <= parse_version("2.0.0"),
-    reason="requires zict version > 2.0.0",
-)
 
 
 @gen_cluster(nthreads=[])
@@ -161,6 +153,7 @@ async def test_worker_bad_args(c, s, a, b):
     tb = await y._traceback()
     assert any("1 / 0" in line for line in pluck(3, traceback.extract_tb(tb)) if line)
     assert "Compute Failed" in hdlr.messages["warning"][0]
+    assert y.key in hdlr.messages["warning"][0]
     logger.setLevel(old_level)
 
     # Now we check that both workers are still alive.
@@ -332,12 +325,15 @@ async def test_worker_port_range(s):
 @gen_test(timeout=60)
 async def test_worker_waits_for_scheduler():
     w = Worker("127.0.0.1:8724")
-    try:
-        await asyncio.wait_for(w, 3)
-    except TimeoutError:
-        pass
-    else:
-        assert False
+
+    async def f():
+        await w
+
+    task = asyncio.create_task(f())
+    await asyncio.sleep(3)
+    assert not task.done()
+    task.cancel()
+
     assert w.status not in (Status.closed, Status.running, Status.paused)
     await w.close(timeout=0.1)
 
@@ -400,8 +396,8 @@ async def test_chained_error_message(c, s, a, b):
         assert "Bar" in str(e.__cause__)
 
 
-@pytest.mark.asyncio
-async def test_plugin_exception(cleanup):
+@gen_test()
+async def test_plugin_exception():
     class MyPlugin:
         def setup(self, worker=None):
             raise ValueError("Setup failed")
@@ -417,8 +413,8 @@ async def test_plugin_exception(cleanup):
                 pass
 
 
-@pytest.mark.asyncio
-async def test_plugin_multiple_exceptions(cleanup):
+@gen_test()
+async def test_plugin_multiple_exceptions():
     class MyPlugin1:
         def setup(self, worker=None):
             raise ValueError("MyPlugin1 Error")
@@ -445,8 +441,8 @@ async def test_plugin_multiple_exceptions(cleanup):
             assert "MyPlugin2 Error" in text
 
 
-@pytest.mark.asyncio
-async def test_plugin_internal_exception(cleanup):
+@gen_test()
+async def test_plugin_internal_exception():
     async with Scheduler(port=0) as s:
         with pytest.raises(UnicodeDecodeError, match="codec can't decode"):
             async with Worker(
@@ -578,13 +574,13 @@ async def test_memory_limit_auto(s):
     async with Worker(s.address, nthreads=1) as a, Worker(
         s.address, nthreads=2
     ) as b, Worker(s.address, nthreads=100) as c, Worker(s.address, nthreads=200) as d:
-        assert isinstance(a.memory_limit, Number)
-        assert isinstance(b.memory_limit, Number)
+        assert isinstance(a.memory_manager.memory_limit, Number)
+        assert isinstance(b.memory_manager.memory_limit, Number)
 
         if CPU_COUNT > 1:
-            assert a.memory_limit < b.memory_limit
+            assert a.memory_manager.memory_limit < b.memory_manager.memory_limit
 
-        assert c.memory_limit == d.memory_limit
+        assert c.memory_manager.memory_limit == d.memory_manager.memory_limit
 
 
 @gen_cluster(client=True)
@@ -911,109 +907,6 @@ async def test_dataframe_attribute_error(c, s, a, b):
     assert result.data == 123
 
 
-class FailToPickle:
-    def __init__(self, *, reported_size=0, actual_size=0):
-        self.reported_size = int(reported_size)
-        self.data = "x" * int(actual_size)
-
-    def __getstate__(self):
-        raise TypeError()
-
-    def __sizeof__(self):
-        return self.reported_size
-
-
-async def assert_basic_futures(c: Client) -> None:
-    futures = c.map(inc, range(10))
-    results = await c.gather(futures)
-    assert results == list(map(inc, range(10)))
-
-
-@requires_zict
-@gen_cluster(client=True)
-async def test_fail_write_to_disk_target_1(c, s, a, b):
-    """Test failure to spill triggered by key which is individually larger
-    than target. The data is lost and the task is marked as failed;
-    the worker remains in usable condition.
-    """
-    future = c.submit(FailToPickle, reported_size=100e9)
-    await wait(future)
-
-    assert future.status == "error"
-
-    with pytest.raises(TypeError, match="Could not serialize"):
-        await future
-
-    await assert_basic_futures(c)
-
-
-@requires_zict
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)],
-    worker_kwargs=dict(
-        memory_limit="1 kiB",
-        memory_target_fraction=0.5,
-        memory_spill_fraction=False,
-        memory_pause_fraction=False,
-    ),
-)
-async def test_fail_write_to_disk_target_2(c, s, a):
-    """Test failure to spill triggered by key which is individually smaller
-    than target, so it is not spilled immediately. The data is retained and
-    the task is NOT marked as failed; the worker remains in usable condition.
-    """
-    x = c.submit(FailToPickle, reported_size=256, key="x")
-    await wait(x)
-    assert x.status == "finished"
-    assert set(a.data.memory) == {"x"}
-
-    y = c.submit(lambda: "y" * 256, key="y")
-    await wait(y)
-    if parse_version(zict.__version__) <= parse_version("2.0.0"):
-        assert set(a.data.memory) == {"y"}
-    else:
-        assert set(a.data.memory) == {"x", "y"}
-    assert not a.data.disk
-
-    await assert_basic_futures(c)
-
-
-@requires_zict_210
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)],
-    worker_kwargs=dict(
-        memory_monitor_interval="10ms",
-        memory_limit="1 kiB",  # Spill everything
-        memory_target_fraction=False,
-        memory_spill_fraction=0.7,
-        memory_pause_fraction=False,
-    ),
-)
-async def test_fail_write_to_disk_spill(c, s, a):
-    """Test failure to evict a key, triggered by the spill threshold"""
-    with captured_logger(logging.getLogger("distributed.spill")) as logs:
-        bad = c.submit(FailToPickle, actual_size=1_000_000, key="bad")
-        await wait(bad)
-
-        # Must wait for memory monitor to kick in
-        while True:
-            logs_value = logs.getvalue()
-            if logs_value:
-                break
-            await asyncio.sleep(0.01)
-
-    assert "Failed to pickle" in logs_value
-    assert "Traceback" in logs_value
-
-    # key is in fast
-    assert bad.status == "finished"
-    assert bad.key in a.data.fast
-
-    await assert_basic_futures(c)
-
-
 @gen_cluster()
 async def test_pid(s, a, b):
     assert s.workers[a.address].pid == os.getpid()
@@ -1192,301 +1085,6 @@ async def test_statistical_profiling_2(c, s, a, b):
             break
 
 
-@requires_zict
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)],
-    worker_kwargs=dict(
-        memory_limit=1200 / 0.6,
-        memory_target_fraction=0.6,
-        memory_spill_fraction=False,
-        memory_pause_fraction=False,
-    ),
-)
-async def test_spill_target_threshold(c, s, a):
-    """Test distributed.worker.memory.target threshold. Note that in this test we
-    disabled spill and pause thresholds, which work on the process memory, and just left
-    the target threshold, which works on managed memory so it is unperturbed by the
-    several hundreds of MB of unmanaged memory that are typical of the test suite.
-    """
-    x = c.submit(lambda: "x" * 500, key="x")
-    await wait(x)
-    y = c.submit(lambda: "y" * 500, key="y")
-    await wait(y)
-
-    assert set(a.data) == {"x", "y"}
-    assert set(a.data.memory) == {"x", "y"}
-
-    z = c.submit(lambda: "z" * 500, key="z")
-    await wait(z)
-    assert set(a.data) == {"x", "y", "z"}
-    assert set(a.data.memory) == {"y", "z"}
-    assert set(a.data.disk) == {"x"}
-
-    await x
-    assert set(a.data.memory) == {"x", "z"}
-    assert set(a.data.disk) == {"y"}
-
-
-@requires_zict_210
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)],
-    worker_kwargs=dict(
-        memory_limit=1600,
-        max_spill=600,
-        memory_target_fraction=0.6,
-        memory_spill_fraction=False,
-        memory_pause_fraction=False,
-    ),
-)
-async def test_spill_constrained(c, s, w):
-    """Test distributed.worker.memory.max-spill parameter"""
-    # spills starts at 1600*0.6=960 bytes of managed memory
-
-    # size in memory ~200; size on disk ~400
-    x = c.submit(lambda: "x" * 200, key="x")
-    await wait(x)
-    # size in memory ~500; size on disk ~700
-    y = c.submit(lambda: "y" * 500, key="y")
-    await wait(y)
-
-    assert set(w.data) == {x.key, y.key}
-    assert set(w.data.memory) == {x.key, y.key}
-
-    z = c.submit(lambda: "z" * 500, key="z")
-    await wait(z)
-
-    assert set(w.data) == {x.key, y.key, z.key}
-
-    # max_spill has not been reached
-    assert set(w.data.memory) == {y.key, z.key}
-    assert set(w.data.disk) == {x.key}
-
-    # zb is individually larger than max_spill
-    zb = c.submit(lambda: "z" * 1700, key="zb")
-    await wait(zb)
-
-    assert set(w.data.memory) == {y.key, z.key, zb.key}
-    assert set(w.data.disk) == {x.key}
-
-    del zb
-    while "zb" in w.data:
-        await asyncio.sleep(0.01)
-
-    # zc is individually smaller than max_spill, but the evicted key together with
-    # x it exceeds max_spill
-    zc = c.submit(lambda: "z" * 500, key="zc")
-    await wait(zc)
-    assert set(w.data.memory) == {y.key, z.key, zc.key}
-    assert set(w.data.disk) == {x.key}
-
-
-@requires_zict
-@gen_cluster(
-    nthreads=[("", 1)],
-    client=True,
-    worker_kwargs=dict(
-        memory_monitor_interval="10ms",
-        memory_target_fraction=False,
-        memory_spill_fraction=0.7,
-        memory_pause_fraction=False,
-    ),
-)
-async def test_spill_spill_threshold(c, s, a):
-    """Test distributed.worker.memory.spill threshold.
-    Test that the spill threshold uses the process memory and not the managed memory
-    reported by sizeof(), which may be inaccurate.
-    """
-    # Reach 'spill' threshold after 400MB of managed data. We need to be generous in
-    # order to avoid flakiness due to fluctuations in unmanaged memory.
-    # FIXME https://github.com/dask/distributed/issues/5367
-    #       This works just by luck for the purpose of the spill and pause thresholds,
-    #       and does NOT work for the target threshold.
-    memory = psutil.Process().memory_info().rss
-    a.memory_limit = (memory + 300e6) / 0.7
-
-    class UnderReport:
-        """100 MB process memory, 10 bytes reported managed memory"""
-
-        def __init__(self, *args):
-            self.data = "x" * int(100e6)
-
-        def __sizeof__(self):
-            return 10
-
-        def __reduce__(self):
-            """Speed up test by writing very little to disk when spilling"""
-            return UnderReport, ()
-
-    futures = c.map(UnderReport, range(8))
-
-    while not a.data.disk:
-        await asyncio.sleep(0.01)
-
-
-async def assert_not_everything_is_spilled(w: Worker) -> None:
-    start = time()
-    while time() < start + 0.5:
-        assert w.data
-        if not w.data.memory:  # type: ignore
-            # The hysteresis system fails on Windows and MacOSX because process memory
-            # is very slow to shrink down after calls to PyFree. As a result,
-            # Worker.memory_monitor will continue spilling until there's nothing left.
-            # Nothing we can do about this short of finding either a way to change this
-            # behaviour at OS level or a better measure of allocated memory.
-            assert not LINUX, "All data was spilled to disk"
-            raise pytest.xfail("https://github.com/dask/distributed/issues/5840")
-        await asyncio.sleep(0)
-
-
-@requires_zict
-@gen_cluster(
-    nthreads=[("", 1)],
-    client=True,
-    worker_kwargs=dict(
-        # FIXME https://github.com/dask/distributed/issues/5367
-        #       Can't reconfigure the absolute target threshold after the worker
-        #       started, so we're setting it here to something extremely small and then
-        #       increasing the memory_limit dynamically below in order to test the
-        #       spill threshold.
-        memory_limit=1,
-        memory_monitor_interval="10ms",
-        memory_target_fraction=False,
-        memory_spill_fraction=0.7,
-        memory_pause_fraction=False,
-    ),
-)
-async def test_spill_no_target_threshold(c, s, a):
-    """Test that you can enable the spill threshold while leaving the target threshold
-    to False
-    """
-    memory = psutil.Process().memory_info().rss
-    a.memory_limit = (memory + 300e6) / 0.7  # 300 MB before we start spilling
-
-    class OverReport:
-        """Configurable process memory, 10 GB reported managed memory"""
-
-        def __init__(self, size):
-            self.data = "x" * size
-
-        def __sizeof__(self):
-            return int(10e9)
-
-        def __reduce__(self):
-            """Speed up test by writing very little to disk when spilling"""
-            return OverReport, (len(self.data),)
-
-    f1 = c.submit(OverReport, 0, key="f1")
-    await wait(f1)
-    assert set(a.data.memory) == {"f1"}
-
-    # 800 MB. Use large chunks to stimulate timely release of process memory.
-    futures = c.map(OverReport, range(int(100e6), int(100e6) + 8))
-
-    while not a.data.disk:
-        await asyncio.sleep(0.01)
-    assert "f1" in a.data.disk
-
-    # Spilling normally starts at the spill threshold and stops at the target threshold.
-    # In this special case, it stops as soon as the process memory goes below the spill
-    # threshold, e.g. without a hysteresis cycle. Test that we didn't instead dump the
-    # whole data to disk (memory_limit * target = 0)
-    await assert_not_everything_is_spilled(a)
-
-
-@pytest.mark.slow
-@requires_zict
-@gen_cluster(
-    nthreads=[("", 1)],
-    client=True,
-    worker_kwargs=dict(
-        memory_limit="1 GiB",  # See FIXME note in previous test
-        memory_monitor_interval="10ms",
-        memory_target_fraction=0.4,
-        memory_spill_fraction=0.7,
-        memory_pause_fraction=False,
-    ),
-)
-async def test_spill_hysteresis(c, s, a):
-    memory = psutil.Process().memory_info().rss
-    a.memory_limit = (memory + 1e9) / 0.7  # Start spilling after 1 GB
-
-    # Under-report managed memory, so that we reach the spill threshold for process
-    # memory without first reaching the target threshold for managed memory
-    class UnderReport:
-        def __init__(self):
-            self.data = "x" * int(100e6)  # 100 MB
-
-        def __sizeof__(self):
-            return 1
-
-        def __reduce__(self):
-            """Speed up test by writing very little to disk when spilling"""
-            return UnderReport, ()
-
-    max_in_memory = 0
-    futures = []
-    while not a.data.disk:
-        futures.append(c.submit(UnderReport, pure=False))
-        max_in_memory = max(max_in_memory, len(a.data.memory))
-        await wait(futures)
-        await asyncio.sleep(0.05)
-        max_in_memory = max(max_in_memory, len(a.data.memory))
-
-    # If there were no hysteresis, we would lose exactly 1 key.
-    # Note that, for this test to be meaningful, memory must shrink down readily when
-    # we deallocate Python objects. This is not always the case on Windows and MacOSX;
-    # on Linux we set MALLOC_TRIM to help in that regard.
-    # To verify that this test is useful, set target=spill and watch it fail.
-    while len(a.data.memory) > max_in_memory - 3:
-        await asyncio.sleep(0.01)
-    await assert_not_everything_is_spilled(a)
-
-
-@pytest.mark.slow
-@gen_cluster(
-    nthreads=[("", 1)],
-    client=True,
-    worker_kwargs=dict(
-        memory_monitor_interval="10ms",
-        memory_target_fraction=False,
-        memory_spill_fraction=False,
-        memory_pause_fraction=0.8,
-    ),
-)
-async def test_pause_executor(c, s, a):
-    # See notes in test_spill_spill_threshold
-    memory = psutil.Process().memory_info().rss
-    a.memory_limit = (memory + 160e6) / 0.8  # Pause after 200 MB
-
-    # Note: it's crucial to have a very large single chunk of memory that gets descoped
-    # all at once in order to instigate release of process memory.
-    # Read: https://github.com/dask/distributed/issues/5840
-    def f():
-        # Add 400 MB unmanaged memory
-        x = "x" * int(400e6)
-        w = get_worker()
-        while w.status != Status.paused:
-            sleep(0.01)
-
-    with captured_logger(logging.getLogger("distributed.worker")) as logger:
-        future = c.submit(f, key="x")
-        futures = c.map(slowinc, range(30), delay=0.1)
-
-        while a.status != Status.paused:
-            await asyncio.sleep(0.01)
-
-        assert "Pausing worker" in logger.getvalue()
-        assert sum(f.status == "finished" for f in futures) < 4
-
-        while a.status != Status.running:
-            await asyncio.sleep(0.01)
-
-        assert "Resuming worker" in logger.getvalue()
-        await wait(futures)
-
-
 @gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "50 ms"})
 async def test_statistical_profiling_cycle(c, s, a, b):
     futures = c.map(slowinc, range(20), delay=0.05)
@@ -1547,31 +1145,6 @@ async def test_deque_handler(s):
         assert any(msg.msg == "foo456" for msg in deque_handler.deque)
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)],
-    worker_kwargs={"memory_limit": 0, "memory_monitor_interval": "10ms"},
-)
-async def test_avoid_memory_monitor_if_zero_limit(c, s, a):
-    assert type(a.data) is dict
-    assert "memory" not in a.periodic_callbacks
-    future = c.submit(inc, 1)
-    assert (await future) == 2
-    await asyncio.sleep(0.05)
-    await c.submit(inc, 2)  # worker doesn't pause
-
-
-@gen_cluster(
-    nthreads=[("127.0.0.1", 1)],
-    config={
-        "distributed.worker.memory.spill": False,
-        "distributed.worker.memory.target": False,
-    },
-)
-async def test_dict_data_if_no_spill_to_disk(s, w):
-    assert type(w.data) is dict
-
-
 def test_get_worker_name(client):
     def f():
         get_client().submit(inc, 1).result()
@@ -1585,11 +1158,6 @@ def test_get_worker_name(client):
     while not any("worker" in n for n in client.run_on_scheduler(func)):
         sleep(0.1)
         assert time() < start + 10
-
-
-@gen_cluster(nthreads=[("127.0.0.1", 1)], worker_kwargs={"memory_limit": "2e3 MB"})
-async def test_parse_memory_limit(s, w):
-    assert w.memory_limit == 2e9
 
 
 @gen_cluster(nthreads=[], client=True)
@@ -1732,28 +1300,6 @@ async def test_register_worker_callbacks_err(c, s, a, b):
 
 
 @gen_cluster(nthreads=[])
-async def test_data_types(s):
-    w = await Worker(s.address, data=dict)
-    assert isinstance(w.data, dict)
-    await w.close()
-
-    data = dict()
-    w = await Worker(s.address, data=data)
-    assert w.data is data
-    await w.close()
-
-    class Data(dict):
-        def __init__(self, x, y):
-            self.x = x
-            self.y = y
-
-    w = await Worker(s.address, data=(Data, {"x": 123, "y": 456}))
-    assert w.data.x == 123
-    assert w.data.y == 456
-    await w.close()
-
-
-@gen_cluster(nthreads=[])
 async def test_local_directory(s):
     with tmpfile() as fn:
         with dask.config.set(temporary_directory=fn):
@@ -1784,19 +1330,9 @@ async def test_host_address(c, s):
     await n.close()
 
 
-def test_resource_limit(monkeypatch):
-    assert parse_memory_limit("250MiB", 1, total_cores=1) == 1024 * 1024 * 250
-
-    new_limit = 1024 * 1024 * 200
-    import distributed.worker
-
-    monkeypatch.setattr(distributed.system, "MEMORY_LIMIT", new_limit)
-    assert parse_memory_limit("250MiB", 1, total_cores=1) == new_limit
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
-async def test_interface_async(cleanup, loop, Worker):
+@gen_test()
+async def test_interface_async(Worker):
     from distributed.utils import get_ip_interface
 
     psutil = pytest.importorskip("psutil")
@@ -1827,9 +1363,9 @@ async def test_interface_async(cleanup, loop, Worker):
 
 
 @pytest.mark.gpu
-@pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
-async def test_protocol_from_scheduler_address(cleanup, Worker):
+@gen_test()
+async def test_protocol_from_scheduler_address(Worker):
     pytest.importorskip("ucp")
 
     async with Scheduler(protocol="ucx", dashboard_address=":0") as s:
@@ -1841,8 +1377,8 @@ async def test_protocol_from_scheduler_address(cleanup, Worker):
                 assert info["address"].startswith("ucx://")
 
 
-@pytest.mark.asyncio
-async def test_host_uses_scheduler_protocol(cleanup, monkeypatch):
+@gen_test()
+async def test_host_uses_scheduler_protocol(monkeypatch):
     # Ensure worker uses scheduler's protocol to determine host address, not the default scheme
     # See https://github.com/dask/distributed/pull/4883
     from distributed.comm.tcp import TCPBackend
@@ -1861,9 +1397,9 @@ async def test_host_uses_scheduler_protocol(cleanup, monkeypatch):
                 pass
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
-async def test_worker_listens_on_same_interface_by_default(cleanup, Worker):
+@gen_test()
+async def test_worker_listens_on_same_interface_by_default(Worker):
     async with Scheduler(host="localhost", dashboard_address=":0") as s:
         assert s.ip in {"127.0.0.1", "localhost"}
         async with Worker(s.address) as w:
@@ -1924,6 +1460,61 @@ async def test_close_gracefully(c, s, a, b):
     # they have not been recomputed
     for key in mem:
         assert_amm_transfer_story(key, b, a)
+
+
+@pytest.mark.parametrize("sync", [False, pytest.param(True, marks=[pytest.mark.slow])])
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_close_while_executing(c, s, a, sync):
+    ev = Event()
+
+    if sync:
+
+        def f(ev):
+            ev.set()
+            sleep(2)
+
+    else:
+
+        async def f(ev):
+            await ev.set()
+            await asyncio.Event().wait()  # Block indefinitely
+
+    f1 = c.submit(f, ev, key="f1")
+    await ev.wait()
+    task = next(
+        task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
+    )
+    await a.close()
+    assert task.cancelled()
+    assert s.tasks["f1"].state == "no-worker"
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_close_async_task_handles_cancellation(c, s, a):
+    ev = Event()
+
+    async def f(ev):
+        await ev.set()
+        try:
+            await asyncio.Event().wait()  # Block indefinitely
+        except asyncio.CancelledError:
+            await asyncio.Event().wait()  # Ignore the first cancel()
+
+    f1 = c.submit(f, ev, key="f1")
+    await ev.wait()
+    task = next(
+        task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
+    )
+    start = time()
+    with captured_logger("distributed.worker", level=logging.ERROR) as logger:
+        await a.close(timeout=1)
+    assert "Failed to cancel asyncio task" in logger.getvalue()
+    assert time() - start < 5
+    assert not task.cancelled()
+    assert s.tasks["f1"].state == "no-worker"
+    task.cancel()
+    await asyncio.wait({task})
 
 
 @pytest.mark.slow
@@ -2148,43 +1739,71 @@ async def test_story_with_deps(c, s, a, b):
     Assert that the structure of the story does not change unintentionally and
     expected subfields are actually filled
     """
-    dep = c.submit(inc, 1, workers=[a.address])
-    res = c.submit(inc, dep, workers=[b.address])
+    dep = c.submit(inc, 1, workers=[a.address], key="dep")
+    res = c.submit(inc, dep, workers=[b.address], key="res")
     await res
-    key = res.key
 
-    story = a.story(key)
+    story = a.story("res")
     assert story == []
-    story = b.story(key)
+    story = b.story("res")
 
     # Story now includes randomized stimulus_ids and timestamps.
     stimulus_ids = {ev[-2] for ev in story}
-    assert len(stimulus_ids) == 3, stimulus_ids
+    assert len(stimulus_ids) == 2, stimulus_ids
     # This is a simple transition log
     expected = [
-        (key, "compute-task"),
-        (key, "released", "waiting", "waiting", {dep.key: "fetch"}),
-        (key, "waiting", "ready", "ready", {}),
-        (key, "ready", "executing", "executing", {}),
-        (key, "put-in-memory"),
-        (key, "executing", "memory", "memory", {}),
+        ("res", "compute-task"),
+        ("res", "released", "waiting", "waiting", {"dep": "fetch"}),
+        ("res", "waiting", "ready", "ready", {"res": "executing"}),
+        ("res", "ready", "executing", "executing", {}),
+        ("res", "put-in-memory"),
+        ("res", "executing", "memory", "memory", {}),
     ]
     assert_worker_story(story, expected, strict=True)
 
-    story = b.story(dep.key)
+    story = b.story("dep")
     stimulus_ids = {ev[-2] for ev in story}
     assert len(stimulus_ids) == 2, stimulus_ids
     expected = [
-        (dep.key, "ensure-task-exists", "released"),
-        (dep.key, "released", "fetch", "fetch", {}),
-        ("gather-dependencies", a.address, {dep.key}),
-        (dep.key, "fetch", "flight", "flight", {}),
-        ("request-dep", a.address, {dep.key}),
-        ("receive-dep", a.address, {dep.key}),
-        (dep.key, "put-in-memory"),
-        (dep.key, "flight", "memory", "memory", {res.key: "ready"}),
+        ("dep", "ensure-task-exists", "released"),
+        ("dep", "released", "fetch", "fetch", {}),
+        ("gather-dependencies", a.address, {"dep"}),
+        ("dep", "fetch", "flight", "flight", {}),
+        ("request-dep", a.address, {"dep"}),
+        ("receive-dep", a.address, {"dep"}),
+        ("dep", "put-in-memory"),
+        ("dep", "flight", "memory", "memory", {"res": "ready"}),
     ]
     assert_worker_story(story, expected, strict=True)
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_stimulus_story(c, s, a):
+    class C:
+        pass
+
+    f = c.submit(C, key="f")  # Test that substrings aren't matched by story()
+    f2 = c.submit(inc, 2, key="f2")
+    f3 = c.submit(inc, 3, key="f3")
+    await wait([f, f2, f3])
+
+    # Test that ExecuteSuccessEvent.value is not stored in the the event log
+    assert isinstance(a.data["f"], C)
+    ref = weakref.ref(a.data["f"])
+    del f
+    while "f" in a.data:
+        await asyncio.sleep(0.01)
+    wait_profiler()
+    assert ref() is None
+
+    story = a.stimulus_story("f", "f2")
+    assert {ev.key for ev in story} == {"f", "f2"}
+    assert {ev.type for ev in story} == {C, int}
+
+    prev_handled = story[0].handled
+    for ev in story[1:]:
+        assert ev.handled >= prev_handled
+        prev_handled = ev.handled
 
 
 @gen_cluster(client=True)
@@ -2366,6 +1985,15 @@ async def test_multiple_executors(c, s):
         default_result, gpu_result = await c.gather(futures)
         assert "Dask-Default-Threads" in default_result
         assert "Dask-Foo-Threads" in gpu_result
+
+
+@gen_cluster(client=True)
+async def test_bad_executor_annotation(c, s, a, b):
+    with dask.annotate(executor="bad"):
+        future = c.submit(inc, 1)
+    with pytest.raises(ValueError, match="Invalid executor 'bad'; expected one of: "):
+        await future
+    assert future.status == "error"
 
 
 @gen_cluster(client=True)
@@ -3096,7 +2724,7 @@ async def test_acquire_replicas(c, s, a, b):
 
     s.request_acquire_replicas(b.address, [fut.key], stimulus_id=f"test-{time()}")
 
-    while len(s.who_has[fut.key]) != 2:
+    while len(s.tasks[fut.key].who_has) != 2:
         await asyncio.sleep(0.005)
 
     for w in (a, b):
@@ -3122,7 +2750,7 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
     while futA.key not in b.tasks or not b.tasks[futA.key].state == "memory":
         await asyncio.sleep(0.005)
 
-    while len(s.who_has[futA.key]) != 2:
+    while len(s.tasks[futA.key].who_has) != 2:
         await asyncio.sleep(0.005)
 
     # Ensure that both the replica and an ordinary dependency pass through the
@@ -3233,80 +2861,103 @@ async def test_remove_replicas_simple(c, s, a, b):
 
 @gen_cluster(
     client=True,
+    nthreads=[("", 1), ("", 6)],  # Up to 5 threads of b will get stuck; read below
     config={"distributed.comm.recent-messages-log-length": 1_000},
 )
-async def test_remove_replicas_while_computing(c, s, *workers):
-    futs = c.map(inc, range(10), workers=[workers[0].address])
+async def test_remove_replicas_while_computing(c, s, a, b):
+    futs = c.map(inc, range(10), workers=[a.address])
+    dependents_event = distributed.Event()
 
-    # All interesting things will happen on that worker
-    w = workers[1]
-    intermediate = c.map(slowinc, futs, delay=0.05, workers=[w.address])
+    def some_slow(x, event):
+        if x % 2:
+            event.wait()
+        return x + 1
 
-    def reduce(*args, **kwargs):
-        import time
+    # All interesting things will happen on b
+    dependents = c.map(some_slow, futs, event=dependents_event, workers=[b.address])
 
-        time.sleep(0.5)
-        return
-
-    final = c.submit(reduce, intermediate, workers=[w.address], key="final")
-
-    while not any(f.key in w.tasks for f in intermediate):
-        await asyncio.sleep(0.001)
+    while not any(f.key in b.tasks for f in dependents):
+        await asyncio.sleep(0.01)
 
     # The scheduler removes keys from who_has/has_what immediately
     # Make sure the worker responds to the rejection and the scheduler corrects
     # the state
-    ws = s.workers[w.address]
-    while not all(s.tasks[fut.key] in ws.has_what for fut in futs):
-        await asyncio.sleep(0.001)
+    ws = s.workers[b.address]
 
-    s.request_remove_replicas(
-        w.address, [fut.key for fut in futs], stimulus_id=f"test-{time()}"
-    )
-    # Scheduler removed keys immediately...
-    assert not any(s.tasks[fut.key] in ws.has_what for fut in futs)
-    # ... but the state is properly restored
-    while not any(s.tasks[fut.key] in ws.has_what for fut in futs):
+    def ws_has_futs(aggr_func):
+        nonlocal futs
+        return aggr_func(s.tasks[fut.key] in ws.has_what for fut in futs)
+
+    # Wait for all futs to transfer over
+    while not ws_has_futs(all):
         await asyncio.sleep(0.01)
 
-    await wait(intermediate)
+    # Wait for some dependent tasks to be done. No more than half of the dependents can
+    # finish, as the others are blocked on dependents_event.
+    # Note: for this to work reliably regardless of scheduling order, we need to have 6+
+    # threads. At the moment of writing it works with 2 because futures of Client.map
+    # are always scheduled from left to right, but we'd rather not rely on this
+    # assumption.
+    while not any(fut.status == "finished" for fut in dependents):
+        await asyncio.sleep(0.01)
+    assert not all(fut.status == "finished" for fut in dependents)
+
+    # Try removing the initial keys
+    s.request_remove_replicas(
+        b.address, [fut.key for fut in futs], stimulus_id=f"test-{time()}"
+    )
+    # Scheduler removed all keys immediately...
+    assert not ws_has_futs(any)
+    # ... but the state is properly restored for all tasks for which the dependent task
+    # isn't done yet
+    while not ws_has_futs(any):
+        await asyncio.sleep(0.01)
+
+    # Let the remaining dependent tasks complete
+    await dependents_event.set()
+    await wait(dependents)
+    assert ws_has_futs(any) and not ws_has_futs(all)
 
     # If a request is rejected, the worker responds with an add-keys message to
     # reenlist the key in the schedulers state system to avoid race conditions,
     # see also https://github.com/dask/distributed/issues/5265
     rejections = set()
-    for msg in w.log:
+    for msg in b.log:
         if msg[0] == "remove-replica-rejected":
             rejections.update(msg[1])
+    assert rejections
+
+    def answer_sent(key):
+        for batch in b.batched_stream.recent_message_log:
+            for msg in batch:
+                if "op" in msg and msg["op"] == "add-keys" and key in msg["keys"]:
+                    return True
+        return False
+
     for rejected_key in rejections:
-
-        def answer_sent(key):
-            for batch in w.batched_stream.recent_message_log:
-                for msg in batch:
-                    if "op" in msg and msg["op"] == "add-keys" and key in msg["keys"]:
-                        return True
-            return False
-
         assert answer_sent(rejected_key)
 
-    # Since intermediate is done, futs replicas may be removed.
+    # Now that all dependent tasks are done, futs replicas may be removed.
     # They might be already gone due to the above remove replica calls
     s.request_remove_replicas(
-        w.address, [fut.key for fut in futs], stimulus_id=f"test-{time()}"
+        b.address,
+        [fut.key for fut in futs if ws in s.tasks[fut.key].who_has],
+        stimulus_id=f"test-{time()}",
     )
 
-    while any(w.tasks[f.key].state != "released" for f in futs if f.key in w.tasks):
-        await asyncio.sleep(0.001)
+    while any(b.tasks[f.key].state != "released" for f in futs if f.key in b.tasks):
+        await asyncio.sleep(0.01)
 
     # The scheduler actually gets notified about the removed replica
-    while not all(len(s.tasks[f.key].who_has) == 1 for f in futs):
-        await asyncio.sleep(0.001)
+    while ws_has_futs(any):
+        await asyncio.sleep(0.01)
+    # A replica is still on workers[0]
+    assert all(len(s.tasks[f.key].who_has) == 1 for f in futs)
 
-    await final
-    del final, intermediate, futs
+    del dependents, futs
 
-    while any(w.tasks for w in workers):
-        await asyncio.sleep(0.001)
+    while any(w.tasks for w in (a, b)):
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
@@ -3428,38 +3079,18 @@ async def test_missing_released_zombie_tasks_2(c, s, a, b):
         )
 
 
-@pytest.mark.slow
-@gen_cluster(
-    client=True,
-    Worker=Nanny,
-    nthreads=[("", 1)],
-    config={"distributed.worker.memory.pause": 0.5},
-    worker_kwargs={"memory_limit": 2**29},  # 500 MiB
-)
-async def test_worker_status_sync(c, s, a):
-    (ws,) = s.workers.values()
-
-    while ws.status != Status.running:
-        await asyncio.sleep(0.01)
-
-    def leak():
-        distributed._test_leak = "x" * 2**28  # 250 MiB
-
-    def clear_leak():
-        del distributed._test_leak
-
-    await c.run(leak)
-
+@gen_cluster(nthreads=[("", 1)], config={"distributed.worker.memory.pause": False})
+async def test_worker_status_sync(s, a):
+    ws = s.workers[a.address]
+    a.status = Status.paused
     while ws.status != Status.paused:
         await asyncio.sleep(0.01)
 
-    await c.run(clear_leak)
-
+    a.status = Status.running
     while ws.status != Status.running:
         await asyncio.sleep(0.01)
 
     await s.retire_workers()
-
     while ws.status != Status.closed:
         await asyncio.sleep(0.01)
 
@@ -3516,11 +3147,11 @@ async def test_task_flight_compute_oserror(c, s, a, b):
     await wait(futs)
     assert a.data
     assert write_queue.empty()
-    f1 = c.submit(sum, futs, workers=[b.address])
+    f1 = c.submit(sum, futs, workers=[b.address], key="f1")
     peer, msg = await write_queue.get()
     assert peer == a.address
     assert msg["op"] == "get_data"
-    in_flight_tasks = [ts for ts in b.tasks.values() if ts.key != f1.key]
+    in_flight_tasks = [ts for ts in b.tasks.values() if ts.key != "f1"]
     assert all(ts.state == "flight" for ts in in_flight_tasks)
     await a.close()
     write_event.set()
@@ -3531,28 +3162,28 @@ async def test_task_flight_compute_oserror(c, s, a, b):
     # asserting a few internals to make sure that if things change this is done
     # deliberately
 
-    sum_story = b.story(f1.key)
+    sum_story = b.story("f1")
     expected_sum_story = [
-        (f1.key, "compute-task"),
+        ("f1", "compute-task"),
         (
-            f1.key,
+            "f1",
             "released",
             "waiting",
             "waiting",
             {ts.key: "fetch" for ts in in_flight_tasks},
         ),
         # inc is lost and needs to be recomputed. Therefore, sum is released
-        ("free-keys", (f1.key,)),
-        (f1.key, "release-key"),
-        (f1.key, "waiting", "released", "released", {f1.key: "forgotten"}),
-        (f1.key, "released", "forgotten", "forgotten", {}),
+        ("free-keys", ("f1",)),
+        ("f1", "release-key"),
+        ("f1", "waiting", "released", "released", {"f1": "forgotten"}),
+        ("f1", "released", "forgotten", "forgotten", {}),
         # Now, we actually compute the task *once*. This must not cycle back
-        (f1.key, "compute-task"),
-        (f1.key, "released", "waiting", "waiting", {f1.key: "ready"}),
-        (f1.key, "waiting", "ready", "ready", {}),
-        (f1.key, "ready", "executing", "executing", {}),
-        (f1.key, "put-in-memory"),
-        (f1.key, "executing", "memory", "memory", {}),
+        ("f1", "compute-task"),
+        ("f1", "released", "waiting", "waiting", {"f1": "ready"}),
+        ("f1", "waiting", "ready", "ready", {"f1": "executing"}),
+        ("f1", "ready", "executing", "executing", {}),
+        ("f1", "put-in-memory"),
+        ("f1", "executing", "memory", "memory", {}),
     ]
     assert_worker_story(sum_story, expected_sum_story, strict=True)
 
@@ -3748,12 +3379,11 @@ async def test_Worker__to_dict(c, s, a):
     x = c.submit(inc, 1, key="x")
     await wait(x)
     d = a._to_dict()
-    assert d.keys() == {
+    assert set(d) == {
         "type",
         "id",
         "scheduler",
         "nthreads",
-        "memory_limit",
         "address",
         "status",
         "thread_id",
@@ -3764,76 +3394,134 @@ async def test_Worker__to_dict(c, s, a):
         "in_flight_tasks",
         "in_flight_workers",
         "log",
+        "stimulus_log",
         "tasks",
-        "memory_target_fraction",
-        "memory_spill_fraction",
-        "memory_pause_fraction",
         "logs",
         "config",
         "incoming_transfer_log",
         "outgoing_transfer_log",
         "data_needed",
         "pending_data_per_worker",
+        # attributes of WorkerMemoryManager
+        "data",
+        "max_spill",
+        "memory_limit",
+        "memory_monitor_interval",
+        "memory_pause_fraction",
+        "memory_spill_fraction",
+        "memory_target_fraction",
     }
     assert d["tasks"]["x"]["key"] == "x"
+    assert d["data"] == ["x"]
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_TaskState__to_dict(c, s, a):
-    """tasks that are listed as dependencies of other tasks are dumped as a short repr
-    and always appear in full under Worker.tasks
-    """
-    x = c.submit(inc, 1, key="x")
-    y = c.submit(inc, x, key="y")
-    z = c.submit(inc, 2, key="z")
-    await wait([x, y, z])
+@gen_cluster(nthreads=[])
+async def test_extension_methods(s):
+    flag = False
+    shutdown = False
 
-    tasks = a._to_dict()["tasks"]
+    class WorkerExtension:
+        def __init__(self, worker):
+            pass
 
-    assert isinstance(tasks["x"], dict)
-    assert isinstance(tasks["y"], dict)
-    assert isinstance(tasks["z"], dict)
-    assert tasks["x"]["dependents"] == ["<TaskState 'y' memory>"]
-    assert tasks["y"]["dependencies"] == ["<TaskState 'x' memory>"]
+        def heartbeat(self):
+            return {"data": 123}
+
+        async def close(self):
+            nonlocal shutdown
+            shutdown = True
+
+    class SchedulerExtension:
+        def __init__(self, scheduler):
+            self.scheduler = scheduler
+            pass
+
+        def heartbeat(self, ws, data: dict):
+            nonlocal flag
+            assert ws in self.scheduler.workers.values()
+            assert data == {"data": 123}
+            flag = True
+
+    s.extensions["test"] = SchedulerExtension(s)
+
+    async with Worker(s.address, extensions={"test": WorkerExtension}) as w:
+        assert not shutdown
+        await w.heartbeat()
+        assert flag
+
+    assert shutdown
 
 
-def test_unique_task_heap():
-    heap = UniqueTaskHeap()
+@gen_cluster()
+async def test_benchmark_hardware(s, a, b):
+    sizes = ["1 kiB", "10 kiB"]
+    disk = benchmark_disk(sizes=sizes, duration="1 ms")
+    memory = benchmark_memory(sizes=sizes, duration="1 ms")
+    network = await benchmark_network(
+        address=a.address, rpc=b.rpc, sizes=sizes, duration="1 ms"
+    )
 
-    for x in range(10):
-        ts = TaskState(f"f{x}")
-        ts.priority = (0, 0, 1, x % 3)
-        heap.push(ts)
+    assert set(disk) == set(memory) == set(network) == set(sizes)
 
-    heap_list = list(heap)
-    # iteration does not empty heap
-    assert len(heap) == 10
-    assert heap_list == sorted(heap_list, key=lambda ts: ts.priority)
 
-    seen = set()
-    last_prio = (0, 0, 0, 0)
-    while heap:
-        peeked = heap.peek()
-        ts = heap.pop()
-        assert peeked == ts
-        seen.add(ts.key)
-        assert ts.priority
-        assert last_prio <= ts.priority
-        last_prio = last_prio
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.admin.tick.interval": "5ms",
+        "distributed.admin.tick.cycle": "100ms",
+    },
+)
+async def test_tick_interval(c, s, a, b):
+    import time
 
-    ts = TaskState("foo")
-    heap.push(ts)
-    heap.push(ts)
-    assert len(heap) == 1
+    await a.heartbeat()
+    x = s.workers[a.address].metrics["event_loop_interval"]
+    while s.workers[a.address].metrics["event_loop_interval"] > 0.050:
+        await asyncio.sleep(0.01)
+    while s.workers[a.address].metrics["event_loop_interval"] < 0.100:
+        await asyncio.sleep(0.01)
+        time.sleep(0.200)
 
-    assert repr(heap) == "<UniqueTaskHeap: 1 items>"
 
-    assert heap.pop() == ts
-    assert not heap
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_log_invalid_transitions(c, s, a):
+    x = c.submit(inc, 1)
+    y = c.submit(inc, x)
+    xkey = x.key
+    del x
+    await y
+    while a.tasks[xkey].state != "released":
+        await asyncio.sleep(0.01)
+    ts = a.tasks[xkey]
+    with pytest.raises(InvalidTransition):
+        a.transition(ts, "foo", stimulus_id="bar")
 
-    # Test that we're cleaning the seen set on pop
-    heap.push(ts)
-    assert len(heap) == 1
-    assert heap.pop() == ts
+    while not s.events["invalid-worker-transition"]:
+        await asyncio.sleep(0.01)
 
-    assert repr(heap) == "<UniqueTaskHeap: 0 items>"
+    assert "foo" in str(s.events["invalid-worker-transition"])
+    assert a.address in str(s.events["invalid-worker-transition"])
+    assert ts.key in str(s.events["invalid-worker-transition"])
+
+    del s.events["invalid-worker-transition"]  # for test cleanup
+
+
+class BreakingWorker(Worker):
+    broke_once = False
+
+    def get_data(self, comm, **kwargs):
+        if not self.broke_once:
+            self.broke_once = True
+            raise OSError("fake error")
+        return super().get_data(comm, **kwargs)
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=BreakingWorker)
+async def test_broken_comm(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+    )
+    s = df.shuffle("id", shuffle="tasks")
+    await c.compute(s.size)

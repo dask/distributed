@@ -73,7 +73,6 @@ async def test_client_actions(s, a, b, direct_to_workers):
         assert counter._address
         assert hasattr(counter, "increment")
         assert hasattr(counter, "add")
-        assert hasattr(counter, "n")
 
         assert await counter.n == 0
 
@@ -122,7 +121,7 @@ async def test_Actor(c, s, a, b):
 
     assert counter._cls == Counter
 
-    assert hasattr(counter, "n")
+    assert await counter.n == 0
     assert hasattr(counter, "increment")
     assert hasattr(counter, "add")
 
@@ -364,7 +363,10 @@ async def test_many_computations(c, s, a, b):
     done = c.submit(lambda x: None, futures)
 
     while not done.done():
-        assert len(s.processing) <= a.nthreads + b.nthreads
+        assert (
+            len([ws for ws in s.workers.values() if ws.processing])
+            <= a.nthreads + b.nthreads
+        )
         await asyncio.sleep(0.01)
 
     await done

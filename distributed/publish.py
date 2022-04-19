@@ -2,7 +2,7 @@ from collections.abc import MutableMapping
 
 from dask.utils import stringify
 
-from .utils import log_errors
+from distributed.utils import log_errors
 
 
 class PublishExtension:
@@ -26,7 +26,6 @@ class PublishExtension:
         }
 
         self.scheduler.handlers.update(handlers)
-        self.scheduler.extensions["publish"] = self
 
     def put(self, keys=None, data=None, name=None, override=False, client=None):
         with log_errors():

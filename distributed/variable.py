@@ -8,10 +8,10 @@ from tlz import merge
 
 from dask.utils import parse_timedelta, stringify
 
-from .client import Client, Future
-from .metrics import time
-from .utils import TimeoutError, log_errors
-from .worker import get_client, get_worker
+from distributed.client import Client, Future
+from distributed.metrics import time
+from distributed.utils import TimeoutError, log_errors
+from distributed.worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +39,6 @@ class VariableExtension:
 
         self.scheduler.stream_handlers["variable-future-release"] = self.future_release
         self.scheduler.stream_handlers["variable_delete"] = self.delete
-
-        self.scheduler.extensions["variables"] = self
 
     async def set(self, name=None, key=None, data=None, client=None):
         if key is not None:

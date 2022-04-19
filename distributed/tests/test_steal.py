@@ -12,11 +12,12 @@ from tlz import concat, sliding_window
 
 import dask
 
-from distributed import Lock, Nanny, Worker, wait, worker_client
+from distributed import Event, Lock, Nanny, Worker, wait, worker_client
 from distributed.compatibility import LINUX
 from distributed.config import config
 from distributed.core import Status
 from distributed.metrics import time
+from distributed.profile import wait_profiler
 from distributed.scheduler import key_split
 from distributed.system import MEMORY_LIMIT
 from distributed.utils_test import (
@@ -60,7 +61,7 @@ async def test_dont_steal_expensive_data_fast_computation(c, s, a, b):
         for i in range(10)
     ]
     await wait(cheap)
-    assert len(s.who_has[x.key]) == 1
+    assert len(s.tasks[x.key].who_has) == 1
     assert len(b.data) == 0
     assert len(a.data) == 12
 
@@ -90,7 +91,7 @@ async def test_steal_expensive_data_slow_computation(c, s, a, b):
 
     slow = [c.submit(slowinc, x, delay=0.1, pure=False) for i in range(20)]
     await wait(slow)
-    assert len(s.who_has[x.key]) > 1
+    assert len(s.tasks[x.key].who_has) > 1
 
     assert b.data  # not empty
 
@@ -104,11 +105,11 @@ async def test_worksteal_many_thieves(c, s, *workers):
 
     await wait(xs)
 
-    for w, keys in s.has_what.items():
-        assert 2 < len(keys) < 30
+    for ws in s.workers.values():
+        assert 2 < len(ws.has_what) < 30
 
-    assert len(s.who_has[x.key]) > 1
-    assert sum(map(len, s.has_what.values())) < 150
+    assert len(s.tasks[x.key].who_has) > 1
+    assert sum(len(ws.has_what) for ws in s.workers.values()) < 150
 
 
 @gen_cluster(
@@ -256,7 +257,7 @@ async def test_steal_related_tasks(e, s, a, b, c):
 
     nearby = 0
     for f1, f2 in sliding_window(2, futures):
-        if s.who_has[f1.key] == s.who_has[f2.key]:
+        if s.tasks[f1.key].who_has == s.tasks[f2.key].who_has:
             nearby += 1
 
     assert nearby > 10
@@ -274,8 +275,8 @@ async def test_dont_steal_fast_tasks_compute_time(c, s, *workers):
 
     await wait(futures)
 
-    assert len(set.union(*(s.who_has[x.key] for x in xs))) == 1
-    assert len(s.has_what[workers[0].address]) == len(xs) + len(futures)
+    assert len(set.union(*(s.tasks[x.key].who_has for x in xs))) == 1
+    assert len(s.workers[workers[0].address].has_what) == len(xs) + len(futures)
 
 
 @gen_cluster(client=True)
@@ -311,8 +312,8 @@ async def test_dont_steal_fast_tasks_blocklist(c, s, a, b):
     await wait(futures)
 
     # The +1 is the dependency we initially submitted to worker B
-    assert len(s.has_what[a.address]) == 101
-    assert len(s.has_what[b.address]) == 1
+    assert len(s.workers[a.address].has_what) == 101
+    assert len(s.workers[b.address].has_what) == 1
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
@@ -671,7 +672,7 @@ async def assert_balanced(inp, expected, c, s, *workers):
             )
             futures.append(f)
 
-    while len(s.rprocessing) < len(futures):
+    while len([ts for ts in s.tasks.values() if ts.processing_on]) < len(futures):
         await asyncio.sleep(0.001)
 
     for i in range(10):
@@ -681,7 +682,10 @@ async def assert_balanced(inp, expected, c, s, *workers):
             await asyncio.sleep(0.001)
 
         result = [
-            sorted((int(key_split(k)) for k in s.processing[w.address]), reverse=True)
+            sorted(
+                (int(key_split(ts.key)) for ts in s.workers[w.address].processing),
+                reverse=True,
+            )
             for w in workers
         ]
 
@@ -749,7 +753,7 @@ async def test_restart(c, s, a, b):
     futures = c.map(
         slowinc, range(100), delay=0.01, workers=a.address, allow_other_workers=True
     )
-    while not s.processing[b.worker_address]:
+    while not s.workers[b.worker_address].processing:
         await asyncio.sleep(0.01)
 
     # Unknown tasks are never stolen therefore wait for a measurement
@@ -788,14 +792,14 @@ async def test_steal_communication_heavy_tasks(c, s, a, b):
         for i in range(10)
     ]
 
-    while not any(f.key in s.rprocessing for f in futures):
+    while not any(f.key in s.tasks and s.tasks[f.key].processing_on for f in futures):
         await asyncio.sleep(0.01)
 
     steal.balance()
     while steal.in_flight:
         await asyncio.sleep(0.001)
 
-    assert s.processing[b.address]
+    assert s.workers[b.address].processing
 
 
 @gen_cluster(client=True)
@@ -817,13 +821,13 @@ async def test_steal_twice(c, s, a, b):
     await wait(futures)
 
     # Note: this includes a and b
-    empty_workers = [w for w, keys in s.has_what.items() if not keys]
+    empty_workers = [ws for ws in s.workers.values() if not ws.has_what]
     assert (
         len(empty_workers) < 3
     ), f"Too many workers without keys ({len(empty_workers)} out of {len(s.workers)})"
     # This also tests that some tasks were stolen from b
     # (see `while len(b.tasks) < 30` above)
-    assert max(map(len, s.has_what.values())) < 30
+    assert max(len(ws.has_what) for ws in s.workers.values()) < 30
 
     assert a.in_flight_tasks == 0
     assert b.in_flight_tasks == 0
@@ -834,10 +838,10 @@ async def test_steal_twice(c, s, a, b):
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 3,
-    worker_kwargs={"memory_monitor_interval": "20ms"},
+    config={"distributed.worker.memory.pause": False},
 )
 async def test_paused_workers_must_not_steal(c, s, w1, w2, w3):
-    w2.memory_pause_fraction = 1e-15
+    w2.status = Status.paused
     while s.workers[w2.address].status != Status.paused:
         await asyncio.sleep(0.01)
 
@@ -889,7 +893,7 @@ async def test_dont_steal_long_running_tasks(c, s, a, b):
     await c.submit(inc, 1)  # learn duration
 
     long_tasks = c.map(long, [0.5, 0.6], workers=a.address, allow_other_workers=True)
-    while sum(map(len, s.processing.values())) < 2:  # let them start
+    while sum(len(ws.processing) for ws in s.workers.values()) < 2:  # let them start
         await asyncio.sleep(0.01)
 
     start = time()
@@ -942,9 +946,9 @@ async def test_cleanup_repeated_tasks(c, s, a, b):
         await asyncio.sleep(0.01)
         assert time() < start + 1
 
-    assert not s.who_has
-    assert not any(s.has_what.values())
+    assert not s.tasks
 
+    wait_profiler()
     assert not list(ws)
 
 
@@ -1146,9 +1150,11 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
     # https://github.com/dask/distributed/issues/5370
     steal = s.extensions["stealing"]
     w0 = workers[0]
+    ev = Event()
     futs1 = c.map(
-        slowinc,
+        lambda _, ev: ev.wait(),
         range(10),
+        ev=ev,
         key=[f"f1-{ix}" for ix in range(10)],
         workers=[w0.address],
         allow_other_workers=True,
@@ -1173,19 +1179,30 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
     assert wsB == victim_ts.processing_on
     # move_task_request is not responsible for respecting worker restrictions
     steal.move_task_request(victim_ts, wsB, wsC)
+
+    # Let tasks finish
+    await ev.set()
     await c.gather(futs1)
 
-    # If this turns out to be overly flaky, the following may be relaxed or
-    # removed. The point of this test is to not deadlock but verifying expected
-    # state is still a nice thing
+    assert victim_ts.who_has != {wsC}
+    msgs = steal.story(victim_ts)
+    msgs = [msg[:-1] for msg in msgs]  # Remove random IDs
 
-    # Either the last request goes through or both have been rejected since the
-    # computation was already done by the time the request comes in. This is
-    # unfortunately not stable even if we increase the compute time
-    if victim_ts.who_has != {wsC}:
-        msgs = steal.story(victim_ts)
-        assert len(msgs) == 2
-        assert all(msg[0] == "already-aborted" for msg in msgs), msgs
+    # There are three possible outcomes
+    expect1 = [
+        ("stale-response", victim_key, "executing", wsA.address),
+        ("already-computing", victim_key, "executing", wsB.address, wsC.address),
+    ]
+    expect2 = [
+        ("already-computing", victim_key, "executing", wsB.address, wsC.address),
+        ("already-aborted", victim_key, "executing", wsA.address),
+    ]
+    # This outcome appears only in ~2% of the runs
+    expect3 = [
+        ("already-computing", victim_key, "executing", wsB.address, wsC.address),
+        ("already-aborted", victim_key, "memory", wsA.address),
+    ]
+    assert msgs in (expect1, expect2, expect3)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)

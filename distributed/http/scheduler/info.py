@@ -12,10 +12,10 @@ from tornado.websocket import WebSocketHandler
 
 from dask.utils import format_bytes, format_time
 
-from ...diagnostics.websocket import WebsocketPlugin
-from ...metrics import time
-from ...utils import log_errors
-from ..utils import RequestHandler, redirect
+from distributed.diagnostics.websocket import WebsocketPlugin
+from distributed.http.utils import RequestHandler, redirect
+from distributed.metrics import time
+from distributed.utils import log_errors
 
 ns = {
     func.__name__: func
@@ -119,7 +119,7 @@ class WorkerCallStacks(RequestHandler):
     async def get(self, worker):
         with log_errors():
             worker = escape.url_unescape(worker)
-            keys = self.server.processing[worker]
+            keys = {ts.key for ts in self.server.workers[worker].processing}
             call_stack = await self.server.get_call_stack(keys=keys)
             self.render(
                 "call-stack.html",

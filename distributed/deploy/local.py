@@ -7,12 +7,13 @@ import toolz
 from dask.system import CPU_COUNT
 from dask.widgets import get_template
 
-from ..nanny import Nanny
-from ..scheduler import Scheduler
-from ..security import Security
-from ..worker import Worker, parse_memory_limit
-from .spec import SpecCluster
-from .utils import nprocesses_nthreads
+from distributed.deploy.spec import SpecCluster
+from distributed.deploy.utils import nprocesses_nthreads
+from distributed.nanny import Nanny
+from distributed.scheduler import Scheduler
+from distributed.security import Security
+from distributed.worker import Worker
+from distributed.worker_memory import parse_memory_limit
 
 logger = logging.getLogger(__name__)
 

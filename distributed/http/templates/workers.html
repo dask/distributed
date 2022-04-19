@@ -5,7 +5,7 @@
 
   <a class="button is-primary" href="logs.html">Logs</a>
   <a class="button is-primary" href="../../status">Bokeh</a>
-  {% set worker_list = list(workers.values()) %}
+  {% set worker_list = sorted(workers.values(), key=lambda ws: ws.name) %}
   {% include "worker-table.html" %}
 
 {% end %}

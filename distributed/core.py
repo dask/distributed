@@ -6,6 +6,7 @@ import logging
 import sys
 import threading
 import traceback
+import types
 import uuid
 import warnings
 import weakref
@@ -14,7 +15,7 @@ from collections.abc import Container
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import Callable, ClassVar
+from typing import Callable, ClassVar, TypedDict, TypeVar
 
 import tblib
 from tlz import merge
@@ -24,10 +25,8 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
-from distributed.utils import recursive_to_dict
-
-from . import profile, protocol
-from .comm import (
+from distributed import profile, protocol
+from distributed.comm import (
     Comm,
     CommClosedError,
     connect,
@@ -36,13 +35,14 @@ from .comm import (
     normalize_address,
     unparse_host_port,
 )
-from .metrics import time
-from .system_monitor import SystemMonitor
-from .utils import (
+from distributed.metrics import time
+from distributed.system_monitor import SystemMonitor
+from distributed.utils import (
     TimeoutError,
     get_traceback,
     has_keyword,
     is_coroutine_function,
+    recursive_to_dict,
     truncate_exception,
 )
 
@@ -202,7 +202,7 @@ class Server:
         if not hasattr(self.io_loop, "profile"):
             ref = weakref.ref(self.io_loop)
 
-            def stop():
+            def stop() -> bool:
                 loop = ref()
                 return loop is None or loop.asyncio_loop.is_closed()
 
@@ -215,11 +215,11 @@ class Server:
 
         # Statistics counters for various events
         with suppress(ImportError):
-            from .counter import Digest
+            from distributed.counter import Digest
 
             self.digests = defaultdict(partial(Digest, loop=self.io_loop))
 
-        from .counter import Counter
+        from distributed.counter import Counter
 
         self.counters = defaultdict(partial(Counter, loop=self.io_loop))
 
@@ -235,11 +235,20 @@ class Server:
         self.periodic_callbacks["monitor"] = pc
 
         self._last_tick = time()
-        measure_tick_interval = parse_timedelta(
+        self._tick_counter = 0
+        self._tick_count = 0
+        self._tick_count_last = time()
+        self._tick_interval = parse_timedelta(
             dask.config.get("distributed.admin.tick.interval"), default="ms"
         )
-        pc = PeriodicCallback(self._measure_tick, measure_tick_interval * 1000)
-        self.periodic_callbacks["tick"] = pc
+        self._tick_interval_observed = self._tick_interval
+        self.periodic_callbacks["tick"] = PeriodicCallback(
+            self._measure_tick, self._tick_interval * 1000
+        )
+        self.periodic_callbacks["ticks"] = PeriodicCallback(
+            self._cycle_ticks,
+            parse_timedelta(dask.config.get("distributed.admin.tick.cycle")) * 1000,
+        )
 
         self.thread_id = 0
 
@@ -264,7 +273,10 @@ class Server:
 
     @property
     def status(self):
-        return self._status
+        try:
+            return self._status
+        except AttributeError:
+            return Status.undefined
 
     @status.setter
     def status(self, new_status):
@@ -349,6 +361,7 @@ class Server:
         now = time()
         diff = now - self._last_tick
         self._last_tick = now
+        self._tick_counter += 1
         if diff > tick_maximum_delay:
             logger.info(
                 "Event loop was unresponsive in %s for %.2fs.  "
@@ -360,6 +373,13 @@ class Server:
             )
         if self.digests is not None:
             self.digests["tick-duration"].add(diff)
+
+    def _cycle_ticks(self):
+        if not self._tick_counter:
+            return
+        last, self._tick_count_last = self._tick_count_last, time()
+        count, self._tick_counter = self._tick_counter, 0
+        self._tick_interval_observed = (time() - last) / (count or 1)
 
     @property
     def address(self):
@@ -399,9 +419,7 @@ class Server:
     def identity(self) -> dict[str, str]:
         return {"type": type(self).__name__, "id": self.id}
 
-    def _to_dict(
-        self, comm: Comm | None = None, *, exclude: Container[str] = ()
-    ) -> dict:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -539,7 +557,7 @@ class Server:
                             result = asyncio.ensure_future(result)
                             self._ongoing_coroutines.add(result)
                             result = await result
-                    except (CommClosedError, asyncio.CancelledError):
+                    except CommClosedError:
                         if self.status in Status.ANY_RUNNING:
                             logger.info("Lost connection to %r", address, exc_info=True)
                         break
@@ -579,7 +597,7 @@ class Server:
                         "Failed while closing connection to %r: %s", address, e
                     )
 
-    async def handle_stream(self, comm, extra=None, every_cycle=[]):
+    async def handle_stream(self, comm, extra=None, every_cycle=()):
         extra = extra or {}
         logger.info("Starting established connection")
 
@@ -859,11 +877,11 @@ class rpc:
 
         return send_recv_from_rpc
 
-    def close_rpc(self):
+    async def close_rpc(self):
         if self.status != Status.closed:
             rpc.active.discard(self)
         self.status = Status.closed
-        return asyncio.gather(*self.close_comms())
+        return await asyncio.gather(*self.close_comms())
 
     def __enter__(self):
         return self
@@ -998,7 +1016,6 @@ class ConnectionPool:
         self.deserializers = deserializers if deserializers is not None else serializers
         self.connection_args = connection_args or {}
         self.timeout = timeout
-        self._n_connecting = 0
         self.server = weakref.ref(server) if server else None
         self._created = weakref.WeakSet()
         self._instances.add(self)
@@ -1007,6 +1024,8 @@ class ConnectionPool:
         # while the _n_connecting also accounts for connection attempts which
         # are waiting due to the connection limit
         self._connecting = set()
+        self._pending_count = 0
+        self._connecting_count = 0
         self.status = Status.init
 
     def _validate(self):
@@ -1029,7 +1048,7 @@ class ConnectionPool:
         return "<ConnectionPool: open=%d, active=%d, connecting=%d>" % (
             self.open,
             self.active,
-            self._n_connecting,
+            len(self._connecting),
         )
 
     def __call__(self, addr=None, ip=None, port=None):
@@ -1051,6 +1070,40 @@ class ConnectionPool:
         self.semaphore = asyncio.Semaphore(self.limit)
         self.status = Status.running
 
+    @property
+    def _n_connecting(self) -> int:
+        return self._connecting_count
+
+    async def _connect(self, addr, timeout=None):
+        self._pending_count += 1
+        try:
+            await self.semaphore.acquire()
+            try:
+                self._connecting_count += 1
+                comm = await connect(
+                    addr,
+                    timeout=timeout or self.timeout,
+                    deserialize=self.deserialize,
+                    **self.connection_args,
+                )
+                comm.name = "ConnectionPool"
+                comm._pool = weakref.ref(self)
+                comm.allow_offload = self.allow_offload
+                self._created.add(comm)
+
+                self.occupied[addr].add(comm)
+
+                return comm
+            except BaseException:
+                self.semaphore.release()
+                raise
+            finally:
+                self._connecting_count -= 1
+        except asyncio.CancelledError:
+            raise CommClosedError("ConnectionPool closing.")
+        finally:
+            self._pending_count -= 1
+
     async def connect(self, addr, timeout=None):
         """
         Get a Comm to the given address.  For internal use.
@@ -1068,44 +1121,30 @@ class ConnectionPool:
         if self.semaphore.locked():
             self.collect()
 
-        self._n_connecting += 1
-        await self.semaphore.acquire()
-        fut = None
+        # This construction is there to ensure that cancellation requests from
+        # the outside can be distinguished from cancellations of our own.
+        # Once the CommPool closes, we'll cancel the connect_attempt which will
+        # raise an OSError
+        # If the ``connect`` is cancelled from the outside, the Event.wait will
+        # be cancelled instead which we'll reraise as a CancelledError and allow
+        # it to propagate
+        connect_attempt = asyncio.create_task(self._connect(addr, timeout))
+        done = asyncio.Event()
+        self._connecting.add(connect_attempt)
+        connect_attempt.add_done_callback(lambda _: done.set())
+        connect_attempt.add_done_callback(self._connecting.discard)
+
         try:
-            if self.status != Status.running:
-                raise CommClosedError(
-                    f"ConnectionPool not running. Status: {self.status}"
-                )
-
-            fut = asyncio.create_task(
-                connect(
-                    addr,
-                    timeout=timeout or self.timeout,
-                    deserialize=self.deserialize,
-                    **self.connection_args,
-                )
-            )
-            self._connecting.add(fut)
-            comm = await fut
-            comm.name = "ConnectionPool"
-            comm._pool = weakref.ref(self)
-            comm.allow_offload = self.allow_offload
-            self._created.add(comm)
-
-            occupied.add(comm)
-
-            return comm
-        except asyncio.CancelledError as exc:
-            self.semaphore.release()
-            raise CommClosedError(
-                f"ConnectionPool not running. Status: {self.status}"
-            ) from exc
-        except Exception:
-            self.semaphore.release()
+            await done.wait()
+        except asyncio.CancelledError:
+            # This is an outside cancel attempt
+            connect_attempt.cancel()
+            try:
+                await connect_attempt
+            except CommClosedError:
+                pass
             raise
-        finally:
-            self._connecting.discard(fut)
-            self._n_connecting -= 1
+        return await connect_attempt
 
     def reuse(self, addr, comm):
         """
@@ -1123,7 +1162,7 @@ class ConnectionPool:
                 self.semaphore.release()
             else:
                 self.available[addr].add(comm)
-                if self.semaphore.locked() and self._n_connecting > 0:
+                if self.semaphore.locked() and self._pending_count:
                     self.collect()
 
     def collect(self):
@@ -1134,7 +1173,7 @@ class ConnectionPool:
             "Collecting unused comms.  open: %d, active: %d, connecting: %d",
             self.open,
             self.active,
-            self._n_connecting,
+            len(self._connecting),
         )
         for addr, comms in self.available.items():
             for comm in comms:
@@ -1163,6 +1202,8 @@ class ConnectionPool:
         Close all communications
         """
         self.status = Status.closed
+        for conn_fut in self._connecting:
+            conn_fut.cancel()
         for d in [self.available, self.occupied]:
             comms = set()
             while d:
@@ -1175,12 +1216,7 @@ class ConnectionPool:
             for _ in comms:
                 self.semaphore.release()
 
-        for conn_fut in self._connecting:
-            conn_fut.cancel()
-
-        # We might still have tasks haning in the semaphore. This will let them
-        # run into an exception and raise a commclosed
-        while self._n_connecting:
+        while self._connecting:
             await asyncio.sleep(0.005)
 
 
@@ -1191,7 +1227,7 @@ def coerce_to_address(o):
     return normalize_address(o)
 
 
-def collect_causes(e):
+def collect_causes(e: BaseException) -> list[BaseException]:
     causes = []
     while e.__cause__ is not None:
         causes.append(e.__cause__)
@@ -1199,7 +1235,15 @@ def collect_causes(e):
     return causes
 
 
-def error_message(e, status="error"):
+class ErrorMessage(TypedDict):
+    status: str
+    exception: protocol.Serialize
+    traceback: protocol.Serialize | None
+    exception_text: str
+    traceback_text: str
+
+
+def error_message(e: BaseException, status="error") -> ErrorMessage:
     """Produce message to send back given an exception has occurred
 
     This does the following:
@@ -1220,33 +1264,38 @@ def error_message(e, status="error"):
     tb_text = "".join(traceback.format_tb(tb))
     e = truncate_exception(e, MAX_ERROR_LEN)
     try:
-        e_serialized = protocol.pickle.dumps(e)
-        protocol.pickle.loads(e_serialized)
+        e_bytes = protocol.pickle.dumps(e)
+        protocol.pickle.loads(e_bytes)
     except Exception:
-        e_serialized = protocol.pickle.dumps(Exception(repr(e)))
-    e_serialized = protocol.to_serialize(e_serialized)
+        e_bytes = protocol.pickle.dumps(Exception(repr(e)))
+    e_serialized = protocol.to_serialize(e_bytes)
 
     try:
-        tb_serialized = protocol.pickle.dumps(tb)
-        protocol.pickle.loads(tb_serialized)
+        tb_bytes = protocol.pickle.dumps(tb)
+        protocol.pickle.loads(tb_bytes)
     except Exception:
-        tb_serialized = protocol.pickle.dumps(tb_text)
+        tb_bytes = protocol.pickle.dumps(tb_text)
 
-    if len(tb_serialized) > MAX_ERROR_LEN:
-        tb_result = None
+    if len(tb_bytes) > MAX_ERROR_LEN:
+        tb_serialized = None
     else:
-        tb_result = protocol.to_serialize(tb_serialized)
+        tb_serialized = protocol.to_serialize(tb_bytes)
 
     return {
         "status": status,
         "exception": e_serialized,
-        "traceback": tb_result,
+        "traceback": tb_serialized,
         "exception_text": repr(e),
         "traceback_text": tb_text,
     }
 
 
-def clean_exception(exception, traceback=None, **kwargs):
+E = TypeVar("E", bound=BaseException)
+
+
+def clean_exception(
+    exception: E, traceback: types.TracebackType | None = None, **kwargs
+) -> tuple[type[E], E, types.TracebackType | None]:
     """Reraise exception and traceback. Deserialize if necessary
 
     See Also

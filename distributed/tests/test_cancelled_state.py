@@ -1,12 +1,16 @@
 import asyncio
 from unittest import mock
 
-import pytest
-
 import distributed
-from distributed import Worker
+from distributed import Event
 from distributed.core import CommClosedError
-from distributed.utils_test import _LockedCommPool, gen_cluster, inc, slowinc
+from distributed.utils_test import (
+    _LockedCommPool,
+    assert_worker_story,
+    gen_cluster,
+    inc,
+    slowinc,
+)
 
 
 async def wait_for_state(key, state, dask_worker):
@@ -54,7 +58,13 @@ async def test_abort_execution_add_as_dependency(c, s, a):
 
 @gen_cluster(client=True)
 async def test_abort_execution_to_fetch(c, s, a, b):
-    fut = c.submit(slowinc, 1, delay=2, key="f1", workers=[a.worker_address])
+    ev = Event()
+
+    def f(ev):
+        ev.wait()
+        return 123
+
+    fut = c.submit(f, ev, key="f1", workers=[a.worker_address])
     await wait_for_state(fut.key, "executing", a)
     fut.release()
     await wait_for_cancelled(fut.key, a)
@@ -65,7 +75,34 @@ async def test_abort_execution_to_fetch(c, s, a, b):
     # then, a must switch the execute to fetch. Instead of doing so, it will
     # simply re-use the currently computing result.
     fut = c.submit(inc, fut, workers=[a.worker_address], key="f2")
-    await fut
+    await wait_for_state("f2", "waiting", a)
+    await ev.set()
+    assert await fut == 124  # It would be 3 if the result was copied from b
+    del fut
+    while "f1" in a.tasks:
+        await asyncio.sleep(0.01)
+
+    assert_worker_story(
+        a.story("f1"),
+        [
+            ("f1", "compute-task"),
+            ("f1", "released", "waiting", "waiting", {"f1": "ready"}),
+            ("f1", "waiting", "ready", "ready", {"f1": "executing"}),
+            ("f1", "ready", "executing", "executing", {}),
+            ("free-keys", ("f1",)),
+            ("f1", "executing", "released", "cancelled", {}),
+            ("f1", "ensure-task-exists", "cancelled"),
+            ("f1", "cancelled", "fetch", "cancelled", {"f1": ("resumed", "fetch")}),
+            ("f1", "cancelled", "resumed", "resumed", {}),
+            ("f1", "put-in-memory"),
+            ("f1", "resumed", "memory", "memory", {"f2": "ready"}),
+            ("free-keys", ("f1",)),
+            ("f1", "release-key"),
+            ("f1", "memory", "released", "released", {}),
+            ("f1", "released", "forgotten", "forgotten", {}),
+        ],
+        strict=True,
+    )
 
 
 @gen_cluster(client=True)
@@ -131,7 +168,6 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, a, b):
 
     b_story = b.story(fut1.key)
     assert any("receive-dep-failed" in msg for msg in b_story)
-    assert any("missing-dep" in msg for msg in b_story)
     assert any("cancelled" in msg for msg in b_story)
     assert any("resumed" in msg for msg in b_story)
 
@@ -208,58 +244,4 @@ async def test_flight_cancelled_error(c, s, a, b):
         await asyncio.sleep(0.01)
 
     # Everything should still be executing as usual after this
-    await c.submit(sum, c.map(inc, range(10))) == sum(map(inc, range(10)))
-
-
-class LargeButForbiddenSerialization:
-    def __reduce__(self):
-        raise RuntimeError("I will never serialize!")
-
-    def __sizeof__(self) -> int:
-        """Ensure this is immediately tried to spill"""
-        return 1_000_000_000_000
-
-
-def test_ensure_spilled_immediately(tmpdir):
-    """See also test_value_raises_during_spilling"""
-    import sys
-
-    from distributed.spill import SpillBuffer
-
-    mem_target = 1000
-    buf = SpillBuffer(tmpdir, target=mem_target)
-    buf["key"] = 1
-
-    obj = LargeButForbiddenSerialization()
-    assert sys.getsizeof(obj) > mem_target
-    with pytest.raises(
-        TypeError,
-        match=f"Could not serialize object of type {LargeButForbiddenSerialization.__name__}",
-    ):
-        buf["error"] = obj
-
-
-@gen_cluster(client=True, nthreads=[])
-async def test_value_raises_during_spilling(c, s):
-    """See also test_ensure_spilled_immediately"""
-
-    # Use a worker with a default memory limit
-    async with Worker(
-        s.address,
-    ) as w:
-
-        def produce_evil_data():
-            return LargeButForbiddenSerialization()
-
-        fut = c.submit(produce_evil_data)
-
-        await wait_for_state(fut.key, "error", w)
-
-        with pytest.raises(
-            TypeError,
-            match=f"Could not serialize object of type {LargeButForbiddenSerialization.__name__}",
-        ):
-            await fut
-
-        # Everything should still be executing as usual after this
-        await c.submit(sum, c.map(inc, range(10))) == sum(map(inc, range(10)))
+    assert await c.submit(sum, c.map(inc, range(10))) == sum(map(inc, range(10)))

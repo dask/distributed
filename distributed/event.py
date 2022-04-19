@@ -6,9 +6,9 @@ from contextlib import suppress
 
 from dask.utils import parse_timedelta
 
-from .client import Client
-from .utils import TimeoutError, log_errors
-from .worker import get_worker
+from distributed.client import Client
+from distributed.utils import TimeoutError, log_errors
+from distributed.worker import get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +57,6 @@ class EventExtension:
                 "event_is_set": self.event_is_set,
             }
         )
-
-        self.scheduler.extensions["events"] = self
 
     async def event_wait(self, name=None, timeout=None):
         """Wait until the event is set to true.

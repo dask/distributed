@@ -16,12 +16,12 @@ import dask
 from dask.utils import parse_bytes, parse_timedelta
 from dask.widgets import get_template
 
-from ..core import CommClosedError, Status, rpc
-from ..scheduler import Scheduler
-from ..security import Security
-from ..utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
-from .adaptive import Adaptive
-from .cluster import Cluster
+from distributed.core import Status, rpc
+from distributed.deploy.adaptive import Adaptive
+from distributed.deploy.cluster import Cluster
+from distributed.scheduler import Scheduler
+from distributed.security import Security
+from distributed.utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
 
 logger = logging.getLogger(__name__)
 
@@ -284,18 +284,19 @@ class SpecCluster(Cluster):
                 options = {"dashboard": True}
             self.scheduler_spec = {"cls": Scheduler, "options": options}
 
-        # Check if scheduler has already been created by a subclass
-        if self.scheduler is None:
-            cls = self.scheduler_spec["cls"]
-            if isinstance(cls, str):
-                cls = import_term(cls)
-            self.scheduler = cls(**self.scheduler_spec.get("options", {}))
-            self.scheduler = await self.scheduler
-        self.scheduler_comm = rpc(
-            getattr(self.scheduler, "external_address", None) or self.scheduler.address,
-            connection_args=self.security.get_connection_args("client"),
-        )
         try:
+            # Check if scheduler has already been created by a subclass
+            if self.scheduler is None:
+                cls = self.scheduler_spec["cls"]
+                if isinstance(cls, str):
+                    cls = import_term(cls)
+                self.scheduler = cls(**self.scheduler_spec.get("options", {}))
+                self.scheduler = await self.scheduler
+            self.scheduler_comm = rpc(
+                getattr(self.scheduler, "external_address", None)
+                or self.scheduler.address,
+                connection_args=self.security.get_connection_args("client"),
+            )
             await super()._start()
         except Exception as e:  # pragma: no cover
             self.status = Status.failed
@@ -404,14 +405,15 @@ class SpecCluster(Cluster):
             if isawaitable(f):
                 await f
             await self._correct_state()
-            for future in self._futures:
-                await future
-            async with self._lock:
-                with suppress(CommClosedError, OSError):
-                    if self.scheduler_comm:
-                        await self.scheduler_comm.close(close_workers=True)
-                    else:
-                        logger.warning("Cluster closed without starting up")
+            await asyncio.gather(*self._futures)
+
+            if self.scheduler_comm:
+                async with self._lock:
+                    with suppress(OSError):
+                        await self.scheduler_comm.terminate(close_workers=True)
+                    await self.scheduler_comm.close_rpc()
+            else:
+                logger.warning("Cluster closed without starting up")
 
             await self.scheduler.close()
             for w in self._created:

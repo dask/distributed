@@ -24,12 +24,11 @@ optional_packages = [
     "numpy",
     "pandas",
     "lz4",
-    "blosc",
 ]
 
 
 # only these scheduler packages will be checked for version mismatch
-scheduler_relevant_packages = set(required_packages) | {"lz4", "blosc"}
+scheduler_relevant_packages = set(required_packages) | {"lz4"}
 
 
 # notes to be displayed for mismatch packages
@@ -80,7 +79,7 @@ def get_package_info(pkgs: Iterable[str]) -> dict[str, str | None]:
 
 
 def error_message(scheduler, workers, client, client_name="client"):
-    from .utils import asciitable
+    from distributed.utils import asciitable
 
     client = client.get("packages") if client else "UNKNOWN"
     scheduler = scheduler.get("packages") if scheduler else "UNKNOWN"

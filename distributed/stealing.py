@@ -14,10 +14,10 @@ from tornado.ioloop import PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
-from .comm.addressing import get_address_host
-from .core import CommClosedError, Status
-from .diagnostics.plugin import SchedulerPlugin
-from .utils import log_errors, recursive_to_dict
+from distributed.comm.addressing import get_address_host
+from distributed.core import CommClosedError, Status
+from distributed.diagnostics.plugin import SchedulerPlugin
+from distributed.utils import log_errors, recursive_to_dict
 
 # Stealing requires multiple network bounces and if successful also task
 # submission which may include code serialization. Therefore, be very
@@ -71,7 +71,6 @@ class WorkStealing(SchedulerPlugin):
         )
         # `callback_time` is in milliseconds
         self.scheduler.add_plugin(self)
-        self.scheduler.extensions["stealing"] = self
         self.scheduler.events["stealing"] = deque(maxlen=100000)
         self.count = 0
         # { task state: <stealing info dict> }
@@ -258,7 +257,7 @@ class WorkStealing(SchedulerPlugin):
         except CommClosedError:
             logger.info("Worker comm %r closed while stealing: %r", victim, ts)
             return "comm-closed"
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -338,7 +337,7 @@ class WorkStealing(SchedulerPlugin):
                 self.log(("confirm", *_log_msg))
             else:
                 raise ValueError(f"Unexpected task state: {state}")
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
                 import pdb
@@ -415,10 +414,7 @@ class WorkStealing(SchedulerPlugin):
                         if not idle:
                             break
 
-                        if _has_restrictions(ts):
-                            thieves = [ws for ws in idle if _can_steal(ws, ts, sat)]
-                        else:
-                            thieves = idle
+                        thieves = _potential_thieves_for(ts, idle)
                         if not thieves:
                             break
                         thief = thieves[i % len(thieves)]
@@ -451,10 +447,7 @@ class WorkStealing(SchedulerPlugin):
                             continue
 
                         i += 1
-                        if _has_restrictions(ts):
-                            thieves = [ws for ws in idle if _can_steal(ws, ts, sat)]
-                        else:
-                            thieves = idle
+                        thieves = _potential_thieves_for(ts, idle)
                         if not thieves:
                             continue
                         thief = thieves[i % len(thieves)]
@@ -492,18 +485,16 @@ class WorkStealing(SchedulerPlugin):
         return out
 
 
-def _has_restrictions(ts):
-    """Determine whether the given task has restrictions and whether these
-    restrictions are strict.
-    """
-    return not ts.loose_restrictions and (
-        ts.host_restrictions or ts.worker_restrictions or ts.resource_restrictions
-    )
+def _potential_thieves_for(ts, idle):
+    """Return the list of workers from ``idle`` that could steal ``ts``."""
+    if _has_restrictions(ts):
+        return [ws for ws in idle if _can_steal(ws, ts)]
+    else:
+        return idle
 
 
-def _can_steal(thief, ts, victim):
-    """Determine whether worker ``thief`` can steal task ``ts`` from worker
-    ``victim``.
+def _can_steal(thief, ts):
+    """Determine whether worker ``thief`` can steal task ``ts``.
 
     Assumes that `ts` has some restrictions.
     """
@@ -527,6 +518,15 @@ def _can_steal(thief, ts, victim):
             if supplied < value:
                 return False
     return True
+
+
+def _has_restrictions(ts):
+    """Determine whether the given task has restrictions and whether these
+    restrictions are strict.
+    """
+    return not ts.loose_restrictions and (
+        ts.host_restrictions or ts.worker_restrictions or ts.resource_restrictions
+    )
 
 
 fast_tasks = {"split-shuffle"}

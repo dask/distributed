@@ -20,7 +20,7 @@ import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
 from collections import OrderedDict, UserDict, deque
-from collections.abc import Container, KeysView, ValuesView
+from collections.abc import Collection, Container, KeysView, ValuesView
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
@@ -48,8 +48,8 @@ from dask import istask
 from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
-from .compatibility import WINDOWS
-from .metrics import time
+from distributed.compatibility import WINDOWS
+from distributed.metrics import time
 
 try:
     from dask.context import thread_state
@@ -74,10 +74,8 @@ def _initialize_mp_context():
     if method == "forkserver":
         # Makes the test suite much faster
         preload = ["distributed"]
-        if "pkg_resources" in sys.modules:
-            preload.append("pkg_resources")
 
-        from .versions import optional_packages, required_packages
+        from distributed.versions import optional_packages, required_packages
 
         for pkg, _ in required_packages + optional_packages:
             try:
@@ -689,7 +687,7 @@ def key_split_group(x) -> str:
 
 @contextmanager
 def log_errors(pdb=False):
-    from .comm import CommClosedError
+    from distributed.comm import CommClosedError
 
     try:
         yield
@@ -1126,21 +1124,8 @@ def color_of(x, palette=palette):
     return palette[n % len(palette)]
 
 
-def _iscoroutinefunction(f):
-    return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
-
-
-@functools.lru_cache(None)
-def _iscoroutinefunction_cached(f):
-    return _iscoroutinefunction(f)
-
-
 def iscoroutinefunction(f):
-    # Attempt to use lru_cache version and fall back to non-cached version if needed
-    try:
-        return _iscoroutinefunction_cached(f)
-    except TypeError:  # unhashable type
-        return _iscoroutinefunction(f)
+    return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
 
 
 @contextmanager
@@ -1163,15 +1148,15 @@ def format_dashboard_link(host, port):
     )
 
 
-def parse_ports(port):
+def parse_ports(port: int | str | Collection[int] | None) -> list[int] | list[None]:
     """Parse input port information into list of ports
 
     Parameters
     ----------
-    port : int, str, None
+    port : int, str, list[int], None
         Input port or ports. Can be an integer like 8787, a string for a
-        single port like "8787", a string for a sequential range of ports like
-        "8000:8200", or None.
+        single port like "8787", string for a sequential range of ports like
+        "8000:8200", a collection of ints, or None.
 
     Returns
     -------
@@ -1203,12 +1188,7 @@ def parse_ports(port):
     [None]
 
     """
-    if isinstance(port, str) and ":" not in port:
-        port = int(port)
-
-    if isinstance(port, (int, type(None))):
-        ports = [port]
-    else:
+    if isinstance(port, str) and ":" in port:
         port_start, port_stop = map(int, port.split(":"))
         if port_stop <= port_start:
             raise ValueError(
@@ -1216,9 +1196,20 @@ def parse_ports(port):
                 "port_stop must be greater than port_start, but got "
                 f"{port_start=} and {port_stop=}"
             )
-        ports = list(range(port_start, port_stop + 1))
+        return list(range(port_start, port_stop + 1))
 
-    return ports
+    if isinstance(port, str):
+        return [int(port)]
+
+    if isinstance(port, int) or port is None:
+        return [port]  # type: ignore
+
+    if isinstance(port, Collection):
+        if not all(isinstance(p, int) for p in port):
+            raise TypeError(port)
+        return list(port)  # type: ignore
+
+    raise TypeError(port)
 
 
 is_coroutine_function = iscoroutinefunction
@@ -1617,3 +1608,16 @@ def recursive_to_dict(
         return repr(obj)
     finally:
         tok.var.reset(tok)
+
+
+def is_python_shutting_down() -> bool:
+    """Is the interpreter shutting down now?
+
+    This is a variant of ``sys.is_finalizing`` which can return True inside the ``__del__``
+    method of classes defined inside the distributed package.
+    """
+    # This import must remain local for the global variable to be
+    # properly evaluated
+    from distributed import _python_shutting_down
+
+    return _python_shutting_down

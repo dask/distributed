@@ -11,7 +11,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from .utils import TimeoutError, mp_context
+from distributed.utils import TimeoutError, mp_context
 
 logger = logging.getLogger(__name__)
 

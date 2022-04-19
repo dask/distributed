@@ -385,13 +385,13 @@ intersphinx_mapping = {
     "pandas": ("https://pandas.pydata.org/docs", None),
     "dask": ("https://docs.dask.org/en/latest", None),
     "bokeh": ("https://docs.bokeh.org/en/latest", None),
+    "fsspec": ("https://filesystem-spec.readthedocs.io/en/latest", None),
 }
 
 # Redirects
 # https://tech.signavio.com/2017/managing-sphinx-redirects
 redirect_files = [
     # old html, new html
-    ("joblib.html", "https://ml.dask.org/joblib.html"),
     ("setup.html", "https://docs.dask.org/en/latest/setup.html"),
     ("ec2.html", "https://docs.dask.org/en/latest/setup/cloud.html"),
     ("configuration.html", "https://docs.dask.org/en/latest/configuration.html"),

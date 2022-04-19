@@ -11,11 +11,11 @@ from typing import Generic, Literal, NoReturn, TypeVar
 
 from tornado.ioloop import IOLoop
 
-from .client import Future
-from .protocol import to_serialize
-from .utils import iscoroutinefunction, sync, thread_state
-from .utils_comm import WrappedKey
-from .worker import get_client, get_worker
+from distributed.client import Future
+from distributed.protocol import to_serialize
+from distributed.utils import iscoroutinefunction, sync, thread_state
+from distributed.utils_comm import WrappedKey
+from distributed.worker import get_client, get_worker
 
 _T = TypeVar("_T")
 

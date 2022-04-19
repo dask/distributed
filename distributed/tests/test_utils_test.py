@@ -31,6 +31,7 @@ from distributed.utils_test import (
     new_config,
     tls_only_security,
 )
+from distributed.worker import InvalidTransition
 
 
 def test_bare_cluster(loop):
@@ -52,7 +53,7 @@ async def test_gen_cluster(c, s, a, b):
     assert isinstance(s, Scheduler)
     for w in [a, b]:
         assert isinstance(w, Worker)
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+    assert set(s.workers) == {w.address for w in [a, b]}
     assert await c.submit(lambda: 123) == 123
 
 
@@ -132,7 +133,7 @@ async def test_gen_cluster_without_client(s, a, b):
     assert isinstance(s, Scheduler)
     for w in [a, b]:
         assert isinstance(w, Worker)
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+    assert set(s.workers) == {w.address for w in [a, b]}
 
     async with Client(s.address, asynchronous=True) as c:
         future = c.submit(lambda x: x + 1, 1)
@@ -153,7 +154,7 @@ async def test_gen_cluster_tls(e, s, a, b):
     for w in [a, b]:
         assert isinstance(w, Worker)
         assert w.address.startswith("tls://")
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+    assert set(s.workers) == {w.address for w in [a, b]}
 
 
 @pytest.mark.xfail(
@@ -202,9 +203,8 @@ async def test_gen_test_double_parametrized(foo, bar):
 
 
 @gen_test()
-async def test_gen_test_pytest_fixture(tmp_path, c):
+async def test_gen_test_pytest_fixture(tmp_path):
     assert isinstance(tmp_path, pathlib.Path)
-    assert isinstance(c, Client)
 
 
 @contextmanager
@@ -264,8 +264,8 @@ def test_tls_cluster(tls_client):
     assert tls_client.security
 
 
-@pytest.mark.asyncio
-async def test_tls_scheduler(security, cleanup):
+@gen_test()
+async def test_tls_scheduler(security):
     async with Scheduler(
         security=security, host="localhost", dashboard_address=":0"
     ) as s:
@@ -290,7 +290,7 @@ class MyServer(Server):
         return "pong"
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_locked_comm_drop_in_replacement(loop):
 
     async with MyServer({}) as a, await MyServer({}) as b:
@@ -319,7 +319,7 @@ async def test_locked_comm_drop_in_replacement(loop):
         assert await read_queue.get() == (b.address, "pong")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_locked_comm_intercept_read(loop):
 
     async with MyServer({}) as a, MyServer({}) as b:
@@ -348,7 +348,7 @@ async def test_locked_comm_intercept_read(loop):
         assert await fut == "pong"
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_locked_comm_intercept_write(loop):
 
     async with MyServer({}) as a, MyServer({}) as b:
@@ -450,21 +450,26 @@ def test_assert_worker_story():
 
 
 @pytest.mark.parametrize(
-    "story",
+    "story_factory",
     [
-        [()],  # Missing payload, stimulus_id, ts
-        [("foo",)],  # Missing (stimulus_id, ts)
-        [("foo", "bar")],  # Missing ts
-        [("foo", "bar", "baz")],  # ts is not a float
-        [("foo", "bar", time() + 3600)],  # ts is in the future
-        [("foo", "bar", time() - 7200)],  # ts is too old
-        [("foo", 123, time())],  # stimulus_id is not a string
-        [("foo", "", time())],  # stimulus_id is an empty string
-        [("", time())],  # no payload
-        [("foo", "id", time()), ("foo", "id", time() - 10)],  # timestamps out of order
+        pytest.param(lambda: [()], id="Missing payload, stimulus_id, ts"),
+        pytest.param(lambda: [("foo",)], id="Missing (stimulus_id, ts)"),
+        pytest.param(lambda: [("foo", "bar")], id="Missing ts"),
+        pytest.param(lambda: [("foo", "bar", "baz")], id="ts is not a float"),
+        pytest.param(lambda: [("foo", "bar", time() + 3600)], id="ts is in the future"),
+        pytest.param(lambda: [("foo", "bar", time() - 7200)], id="ts is too old"),
+        pytest.param(lambda: [("foo", 123, time())], id="stimulus_id is not a str"),
+        pytest.param(lambda: [("foo", "", time())], id="stimulus_id is an empty str"),
+        pytest.param(lambda: [("", time())], id="no payload"),
+        pytest.param(
+            lambda: [("foo", "id", time()), ("foo", "id", time() - 10)],
+            id="timestamps out of order",
+        ),
     ],
 )
-def test_assert_worker_story_malformed_story(story):
+def test_assert_worker_story_malformed_story(story_factory):
+    # defer the calls to time() to when the test runs rather than collection
+    story = story_factory()
     with pytest.raises(AssertionError, match="Malformed story event"):
         assert_worker_story(story, [])
 
@@ -602,3 +607,33 @@ def test_start_failure_scheduler():
     with pytest.raises(TypeError):
         with cluster(scheduler_kwargs={"foo": "bar"}):
             return
+
+
+def test_invalid_transitions(capsys):
+    @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+    async def test_log_invalid_transitions(c, s, a):
+        x = c.submit(inc, 1, key="task-name")
+        y = c.submit(inc, x)
+        xkey = x.key
+        del x
+        await y
+        while a.tasks[xkey].state != "released":
+            await asyncio.sleep(0.01)
+        ts = a.tasks[xkey]
+        with pytest.raises(InvalidTransition):
+            a.transition(ts, "foo", stimulus_id="bar")
+
+        while not s.events["invalid-worker-transition"]:
+            await asyncio.sleep(0.01)
+
+    with pytest.raises(Exception) as info:
+        test_log_invalid_transitions()
+
+    assert "invalid" in str(info).lower()
+    assert "worker" in str(info).lower()
+    assert "transition" in str(info).lower()
+
+    out, err = capsys.readouterr()
+
+    assert "foo" in out + err
+    assert "task-name" in out + err

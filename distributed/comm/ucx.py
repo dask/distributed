@@ -16,12 +16,17 @@ from typing import TYPE_CHECKING
 import dask
 from dask.utils import parse_bytes
 
-from ..diagnostics.nvml import has_cuda_context
-from ..utils import ensure_ip, get_ip, get_ipv6, log_errors, nbytes
-from .addressing import parse_host_port, unparse_host_port
-from .core import Comm, CommClosedError, Connector, Listener
-from .registry import Backend, backends
-from .utils import ensure_concrete_host, from_frames, to_frames
+from distributed.comm.addressing import parse_host_port, unparse_host_port
+from distributed.comm.core import Comm, CommClosedError, Connector, Listener
+from distributed.comm.registry import Backend, backends
+from distributed.comm.utils import (
+    ensure_concrete_host,
+    from_frames,
+    host_array,
+    to_frames,
+)
+from distributed.diagnostics.nvml import has_cuda_context
+from distributed.utils import ensure_ip, get_ip, get_ipv6, log_errors, nbytes
 
 logger = logging.getLogger(__name__)
 
@@ -32,19 +37,35 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     try:
         import ucp
-        from ucp import create_endpoint as ucx_create_endpoint
-        from ucp import create_listener as ucx_create_listener
     except ImportError:
         pass
 else:
     ucp = None  # type: ignore
-    ucx_create_endpoint = None  # type: ignore
-    ucx_create_listener = None  # type: ignore
 
-host_array = None
 device_array = None
 pre_existing_cuda_context = False
 cuda_context_created = False
+
+
+_warning_suffix = (
+    "This is often the result of a CUDA-enabled library calling a CUDA runtime function before "
+    "Dask-CUDA can spawn worker processes. Please make sure any such function calls don't happen "
+    "at import time or in the global scope of a program."
+)
+
+
+def _warn_existing_cuda_context(ctx, pid):
+    warnings.warn(
+        f"A CUDA context for device {ctx} already exists on process ID {pid}. {_warning_suffix}"
+    )
+
+
+def _warn_cuda_context_wrong_device(ctx_expected, ctx_actual, pid):
+    warnings.warn(
+        f"Worker with process ID {pid} should have a CUDA context assigned to device "
+        f"{ctx_expected}, but instead the CUDA context is on device {ctx_actual}. "
+        f"{_warning_suffix}"
+    )
 
 
 def synchronize_stream(stream=0):
@@ -57,7 +78,7 @@ def synchronize_stream(stream=0):
 
 
 def init_once():
-    global ucp, host_array, device_array
+    global ucp, device_array
     global ucx_create_endpoint, ucx_create_listener
     global pre_existing_cuda_context, cuda_context_created
 
@@ -85,13 +106,7 @@ def init_once():
         )
         pre_existing_cuda_context = has_cuda_context()
         if pre_existing_cuda_context is not False:
-            warnings.warn(
-                f"A CUDA context for device {pre_existing_cuda_context} already exists on process "
-                f"ID {os.getpid()}. This is often the result of a CUDA-enabled library calling a "
-                "CUDA runtime function before Dask-CUDA can spawn worker processes. Please make "
-                "sure any such function calls don't happen at import time or in the global scope "
-                "of a program."
-            )
+            _warn_existing_cuda_context(pre_existing_cuda_context, os.getpid())
 
         numba.cuda.current_context()
 
@@ -100,13 +115,8 @@ def init_once():
             cuda_context_created is not False
             and cuda_context_created != cuda_visible_device
         ):
-            warnings.warn(
-                f"Worker with process ID {os.getpid()} should have a CUDA context assigned to "
-                f"device {cuda_visible_device}, but instead the CUDA context is on device "
-                "{cuda_context_created}. This is often the result of a CUDA-enabled library "
-                "calling a CUDA runtime function before Dask-CUDA can spawn worker processes. "
-                "Please make sure any such function calls don't happen at import time or in "
-                "the global scope of a program."
+            _warn_cuda_context_wrong_device(
+                cuda_visible_device, cuda_context_created, os.getpid()
             )
 
     import ucp as _ucp
@@ -114,14 +124,6 @@ def init_once():
     ucp = _ucp
 
     ucp.init(options=ucx_config, env_takes_precedence=True)
-
-    # Find the function, `host_array()`, to use when allocating new host arrays
-    try:
-        import numpy
-
-        host_array = lambda n: numpy.empty((n,), dtype="u1")
-    except ImportError:
-        host_array = lambda n: bytearray(n)
 
     # Find the function, `cuda_array()`, to use when allocating new CUDA arrays
     try:
@@ -151,22 +153,6 @@ def init_once():
         rmm.reinitialize(
             pool_allocator=True, managed_memory=False, initial_pool_size=pool_size
         )
-
-    try:
-        from ucp.endpoint_reuse import EndpointReuse
-    except ImportError:
-        ucx_create_endpoint = ucp.create_endpoint
-        ucx_create_listener = ucp.create_listener
-    else:
-        reuse_endpoints = dask.config.get("distributed.comm.ucx.reuse-endpoints")
-        if (
-            reuse_endpoints is None and ucp.get_ucx_version() >= (1, 11, 0)
-        ) or reuse_endpoints is False:
-            ucx_create_endpoint = ucp.create_endpoint
-            ucx_create_listener = ucp.create_listener
-        else:
-            ucx_create_endpoint = EndpointReuse.create_endpoint
-            ucx_create_listener = EndpointReuse.create_listener
 
 
 def _close_comm(ref):
@@ -412,7 +398,7 @@ class UCXConnector(Connector):
         ip, port = parse_host_port(address)
         init_once()
         try:
-            ep = await ucx_create_endpoint(ip, port)
+            ep = await ucp.create_endpoint(ip, port)
         except (ucp.exceptions.UCXCloseError, ucp.exceptions.UCXCanceled,) + (
             getattr(ucp.exceptions, "UCXConnectionReset", ()),
             getattr(ucp.exceptions, "UCXNotConnected", ()),
@@ -476,7 +462,7 @@ class UCXListener(Listener):
                 await self.comm_handler(ucx)
 
         init_once()
-        self.ucp_server = ucx_create_listener(serve_forever, port=self._input_port)
+        self.ucp_server = ucp.create_listener(serve_forever, port=self._input_port)
 
     def stop(self):
         self.ucp_server = None
@@ -545,9 +531,7 @@ def _scrub_ucx_config():
     # 2) explicitly defined UCX configuration flags
 
     # import does not initialize ucp -- this will occur outside this function
-    from ucp import get_config, get_ucx_version
-
-    ucx_110 = get_ucx_version() >= (1, 10, 0)
+    from ucp import get_config
 
     options = {}
 
@@ -562,11 +546,11 @@ def _scrub_ucx_config():
         ]
     ):
         if dask.config.get("distributed.comm.ucx.rdmacm"):
-            tls = "tcp" if ucx_110 else "tcp,rdmacm"
+            tls = "tcp"
             tls_priority = "rdmacm"
         else:
-            tls = "tcp" if ucx_110 else "tcp,sockcm"
-            tls_priority = "tcp" if ucx_110 else "sockcm"
+            tls = "tcp"
+            tls_priority = "tcp"
 
         # CUDA COPY can optionally be used with ucx -- we rely on the user
         # to define when messages will include CUDA objects.  Note:
@@ -585,10 +569,6 @@ def _scrub_ucx_config():
             tls = tls + ",cuda_ipc"
 
         options = {"TLS": tls, "SOCKADDR_TLS_PRIORITY": tls_priority}
-
-        net_devices = dask.config.get("distributed.comm.ucx.net-devices")
-        if net_devices is not None and net_devices != "":
-            options["NET_DEVICES"] = net_devices
 
     # ANY UCX options defined in config will overwrite high level dask.ucx flags
     valid_ucx_vars = list(get_config().keys())

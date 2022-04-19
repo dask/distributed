@@ -5,8 +5,8 @@ from collections import defaultdict
 
 from dask.utils import parse_timedelta, stringify
 
-from .client import Client, Future
-from .worker import get_client, get_worker
+from distributed.client import Client, Future
+from distributed.worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +41,6 @@ class QueueExtension:
         self.scheduler.stream_handlers.update(
             {"queue-future-release": self.future_release, "queue_release": self.release}
         )
-
-        self.scheduler.extensions["queues"] = self
 
     def create(self, name=None, client=None, maxsize=0):
         logger.debug(f"Queue name: {name}")

@@ -9,10 +9,10 @@ from collections import deque, namedtuple
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
 
-from ..protocol import nested_deserialize
-from ..utils import get_ip
-from .core import Comm, CommClosedError, Connector, Listener
-from .registry import Backend, backends
+from distributed.comm.core import Comm, CommClosedError, Connector, Listener
+from distributed.comm.registry import Backend, backends
+from distributed.protocol import nested_deserialize
+from distributed.utils import get_ip
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +252,14 @@ class InProcListener(Listener):
         self.deserialize = deserialize
         self.listen_q = Queue()
 
+    async def _handle_stream(self, comm):
+        try:
+            await self.on_connection(comm)
+        except CommClosedError:
+            logger.debug("Connection closed before handshake completed")
+            return
+        await self.comm_handler(comm)
+
     async def _listen(self):
         while True:
             conn_req = await self.listen_q.get()
@@ -267,12 +275,7 @@ class InProcListener(Listener):
             )
             # Notify connector
             conn_req.c_loop.add_callback(conn_req.conn_event.set)
-            try:
-                await self.on_connection(comm)
-            except CommClosedError:
-                logger.debug("Connection closed before handshake completed")
-                return
-            IOLoop.current().add_callback(self.comm_handler, comm)
+            IOLoop.current().add_callback(self._handle_stream, comm)
 
     def connect_threadsafe(self, conn_req):
         self.loop.add_callback(self.listen_q.put_nowait, conn_req)
