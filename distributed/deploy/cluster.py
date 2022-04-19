@@ -98,6 +98,7 @@ class Cluster(SyncMethodMixin):
 
     async def _start(self):
         comm = await self.scheduler_comm.live_comm()
+        comm.name = "Cluster worker status"
         await comm.write({"op": "subscribe_worker_status"})
         self.scheduler_info = SchedulerInfo(await comm.read())
         self._watch_worker_status_comm = comm
@@ -193,7 +194,7 @@ class Cluster(SyncMethodMixin):
             return self.sync(self._close, callback_timeout=timeout)
 
     def __del__(self):
-        if self.status != Status.closed:
+        if getattr(self, "status", Status.closed) != Status.closed:
             with suppress(AttributeError, RuntimeError):  # during closing
                 self.loop.add_callback(self.close)
 

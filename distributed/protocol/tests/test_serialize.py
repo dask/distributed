@@ -425,7 +425,7 @@ def test_serialize_raises():
     assert "Hello-123" in str(info.value)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_profile_nested_sizeof():
     # https://github.com/dask/distributed/issues/1674
     n = 500

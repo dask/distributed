@@ -9,6 +9,7 @@ import pytest
 from dask.sizeof import sizeof
 
 from distributed.compatibility import WINDOWS
+from distributed.profile import wait_profiler
 from distributed.protocol import serialize_bytelist
 from distributed.spill import SpillBuffer, has_zict_210, has_zict_220
 from distributed.utils_test import captured_logger
@@ -337,6 +338,7 @@ def test_weakref_cache(tmpdir, cls, expect_cached, size):
     # the same id as a deleted one
     id_x = x.id
     del x
+    wait_profiler()
 
     if size < 100:
         buf["y"]

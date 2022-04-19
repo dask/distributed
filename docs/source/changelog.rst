@@ -1,6 +1,129 @@
 Changelog
 =========
 
+.. _v2022.04.1:
+
+2022.04.1
+---------
+
+Released on April 15, 2022
+
+New Features
+^^^^^^^^^^^^
+- Add ``KillWorker`` Plugin (:pr:`6126`) `Matthew Rocklin`_
+
+Enhancements
+^^^^^^^^^^^^
+- Sort worker list in info pages (:pr:`6135`) `Matthew Rocklin`_
+- Add back ``Worker.transition_fetch_missing`` (:pr:`6112`) `Matthew Rocklin`_
+- Log state machine events (:pr:`6092`) `crusaderky`_
+- Migrate ``ensure_executing`` transitions to new ``WorkerState`` event mechanism - part 1 (:pr:`6003`) `crusaderky`_
+- Migrate ``ensure_executing`` transitions to new ``WorkerState`` event mechanism - part 2 (:pr:`6062`) `crusaderky`_
+- Annotate worker transitions to error (:pr:`6012`) `crusaderky`_
+
+Bug Fixes
+^^^^^^^^^
+- Avoid transitioning from memory/released to missing in worker (:pr:`6123`) `Matthew Rocklin`_
+- Don't try to reconnect client on interpreter shutdown (:pr:`6120`) `Matthew Rocklin`_
+- Wrap UCX init warnings in importable functions (:pr:`6121`) `Charles Blackmon-Luca`_
+- Cancel asyncio tasks on worker close (:pr:`6098`) `crusaderky`_
+- Avoid port collisions when defining port ranges (:pr:`6054`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Avoid intermittent failure in ``test_cancel_fire_and_forget`` (:pr:`6131`) `Matthew Rocklin`_
+- Ignore ``bokeh`` warning in pytest (:pr:`6127`) `Matthew Rocklin`_
+- Start uncythonization (:pr:`6104`) `Martin Durant`_
+- Avoid redundant cleanup fixture in ``gen_test`` tests (:pr:`6118`) `Thomas Grainger`_
+- Move ``comm.close`` to finally in ``test_comms`` (:pr:`6109`) `Florian Jetter`_
+- Use ``async`` with ``Server`` in ``test_core.py`` (:pr:`6100`) `Matthew Rocklin`_
+- Elevate warnings to errors in the test suite (:pr:`6094`) `Thomas Grainger`_
+- Add ``urllib3`` to nightly conda builds (:pr:`6102`) `James Bourbeau`_
+- Drop Blosc (:pr:`6027`) `Matthew Rocklin`_
+- Robust ``test_get_returns_early`` (:pr:`6090`) `Florian Jetter`_
+- Overhaul ``test_priorities.py`` (:pr:`6077`) `crusaderky`_
+- Remove ``pytest-asyncio`` (:pr:`6063`) `Thomas Grainger`_
+- Clean up usage around plain ``rpc`` (:pr:`6082`) `Florian Jetter`_
+- Drop OSX builds for Python 3.9 (:pr:`6073`) `Florian Jetter`_
+- Bump periods in ``utils_test.wait_for`` (:pr:`6081`) `Florian Jetter`_
+- Check for ucx-py nightlies when updating gpuCI (:pr:`6006`) `Charles Blackmon-Luca`_
+- Type annotations for ``profile.py`` (:pr:`6067`) `crusaderky`_
+- Fix flaky ``test_worker_time_to_live`` (:pr:`6061`) `crusaderky`_
+- Fix flaky ``test_as_completed_async_for_cancel`` (:pr:`6072`) `crusaderky`_
+- Fix regression in ``test_weakref_cache`` (:pr:`6033`) `crusaderky`_
+- Trivial fix to ``test_nanny_worker_port_range`` (:pr:`6070`) `crusaderky`_
+- Drop deprecated ``tornado.netutil.ExecutorResolver`` (:pr:`6031`) `Thomas Grainger`_
+- Delete ``asyncio.py`` (:pr:`6066`) `Thomas Grainger`_
+- Tweak conda environment files (:pr:`6037`) `crusaderky`_
+- Harden ``test_abort_execution_to_fetch`` and more (:pr:`6026`) `crusaderky`_
+- Fix ``test_as_completed_with_results_no_raise`` and name ``comm`` (:pr:`6042`) `Matthew Rocklin`_
+- Use more robust limits in ``test_worker_memory`` (:pr:`6055`) `Florian Jetter`_
+
+.. _v2022.04.0:
+
+2022.04.0
+---------
+
+Released on April 1, 2022
+
+New Features
+^^^^^^^^^^^^
+- Add Python 3.10 support (:pr:`5952`) `Thomas Grainger`_
+- New cluster dump utilities (:pr:`5920`) `Simon Perkins`_
+- New ``ClusterDump`` ``SchedulerPlugin`` for dumping cluster state on close (:pr:`5983`) `Simon Perkins`_
+- Track Event Loop intervals in dashboard plot (:pr:`5964`) `Matthew Rocklin`_
+- ``ToPickle`` - ``Unpickle`` on the Scheduler (:pr:`5728`) `Mads R. B. Kristensen`_
+
+Enhancements
+^^^^^^^^^^^^
+- Retry on transient error codes in ``preload`` (:pr:`5982`) `Matthew Rocklin`_
+- More idiomatic ``mypy`` configuration (:pr:`6022`) `crusaderky`_
+- Name extensions and enable extension heartbeats (:pr:`5957`) `Matthew Rocklin`_
+- Better error message on misspelled executor annotation (:pr:`6009`) `crusaderky`_
+- Clarify that SchedulerPlugin must be subclassed (:pr:`6008`) `crusaderky`_
+- Remove duplication from stealing (:pr:`5787`) `Duncan McGregor`_
+- Remove cache in ``iscoroutinefunction`` to avoid holding on to refs (:pr:`5985`) `Florian Jetter`_
+- Add title to individual plots (:pr:`5967`) `Matthew Rocklin`_
+- Specify average in timeseries titles (:pr:`5974`) `Matthew Rocklin`_
+
+Bug Fixes
+^^^^^^^^^
+- Do not catch ``CancelledError`` in ``CommPool`` (:pr:`6005`) `Florian Jetter`_
+
+Deprecations
+^^^^^^^^^^^^
+- Remove ``distributed._ipython_utils`` and dependents (:pr:`6036`) `Thomas Grainger`_
+- Remove support for PyPy (:pr:`6029`) `James Bourbeau`_
+- Drop runtime dependency to setuptools (:pr:`6017`) `crusaderky`_
+- Remove heartbeats from events (:pr:`5989`) `Matthew Rocklin`_
+
+Documentation
+^^^^^^^^^^^^^
+- Mention default value of Client's ``timeout`` (:pr:`5933`) `Eric Engestrom`_
+- Update celery and other outdated 3rd party URLs (:pr:`5988`) `Thomas Grainger`_
+
+Maintenance
+^^^^^^^^^^^
+- Improve ``test_hardware`` test (:pr:`6039`) `Matthew Rocklin`_
+- Short variant of test_report.html (:pr:`6034`) `crusaderky`_
+- Make ``test_reconnect`` async (:pr:`6000`) `Matthew Rocklin`_
+- Update gpuCI ``RAPIDS_VER`` to ``22.06`` (:pr:`5962`)
+- Add tiny test for ``ToPickle`` (:pr:`6021`) `Matthew Rocklin`_
+- Remove ``check_python_3`` (broken with ``click>=8.1.0``) (:pr:`6018`) `Thomas Grainger`_
+- Fix black in CI (:pr:`6019`) `crusaderky`_
+- Add a hardware benchmark to test memory, disk, and network bandwidths (:pr:`5966`) `Matthew Rocklin`_
+- Relax variable ``test_race`` (:pr:`5993`) `Matthew Rocklin`_
+- Skip ``dask-ssh`` tests without ``paramiko`` (:pr:`5907`) `Elliott Sales de Andrade`_
+- Remove ``test_restart_sync_no_center`` (:pr:`5994`) `Matthew Rocklin`_
+- Set lower tick frequency in tests (:pr:`5977`) `Matthew Rocklin`_
+- Catch ``NotADirectoryError`` in ``SafeTemporaryDirectory`` (:pr:`5984`) `Florian Jetter`_
+- Fix flaky ``test_weakref_cache`` (:pr:`5978`) `crusaderky`_
+- Fixup ``test_worker_doesnt_await_task_completion`` (:pr:`5979`) `Matthew Rocklin`_
+- Use broader range in ``test_nanny_worker_port_range`` (:pr:`5980`) `Matthew Rocklin`_
+- Use ``tempfile`` directory in cluster ``fixture`` (:pr:`5825`) `Florian Jetter`_
+- Drop ``setuptools`` from ``distributed`` recipe (:pr:`5963`) `jakirkham`_
+
+
 .. _v2022.03.0:
 
 2022.03.0
@@ -3386,3 +3509,5 @@ significantly without many new features.
 .. _`Bryan W. Weber`: https://github.com/bryanwweber
 .. _`crendoncoiled`: https://github.com/crendoncoiled
 .. _`Andrii Oriekhov`: https://github.com/andriyor
+.. _`Duncan McGregor`: https://github.com/dmcg
+.. _`Eric Engestrom`: https://github.com/lace

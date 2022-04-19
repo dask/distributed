@@ -17,7 +17,6 @@ dependencies:
   - ipykernel
   - ipywidgets
   - jinja2
-  - jupyter_client
   - msgpack-python
   - netcdf4
   - paramiko
@@ -37,10 +36,12 @@ dependencies:
   - sortedcollections
   - tblib
   - toolz
-  - tornado=6
+  - tornado
   - zict  # overridden by git tip below
   - zstandard
   - pip:
       - git+https://github.com/dask/dask
+      - git+https://github.com/dask/s3fs
       - git+https://github.com/dask/zict
-      - pytest-asyncio<0.14.0 # `pytest-asyncio<0.14.0` isn't available on conda-forge for Python 3.10
+      - git+https://github.com/fsspec/filesystem_spec
+      - keras

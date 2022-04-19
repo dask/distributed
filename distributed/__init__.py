@@ -1,6 +1,7 @@
 from distributed import config  # isort:skip; load distributed configuration first
 from distributed import widgets  # isort:skip; load distributed widgets second
 
+import atexit
 
 import dask
 from dask.config import config  # type: ignore
@@ -39,7 +40,7 @@ from distributed.multi_lock import MultiLock
 from distributed.nanny import Nanny
 from distributed.pubsub import Pub, Sub
 from distributed.queues import Queue
-from distributed.scheduler import Scheduler
+from distributed.scheduler import KilledWorker, Scheduler
 from distributed.security import Security
 from distributed.semaphore import Semaphore
 from distributed.threadpoolexecutor import rejoin
@@ -73,3 +74,24 @@ def __getattr__(name):
         return __git_revision__
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+_python_shutting_down = False
+
+
+@atexit.register
+def _():
+    """Set a global when Python shuts down.
+
+    Note
+    ----
+    This function must be registered with atexit *after* any class that invokes
+    ``dstributed.utils.is_python_shutting_down`` has been defined. This way it
+    will be called before the ``__del__`` method of those classes.
+
+    See Also
+    --------
+    distributed.utils.is_python_shutting_down
+    """
+    global _python_shutting_down
+    _python_shutting_down = True

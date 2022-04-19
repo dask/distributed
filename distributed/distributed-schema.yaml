@@ -687,7 +687,7 @@ properties:
             description: |
               The compression algorithm to use
 
-              This could be one of lz4, snappy, zstd, or blosc
+              This could be one of lz4, snappy, zstd
 
           offload:
             type:

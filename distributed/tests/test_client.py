@@ -18,7 +18,7 @@ import weakref
 import zipfile
 from collections import deque
 from collections.abc import Generator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from functools import partial
 from operator import add
 from threading import Semaphore
@@ -38,6 +38,7 @@ from dask.utils import parse_timedelta, stringify, tmpfile
 
 from distributed import (
     CancelledError,
+    Event,
     Executor,
     LocalCluster,
     Nanny,
@@ -69,12 +70,8 @@ from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import Server, Status
 from distributed.metrics import time
 from distributed.objects import HasWhat, WhoHas
-from distributed.scheduler import (
-    COMPILED,
-    CollectTaskMetaDataPlugin,
-    KilledWorker,
-    Scheduler,
-)
+from distributed.profile import wait_profiler
+from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
 from distributed.sizeof import sizeof
 from distributed.utils import is_valid_xml, mp_context, sync, tmp_text
 from distributed.utils_test import (
@@ -286,7 +283,6 @@ async def test_compute_retries_annotations(c, s, a, b):
     y = delayed(varying(yargs))()
 
     x, y = c.compute([x, y], optimize_graph=False)
-    gc.collect()
 
     assert await x == 30
     with pytest.raises(ZeroDivisionError, match="five"):
@@ -676,19 +672,15 @@ def test_get_sync(c):
 
 
 def test_no_future_references(c):
-    from weakref import WeakSet
-
-    ws = WeakSet()
+    """Test that there are neither global references to Future objects nor circular
+    references that need to be collected by gc
+    """
+    ws = weakref.WeakSet()
     futures = c.map(inc, range(10))
     ws.update(futures)
     del futures
-    import gc
-
-    gc.collect()
-    start = time()
-    while list(ws):
-        sleep(0.01)
-        assert time() < start + 30
+    wait_profiler()
+    assert not list(ws)
 
 
 def test_get_sync_optimize_graph_passes_through(c):
@@ -820,9 +812,7 @@ async def test_recompute_released_key(c, s, a, b):
     result1 = await x
     xkey = x.key
     del x
-    import gc
-
-    gc.collect()
+    wait_profiler()
     await asyncio.sleep(0)
     assert c.refcount[xkey] == 0
 
@@ -1231,10 +1221,6 @@ async def test_scatter_hash_2(c, s, a, b):
 @gen_cluster(client=True)
 async def test_get_releases_data(c, s, a, b):
     await c.gather(c.get({"x": (inc, 1)}, ["x"], sync=False))
-    import gc
-
-    gc.collect()
-
     while c.refcount["x"]:
         await asyncio.sleep(0.01)
 
@@ -3051,9 +3037,8 @@ async def test_unrunnable_task_runs(c, s, a, b):
 @gen_cluster(client=True, nthreads=[])
 async def test_add_worker_after_tasks(c, s):
     futures = c.map(inc, range(10))
-    n = await Nanny(s.address, nthreads=2, loop=s.loop)
-    await c.gather(futures)
-    await n.close()
+    async with Nanny(s.address, nthreads=2):
+        await c.gather(futures)
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
@@ -3539,21 +3524,24 @@ def test_close_idempotent(c):
     c.close()
 
 
-@nodebug
 def test_get_returns_early(c):
-    start = time()
-    with suppress(RuntimeError):
-        result = c.get({"x": (throws, 1), "y": (sleep, 1)}, ["x", "y"])
-    assert time() < start + 0.5
-    # Futures should be released and forgotten
-    wait_for(lambda: not c.futures, timeout=0.1)
+    event = Event()
 
+    def block(ev):
+        ev.wait()
+
+    with pytest.raises(RuntimeError):
+        result = c.get({"x": (throws, 1), "y": (block, event)}, ["x", "y"])
+
+    # Futures should be released and forgotten
+    wait_for(lambda: not c.futures, timeout=1)
+    event.set()
     wait_for(lambda: not any(c.processing().values()), timeout=3)
 
     x = c.submit(inc, 1)
     x.result()
 
-    with suppress(RuntimeError):
+    with pytest.raises(RuntimeError):
         result = c.get({"x": (throws, 1), x.key: (inc, 1)}, ["x", x.key])
     assert x.key in c.futures
 
@@ -3569,9 +3557,7 @@ async def test_Client_clears_references_after_restart(c, s, a, b):
 
     key = x.key
     del x
-    import gc
-
-    gc.collect()
+    wait_profiler()
     await asyncio.sleep(0)
 
     assert key not in c.refcount
@@ -3700,8 +3686,11 @@ async def test_scatter_raises_if_no_workers(c, s):
         await c.scatter(1, timeout=0.5)
 
 
+@pytest.mark.flaky(reruns=2)
 @gen_test()
 async def test_reconnect():
+    port = random.randint(10000, 50000)
+
     async def hard_stop(s):
         for pc in s.periodic_callbacks.values():
             pc.stop()
@@ -3716,7 +3705,6 @@ async def test_reconnect():
         s.stop()
         await Server.close(s)
 
-    port = 9393
     futures = []
     w = Worker(f"127.0.0.1:{port}")
     futures.append(asyncio.ensure_future(w.start()))
@@ -3797,7 +3785,6 @@ async def test_reconnect_timeout(c, s):
     ) as logger:
         await s.close()
         while c.status != "closed":
-            await c._update_scheduler_info()
             await asyncio.sleep(0.05)
     text = logger.getvalue()
     assert "Failed to reconnect" in text
@@ -4647,17 +4634,19 @@ async def test_scatter_dict_workers(c, s, a, b):
     assert "a" in a.data or "a" in b.data
 
 
+@pytest.mark.flaky(reruns=2)
 @pytest.mark.slow
 @gen_test()
 async def test_client_timeout():
     """`await Client(...)` keeps retrying for 10 seconds if it can't find the Scheduler
     straight away
     """
+    port = random.randint(10000, 50000)
     with dask.config.set({"distributed.comm.timeouts.connect": "10s"}):
-        c = Client("127.0.0.1:57484", asynchronous=True)
+        c = Client(f"127.0.0.1:{port}", asynchronous=True)
         client_start_fut = asyncio.ensure_future(c)
         await asyncio.sleep(2)
-        async with Scheduler(port=57484, dashboard_address=":0"):
+        async with Scheduler(port=port, dashboard_address=":0"):
             await client_start_fut
             assert await c.run_on_scheduler(lambda: 123) == 123
             await c.close()
@@ -5338,7 +5327,6 @@ def test_dynamic_workloads_sync_random(c):
     assert future.result(timeout=20) == 52
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(client=True)
 async def test_bytes_keys(c, s, a, b):
     key = b"inc-123"
@@ -5408,11 +5396,11 @@ def test_quiet_quit_when_cluster_leaves(loop_in_thread):
 
 
 def test_warn_executor(loop, s, a, b):
-    with warnings.catch_warnings(record=True) as record:
-        with Executor(s["address"], loop=loop) as c:
-            pass
+    with pytest.warns(UserWarning, match=r"Executor has been renamed to Client"):
+        c = Executor(s["address"], loop=loop)
 
-    assert any("Client" in str(r.message) for r in record)
+    with c:
+        pass
 
 
 @gen_cluster([("127.0.0.1", 4)] * 2, client=True)
@@ -5661,23 +5649,20 @@ async def test_config_scheduler_address(s, a, b):
 
 @gen_cluster(client=True)
 async def test_warn_when_submitting_large_values(c, s, a, b):
-    with warnings.catch_warnings(record=True) as record:
+    with pytest.warns(
+        UserWarning,
+        match=r"Large object of size (2\.00 MB|1.91 MiB) detected in task graph:"
+        r" \n  \(b'00000000000000000000000000000000000000000000000 \.\.\. 000000000000',\)"
+        r"\nConsider scattering large objects ahead of time.*",
+    ):
         future = c.submit(lambda x: x + 1, b"0" * 2000000)
-
-    text = str(record[0].message)
-    assert "2.00 MB" in text or "1.91 MiB" in text
-    assert "large" in text
-    assert "..." in text
-    assert "'000" in text
-    assert "000'" in text
-    assert len(text) < 2000
 
     with warnings.catch_warnings(record=True) as record:
         data = b"0" * 2000000
         for i in range(10):
             future = c.submit(lambda x, y: x, data, i)
 
-    assert len(record) < 2
+    assert not record
 
 
 @gen_cluster(client=True)
@@ -5708,7 +5693,6 @@ async def test_quiet_scheduler_loss(c, s):
     c._periodic_callbacks["scheduler-info"].interval = 10
     with captured_logger(logging.getLogger("distributed.client")) as logger:
         await s.close()
-        await c._update_scheduler_info()
     text = logger.getvalue()
     assert "BrokenPipeError" not in text
 
@@ -5734,11 +5718,13 @@ async def test_dashboard_link_inproc():
             assert "/" not in c.dashboard_link
 
 
+@pytest.mark.flaky(reruns=2)
 @gen_test()
 async def test_client_timeout_2():
+    port = random.randint(10000, 50000)
     with dask.config.set({"distributed.comm.timeouts.connect": "10ms"}):
         start = time()
-        c = Client("127.0.0.1:3755", asynchronous=True)
+        c = Client(f"127.0.0.1:{port}", asynchronous=True)
         with pytest.raises((TimeoutError, IOError)):
             await c
         stop = time()
@@ -6140,8 +6126,8 @@ async def test_wait_for_workers(c, s, a, b):
 
 
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
-@pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
+@gen_test()
 async def test_file_descriptors_dont_leak(Worker):
     pytest.importorskip("pandas")
     df = dask.datasets.timeseries(freq="10s", dtypes={"x": int, "y": float})
@@ -6186,8 +6172,8 @@ async def test_shutdown():
                 assert w.status == Status.closed
 
 
-@pytest.mark.asyncio
-async def test_shutdown_localcluster(cleanup):
+@gen_test()
+async def test_shutdown_localcluster():
     async with LocalCluster(
         n_workers=1, asynchronous=True, processes=False, dashboard_address=":0"
     ) as lc:
@@ -6298,24 +6284,16 @@ async def test_as_completed_async_for_results(c, s, a, b):
 @gen_cluster(client=True)
 async def test_as_completed_async_for_cancel(c, s, a, b):
     x = c.submit(inc, 1)
-    y = c.submit(sleep, 0.3)
+    ev = Event()
+    y = c.submit(lambda ev: ev.wait(), ev)
     ac = as_completed([x, y])
 
-    async def _():
-        await asyncio.sleep(0.1)
-        await y.cancel(asynchronous=True)
+    await x
+    await y.cancel()
 
-    c.loop.add_callback(_)
-
-    L = []
-
-    async def f():
-        async for future in ac:
-            L.append(future)
-
-    await f()
-
-    assert L == [x, y]
+    futs = [future async for future in ac]
+    assert futs == [x, y]
+    await ev.set()  # Allow for clean teardown
 
 
 @gen_test()
@@ -7423,7 +7401,7 @@ class TestClientSecurityLoader:
             ):
                 yield
 
-    @pytest.mark.asyncio
+    @gen_test()
     async def test_security_loader(self, monkeypatch):
         security = tls_only_security()
 
@@ -7439,7 +7417,7 @@ class TestClientSecurityLoader:
                 async with Client(scheduler.address, asynchronous=True) as client:
                     assert client.security is security
 
-    @pytest.mark.asyncio
+    @gen_test()
     async def test_security_loader_ignored_if_explicit_security_provided(
         self, monkeypatch
     ):
@@ -7457,7 +7435,7 @@ class TestClientSecurityLoader:
                 ) as client:
                     assert client.security is security
 
-    @pytest.mark.asyncio
+    @gen_test()
     async def test_security_loader_ignored_if_returns_none(self, monkeypatch):
         """Test that if a security loader is configured, but it returns `None`,
         then the default security configuration is used"""
@@ -7490,7 +7468,7 @@ class TestClientSecurityLoader:
 
         assert loader.called
 
-    @pytest.mark.asyncio
+    @gen_test()
     async def test_security_loader_import_failed(self):
         security = tls_only_security()
 

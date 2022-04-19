@@ -1,7 +1,6 @@
 import asyncio
 import random
 import threading
-import warnings
 from collections import defaultdict
 from time import sleep
 
@@ -216,12 +215,13 @@ async def test_local_client_warning(c, s, a, b):
     from distributed import local_client
 
     def func(x):
-        with warnings.catch_warnings(record=True) as record:
-            with local_client() as c:
-                x = c.submit(inc, x)
-                result = x.result()
-            assert any("worker_client" in str(r.message) for r in record)
-            return result
+        with pytest.warns(
+            UserWarning, match=r"local_client has moved to worker_client"
+        ):
+            cmgr = local_client()
+
+        with cmgr as c:
+            return c.submit(inc, x).result()
 
     future = c.submit(func, 10)
     result = await future

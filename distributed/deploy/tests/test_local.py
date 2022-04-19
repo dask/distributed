@@ -1,9 +1,7 @@
 import asyncio
-import gc
 import subprocess
 import sys
 import unittest
-import weakref
 from threading import Lock
 from time import sleep
 from urllib.parse import urlparse
@@ -20,7 +18,6 @@ from distributed.core import Status
 from distributed.deploy.local import LocalCluster
 from distributed.deploy.utils_test import ClusterTest
 from distributed.metrics import time
-from distributed.scheduler import COMPILED
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import TimeoutError, sync
 from distributed.utils_test import (
@@ -355,7 +352,7 @@ async def test_worker_params():
         memory_limit=500,
         asynchronous=True,
     ) as c:
-        assert [w.memory_limit for w in c.workers.values()] == [500] * 2
+        assert [w.memory_manager.memory_limit for w in c.workers.values()] == [500] * 2
 
 
 @gen_test()
@@ -370,7 +367,7 @@ async def test_memory_limit_none():
     ) as c:
         w = c.workers[0]
         assert type(w.data) is dict
-        assert w.memory_limit is None
+        assert w.memory_manager.memory_limit is None
 
 
 def test_cleanup():
@@ -502,7 +499,10 @@ def test_memory(loop, n_workers):
         dashboard_address=":0",
         loop=loop,
     ) as cluster:
-        assert sum(w.memory_limit for w in cluster.workers.values()) <= MEMORY_LIMIT
+        assert (
+            sum(w.memory_manager.memory_limit for w in cluster.workers.values())
+            <= MEMORY_LIMIT
+        )
 
 
 @pytest.mark.parametrize("n_workers", [None, 3])
@@ -644,18 +644,9 @@ def test_adapt(loop):
         cluster.adapt(minimum=0, maximum=2, interval="10ms")
         assert cluster._adaptive.minimum == 0
         assert cluster._adaptive.maximum == 2
-        ref = weakref.ref(cluster._adaptive)
 
         cluster.adapt(minimum=1, maximum=2, interval="10ms")
         assert cluster._adaptive.minimum == 1
-        gc.collect()
-
-        # the old Adaptive class sticks around, not sure why
-        # start = time()
-        # while ref():
-        #     sleep(0.01)
-        #     gc.collect()
-        #     assert time() < start + 5
 
         start = time()
         while len(cluster.scheduler.workers) != 1:
@@ -770,7 +761,6 @@ async def test_scale_retires_workers():
     await cluster.close()
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 def test_local_tls_restart(loop):
     from distributed.utils_test import tls_only_security
 
@@ -942,9 +932,9 @@ async def test_scale_memory_cores():
         assert len(cluster.worker_spec) == 4
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("memory_limit", ["2 GiB", None])
-async def test_repr(memory_limit, cleanup):
+@gen_test()
+async def test_repr(memory_limit):
     async with LocalCluster(
         n_workers=2,
         processes=False,
@@ -979,9 +969,9 @@ async def test_threads_per_worker_set_to_0():
             assert all(w.nthreads < CPU_COUNT for w in cluster.workers.values())
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("temporary", [True, False])
-async def test_capture_security(cleanup, temporary):
+@gen_test()
+async def test_capture_security(temporary):
     if temporary:
         xfail_ssl_issue5601()
         pytest.importorskip("cryptography")
@@ -1050,28 +1040,29 @@ async def test_cluster_names():
             assert unnamed_cluster2 != unnamed_cluster
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("nanny", [True, False])
+@gen_test()
 async def test_local_cluster_redundant_kwarg(nanny):
-    with pytest.raises(TypeError, match="unexpected keyword argument"):
-        # Extra arguments are forwarded to the worker class. Depending on
-        # whether we use the nanny or not, the error treatment is quite
-        # different and we should assert that an exception is raised
-        async with await LocalCluster(
-            typo_kwarg="foo",
-            processes=nanny,
-            n_workers=1,
-            dashboard_address=":0",
-        ) as cluster:
+    cluster = LocalCluster(
+        typo_kwarg="foo",
+        processes=nanny,
+        n_workers=1,
+        dashboard_address=":0",
+        asynchronous=True,
+    )
+    try:
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
+            # Extra arguments are forwarded to the worker class. Depending on
+            # whether we use the nanny or not, the error treatment is quite
+            # different and we should assert that an exception is raised
+            async with cluster:
+                pass
+    finally:
+        # FIXME: LocalCluster leaks if LocalCluster.__aenter__ raises
+        await cluster.close()
 
-            # This will never work but is a reliable way to block without hard
-            # coding any sleep values
-            async with Client(cluster) as c:
-                f = c.submit(sleep, 0)
-                await f
 
-
-@pytest.mark.asyncio
+@gen_test()
 async def test_cluster_info_sync():
     async with LocalCluster(
         processes=False, asynchronous=True, scheduler_sync_interval="1ms"
@@ -1098,7 +1089,7 @@ async def test_cluster_info_sync():
         assert info["foo"] == "bar"
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_cluster_info_sync_is_robust_to_network_blips(monkeypatch):
     async with LocalCluster(
         processes=False, asynchronous=True, scheduler_sync_interval="1ms"
@@ -1134,9 +1125,9 @@ async def test_cluster_info_sync_is_robust_to_network_blips(monkeypatch):
         assert info["foo"] == "bar"
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("host", [None, "127.0.0.1"])
 @pytest.mark.parametrize("use_nanny", [True, False])
+@gen_test()
 async def test_cluster_host_used_throughout_cluster(host, use_nanny):
     """Ensure that the `host` kwarg is propagated through scheduler, nanny, and workers"""
     async with LocalCluster(host=host, asynchronous=True) as cluster:
@@ -1152,7 +1143,7 @@ async def test_cluster_host_used_throughout_cluster(host, use_nanny):
 
 
 @gen_test()
-async def test_connect_to_closed_cluster(cleanup):
+async def test_connect_to_closed_cluster():
     async with LocalCluster(processes=False, asynchronous=True) as cluster:
         async with Client(cluster, asynchronous=True) as c1:
             assert await c1.submit(inc, 1) == 2

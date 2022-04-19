@@ -24,51 +24,12 @@ from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
+from distributed.profile import wait_profiler
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, parse_ports
 from distributed.utils_test import captured_logger, gen_cluster, gen_test
 
 pytestmark = pytest.mark.ci1
-
-
-@pytest.mark.slow
-@gen_cluster(nthreads=[], timeout=120)
-async def test_nanny(s):
-    async with Nanny(s.address, nthreads=2, loop=s.loop) as n:
-        async with rpc(n.address) as nn:
-            assert n.is_alive()
-            [ws] = s.workers.values()
-            assert ws.nthreads == 2
-            assert ws.nanny == n.address
-
-            await nn.kill()
-            assert not n.is_alive()
-            start = time()
-            while n.worker_address in s.workers:
-                assert time() < start + 1
-                await asyncio.sleep(0.01)
-
-            await nn.kill()
-            assert not n.is_alive()
-            assert n.worker_address not in s.workers
-
-            await nn.instantiate()
-            assert n.is_alive()
-            [ws] = s.workers.values()
-            assert ws.nthreads == 2
-            assert ws.nanny == n.address
-
-            await nn.terminate()
-            assert not n.is_alive()
-
-
-@gen_cluster(nthreads=[])
-async def test_many_kills(s):
-    n = await Nanny(s.address, nthreads=2, loop=s.loop)
-    assert n.is_alive()
-    await asyncio.gather(*(n.kill() for _ in range(5)))
-    await asyncio.gather(*(n.kill() for _ in range(5)))
-    await n.close()
 
 
 @gen_cluster(Worker=Nanny)
@@ -81,31 +42,31 @@ async def test_str(s, a, b):
 
 @gen_cluster(nthreads=[], client=True)
 async def test_nanny_process_failure(c, s):
-    n = await Nanny(s.address, nthreads=2)
-    first_dir = n.worker_dir
+    async with Nanny(s.address, nthreads=2) as n:
+        first_dir = n.worker_dir
 
-    assert os.path.exists(first_dir)
+        assert os.path.exists(first_dir)
 
-    ww = rpc(n.worker_address)
-    await ww.update_data(data=valmap(dumps, {"x": 1, "y": 2}))
-    pid = n.pid
-    assert pid is not None
-    with suppress(CommClosedError):
-        await c.run(os._exit, 0, workers=[n.worker_address])
+        ww = rpc(n.worker_address)
+        await ww.update_data(data=valmap(dumps, {"x": 1, "y": 2}))
+        pid = n.pid
+        assert pid is not None
+        with suppress(CommClosedError):
+            await c.run(os._exit, 0, workers=[n.worker_address])
 
-    while n.pid == pid:  # wait while process dies and comes back
-        await asyncio.sleep(0.01)
+        while n.pid == pid:  # wait while process dies and comes back
+            await asyncio.sleep(0.01)
 
-    await asyncio.sleep(1)
-    while not n.is_alive():  # wait while process comes back
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(1)
+        while not n.is_alive():  # wait while process comes back
+            await asyncio.sleep(0.01)
 
-    # assert n.worker_address != original_address  # most likely
+        # assert n.worker_address != original_address  # most likely
 
-    while n.worker_address not in s.nthreads or n.worker_dir is None:
-        await asyncio.sleep(0.01)
+        while n.worker_address not in s.nthreads or n.worker_dir is None:
+            await asyncio.sleep(0.01)
 
-    second_dir = n.worker_dir
+        second_dir = n.worker_dir
 
     await n.close()
     assert not os.path.exists(second_dir)
@@ -117,14 +78,11 @@ async def test_nanny_process_failure(c, s):
 
 @gen_cluster(nthreads=[])
 async def test_run(s):
-    n = await Nanny(s.address, nthreads=2, loop=s.loop)
-
-    with rpc(n.address) as nn:
-        response = await nn.run(function=dumps(lambda: 1))
-        assert response["status"] == "OK"
-        assert response["result"] == 1
-
-    await n.close()
+    async with Nanny(s.address, nthreads=2) as n:
+        with rpc(n.address) as nn:
+            response = await nn.run(function=dumps(lambda: 1))
+            assert response["status"] == "OK"
+            assert response["result"] == 1
 
 
 @pytest.mark.slow
@@ -205,17 +163,16 @@ async def test_num_fds(s):
     proc = psutil.Process()
 
     # Warm up
-    w = await Nanny(s.address)
-    await w.close()
-    del w
+    async with Nanny(s.address):
+        pass
+    wait_profiler()
     gc.collect()
 
     before = proc.num_fds()
 
     for i in range(3):
-        w = await Nanny(s.address)
-        await asyncio.sleep(0.1)
-        await w.close()
+        async with Nanny(s.address):
+            await asyncio.sleep(0.1)
 
     while proc.num_fds() > before:
         print("fds:", before, proc.num_fds())
@@ -226,23 +183,21 @@ async def test_num_fds(s):
 @gen_cluster(client=True, nthreads=[])
 async def test_worker_uses_same_host_as_nanny(c, s):
     for host in ["tcp://0.0.0.0", "tcp://127.0.0.2"]:
-        n = await Nanny(s.address, host=host)
+        async with Nanny(s.address, host=host):
 
-        def func(dask_worker):
-            return dask_worker.listener.listen_address
+            def func(dask_worker):
+                return dask_worker.listener.listen_address
 
-        result = await c.run(func)
-        assert host in first(result.values())
-        await n.close()
+            result = await c.run(func)
+            assert host in first(result.values())
 
 
 @gen_test()
 async def test_scheduler_file():
     with tmpfile() as fn:
         s = await Scheduler(scheduler_file=fn, dashboard_address=":0")
-        w = await Nanny(scheduler_file=fn)
-        assert set(s.workers) == {w.worker_address}
-        await w.close()
+        async with Nanny(scheduler_file=fn) as n:
+            assert set(s.workers) == {n.worker_address}
         s.stop()
 
 
@@ -371,11 +326,10 @@ async def test_environment_variable_config(c, s, monkeypatch):
 async def test_local_directory(s):
     with tmpfile() as fn:
         with dask.config.set(temporary_directory=fn):
-            w = await Nanny(s.address)
-            assert w.local_directory.startswith(fn)
-            assert "dask-worker-space" in w.local_directory
-            assert w.process.worker_dir.count("dask-worker-space") == 1
-            await w.close()
+            async with Nanny(s.address) as n:
+                assert n.local_directory.startswith(fn)
+                assert "dask-worker-space" in n.local_directory
+                assert n.process.worker_dir.count("dask-worker-space") == 1
 
 
 def _noop(x):
@@ -497,8 +451,8 @@ class KeyboardInterruptWorker(worker.Worker):
 
 
 @pytest.mark.parametrize("protocol", ["tcp", "ucx"])
-@pytest.mark.asyncio
-async def test_nanny_closed_by_keyboard_interrupt(cleanup, protocol):
+@gen_test()
+async def test_nanny_closed_by_keyboard_interrupt(protocol):
     if protocol == "ucx":  # Skip if UCX isn't available
         pytest.importorskip("ucp")
 
@@ -506,10 +460,9 @@ async def test_nanny_closed_by_keyboard_interrupt(cleanup, protocol):
         async with Nanny(
             s.address, nthreads=1, worker_class=KeyboardInterruptWorker
         ) as n:
-            n.auto_restart = False
             await n.process.stopped.wait()
             # Check that the scheduler has been notified about the closed worker
-            assert len(s.workers) == 0
+            assert "remove-worker" in str(s.events)
 
 
 class StartException(Exception):
@@ -575,3 +528,35 @@ async def test_no_unnecessary_imports_on_worker(c, s, a, modname):
 
     await c.wait_for_workers(1)
     await c.run(assert_no_import)
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny)
+async def test_repeated_restarts(c, s, a, b):
+    for _ in range(3):
+        await c.restart()
+        assert len(s.workers) == 2
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1 GiB"},
+    nthreads=[("127.0.0.1", 1)],
+)
+async def test_restart_memory(c, s, n):
+    # First kill nanny with restart
+    await c.restart()
+
+    # then kill nanny with memory
+    from dask.distributed import KilledWorker
+
+    np = pytest.importorskip("numpy")
+    s.allowed_failures = 1
+    future = c.submit(np.ones, 300_000_000, dtype="f8")
+    with pytest.raises(KilledWorker):
+        await future
+
+    while not s.workers:
+        await asyncio.sleep(0.1)

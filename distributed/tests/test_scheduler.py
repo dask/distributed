@@ -1350,7 +1350,7 @@ async def test_non_existent_worker(c, s):
         ("127.0.0.1:0", ("127.0.0.1",)),
     ],
 )
-@pytest.mark.asyncio
+@gen_test()
 async def test_dashboard_host(host, dashboard_address, expect):
     """Dashboard is accessible from any host by default, but it can be also bound to
     localhost.
@@ -1457,6 +1457,8 @@ async def test_cancel_fire_and_forget(c, s, a, b):
     await asyncio.sleep(0.05)
     await future.cancel(force=True)
     assert future.status == "cancelled"
+    while s.tasks:  # in rare conditions this can take a little while
+        await asyncio.sleep(0.01)
     assert not s.tasks
 
 

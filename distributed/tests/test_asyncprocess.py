@@ -79,7 +79,7 @@ async def test_simple():
     t1 = time()
     await proc.join(timeout=0.02)
     dt = time() - t1
-    assert 0.2 >= dt >= 0.01
+    assert 0.2 >= dt >= 0.001
     assert proc.is_alive()
     assert proc.pid is not None
     assert proc.exitcode is None
@@ -107,13 +107,14 @@ async def test_simple():
     assert dt <= 0.6
 
     del proc
-    gc.collect()
+
     start = time()
     while wr1() is not None and time() < start + 1:
         # Perhaps the GIL switched before _watch_process() exit,
         # help it a little
         sleep(0.001)
         gc.collect()
+
     if wr1() is not None:
         # Help diagnosing
         from types import FrameType

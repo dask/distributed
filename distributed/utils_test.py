@@ -47,7 +47,7 @@ from distributed import system
 from distributed import versions as version_module
 from distributed.client import Client, _global_clients, default_client
 from distributed.comm import Comm
-from distributed.comm.tcp import TCP, BaseTCPConnector
+from distributed.comm.tcp import TCP
 from distributed.compatibility import WINDOWS
 from distributed.config import initialize_logging
 from distributed.core import CommClosedError, ConnectionPool, Status, connect, rpc
@@ -70,7 +70,7 @@ from distributed.utils import (
     reset_logger_locks,
     sync,
 )
-from distributed.worker import Worker
+from distributed.worker import InvalidTransition, Worker
 
 try:
     import dask.array  # register config
@@ -194,29 +194,6 @@ def pristine_loop():
             pass
         IOLoop.clear_instance()
         IOLoop.clear_current()
-
-
-@contextmanager
-def mock_ipython():
-    from unittest import mock
-
-    from distributed._ipython_utils import remote_magic
-
-    ip = mock.Mock()
-    ip.user_ns = {}
-    ip.kernel = None
-
-    def get_ip():
-        return ip
-
-    with mock.patch("IPython.get_ipython", get_ip), mock.patch(
-        "distributed._ipython_utils.get_ipython", get_ip
-    ):
-        yield ip
-    # cleanup remote_magic client cache
-    for kc in remote_magic._clients.values():
-        kc.stop_channels()
-    remote_magic._clients.clear()
 
 
 original_config = copy.deepcopy(dask.config.config)
@@ -888,8 +865,23 @@ async def start_cluster(
         if time() > start + 30:
             await asyncio.gather(*(w.close(timeout=1) for w in workers))
             await s.close(fast=True)
+            check_invalid_worker_transitions(s)
             raise TimeoutError("Cluster creation timeout")
     return s, workers
+
+
+def check_invalid_worker_transitions(s):
+    if not s.events.get("invalid-worker-transition"):
+        return
+
+    for timestamp, msg in s.events["invalid-worker-transition"]:
+        worker = msg.pop("worker")
+        print("Worker:", worker)
+        print(InvalidTransition(**msg))
+
+    raise ValueError(
+        "Invalid worker transitions found", len(s.events["invalid-worker-transition"])
+    )
 
 
 async def end_cluster(s, workers):
@@ -902,6 +894,7 @@ async def end_cluster(s, workers):
     await asyncio.gather(*(end_worker(w) for w in workers))
     await s.close()  # wait until scheduler stops completely
     s.stop()
+    check_invalid_worker_transitions(s)
 
 
 def gen_cluster(
@@ -1249,7 +1242,7 @@ def popen(args: list[str], flush_output: bool = True, **kwargs):
                 print("-" * 80)
 
 
-def wait_for(predicate, timeout, fail_func=None, period=0.001):
+def wait_for(predicate, timeout, fail_func=None, period=0.05):
     deadline = time() + timeout
     while not predicate():
         sleep(period)
@@ -1259,7 +1252,7 @@ def wait_for(predicate, timeout, fail_func=None, period=0.001):
             pytest.fail(f"condition not reached until {timeout} seconds")
 
 
-async def async_wait_for(predicate, timeout, fail_func=None, period=0.001):
+async def async_wait_for(predicate, timeout, fail_func=None, period=0.05):
     deadline = time() + timeout
     while not predicate():
         await asyncio.sleep(period)
@@ -1612,9 +1605,6 @@ def save_sys_modules():
 @contextmanager
 def check_thread_leak():
     """Context manager to ensure we haven't leaked any threads"""
-    # "TCP-Executor" threads are never stopped once they are started
-    BaseTCPConnector.warmup()
-
     active_threads_start = threading.enumerate()
 
     yield

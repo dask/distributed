@@ -1,11 +1,21 @@
+from itertools import chain
+
 import pytest
 
+from distributed.protocol.serialize import Serialize
 from distributed.utils import recursive_to_dict
 from distributed.worker_state_machine import (
+    ExecuteFailureEvent,
+    ExecuteSuccessEvent,
+    Instruction,
     ReleaseWorkerDataMsg,
+    RescheduleEvent,
+    RescheduleMsg,
     SendMessageToScheduler,
+    StateMachineEvent,
     TaskState,
     UniqueTaskHeap,
+    merge_recs_instructions,
 )
 
 
@@ -82,13 +92,143 @@ def test_unique_task_heap():
     assert repr(heap) == "<UniqueTaskHeap: 0 items>"
 
 
-@pytest.mark.parametrize("cls", SendMessageToScheduler.__subclasses__())
-def test_sendmsg_slots(cls):
-    smsg = cls(**dict.fromkeys(cls.__annotations__))
-    assert not hasattr(smsg, "__dict__")
+@pytest.mark.parametrize(
+    "cls",
+    chain(
+        [UniqueTaskHeap],
+        Instruction.__subclasses__(),
+        SendMessageToScheduler.__subclasses__(),
+        StateMachineEvent.__subclasses__(),
+    ),
+)
+def test_slots(cls):
+    params = [
+        k
+        for k in dir(cls)
+        if not k.startswith("_")
+        and k not in ("op", "handled")
+        and not callable(getattr(cls, k))
+    ]
+    inst = cls(**dict.fromkeys(params))
+    assert not hasattr(inst, "__dict__")
 
 
 def test_sendmsg_to_dict():
     # Arbitrary sample class
     smsg = ReleaseWorkerDataMsg(key="x")
     assert smsg.to_dict() == {"op": "release-worker-data", "key": "x"}
+
+
+def test_merge_recs_instructions():
+    x = TaskState("x")
+    y = TaskState("y")
+    instr1 = RescheduleMsg(key="foo", worker="a")
+    instr2 = RescheduleMsg(key="bar", worker="b")
+    assert merge_recs_instructions(
+        ({x: "memory"}, [instr1]),
+        ({y: "released"}, [instr2]),
+    ) == (
+        {x: "memory", y: "released"},
+        [instr1, instr2],
+    )
+
+    # Identical recommendations are silently ignored; incompatible ones raise
+    assert merge_recs_instructions(({x: "memory"}, []), ({x: "memory"}, [])) == (
+        {x: "memory"},
+        [],
+    )
+    with pytest.raises(ValueError):
+        merge_recs_instructions(({x: "memory"}, []), ({x: "released"}, []))
+
+
+def test_event_to_dict():
+    ev = RescheduleEvent(stimulus_id="test", key="x")
+    ev2 = ev.to_loggable(handled=11.22)
+    assert ev2 == ev
+    d = recursive_to_dict(ev2)
+    assert d == {
+        "cls": "RescheduleEvent",
+        "stimulus_id": "test",
+        "handled": 11.22,
+        "key": "x",
+    }
+    ev3 = StateMachineEvent.from_dict(d)
+    assert ev3 == ev
+
+
+def test_executesuccess_to_dict():
+    """The potentially very large ExecuteSuccessEvent.value is not stored in the log"""
+    ev = ExecuteSuccessEvent(
+        stimulus_id="test",
+        key="x",
+        value=123,
+        start=123.4,
+        stop=456.7,
+        nbytes=890,
+        type=int,
+    )
+    ev2 = ev.to_loggable(handled=11.22)
+    assert ev2.value is None
+    assert ev.value == 123
+    d = recursive_to_dict(ev2)
+    assert d == {
+        "cls": "ExecuteSuccessEvent",
+        "stimulus_id": "test",
+        "handled": 11.22,
+        "key": "x",
+        "value": None,
+        "nbytes": 890,
+        "start": 123.4,
+        "stop": 456.7,
+        "type": "<class 'int'>",
+    }
+    ev3 = StateMachineEvent.from_dict(d)
+    assert isinstance(ev3, ExecuteSuccessEvent)
+    assert ev3.stimulus_id == "test"
+    assert ev3.handled == 11.22
+    assert ev3.key == "x"
+    assert ev3.value is None
+    assert ev3.start == 123.4
+    assert ev3.stop == 456.7
+    assert ev3.nbytes == 890
+    assert ev3.type is None
+
+
+def test_executefailure_to_dict():
+    ev = ExecuteFailureEvent(
+        stimulus_id="test",
+        key="x",
+        start=123.4,
+        stop=456.7,
+        exception=Serialize(ValueError("foo")),
+        traceback=Serialize("lose me"),
+        exception_text="exc text",
+        traceback_text="tb text",
+    )
+    ev2 = ev.to_loggable(handled=11.22)
+    assert ev2 == ev
+    d = recursive_to_dict(ev2)
+    assert d == {
+        "cls": "ExecuteFailureEvent",
+        "stimulus_id": "test",
+        "handled": 11.22,
+        "key": "x",
+        "start": 123.4,
+        "stop": 456.7,
+        "exception": "<Serialize: foo>",
+        "traceback": "<Serialize: lose me>",
+        "exception_text": "exc text",
+        "traceback_text": "tb text",
+    }
+    ev3 = StateMachineEvent.from_dict(d)
+    assert isinstance(ev3, ExecuteFailureEvent)
+    assert ev3.stimulus_id == "test"
+    assert ev3.handled == 11.22
+    assert ev3.key == "x"
+    assert ev3.start == 123.4
+    assert ev3.stop == 456.7
+    assert isinstance(ev3.exception, Serialize)
+    assert isinstance(ev3.exception.data, Exception)
+    assert ev3.traceback is None
+    assert ev3.exception_text == "exc text"
+    assert ev3.traceback_text == "tb text"

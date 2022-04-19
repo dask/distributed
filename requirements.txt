@@ -1,6 +1,6 @@
 click >= 6.6
 cloudpickle >= 1.5.0
-dask == 2022.03.0
+dask == 2022.04.1
 jinja2
 msgpack >= 0.6.0
 packaging >= 20.0
