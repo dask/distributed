@@ -68,7 +68,6 @@ from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import Server, Status
 from distributed.metrics import time
-from distributed.objects import HasWhat, WhoHas
 from distributed.profile import wait_profiler
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
 from distributed.sizeof import sizeof
@@ -793,7 +792,7 @@ async def test_garbage_collection_with_scatter(c, s, a, b):
     [future] = await c.scatter([1])
     assert future.key in c.futures
     assert future.status == "finished"
-    assert s.who_wants[future.key] == {c.id}
+    assert {cs.client_key for cs in s.tasks[future.key].who_wants} == {c.id}
 
     key = future.key
     assert c.refcount[key] == 1
@@ -923,10 +922,10 @@ async def test_restrictions_submit(c, s, a, b):
     y = c.submit(inc, x, workers={b.ip})
     await wait([x, y])
 
-    assert s.host_restrictions[x.key] == {a.ip}
+    assert s.tasks[x.key].host_restrictions == {a.ip}
     assert x.key in a.data
 
-    assert s.host_restrictions[y.key] == {b.ip}
+    assert s.tasks[y.key].host_restrictions == {b.ip}
     assert y.key in b.data
 
 
@@ -936,10 +935,10 @@ async def test_restrictions_ip_port(c, s, a, b):
     y = c.submit(inc, x, workers={b.address})
     await wait([x, y])
 
-    assert s.worker_restrictions[x.key] == {a.address}
+    assert s.tasks[x.key].worker_restrictions == {a.address}
     assert x.key in a.data
 
-    assert s.worker_restrictions[y.key] == {b.address}
+    assert s.tasks[y.key].worker_restrictions == {b.address}
     assert y.key in b.data
 
 
@@ -952,7 +951,7 @@ async def test_restrictions_map(c, s, a, b):
     assert set(a.data) == {x.key for x in L}
     assert not b.data
     for x in L:
-        assert s.host_restrictions[x.key] == {a.ip}
+        assert s.tasks[x.key].host_restrictions == {a.ip}
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
@@ -1380,13 +1379,6 @@ async def test_directed_scatter(c, s, a, b):
 
     await c.scatter([4, 5], workers=[b.name])
     assert len(b.data) == 2
-
-
-def test_directed_scatter_sync(c, s, a, b, loop):
-    futures = c.scatter([1, 2, 3], workers=[b["address"]])
-    has_what = sync(loop, c.scheduler.has_what)
-    assert len(has_what[b["address"]]) == len(futures)
-    assert len(has_what[a["address"]]) == 0
 
 
 @gen_cluster(client=True)
@@ -1834,8 +1826,6 @@ def test_start_is_idempotent(c):
 
 @gen_cluster(client=True)
 async def test_client_with_scheduler(c, s, a, b):
-    assert s.nthreads == {a.address: a.nthreads, b.address: b.nthreads}
-
     x = c.submit(inc, 1)
     y = c.submit(inc, 2)
     z = c.submit(add, x, y)
@@ -1861,28 +1851,30 @@ async def test_allow_restrictions(c, s, a, b):
     x = c.submit(inc, 1, workers=a.ip)
     await x
     assert s.tasks[x.key].who_has == {aws}
-    assert not s.loose_restrictions
+    assert not any(ts.loose_restrictions for ts in s.tasks.values())
 
     x = c.submit(inc, 2, workers=a.ip, allow_other_workers=True)
     await x
     assert s.tasks[x.key].who_has == {aws}
-    assert x.key in s.loose_restrictions
+    assert s.tasks[x.key].loose_restrictions
 
     L = c.map(inc, range(3, 13), workers=a.ip, allow_other_workers=True)
     await wait(L)
     assert all(s.tasks[f.key].who_has == {aws} for f in L)
-    assert {f.key for f in L}.issubset(s.loose_restrictions)
+    for f in L:
+        assert s.tasks[f.key].loose_restrictions
 
     x = c.submit(inc, 15, workers="127.0.0.3", allow_other_workers=True)
 
     await x
     assert s.tasks[x.key].who_has
-    assert x.key in s.loose_restrictions
+    assert s.tasks[x.key].loose_restrictions
 
     L = c.map(inc, range(15, 25), workers="127.0.0.3", allow_other_workers=True)
     await wait(L)
     assert all(s.tasks[f.key].who_has for f in L)
-    assert {f.key for f in L}.issubset(s.loose_restrictions)
+    for f in L:
+        assert s.tasks[f.key].loose_restrictions
 
     with pytest.raises(ValueError):
         c.submit(inc, 1, allow_other_workers=True)
@@ -2049,8 +2041,8 @@ async def test_forget_simple(c, s, a, b):
     z = c.submit(add, x, y, workers=[a.ip], allow_other_workers=True)
 
     await wait([x, y, z])
-    assert not s.waiting_data.get(x.key)
-    assert not s.waiting_data.get(y.key)
+    assert not s.tasks[x.key].waiting_on
+    assert not s.tasks[y.key].waiting_on
 
     assert set(s.tasks) == {x.key, y.key, z.key}
 
@@ -2125,31 +2117,30 @@ async def test_forget_errors(c, s, a, b):
     z = c.submit(inc, y)
     await wait([y])
 
-    assert x.key in s.exceptions
-    assert x.key in s.exceptions_blame
-    assert y.key in s.exceptions_blame
-    assert z.key in s.exceptions_blame
+    assert s.tasks[x.key].exception
+    assert s.tasks[x.key].exception_blame
+    assert s.tasks[y.key].exception_blame
+    assert s.tasks[z.key].exception_blame
 
     s.client_releases_keys(keys=[z.key], client=c.id)
 
-    assert x.key in s.exceptions
-    assert x.key in s.exceptions_blame
-    assert y.key in s.exceptions_blame
-    assert z.key not in s.exceptions_blame
+    assert s.tasks[x.key].exception
+    assert s.tasks[x.key].exception_blame
+    assert s.tasks[y.key].exception_blame
+    assert z.key not in s.tasks
 
     s.client_releases_keys(keys=[x.key], client=c.id)
 
-    assert x.key in s.exceptions
-    assert x.key in s.exceptions_blame
-    assert y.key in s.exceptions_blame
-    assert z.key not in s.exceptions_blame
+    assert s.tasks[x.key].exception
+    assert s.tasks[x.key].exception_blame
+    assert s.tasks[y.key].exception_blame
+    assert z.key not in s.tasks
 
     s.client_releases_keys(keys=[y.key], client=c.id)
 
-    assert x.key not in s.exceptions
-    assert x.key not in s.exceptions_blame
-    assert y.key not in s.exceptions_blame
-    assert z.key not in s.exceptions_blame
+    assert x.key not in s.tasks
+    assert y.key not in s.tasks
+    assert z.key not in s.tasks
 
 
 def test_repr_sync(c):
@@ -2159,18 +2150,6 @@ def test_repr_sync(c):
     assert c.scheduler.address in r
     assert str(2) in s  # nworkers
     assert "cores" in s or "threads" in s
-
-
-@gen_cluster(client=True)
-async def test_waiting_data(c, s, a, b):
-    x = c.submit(inc, 1)
-    y = c.submit(inc, 2)
-    z = c.submit(add, x, y, workers=[a.ip], allow_other_workers=True)
-
-    await wait([x, y, z])
-
-    assert not s.waiting_data.get(x.key)
-    assert not s.waiting_data.get(y.key)
 
 
 @gen_cluster()
@@ -2188,21 +2167,17 @@ async def test_multi_client(s, a, b):
 
     await wait([x, y])
 
-    assert s.wants_what == {
-        c.id: {x.key, y.key},
-        f.id: {y.key},
-        "fire-and-forget": set(),
-    }
-    assert s.who_wants == {x.key: {c.id}, y.key: {c.id, f.id}}
+    assert {ts.key for ts in s.clients[c.id].wants_what} == {x.key, y.key}
+    assert {ts.key for ts in s.clients[f.id].wants_what} == {y.key}
 
     await c.close()
 
-    while c.id in s.wants_what:
+    while c.id in s.clients:
         await asyncio.sleep(0.01)
 
-    assert c.id not in s.wants_what
-    assert c.id not in s.who_wants[y.key]
-    assert x.key not in s.who_wants
+    assert c.id not in s.clients
+    assert c.id not in s.tasks[y.key].who_wants
+    assert x.key not in s.tasks
 
     await f.close()
 
@@ -2251,24 +2226,23 @@ async def test_multi_garbage_collection(s, a, b):
     while x.key in a.data or x.key in b.data:
         await asyncio.sleep(0.01)
 
-    assert s.wants_what == {c.id: {y.key}, f.id: {y.key}, "fire-and-forget": set()}
-    assert s.who_wants == {y.key: {c.id, f.id}}
+    assert {ts.key for ts in s.clients[c.id].wants_what} == {y.key}
+    assert {ts.key for ts in s.clients[f.id].wants_what} == {y.key}
 
     y.__del__()
-    while x.key in s.wants_what[f.id]:
+    while x.key in {ts.key for ts in s.clients[f.id].wants_what}:
         await asyncio.sleep(0.01)
 
     await asyncio.sleep(0.1)
     assert y.key in a.data or y.key in b.data
-    assert s.wants_what == {c.id: {y.key}, f.id: set(), "fire-and-forget": set()}
-    assert s.who_wants == {y.key: {c.id}}
+    assert {ts.key for ts in s.clients[c.id].wants_what} == {y.key}
+    assert not s.clients[f.id].wants_what
 
     y2.__del__()
     while y.key in a.data or y.key in b.data:
         await asyncio.sleep(0.01)
 
-    assert not any(v for v in s.wants_what.values())
-    assert not s.who_wants
+    assert not s.tasks
 
     await c.close()
     await f.close()
@@ -2291,25 +2265,6 @@ async def test__broadcast_integer(c, s, *workers):
 async def test__broadcast_dict(c, s, a, b):
     d = await c.scatter({"x": 1}, broadcast=True)
     assert a.data == b.data == {"x": 1}
-
-
-def test_broadcast(c, s, a, b):
-    x, y = c.scatter([1, 2], broadcast=True)
-
-    has_what = sync(c.loop, c.scheduler.has_what)
-
-    assert {k: set(v) for k, v in has_what.items()} == {
-        a["address"]: {x.key, y.key},
-        b["address"]: {x.key, y.key},
-    }
-
-    [z] = c.scatter([3], broadcast=True, workers=[a["address"]])
-
-    has_what = sync(c.loop, c.scheduler.has_what)
-    assert {k: set(v) for k, v in has_what.items()} == {
-        a["address"]: {x.key, y.key, z.key},
-        b["address"]: {x.key, y.key},
-    }
 
 
 @gen_cluster(client=True)
@@ -2465,8 +2420,8 @@ async def test_async_persist(c, s, a, b):
     while y.key not in s.tasks and w.key not in s.tasks:
         await asyncio.sleep(0.01)
 
-    assert s.who_wants[y.key] == {c.id}
-    assert s.who_wants[w.key] == {c.id}
+    assert {cs.client_key for cs in s.tasks[y.key].who_wants} == {c.id}
+    assert {cs.client_key for cs in s.tasks[w.key].who_wants} == {c.id}
 
     yyf, wwf = c.compute([yy, ww])
     yyy, www = await c.gather([yyf, wwf])
@@ -3026,9 +2981,8 @@ async def test_unrunnable_task_runs(c, s, a, b):
 @gen_cluster(client=True, nthreads=[])
 async def test_add_worker_after_tasks(c, s):
     futures = c.map(inc, range(10))
-    n = await Nanny(s.address, nthreads=2, loop=s.loop)
-    await c.gather(futures)
-    await n.close()
+    async with Nanny(s.address, nthreads=2):
+        await c.gather(futures)
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
@@ -3378,39 +3332,9 @@ async def test_set_as_default(s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_get_processing(c, s, a, b):
-    processing = await c.processing()
-    assert processing == valmap(tuple, s.processing)
-
-    futures = c.map(
-        slowinc, range(10), delay=0.1, workers=[a.address], allow_other_workers=True
-    )
-
-    await asyncio.sleep(0.2)
-
-    x = await c.processing()
-    assert set(x) == {a.address, b.address}
-
-    x = await c.processing(workers=[a.address])
-    assert isinstance(x[a.address], (list, tuple))
-
-
-@gen_cluster(client=True)
 async def test_get_foo(c, s, a, b):
     futures = c.map(inc, range(10))
     await wait(futures)
-
-    x = await c.scheduler.ncores()
-    assert x == s.nthreads
-
-    x = await c.scheduler.ncores(workers=[a.address])
-    assert x == {a.address: s.nthreads[a.address]}
-
-    x = await c.scheduler.has_what()
-    assert valmap(sorted, x) == valmap(sorted, s.has_what)
-
-    x = await c.scheduler.has_what(workers=[a.address])
-    assert valmap(sorted, x) == {a.address: sorted(s.has_what[a.address])}
 
     x = await c.scheduler.nbytes(summary=False)
     assert x == s.get_nbytes(summary=False)
@@ -3419,10 +3343,14 @@ async def test_get_foo(c, s, a, b):
     assert x == {futures[0].key: s.tasks[futures[0].key].nbytes}
 
     x = await c.scheduler.who_has()
-    assert valmap(sorted, x) == valmap(sorted, s.who_has)
+    assert valmap(set, x) == {
+        key: {ws.address for ws in ts.who_has} for key, ts in s.tasks.items()
+    }
 
     x = await c.scheduler.who_has(keys=[futures[0].key])
-    assert valmap(sorted, x) == {futures[0].key: sorted(s.who_has[futures[0].key])}
+    assert valmap(set, x) == {
+        futures[0].key: {ws.address for ws in s.tasks[futures[0].key].who_has}
+    }
 
 
 def assert_dict_key_equal(expected, actual):
@@ -3615,28 +3543,6 @@ async def test_status(s):
 
     await c.close()
     assert c.status == "closed"
-
-
-@gen_cluster(client=True)
-async def test_async_whowhat(c, s, a, b):
-    [x] = await c.scatter([1], workers=a.address)
-
-    who_has = await c.who_has()
-    has_what = await c.has_what()
-    assert type(who_has) is WhoHas
-    assert type(has_what) is HasWhat
-
-    assert who_has == {x.key: (a.address,)}
-    assert has_what == {a.address: (x.key,), b.address: ()}
-
-
-def test_client_repr_html(c):
-    x = c.submit(inc, 1)
-
-    who_has = c.who_has()
-    has_what = c.has_what()
-    assert type(who_has) is WhoHas
-    assert type(has_what) is HasWhat
 
 
 @gen_cluster(client=True)
@@ -4222,7 +4128,9 @@ async def test_persist_workers_annotate(e, s, a, b, c):
     assert all(v.key in a.data for v in L1)
     assert total.key in b.data
 
-    assert s.loose_restrictions == {total2.key} | {v.key for v in L2}
+    assert s.tasks[total2.key].loose_restrictions
+    for v in L2:
+        assert s.tasks[v.key].loose_restrictions
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
@@ -4242,7 +4150,7 @@ async def test_persist_workers_annotate2(e, s, a, b, c):
         assert all(layer.annotations is None for layer in x.dask.layers.values())
 
     for v in L1:
-        assert s.worker_restrictions[v.key] == {a.address}
+        assert s.tasks[v.key].worker_restrictions == {a.address}
 
 
 @nodebug  # test timing is fragile
@@ -4262,10 +4170,12 @@ async def test_persist_workers(e, s, a, b, c):
     await wait(out)
 
     for v in L1 + L2 + [total, total2]:
-        assert s.worker_restrictions[v.key] == {a.address, b.address}
-    assert not any(c.address in r for r in s.worker_restrictions)
+        assert s.tasks[v.key].worker_restrictions == {a.address, b.address}
+    assert not any(c.address in ts.worker_restrictions for ts in s.tasks.values())
 
-    assert s.loose_restrictions == {total.key, total2.key} | {v.key for v in L1 + L2}
+    assert s.tasks[total.key].loose_restrictions
+    for v in L1 + L2:
+        assert s.tasks[v.key].loose_restrictions
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
@@ -4283,12 +4193,14 @@ async def test_compute_workers_annotate(e, s, a, b, c):
 
     await wait(out)
     for v in L1:
-        assert s.worker_restrictions[v.key] == {a.address}
+        assert s.tasks[v.key].worker_restrictions == {a.address}
     for v in L2:
-        assert s.worker_restrictions[v.key] == {c.address}
-    assert s.worker_restrictions[total.key] == {b.address}
+        assert s.tasks[v.key].worker_restrictions == {c.address}
+    assert s.tasks[total.key].worker_restrictions == {b.address}
 
-    assert s.loose_restrictions == {total.key} | {v.key for v in L1}
+    assert s.tasks[total.key].loose_restrictions
+    for v in L1:
+        assert s.tasks[v.key].loose_restrictions
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
@@ -4305,10 +4217,12 @@ async def test_compute_workers(e, s, a, b, c):
 
     await wait(out)
     for v in L1 + L2 + [total]:
-        assert s.worker_restrictions[v.key] == {a.address, b.address}
-    assert not any(c.address in r for r in s.worker_restrictions)
+        assert s.tasks[v.key].worker_restrictions == {a.address, b.address}
+    assert not any(c.address in ts.worker_restrictions for ts in s.tasks.values())
 
-    assert s.loose_restrictions == {total.key} | {v.key for v in L1 + L2}
+    assert s.tasks[total.key].loose_restrictions
+    for v in L1 + L2:
+        assert s.tasks[v.key].loose_restrictions
 
 
 @gen_cluster(client=True)
@@ -4340,8 +4254,8 @@ async def test_retire_workers_2(c, s, a, b):
 
     await s.retire_workers(workers=[a.address])
     assert b.data == {x.key: 1}
-    assert s.who_has == {x.key: {b.address}}
-    assert s.has_what == {b.address: {x.key}}
+    assert {ws.address for ws in s.tasks[x.key].who_has} == {b.address}
+    assert {ts.key for ts in s.workers[b.address].has_what} == {x.key}
 
     assert a.address not in s.workers
 
@@ -4358,7 +4272,7 @@ async def test_retire_many_workers(c, s, *workers):
     while len(s.workers) != 3:
         await asyncio.sleep(0.01)
 
-    assert len(s.has_what) == len(s.nthreads) == 3
+    assert len(s.workers) == 3
 
     assert all(future.done() for future in futures)
     assert all(s.tasks[future.key].state == "memory" for future in futures)
@@ -4658,19 +4572,6 @@ async def test_map_list_kwargs(c, s, a, b):
     futures = c.map(f, range(10), L=futures)
     results = await c.gather(futures)
     assert results == [i + 6 for i in range(10)]
-
-
-@gen_cluster(client=True)
-async def test_dont_clear_waiting_data(c, s, a, b):
-    x = await c.scatter(1)
-    y = c.submit(slowinc, x, delay=0.5)
-    while y.key not in s.tasks:
-        await asyncio.sleep(0.01)
-    key = x.key
-    del x
-    for i in range(5):
-        assert s.waiting_data[key]
-        await asyncio.sleep(0)
 
 
 @gen_cluster(client=True)
@@ -4976,8 +4877,8 @@ async def test_fire_and_forget(c, s, a, b):
     while len(s.tasks) > 1:
         await asyncio.sleep(0.01)
 
-    assert set(s.who_wants) == {future.key}
     assert set(s.tasks) == {future.key}
+    assert s.tasks[future.key].who_wants
 
 
 @gen_cluster(client=True)
@@ -5033,10 +4934,10 @@ async def test_close(s, a, b):
     c = await Client(s.address, asynchronous=True)
     future = c.submit(inc, 1)
     await wait(future)
-    assert c.id in s.wants_what
+    assert c.id in s.clients
     await c.close()
 
-    while c.id in s.wants_what or s.tasks:
+    while c.id in s.clients or s.tasks:
         await asyncio.sleep(0.01)
 
 

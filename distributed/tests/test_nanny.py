@@ -63,7 +63,7 @@ async def test_nanny_process_failure(c, s):
 
         # assert n.worker_address != original_address  # most likely
 
-        while n.worker_address not in s.nthreads or n.worker_dir is None:
+        while n.worker_address not in s.workers or n.worker_dir is None:
             await asyncio.sleep(0.01)
 
         second_dir = n.worker_dir

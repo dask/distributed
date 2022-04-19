@@ -119,7 +119,7 @@ class WorkerCallStacks(RequestHandler):
     async def get(self, worker):
         with log_errors():
             worker = escape.url_unescape(worker)
-            keys = self.server.processing[worker]
+            keys = {ts.key for ts in self.server.workers[worker].processing}
             call_stack = await self.server.get_call_stack(keys=keys)
             self.render(
                 "call-stack.html",
