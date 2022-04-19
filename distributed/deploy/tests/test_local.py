@@ -18,7 +18,6 @@ from distributed.core import Status
 from distributed.deploy.local import LocalCluster
 from distributed.deploy.utils_test import ClusterTest
 from distributed.metrics import time
-from distributed.scheduler import COMPILED
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import TimeoutError, sync
 from distributed.utils_test import (
@@ -353,7 +352,7 @@ async def test_worker_params():
         memory_limit=500,
         asynchronous=True,
     ) as c:
-        assert [w.memory_limit for w in c.workers.values()] == [500] * 2
+        assert [w.memory_manager.memory_limit for w in c.workers.values()] == [500] * 2
 
 
 @gen_test()
@@ -368,7 +367,7 @@ async def test_memory_limit_none():
     ) as c:
         w = c.workers[0]
         assert type(w.data) is dict
-        assert w.memory_limit is None
+        assert w.memory_manager.memory_limit is None
 
 
 def test_cleanup():
@@ -443,7 +442,7 @@ async def test_scale_up_and_down():
             cluster.scale(2)
             await cluster
             assert len(cluster.workers) == 2
-            assert len(cluster.scheduler.nthreads) == 2
+            assert len(cluster.scheduler.workers) == 2
 
             cluster.scale(1)
             await cluster
@@ -500,7 +499,10 @@ def test_memory(loop, n_workers):
         dashboard_address=":0",
         loop=loop,
     ) as cluster:
-        assert sum(w.memory_limit for w in cluster.workers.values()) <= MEMORY_LIMIT
+        assert (
+            sum(w.memory_manager.memory_limit for w in cluster.workers.values())
+            <= MEMORY_LIMIT
+        )
 
 
 @pytest.mark.parametrize("n_workers", [None, 3])
@@ -759,7 +761,6 @@ async def test_scale_retires_workers():
     await cluster.close()
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 def test_local_tls_restart(loop):
     from distributed.utils_test import tls_only_security
 
@@ -933,7 +934,7 @@ async def test_scale_memory_cores():
 
 @pytest.mark.parametrize("memory_limit", ["2 GiB", None])
 @gen_test()
-async def test_repr(memory_limit, cleanup):
+async def test_repr(memory_limit):
     async with LocalCluster(
         n_workers=2,
         processes=False,
@@ -970,7 +971,7 @@ async def test_threads_per_worker_set_to_0():
 
 @pytest.mark.parametrize("temporary", [True, False])
 @gen_test()
-async def test_capture_security(cleanup, temporary):
+async def test_capture_security(temporary):
     if temporary:
         xfail_ssl_issue5601()
         pytest.importorskip("cryptography")
@@ -1142,7 +1143,7 @@ async def test_cluster_host_used_throughout_cluster(host, use_nanny):
 
 
 @gen_test()
-async def test_connect_to_closed_cluster(cleanup):
+async def test_connect_to_closed_cluster():
     async with LocalCluster(processes=False, asynchronous=True) as cluster:
         async with Client(cluster, asynchronous=True) as c1:
             assert await c1.submit(inc, 1) == 2

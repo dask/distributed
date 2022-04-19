@@ -1,7 +1,6 @@
 import asyncio
 import random
 import threading
-import warnings
 from collections import defaultdict
 from time import sleep
 
@@ -32,13 +31,13 @@ async def test_submit_from_worker(c, s, a, b):
             return result
 
     x, y = c.map(func, [10, 20])
-    xx, yy = await c._gather([x, y])
+    xx, yy = await c.gather([x, y])
 
     assert xx == 10 + 1 + (10 + 1) * 2
     assert yy == 20 + 1 + (20 + 1) * 2
 
     assert len(s.transition_log) > 10
-    assert len([id for id in s.wants_what if id.lower().startswith("client")]) == 1
+    assert len([id for id in s.clients if id.lower().startswith("client")]) == 1
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
@@ -77,7 +76,7 @@ async def test_scatter_from_worker(c, s, a, b):
     assert result is True
 
     start = time()
-    while not all(v == 1 for v in s.nthreads.values()):
+    while not all(ws.nthreads == 1 for ws in s.workers.values()):
         await asyncio.sleep(0.1)
         assert time() < start + 5
 
@@ -216,12 +215,13 @@ async def test_local_client_warning(c, s, a, b):
     from distributed import local_client
 
     def func(x):
-        with warnings.catch_warnings(record=True) as record:
-            with local_client() as c:
-                x = c.submit(inc, x)
-                result = x.result()
-            assert any("worker_client" in str(r.message) for r in record)
-            return result
+        with pytest.warns(
+            UserWarning, match=r"local_client has moved to worker_client"
+        ):
+            cmgr = local_client()
+
+        with cmgr as c:
+            return c.submit(inc, x).result()
 
     future = c.submit(func, 10)
     result = await future

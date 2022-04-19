@@ -364,6 +364,7 @@ class Worker(ServerNode):
     executed_count: int
     long_running: set[str]
     log: deque[tuple]  # [(..., stimulus_id: str | None, timestamp: float), ...]
+    stimulus_log: deque[StateMachineEvent]
     incoming_transfer_log: deque[dict[str, Any]]
     outgoing_transfer_log: deque[dict[str, Any]]
     target_message_size: int
@@ -421,6 +422,7 @@ class Worker(ServerNode):
     execution_state: dict[str, Any]
     plugins: dict[str, WorkerPlugin]
     _pending_plugins: tuple[WorkerPlugin, ...]
+    _async_instructions: set[asyncio.Task]
 
     def __init__(
         self,
@@ -519,7 +521,8 @@ class Worker(ServerNode):
 
         self.target_message_size = int(50e6)  # 50 MB
 
-        self.log = deque(maxlen=100000)
+        self.log = deque(maxlen=100_000)
+        self.stimulus_log = deque(maxlen=10_000)
         if validate is None:
             validate = dask.config.get("distributed.scheduler.validate")
         self.validate = validate
@@ -546,6 +549,7 @@ class Worker(ServerNode):
             ("executing", "released"): self.transition_executing_released,
             ("executing", "rescheduled"): self.transition_executing_rescheduled,
             ("fetch", "flight"): self.transition_fetch_flight,
+            ("fetch", "missing"): self.transition_fetch_missing,
             ("fetch", "released"): self.transition_generic_released,
             ("flight", "error"): self.transition_flight_error,
             ("flight", "fetch"): self.transition_flight_fetch,
@@ -838,6 +842,8 @@ class Worker(ServerNode):
             self.lifetime += (random.random() * 2 - 1) * lifetime_stagger
             self.io_loop.call_later(self.lifetime, self.close_gracefully)
 
+        self._async_instructions = set()
+
         Worker._instances.add(self)
 
     ################
@@ -1020,6 +1026,7 @@ class Worker(ServerNode):
             "in_flight_tasks": self.in_flight_tasks,
             "in_flight_workers": self.in_flight_workers,
             "log": self.log,
+            "stimulus_log": self.stimulus_log,
             "tasks": self.tasks,
             "logs": self.get_logs(),
             "config": dask.config.config,
@@ -1171,8 +1178,10 @@ class Worker(ServerNode):
         except OSError as e:
             # Scheduler is gone. Respect distributed.comm.timeouts.connect
             if "Timed out trying to connect" in str(e):
+                logger.info("Timed out while trying to connect during heartbeat")
                 await self.close(report=False)
             else:
+                logger.exception(e)
                 raise e
         finally:
             self.heartbeat_active = False
@@ -1188,6 +1197,10 @@ class Worker(ServerNode):
                 logger.info("Connection to scheduler broken.  Reconnecting...")
                 self.loop.add_callback(self.heartbeat)
             else:
+                logger.info(
+                    "Connection to scheduler broken. Closing without reporting.  Status: %s",
+                    self.status,
+                )
                 await self.close(report=False)
 
     async def upload_file(self, comm, filename=None, data=None, load=True):
@@ -1383,10 +1396,6 @@ class Worker(ServerNode):
         self.start_periodic_callbacks()
         return self
 
-    def _close(self, *args, **kwargs):
-        warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
-        return self.close(*args, **kwargs)
-
     async def close(
         self, report=True, timeout=30, nanny=True, executor_wait=True, safe=False
     ):
@@ -1404,7 +1413,24 @@ class Worker(ServerNode):
                 logger.info("Stopping worker")
             if self.status not in Status.ANY_RUNNING:
                 logger.info("Closed worker has not yet started: %s", self.status)
+            if not report:
+                logger.info("Not reporting worker closure to scheduler")
+            if not executor_wait:
+                logger.info("Not waiting on executor to close")
             self.status = Status.closing
+
+            if self._async_instructions:
+                for task in self._async_instructions:
+                    task.cancel()
+                # async tasks can handle cancellation and could take an arbitrary amount
+                # of time to terminate
+                _, pending = await asyncio.wait(
+                    self._async_instructions, timeout=timeout
+                )
+                for task in pending:
+                    logger.error(
+                        f"Failed to cancel asyncio task after {timeout} seconds: {task}"
+                    )
 
             for preload in self.preloads:
                 await preload.teardown()
@@ -1524,10 +1550,6 @@ class Worker(ServerNode):
             workers=[self.address], close_workers=False, remove=False
         )
         await self.close(safe=True, nanny=not restart)
-
-    async def terminate(self, report: bool = True, **kwargs) -> str:
-        await self.close(report=report, **kwargs)
-        return "OK"
 
     async def wait_until_closed(self):
         warnings.warn("wait_until_closed has moved to finished()")
@@ -1924,6 +1946,14 @@ class Worker(ServerNode):
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         assert ts.done
+        ts.state = "missing"
+        self._missing_dep_flight.add(ts)
+        ts.done = False
+        return {}, []
+
+    def transition_fetch_missing(
+        self, ts: TaskState, *, stimulus_id: str
+    ) -> RecsInstrs:
         ts.state = "missing"
         self._missing_dep_flight.add(ts)
         ts.done = False
@@ -2512,14 +2542,30 @@ class Worker(ServerNode):
                 recs.update(b_recs)
                 instructions += b_instructions
             except InvalidTransition:
-                raise InvalidTransition(
-                    f"Impossible transition from {start} to {finish} for {ts.key}"
-                ) from None
+                self.log_event(
+                    "invalid-worker-transition",
+                    {
+                        "key": ts.key,
+                        "start": start,
+                        "finish": finish,
+                        "story": self.story(ts),
+                        "worker": self.address,
+                    },
+                )
+                raise InvalidTransition(ts.key, start, finish, self.story(ts))
 
         else:
-            raise InvalidTransition(
-                f"Impossible transition from {start} to {finish} for {ts.key}"
+            self.log_event(
+                "invalid-worker-transition",
+                {
+                    "key": ts.key,
+                    "start": start,
+                    "finish": finish,
+                    "story": self.story(ts),
+                    "worker": self.address,
+                },
             )
+            raise InvalidTransition(ts.key, start, finish, self.story(ts))
 
         self.log.append(
             (
@@ -2598,17 +2644,21 @@ class Worker(ServerNode):
 
     def handle_stimulus(self, stim: StateMachineEvent) -> None:
         with log_errors():
-            # self.stimulus_history.append(stim)  # TODO
+            self.stimulus_log.append(stim.to_loggable(handled=time()))
             recs, instructions = self.handle_event(stim)
             self.transitions(recs, stimulus_id=stim.stimulus_id)
             self._handle_instructions(instructions)
 
-    def _handle_stimulus_from_future(
-        self, future: asyncio.Future[StateMachineEvent | None]
+    def _handle_stimulus_from_task(
+        self, task: asyncio.Task[StateMachineEvent | None]
     ) -> None:
+        self._async_instructions.remove(task)
         with log_errors():
-            # This *should* never raise
-            stim = future.result()
+            try:
+                # This *should* never raise any other exceptions
+                stim = task.result()
+            except asyncio.CancelledError:
+                return
         if stim:
             self.handle_stimulus(stim)
 
@@ -2619,10 +2669,12 @@ class Worker(ServerNode):
             if isinstance(inst, SendMessageToScheduler):
                 self.batched_stream.send(inst.to_dict())
             elif isinstance(inst, Execute):
-                coro = self.execute(inst.key, stimulus_id=inst.stimulus_id)
-                task = asyncio.create_task(coro)
-                # TODO track task (at the moment it's fire-and-forget)
-                task.add_done_callback(self._handle_stimulus_from_future)
+                task = asyncio.create_task(
+                    self.execute(inst.key, stimulus_id=inst.stimulus_id),
+                    name=f"execute({inst.key})",
+                )
+                self._async_instructions.add(task)
+                task.add_done_callback(self._handle_stimulus_from_task)
             else:
                 raise TypeError(inst)  # pragma: nocover
 
@@ -2648,8 +2700,16 @@ class Worker(ServerNode):
         }
 
     def story(self, *keys_or_tasks: str | TaskState) -> list[tuple]:
+        """Return all transitions involving one or more tasks"""
         keys = {e.key if isinstance(e, TaskState) else e for e in keys_or_tasks}
         return worker_story(keys, self.log)
+
+    def stimulus_story(
+        self, *keys_or_tasks: str | TaskState
+    ) -> list[StateMachineEvent]:
+        """Return all state machine events involving one or more tasks"""
+        keys = {e.key if isinstance(e, TaskState) else e for e in keys_or_tasks}
+        return [ev for ev in self.stimulus_log if getattr(ev, "key", None) in keys]
 
     def ensure_communicating(self) -> None:
         stimulus_id = f"ensure-communicating-{time()}"
@@ -2670,6 +2730,9 @@ class Worker(ServerNode):
 
             if ts.state != "fetch":
                 continue
+
+            if self.validate:
+                assert ts.who_has
 
             workers = [w for w in ts.who_has if w not in self.in_flight_workers]
             if not workers:
@@ -2999,7 +3062,11 @@ class Worker(ServerNode):
                 for d in has_what:
                     ts = self.tasks[d]
                     ts.who_has.remove(worker)
-
+                    if not ts.who_has and ts.state not in ("released", "memory"):
+                        recommendations[ts] = "missing"
+                        self.log.append(
+                            ("missing-who-has", worker, ts.key, stimulus_id, time())
+                        )
             except Exception as e:
                 logger.exception(e)
                 if self.batched_stream and LOG_PDB:
@@ -3040,7 +3107,10 @@ class Worker(ServerNode):
                         self.batched_stream.send(
                             {"op": "missing-data", "errant_worker": worker, "key": d}
                         )
-                        recommendations[ts] = "fetch" if ts.who_has else "missing"
+                        if ts.who_has:
+                            recommendations[ts] = "fetch"
+                        elif ts.state not in ("released", "memory"):
+                            recommendations[ts] = "missing"
                 del data, response
                 self.transitions(recommendations, stimulus_id=stimulus_id)
 
@@ -3970,6 +4040,7 @@ class Worker(ServerNode):
                 self.validate_task(ts)
 
         except Exception as e:
+            logger.error("Validate state failed.  Closing.", exc_info=e)
             self.loop.add_callback(self.close)
             logger.exception(e)
             if LOG_PDB:
@@ -4589,16 +4660,10 @@ def convert_kwargs_to_str(kwargs: dict, max_len: int | None = None) -> str:
         return "{{{}}}".format(", ".join(strs))
 
 
-async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=True):
+async def run(server, comm, function, args=(), kwargs=None, wait=True):
     kwargs = kwargs or {}
     function = pickle.loads(function)
-    if is_coro is None:
-        is_coro = iscoroutinefunction(function)
-    else:
-        warnings.warn(
-            "The is_coro= parameter is deprecated. "
-            "We now automatically detect coroutines/async functions"
-        )
+    is_coro = iscoroutinefunction(function)
     assert wait or is_coro, "Combination not supported"
     if args:
         args = pickle.loads(args)

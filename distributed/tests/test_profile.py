@@ -304,3 +304,26 @@ def test_call_stack_f_lineno(f_lasti: int, f_lineno: int) -> None:
     assert call_stack(FakeFrame(f_lasti=f_lasti, f_code=FAKE_CODE)) == [  # type: ignore
         f'  File "<stdin>", line {f_lineno}, in example\n\t'
     ]
+
+
+def test_stack_overflow():
+    old = sys.getrecursionlimit()
+    sys.setrecursionlimit(200)
+    try:
+        state = create()
+        frame = None
+
+        def f(i):
+            if i == 0:
+                nonlocal frame
+                frame = sys._current_frames()[threading.get_ident()]
+                return
+            else:
+                return f(i - 1)
+
+        f(sys.getrecursionlimit() - 40)
+        process(frame, None, state)
+        merge(state, state, state)
+
+    finally:
+        sys.setrecursionlimit(old)

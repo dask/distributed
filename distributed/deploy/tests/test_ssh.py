@@ -28,9 +28,11 @@ def test_ssh_hosts_empty_list():
 
 
 @gen_test()
-async def test_ssh_cluster_raises_if_asyncssh_not_installed(monkeypatch, cleanup):
+async def test_ssh_cluster_raises_if_asyncssh_not_installed(monkeypatch):
     monkeypatch.setitem(sys.modules, "asyncssh", None)
-    with pytest.raises(ImportError, match="SSHCluster requires the `asyncssh` package"):
+    with pytest.raises(
+        (RuntimeError, ImportError), match="SSHCluster requires the `asyncssh` package"
+    ):
         async with SSHCluster(
             ["127.0.0.1"] * 3,
             connect_options=[dict(known_hosts=None)] * 3,
@@ -156,33 +158,38 @@ async def test_keywords():
 
 @pytest.mark.avoid_ci
 def test_defer_to_old(loop):
-    with pytest.warns(Warning):
-        with SSHCluster(
+    with pytest.warns(
+        UserWarning,
+        match=r"Note that the SSHCluster API has been replaced\.  "
+        r"We're routing you to the older implementation\.  "
+        r"This will be removed in the future",
+    ):
+        c = SSHCluster(
             scheduler_addr="127.0.0.1",
             scheduler_port=7437,
             worker_addrs=["127.0.0.1", "127.0.0.1"],
-        ) as c:
-            from distributed.deploy.old_ssh import SSHCluster as OldSSHCluster
+        )
+    with c:
+        from distributed.deploy.old_ssh import SSHCluster as OldSSHCluster
 
-            assert isinstance(c, OldSSHCluster)
+        assert isinstance(c, OldSSHCluster)
 
 
 @pytest.mark.avoid_ci
 def test_old_ssh_with_local_dir(loop):
-    with pytest.warns(Warning):
-        from distributed.deploy.old_ssh import SSHCluster as OldSSHCluster
+    from distributed.deploy.old_ssh import SSHCluster as OldSSHCluster
 
-        with OldSSHCluster(
-            scheduler_addr="127.0.0.1",
-            scheduler_port=7437,
-            worker_addrs=["127.0.0.1", "127.0.0.1"],
-            local_directory="/tmp",
-        ) as c:
-            assert len(c.workers) == 2
-            with Client(c) as client:
-                result = client.submit(lambda x: x + 1, 10)
-                result = result.result()
-                assert result == 11
+    with OldSSHCluster(
+        scheduler_addr="127.0.0.1",
+        scheduler_port=7437,
+        worker_addrs=["127.0.0.1", "127.0.0.1"],
+        local_directory="/tmp",
+    ) as c:
+        assert len(c.workers) == 2
+        with Client(c) as client:
+            result = client.submit(lambda x: x + 1, 10)
+            result = result.result()
+            assert result == 11
 
 
 @gen_test()

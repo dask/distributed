@@ -139,7 +139,7 @@ async def test_large_transfer_with_no_compression():
     ],
 )
 @gen_test()
-async def test_http_and_comm_server(cleanup, dashboard, protocol, security, port):
+async def test_http_and_comm_server(dashboard, protocol, security, port):
     if security:
         xfail_ssl_issue5601()
         pytest.importorskip("cryptography")
@@ -159,7 +159,7 @@ async def test_http_and_comm_server(cleanup, dashboard, protocol, security, port
 
 @pytest.mark.parametrize("protocol", ["ws://", "wss://"])
 @gen_test()
-async def test_connection_made_with_extra_conn_args(cleanup, protocol):
+async def test_connection_made_with_extra_conn_args(protocol):
     if protocol == "ws://":
         security = Security(
             extra_conn_args={"headers": {"Authorization": "Token abcd"}}
@@ -186,9 +186,6 @@ async def test_quiet_close():
             protocol="ws", processes=False, asynchronous=True, dashboard_address=":0"
         ):
             pass
-
-    # For some reason unrelated @coroutine warnings are showing up
-    record = [warning for warning in record if "coroutine" not in str(warning.message)]
 
     assert not record, record[0].message
 

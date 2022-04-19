@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 import traceback
+import weakref
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from numbers import Number
@@ -26,6 +27,7 @@ from dask.utils import tmpfile
 import distributed
 from distributed import (
     Client,
+    Event,
     Nanny,
     Reschedule,
     default_client,
@@ -39,6 +41,7 @@ from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
+from distributed.profile import wait_profiler
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
 from distributed.utils import TimeoutError
@@ -58,6 +61,7 @@ from distributed.utils_test import (
     slowsum,
 )
 from distributed.worker import (
+    InvalidTransition,
     Worker,
     benchmark_disk,
     benchmark_memory,
@@ -321,12 +325,15 @@ async def test_worker_port_range(s):
 @gen_test(timeout=60)
 async def test_worker_waits_for_scheduler():
     w = Worker("127.0.0.1:8724")
-    try:
-        await asyncio.wait_for(w, 3)
-    except TimeoutError:
-        pass
-    else:
-        assert False
+
+    async def f():
+        await w
+
+    task = asyncio.create_task(f())
+    await asyncio.sleep(3)
+    assert not task.done()
+    task.cancel()
+
     assert w.status not in (Status.closed, Status.running, Status.paused)
     await w.close(timeout=0.1)
 
@@ -390,7 +397,7 @@ async def test_chained_error_message(c, s, a, b):
 
 
 @gen_test()
-async def test_plugin_exception(cleanup):
+async def test_plugin_exception():
     class MyPlugin:
         def setup(self, worker=None):
             raise ValueError("Setup failed")
@@ -407,7 +414,7 @@ async def test_plugin_exception(cleanup):
 
 
 @gen_test()
-async def test_plugin_multiple_exceptions(cleanup):
+async def test_plugin_multiple_exceptions():
     class MyPlugin1:
         def setup(self, worker=None):
             raise ValueError("MyPlugin1 Error")
@@ -435,7 +442,7 @@ async def test_plugin_multiple_exceptions(cleanup):
 
 
 @gen_test()
-async def test_plugin_internal_exception(cleanup):
+async def test_plugin_internal_exception():
     async with Scheduler(port=0) as s:
         with pytest.raises(UnicodeDecodeError, match="codec can't decode"):
             async with Worker(
@@ -567,13 +574,13 @@ async def test_memory_limit_auto(s):
     async with Worker(s.address, nthreads=1) as a, Worker(
         s.address, nthreads=2
     ) as b, Worker(s.address, nthreads=100) as c, Worker(s.address, nthreads=200) as d:
-        assert isinstance(a.memory_limit, Number)
-        assert isinstance(b.memory_limit, Number)
+        assert isinstance(a.memory_manager.memory_limit, Number)
+        assert isinstance(b.memory_manager.memory_limit, Number)
 
         if CPU_COUNT > 1:
-            assert a.memory_limit < b.memory_limit
+            assert a.memory_manager.memory_limit < b.memory_manager.memory_limit
 
-        assert c.memory_limit == d.memory_limit
+        assert c.memory_manager.memory_limit == d.memory_manager.memory_limit
 
 
 @gen_cluster(client=True)
@@ -1371,7 +1378,7 @@ async def test_protocol_from_scheduler_address(Worker):
 
 
 @gen_test()
-async def test_host_uses_scheduler_protocol(cleanup, monkeypatch):
+async def test_host_uses_scheduler_protocol(monkeypatch):
     # Ensure worker uses scheduler's protocol to determine host address, not the default scheme
     # See https://github.com/dask/distributed/pull/4883
     from distributed.comm.tcp import TCPBackend
@@ -1453,6 +1460,61 @@ async def test_close_gracefully(c, s, a, b):
     # they have not been recomputed
     for key in mem:
         assert_amm_transfer_story(key, b, a)
+
+
+@pytest.mark.parametrize("sync", [False, pytest.param(True, marks=[pytest.mark.slow])])
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_close_while_executing(c, s, a, sync):
+    ev = Event()
+
+    if sync:
+
+        def f(ev):
+            ev.set()
+            sleep(2)
+
+    else:
+
+        async def f(ev):
+            await ev.set()
+            await asyncio.Event().wait()  # Block indefinitely
+
+    f1 = c.submit(f, ev, key="f1")
+    await ev.wait()
+    task = next(
+        task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
+    )
+    await a.close()
+    assert task.cancelled()
+    assert s.tasks["f1"].state == "no-worker"
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_close_async_task_handles_cancellation(c, s, a):
+    ev = Event()
+
+    async def f(ev):
+        await ev.set()
+        try:
+            await asyncio.Event().wait()  # Block indefinitely
+        except asyncio.CancelledError:
+            await asyncio.Event().wait()  # Ignore the first cancel()
+
+    f1 = c.submit(f, ev, key="f1")
+    await ev.wait()
+    task = next(
+        task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
+    )
+    start = time()
+    with captured_logger("distributed.worker", level=logging.ERROR) as logger:
+        await a.close(timeout=1)
+    assert "Failed to cancel asyncio task" in logger.getvalue()
+    assert time() - start < 5
+    assert not task.cancelled()
+    assert s.tasks["f1"].state == "no-worker"
+    task.cancel()
+    await asyncio.wait({task})
 
 
 @pytest.mark.slow
@@ -1713,6 +1775,35 @@ async def test_story_with_deps(c, s, a, b):
         ("dep", "flight", "memory", "memory", {"res": "ready"}),
     ]
     assert_worker_story(story, expected, strict=True)
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_stimulus_story(c, s, a):
+    class C:
+        pass
+
+    f = c.submit(C, key="f")  # Test that substrings aren't matched by story()
+    f2 = c.submit(inc, 2, key="f2")
+    f3 = c.submit(inc, 3, key="f3")
+    await wait([f, f2, f3])
+
+    # Test that ExecuteSuccessEvent.value is not stored in the the event log
+    assert isinstance(a.data["f"], C)
+    ref = weakref.ref(a.data["f"])
+    del f
+    while "f" in a.data:
+        await asyncio.sleep(0.01)
+    wait_profiler()
+    assert ref() is None
+
+    story = a.stimulus_story("f", "f2")
+    assert {ev.key for ev in story} == {"f", "f2"}
+    assert {ev.type for ev in story} == {C, int}
+
+    prev_handled = story[0].handled
+    for ev in story[1:]:
+        assert ev.handled >= prev_handled
+        prev_handled = ev.handled
 
 
 @gen_cluster(client=True)
@@ -2633,7 +2724,7 @@ async def test_acquire_replicas(c, s, a, b):
 
     s.request_acquire_replicas(b.address, [fut.key], stimulus_id=f"test-{time()}")
 
-    while len(s.who_has[fut.key]) != 2:
+    while len(s.tasks[fut.key].who_has) != 2:
         await asyncio.sleep(0.005)
 
     for w in (a, b):
@@ -2659,7 +2750,7 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
     while futA.key not in b.tasks or not b.tasks[futA.key].state == "memory":
         await asyncio.sleep(0.005)
 
-    while len(s.who_has[futA.key]) != 2:
+    while len(s.tasks[futA.key].who_has) != 2:
         await asyncio.sleep(0.005)
 
     # Ensure that both the replica and an ordinary dependency pass through the
@@ -3303,6 +3394,7 @@ async def test_Worker__to_dict(c, s, a):
         "in_flight_tasks",
         "in_flight_workers",
         "log",
+        "stimulus_log",
         "tasks",
         "logs",
         "config",
@@ -3389,3 +3481,47 @@ async def test_tick_interval(c, s, a, b):
     while s.workers[a.address].metrics["event_loop_interval"] < 0.100:
         await asyncio.sleep(0.01)
         time.sleep(0.200)
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_log_invalid_transitions(c, s, a):
+    x = c.submit(inc, 1)
+    y = c.submit(inc, x)
+    xkey = x.key
+    del x
+    await y
+    while a.tasks[xkey].state != "released":
+        await asyncio.sleep(0.01)
+    ts = a.tasks[xkey]
+    with pytest.raises(InvalidTransition):
+        a.transition(ts, "foo", stimulus_id="bar")
+
+    while not s.events["invalid-worker-transition"]:
+        await asyncio.sleep(0.01)
+
+    assert "foo" in str(s.events["invalid-worker-transition"])
+    assert a.address in str(s.events["invalid-worker-transition"])
+    assert ts.key in str(s.events["invalid-worker-transition"])
+
+    del s.events["invalid-worker-transition"]  # for test cleanup
+
+
+class BreakingWorker(Worker):
+    broke_once = False
+
+    def get_data(self, comm, **kwargs):
+        if not self.broke_once:
+            self.broke_once = True
+            raise OSError("fake error")
+        return super().get_data(comm, **kwargs)
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=BreakingWorker)
+async def test_broken_comm(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+    )
+    s = df.shuffle("id", shuffle="tasks")
+    await c.compute(s.size)

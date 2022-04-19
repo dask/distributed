@@ -3,6 +3,7 @@ from __future__ import annotations
 import heapq
 import sys
 from collections.abc import Callable, Container, Iterator
+from copy import copy
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Collection  # TODO move to collections.abc (requires Python >=3.9)
@@ -66,7 +67,21 @@ class StartStop(TypedDict, total=False):
 
 
 class InvalidTransition(Exception):
-    pass
+    def __init__(self, key, start, finish, story):
+        self.key = key
+        self.start = start
+        self.finish = finish
+        self.story = story
+
+    def __repr__(self):
+        return (
+            f"InvalidTransition: {self.key} :: {self.start}->{self.finish}"
+            + "\n"
+            + "  Story:\n    "
+            + "\n    ".join(map(str, self.story))
+        )
+
+    __str__ = __repr__
 
 
 @lru_cache
@@ -353,8 +368,61 @@ class AddKeysMsg(SendMessageToScheduler):
 
 @dataclass
 class StateMachineEvent:
-    __slots__ = ("stimulus_id",)
+    __slots__ = ("stimulus_id", "handled")
     stimulus_id: str
+    #: timestamp of when the event was handled by the worker
+    # TODO Switch to @dataclass(slots=True), uncomment the line below, and remove the
+    #      __new__ method (requires Python >=3.10)
+    # handled: float | None = field(init=False, default=None)
+    _classes: ClassVar[dict[str, type[StateMachineEvent]]] = {}
+
+    def __new__(cls, *args, **kwargs):
+        self = object.__new__(cls)
+        self.handled = None
+        return self
+
+    def __init_subclass__(cls):
+        StateMachineEvent._classes[cls.__name__] = cls
+
+    def to_loggable(self, *, handled: float) -> StateMachineEvent:
+        """Produce a variant version of self that is small enough to be stored in memory
+        in the medium term and contains meaningful information for debugging
+        """
+        self.handled = handled
+        return self
+
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
+        """Dictionary representation for debugging purposes.
+
+        See also
+        --------
+        distributed.utils.recursive_to_dict
+        """
+        info = {
+            "cls": type(self).__name__,
+            "stimulus_id": self.stimulus_id,
+            "handled": self.handled,
+        }
+        info.update({k: getattr(self, k) for k in self.__annotations__})
+        info = {k: v for k, v in info.items() if k not in exclude}
+        return recursive_to_dict(info, exclude=exclude)
+
+    @staticmethod
+    def from_dict(d: dict) -> StateMachineEvent:
+        """Convert the output of ``recursive_to_dict`` back into the original object.
+        The output object is meaningful for the purpose of rebuilding the state machine,
+        but not necessarily identical to the original.
+        """
+        kwargs = d.copy()
+        cls = StateMachineEvent._classes[kwargs.pop("cls")]
+        handled = kwargs.pop("handled")
+        inst = cls(**kwargs)
+        inst.handled = handled
+        inst._after_from_dict()
+        return inst
+
+    def _after_from_dict(self) -> None:
+        """Optional post-processing after an instance is created by ``from_dict``"""
 
 
 @dataclass
@@ -372,6 +440,16 @@ class ExecuteSuccessEvent(StateMachineEvent):
     type: type | None
     __slots__ = tuple(__annotations__)  # type: ignore
 
+    def to_loggable(self, *, handled: float) -> StateMachineEvent:
+        out = copy(self)
+        out.handled = handled
+        out.value = None
+        return out
+
+    def _after_from_dict(self) -> None:
+        self.value = None
+        self.type = None
+
 
 @dataclass
 class ExecuteFailureEvent(StateMachineEvent):
@@ -383,6 +461,10 @@ class ExecuteFailureEvent(StateMachineEvent):
     exception_text: str
     traceback_text: str
     __slots__ = tuple(__annotations__)  # type: ignore
+
+    def _after_from_dict(self) -> None:
+        self.exception = Serialize(Exception())
+        self.traceback = None
 
 
 @dataclass
