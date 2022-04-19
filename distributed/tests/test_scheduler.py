@@ -1467,6 +1467,10 @@ async def test_cancel_fire_and_forget(c, s, a, b):
 
     fire_and_forget(future)
     await ev1.wait()
+    # Cancel the future for z when
+    # - x is in memory
+    # - y is processing
+    # - z is pending
     await future.cancel(force=True)
     assert future.status == "cancelled"
     while s.tasks:
