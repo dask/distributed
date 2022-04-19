@@ -1755,7 +1755,7 @@ def check_instances():
 
 
 @contextmanager
-def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
+def clean(threads=True, instances=True, timeout=1, processes=True):
     with check_thread_leak() if threads else nullcontext():
         with pristine_loop() as loop:
             with check_process_leak(check=processes):
