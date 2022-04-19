@@ -121,7 +121,7 @@ async def test_AllProgress(c, s, a, b):
     keys = {x.key, y.key, z.key}
     del x, y, z
 
-    while any(k in s.who_has for k in keys):
+    while any(s.tasks[k].who_has for k in keys):
         await asyncio.sleep(0.01)
 
     assert p.state["released"]["inc"] == keys

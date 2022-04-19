@@ -53,7 +53,7 @@ async def test_gen_cluster(c, s, a, b):
     assert isinstance(s, Scheduler)
     for w in [a, b]:
         assert isinstance(w, Worker)
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+    assert set(s.workers) == {w.address for w in [a, b]}
     assert await c.submit(lambda: 123) == 123
 
 
@@ -133,7 +133,7 @@ async def test_gen_cluster_without_client(s, a, b):
     assert isinstance(s, Scheduler)
     for w in [a, b]:
         assert isinstance(w, Worker)
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+    assert set(s.workers) == {w.address for w in [a, b]}
 
     async with Client(s.address, asynchronous=True) as c:
         future = c.submit(lambda x: x + 1, 1)
@@ -154,7 +154,7 @@ async def test_gen_cluster_tls(e, s, a, b):
     for w in [a, b]:
         assert isinstance(w, Worker)
         assert w.address.startswith("tls://")
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+    assert set(s.workers) == {w.address for w in [a, b]}
 
 
 @pytest.mark.xfail(

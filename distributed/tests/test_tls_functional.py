@@ -90,7 +90,7 @@ async def test_nanny(c, s, a, b):
         assert isinstance(n, Nanny)
         assert n.address.startswith("tls://")
         assert n.worker_address.startswith("tls://")
-    assert s.nthreads == {n.worker_address: n.nthreads for n in [a, b]}
+    assert set(s.workers) == {n.worker_address for n in [a, b]}
 
     x = c.submit(inc, 10)
     result = await x
