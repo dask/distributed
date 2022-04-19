@@ -39,12 +39,15 @@ def test_bare_cluster(loop):
         pass
 
 
-def test_cluster(loop):
+def test_cluster(cleanup):
+    async def identity():
+        async with rpc(s["address"]) as scheduler_rpc:
+            return await scheduler_rpc.identity()
+
     with cluster() as (s, [a, b]):
-        with rpc(s["address"]) as s:
-            ident = loop.run_sync(s.identity)
-            assert ident["type"] == "Scheduler"
-            assert len(ident["workers"]) == 2
+        ident = asyncio.run(identity())
+        assert ident["type"] == "Scheduler"
+        assert len(ident["workers"]) == 2
 
 
 @gen_cluster(client=True)

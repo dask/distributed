@@ -765,7 +765,7 @@ async def disconnect(addr, timeout=3, rpc_kwargs=None):
     rpc_kwargs = rpc_kwargs or {}
 
     async def do_disconnect():
-        with rpc(addr, **rpc_kwargs) as w:
+        async with rpc(addr, **rpc_kwargs) as w:
             # If the worker was killed hard (e.g. sigterm) during test runtime,
             # we do not know at this point and may not be able to connect
             with suppress(EnvironmentError, CommClosedError):

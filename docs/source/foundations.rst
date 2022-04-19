@@ -154,7 +154,7 @@ with the stream data case above.
        # comm = await connect('tcp://127.0.0.1', 8888)
        # await comm.write({'op': 'add', 'x': 1, 'y': 2})
        # result = await comm.read()
-       with rpc('tcp://127.0.0.1:8888') as r:
+       async with rpc('tcp://127.0.0.1:8888') as r:
            result = await r.add(x=1, y=2)
 
        print(result)
