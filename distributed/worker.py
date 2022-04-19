@@ -4660,16 +4660,10 @@ def convert_kwargs_to_str(kwargs: dict, max_len: int | None = None) -> str:
         return "{{{}}}".format(", ".join(strs))
 
 
-async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=True):
+async def run(server, comm, function, args=(), kwargs=None, wait=True):
     kwargs = kwargs or {}
     function = pickle.loads(function)
-    if is_coro is None:
-        is_coro = iscoroutinefunction(function)
-    else:
-        warnings.warn(
-            "The is_coro= parameter is deprecated. "
-            "We now automatically detect coroutines/async functions"
-        )
+    is_coro = iscoroutinefunction(function)
     assert wait or is_coro, "Combination not supported"
     if args:
         args = pickle.loads(args)
