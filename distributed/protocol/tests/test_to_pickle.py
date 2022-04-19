@@ -6,12 +6,12 @@ import pytest
 import dask.config
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 
-from distributed.client import Client
+from distributed.client import Client, _del_global_client
 from distributed.protocol import dumps, loads
 from distributed.protocol.serialize import ToPickle
 from distributed.scheduler import Scheduler
 from distributed.utils import CancelledError
-from distributed.utils_test import captured_logger
+from distributed.utils_test import captured_logger, gen_test
 from distributed.worker import Worker
 
 
@@ -56,7 +56,7 @@ class NonMsgPackSerializableLayer(MaterializedLayer):
 
 @pytest.mark.parametrize("allow_pickle", [False, True])
 @pytest.mark.parametrize("protocol", ["tcp", "inproc"])
-@pytest.mark.asyncio
+@gen_test()
 async def test_non_msgpack_serializable(allow_pickle, protocol):
     async def client_run(log, a, c):
         a = NonMsgPackSerializableLayer({"x": 42})
@@ -82,3 +82,6 @@ async def test_non_msgpack_serializable(allow_pickle, protocol):
                 async with Worker(s.listeners[0].contact_address) as a:
                     async with Client(s.address, asynchronous=True) as c:
                         await client_run(log, a, c)
+        # In order to avoid a timeout in gen_test() when the Scheduler crashes
+        # because of `allow_pickle=False`, we delete the client explicitly.
+        _del_global_client(c)
