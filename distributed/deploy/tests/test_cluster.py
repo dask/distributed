@@ -1,3 +1,5 @@
+from types import CoroutineType
+
 import pytest
 
 from distributed.deploy.cluster import Cluster
@@ -44,3 +46,41 @@ async def test_cluster_info():
 
     cluster = FooCluster()
     assert "foo" in cluster._cluster_info
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous_cluster", [True, False])
+async def test_sync_defaults_to_cluster_setting(
+    asynchronous_cluster, loop_in_thread, cleanup
+):
+
+    cluster = Cluster(asynchronous=asynchronous_cluster, loop=loop_in_thread)
+
+    async def foo():
+        return 1
+
+    result = cluster.sync(foo)
+
+    if asynchronous_cluster:
+        assert isinstance(result, CoroutineType)
+        assert await result == 1
+    else:
+        assert result == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous_cluster", [True, False])
+async def test_sync_allows_override_of_asychronous(
+    asynchronous_cluster, loop_in_thread, cleanup
+):
+    cluster = Cluster(asynchronous=asynchronous_cluster, loop=loop_in_thread)
+
+    async def foo():
+        return 1
+
+    async_result = cluster.sync(foo, asynchronous=True)
+    sync_result = cluster.sync(foo, asynchronous=False)
+
+    assert isinstance(async_result, CoroutineType)
+    assert await async_result == 1
+    assert sync_result == 1

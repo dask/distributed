@@ -649,6 +649,6 @@ async def run_spec(spec: dict, *args):
 def close_clusters():
     for cluster in list(SpecCluster._instances):
         if cluster.shutdown_on_close:
-            with suppress(gen.TimeoutError, TimeoutError):
+            with suppress(gen.TimeoutError, TimeoutError, RuntimeError):
                 if cluster.status != Status.closed:
-                    cluster.close(timeout=10)
+                    cluster.sync(cluster.close, asynchronous=False, callback_timeout=10)
