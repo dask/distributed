@@ -4298,7 +4298,8 @@ class Client(SyncMethodMixin):
         assert on_error in ("raise", "ignore")
 
         try:
-            flat_stories = list(await self.scheduler.get_story(keys=keys))
+            flat_stories = await self.scheduler.get_story(keys=keys)
+            flat_stories = [("scheduler", *msg) for msg in flat_stories]
         except Exception:
             if on_error == "raise":
                 raise
@@ -4310,13 +4311,8 @@ class Client(SyncMethodMixin):
         responses = await self.scheduler.broadcast(
             msg={"op": "get_story", "keys": keys}, on_error=on_error
         )
-
-        for stories in responses.values():
-            if isinstance(stories, (tuple, list)):
-                flat_stories.extend(s for s in stories)
-            else:
-                flat_stories.append(stories)
-
+        for worker, stories in responses.items():
+            flat_stories.extend((worker, *msg) for msg in stories)
         return flat_stories
 
     def story(self, *keys_or_stimulus_ids, on_error="raise"):

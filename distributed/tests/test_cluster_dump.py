@@ -126,31 +126,19 @@ async def test_cluster_dump_story(c, s, a, b, tmp_path):
     assert story.keys() == {"f1", "f2"}
 
     for k, task_story in story.items():
-        expected = [
-            (k, "released", "waiting", {k: "processing"}),
-            (k, "waiting", "processing", {}),
-            (k, "processing", "memory", {}),
-        ]
-
-        for event, expected_event in zip(task_story, expected):
-            for e1, e2 in zip(event, expected_event):
-                assert e1 == e2
+        # assert_story expects the expected field to not contain stim IDs or
+        # timestamps
+        s_story = [msg[:-2] for msg in s.story(k)]
+        assert_story(task_story, s_story)
 
     story = dump.worker_story("f1", "f2")
     assert story.keys() == {"f1", "f2"}
-
+    # breakpoint()
     for k, task_story in story.items():
-        assert_story(
-            task_story,
-            [
-                (k, "compute-task"),
-                (k, "released", "waiting", "waiting", {k: "ready"}),
-                (k, "waiting", "ready", "ready", {k: "executing"}),
-                (k, "ready", "executing", "executing", {}),
-                (k, "put-in-memory"),
-                (k, "executing", "memory", "memory", {}),
-            ],
-        )
+        # assert_story expects the expected field to not contain stim IDs or
+        # timestamps
+        w_story = [msg[:-2] for msg in a.story(k) + b.story(k)]
+        assert_story(task_story, w_story)
 
 
 @gen_cluster(client=True)

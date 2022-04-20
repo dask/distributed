@@ -77,7 +77,6 @@ from distributed.utils import is_valid_xml, mp_context, sync, tmp_text
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _UnhashableCallable,
-    assert_story,
     async_wait_for,
     asyncinc,
     captured_logger,
@@ -7495,58 +7494,3 @@ async def test_wait_for_workers_updates_info(c, s):
     async with Worker(s.address):
         await c.wait_for_workers(1)
         assert c.scheduler_info()["workers"]
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_client_story(c, s, *workers):
-    f = c.submit(inc, 1)
-    assert await f == 2
-    story = await c.story(f.key)
-
-    assert_story(
-        story,
-        [
-            (f.key, "released", "waiting", {f.key: "processing"}),
-            (f.key, "waiting", "processing", {}),
-            (f.key, "processing", "memory", {}),
-            (f.key, "compute-task"),
-            (f.key, "released", "waiting", "waiting", {f.key: "ready"}),
-            (f.key, "waiting", "ready", "ready", {f.key: "executing"}),
-            (f.key, "ready", "executing", "executing", {}),
-            (f.key, "put-in-memory"),
-            (f.key, "executing", "memory", "memory", {}),
-        ],
-        ordered_timestamps=False,
-    )
-
-    stimulus_ids = {ev[-2] for ev in story}
-    assert len(stimulus_ids) == 3
-
-
-class WorkerBrokenStory(Worker):
-    async def get_story(self, *args, **kw):
-        raise CommClosedError
-
-
-@gen_cluster(client=True, Worker=WorkerBrokenStory)
-@pytest.mark.parametrize("on_error", ["ignore", "raise"])
-async def test_client_story_failed_worker(c, s, a, b, on_error):
-    f = c.submit(inc, 1)
-    coro = c.story(f.key, on_error=on_error)
-    await f
-
-    if on_error == "raise":
-        with pytest.raises(CommClosedError) as e:
-            await coro
-    elif on_error == "ignore":
-        story = await coro
-        assert_story(
-            story,
-            [
-                (f.key, "released", "waiting", {f.key: "processing"}),
-                (f.key, "waiting", "processing", {}),
-                (f.key, "processing", "memory", {}),
-            ],
-        )
-    else:
-        raise ValueError(on_error)

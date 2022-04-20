@@ -48,6 +48,7 @@ from dask.utils import (
 )
 
 from distributed import comm, preloading, profile, utils
+from distributed._stories import worker_story
 from distributed.batched import BatchedSend
 from distributed.comm import connect, get_address_host
 from distributed.comm.addressing import address_from_user_args, parse_address
@@ -74,7 +75,6 @@ from distributed.pubsub import PubSubWorkerExtension
 from distributed.security import Security
 from distributed.shuffle import ShuffleWorkerExtension
 from distributed.sizeof import safe_sizeof as sizeof
-from distributed.stories import worker_story
 from distributed.threadpoolexecutor import ThreadPoolExecutor
 from distributed.threadpoolexecutor import secede as tpe_secede
 from distributed.utils import (

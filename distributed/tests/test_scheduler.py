@@ -37,7 +37,6 @@ from distributed.scheduler import MemoryState, Scheduler
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
     BrokenComm,
-    assert_story,
     captured_logger,
     cluster,
     dec,
@@ -3541,84 +3540,3 @@ async def test_repr(s, a):
             repr(ws_b)
             == f"<WorkerState {b.address!r}, status: running, memory: 0, processing: 0>"
         )
-
-
-@gen_cluster(client=True)
-async def test_stimulus_success(c, s, a, b):
-    f = c.submit(inc, 1)
-    key = f.key
-
-    await f
-    await c.close()
-
-    stories = s.story(key)
-
-    assert_story(
-        stories,
-        [
-            (key, "released", "waiting", {key: "processing"}),
-            (key, "waiting", "processing", {}),
-            (key, "processing", "memory", {}),
-            (
-                key,
-                "memory",
-                "forgotten",
-                {},
-            ),
-        ],
-    )
-
-    stimulus_ids = {s[-2] for s in stories}
-    assert len(stimulus_ids) == 3
-
-
-@gen_cluster(client=True)
-async def test_stimulus_retry(c, s, a, b):
-    def task():
-        assert dask.config.get("foo")
-
-    with dask.config.set(foo=False):
-        f = c.submit(task)
-        with pytest.raises(AssertionError):
-            await f
-
-    with dask.config.set(foo=True):
-        await f.retry()
-        await f
-
-    story = s.story(f.key)
-    stimulus_ids = {s[-2] for s in story}
-    assert len(stimulus_ids) == 4
-
-    assert_story(
-        story,
-        [
-            (f.key, "released", "waiting", {f.key: "processing"}),
-            (f.key, "waiting", "processing", {}),
-            (
-                f.key,
-                "processing",
-                "erred",
-                {},
-            ),
-            (
-                f.key,
-                "erred",
-                "released",
-                {},
-            ),
-            (
-                f.key,
-                "released",
-                "waiting",
-                {f.key: "processing"},
-            ),
-            (
-                f.key,
-                "waiting",
-                "processing",
-                {},
-            ),
-            (f.key, "processing", "memory", {}),
-        ],
-    )

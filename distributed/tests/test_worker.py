@@ -1729,51 +1729,6 @@ async def test_story(c, s, w):
     assert w.story(ts) == w.story(ts.key)
 
 
-@gen_cluster(client=True)
-async def test_story_with_deps(c, s, a, b):
-    """
-    Assert that the structure of the story does not change unintentionally and
-    expected subfields are actually filled
-    """
-    dep = c.submit(inc, 1, workers=[a.address], key="dep")
-    res = c.submit(inc, dep, workers=[b.address], key="res")
-    await res
-
-    story = a.story("res")
-    assert story == []
-    story = b.story("res")
-
-    # Story now includes randomized stimulus_ids and timestamps.
-    stimulus_ids = {ev[-2] for ev in story}
-    assert len(stimulus_ids) == 3
-
-    # This is a simple transition log
-    expected = [
-        ("res", "compute-task"),
-        ("res", "released", "waiting", "waiting", {"dep": "fetch"}),
-        ("res", "waiting", "ready", "ready", {"res": "executing"}),
-        ("res", "ready", "executing", "executing", {}),
-        ("res", "put-in-memory"),
-        ("res", "executing", "memory", "memory", {}),
-    ]
-    assert_story(story, expected, strict=True)
-
-    story = b.story("dep")
-    stimulus_ids = {ev[-2] for ev in story}
-    assert len(stimulus_ids) == 2, stimulus_ids
-    expected = [
-        ("dep", "ensure-task-exists", "released"),
-        ("dep", "released", "fetch", "fetch", {}),
-        ("gather-dependencies", a.address, {"dep"}),
-        ("dep", "fetch", "flight", "flight", {}),
-        ("request-dep", a.address, {"dep"}),
-        ("receive-dep", a.address, {"dep"}),
-        ("dep", "put-in-memory"),
-        ("dep", "flight", "memory", "memory", {"res": "ready"}),
-    ]
-    assert_story(story, expected, strict=True)
-
-
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_stimulus_story(c, s, a):
     class C:

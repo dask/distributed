@@ -55,6 +55,7 @@ from dask.widgets import get_template
 
 from distributed import cluster_dump, preloading, profile
 from distributed import versions as version_module
+from distributed._stories import scheduler_story
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
 from distributed.comm import (
@@ -84,7 +85,6 @@ from distributed.recreate_tasks import ReplayTaskScheduler
 from distributed.security import Security
 from distributed.semaphore import SemaphoreExtension
 from distributed.stealing import WorkStealing
-from distributed.stories import scheduler_story
 from distributed.utils import (
     All,
     TimeoutError,
@@ -4795,7 +4795,6 @@ class Scheduler(SchedulerState, ServerNode):
 
         We listen to all future messages from this Comm.
         """
-        stimulus_id = f"add-client-{time()}"
         assert client is not None
         comm.name = "Scheduler->Client"
         logger.info("Receive client connection: %s", client)
@@ -4824,7 +4823,7 @@ class Scheduler(SchedulerState, ServerNode):
             try:
                 await self.handle_stream(comm=comm, extra={"client": client})
             finally:
-                self.remove_client(client=client, stimulus_id=stimulus_id)
+                self.remove_client(client=client, stimulus_id=f"remove-client-{time()}")
                 logger.debug("Finished handling client %s", client)
         finally:
             if not comm.closed():
@@ -5352,8 +5351,14 @@ class Scheduler(SchedulerState, ServerNode):
                     for worker in workers:
                         ws = self.workers.get(worker)
                         if ws is not None and ws in ts.who_has:
+                            # FIXME: This code path is not tested
                             self.remove_replica(ts, ws)
-                            self._transitions(recommendations, client_msgs, worker_msgs)
+                            self._transitions(
+                                recommendations,
+                                client_msgs,
+                                worker_msgs,
+                                stimulus_id=stimulus_id,
+                            )
                 self.send_all(client_msgs, worker_msgs)
 
         self.log_event("all", {"action": "gather", "count": len(keys)})
@@ -6867,7 +6872,7 @@ class Scheduler(SchedulerState, ServerNode):
         keys = {key.key if isinstance(key, TaskState) else key for key in keys}
         return scheduler_story(keys, self.transition_log)
 
-    async def get_story(self, keys=None):
+    async def get_story(self, keys=()):
         return self.story(*keys)
 
     transition_story = story
@@ -7314,6 +7319,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     async def check_worker_ttl(self):
         now = time()
+        stimulus_id = f"check-worker-ttl-{now}"
         for ws in self.workers.values():
             if (ws.last_seen < now - self.worker_ttl) and (
                 ws.last_seen < now - 10 * heartbeat_interval(len(self.workers))
@@ -7323,9 +7329,7 @@ class Scheduler(SchedulerState, ServerNode):
                     self.worker_ttl,
                     ws,
                 )
-                await self.remove_worker(
-                    address=ws.address, stimulus_id=f"check-worker-ttl-{time()}"
-                )
+                await self.remove_worker(address=ws.address, stimulus_id=stimulus_id)
 
     def check_idle(self):
         if any([ws.processing for ws in self.workers.values()]) or self.unrunnable:

@@ -1875,6 +1875,40 @@ def xfail_ssl_issue5601():
         raise
 
 
+def assert_valid_story(story, ordered_timestamps=True):
+    """Test that a story is well formed.
+
+    Parameters
+    ----------
+    story: list[tuple]
+        Output of Worker.story
+    ordered_timestamps: bool, optional
+        If False, timestamps are not required to be monotically increasing.
+        Useful for asserting stories composed from the scheduler and
+        multiple workers
+    """
+
+    now = time()
+    prev_ts = 0.0
+    for ev in story:
+        try:
+            assert len(ev) > 2, "too short"
+            assert isinstance(ev, tuple), "not a tuple"
+            assert isinstance(ev[-2], str) and ev[-2], "stimulus_id not a string"
+            assert isinstance(ev[-1], float), "Timestamp is not a float"
+            if ordered_timestamps:
+                assert prev_ts <= ev[-1], "Timestamps are not monotonically ascending"
+            # Timestamps are within the last hour. It's been observed that a
+            # timestamp generated in a Nanny process can be a few milliseconds
+            # in the future.
+            assert now - 3600 < ev[-1] <= now + 1, "Timestamps is too old"
+            prev_ts = ev[-1]
+        except AssertionError as err:
+            raise AssertionError(
+                f"Malformed story event: {ev}\nProblem: {err}.\nin story:\n{_format_story(story)}"
+            )
+
+
 def assert_story(
     story: list[tuple],
     expect: list[tuple],
@@ -1882,7 +1916,17 @@ def assert_story(
     strict: bool = False,
     ordered_timestamps: bool = True,
 ) -> None:
-    """Test the output of ``Worker.story``
+    """Test the output of ``Worker.story`` or ``Scheduler.story``
+
+    Warning
+    =======
+
+    Tests with overly verbose stories introduce maintenance cost and should
+    therefore be used with caution. This should only be used for very specific
+    unit tests where the exact order of events is crucial and there is no other
+    practical way to assert or observe what happened.
+    A typical use case involves testing for race conditions where subtle changes
+    of event ordering would cause harm.
 
     Parameters
     ==========
@@ -1915,25 +1959,7 @@ def assert_story(
         Useful for asserting stories composed from the scheduler and
         multiple workers
     """
-    now = time()
-    prev_ts = 0.0
-    for ev in story:
-        try:
-            assert len(ev) > 2
-            assert isinstance(ev, tuple)
-            assert isinstance(ev[-2], str) and ev[-2]  # stimulus_id
-            assert isinstance(ev[-1], float)  # timestamp
-            if ordered_timestamps:
-                assert prev_ts <= ev[-1]  # Timestamps are monotonic ascending
-            # Timestamps are within the last hour. It's been observed that a timestamp
-            # generated in a Nanny process can be a few milliseconds in the future.
-            assert now - 3600 < ev[-1] <= now + 1
-            prev_ts = ev[-1]
-        except AssertionError:
-            raise AssertionError(
-                f"Malformed story event: {ev}\nin story:\n{_format_story(story)}"
-            )
-
+    assert_valid_story(story, ordered_timestamps=ordered_timestamps)
     try:
         if strict and len(story) != len(expect):
             raise StopIteration()
