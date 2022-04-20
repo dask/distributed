@@ -2211,7 +2211,7 @@ class SchedulerState:
                     {
                         "op": "cancel-compute",
                         "key": key,
-                        "stimulus_id": f"processing-memory-{time()}",
+                        "stimulus_id": stimulus_id,
                     }
                 ]
 
@@ -3810,7 +3810,6 @@ class Scheduler(SchedulerState, ServerNode):
         stimulus_id=None,
     ):
         """Add a new worker to the cluster"""
-        stimulus_id = stimulus_id or f"add-worker-{time()}"
         with log_errors():
             address = self.coerce_address(address, resolve_address)
             address = normalize_address(address)
@@ -3929,7 +3928,7 @@ class Scheduler(SchedulerState, ServerNode):
                         {
                             "op": "remove-replicas",
                             "keys": already_released_keys,
-                            "stimulus_id": f"reconnect-already-released-{time()}",
+                            "stimulus_id": stimulus_id,
                         }
                     )
 
@@ -4031,7 +4030,7 @@ class Scheduler(SchedulerState, ServerNode):
             fifo_timeout,
             annotations,
             code=code,
-            stimulus_id=f"update-graph-hlg-{time()}",
+            stimulus_id=f"update-graph-{time()}",
         )
 
     def update_graph(
@@ -4097,7 +4096,9 @@ class Scheduler(SchedulerState, ServerNode):
                     if k in keys:
                         keys.remove(k)
                     self.report({"op": "cancelled-key", "key": k}, client=client)
-                    self.client_releases_keys(keys=[k], client=client)
+                    self.client_releases_keys(
+                        keys=[k], client=client, stimulus_id=stimulus_id
+                    )
 
         # Avoid computation that is already finished
         already_in_memory = set()  # tasks that are already done
@@ -4421,7 +4422,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return tuple(seen)
 
-    async def remove_worker(self, address, safe=False, close=True, stimulus_id=None):
+    async def remove_worker(self, address, stimulus_id, safe=False, close=True):
         """
         Remove worker from cluster
 
@@ -4429,7 +4430,6 @@ class Scheduler(SchedulerState, ServerNode):
         appears to be unresponsive.  This may send its tasks back to a released
         state.
         """
-        stimulus_id = stimulus_id or f"remove-worker-{time()}"
         with log_errors():
             if self.status == Status.closed:
                 return
@@ -4571,7 +4571,9 @@ class Scheduler(SchedulerState, ServerNode):
         self.report({"op": "cancelled-key", "key": key})
         clients = list(ts.who_wants) if force else [cs]
         for cs in clients:
-            self.client_releases_keys(keys=[key], client=cs.client_key)
+            self.client_releases_keys(
+                keys=[key], client=cs.client_key, stimulus_id=f"cancel-key-{time()}"
+            )
 
     def client_desires_keys(self, keys=None, client=None):
         cs: ClientState = self.clients.get(client)
@@ -4888,7 +4890,9 @@ class Scheduler(SchedulerState, ServerNode):
     def handle_uncaught_error(self, **msg):
         logger.exception(clean_exception(**msg)[1])
 
-    def handle_task_finished(self, key=None, worker=None, stimulus_id=None, **msg):
+    def handle_task_finished(
+        self, key: str, worker: str, stimulus_id: str, **msg
+    ) -> None:
         if worker not in self.workers:
             return
         validate_key(key)
@@ -4901,15 +4905,15 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.send_all(client_msgs, worker_msgs)
 
-    def handle_task_erred(self, key=None, stimulus_id=None, **msg):
+    def handle_task_erred(self, key: str, stimulus_id: str, **msg) -> None:
         r: tuple = self.stimulus_task_erred(key=key, stimulus_id=stimulus_id, **msg)
         recommendations, client_msgs, worker_msgs = r
         self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
         self.send_all(client_msgs, worker_msgs)
 
     def handle_missing_data(
-        self, key=None, errant_worker=None, stimulus_id=None, **kwargs
-    ):
+        self, key: str, errant_worker: str, stimulus_id: str, **kwargs
+    ) -> None:
         """Signal that `errant_worker` does not hold `key`
 
         This may either indicate that `errant_worker` is dead or that we may be
@@ -4926,12 +4930,13 @@ class Scheduler(SchedulerState, ServerNode):
         errant_worker : str, optional
             Address of the worker supposed to hold a replica, by default None
         """
-        assert stimulus_id
         logger.debug("handle missing data key=%s worker=%s", key, errant_worker)
         self.log_event(errant_worker, {"action": "missing-data", "key": key})
-        ts: TaskState = self.tasks.get(key)
-        if ts is None:
+
+        if key not in self.tasks:
             return
+
+        ts: TaskState = self.tasks[key]
         ws: WorkerState = self.workers.get(errant_worker)
 
         if ws is not None and ws in ts.who_has:
@@ -5381,7 +5386,9 @@ class Scheduler(SchedulerState, ServerNode):
             logger.info("Send lost future signal to clients")
             for cs in self.clients.values():
                 self.client_releases_keys(
-                    keys=[ts.key for ts in cs.wants_what], client=cs.client_key
+                    keys=[ts.key for ts in cs.wants_what],
+                    client=cs.client_key,
+                    stimulus_id=stimulus_id,
                 )
 
             nannies = {addr: ws.nanny for addr, ws in self.workers.items()}
