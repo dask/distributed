@@ -108,7 +108,7 @@ This information is involved in deciding
 :ref:`which worker to run a task on <decide-worker>`.
 
 .. autoclass:: WorkerState
-
+    :members:
 
 In addition to individual worker state, the scheduler maintains two
 containers to help with scheduling tasks:
@@ -139,6 +139,7 @@ Information about each individual client of the scheduler is kept
 in a :class:`ClientState` object:
 
 .. autoclass:: ClientState
+    :members:
 
 
 .. XXX list invariants somewhere?
@@ -315,3 +316,5 @@ API
    :inherited-members:
 
 .. autofunction:: decide_worker
+
+.. autoclass:: MemoryState

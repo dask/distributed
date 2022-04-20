@@ -1184,8 +1184,10 @@ class Worker(ServerNode):
         except OSError as e:
             # Scheduler is gone. Respect distributed.comm.timeouts.connect
             if "Timed out trying to connect" in str(e):
+                logger.info("Timed out while trying to connect during heartbeat")
                 await self.close(report=False)
             else:
+                logger.exception(e)
                 raise e
         finally:
             self.heartbeat_active = False
@@ -1201,6 +1203,10 @@ class Worker(ServerNode):
                 logger.info("Connection to scheduler broken.  Reconnecting...")
                 self.loop.add_callback(self.heartbeat)
             else:
+                logger.info(
+                    "Connection to scheduler broken. Closing without reporting.  Status: %s",
+                    self.status,
+                )
                 await self.close(report=False)
 
     async def upload_file(self, comm, filename=None, data=None, load=True):
@@ -1396,10 +1402,6 @@ class Worker(ServerNode):
         self.start_periodic_callbacks()
         return self
 
-    def _close(self, *args, **kwargs):
-        warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
-        return self.close(*args, **kwargs)
-
     async def close(
         self, report=True, timeout=30, nanny=True, executor_wait=True, safe=False
     ):
@@ -1417,6 +1419,10 @@ class Worker(ServerNode):
                 logger.info("Stopping worker")
             if self.status not in Status.ANY_RUNNING:
                 logger.info("Closed worker has not yet started: %s", self.status)
+            if not report:
+                logger.info("Not reporting worker closure to scheduler")
+            if not executor_wait:
+                logger.info("Not waiting on executor to close")
             self.status = Status.closing
 
             if self._async_instructions:
@@ -1555,10 +1561,6 @@ class Worker(ServerNode):
             stimulus_id=f"worker-close-gracefully-{time()}",
         )
         await self.close(safe=True, nanny=not restart)
-
-    async def terminate(self, report: bool = True, **kwargs) -> str:
-        await self.close(report=report, **kwargs)
-        return "OK"
 
     async def wait_until_closed(self):
         warnings.warn("wait_until_closed has moved to finished()")
@@ -2566,14 +2568,30 @@ class Worker(ServerNode):
                 recs.update(b_recs)
                 instructions += b_instructions
             except InvalidTransition:
-                raise InvalidTransition(
-                    f"Impossible transition from {start} to {finish} for {ts.key}"
-                ) from None
+                self.log_event(
+                    "invalid-worker-transition",
+                    {
+                        "key": ts.key,
+                        "start": start,
+                        "finish": finish,
+                        "story": self.story(ts),
+                        "worker": self.address,
+                    },
+                )
+                raise InvalidTransition(ts.key, start, finish, self.story(ts))
 
         else:
-            raise InvalidTransition(
-                f"Impossible transition from {start} to {finish} for {ts.key}"
+            self.log_event(
+                "invalid-worker-transition",
+                {
+                    "key": ts.key,
+                    "start": start,
+                    "finish": finish,
+                    "story": self.story(ts),
+                    "worker": self.address,
+                },
             )
+            raise InvalidTransition(ts.key, start, finish, self.story(ts))
 
         self.log.append(
             (
@@ -3076,7 +3094,7 @@ class Worker(ServerNode):
                 for d in has_what:
                     ts = self.tasks[d]
                     ts.who_has.remove(worker)
-                    if not ts.who_has:
+                    if not ts.who_has and ts.state not in ("released", "memory"):
                         recommendations[ts] = "missing"
                         self.log.append(
                             ("missing-who-has", worker, ts.key, stimulus_id, time())
@@ -3126,7 +3144,10 @@ class Worker(ServerNode):
                                 "stimulus_id": stimulus_id,
                             }
                         )
-                        recommendations[ts] = "fetch" if ts.who_has else "missing"
+                        if ts.who_has:
+                            recommendations[ts] = "fetch"
+                        elif ts.state not in ("released", "memory"):
+                            recommendations[ts] = "missing"
                 del data, response
                 self.transitions(recommendations, stimulus_id=stimulus_id)
 
@@ -4056,6 +4077,7 @@ class Worker(ServerNode):
                 self.validate_task(ts)
 
         except Exception as e:
+            logger.error("Validate state failed.  Closing.", exc_info=e)
             self.loop.add_callback(self.close)
             logger.exception(e)
             if LOG_PDB:
@@ -4675,16 +4697,10 @@ def convert_kwargs_to_str(kwargs: dict, max_len: int | None = None) -> str:
         return "{{{}}}".format(", ".join(strs))
 
 
-async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=True):
+async def run(server, comm, function, args=(), kwargs=None, wait=True):
     kwargs = kwargs or {}
     function = pickle.loads(function)
-    if is_coro is None:
-        is_coro = iscoroutinefunction(function)
-    else:
-        warnings.warn(
-            "The is_coro= parameter is deprecated. "
-            "We now automatically detect coroutines/async functions"
-        )
+    is_coro = iscoroutinefunction(function)
     assert wait or is_coro, "Combination not supported"
     if args:
         args = pickle.loads(args)

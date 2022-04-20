@@ -22,6 +22,7 @@ from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
 
 from distributed import (
     Client,
+    Event,
     Lock,
     Nanny,
     SchedulerPlugin,
@@ -64,8 +65,7 @@ bob = "bob:1234"
 async def test_administration(s, a, b):
     assert isinstance(s.address, str)
     assert s.address in str(s)
-    assert str(sum(s.nthreads.values())) in repr(s)
-    assert str(len(s.nthreads)) in repr(s)
+    assert str(len(s.workers)) in repr(s)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
@@ -296,24 +296,6 @@ async def test_retire_workers_empty(s):
 
 
 @gen_cluster()
-async def test_remove_client(s, a, b):
-    s.update_graph(
-        tasks={"x": dumps_task((inc, 1)), "y": dumps_task((inc, "x"))},
-        dependencies={"x": [], "y": ["x"]},
-        keys=["y"],
-        client="ident",
-    )
-
-    assert s.tasks
-    assert s.dependencies
-
-    s.remove_client(client="ident")
-
-    assert not s.tasks
-    assert not s.dependencies
-
-
-@gen_cluster()
 async def test_server_listens_to_other_ops(s, a, b):
     with rpc(s.address) as r:
         ident = await r.identity()
@@ -332,7 +314,7 @@ async def test_remove_worker_from_scheduler(s, a, b):
 
     assert a.address in s.stream_comms
     await s.remove_worker(address=a.address, stimulus_id="test")
-    assert a.address not in s.nthreads
+    assert a.address not in s.workers
     assert len(s.workers[b.address].processing) == len(dsk)  # b owns everything
 
 
@@ -340,7 +322,7 @@ async def test_remove_worker_from_scheduler(s, a, b):
 async def test_remove_worker_by_name_from_scheduler(s, a, b):
     assert a.address in s.stream_comms
     assert await s.remove_worker(address=a.name, stimulus_id="test") == "OK"
-    assert a.address not in s.nthreads
+    assert a.address not in s.workers
     assert (
         await s.remove_worker(address=a.address, stimulus_id="test")
         == "already-removed"
@@ -350,14 +332,14 @@ async def test_remove_worker_by_name_from_scheduler(s, a, b):
 @gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "10 ms"})
 async def test_clear_events_worker_removal(s, a, b):
     assert a.address in s.events
-    assert a.address in s.nthreads
+    assert a.address in s.workers
     assert b.address in s.events
-    assert b.address in s.nthreads
+    assert b.address in s.workers
 
     await s.remove_worker(address=a.address, stimulus_id="test")
     # Shortly after removal, the events should still be there
     assert a.address in s.events
-    assert a.address not in s.nthreads
+    assert a.address not in s.workers
     s.validate_state()
 
     start = time()
@@ -435,14 +417,14 @@ async def test_scheduler_init_pulls_blocked_handlers_from_config(s):
 @gen_cluster()
 async def test_feed(s, a, b):
     def func(scheduler):
-        return dumps(dict(scheduler.worker_info))
+        return dumps(dict(scheduler.workers))
 
     comm = await connect(s.address)
     await comm.write({"op": "feed", "function": dumps(func), "interval": 0.01})
 
     for i in range(5):
         response = await comm.read()
-        expected = dict(s.worker_info)
+        expected = dict(s.workers)
         assert cloudpickle.loads(response) == expected
 
     await comm.close()
@@ -637,7 +619,6 @@ async def test_restart(c, s, a, b):
         assert not ws.processing
 
     assert not s.tasks
-    assert not s.dependencies
 
 
 @gen_cluster()
@@ -702,8 +683,7 @@ async def test_broadcast_on_error(s, a, b):
 
 @gen_cluster()
 async def test_broadcast_deprecation(s, a, b):
-    with pytest.warns(FutureWarning):
-        out = await s.broadcast(msg={"op": "ping"}, workers=True)
+    out = await s.broadcast(msg={"op": "ping"})
     assert out == {a.address: b"pong", b.address: b"pong"}
 
 
@@ -793,7 +773,6 @@ async def test_update_graph_culls(s, a, b):
         client="client",
     )
     assert "z" not in s.tasks
-    assert "z" not in s.dependencies
 
 
 def test_io_loop(loop):
@@ -862,7 +841,7 @@ async def test_retire_workers(c, s, a, b):
     workers = await s.retire_workers()
     assert list(workers) == [a.address]
     assert workers[a.address]["nthreads"] == a.nthreads
-    assert list(s.nthreads) == [b.address]
+    assert list(s.workers) == [b.address]
 
     assert s.workers_to_close() == []
 
@@ -923,14 +902,14 @@ async def test_workers_to_close_grouped(c, s, *workers):
 
     # Assert that job in one worker blocks closure of group
     future = c.submit(slowinc, 1, delay=0.2, workers=workers[0].address)
-    while len(s.rprocessing) < 1:
+    while not any(ws.processing for ws in s.workers.values()):
         await asyncio.sleep(0.001)
 
     assert set(s.workers_to_close(key=key)) == {workers[2].address, workers[3].address}
 
     del future
 
-    while len(s.rprocessing) > 0:
+    while any(ws.processing for ws in s.workers.values()):
         await asyncio.sleep(0.001)
 
     # Assert that *total* byte count in group determines group priority
@@ -965,7 +944,7 @@ async def test_file_descriptors(c, s):
     N = 20
     nannies = await asyncio.gather(*(Nanny(s.address, loop=s.loop) for _ in range(N)))
 
-    while len(s.nthreads) < N:
+    while len(s.workers) < N:
         await asyncio.sleep(0.1)
 
     num_fds_2 = proc.num_fds()
@@ -1450,17 +1429,34 @@ async def test_statistical_profiling_failure(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_cancel_fire_and_forget(c, s, a, b):
-    x = delayed(slowinc)(1, delay=0.05)
-    y = delayed(slowinc)(x, delay=0.05)
-    z = delayed(slowinc)(y, delay=0.05)
-    w = delayed(slowinc)(z, delay=0.05)
-    future = c.compute(w)
-    fire_and_forget(future)
+    ev1 = Event()
+    ev2 = Event()
 
-    await asyncio.sleep(0.05)
+    @delayed
+    def f(_):
+        pass
+
+    @delayed
+    def g(_, ev1, ev2):
+        ev1.set()
+        ev2.wait()
+
+    x = f(None, dask_key_name="x")
+    y = g(x, ev1, ev2, dask_key_name="y")
+    z = f(y, dask_key_name="z")
+    future = c.compute(z)
+
+    fire_and_forget(future)
+    await ev1.wait()
+    # Cancel the future for z when
+    # - x is in memory
+    # - y is processing
+    # - z is pending
     await future.cancel(force=True)
     assert future.status == "cancelled"
-    assert not s.tasks
+    while s.tasks:
+        await asyncio.sleep(0.01)
+    await ev2.set()
 
 
 @gen_cluster(
@@ -1530,13 +1526,13 @@ async def test_retries(c, s, a, b):
     result = await future
     assert result == 42
     assert s.tasks[future.key].retries == 1
-    assert future.key not in s.exceptions
+    assert not s.tasks[future.key].exception
 
     future = c.submit(varying(args), retries=2, pure=False)
     result = await future
     assert result == 42
     assert s.tasks[future.key].retries == 0
-    assert future.key not in s.exceptions
+    assert not s.tasks[future.key].exception
 
     future = c.submit(varying(args), retries=1, pure=False)
     with pytest.raises(ZeroDivisionError) as exc_info:

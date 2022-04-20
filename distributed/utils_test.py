@@ -70,7 +70,7 @@ from distributed.utils import (
     reset_logger_locks,
     sync,
 )
-from distributed.worker import Worker
+from distributed.worker import InvalidTransition, Worker
 
 try:
     import dask.array  # register config
@@ -865,8 +865,23 @@ async def start_cluster(
         if time() > start + 30:
             await asyncio.gather(*(w.close(timeout=1) for w in workers))
             await s.close(fast=True)
+            check_invalid_worker_transitions(s)
             raise TimeoutError("Cluster creation timeout")
     return s, workers
+
+
+def check_invalid_worker_transitions(s):
+    if not s.events.get("invalid-worker-transition"):
+        return
+
+    for timestamp, msg in s.events["invalid-worker-transition"]:
+        worker = msg.pop("worker")
+        print("Worker:", worker)
+        print(InvalidTransition(**msg))
+
+    raise ValueError(
+        "Invalid worker transitions found", len(s.events["invalid-worker-transition"])
+    )
 
 
 async def end_cluster(s, workers):
@@ -879,6 +894,7 @@ async def end_cluster(s, workers):
     await asyncio.gather(*(end_worker(w) for w in workers))
     await s.close()  # wait until scheduler stops completely
     s.stop()
+    check_invalid_worker_transitions(s)
 
 
 def gen_cluster(
@@ -1739,7 +1755,7 @@ def check_instances():
 
 
 @contextmanager
-def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
+def clean(threads=True, instances=True, timeout=1, processes=True):
     with check_thread_leak() if threads else nullcontext():
         with pristine_loop() as loop:
             with check_process_leak(check=processes):

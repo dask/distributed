@@ -31,6 +31,7 @@ from distributed.utils_test import (
     new_config,
     tls_only_security,
 )
+from distributed.worker import InvalidTransition
 
 
 def test_bare_cluster(loop):
@@ -52,7 +53,7 @@ async def test_gen_cluster(c, s, a, b):
     assert isinstance(s, Scheduler)
     for w in [a, b]:
         assert isinstance(w, Worker)
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+    assert set(s.workers) == {w.address for w in [a, b]}
     assert await c.submit(lambda: 123) == 123
 
 
@@ -132,7 +133,7 @@ async def test_gen_cluster_without_client(s, a, b):
     assert isinstance(s, Scheduler)
     for w in [a, b]:
         assert isinstance(w, Worker)
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+    assert set(s.workers) == {w.address for w in [a, b]}
 
     async with Client(s.address, asynchronous=True) as c:
         future = c.submit(lambda x: x + 1, 1)
@@ -153,7 +154,7 @@ async def test_gen_cluster_tls(e, s, a, b):
     for w in [a, b]:
         assert isinstance(w, Worker)
         assert w.address.startswith("tls://")
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+    assert set(s.workers) == {w.address for w in [a, b]}
 
 
 @pytest.mark.xfail(
@@ -606,3 +607,33 @@ def test_start_failure_scheduler():
     with pytest.raises(TypeError):
         with cluster(scheduler_kwargs={"foo": "bar"}):
             return
+
+
+def test_invalid_transitions(capsys):
+    @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+    async def test_log_invalid_transitions(c, s, a):
+        x = c.submit(inc, 1, key="task-name")
+        y = c.submit(inc, x)
+        xkey = x.key
+        del x
+        await y
+        while a.tasks[xkey].state != "released":
+            await asyncio.sleep(0.01)
+        ts = a.tasks[xkey]
+        with pytest.raises(InvalidTransition):
+            a.transition(ts, "foo", stimulus_id="bar")
+
+        while not s.events["invalid-worker-transition"]:
+            await asyncio.sleep(0.01)
+
+    with pytest.raises(Exception) as info:
+        test_log_invalid_transitions()
+
+    assert "invalid" in str(info).lower()
+    assert "worker" in str(info).lower()
+    assert "transition" in str(info).lower()
+
+    out, err = capsys.readouterr()
+
+    assert "foo" in out + err
+    assert "task-name" in out + err

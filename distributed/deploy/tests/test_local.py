@@ -442,7 +442,7 @@ async def test_scale_up_and_down():
             cluster.scale(2)
             await cluster
             assert len(cluster.workers) == 2
-            assert len(cluster.scheduler.nthreads) == 2
+            assert len(cluster.scheduler.workers) == 2
 
             cluster.scale(1)
             await cluster
