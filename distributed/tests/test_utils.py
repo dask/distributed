@@ -122,10 +122,11 @@ def test_sync_timeout(loop_in_thread):
 
 
 def test_sync_closed_loop():
-    loop = IOLoop.current()
+    async def get_loop():
+        return IOLoop.current()
+
+    loop = asyncio.run(get_loop())
     loop.close()
-    IOLoop.clear_current()
-    IOLoop.clear_instance()
 
     with pytest.raises(RuntimeError) as exc_info:
         sync(loop, inc, 1)
