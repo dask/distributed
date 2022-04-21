@@ -4139,13 +4139,13 @@ class Scheduler(SchedulerState, ServerNode):
             if "resources" in annotations:
                 resources.update(annotations["resources"])
 
-            for a, kv in annotations.items():
+            for key, kv in annotations.items():
                 for k, v in kv.items():
                     # Tasks might have been culled, in which case
                     # we have nothing to annotate.
-                    ts = self.tasks.get(k)
+                    ts = self.tasks.get(key)
                     if ts is not None:
-                        ts.annotations[a] = v
+                        ts.annotations[k] = v
 
         # Add actors
         if actors is True:
