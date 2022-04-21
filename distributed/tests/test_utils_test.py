@@ -474,6 +474,24 @@ def test_assert_story_malformed_story(story_factory):
         assert_story(story, [])
 
 
+@pytest.mark.parametrize("strict", [True, False])
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_assert_story_identity(c, s, a, strict):
+    f1 = c.submit(inc, 1, key="f1")
+    f2 = c.submit(inc, f1, key="f2")
+    assert await f2 == 3
+    scheduler_story = s.story(f2.key)
+    assert scheduler_story
+    worker_story = a.story(f2.key)
+    assert worker_story
+    assert_story(worker_story, worker_story, strict=strict)
+    assert_story(scheduler_story, scheduler_story, strict=strict)
+    with pytest.raises(AssertionError):
+        assert_story(scheduler_story, worker_story, strict=strict)
+    with pytest.raises(AssertionError):
+        assert_story(worker_story, scheduler_story, strict=strict)
+
+
 @gen_cluster()
 async def test_dump_cluster_state(s, a, b, tmpdir):
     await dump_cluster_state(s, [a, b], str(tmpdir), "dump")

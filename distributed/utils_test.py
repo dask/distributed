@@ -1949,7 +1949,14 @@ def assert_story(
     story: list[tuple]
         Output of Worker.story
     expect: list[tuple]
-        Expected events. Each expected event must contain exactly 2 less fields than the
+        Expected events.
+        The expected events either need to be exact matches or are allowed to
+        not provide a stimulus_id and timestamp.
+        e.g.
+        `("log", "entry", "stim-id-9876", 1234)`
+        is equivalent to
+        `("log", "entry")`
+
         story (the last two fields are always the stimulus_id and the timestamp).
 
         Elements of the expect tuples can be
@@ -1976,6 +1983,12 @@ def assert_story(
         multiple workers
     """
     assert_valid_story(story, ordered_timestamps=ordered_timestamps)
+
+    def _valid_event(event, ev_expect):
+        return len(event) == len(ev_expect) and all(
+            ex(ev) if callable(ex) else ev == ex for ev, ex in zip(event, ev_expect)
+        )
+
     try:
         if strict and len(story) != len(expect):
             raise StopIteration()
@@ -1983,11 +1996,11 @@ def assert_story(
         for ev_expect in expect:
             while True:
                 event = next(story_it)
-                # Ignore (stimulus_id, timestamp)
-                event = event[:-2]
-                if len(event) == len(ev_expect) and all(
-                    ex(ev) if callable(ex) else ev == ex
-                    for ev, ex in zip(event, ev_expect)
+
+                if (
+                    _valid_event(event, ev_expect)
+                    # Ignore (stimulus_id, timestamp)
+                    or _valid_event(event[:-2], ev_expect)
                 ):
                     break
     except StopIteration:
