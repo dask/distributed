@@ -1279,7 +1279,6 @@ class Client(SyncMethodMixin):
             msg = await asyncio.wait_for(comm.read(), timeout)
         else:
             msg = await comm.read()
-        assert len(msg) == 1
         assert msg[0]["op"] == "stream-start"
 
         if msg[0].get("error"):
