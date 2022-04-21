@@ -154,19 +154,19 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, a, b):
         "get_data_from_worker",
         side_effect=wait_and_raise,
     ):
-        fut1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
-        fut2 = c.submit(inc, fut1, workers=[b.address])
+        x = c.submit(inc, 1, key="x", workers=[a.address], allow_other_workers=True)
+        y = c.submit(inc, x, key="y", workers=[b.address])
 
-        await wait_for_state(fut1.key, "flight", b)
+        await wait_for_state("x", "flight", b)
 
         # Close in scheduler to ensure we transition and reschedule task properly
         await s.close_worker(worker=a.address)
-        await wait_for_state(fut1.key, "resumed", b)
+        await wait_for_state("x", "resumed", b)
 
     lock.release()
-    assert await fut2 == 3
+    assert await y == 3
 
-    b_story = b.story(fut1.key)
+    b_story = b.story("x")
     assert any("receive-dep-failed" in msg for msg in b_story)
     assert any("cancelled" in msg for msg in b_story)
     assert any("resumed" in msg for msg in b_story)
