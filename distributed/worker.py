@@ -928,9 +928,10 @@ class Worker(ServerNode):
         """
         prev_status = self.status
         ServerNode.status.__set__(self, value)
-        self._send_worker_status_change(f"worker-status-change-{time()}")
+        stimulus_id = f"worker-status-change-{time()}"
+        self._send_worker_status_change(stimulus_id)
         if prev_status == Status.paused and value == Status.running:
-            self.handle_stimulus(UnpauseEvent(stimulus_id=f"set-status-{time()}"))
+            self.handle_stimulus(UnpauseEvent(stimulus_id=stimulus_id))
 
     def _send_worker_status_change(self, stimulus_id: str) -> None:
         if (
