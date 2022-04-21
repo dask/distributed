@@ -171,7 +171,7 @@ class GCDiagnosis:
         self.enable()
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_value, traceback):
         self.disable()
 
     def _gc_callback(self, phase, info):

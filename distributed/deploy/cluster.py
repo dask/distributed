@@ -462,14 +462,14 @@ class Cluster(SyncMethodMixin):
     def __enter__(self):
         return self.sync(self.__aenter__)
 
-    def __exit__(self, typ, value, traceback):
-        return self.sync(self.__aexit__, typ, value, traceback)
+    def __exit__(self, exc_type, exc_value, traceback):
+        return self.sync(self.__aexit__, exc_type, exc_value, traceback)
 
     async def __aenter__(self):
         await self
         return self
 
-    async def __aexit__(self, typ, value, traceback):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         f = self.close()
         if isawaitable(f):
             await f

@@ -620,9 +620,9 @@ def _close_queue(q):
 
 
 class _SafeTemporaryDirectory(tempfile.TemporaryDirectory):
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_value, traceback):
         try:
-            return super().__exit__(exc_type, exc_val, exc_tb)
+            return super().__exit__(exc_type, exc_value, traceback)
         except (PermissionError, NotADirectoryError):
             # It appears that we either have a process still interacting with
             # the tmpdirs of the workers or that win process are not releasing
