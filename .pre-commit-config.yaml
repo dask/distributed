@@ -46,6 +46,6 @@ repos:
           - types-setuptools
           # Typed libraries
           - numpy
-          - git+https://github.com/crusaderky/dask@parse_timedelta
+          - dask
           - tornado
           - zict
