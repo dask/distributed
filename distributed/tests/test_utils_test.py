@@ -543,7 +543,7 @@ async def test_dump_cluster_unresponsive_remote_worker(c, s, a, b, tmpdir):
 
 def garbage_process(barrier, ignore_sigterm: bool = False, t: float = 3600) -> None:
     if ignore_sigterm:
-        for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):  # type: ignore
             signal.signal(signum, signal.SIG_IGN)
     barrier.wait()
     sleep(t)
