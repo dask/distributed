@@ -153,11 +153,11 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
         fut1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
         fut2 = c.submit(inc, fut1, workers=[b.address])
 
-        await wait_for_state("x", "flight", b)
+        await wait_for_state(fut1.key, "flight", b)
 
         # Close in scheduler to ensure we transition and reschedule task properly
         await s.close_worker(worker=a.address)
-        await wait_for_state("x", "resumed", b)
+        await wait_for_state(fut1.key, "resumed", b)
 
         lock.release()
         assert await fut2 == 3
