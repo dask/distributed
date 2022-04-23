@@ -1324,13 +1324,13 @@ class EmptyContext:
     def __enter__(self):
         pass
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_value, traceback):
         pass
 
     async def __aenter__(self):
         pass
 
-    async def __aexit__(self, *args):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         pass
 
 

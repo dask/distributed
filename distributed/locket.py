@@ -197,5 +197,5 @@ class _Locker:
         self.acquire()
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_value, traceback):
         self.release()

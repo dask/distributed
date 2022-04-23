@@ -1,9 +1,7 @@
 import asyncio
-from unittest import mock
 
 import distributed
-from distributed import Event
-from distributed.core import CommClosedError
+from distributed import Event, Worker
 from distributed.utils_test import (
     _LockedCommPool,
     assert_worker_story,
@@ -140,22 +138,20 @@ async def test_worker_stream_died_during_comm(c, s, a, b):
     assert any("receive-dep-failed" in msg for msg in b.log)
 
 
-@gen_cluster(client=True)
-async def test_flight_to_executing_via_cancelled_resumed(c, s, a, b):
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
+
     lock = asyncio.Lock()
     await lock.acquire()
 
-    async def wait_and_raise(*args, **kwargs):
-        async with lock:
-            raise CommClosedError()
+    class BrokenWorker(Worker):
+        async def get_data(self, comm, *args, **kwargs):
+            async with lock:
+                comm.abort()
 
-    with mock.patch.object(
-        distributed.worker,
-        "get_data_from_worker",
-        side_effect=wait_and_raise,
-    ):
-        x = c.submit(inc, 1, key="x", workers=[a.address], allow_other_workers=True)
-        y = c.submit(inc, x, key="y", workers=[b.address])
+    async with BrokenWorker(s.address) as a:
+        fut1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
+        fut2 = c.submit(inc, fut1, workers=[b.address])
 
         await wait_for_state("x", "flight", b)
 
@@ -163,13 +159,13 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, a, b):
         await s.close_worker(worker=a.address)
         await wait_for_state("x", "resumed", b)
 
-    lock.release()
-    assert await y == 3
+        lock.release()
+        assert await fut2 == 3
 
-    b_story = b.story("x")
-    assert any("receive-dep-failed" in msg for msg in b_story)
-    assert any("cancelled" in msg for msg in b_story)
-    assert any("resumed" in msg for msg in b_story)
+        b_story = b.story(fut1.key)
+        assert any("receive-dep-failed" in msg for msg in b_story)
+        assert any("cancelled" in msg for msg in b_story)
+        assert any("resumed" in msg for msg in b_story)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -211,37 +207,36 @@ async def test_executing_cancelled_error(c, s, w):
     assert ("error", "released", "released") in start_finish
 
 
-@gen_cluster(client=True)
-async def test_flight_cancelled_error(c, s, a, b):
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_flight_cancelled_error(c, s, b):
     """One worker with one thread. We provoke an flight->cancelled transition
     and let the task err."""
     lock = asyncio.Lock()
     await lock.acquire()
 
-    async def wait_and_raise(*args, **kwargs):
-        async with lock:
-            raise RuntimeError()
+    class BrokenWorker(Worker):
+        block_get_data = True
 
-    with mock.patch.object(
-        distributed.worker,
-        "get_data_from_worker",
-        side_effect=wait_and_raise,
-    ):
+        async def get_data(self, comm, *args, **kwargs):
+            if self.block_get_data:
+                async with lock:
+                    comm.abort()
+            return await super().get_data(comm, *args, **kwargs)
+
+    async with BrokenWorker(s.address) as a:
         fut1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
         fut2 = c.submit(inc, fut1, workers=[b.address])
-
         await wait_for_state(fut1.key, "flight", b)
         fut2.release()
         fut1.release()
         await wait_for_state(fut1.key, "cancelled", b)
-
-    lock.release()
-    # At this point we do not fetch the result of the future since the future
-    # itself would raise a cancelled exception. At this point we're concerned
-    # about the worker. The task should transition over error to be eventually
-    # forgotten since we no longer hold a ref.
-    while fut1.key in b.tasks:
-        await asyncio.sleep(0.01)
-
-    # Everything should still be executing as usual after this
-    assert await c.submit(sum, c.map(inc, range(10))) == sum(map(inc, range(10)))
+        lock.release()
+        # At this point we do not fetch the result of the future since the
+        # future itself would raise a cancelled exception. At this point we're
+        # concerned about the worker. The task should transition over error to
+        # be eventually forgotten since we no longer hold a ref.
+        while fut1.key in b.tasks:
+            await asyncio.sleep(0.01)
+        a.block_get_data = False
+        # Everything should still be executing as usual after this
+        assert await c.submit(sum, c.map(inc, range(10))) == sum(map(inc, range(10)))

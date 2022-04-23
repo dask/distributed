@@ -529,14 +529,14 @@ class Semaphore(SyncMethodMixin):
         self.acquire()
         return self
 
-    def __exit__(self, *args, **kwargs):
+    def __exit__(self, exc_type, exc_value, traceback):
         self.release()
 
     async def __aenter__(self):
         await self.acquire()
         return self
 
-    async def __aexit__(self, *args, **kwargs):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         await self.release()
 
     def __getstate__(self):
