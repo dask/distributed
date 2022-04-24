@@ -636,6 +636,45 @@ async def test_nanny_terminate(c, s, a):
     assert "memory" in out.lower()
 
 
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    worker_kwargs={"memory_limit": "10 GiB"},
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": 0.3,
+        "distributed.worker.memory.pause": 0.5,
+        "distributed.worker.memory.monitor-interval": "10ms",
+    },
+)
+async def test_pause_while_spilling(c, s, a):
+    def get_process_memory():
+        if len(a.data) < 10:
+            # Don't trigger spilling until after all tasks have completed
+            return 0
+        elif a.data.fast and not a.data.slow:
+            # Trigger spilling
+            return 4 * 2**30
+        elif a.data.fast:
+            # Trigger pause, but only after we started spilling
+            return 6 * 2**30
+        else:
+            return 0
+
+    a.monitor.get_process_memory = get_process_memory
+
+    class SlowSpill:
+        def __reduce__(self):
+            sleep(0.1)
+            return SlowSpill, ()
+
+    futs = [c.submit(SlowSpill, pure=False) for _ in range(10)]
+    while a.status != Status.paused:
+        await asyncio.sleep(0.01)
+        # The initial spill still hasn't finished
+        assert len(a.data.slow) < 7
+
+
 @pytest.mark.parametrize(
     "cls,name,value",
     [

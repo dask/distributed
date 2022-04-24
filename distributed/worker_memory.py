@@ -28,6 +28,7 @@ import warnings
 from collections.abc import Callable, MutableMapping
 from contextlib import suppress
 from functools import partial
+from time import monotonic
 from typing import TYPE_CHECKING, Any, Container, Literal, cast
 
 import psutil
@@ -234,6 +235,8 @@ class WorkerMemoryManager:
         )
         count = 0
         need = memory - target
+        last_checked_for_pause = monotonic()
+
         while memory > target:
             if not data.fast:
                 logger.warning(
@@ -265,7 +268,13 @@ class WorkerMemoryManager:
                 self._throttled_gc.collect()
                 memory = worker.monitor.get_process_memory()
 
-        self._maybe_pause_or_unpause(worker, memory)
+            now = monotonic()
+            if now - last_checked_for_pause >= self.memory_monitor_interval:
+                # Spilling may potentially take multiple seconds and we may pass the
+                # pause threshold while we're doing it.
+                last_checked_for_pause = now
+                self._maybe_pause_or_unpause(worker, memory)
+
         if count:
             logger.debug(
                 "Moved %d tasks worth %s to disk",
