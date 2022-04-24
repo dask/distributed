@@ -636,6 +636,7 @@ async def test_nanny_terminate(c, s, a):
     assert "memory" in out.lower()
 
 
+@pytest.mark.slow
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
@@ -674,9 +675,11 @@ async def test_pause_while_spilling(c, s, a):
     while a.status != Status.paused:
         await asyncio.sleep(0.01)
         # The initial spill still hasn't finished
-        assert len(a.data.slow) < 7
+        assert a.data.fast
+    assert a.data.fast
 
 
+@pytest.mark.slow
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
