@@ -399,13 +399,13 @@ class Cluster(SyncMethodMixin):
 
             adapt.on_click(adapt_cb)
 
+            @log_errors
             def scale_cb(b):
-                with log_errors():
-                    n = request.value
-                    with suppress(AttributeError):
-                        self._adaptive.stop()
-                    self.scale(n)
-                    update()
+                n = request.value
+                with suppress(AttributeError):
+                    self._adaptive.stop()
+                self.scale(n)
+                update()
 
             scale.on_click(scale_cb)
         else:  # pragma: no cover
