@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import logging
 import os
+import shutil
 import sys
 import threading
 import traceback
@@ -3566,3 +3567,17 @@ async def test_broken_comm(c, s, a, b):
     )
     s = df.shuffle("id", shuffle="tasks")
     await c.compute(s.size)
+
+
+@gen_cluster(
+    client=True,
+    worker_kwargs={"memory_limit": "1 MiB"},
+    config={"distributed.worker.memory.pause": False},
+)
+async def test_bad_disk(c, s, a, b):
+    np = pytest.importorskip("numpy")
+    x = c.submit(np.random.random, 1_000_000, workers=a.address)
+    await wait(x)
+    shutil.rmtree(a.local_directory)
+    with pytest.raises(Exception):
+        await c.submit(inc, x, workers=b.address)
