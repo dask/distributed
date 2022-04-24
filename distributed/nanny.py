@@ -430,44 +430,44 @@ class Nanny(ServerNode):
 
     @log_errors
     async def plugin_add(self, plugin=None, name=None):
-            if isinstance(plugin, bytes):
-                plugin = pickle.loads(plugin)
+        if isinstance(plugin, bytes):
+            plugin = pickle.loads(plugin)
 
-            if name is None:
-                name = _get_plugin_name(plugin)
+        if name is None:
+            name = _get_plugin_name(plugin)
 
-            assert name
+        assert name
 
-            self.plugins[name] = plugin
+        self.plugins[name] = plugin
 
-            logger.info("Starting Nanny plugin %s" % name)
-            if hasattr(plugin, "setup"):
-                try:
-                    result = plugin.setup(nanny=self)
-                    if isawaitable(result):
-                        result = await result
-                except Exception as e:
-                    msg = error_message(e)
-                    return msg
-            if getattr(plugin, "restart", False):
-                await self.restart()
-
-            return {"status": "OK"}
-
-    @log_errors
-    async def plugin_remove(self, name=None):
-            logger.info(f"Removing Nanny plugin {name}")
+        logger.info("Starting Nanny plugin %s" % name)
+        if hasattr(plugin, "setup"):
             try:
-                plugin = self.plugins.pop(name)
-                if hasattr(plugin, "teardown"):
-                    result = plugin.teardown(nanny=self)
-                    if isawaitable(result):
-                        result = await result
+                result = plugin.setup(nanny=self)
+                if isawaitable(result):
+                    result = await result
             except Exception as e:
                 msg = error_message(e)
                 return msg
+        if getattr(plugin, "restart", False):
+            await self.restart()
 
-            return {"status": "OK"}
+        return {"status": "OK"}
+
+    @log_errors
+    async def plugin_remove(self, name=None):
+        logger.info(f"Removing Nanny plugin {name}")
+        try:
+            plugin = self.plugins.pop(name)
+            if hasattr(plugin, "teardown"):
+                result = plugin.teardown(nanny=self)
+                if isawaitable(result):
+                    result = await result
+        except Exception as e:
+            msg = error_message(e)
+            return msg
+
+        return {"status": "OK"}
 
     async def restart(self, timeout=30, executor_wait=True):
         async def _():
@@ -509,35 +509,35 @@ class Nanny(ServerNode):
 
     @log_errors
     async def _on_exit(self, exitcode):
+        if self.status not in (
+            Status.init,
+            Status.closing,
+            Status.closed,
+            Status.closing_gracefully,
+        ):
+            try:
+                await self._unregister()
+            except OSError:
+                logger.exception("Failed to unregister")
+                if not self.reconnect:
+                    await self.close()
+                    return
+
+        try:
             if self.status not in (
-                Status.init,
                 Status.closing,
                 Status.closed,
                 Status.closing_gracefully,
             ):
-                try:
-                    await self._unregister()
-                except OSError:
-                    logger.exception("Failed to unregister")
-                    if not self.reconnect:
-                        await self.close()
-                        return
+                logger.warning("Restarting worker")
+                await self.instantiate()
+            elif self.status == Status.closing_gracefully:
+                await self.close()
 
-            try:
-                if self.status not in (
-                    Status.closing,
-                    Status.closed,
-                    Status.closing_gracefully,
-                ):
-                    logger.warning("Restarting worker")
-                    await self.instantiate()
-                elif self.status == Status.closing_gracefully:
-                    await self.close()
-
-            except Exception:
-                logger.error(
-                    "Failed to restart worker after its process exited", exc_info=True
-                )
+        except Exception:
+            logger.error(
+                "Failed to restart worker after its process exited", exc_info=True
+            )
 
     @property
     def pid(self):

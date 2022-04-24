@@ -107,19 +107,19 @@ class VariableExtension:
 
     @log_errors
     async def delete(self, name=None, client=None):
-            try:
-                old = self.variables[name]
-            except KeyError:
-                pass
-            else:
-                if old["type"] == "Future":
-                    await self.release(old["value"], name)
-            with suppress(KeyError):
-                del self.waiting_conditions[name]
-            with suppress(KeyError):
-                del self.variables[name]
+        try:
+            old = self.variables[name]
+        except KeyError:
+            pass
+        else:
+            if old["type"] == "Future":
+                await self.release(old["value"], name)
+        with suppress(KeyError):
+            del self.waiting_conditions[name]
+        with suppress(KeyError):
+            del self.variables[name]
 
-            self.scheduler.remove_client("variable-%s" % name)
+        self.scheduler.remove_client("variable-%s" % name)
 
 
 class Variable:

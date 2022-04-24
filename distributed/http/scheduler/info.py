@@ -31,18 +31,18 @@ logger = logging.getLogger(__name__)
 class Workers(RequestHandler):
     @log_errors
     def get(self):
-            self.render(
-                "workers.html",
-                title="Workers",
-                scheduler=self.server,
-                **merge(
-                    self.server.__dict__,
-                    self.server.__pdict__,
-                    ns,
-                    self.extra,
-                    rel_path_statics,
-                ),
-            )
+        self.render(
+            "workers.html",
+            title="Workers",
+            scheduler=self.server,
+            **merge(
+                self.server.__dict__,
+                self.server.__pdict__,
+                ns,
+                self.extra,
+                rel_path_statics,
+            ),
+        )
 
 
 class Worker(RequestHandler):
@@ -94,60 +94,60 @@ class Task(RequestHandler):
 class Logs(RequestHandler):
     @log_errors
     def get(self):
-            logs = self.server.get_logs()
-            self.render(
-                "logs.html",
-                title="Logs",
-                logs=logs,
-                **merge(self.extra, rel_path_statics),
-            )
+        logs = self.server.get_logs()
+        self.render(
+            "logs.html",
+            title="Logs",
+            logs=logs,
+            **merge(self.extra, rel_path_statics),
+        )
 
 
 class WorkerLogs(RequestHandler):
     @log_errors
     async def get(self, worker):
-            worker = escape.url_unescape(worker)
-            logs = await self.server.get_worker_logs(workers=[worker])
-            logs = logs[worker]
-            self.render(
-                "logs.html",
-                title="Logs: " + worker,
-                logs=logs,
-                **merge(self.extra, rel_path_statics),
-            )
+        worker = escape.url_unescape(worker)
+        logs = await self.server.get_worker_logs(workers=[worker])
+        logs = logs[worker]
+        self.render(
+            "logs.html",
+            title="Logs: " + worker,
+            logs=logs,
+            **merge(self.extra, rel_path_statics),
+        )
 
 
 class WorkerCallStacks(RequestHandler):
     @log_errors
     async def get(self, worker):
-            worker = escape.url_unescape(worker)
-            keys = {ts.key for ts in self.server.workers[worker].processing}
-            call_stack = await self.server.get_call_stack(keys=keys)
-            self.render(
-                "call-stack.html",
-                title="Call Stacks: " + worker,
-                call_stack=call_stack,
-                **merge(self.extra, rel_path_statics),
-            )
+        worker = escape.url_unescape(worker)
+        keys = {ts.key for ts in self.server.workers[worker].processing}
+        call_stack = await self.server.get_call_stack(keys=keys)
+        self.render(
+            "call-stack.html",
+            title="Call Stacks: " + worker,
+            call_stack=call_stack,
+            **merge(self.extra, rel_path_statics),
+        )
 
 
 class TaskCallStack(RequestHandler):
     @log_errors
     async def get(self, key):
-            key = escape.url_unescape(key)
-            call_stack = await self.server.get_call_stack(keys=[key])
-            if not call_stack:
-                self.write(
-                    "<p>Task not actively running. "
-                    "It may be finished or not yet started</p>"
-                )
-            else:
-                self.render(
-                    "call-stack.html",
-                    title="Call Stack: " + key,
-                    call_stack=call_stack,
-                    **merge(self.extra, rel_path_statics),
-                )
+        key = escape.url_unescape(key)
+        call_stack = await self.server.get_call_stack(keys=[key])
+        if not call_stack:
+            self.write(
+                "<p>Task not actively running. "
+                "It may be finished or not yet started</p>"
+            )
+        else:
+            self.render(
+                "call-stack.html",
+                title="Call Stack: " + key,
+                call_stack=call_stack,
+                **merge(self.extra, rel_path_statics),
+            )
 
 
 class IndividualPlots(RequestHandler):

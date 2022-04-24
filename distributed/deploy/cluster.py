@@ -401,11 +401,11 @@ class Cluster(SyncMethodMixin):
 
             @log_errors
             def scale_cb(b):
-                    n = request.value
-                    with suppress(AttributeError):
-                        self._adaptive.stop()
-                    self.scale(n)
-                    update()
+                n = request.value
+                with suppress(AttributeError):
+                    self._adaptive.stop()
+                self.scale(n)
+                update()
 
             scale.on_click(scale_cb)
         else:  # pragma: no cover

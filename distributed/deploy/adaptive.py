@@ -185,21 +185,21 @@ class Adaptive(AdaptiveCore):
 
     @log_errors
     async def scale_down(self, workers):
-            if not workers:
-                return
+        if not workers:
+            return
 
-            logger.info("Retiring workers %s", workers)
-            # Ask scheduler to cleanly retire workers
-            await self.scheduler.retire_workers(
-                names=workers,
-                remove=True,
-                close_workers=True,
-            )
+        logger.info("Retiring workers %s", workers)
+        # Ask scheduler to cleanly retire workers
+        await self.scheduler.retire_workers(
+            names=workers,
+            remove=True,
+            close_workers=True,
+        )
 
-            # close workers more forcefully
-            f = self.cluster.scale_down(workers)
-            if isawaitable(f):
-                await f
+        # close workers more forcefully
+        f = self.cluster.scale_down(workers)
+        if isawaitable(f):
+            await f
 
     async def scale_up(self, n):
         f = self.cluster.scale(n)

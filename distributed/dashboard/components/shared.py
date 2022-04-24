@@ -89,42 +89,42 @@ class Processing(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self, messages):
-            msg = messages["processing"]
-            if not msg.get("nthreads"):
-                return
-            data = self.processing_update(msg)
-            x_range = self.root.x_range
-            max_right = max(data["right"])
-            cores = max(data["nthreads"])
-            if x_range.end < max_right:
-                x_range.end = max_right + 2
-            elif x_range.end > 2 * max_right + cores:  # way out there, walk back
-                x_range.end = x_range.end * 0.95 + max_right * 0.05
+        msg = messages["processing"]
+        if not msg.get("nthreads"):
+            return
+        data = self.processing_update(msg)
+        x_range = self.root.x_range
+        max_right = max(data["right"])
+        cores = max(data["nthreads"])
+        if x_range.end < max_right:
+            x_range.end = max_right + 2
+        elif x_range.end > 2 * max_right + cores:  # way out there, walk back
+            x_range.end = x_range.end * 0.95 + max_right * 0.05
 
-            update(self.source, data)
+        update(self.source, data)
 
     @staticmethod
     @log_errors
     def processing_update(msg):
-            names = sorted(msg["processing"])
-            names = sorted(names)
-            processing = msg["processing"]
-            processing = [processing[name] for name in names]
-            nthreads = msg["nthreads"]
-            nthreads = [nthreads[name] for name in names]
-            n = len(names)
-            d = {
-                "name": list(names),
-                "processing": processing,
-                "right": list(processing),
-                "top": list(range(n, 0, -1)),
-                "bottom": list(range(n - 1, -1, -1)),
-                "nthreads": nthreads,
-            }
+        names = sorted(msg["processing"])
+        names = sorted(names)
+        processing = msg["processing"]
+        processing = [processing[name] for name in names]
+        nthreads = msg["nthreads"]
+        nthreads = [nthreads[name] for name in names]
+        n = len(names)
+        d = {
+            "name": list(names),
+            "processing": processing,
+            "right": list(processing),
+            "top": list(range(n, 0, -1)),
+            "bottom": list(range(n - 1, -1, -1)),
+            "nthreads": nthreads,
+        }
 
-            d["alpha"] = [0.7] * n
+        d["alpha"] = [0.7] * n
 
-            return d
+        return d
 
 
 class ProfilePlot(DashboardComponent):
@@ -142,25 +142,25 @@ class ProfilePlot(DashboardComponent):
         @without_property_validation
         @log_errors
         def cb(attr, old, new):
-                try:
-                    ind = new.indices[0]
-                except IndexError:
-                    return
-                data = profile.plot_data(self.states[ind], profile_interval)
-                del self.states[:]
-                self.states.extend(data.pop("states"))
-                update(self.source, data)
-                self.source.selected = old
+            try:
+                ind = new.indices[0]
+            except IndexError:
+                return
+            data = profile.plot_data(self.states[ind], profile_interval)
+            del self.states[:]
+            self.states.extend(data.pop("states"))
+            update(self.source, data)
+            self.source.selected = old
 
         self.source.selected.on_change("indices", cb)
 
     @without_property_validation
     @log_errors
     def update(self, state):
-            self.state = state
-            data = profile.plot_data(self.state, profile_interval)
-            self.states = data.pop("states")
-            update(self.source, data)
+        self.state = state
+        data = profile.plot_data(self.state, profile_interval)
+        self.states = data.pop("states")
+        update(self.source, data)
 
 
 class ProfileTimePlot(DashboardComponent):
@@ -230,14 +230,14 @@ class ProfileTimePlot(DashboardComponent):
 
         @log_errors
         def ts_change(attr, old, new):
-                selected = self.ts_source.selected.indices
-                if selected:
-                    start = self.ts_source.data["time"][min(selected)] / 1000
-                    stop = self.ts_source.data["time"][max(selected)] / 1000
-                    self.start, self.stop = min(start, stop), max(start, stop)
-                else:
-                    self.start = self.stop = None
-                self.trigger_update(update_metadata=False)
+            selected = self.ts_source.selected.indices
+            if selected:
+                start = self.ts_source.data["time"][min(selected)] / 1000
+                stop = self.ts_source.data["time"][max(selected)] / 1000
+                self.start, self.stop = min(start, stop), max(start, stop)
+            else:
+                self.start = self.stop = None
+            self.trigger_update(update_metadata=False)
 
         self.ts_source.selected.on_change("indices", ts_change)
 
@@ -273,37 +273,37 @@ class ProfileTimePlot(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self, state, metadata=None):
-            self.state = state
-            data = profile.plot_data(self.state, profile_interval)
-            self.states = data.pop("states")
-            update(self.source, data)
+        self.state = state
+        data = profile.plot_data(self.state, profile_interval)
+        self.states = data.pop("states")
+        update(self.source, data)
 
-            if metadata is not None and metadata["counts"]:
-                self.task_names = ["All"] + sorted(metadata["keys"])
-                self.select.options = self.task_names
-                if self.key:
-                    ts = metadata["keys"][self.key]
-                else:
-                    ts = metadata["counts"]
-                times, counts = zip(*ts)
-                self.ts = {"count": counts, "time": [t * 1000 for t in times]}
+        if metadata is not None and metadata["counts"]:
+            self.task_names = ["All"] + sorted(metadata["keys"])
+            self.select.options = self.task_names
+            if self.key:
+                ts = metadata["keys"][self.key]
+            else:
+                ts = metadata["counts"]
+            times, counts = zip(*ts)
+            self.ts = {"count": counts, "time": [t * 1000 for t in times]}
 
-                self.ts_source.data.update(self.ts)
+            self.ts_source.data.update(self.ts)
 
     @without_property_validation
     def trigger_update(self, update_metadata=True):
         @log_errors
         async def cb():
-                prof = await self.server.get_profile(
-                    key=self.key, start=self.start, stop=self.stop
-                )
-                if update_metadata:
-                    metadata = await self.server.get_profile_metadata()
-                else:
-                    metadata = None
-                if isinstance(prof, gen.Future):
-                    prof, metadata = await asyncio.gather(prof, metadata)
-                self.doc().add_next_tick_callback(lambda: self.update(prof, metadata))
+            prof = await self.server.get_profile(
+                key=self.key, start=self.start, stop=self.stop
+            )
+            if update_metadata:
+                metadata = await self.server.get_profile_metadata()
+            else:
+                metadata = None
+            if isinstance(prof, gen.Future):
+                prof, metadata = await asyncio.gather(prof, metadata)
+            self.doc().add_next_tick_callback(lambda: self.update(prof, metadata))
 
         self.server.loop.add_callback(cb)
 
@@ -332,16 +332,16 @@ class ProfileServer(DashboardComponent):
         @without_property_validation
         @log_errors
         def cb(attr, old, new):
-                if changing[0] or len(new) == 0:
-                    return
+            if changing[0] or len(new) == 0:
+                return
 
-                data = profile.plot_data(self.states[new[0]], profile_interval)
-                del self.states[:]
-                self.states.extend(data.pop("states"))
-                changing[0] = True  # don't recursively trigger callback
-                update(self.source, data)
-                self.source.selected.indices = old
-                changing[0] = False
+            data = profile.plot_data(self.states[new[0]], profile_interval)
+            del self.states[:]
+            self.states.extend(data.pop("states"))
+            changing[0] = True  # don't recursively trigger callback
+            update(self.source, data)
+            self.source.selected.indices = old
+            changing[0] = False
 
         self.source.selected.on_change("indices", cb)
 
@@ -364,14 +364,14 @@ class ProfileServer(DashboardComponent):
 
         @log_errors
         def ts_change(attr, old, new):
-                selected = self.ts_source.selected.indices
-                if selected:
-                    start = self.ts_source.data["time"][min(selected)] / 1000
-                    stop = self.ts_source.data["time"][max(selected)] / 1000
-                    self.start, self.stop = min(start, stop), max(start, stop)
-                else:
-                    self.start = self.stop = None
-                self.trigger_update()
+            selected = self.ts_source.selected.indices
+            if selected:
+                start = self.ts_source.data["time"][min(selected)] / 1000
+                stop = self.ts_source.data["time"][max(selected)] / 1000
+                self.start, self.stop = min(start, stop), max(start, stop)
+            else:
+                self.start = self.stop = None
+            self.trigger_update()
 
         self.ts_source.selected.on_change("indices", ts_change)
 
@@ -391,10 +391,10 @@ class ProfileServer(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self, state):
-            self.state = state
-            data = profile.plot_data(self.state, profile_interval)
-            self.states = data.pop("states")
-            update(self.source, data)
+        self.state = state
+        data = profile.plot_data(self.state, profile_interval)
+        self.states = data.pop("states")
+        update(self.source, data)
 
     @without_property_validation
     def trigger_update(self):
@@ -543,14 +543,14 @@ class SystemMonitor(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self):
-            self.source.stream(self.get_data(), 1000)
-            self.label_source.data["cpu"] = [
-                "{}: {:.1f}%".format(f.__name__, f(self.source.data["cpu"]))
-                for f in [min, max, mean]
-            ]
-            self.label_source.data["memory"] = [
-                "{}: {}".format(
-                    f.__name__, dask.utils.format_bytes(f(self.source.data["memory"]))
-                )
-                for f in [min, max, mean]
-            ]
+        self.source.stream(self.get_data(), 1000)
+        self.label_source.data["cpu"] = [
+            "{}: {:.1f}%".format(f.__name__, f(self.source.data["cpu"]))
+            for f in [min, max, mean]
+        ]
+        self.label_source.data["memory"] = [
+            "{}: {}".format(
+                f.__name__, dask.utils.format_bytes(f(self.source.data["memory"]))
+            )
+            for f in [min, max, mean]
+        ]

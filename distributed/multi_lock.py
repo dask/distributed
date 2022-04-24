@@ -112,27 +112,27 @@ class MultiLockExtension:
 
     @log_errors
     async def acquire(self, locks=None, id=None, timeout=None, num_locks=None):
-            if not self._request_locks(locks, id, num_locks):
-                assert id not in self.events
-                event = asyncio.Event()
-                self.events[id] = event
-                future = event.wait()
-                if timeout is not None:
-                    future = asyncio.wait_for(future, timeout)
-                try:
-                    await future
-                except TimeoutError:
-                    self._refain_locks(locks, id)
-                    return False
-                finally:
-                    del self.events[id]
-            # At this point `id` acquired all `locks`
-            assert self.requests_left[id] == 0
-            return True
+        if not self._request_locks(locks, id, num_locks):
+            assert id not in self.events
+            event = asyncio.Event()
+            self.events[id] = event
+            future = event.wait()
+            if timeout is not None:
+                future = asyncio.wait_for(future, timeout)
+            try:
+                await future
+            except TimeoutError:
+                self._refain_locks(locks, id)
+                return False
+            finally:
+                del self.events[id]
+        # At this point `id` acquired all `locks`
+        assert self.requests_left[id] == 0
+        return True
 
     @log_errors
     def release(self, id=None):
-            self._refain_locks(self.requests[id], id)
+        self._refain_locks(self.requests[id], id)
 
 
 class MultiLock:
