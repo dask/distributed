@@ -226,7 +226,6 @@ class WorkerMemoryManager:
             "Worker is at %.0f%% memory usage. Start spilling data to disk.",
             frac * 100,
         )
-        start = monotonic()
         # Implement hysteresis cycle where spilling starts at the spill threshold and
         # stops at the target threshold. Normally that here the target threshold defines
         # process memory, whereas normally it defines reported managed memory (e.g.
@@ -236,7 +235,7 @@ class WorkerMemoryManager:
         )
         count = 0
         need = memory - target
-        last_checked_for_pause = monotonic()
+        last_checked_for_pause = last_yielded = monotonic()
 
         while memory > target:
             if not data.fast:
@@ -259,13 +258,6 @@ class WorkerMemoryManager:
 
             total_spilled += weight
             count += 1
-            # If the current buffer is filled with a lot of small values,
-            # evicting one at a time is very slow and the worker might
-            # generate new data faster than it is able to evict. Therefore,
-            # only pass on control if we spent at least 0.5s evicting
-            if monotonic() - start > 0.5:
-                await asyncio.sleep(0)
-                start = monotonic()
 
             memory = worker.monitor.get_process_memory()
             if total_spilled > need and memory > target:
@@ -276,11 +268,21 @@ class WorkerMemoryManager:
                 memory = worker.monitor.get_process_memory()
 
             now = monotonic()
-            if now - last_checked_for_pause >= self.memory_monitor_interval:
-                # Spilling may potentially take multiple seconds and we may pass the
-                # pause threshold while we're doing it.
-                last_checked_for_pause = now
+
+            # Increase spilling aggressiveness when the fast buffer is filled with a lot
+            # of small values. This artificially chokes the rest of the event loop -
+            # namely, the reception of new data from other workers.
+            # DO NOT tweak this without thorough stress testing.
+            # See https://github.com/dask/distributed/issues/6110.
+            if now - last_yielded > 0.5:
+                await asyncio.sleep(0)
+                last_yielded = now = monotonic()
+
+            # Spilling may potentially take multiple seconds; we may pass the pause
+            # threshold in the meantime.
+            if now - last_checked_for_pause > self.memory_monitor_interval:
                 self._maybe_pause_or_unpause(worker, memory)
+                last_checked_for_pause = now
 
         if count:
             logger.debug(

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import UserDict
-from time import sleep
+from collections import Counter, UserDict
+from time import monotonic, sleep
 
 import pytest
 
@@ -648,8 +648,10 @@ async def test_nanny_terminate(c, s, a):
     },
 )
 async def test_pause_while_spilling(c, s, a):
+    N = 10
+
     def get_process_memory():
-        if len(a.data) < 10:
+        if len(a.data) < N:
             # Don't trigger spilling until after all tasks have completed
             return 0
         elif a.data.fast and not a.data.slow:
@@ -668,11 +670,60 @@ async def test_pause_while_spilling(c, s, a):
             sleep(0.1)
             return SlowSpill, ()
 
-    futs = [c.submit(SlowSpill, pure=False) for _ in range(10)]
+    futs = [c.submit(SlowSpill, pure=False) for _ in range(N)]
     while a.status != Status.paused:
         await asyncio.sleep(0.01)
         # The initial spill still hasn't finished
         assert len(a.data.slow) < 7
+
+
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    worker_kwargs={"memory_limit": "10 GiB"},
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": 0.6,
+        "distributed.worker.memory.pause": False,
+        "distributed.worker.memory.monitor-interval": "10ms",
+    },
+)
+async def test_release_evloop(c, s, a):
+    N = 100
+
+    def get_process_memory():
+        if len(a.data) < N:
+            # Don't trigger spilling until after all tasks have completed
+            return 0
+        return 10 * 2**30
+
+    a.monitor.get_process_memory = get_process_memory
+
+    class SlowSpill:
+        def __reduce__(self):
+            sleep(0.01)
+            return SlowSpill, ()
+
+    futs = [c.submit(SlowSpill, pure=False) for _ in range(N)]
+    while len(a.data) < N:
+        await asyncio.sleep(0)
+
+    ts = [monotonic()]
+    while a.data.fast:
+        await asyncio.sleep(0)
+        ts.append(monotonic())
+
+    # 100 tasks taking 0.01s to pickle each = 2s to spill everything
+    # (this is because everything is pickled twice:
+    # https://github.com/dask/distributed/issues/1371).
+    # We should regain control of the event loop every 0.5s.
+    c = Counter(round(t1 - t0, 1) for t0, t1 in zip(ts, ts[1:]))
+    # with sleep(0) every 0.5s:  {0.0: 315, 0.5: 4}
+    # with sleep(0) every cycle: {0.0: 233}
+    # without any sleep:         {0.0: 359, 2.0: 1}
+    # Make sure we remain in the first use case.
+    assert 1 < sum(v for k, v in c.items() if 0.5 <= k <= 1.9), dict(c)
+    assert not any(v for k, v in c.items() if k >= 2.0), dict(c)
 
 
 @pytest.mark.parametrize(
