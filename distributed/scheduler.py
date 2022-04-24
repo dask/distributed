@@ -3849,8 +3849,7 @@ class Scheduler(SchedulerState, ServerNode):
         if retries is None:
             retries = annotations.pop("retries", None)
         resources = resources or annotations.pop("resources", None)
-        if user_priority is None:
-            user_priority = annotations.pop("priority", None)
+        user_priority = annotations.pop("priority", user_priority)
 
         if isinstance(workers, (str, Number)):
             workers = [workers]
@@ -3919,7 +3918,9 @@ class Scheduler(SchedulerState, ServerNode):
                 retries.update(d)  # TODO: there is an implicit ordering here
             if layer.annotations and "priority" in layer.annotations:
                 user_priority = user_priority or {}
-                d = process(layer.annotations["priority"], keys=layer, string_keys=None)
+                d = process(
+                    layer.annotations.pop("priority"), keys=layer, string_keys=None
+                )
                 user_priority.update(d)  # TODO: there is an implicit ordering here
             if layer.annotations and "resources" in layer.annotations:
                 resources = resources or {}
