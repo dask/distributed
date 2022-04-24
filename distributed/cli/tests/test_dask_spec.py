@@ -1,14 +1,11 @@
 import sys
 
-import pytest
 import yaml
 
 from distributed import Client
-from distributed.scheduler import COMPILED
 from distributed.utils_test import gen_cluster, gen_test, popen
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 @gen_test(timeout=120)
 async def test_text():
     with popen(
@@ -38,7 +35,6 @@ async def test_text():
                 assert w["nthreads"] == 3
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(client=True, nthreads=[])
 async def test_file(c, s, tmp_path):
     fn = str(tmp_path / "foo.yaml")

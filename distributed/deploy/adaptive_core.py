@@ -94,7 +94,7 @@ class AdaptiveCore:
         minimum: int = 0,
         maximum: int | float = math.inf,
         wait_count: int = 3,
-        interval: str | int | float | timedelta | None = "1s",
+        interval: str | int | float | timedelta = "1s",
     ):
         if not isinstance(maximum, int) and not math.isinf(maximum):
             raise TypeError(f"maximum must be int or inf; got {maximum}")

@@ -194,7 +194,7 @@ class Cluster(SyncMethodMixin):
             return self.sync(self._close, callback_timeout=timeout)
 
     def __del__(self):
-        if self.status != Status.closed:
+        if getattr(self, "status", Status.closed) != Status.closed:
             with suppress(AttributeError, RuntimeError):  # during closing
                 self.loop.add_callback(self.close)
 
@@ -399,13 +399,13 @@ class Cluster(SyncMethodMixin):
 
             adapt.on_click(adapt_cb)
 
+            @log_errors
             def scale_cb(b):
-                with log_errors():
-                    n = request.value
-                    with suppress(AttributeError):
-                        self._adaptive.stop()
-                    self.scale(n)
-                    update()
+                n = request.value
+                with suppress(AttributeError):
+                    self._adaptive.stop()
+                self.scale(n)
+                update()
 
             scale.on_click(scale_cb)
         else:  # pragma: no cover
@@ -462,14 +462,14 @@ class Cluster(SyncMethodMixin):
     def __enter__(self):
         return self.sync(self.__aenter__)
 
-    def __exit__(self, typ, value, traceback):
-        return self.sync(self.__aexit__, typ, value, traceback)
+    def __exit__(self, exc_type, exc_value, traceback):
+        return self.sync(self.__aexit__, exc_type, exc_value, traceback)
 
     async def __aenter__(self):
         await self
         return self
 
-    async def __aexit__(self, typ, value, traceback):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         f = self.close()
         if isawaitable(f):
             await f

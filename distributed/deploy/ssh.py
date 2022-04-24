@@ -37,8 +37,10 @@ class Process(ProcessInterface):
         await super().start()
 
     async def close(self):
-        self.proc.kill()  # https://github.com/ronf/asyncssh/issues/112
-        self.connection.close()
+        if self.proc:
+            self.proc.kill()  # https://github.com/ronf/asyncssh/issues/112
+        if self.connection:
+            self.connection.close()
         await super().close()
 
 

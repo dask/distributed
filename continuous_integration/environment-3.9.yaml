@@ -18,6 +18,7 @@ dependencies:
   - ipykernel
   - ipywidgets
   - jinja2
+  - locket >=1.0
   - lz4  # Only tested here
   - msgpack-python
   - netcdf4

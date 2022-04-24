@@ -364,6 +364,7 @@ class Worker(ServerNode):
     executed_count: int
     long_running: set[str]
     log: deque[tuple]  # [(..., stimulus_id: str | None, timestamp: float), ...]
+    stimulus_log: deque[StateMachineEvent]
     incoming_transfer_log: deque[dict[str, Any]]
     outgoing_transfer_log: deque[dict[str, Any]]
     target_message_size: int
@@ -421,6 +422,7 @@ class Worker(ServerNode):
     execution_state: dict[str, Any]
     plugins: dict[str, WorkerPlugin]
     _pending_plugins: tuple[WorkerPlugin, ...]
+    _async_instructions: set[asyncio.Task]
 
     def __init__(
         self,
@@ -519,7 +521,8 @@ class Worker(ServerNode):
 
         self.target_message_size = int(50e6)  # 50 MB
 
-        self.log = deque(maxlen=100000)
+        self.log = deque(maxlen=100_000)
+        self.stimulus_log = deque(maxlen=10_000)
         if validate is None:
             validate = dask.config.get("distributed.scheduler.validate")
         self.validate = validate
@@ -546,6 +549,7 @@ class Worker(ServerNode):
             ("executing", "released"): self.transition_executing_released,
             ("executing", "rescheduled"): self.transition_executing_rescheduled,
             ("fetch", "flight"): self.transition_fetch_flight,
+            ("fetch", "missing"): self.transition_fetch_missing,
             ("fetch", "released"): self.transition_generic_released,
             ("flight", "error"): self.transition_flight_error,
             ("flight", "fetch"): self.transition_flight_fetch,
@@ -838,6 +842,8 @@ class Worker(ServerNode):
             self.lifetime += (random.random() * 2 - 1) * lifetime_stagger
             self.io_loop.call_later(self.lifetime, self.close_gracefully)
 
+        self._async_instructions = set()
+
         Worker._instances.add(self)
 
     ################
@@ -1020,6 +1026,7 @@ class Worker(ServerNode):
             "in_flight_tasks": self.in_flight_tasks,
             "in_flight_workers": self.in_flight_workers,
             "log": self.log,
+            "stimulus_log": self.stimulus_log,
             "tasks": self.tasks,
             "logs": self.get_logs(),
             "config": dask.config.config,
@@ -1171,8 +1178,10 @@ class Worker(ServerNode):
         except OSError as e:
             # Scheduler is gone. Respect distributed.comm.timeouts.connect
             if "Timed out trying to connect" in str(e):
+                logger.info("Timed out while trying to connect during heartbeat")
                 await self.close(report=False)
             else:
+                logger.exception(e)
                 raise e
         finally:
             self.heartbeat_active = False
@@ -1188,6 +1197,10 @@ class Worker(ServerNode):
                 logger.info("Connection to scheduler broken.  Reconnecting...")
                 self.loop.add_callback(self.heartbeat)
             else:
+                logger.info(
+                    "Connection to scheduler broken. Closing without reporting.  Status: %s",
+                    self.status,
+                )
                 await self.close(report=False)
 
     async def upload_file(self, comm, filename=None, data=None, load=True):
@@ -1383,124 +1396,133 @@ class Worker(ServerNode):
         self.start_periodic_callbacks()
         return self
 
-    def _close(self, *args, **kwargs):
-        warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
-        return self.close(*args, **kwargs)
-
+    @log_errors
     async def close(
         self, report=True, timeout=30, nanny=True, executor_wait=True, safe=False
     ):
-        with log_errors():
-            if self.status in (Status.closed, Status.closing):
-                await self.finished()
-                return
+        if self.status in (Status.closed, Status.closing):
+            await self.finished()
+            return
 
-            self.reconnect = False
-            disable_gc_diagnosis()
+        self.reconnect = False
+        disable_gc_diagnosis()
 
-            try:
-                logger.info("Stopping worker at %s", self.address)
-            except ValueError:  # address not available if already closed
-                logger.info("Stopping worker")
-            if self.status not in Status.ANY_RUNNING:
-                logger.info("Closed worker has not yet started: %s", self.status)
-            self.status = Status.closing
+        try:
+            logger.info("Stopping worker at %s", self.address)
+        except ValueError:  # address not available if already closed
+            logger.info("Stopping worker")
+        if self.status not in Status.ANY_RUNNING:
+            logger.info("Closed worker has not yet started: %s", self.status)
+        if not report:
+            logger.info("Not reporting worker closure to scheduler")
+        if not executor_wait:
+            logger.info("Not waiting on executor to close")
+        self.status = Status.closing
 
-            for preload in self.preloads:
-                await preload.teardown()
+        if self._async_instructions:
+            for task in self._async_instructions:
+                task.cancel()
+            # async tasks can handle cancellation and could take an arbitrary amount
+            # of time to terminate
+            _, pending = await asyncio.wait(self._async_instructions, timeout=timeout)
+            for task in pending:
+                logger.error(
+                    f"Failed to cancel asyncio task after {timeout} seconds: {task}"
+                )
 
-            for extension in self.extensions.values():
-                if hasattr(extension, "close"):
-                    result = extension.close()
-                    if isawaitable(result):
-                        result = await result
+        for preload in self.preloads:
+            await preload.teardown()
 
-            if nanny and self.nanny:
-                with self.rpc(self.nanny) as r:
-                    await r.close_gracefully()
+        for extension in self.extensions.values():
+            if hasattr(extension, "close"):
+                result = extension.close()
+                if isawaitable(result):
+                    result = await result
 
-            setproctitle("dask-worker [closing]")
+        if nanny and self.nanny:
+            with self.rpc(self.nanny) as r:
+                await r.close_gracefully()
 
-            teardowns = [
-                plugin.teardown(self)
-                for plugin in self.plugins.values()
-                if hasattr(plugin, "teardown")
-            ]
+        setproctitle("dask-worker [closing]")
 
-            await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
+        teardowns = [
+            plugin.teardown(self)
+            for plugin in self.plugins.values()
+            if hasattr(plugin, "teardown")
+        ]
 
-            for pc in self.periodic_callbacks.values():
-                pc.stop()
+        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
 
-            if self._client:
-                # If this worker is the last one alive, clean up the worker
-                # initialized clients
-                if not any(
-                    w
-                    for w in Worker._instances
-                    if w != self and w.status in Status.ANY_RUNNING
-                ):
-                    for c in Worker._initialized_clients:
-                        # Regardless of what the client was initialized with
-                        # we'll require the result as a future. This is
-                        # necessary since the heursitics of asynchronous are not
-                        # reliable and we might deadlock here
-                        c._asynchronous = True
-                        if c.asynchronous:
-                            await c.close()
-                        else:
-                            # There is still the chance that even with us
-                            # telling the client to be async, itself will decide
-                            # otherwise
-                            c.close()
+        for pc in self.periodic_callbacks.values():
+            pc.stop()
 
-            with suppress(EnvironmentError, TimeoutError):
-                if report and self.contact_address is not None:
-                    await asyncio.wait_for(
-                        self.scheduler.unregister(
-                            address=self.contact_address, safe=safe
-                        ),
-                        timeout,
-                    )
-            await self.scheduler.close_rpc()
-            self._workdir.release()
-
-            self.stop_services()
-
-            # Give some time for a UCX scheduler to complete closing endpoints
-            # before closing self.batched_stream, otherwise the local endpoint
-            # may be closed too early and errors be raised on the scheduler when
-            # trying to send closing message.
-            if self._protocol == "ucx":  # pragma: no cover
-                await asyncio.sleep(0.2)
-
-            if (
-                self.batched_stream
-                and self.batched_stream.comm
-                and not self.batched_stream.comm.closed()
+        if self._client:
+            # If this worker is the last one alive, clean up the worker
+            # initialized clients
+            if not any(
+                w
+                for w in Worker._instances
+                if w != self and w.status in Status.ANY_RUNNING
             ):
-                self.batched_stream.send({"op": "close-stream"})
+                for c in Worker._initialized_clients:
+                    # Regardless of what the client was initialized with
+                    # we'll require the result as a future. This is
+                    # necessary since the heursitics of asynchronous are not
+                    # reliable and we might deadlock here
+                    c._asynchronous = True
+                    if c.asynchronous:
+                        await c.close()
+                    else:
+                        # There is still the chance that even with us
+                        # telling the client to be async, itself will decide
+                        # otherwise
+                        c.close()
 
-            if self.batched_stream:
-                with suppress(TimeoutError):
-                    await self.batched_stream.close(timedelta(seconds=timeout))
+        with suppress(EnvironmentError, TimeoutError):
+            if report and self.contact_address is not None:
+                await asyncio.wait_for(
+                    self.scheduler.unregister(address=self.contact_address, safe=safe),
+                    timeout,
+                )
+        await self.scheduler.close_rpc()
+        self._workdir.release()
 
-            for executor in self.executors.values():
-                if executor is utils._offload_executor:
-                    continue  # Never shutdown the offload executor
-                if isinstance(executor, ThreadPoolExecutor):
-                    executor._work_queue.queue.clear()
-                    executor.shutdown(wait=executor_wait, timeout=timeout)
-                else:
-                    executor.shutdown(wait=executor_wait)
+        self.stop_services()
 
-            self.stop()
-            await self.rpc.close()
+        # Give some time for a UCX scheduler to complete closing endpoints
+        # before closing self.batched_stream, otherwise the local endpoint
+        # may be closed too early and errors be raised on the scheduler when
+        # trying to send closing message.
+        if self._protocol == "ucx":  # pragma: no cover
+            await asyncio.sleep(0.2)
 
-            self.status = Status.closed
-            await super().close()
+        if (
+            self.batched_stream
+            and self.batched_stream.comm
+            and not self.batched_stream.comm.closed()
+        ):
+            self.batched_stream.send({"op": "close-stream"})
 
-            setproctitle("dask-worker [closed]")
+        if self.batched_stream:
+            with suppress(TimeoutError):
+                await self.batched_stream.close(timedelta(seconds=timeout))
+
+        for executor in self.executors.values():
+            if executor is utils._offload_executor:
+                continue  # Never shutdown the offload executor
+            if isinstance(executor, ThreadPoolExecutor):
+                executor._work_queue.queue.clear()
+                executor.shutdown(wait=executor_wait, timeout=timeout)
+            else:
+                executor.shutdown(wait=executor_wait)
+
+        self.stop()
+        await self.rpc.close()
+
+        self.status = Status.closed
+        await super().close()
+
+        setproctitle("dask-worker [closed]")
         return "OK"
 
     async def close_gracefully(self, restart=None):
@@ -1526,10 +1548,6 @@ class Worker(ServerNode):
             workers=[self.address], close_workers=False, remove=False
         )
         await self.close(safe=True, nanny=not restart)
-
-    async def terminate(self, report: bool = True, **kwargs) -> str:
-        await self.close(report=report, **kwargs)
-        return "OK"
 
     async def wait_until_closed(self):
         warnings.warn("wait_until_closed has moved to finished()")
@@ -1926,6 +1944,14 @@ class Worker(ServerNode):
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         assert ts.done
+        ts.state = "missing"
+        self._missing_dep_flight.add(ts)
+        ts.done = False
+        return {}, []
+
+    def transition_fetch_missing(
+        self, ts: TaskState, *, stimulus_id: str
+    ) -> RecsInstrs:
         ts.state = "missing"
         self._missing_dep_flight.add(ts)
         ts.done = False
@@ -2514,14 +2540,30 @@ class Worker(ServerNode):
                 recs.update(b_recs)
                 instructions += b_instructions
             except InvalidTransition:
-                raise InvalidTransition(
-                    f"Impossible transition from {start} to {finish} for {ts.key}"
-                ) from None
+                self.log_event(
+                    "invalid-worker-transition",
+                    {
+                        "key": ts.key,
+                        "start": start,
+                        "finish": finish,
+                        "story": self.story(ts),
+                        "worker": self.address,
+                    },
+                )
+                raise InvalidTransition(ts.key, start, finish, self.story(ts))
 
         else:
-            raise InvalidTransition(
-                f"Impossible transition from {start} to {finish} for {ts.key}"
+            self.log_event(
+                "invalid-worker-transition",
+                {
+                    "key": ts.key,
+                    "start": start,
+                    "finish": finish,
+                    "story": self.story(ts),
+                    "worker": self.address,
+                },
             )
+            raise InvalidTransition(ts.key, start, finish, self.story(ts))
 
         self.log.append(
             (
@@ -2598,19 +2640,23 @@ class Worker(ServerNode):
         else:
             self._handle_instructions(instructions)
 
+    @log_errors
     def handle_stimulus(self, stim: StateMachineEvent) -> None:
-        with log_errors():
-            # self.stimulus_history.append(stim)  # TODO
-            recs, instructions = self.handle_event(stim)
-            self.transitions(recs, stimulus_id=stim.stimulus_id)
-            self._handle_instructions(instructions)
+        self.stimulus_log.append(stim.to_loggable(handled=time()))
+        recs, instructions = self.handle_event(stim)
+        self.transitions(recs, stimulus_id=stim.stimulus_id)
+        self._handle_instructions(instructions)
 
-    def _handle_stimulus_from_future(
-        self, future: asyncio.Future[StateMachineEvent | None]
+    @log_errors
+    def _handle_stimulus_from_task(
+        self, task: asyncio.Task[StateMachineEvent | None]
     ) -> None:
-        with log_errors():
-            # This *should* never raise
-            stim = future.result()
+        self._async_instructions.remove(task)
+        try:
+            # This *should* never raise any other exceptions
+            stim = task.result()
+        except asyncio.CancelledError:
+            return
         if stim:
             self.handle_stimulus(stim)
 
@@ -2621,10 +2667,12 @@ class Worker(ServerNode):
             if isinstance(inst, SendMessageToScheduler):
                 self.batched_stream.send(inst.to_dict())
             elif isinstance(inst, Execute):
-                coro = self.execute(inst.key, stimulus_id=inst.stimulus_id)
-                task = asyncio.create_task(coro)
-                # TODO track task (at the moment it's fire-and-forget)
-                task.add_done_callback(self._handle_stimulus_from_future)
+                task = asyncio.create_task(
+                    self.execute(inst.key, stimulus_id=inst.stimulus_id),
+                    name=f"execute({inst.key})",
+                )
+                self._async_instructions.add(task)
+                task.add_done_callback(self._handle_stimulus_from_task)
             else:
                 raise TypeError(inst)  # pragma: nocover
 
@@ -2650,8 +2698,16 @@ class Worker(ServerNode):
         }
 
     def story(self, *keys_or_tasks: str | TaskState) -> list[tuple]:
+        """Return all transitions involving one or more tasks"""
         keys = {e.key if isinstance(e, TaskState) else e for e in keys_or_tasks}
         return worker_story(keys, self.log)
+
+    def stimulus_story(
+        self, *keys_or_tasks: str | TaskState
+    ) -> list[StateMachineEvent]:
+        """Return all state machine events involving one or more tasks"""
+        keys = {e.key if isinstance(e, TaskState) else e for e in keys_or_tasks}
+        return [ev for ev in self.stimulus_log if getattr(ev, "key", None) in keys]
 
     def ensure_communicating(self) -> None:
         stimulus_id = f"ensure-communicating-{time()}"
@@ -2672,6 +2728,9 @@ class Worker(ServerNode):
 
             if ts.state != "fetch":
                 continue
+
+            if self.validate:
+                assert ts.who_has
 
             workers = [w for w in ts.who_has if w not in self.in_flight_workers]
             if not workers:
@@ -2917,6 +2976,7 @@ class Worker(ServerNode):
         self.counters["transfer-count"].add(len(data))
         self.incoming_count += 1
 
+    @log_errors
     async def gather_dep(
         self,
         worker: str,
@@ -2942,155 +3002,161 @@ class Worker(ServerNode):
             return
 
         recommendations: Recs = {}
-        with log_errors():
-            response = {}
-            to_gather_keys: set[str] = set()
-            cancelled_keys: set[str] = set()
-            try:
-                to_gather_keys, cancelled_keys, cause = self._filter_deps_for_fetch(
-                    to_gather
-                )
+        response = {}
+        to_gather_keys: set[str] = set()
+        cancelled_keys: set[str] = set()
+        try:
+            to_gather_keys, cancelled_keys, cause = self._filter_deps_for_fetch(
+                to_gather
+            )
 
-                if not to_gather_keys:
-                    self.log.append(
-                        ("nothing-to-gather", worker, to_gather, stimulus_id, time())
-                    )
-                    return
-
-                assert cause
-                # Keep namespace clean since this func is long and has many
-                # dep*, *ts* variables
-                del to_gather
-
+            if not to_gather_keys:
                 self.log.append(
-                    ("request-dep", worker, to_gather_keys, stimulus_id, time())
+                    ("nothing-to-gather", worker, to_gather, stimulus_id, time())
                 )
-                logger.debug(
-                    "Request %d keys for task %s from %s",
-                    len(to_gather_keys),
-                    cause,
-                    worker,
-                )
-
-                start = time()
-                response = await get_data_from_worker(
-                    self.rpc, to_gather_keys, worker, who=self.address
-                )
-                stop = time()
-                if response["status"] == "busy":
-                    return
-
-                self._update_metrics_received_data(
-                    start=start,
-                    stop=stop,
-                    data=response["data"],
-                    cause=cause,
-                    worker=worker,
-                )
-                self.log.append(
-                    ("receive-dep", worker, set(response["data"]), stimulus_id, time())
-                )
-
-            except OSError:
-                logger.exception("Worker stream died during communication: %s", worker)
-                has_what = self.has_what.pop(worker)
-                self.pending_data_per_worker.pop(worker)
-                self.log.append(
-                    ("receive-dep-failed", worker, has_what, stimulus_id, time())
-                )
-                for d in has_what:
-                    ts = self.tasks[d]
-                    ts.who_has.remove(worker)
-
-            except Exception as e:
-                logger.exception(e)
-                if self.batched_stream and LOG_PDB:
-                    import pdb
-
-                    pdb.set_trace()
-                msg = error_message(e)
-                for k in self.in_flight_workers[worker]:
-                    ts = self.tasks[k]
-                    recommendations[ts] = tuple(msg.values())
-                raise
-            finally:
-                self.comm_nbytes -= total_nbytes
-                busy = response.get("status", "") == "busy"
-                data = response.get("data", {})
-
-                if busy:
-                    self.log.append(
-                        ("busy-gather", worker, to_gather_keys, stimulus_id, time())
-                    )
-
-                for d in self.in_flight_workers.pop(worker):
-                    ts = self.tasks[d]
-                    ts.done = True
-                    if d in cancelled_keys:
-                        if ts.state == "cancelled":
-                            recommendations[ts] = "released"
-                        else:
-                            recommendations[ts] = "fetch"
-                    elif d in data:
-                        recommendations[ts] = ("memory", data[d])
-                    elif busy:
-                        recommendations[ts] = "fetch"
-                    elif ts not in recommendations:
-                        ts.who_has.discard(worker)
-                        self.has_what[worker].discard(ts.key)
-                        self.log.append((d, "missing-dep", stimulus_id, time()))
-                        self.batched_stream.send(
-                            {"op": "missing-data", "errant_worker": worker, "key": d}
-                        )
-                        recommendations[ts] = "fetch" if ts.who_has else "missing"
-                del data, response
-                self.transitions(recommendations, stimulus_id=stimulus_id)
-
-                if not busy:
-                    self.repetitively_busy = 0
-                else:
-                    # Exponential backoff to avoid hammering scheduler/worker
-                    self.repetitively_busy += 1
-                    await asyncio.sleep(0.100 * 1.5**self.repetitively_busy)
-
-                    await self.query_who_has(*to_gather_keys)
-
-                self.ensure_communicating()
-
-    async def find_missing(self) -> None:
-        with log_errors():
-            if not self._missing_dep_flight:
                 return
-            try:
-                if self.validate:
-                    for ts in self._missing_dep_flight:
-                        assert not ts.who_has
 
-                stimulus_id = f"find-missing-{time()}"
-                who_has = await retry_operation(
-                    self.scheduler.who_has,
-                    keys=[ts.key for ts in self._missing_dep_flight],
+            assert cause
+            # Keep namespace clean since this func is long and has many
+            # dep*, *ts* variables
+            del to_gather
+
+            self.log.append(
+                ("request-dep", worker, to_gather_keys, stimulus_id, time())
+            )
+            logger.debug(
+                "Request %d keys for task %s from %s",
+                len(to_gather_keys),
+                cause,
+                worker,
+            )
+
+            start = time()
+            response = await get_data_from_worker(
+                self.rpc, to_gather_keys, worker, who=self.address
+            )
+            stop = time()
+            if response["status"] == "busy":
+                return
+
+            self._update_metrics_received_data(
+                start=start,
+                stop=stop,
+                data=response["data"],
+                cause=cause,
+                worker=worker,
+            )
+            self.log.append(
+                ("receive-dep", worker, set(response["data"]), stimulus_id, time())
+            )
+
+        except OSError:
+            logger.exception("Worker stream died during communication: %s", worker)
+            has_what = self.has_what.pop(worker)
+            self.pending_data_per_worker.pop(worker)
+            self.log.append(
+                ("receive-dep-failed", worker, has_what, stimulus_id, time())
+            )
+            for d in has_what:
+                ts = self.tasks[d]
+                ts.who_has.remove(worker)
+                if not ts.who_has and ts.state not in ("released", "memory"):
+                    recommendations[ts] = "missing"
+                    self.log.append(
+                        ("missing-who-has", worker, ts.key, stimulus_id, time())
+                    )
+        except Exception as e:
+            logger.exception(e)
+            if self.batched_stream and LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            msg = error_message(e)
+            for k in self.in_flight_workers[worker]:
+                ts = self.tasks[k]
+                recommendations[ts] = tuple(msg.values())
+            raise
+        finally:
+            self.comm_nbytes -= total_nbytes
+            busy = response.get("status", "") == "busy"
+            data = response.get("data", {})
+
+            if busy:
+                self.log.append(
+                    ("busy-gather", worker, to_gather_keys, stimulus_id, time())
                 )
-                who_has = {k: v for k, v in who_has.items() if v}
-                self.update_who_has(who_has)
-                recommendations: Recs = {}
-                for ts in self._missing_dep_flight:
+
+            for d in self.in_flight_workers.pop(worker):
+                ts = self.tasks[d]
+                ts.done = True
+                if d in cancelled_keys:
+                    if ts.state == "cancelled":
+                        recommendations[ts] = "released"
+                    else:
+                        recommendations[ts] = "fetch"
+                elif d in data:
+                    recommendations[ts] = ("memory", data[d])
+                elif busy:
+                    recommendations[ts] = "fetch"
+                elif ts not in recommendations:
+                    ts.who_has.discard(worker)
+                    self.has_what[worker].discard(ts.key)
+                    self.log.append((d, "missing-dep", stimulus_id, time()))
+                    self.batched_stream.send(
+                        {"op": "missing-data", "errant_worker": worker, "key": d}
+                    )
                     if ts.who_has:
                         recommendations[ts] = "fetch"
-                self.transitions(recommendations, stimulus_id=stimulus_id)
+                    elif ts.state not in ("released", "memory"):
+                        recommendations[ts] = "missing"
+            del data, response
+            self.transitions(recommendations, stimulus_id=stimulus_id)
 
-            finally:
-                # This is quite arbitrary but the heartbeat has scaling implemented
-                self.periodic_callbacks[
-                    "find-missing"
-                ].callback_time = self.periodic_callbacks["heartbeat"].callback_time
-                self.ensure_communicating()
+            if not busy:
+                self.repetitively_busy = 0
+            else:
+                # Exponential backoff to avoid hammering scheduler/worker
+                self.repetitively_busy += 1
+                await asyncio.sleep(0.100 * 1.5**self.repetitively_busy)
 
-    async def query_who_has(self, *deps: str) -> dict[str, Collection[str]]:
-        with log_errors():
-            who_has = await retry_operation(self.scheduler.who_has, keys=deps)
+                await self.query_who_has(*to_gather_keys)
+
+            self.ensure_communicating()
+
+    @log_errors
+    async def find_missing(self) -> None:
+        if not self._missing_dep_flight:
+            return
+        try:
+            if self.validate:
+                for ts in self._missing_dep_flight:
+                    assert not ts.who_has
+
+            stimulus_id = f"find-missing-{time()}"
+            who_has = await retry_operation(
+                self.scheduler.who_has,
+                keys=[ts.key for ts in self._missing_dep_flight],
+            )
+            who_has = {k: v for k, v in who_has.items() if v}
             self.update_who_has(who_has)
-            return who_has
+            recommendations: Recs = {}
+            for ts in self._missing_dep_flight:
+                if ts.who_has:
+                    recommendations[ts] = "fetch"
+            self.transitions(recommendations, stimulus_id=stimulus_id)
+
+        finally:
+            # This is quite arbitrary but the heartbeat has scaling implemented
+            self.periodic_callbacks[
+                "find-missing"
+            ].callback_time = self.periodic_callbacks["heartbeat"].callback_time
+            self.ensure_communicating()
+
+    @log_errors
+    async def query_who_has(self, *deps: str) -> dict[str, Collection[str]]:
+        who_has = await retry_operation(self.scheduler.who_has, keys=deps)
+        self.update_who_has(who_has)
+        return who_has
 
     def update_who_has(self, who_has: dict[str, Collection[str]]) -> None:
         try:
@@ -3242,56 +3308,56 @@ class Worker(ServerNode):
     def run_coroutine(self, comm, function, args=(), kwargs=None, wait=True):
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
+    @log_errors
     async def plugin_add(
         self,
         plugin: WorkerPlugin | bytes,
         name: str | None = None,
         catch_errors: bool = True,
     ) -> dict[str, Any]:
-        with log_errors(pdb=False):
-            if isinstance(plugin, bytes):
-                # Note: historically we have accepted duck-typed classes that don't
-                # inherit from WorkerPlugin. Don't do `assert isinstance`.
-                plugin = cast("WorkerPlugin", pickle.loads(plugin))
+        if isinstance(plugin, bytes):
+            # Note: historically we have accepted duck-typed classes that don't
+            # inherit from WorkerPlugin. Don't do `assert isinstance`.
+            plugin = cast("WorkerPlugin", pickle.loads(plugin))
 
-            if name is None:
-                name = _get_plugin_name(plugin)
+        if name is None:
+            name = _get_plugin_name(plugin)
 
-            assert name
+        assert name
 
-            if name in self.plugins:
-                await self.plugin_remove(name=name)
+        if name in self.plugins:
+            await self.plugin_remove(name=name)
 
-            self.plugins[name] = plugin
+        self.plugins[name] = plugin
 
-            logger.info("Starting Worker plugin %s" % name)
-            if hasattr(plugin, "setup"):
-                try:
-                    result = plugin.setup(worker=self)
-                    if isawaitable(result):
-                        result = await result
-                except Exception as e:
-                    if not catch_errors:
-                        raise
-                    msg = error_message(e)
-                    return cast("dict[str, Any]", msg)
-
-            return {"status": "OK"}
-
-    async def plugin_remove(self, name: str) -> dict[str, Any]:
-        with log_errors(pdb=False):
-            logger.info(f"Removing Worker plugin {name}")
+        logger.info("Starting Worker plugin %s" % name)
+        if hasattr(plugin, "setup"):
             try:
-                plugin = self.plugins.pop(name)
-                if hasattr(plugin, "teardown"):
-                    result = plugin.teardown(worker=self)
-                    if isawaitable(result):
-                        result = await result
+                result = plugin.setup(worker=self)
+                if isawaitable(result):
+                    result = await result
             except Exception as e:
+                if not catch_errors:
+                    raise
                 msg = error_message(e)
                 return cast("dict[str, Any]", msg)
 
-            return {"status": "OK"}
+        return {"status": "OK"}
+
+    @log_errors
+    async def plugin_remove(self, name: str) -> dict[str, Any]:
+        logger.info(f"Removing Worker plugin {name}")
+        try:
+            plugin = self.plugins.pop(name)
+            if hasattr(plugin, "teardown"):
+                result = plugin.teardown(worker=self)
+                if isawaitable(result):
+                    result = await result
+        except Exception as e:
+            msg = error_message(e)
+            return cast("dict[str, Any]", msg)
+
+        return {"status": "OK"}
 
     async def actor_execute(
         self,
@@ -3972,6 +4038,7 @@ class Worker(ServerNode):
                 self.validate_task(ts)
 
         except Exception as e:
+            logger.error("Validate state failed.  Closing.", exc_info=e)
             self.loop.add_callback(self.close)
             logger.exception(e)
             if LOG_PDB:
@@ -4591,16 +4658,10 @@ def convert_kwargs_to_str(kwargs: dict, max_len: int | None = None) -> str:
         return "{{{}}}".format(", ".join(strs))
 
 
-async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=True):
+async def run(server, comm, function, args=(), kwargs=None, wait=True):
     kwargs = kwargs or {}
     function = pickle.loads(function)
-    if is_coro is None:
-        is_coro = iscoroutinefunction(function)
-    else:
-        warnings.warn(
-            "The is_coro= parameter is deprecated. "
-            "We now automatically detect coroutines/async functions"
-        )
+    is_coro = iscoroutinefunction(function)
     assert wait or is_coro, "Combination not supported"
     if args:
         args = pickle.loads(args)

@@ -1,6 +1,64 @@
 Changelog
 =========
 
+.. _v2022.04.1:
+
+2022.04.1
+---------
+
+Released on April 15, 2022
+
+New Features
+^^^^^^^^^^^^
+- Add ``KillWorker`` Plugin (:pr:`6126`) `Matthew Rocklin`_
+
+Enhancements
+^^^^^^^^^^^^
+- Sort worker list in info pages (:pr:`6135`) `Matthew Rocklin`_
+- Add back ``Worker.transition_fetch_missing`` (:pr:`6112`) `Matthew Rocklin`_
+- Log state machine events (:pr:`6092`) `crusaderky`_
+- Migrate ``ensure_executing`` transitions to new ``WorkerState`` event mechanism - part 1 (:pr:`6003`) `crusaderky`_
+- Migrate ``ensure_executing`` transitions to new ``WorkerState`` event mechanism - part 2 (:pr:`6062`) `crusaderky`_
+- Annotate worker transitions to error (:pr:`6012`) `crusaderky`_
+
+Bug Fixes
+^^^^^^^^^
+- Avoid transitioning from memory/released to missing in worker (:pr:`6123`) `Matthew Rocklin`_
+- Don't try to reconnect client on interpreter shutdown (:pr:`6120`) `Matthew Rocklin`_
+- Wrap UCX init warnings in importable functions (:pr:`6121`) `Charles Blackmon-Luca`_
+- Cancel asyncio tasks on worker close (:pr:`6098`) `crusaderky`_
+- Avoid port collisions when defining port ranges (:pr:`6054`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Avoid intermittent failure in ``test_cancel_fire_and_forget`` (:pr:`6131`) `Matthew Rocklin`_
+- Ignore ``bokeh`` warning in pytest (:pr:`6127`) `Matthew Rocklin`_
+- Start uncythonization (:pr:`6104`) `Martin Durant`_
+- Avoid redundant cleanup fixture in ``gen_test`` tests (:pr:`6118`) `Thomas Grainger`_
+- Move ``comm.close`` to finally in ``test_comms`` (:pr:`6109`) `Florian Jetter`_
+- Use ``async`` with ``Server`` in ``test_core.py`` (:pr:`6100`) `Matthew Rocklin`_
+- Elevate warnings to errors in the test suite (:pr:`6094`) `Thomas Grainger`_
+- Add ``urllib3`` to nightly conda builds (:pr:`6102`) `James Bourbeau`_
+- Drop Blosc (:pr:`6027`) `Matthew Rocklin`_
+- Robust ``test_get_returns_early`` (:pr:`6090`) `Florian Jetter`_
+- Overhaul ``test_priorities.py`` (:pr:`6077`) `crusaderky`_
+- Remove ``pytest-asyncio`` (:pr:`6063`) `Thomas Grainger`_
+- Clean up usage around plain ``rpc`` (:pr:`6082`) `Florian Jetter`_
+- Drop OSX builds for Python 3.9 (:pr:`6073`) `Florian Jetter`_
+- Bump periods in ``utils_test.wait_for`` (:pr:`6081`) `Florian Jetter`_
+- Check for ucx-py nightlies when updating gpuCI (:pr:`6006`) `Charles Blackmon-Luca`_
+- Type annotations for ``profile.py`` (:pr:`6067`) `crusaderky`_
+- Fix flaky ``test_worker_time_to_live`` (:pr:`6061`) `crusaderky`_
+- Fix flaky ``test_as_completed_async_for_cancel`` (:pr:`6072`) `crusaderky`_
+- Fix regression in ``test_weakref_cache`` (:pr:`6033`) `crusaderky`_
+- Trivial fix to ``test_nanny_worker_port_range`` (:pr:`6070`) `crusaderky`_
+- Drop deprecated ``tornado.netutil.ExecutorResolver`` (:pr:`6031`) `Thomas Grainger`_
+- Delete ``asyncio.py`` (:pr:`6066`) `Thomas Grainger`_
+- Tweak conda environment files (:pr:`6037`) `crusaderky`_
+- Harden ``test_abort_execution_to_fetch`` and more (:pr:`6026`) `crusaderky`_
+- Fix ``test_as_completed_with_results_no_raise`` and name ``comm`` (:pr:`6042`) `Matthew Rocklin`_
+- Use more robust limits in ``test_worker_memory`` (:pr:`6055`) `Florian Jetter`_
+
 .. _v2022.04.0:
 
 2022.04.0

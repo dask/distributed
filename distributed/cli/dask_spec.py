@@ -36,7 +36,7 @@ def main(args, spec: str, spec_file: str):
         except KeyboardInterrupt:
             await asyncio.gather(*(w.close() for w in servers.values()))
 
-    asyncio.get_event_loop().run_until_complete(run())
+    asyncio.run(run())
 
 
 if __name__ == "__main__":

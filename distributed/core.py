@@ -319,7 +319,7 @@ class Server:
         await self
         return self
 
-    async def __aexit__(self, typ, value, traceback):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         await self.close()
 
     def start_periodic_callbacks(self):
@@ -886,13 +886,13 @@ class rpc:
     def __enter__(self):
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_value, traceback):
         asyncio.ensure_future(self.close_rpc())
 
     async def __aenter__(self):
         return self
 
-    async def __aexit__(self, *args):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         await self.close_rpc()
 
     def __del__(self):
@@ -951,7 +951,7 @@ class PooledRPCCall:
     def __enter__(self):
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_value, traceback):
         pass
 
     def __repr__(self):

@@ -145,18 +145,18 @@ async def test_same_futures(c, s, a, b):
     for i in range(5):
         await q.put(future)
 
-    assert s.wants_what["queue-x"] == {future.key}
+    assert {ts.key for ts in s.clients["queue-x"].wants_what} == {future.key}
 
     for i in range(4):
         future2 = await q.get()
-        assert s.wants_what["queue-x"] == {future.key}
+        assert {ts.key for ts in s.clients["queue-x"].wants_what} == {future.key}
         await asyncio.sleep(0.05)
-        assert s.wants_what["queue-x"] == {future.key}
+        assert {ts.key for ts in s.clients["queue-x"].wants_what} == {future.key}
 
     await q.get()
 
     start = time()
-    while s.wants_what["queue-x"]:
+    while "queue-x" in s.clients and s.clients["queue-x"].wants_what:
         await asyncio.sleep(0.01)
         assert time() - start < 2
 

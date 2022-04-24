@@ -10,6 +10,7 @@ from tlz import concat, sliding_window
 from dask import delayed
 
 from distributed import Client, Nanny, wait
+from distributed.chaos import KillWorker
 from distributed.compatibility import WINDOWS
 from distributed.config import config
 from distributed.metrics import time
@@ -66,9 +67,12 @@ async def test_cancel_stress(c, s, *workers):
     n_todo = len(y.dask) - len(x.dask)
     for i in range(5):
         f = c.compute(y)
-        while len(s.waiting) > (random.random() + 1) * 0.5 * n_todo:
+        while (
+            len([ts for ts in s.tasks.values() if ts.waiting_on])
+            > (random.random() + 1) * 0.5 * n_todo
+        ):
             await asyncio.sleep(0.01)
-        await c._cancel(f)
+        await c.cancel(f)
 
 
 def test_cancel_stress_sync(loop):
@@ -219,7 +223,7 @@ async def test_stress_steal(c, s, *workers):
             b = random.choice(workers)
             if a is not b:
                 s.work_steal(a.address, b.address, 0.5)
-        if not s.processing:
+        if not any(ws.processing for ws in s.workers.values()):
             break
 
 
@@ -233,7 +237,7 @@ async def test_close_connections(c, s, *workers):
         x = x.rechunk((1000, 1))
 
     future = c.compute(x.sum())
-    while any(s.processing.values()):
+    while any(ws.processing for ws in s.workers.values()):
         await asyncio.sleep(0.5)
         worker = random.choice(list(workers))
         for comm in worker._comms:
@@ -284,3 +288,29 @@ async def test_no_delay_during_large_transfer(c, s, w):
     nbytes -= nbytes[0]
     assert nbytes.max() < (x_nbytes * 2) / 1e6
     assert nbytes[-1] < (x_nbytes * 1.2) / 1e6
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny, nthreads=[("127.0.0.1", 2)] * 6)
+async def test_chaos_rechunk(c, s, *workers):
+    s.allowed_failures = 10000
+
+    plugin = KillWorker(delay="4 s", mode="graceful")
+
+    await c.register_worker_plugin(plugin, name="kill")
+
+    da = pytest.importorskip("dask.array")
+
+    x = da.random.random((10000, 10000))
+    y = x.rechunk((10000, 20)).rechunk((20, 10000)).sum()
+    z = c.compute(y)
+
+    start = time()
+    while time() < start + 10:
+        if z.status == "error":
+            await z
+        if z.status == "finished":
+            return
+        await asyncio.sleep(0.1)
+
+    await z.cancel()

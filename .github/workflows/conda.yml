@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - setup.py
+      - requirements.txt
       - continuous_integration/recipes/**
       - .github/workflows/conda.yml
 
@@ -73,6 +74,4 @@ jobs:
         run: |
           # install anaconda for upload
           mamba install anaconda-client
-
           anaconda upload --label dev noarch/*.tar.bz2
-          anaconda upload --label dev linux-64/*.tar.bz2
