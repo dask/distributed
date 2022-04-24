@@ -4476,17 +4476,23 @@ class Scheduler(SchedulerState, ServerNode):
 
         return "OK"
 
-    def stimulus_cancel(self, comm, keys=None, client=None, force=False):
+    async def stimulus_cancel(self, comm, keys=None, client=None, force=False):
         """Stop execution on a list of keys"""
         logger.info("Client %s requests to cancel %d keys", client, len(keys))
         if client:
             self.log_event(
                 client, {"action": "cancel", "count": len(keys), "force": force}
             )
+        for _ in range(10):
+            if any(key not in self.tasks for key in keys):
+                await asyncio.sleep(0.050)
+                continue
+            else:
+                break
         for key in keys:
-            self.cancel_key(key, client, force=force)
+            self.cancel_key(key, client, force=force, report=False)
 
-    def cancel_key(self, key, client, retries=5, force=False):
+    def cancel_key(self, key, client, retries=5, force=False, report=True):
         """Cancel a particular key and all dependents"""
         # TODO: this should be converted to use the transition mechanism
         ts: TaskState = self.tasks.get(key)
@@ -4505,7 +4511,8 @@ class Scheduler(SchedulerState, ServerNode):
             for dts in list(ts.dependents):
                 self.cancel_key(dts.key, client, force=force)
         logger.info("Scheduler cancels key %s.  Force=%s", key, force)
-        self.report({"op": "cancelled-key", "key": key})
+        if report:
+            self.report({"op": "cancelled-key", "key": key})
         clients = list(ts.who_wants) if force else [cs]
         for cs in clients:
             self.client_releases_keys(keys=[key], client=cs.client_key)

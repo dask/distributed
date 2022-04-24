@@ -2533,23 +2533,25 @@ def test_futures_of_class():
 
 @gen_cluster(client=True)
 async def test_futures_of_cancelled_raises(c, s, a, b):
-    x = c.submit(inc, 1)
-    await c.cancel([x])
+    x = c.submit(inc, 1, key="x")
+    await x.cancel()
+    assert x.cancelled()
 
     with pytest.raises(CancelledError):
         await x
 
     with pytest.raises(CancelledError):
-        await c.get({"x": (inc, x), "y": (inc, 2)}, ["x", "y"], sync=False)
+        y = c.submit(inc, x, key="y")
+        await y
 
     with pytest.raises(CancelledError):
-        c.submit(inc, x)
+        await c.submit(add, 1, y=x)
 
     with pytest.raises(CancelledError):
-        c.submit(add, 1, y=x)
+        await wait(c.map(add, [1], y=x))
 
     with pytest.raises(CancelledError):
-        c.map(add, [1], y=x)
+        await c.gather(c.get({"x": (inc, x), "y": (inc, 2)}, ["x", "y"], sync=False))
 
     assert "y" not in s.tasks
 
