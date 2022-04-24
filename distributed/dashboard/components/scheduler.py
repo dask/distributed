@@ -3684,14 +3684,15 @@ def status_doc(scheduler, extra, doc):
 
 
 @curry
-@log_errors
 def individual_doc(cls, interval, scheduler, extra, doc, fig_attr="root", **kwargs):
-    fig = cls(scheduler, sizing_mode="stretch_both", **kwargs)
-    fig.update()
-    add_periodic_callback(doc, fig, interval)
-    doc.add_root(getattr(fig, fig_attr))
-    doc.theme = BOKEH_THEME
-    doc.title = "Dask: " + funcname(cls)
+    # Note: @log_errors and @curry are not compatible
+    with log_errors():
+        fig = cls(scheduler, sizing_mode="stretch_both", **kwargs)
+        fig.update()
+        add_periodic_callback(doc, fig, interval)
+        doc.add_root(getattr(fig, fig_attr))
+        doc.theme = BOKEH_THEME
+        doc.title = "Dask: " + funcname(cls)
 
 
 @log_errors
