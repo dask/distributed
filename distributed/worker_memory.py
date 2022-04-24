@@ -226,6 +226,7 @@ class WorkerMemoryManager:
             "Worker is at %.0f%% memory usage. Start spilling data to disk.",
             frac * 100,
         )
+        start = monotonic()
         # Implement hysteresis cycle where spilling starts at the spill threshold and
         # stops at the target threshold. Normally that here the target threshold defines
         # process memory, whereas normally it defines reported managed memory (e.g.
@@ -258,7 +259,13 @@ class WorkerMemoryManager:
 
             total_spilled += weight
             count += 1
-            await asyncio.sleep(0)
+            # If the current buffer is filled with a lot of small values,
+            # evicting one at a time is very slow and the worker might
+            # generate new data faster than it is able to evict. Therefore,
+            # only pass on control if we spent at least 0.5s evicting
+            if monotonic() - start > 0.5:
+                await asyncio.sleep(0)
+                start = monotonic()
 
             memory = worker.monitor.get_process_memory()
             if total_spilled > need and memory > target:
