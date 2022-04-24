@@ -36,7 +36,7 @@ setup(
     license="BSD",
     package_data={
         "": ["templates/index.html", "template.html"],
-        "distributed": ["http/templates/*.html"],
+        "distributed": ["http/templates/*.html", "py.typed"],
     },
     include_package_data=True,
     install_requires=install_requires,

@@ -99,7 +99,7 @@ class ProcessInterface:
         await self
         return self
 
-    async def __aexit__(self, *args, **kwargs):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         await self.close()
 
 
@@ -373,7 +373,7 @@ class SpecCluster(Cluster):
                 dask.config.get("distributed.deploy.lost-worker-timeout")
             )
 
-            asyncio.get_event_loop().call_later(delay, f)
+            asyncio.get_running_loop().call_later(delay, f)
         super()._update_worker_status(op, msg)
 
     def __await__(self):
@@ -433,8 +433,8 @@ class SpecCluster(Cluster):
         assert self.status == Status.running
         return self
 
-    def __exit__(self, typ, value, traceback):
-        super().__exit__(typ, value, traceback)
+    def __exit__(self, exc_type, exc_value, traceback):
+        super().__exit__(exc_type, exc_value, traceback)
         self._loop_runner.stop()
 
     def _threads_per_worker(self) -> int:

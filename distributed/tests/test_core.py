@@ -73,7 +73,8 @@ def echo_no_serialize(comm, x):
     return {"result": x}
 
 
-def test_server_status_is_always_enum():
+@gen_test()
+async def test_server_status_is_always_enum():
     """Assignments with strings is forbidden"""
     server = Server({})
     assert isinstance(server.status, Status)
@@ -84,13 +85,15 @@ def test_server_status_is_always_enum():
         server.status = "running"
 
 
-def test_server_assign_assign_enum_is_quiet():
+@gen_test()
+async def test_server_assign_assign_enum_is_quiet():
     """That would be the default in user code"""
     server = Server({})
     server.status = Status.running
 
 
-def test_server_status_compare_enum_is_quiet():
+@gen_test()
+async def test_server_status_compare_enum_is_quiet():
     """That would be the default in user code"""
     server = Server({})
     server.status == Status.running
@@ -128,7 +131,7 @@ async def test_server():
 
 
 @gen_test()
-async def test_server_raises_on_blocked_handlers(loop):
+async def test_server_raises_on_blocked_handlers():
     async with Server({"ping": pingpong}, blocked_handlers=["ping"]) as server:
         await server.listen(8881)
 
@@ -811,19 +814,16 @@ async def test_tick_logging(s, a, b):
 
 @pytest.mark.parametrize("compression", list(compressions))
 @pytest.mark.parametrize("serialize", [echo_serialize, echo_no_serialize])
-def test_compression(compression, serialize, loop):
+@gen_test()
+async def test_compression(compression, serialize):
     with dask.config.set(compression=compression):
+        async with Server({"echo": serialize}) as server:
+            await server.listen("tcp://")
 
-        async def f():
-            async with Server({"echo": serialize}) as server:
-                await server.listen("tcp://")
-
-                with rpc(server.address) as r:
-                    data = b"1" * 1000000
-                    result = await r.echo(x=to_serialize(data))
-                    assert result == {"result": data}
-
-        loop.run_sync(f)
+            with rpc(server.address) as r:
+                data = b"1" * 1000000
+                result = await r.echo(x=to_serialize(data))
+                assert result == {"result": data}
 
 
 @gen_test()

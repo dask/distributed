@@ -1312,7 +1312,7 @@ def import_term(name: str):
 
 
 async def offload(fn, *args, **kwargs):
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     # Retain context vars while deserializing; see https://bugs.python.org/issue34014
     context = contextvars.copy_context()
     return await loop.run_in_executor(
@@ -1324,13 +1324,13 @@ class EmptyContext:
     def __enter__(self):
         pass
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_value, traceback):
         pass
 
     async def __aenter__(self):
         pass
 
-    async def __aexit__(self, *args):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         pass
 
 

@@ -4594,7 +4594,9 @@ class Scheduler(SchedulerState, ServerNode):
         assert not ts.waiting_on
         assert ts not in self.unrunnable
         for dts in ts.dependents:
-            assert (dts in ts.waiters) == (dts.state in ("waiting", "processing"))
+            assert (dts in ts.waiters) == (
+                dts.state in ("waiting", "processing", "no-worker")
+            )
             assert ts not in dts.waiting_on
 
     def validate_no_worker(self, key):
@@ -7583,7 +7585,7 @@ def validate_task_state(ts: TaskState):
             str(dts),
             str(dts.dependents),
         )
-        if ts.state in ("waiting", "processing"):
+        if ts.state in ("waiting", "processing", "no-worker"):
             assert dts in ts.waiting_on or dts.who_has, (
                 "dep missing",
                 str(ts),
@@ -7592,7 +7594,7 @@ def validate_task_state(ts: TaskState):
         assert dts.state != "forgotten"
 
     for dts in ts.waiters:
-        assert dts.state in ("waiting", "processing"), (
+        assert dts.state in ("waiting", "processing", "no-worker"), (
             "waiter not in play",
             str(ts),
             str(dts),

@@ -173,7 +173,7 @@ def test_locking_disabled(tmpdir):
     base_dir = str(tmpdir)
 
     with dask.config.set({"distributed.worker.use-file-locking": False}):
-        with mock.patch("distributed.diskutils.locket.lock_file") as lock_file:
+        with mock.patch("locket.lock_file") as lock_file:
             assert_contents = functools.partial(assert_directory_contents, base_dir)
 
             ws = WorkSpace(base_dir)
