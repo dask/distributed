@@ -30,7 +30,7 @@ def memory_limit() -> int:
     try:
         import resource
 
-        hard_limit = resource.getrlimit(resource.RLIMIT_RSS)[1]
+        hard_limit = resource.getrlimit(resource.RLIMIT_RSS)[1]  # type: ignore
         if hard_limit > 0:
             limit = min(limit, hard_limit)
     except (ImportError, OSError):

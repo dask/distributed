@@ -777,7 +777,7 @@ class _ZeroCopyWriter:
     # pass to sendmsg.
     if hasattr(socket.socket, "sendmsg"):
         try:
-            SENDMSG_MAX_COUNT = os.sysconf("SC_IOV_MAX")
+            SENDMSG_MAX_COUNT = os.sysconf("SC_IOV_MAX")  # type: ignore
         except Exception:
             SENDMSG_MAX_COUNT = 16  # Should be supported on all systems
     else:
