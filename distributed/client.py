@@ -1207,8 +1207,8 @@ class Client(SyncMethodMixin):
 
         return self
 
+    @log_errors
     async def _reconnect(self):
-        with log_errors():
             assert self.scheduler_comm.comm.closed()
 
             self.status = "connecting"
@@ -1385,9 +1385,9 @@ class Client(SyncMethodMixin):
                 {"op": "client-releases-keys", "keys": [key], "client": self.id}
             )
 
+    @log_errors
     async def _handle_report(self):
-        """Listen to scheduler"""
-        with log_errors():
+            """Listen to scheduler"""
             try:
                 while True:
                     if self.scheduler_comm is None:
@@ -2444,8 +2444,8 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self._retry, futures, asynchronous=asynchronous)
 
+    @log_errors
     async def _publish_dataset(self, *args, name=None, override=False, **kwargs):
-        with log_errors():
             coroutines = []
 
             def add_coro(name, data):

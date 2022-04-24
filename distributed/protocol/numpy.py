@@ -107,8 +107,8 @@ def serialize_numpy_ndarray(x, context=None):
 
 
 @dask_deserialize.register(np.ndarray)
+@log_errors
 def deserialize_numpy_ndarray(header, frames):
-    with log_errors():
         if header.get("pickle"):
             return pickle.loads(frames[0], buffers=frames[1:])
 

@@ -87,8 +87,8 @@ class Processing(DashboardComponent):
         self.root = fig
 
     @without_property_validation
+    @log_errors
     def update(self, messages):
-        with log_errors():
             msg = messages["processing"]
             if not msg.get("nthreads"):
                 return
@@ -104,8 +104,8 @@ class Processing(DashboardComponent):
             update(self.source, data)
 
     @staticmethod
+    @log_errors
     def processing_update(msg):
-        with log_errors():
             names = sorted(msg["processing"])
             names = sorted(names)
             processing = msg["processing"]
@@ -140,8 +140,8 @@ class ProfilePlot(DashboardComponent):
         self.root, self.source = profile.plot_figure(data, **kwargs)
 
         @without_property_validation
+        @log_errors
         def cb(attr, old, new):
-            with log_errors():
                 try:
                     ind = new.indices[0]
                 except IndexError:
@@ -155,8 +155,8 @@ class ProfilePlot(DashboardComponent):
         self.source.selected.on_change("indices", cb)
 
     @without_property_validation
+    @log_errors
     def update(self, state):
-        with log_errors():
             self.state = state
             data = profile.plot_data(self.state, profile_interval)
             self.states = data.pop("states")
@@ -228,8 +228,8 @@ class ProfileTimePlot(DashboardComponent):
         self.ts_plot.yaxis.visible = False
         self.ts_plot.grid.visible = False
 
+        @log_errors
         def ts_change(attr, old, new):
-            with log_errors():
                 selected = self.ts_source.selected.indices
                 if selected:
                     start = self.ts_source.data["time"][min(selected)] / 1000
@@ -271,8 +271,8 @@ class ProfileTimePlot(DashboardComponent):
         )
 
     @without_property_validation
+    @log_errors
     def update(self, state, metadata=None):
-        with log_errors():
             self.state = state
             data = profile.plot_data(self.state, profile_interval)
             self.states = data.pop("states")
@@ -292,8 +292,8 @@ class ProfileTimePlot(DashboardComponent):
 
     @without_property_validation
     def trigger_update(self, update_metadata=True):
+        @log_errors
         async def cb():
-            with log_errors():
                 prof = await self.server.get_profile(
                     key=self.key, start=self.start, stop=self.stop
                 )
@@ -330,10 +330,11 @@ class ProfileServer(DashboardComponent):
         changing = [False]  # avoid repeated changes from within callback
 
         @without_property_validation
+        @log_errors
         def cb(attr, old, new):
-            if changing[0] or len(new) == 0:
-                return
-            with log_errors():
+                if changing[0] or len(new) == 0:
+                    return
+
                 data = profile.plot_data(self.states[new[0]], profile_interval)
                 del self.states[:]
                 self.states.extend(data.pop("states"))
@@ -361,8 +362,8 @@ class ProfileServer(DashboardComponent):
         self.ts_plot.yaxis.visible = False
         self.ts_plot.grid.visible = False
 
+        @log_errors
         def ts_change(attr, old, new):
-            with log_errors():
                 selected = self.ts_source.selected.indices
                 if selected:
                     start = self.ts_source.data["time"][min(selected)] / 1000
@@ -388,8 +389,8 @@ class ProfileServer(DashboardComponent):
         )
 
     @without_property_validation
+    @log_errors
     def update(self, state):
-        with log_errors():
             self.state = state
             data = profile.plot_data(self.state, profile_interval)
             self.states = data.pop("states")
@@ -540,8 +541,8 @@ class SystemMonitor(DashboardComponent):
         return d
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             self.source.stream(self.get_data(), 1000)
             self.label_source.data["cpu"] = [
                 "{}: {:.1f}%".format(f.__name__, f(self.source.data["cpu"]))

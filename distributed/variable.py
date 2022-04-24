@@ -105,8 +105,8 @@ class VariableExtension:
             self.waiting[key, name].add(token)
         return record
 
+    @log_errors
     async def delete(self, name=None, client=None):
-        with log_errors():
             try:
                 old = self.variables[name]
             except KeyError:

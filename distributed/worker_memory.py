@@ -151,14 +151,14 @@ class WorkerMemoryManager:
 
         self._throttled_gc = ThrottledGC(logger=logger)
 
+    @log_errors
     async def memory_monitor(self, worker: Worker) -> None:
-        """Track this process's memory usage and act accordingly.
-        If process memory rises above the spill threshold (70%), start dumping data to
-        disk until it goes below the target threshold (60%).
-        If process memory rises above the pause threshold (80%), stop execution of new
-        tasks.
-        """
-        with log_errors():
+            """Track this process's memory usage and act accordingly.
+            If process memory rises above the spill threshold (70%), start dumping data to
+            disk until it goes below the target threshold (60%).
+            If process memory rises above the pause threshold (80%), stop execution of new
+            tasks.
+            """
             if self._memory_monitoring:
                 return
             self._memory_monitoring = True

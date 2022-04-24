@@ -130,11 +130,11 @@ class ActiveMemoryManagerExtension:
         self.policies.add(policy)
         policy.manager = self
 
+    @log_errors
     def run_once(self) -> None:
-        """Run all policies once and asynchronously (fire and forget) enact their
-        recommendations to replicate/drop tasks
-        """
-        with log_errors():
+            """Run all policies once and asynchronously (fire and forget) enact their
+            recommendations to replicate/drop tasks
+            """
             ts_start = time()
             # This should never fail since this is a synchronous method
             assert not hasattr(self, "pending")

@@ -3479,15 +3479,15 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle("dask-scheduler [closed]")
         disable_gc_diagnosis()
 
+    @log_errors
     async def close_worker(self, worker: str, safe: bool = False):
-        """Remove a worker from the cluster
+            """Remove a worker from the cluster
 
-        This both removes the worker from our local state and also sends a
-        signal to the worker to shut down.  This works regardless of whether or
-        not the worker has a nanny process restarting it
-        """
-        logger.info("Closing worker %s", worker)
-        with log_errors():
+            This both removes the worker from our local state and also sends a
+            signal to the worker to shut down.  This works regardless of whether or
+            not the worker has a nanny process restarting it
+            """
+            logger.info("Closing worker %s", worker)
             self.log_event(worker, {"action": "close-worker"})
             # FIXME: This does not handle nannies
             self.worker_send(worker, {"op": "close", "report": False})
@@ -3605,6 +3605,7 @@ class Scheduler(SchedulerState, ServerNode):
             "heartbeat-interval": heartbeat_interval(len(self.workers)),
         }
 
+    @log_errors
     async def add_worker(
         self,
         comm=None,
@@ -3629,8 +3630,7 @@ class Scheduler(SchedulerState, ServerNode):
         nanny=None,
         extra=None,
     ):
-        """Add a new worker to the cluster"""
-        with log_errors():
+            """Add a new worker to the cluster"""
             address = self.coerce_address(address, resolve_address)
             address = normalize_address(address)
             host = get_address_host(address)
@@ -4225,15 +4225,15 @@ class Scheduler(SchedulerState, ServerNode):
 
         return tuple(seen)
 
+    @log_errors
     async def remove_worker(self, address, safe=False, close=True):
-        """
-        Remove worker from cluster
+            """
+            Remove worker from cluster
 
-        We do this when a worker reports that it plans to leave or when it
-        appears to be unresponsive.  This may send its tasks back to a released
-        state.
-        """
-        with log_errors():
+            We do this when a worker reports that it plans to leave or when it
+            appears to be unresponsive.  This may send its tasks back to a released
+            state.
+            """
             if self.status == Status.closed:
                 return
 
@@ -4338,7 +4338,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.loop.call_later(cleanup_delay, remove_worker_from_events)
             logger.debug("Removed worker %s", ws)
 
-        return "OK"
+            return "OK"
 
     def stimulus_cancel(self, comm, keys=None, client=None, force=False):
         """Stop execution on a list of keys"""
@@ -5103,10 +5103,9 @@ class Scheduler(SchedulerState, ServerNode):
         for collection in self._task_state_collections:
             collection.clear()
 
+    @log_errors
     async def restart(self, client=None, timeout=30):
-        """Restart all workers. Reset local state."""
-        with log_errors():
-
+            """Restart all workers. Reset local state."""
             n_workers = len(self.workers)
 
             logger.info("Send lost future signal to clients")
@@ -5351,78 +5350,78 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.log_event(ws.address, {"action": "remove-worker-data", "keys": keys})
 
+    @log_errors
     async def rebalance(
         self,
         comm=None,
         keys: "Iterable[Hashable]" = None,
         workers: "Iterable[str]" = None,
     ) -> dict:
-        """Rebalance keys so that each worker ends up with roughly the same process
-        memory (managed+unmanaged).
+            """Rebalance keys so that each worker ends up with roughly the same process
+            memory (managed+unmanaged).
 
-        .. warning::
-           This operation is generally not well tested against normal operation of the
-           scheduler. It is not recommended to use it while waiting on computations.
+            .. warning::
+               This operation is generally not well tested against normal operation of the
+               scheduler. It is not recommended to use it while waiting on computations.
 
-        **Algorithm**
+            **Algorithm**
 
-        #. Find the mean occupancy of the cluster, defined as data managed by dask +
-           unmanaged process memory that has been there for at least 30 seconds
-           (``distributed.worker.memory.recent-to-old-time``).
-           This lets us ignore temporary spikes caused by task heap usage.
+            #. Find the mean occupancy of the cluster, defined as data managed by dask +
+               unmanaged process memory that has been there for at least 30 seconds
+               (``distributed.worker.memory.recent-to-old-time``).
+               This lets us ignore temporary spikes caused by task heap usage.
 
-           Alternatively, you may change how memory is measured both for the individual
-           workers as well as to calculate the mean through
-           ``distributed.worker.memory.rebalance.measure``. Namely, this can be useful
-           to disregard inaccurate OS memory measurements.
+               Alternatively, you may change how memory is measured both for the individual
+               workers as well as to calculate the mean through
+               ``distributed.worker.memory.rebalance.measure``. Namely, this can be useful
+               to disregard inaccurate OS memory measurements.
 
-        #. Discard workers whose occupancy is within 5% of the mean cluster occupancy
-           (``distributed.worker.memory.rebalance.sender-recipient-gap`` / 2).
-           This helps avoid data from bouncing around the cluster repeatedly.
-        #. Workers above the mean are senders; those below are recipients.
-        #. Discard senders whose absolute occupancy is below 30%
-           (``distributed.worker.memory.rebalance.sender-min``). In other words, no data
-           is moved regardless of imbalancing as long as all workers are below 30%.
-        #. Discard recipients whose absolute occupancy is above 60%
-           (``distributed.worker.memory.rebalance.recipient-max``).
-           Note that this threshold by default is the same as
-           ``distributed.worker.memory.target`` to prevent workers from accepting data
-           and immediately spilling it out to disk.
-        #. Iteratively pick the sender and recipient that are farthest from the mean and
-           move the *least recently inserted* key between the two, until either all
-           senders or all recipients fall within 5% of the mean.
+            #. Discard workers whose occupancy is within 5% of the mean cluster occupancy
+               (``distributed.worker.memory.rebalance.sender-recipient-gap`` / 2).
+               This helps avoid data from bouncing around the cluster repeatedly.
+            #. Workers above the mean are senders; those below are recipients.
+            #. Discard senders whose absolute occupancy is below 30%
+               (``distributed.worker.memory.rebalance.sender-min``). In other words, no data
+               is moved regardless of imbalancing as long as all workers are below 30%.
+            #. Discard recipients whose absolute occupancy is above 60%
+               (``distributed.worker.memory.rebalance.recipient-max``).
+               Note that this threshold by default is the same as
+               ``distributed.worker.memory.target`` to prevent workers from accepting data
+               and immediately spilling it out to disk.
+            #. Iteratively pick the sender and recipient that are farthest from the mean and
+               move the *least recently inserted* key between the two, until either all
+               senders or all recipients fall within 5% of the mean.
 
-           A recipient will be skipped if it already has a copy of the data. In other
-           words, this method does not degrade replication.
-           A key will be skipped if there are no recipients available with enough memory
-           to accept the key and that don't already hold a copy.
+               A recipient will be skipped if it already has a copy of the data. In other
+               words, this method does not degrade replication.
+               A key will be skipped if there are no recipients available with enough memory
+               to accept the key and that don't already hold a copy.
 
-        The least recently insertd (LRI) policy is a greedy choice with the advantage of
-        being O(1), trivial to implement (it relies on python dict insertion-sorting)
-        and hopefully good enough in most cases. Discarded alternative policies were:
+            The least recently insertd (LRI) policy is a greedy choice with the advantage of
+            being O(1), trivial to implement (it relies on python dict insertion-sorting)
+            and hopefully good enough in most cases. Discarded alternative policies were:
 
-        - Largest first. O(n*log(n)) save for non-trivial additional data structures and
-          risks causing the largest chunks of data to repeatedly move around the
-          cluster like pinballs.
-        - Least recently used (LRU). This information is currently available on the
-          workers only and not trivial to replicate on the scheduler; transmitting it
-          over the network would be very expensive. Also, note that dask will go out of
-          its way to minimise the amount of time intermediate keys are held in memory,
-          so in such a case LRI is a close approximation of LRU.
+            - Largest first. O(n*log(n)) save for non-trivial additional data structures and
+              risks causing the largest chunks of data to repeatedly move around the
+              cluster like pinballs.
+            - Least recently used (LRU). This information is currently available on the
+              workers only and not trivial to replicate on the scheduler; transmitting it
+              over the network would be very expensive. Also, note that dask will go out of
+              its way to minimise the amount of time intermediate keys are held in memory,
+              so in such a case LRI is a close approximation of LRU.
 
-        Parameters
-        ----------
-        keys: optional
-            allowlist of dask keys that should be considered for moving. All other keys
-            will be ignored. Note that this offers no guarantee that a key will actually
-            be moved (e.g. because it is unnecessary or because there are no viable
-            recipient workers for it).
-        workers: optional
-            allowlist of workers addresses to be considered as senders or recipients.
-            All other workers will be ignored. The mean cluster occupancy will be
-            calculated only using the allowed workers.
-        """
-        with log_errors():
+            Parameters
+            ----------
+            keys: optional
+                allowlist of dask keys that should be considered for moving. All other keys
+                will be ignored. Note that this offers no guarantee that a key will actually
+                be moved (e.g. because it is unnecessary or because there are no viable
+                recipient workers for it).
+            workers: optional
+                allowlist of workers addresses to be considered as senders or recipients.
+                All other workers will be ignored. The mean cluster occupancy will be
+                calculated only using the allowed workers.
+            """
             if workers is not None:
                 wss = [self.workers[w] for w in workers]
             else:
@@ -5945,6 +5944,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             return result
 
+    @log_errors
     async def retire_workers(
         self,
         comm=None,
@@ -5955,38 +5955,37 @@ class Scheduler(SchedulerState, ServerNode):
         remove: bool = True,
         **kwargs,
     ) -> dict:
-        """Gracefully retire workers from cluster
+            """Gracefully retire workers from cluster
 
-        Parameters
-        ----------
-        workers: list[str] (optional)
-            List of worker addresses to retire.
-        names: list (optional)
-            List of worker names to retire.
-            Mutually exclusive with ``workers``.
-            If neither ``workers`` nor ``names`` are provided, we call
-            ``workers_to_close`` which finds a good set.
-        close_workers: bool (defaults to False)
-            Whether or not to actually close the worker explicitly from here.
-            Otherwise we expect some external job scheduler to finish off the
-            worker.
-        remove: bool (defaults to True)
-            Whether or not to remove the worker metadata immediately or else
-            wait for the worker to contact us
-        **kwargs: dict
-            Extra options to pass to workers_to_close to determine which
-            workers we should drop
+            Parameters
+            ----------
+            workers: list[str] (optional)
+                List of worker addresses to retire.
+            names: list (optional)
+                List of worker names to retire.
+                Mutually exclusive with ``workers``.
+                If neither ``workers`` nor ``names`` are provided, we call
+                ``workers_to_close`` which finds a good set.
+            close_workers: bool (defaults to False)
+                Whether or not to actually close the worker explicitly from here.
+                Otherwise we expect some external job scheduler to finish off the
+                worker.
+            remove: bool (defaults to True)
+                Whether or not to remove the worker metadata immediately or else
+                wait for the worker to contact us
+            **kwargs: dict
+                Extra options to pass to workers_to_close to determine which
+                workers we should drop
 
-        Returns
-        -------
-        Dictionary mapping worker ID/address to dictionary of information about
-        that worker for each retired worker.
+            Returns
+            -------
+            Dictionary mapping worker ID/address to dictionary of information about
+            that worker for each retired worker.
 
-        See Also
-        --------
-        Scheduler.workers_to_close
-        """
-        with log_errors():
+            See Also
+            --------
+            Scheduler.workers_to_close
+            """
             # This lock makes retire_workers, rebalance, and replicate mutually
             # exclusive and will no longer be necessary once rebalance and replicate are
             # migrated to the Active Memory Manager.
@@ -6137,6 +6136,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return "OK"
 
+    @log_errors
     def update_data(
         self,
         *,
@@ -6144,14 +6144,13 @@ class Scheduler(SchedulerState, ServerNode):
         nbytes: dict,
         client=None,
     ):
-        """
-        Learn that new data has entered the network from an external source
+            """
+            Learn that new data has entered the network from an external source
 
-        See Also
-        --------
-        Scheduler.mark_key_in_memory
-        """
-        with log_errors():
+            See Also
+            --------
+            Scheduler.mark_key_in_memory
+            """
             who_has = {
                 k: [self.coerce_address(vv) for vv in v] for k, v in who_has.items()
             }
@@ -6193,26 +6192,26 @@ class Scheduler(SchedulerState, ServerNode):
         if report_msg is not None:
             self.report(report_msg, ts=ts, client=client)
 
+    @log_errors
     async def feed(
         self, comm, function=None, setup=None, teardown=None, interval="1s", **kwargs
     ):
-        """
-        Provides a data Comm to external requester
+            """
+            Provides a data Comm to external requester
 
-        Caution: this runs arbitrary Python code on the scheduler.  This should
-        eventually be phased out.  It is mostly used by diagnostics.
-        """
-        if not dask.config.get("distributed.scheduler.pickle"):
-            logger.warn(
-                "Tried to call 'feed' route with custom functions, but "
-                "pickle is disallowed.  Set the 'distributed.scheduler.pickle'"
-                "config value to True to use the 'feed' route (this is mostly "
-                "commonly used with progress bars)"
-            )
-            return
+            Caution: this runs arbitrary Python code on the scheduler.  This should
+            eventually be phased out.  It is mostly used by diagnostics.
+            """
+            if not dask.config.get("distributed.scheduler.pickle"):
+                logger.warning(
+                    "Tried to call 'feed' route with custom functions, but "
+                    "pickle is disallowed.  Set the 'distributed.scheduler.pickle'"
+                    "config value to True to use the 'feed' route (this is mostly "
+                    "commonly used with progress bars)"
+                )
+                return
 
-        interval = parse_timedelta(interval)
-        with log_errors():
+            interval = parse_timedelta(interval)
             if function:
                 function = pickle.loads(function)
             if setup:
@@ -6377,8 +6376,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         return result
 
+    @log_errors
     def get_nbytes(self, keys=None, summary=True):
-        with log_errors():
             if keys is not None:
                 result = {k: self.tasks[k].nbytes for k in keys}
             else:
@@ -6440,8 +6439,8 @@ class Scheduler(SchedulerState, ServerNode):
                 restrictions = {restrictions}
             ts.worker_restrictions = set(restrictions)
 
+    @log_errors
     def get_task_prefix_states(self):
-        with log_errors():
             state = {}
 
             for tp in self.task_prefixes.values():
@@ -6458,7 +6457,7 @@ class Scheduler(SchedulerState, ServerNode):
                         "waiting": active_states["waiting"],
                     }
 
-        return state
+            return state
 
     def get_task_status(self, keys=None):
         return {

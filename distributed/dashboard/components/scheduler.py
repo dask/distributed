@@ -108,8 +108,8 @@ logos_dict = {
 class Occupancy(DashboardComponent):
     """Occupancy (in time) per worker"""
 
+    @log_errors
     def __init__(self, scheduler, **kwargs):
-        with log_errors():
             self.scheduler = scheduler
             self.source = ColumnDataSource(
                 {
@@ -151,8 +151,8 @@ class Occupancy(DashboardComponent):
             self.root.add_tools(hover, tap)
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             workers = self.scheduler.workers.values()
 
             y = list(range(len(workers)))
@@ -194,8 +194,8 @@ class Occupancy(DashboardComponent):
 class ProcessingHistogram(DashboardComponent):
     """How many tasks are on each worker"""
 
+    @log_errors
     def __init__(self, scheduler, **kwargs):
-        with log_errors():
             self.last = 0
             self.scheduler = scheduler
             self.source = ColumnDataSource(
@@ -245,8 +245,8 @@ def _memory_color(current: int, limit: int) -> str:
 class ClusterMemory(DashboardComponent):
     """Total memory usage on the cluster"""
 
+    @log_errors
     def __init__(self, scheduler, width=600, **kwargs):
-        with log_errors():
             self.scheduler = scheduler
             self.source = ColumnDataSource(
                 {
@@ -322,8 +322,8 @@ class ClusterMemory(DashboardComponent):
             self.root.add_tools(hover)
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             limit = sum(ws.memory_limit for ws in self.scheduler.workers.values())
             meminfo = self.scheduler.memory
             color = _memory_color(meminfo.process, limit)
@@ -360,8 +360,8 @@ class ClusterMemory(DashboardComponent):
 class WorkersMemory(DashboardComponent):
     """Memory usage for single workers"""
 
+    @log_errors
     def __init__(self, scheduler, width=600, **kwargs):
-        with log_errors():
             self.scheduler = scheduler
             self.source = ColumnDataSource(
                 {
@@ -447,14 +447,14 @@ class WorkersMemory(DashboardComponent):
             self.root.add_tools(hover)
 
     @without_property_validation
+    @log_errors
     def update(self):
-        def quadlist(i) -> list:
-            out = []
-            for ii in i:
-                out += [ii, ii, ii, ii]
-            return out
+            def quadlist(i) -> list:
+                out = []
+                for ii in i:
+                    out += [ii, ii, ii, ii]
+                return out
 
-        with log_errors():
             workers = self.scheduler.workers.values()
 
             width = []
@@ -521,8 +521,8 @@ class WorkersMemoryHistogram(DashboardComponent):
     usage. Replaces the per-worker graph when there are >= 50 workers.
     """
 
+    @log_errors
     def __init__(self, scheduler, **kwargs):
-        with log_errors():
             self.last = 0
             self.scheduler = scheduler
             self.source = ColumnDataSource(
@@ -570,8 +570,8 @@ class WorkersMemoryHistogram(DashboardComponent):
 class Hardware(DashboardComponent):
     """Occupancy (in time) per worker"""
 
+    @log_errors
     def __init__(self, scheduler, **kwargs):
-        with log_errors():
             self.scheduler = scheduler
             # Disk
             self.disk_source = ColumnDataSource(
@@ -712,8 +712,8 @@ class Hardware(DashboardComponent):
 class BandwidthTypes(DashboardComponent):
     """Bar chart showing bandwidth per type"""
 
+    @log_errors
     def __init__(self, scheduler, **kwargs):
-        with log_errors():
             self.last = 0
             self.scheduler = scheduler
             self.source = ColumnDataSource(
@@ -758,8 +758,8 @@ class BandwidthTypes(DashboardComponent):
             self.root.add_tools(hover)
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             bw = self.scheduler.bandwidth_types
             self.root.y_range.factors = list(sorted(bw))
             result = {
@@ -777,8 +777,8 @@ class BandwidthTypes(DashboardComponent):
 class BandwidthWorkers(DashboardComponent):
     """How many tasks are on each worker"""
 
+    @log_errors
     def __init__(self, scheduler, **kwargs):
-        with log_errors():
             self.last = 0
             self.scheduler = scheduler
             self.source = ColumnDataSource(
@@ -842,8 +842,8 @@ class BandwidthWorkers(DashboardComponent):
             self.root.add_tools(hover)
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             bw = self.scheduler.bandwidth_workers
             if not bw:
                 return
@@ -883,8 +883,8 @@ class WorkerNetworkBandwidth(DashboardComponent):
     Plots horizontal bars with the read_bytes and write_bytes worker state
     """
 
+    @log_errors
     def __init__(self, scheduler, **kwargs):
-        with log_errors():
             self.scheduler = scheduler
             self.source = ColumnDataSource(
                 {
@@ -980,8 +980,8 @@ class WorkerNetworkBandwidth(DashboardComponent):
             self.disk.toolbar_location = None
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             workers = self.scheduler.workers.values()
 
             h = 0.1
@@ -1043,8 +1043,8 @@ class SystemTimeseries(DashboardComponent):
     from ws.metrics["val"] for ws in scheduler.workers.values() divided by nuber of workers.
     """
 
+    @log_errors
     def __init__(self, scheduler, **kwargs):
-        with log_errors():
             self.scheduler = scheduler
             self.source = ColumnDataSource(
                 {
@@ -1200,8 +1200,8 @@ class SystemTimeseries(DashboardComponent):
         return result
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             self.source.stream(self.get_data(), 1000)
 
             if self.scheduler.workers:
@@ -1222,8 +1222,8 @@ class SystemTimeseries(DashboardComponent):
 class ComputePerKey(DashboardComponent):
     """Bar chart showing time spend in action by key prefix"""
 
+    @log_errors
     def __init__(self, scheduler, **kwargs):
-        with log_errors():
             self.last = 0
             self.scheduler = scheduler
 
@@ -1337,8 +1337,8 @@ class ComputePerKey(DashboardComponent):
             self.root = Tabs(tabs=[tab1, tab2])
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             compute_times = defaultdict(float)
 
             for key, ts in self.scheduler.task_prefixes.items():
@@ -1384,8 +1384,8 @@ class ComputePerKey(DashboardComponent):
 class AggregateAction(DashboardComponent):
     """Bar chart showing time spend in action by key prefix"""
 
+    @log_errors
     def __init__(self, scheduler, **kwargs):
-        with log_errors():
             self.last = 0
             self.scheduler = scheduler
 
@@ -1442,8 +1442,8 @@ class AggregateAction(DashboardComponent):
             self.root.add_tools(hover)
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             agg_times = defaultdict(float)
 
             for key, ts in self.scheduler.task_prefixes.items():
@@ -1480,8 +1480,8 @@ class AggregateAction(DashboardComponent):
 class MemoryByKey(DashboardComponent):
     """Bar chart showing memory use by key prefix"""
 
+    @log_errors
     def __init__(self, scheduler, **kwargs):
-        with log_errors():
             self.last = 0
             self.scheduler = scheduler
             self.source = ColumnDataSource(
@@ -1527,8 +1527,8 @@ class MemoryByKey(DashboardComponent):
             self.root.add_tools(hover)
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             counts = defaultdict(int)
             nbytes = defaultdict(int)
             for ws in self.scheduler.workers.values():
@@ -1554,8 +1554,8 @@ class MemoryByKey(DashboardComponent):
 class CurrentLoad(DashboardComponent):
     """Tasks and CPU usage on each worker"""
 
+    @log_errors
     def __init__(self, scheduler, width=600, **kwargs):
-        with log_errors():
             self.last = 0
             self.scheduler = scheduler
             self.source = ColumnDataSource(
@@ -1637,8 +1637,8 @@ class CurrentLoad(DashboardComponent):
             self.cpu_figure = cpu
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             workers = self.scheduler.workers.values()
             now = time()
             if not any(ws.processing for ws in workers) and now < self.last + 1:
@@ -1706,8 +1706,8 @@ class StealingTimeSeries(DashboardComponent):
         )
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             result = {
                 "time": [time() * 1000],
                 "idle": [len(self.scheduler.idle)],
@@ -1796,8 +1796,8 @@ class StealingEvents(DashboardComponent):
         return d
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             log = self.scheduler.get_events(topic="stealing")
             current = len(self.scheduler.events["stealing"])
             n = current - self.last
@@ -1868,8 +1868,8 @@ class Events(DashboardComponent):
         )
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             log = self.scheduler.events[self.name]
             n = self.scheduler.event_counts[self.name] - self.last
             if log:
@@ -1933,10 +1933,11 @@ class TaskStream(DashboardComponent):
         self.task_stream_index = [0]
 
     @without_property_validation
+    @log_errors
     def update(self):
-        if self.index == self.plugin.index:
-            return
-        with log_errors():
+            if self.index == self.plugin.index:
+                return
+
             if self.index and len(self.source.data["start"]):
                 start = min(self.source.data["start"])
                 duration = max(self.source.data["duration"])
@@ -2152,8 +2153,8 @@ class TaskGraph(DashboardComponent):
         self.max_items = config.get("distributed.dashboard.graph-max-items", 5000)
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             # If there are too many tasks in the scheduler we'll disable this
             # compoonents to not overload scheduler or client. Once we drop
             # below the threshold, the data is filled up again as usual
@@ -2437,9 +2438,8 @@ class TaskGroupGraph(DashboardComponent):
         self.root.add_tools(hover)
 
     @without_property_validation
+    @log_errors
     def update_layout(self):
-
-        with log_errors():
             # Get dependecies per task group.
             # In some cases there are tg that have themselves as dependencies - we remove those.
             dependencies = {
@@ -2847,12 +2847,12 @@ class TaskGroupProgress(DashboardComponent):
         return new_data
 
     @without_property_validation
+    @log_errors
     def update(self):
-        """
-        Maybe update the chart. This is somewhat expensive to draw, so we update
-        it pretty defensively.
-        """
-        with log_errors():
+            """
+            Maybe update the chart. This is somewhat expensive to draw, so we update
+            it pretty defensively.
+            """
             if self._should_add_new_renderers():
                 # Update the chart, allowing for new task groups to be added.
                 new_data = self._get_timeseries(restrict_to_existing=False)
@@ -3124,8 +3124,8 @@ class TaskProgress(DashboardComponent):
         self.root.add_tools(hover)
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             state = {
                 "memory": {},
                 "erred": {},
@@ -3173,8 +3173,8 @@ class TaskProgress(DashboardComponent):
 class EventLoop(DashboardComponent):
     """Event Loop Health"""
 
+    @log_errors
     def __init__(self, scheduler, **kwargs):
-        with log_errors():
             self.scheduler = scheduler
             self.source = ColumnDataSource(
                 {
@@ -3206,8 +3206,8 @@ class EventLoop(DashboardComponent):
             self.root.add_tools(hover)
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             s = self.scheduler
 
             data = {
@@ -3521,8 +3521,8 @@ class SchedulerLogs:
         )
 
 
+@log_errors
 def systemmonitor_doc(scheduler, extra, doc):
-    with log_errors():
         sysmon = SystemMonitor(scheduler, sizing_mode="stretch_both")
         doc.title = "Dask: Scheduler System Monitor"
         add_periodic_callback(doc, sysmon, 500)
@@ -3533,8 +3533,8 @@ def systemmonitor_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
+@log_errors
 def stealing_doc(scheduler, extra, doc):
-    with log_errors():
         occupancy = Occupancy(scheduler)
         stealing_ts = StealingTimeSeries(scheduler)
         stealing_events = StealingEvents(scheduler)
@@ -3560,8 +3560,8 @@ def stealing_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
+@log_errors
 def events_doc(scheduler, extra, doc):
-    with log_errors():
         events = Events(scheduler, "all", height=250)
         events.update()
         add_periodic_callback(doc, events, 500)
@@ -3572,8 +3572,8 @@ def events_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
+@log_errors
 def workers_doc(scheduler, extra, doc):
-    with log_errors():
         table = WorkerTable(scheduler)
         table.update()
         add_periodic_callback(doc, table, 500)
@@ -3584,8 +3584,8 @@ def workers_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
+@log_errors
 def hardware_doc(scheduler, extra, doc):
-    with log_errors():
         hw = Hardware(scheduler)
         hw.update()
         doc.title = "Dask: Cluster Hardware Bandwidth"
@@ -3597,8 +3597,8 @@ def hardware_doc(scheduler, extra, doc):
         add_periodic_callback(doc, hw, 500)
 
 
+@log_errors
 def tasks_doc(scheduler, extra, doc):
-    with log_errors():
         ts = TaskStream(
             scheduler,
             n_rectangles=dask.config.get(
@@ -3616,8 +3616,8 @@ def tasks_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
+@log_errors
 def graph_doc(scheduler, extra, doc):
-    with log_errors():
         graph = TaskGraph(scheduler, sizing_mode="stretch_both")
         doc.title = "Dask: Task Graph"
         graph.update()
@@ -3629,8 +3629,8 @@ def graph_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
+@log_errors
 def tg_graph_doc(scheduler, extra, doc):
-    with log_errors():
         tg_graph = TaskGroupGraph(scheduler, sizing_mode="stretch_both")
         doc.title = "Dask: Task Groups Graph"
         tg_graph.update()
@@ -3641,8 +3641,8 @@ def tg_graph_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
+@log_errors
 def status_doc(scheduler, extra, doc):
-    with log_errors():
         cluster_memory = ClusterMemory(scheduler, sizing_mode="stretch_both")
         cluster_memory.update()
         add_periodic_callback(doc, cluster_memory, 100)
@@ -3710,8 +3710,8 @@ def status_doc(scheduler, extra, doc):
 
 
 @curry
+@log_errors
 def individual_doc(cls, interval, scheduler, extra, doc, fig_attr="root", **kwargs):
-    with log_errors():
         fig = cls(scheduler, sizing_mode="stretch_both", **kwargs)
         fig.update()
         add_periodic_callback(doc, fig, interval)
@@ -3720,24 +3720,24 @@ def individual_doc(cls, interval, scheduler, extra, doc, fig_attr="root", **kwar
         doc.title = "Dask: " + funcname(cls)
 
 
+@log_errors
 def individual_profile_doc(scheduler, extra, doc):
-    with log_errors():
         prof = ProfileTimePlot(scheduler, sizing_mode="stretch_both", doc=doc)
         doc.add_root(prof.root)
         prof.trigger_update()
         doc.theme = BOKEH_THEME
 
 
+@log_errors
 def individual_profile_server_doc(scheduler, extra, doc):
-    with log_errors():
         prof = ProfileServer(scheduler, sizing_mode="stretch_both", doc=doc)
         doc.add_root(prof.root)
         prof.trigger_update()
         doc.theme = BOKEH_THEME
 
 
+@log_errors
 def profile_doc(scheduler, extra, doc):
-    with log_errors():
         doc.title = "Dask: Profile"
         prof = ProfileTimePlot(scheduler, sizing_mode="stretch_both", doc=doc)
         doc.add_root(prof.root)
@@ -3748,8 +3748,8 @@ def profile_doc(scheduler, extra, doc):
         prof.trigger_update()
 
 
+@log_errors
 def profile_server_doc(scheduler, extra, doc):
-    with log_errors():
         doc.title = "Dask: Profile of Event Loop"
         prof = ProfileServer(scheduler, sizing_mode="stretch_both", doc=doc)
         doc.add_root(prof.root)

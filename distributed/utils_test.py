@@ -483,9 +483,9 @@ def run_worker(q, scheduler_q, config, **kwargs):
                         loop.close(all_fds=True)
 
 
+@log_errors
 def run_nanny(q, scheduler_q, config, **kwargs):
     with dask.config.set(config):
-        with log_errors():
             with pristine_loop() as loop:
                 scheduler_addr = scheduler_q.get()
 

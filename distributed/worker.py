@@ -1396,10 +1396,10 @@ class Worker(ServerNode):
         self.start_periodic_callbacks()
         return self
 
+    @log_errors
     async def close(
         self, report=True, timeout=30, nanny=True, executor_wait=True, safe=False
     ):
-        with log_errors():
             if self.status in (Status.closed, Status.closing):
                 await self.finished()
                 return
@@ -1525,7 +1525,7 @@ class Worker(ServerNode):
             await super().close()
 
             setproctitle("dask-worker [closed]")
-        return "OK"
+            return "OK"
 
     async def close_gracefully(self, restart=None):
         """Gracefully shut down a worker
@@ -2642,23 +2642,23 @@ class Worker(ServerNode):
         else:
             self._handle_instructions(instructions)
 
+    @log_errors
     def handle_stimulus(self, stim: StateMachineEvent) -> None:
-        with log_errors():
             self.stimulus_log.append(stim.to_loggable(handled=time()))
             recs, instructions = self.handle_event(stim)
             self.transitions(recs, stimulus_id=stim.stimulus_id)
             self._handle_instructions(instructions)
 
+    @log_errors
     def _handle_stimulus_from_task(
         self, task: asyncio.Task[StateMachineEvent | None]
     ) -> None:
         self._async_instructions.remove(task)
-        with log_errors():
-            try:
-                # This *should* never raise any other exceptions
-                stim = task.result()
-            except asyncio.CancelledError:
-                return
+        try:
+            # This *should* never raise any other exceptions
+            stim = task.result()
+        except asyncio.CancelledError:
+            return
         if stim:
             self.handle_stimulus(stim)
 
@@ -2978,6 +2978,7 @@ class Worker(ServerNode):
         self.counters["transfer-count"].add(len(data))
         self.incoming_count += 1
 
+    @log_errors
     async def gather_dep(
         self,
         worker: str,
@@ -2986,24 +2987,23 @@ class Worker(ServerNode):
         *,
         stimulus_id: str,
     ) -> None:
-        """Gather dependencies for a task from a worker who has them
+            """Gather dependencies for a task from a worker who has them
 
-        Parameters
-        ----------
-        worker : str
-            Address of worker to gather dependencies from
-        to_gather : list
-            Keys of dependencies to gather from worker -- this is not
-            necessarily equivalent to the full list of dependencies of ``dep``
-            as some dependencies may already be present on this worker.
-        total_nbytes : int
-            Total number of bytes for all the dependencies in to_gather combined
-        """
-        if self.status not in Status.ANY_RUNNING:  # type: ignore
-            return
+            Parameters
+            ----------
+            worker : str
+                Address of worker to gather dependencies from
+            to_gather : list
+                Keys of dependencies to gather from worker -- this is not
+                necessarily equivalent to the full list of dependencies of ``dep``
+                as some dependencies may already be present on this worker.
+            total_nbytes : int
+                Total number of bytes for all the dependencies in to_gather combined
+            """
+            if self.status not in Status.ANY_RUNNING:  # type: ignore
+                return
 
-        recommendations: Recs = {}
-        with log_errors():
+            recommendations: Recs = {}
             response = {}
             to_gather_keys: set[str] = set()
             cancelled_keys: set[str] = set()
@@ -3125,8 +3125,8 @@ class Worker(ServerNode):
 
                 self.ensure_communicating()
 
+    @log_errors
     async def find_missing(self) -> None:
-        with log_errors():
             if not self._missing_dep_flight:
                 return
             try:
@@ -3154,8 +3154,8 @@ class Worker(ServerNode):
                 ].callback_time = self.periodic_callbacks["heartbeat"].callback_time
                 self.ensure_communicating()
 
+    @log_errors
     async def query_who_has(self, *deps: str) -> dict[str, Collection[str]]:
-        with log_errors():
             who_has = await retry_operation(self.scheduler.who_has, keys=deps)
             self.update_who_has(who_has)
             return who_has
@@ -3310,13 +3310,13 @@ class Worker(ServerNode):
     def run_coroutine(self, comm, function, args=(), kwargs=None, wait=True):
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
+    @log_errors
     async def plugin_add(
         self,
         plugin: WorkerPlugin | bytes,
         name: str | None = None,
         catch_errors: bool = True,
     ) -> dict[str, Any]:
-        with log_errors(pdb=False):
             if isinstance(plugin, bytes):
                 # Note: historically we have accepted duck-typed classes that don't
                 # inherit from WorkerPlugin. Don't do `assert isinstance`.
@@ -3346,8 +3346,8 @@ class Worker(ServerNode):
 
             return {"status": "OK"}
 
+    @log_errors
     async def plugin_remove(self, name: str) -> dict[str, Any]:
-        with log_errors(pdb=False):
             logger.info(f"Removing Worker plugin {name}")
             try:
                 plugin = self.plugins.pop(name)

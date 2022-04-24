@@ -399,8 +399,8 @@ class Cluster(SyncMethodMixin):
 
             adapt.on_click(adapt_cb)
 
+            @log_errors
             def scale_cb(b):
-                with log_errors():
                     n = request.value
                     with suppress(AttributeError):
                         self._adaptive.stop()

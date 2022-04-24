@@ -26,8 +26,8 @@ NVML_ENABLED = nvml.device_get_count() > 0
 class GPUCurrentLoad(DashboardComponent):
     """How many tasks are on each worker"""
 
+    @log_errors
     def __init__(self, scheduler, width=600, **kwargs):
-        with log_errors():
             self.last = 0
             self.scheduler = scheduler
             self.source = ColumnDataSource(
@@ -116,8 +116,8 @@ class GPUCurrentLoad(DashboardComponent):
             self.utilization_figure.x_range.end = 100
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             workers = list(self.scheduler.workers.values())
 
             utilization = []
@@ -168,8 +168,8 @@ class GPUCurrentLoad(DashboardComponent):
             update(self.source, result)
 
 
+@log_errors
 def gpu_memory_doc(scheduler, extra, doc):
-    with log_errors():
         gpu_load = GPUCurrentLoad(scheduler, sizing_mode="stretch_both")
         gpu_load.update()
         add_periodic_callback(doc, gpu_load, 100)
@@ -177,8 +177,8 @@ def gpu_memory_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
+@log_errors
 def gpu_utilization_doc(scheduler, extra, doc):
-    with log_errors():
         gpu_load = GPUCurrentLoad(scheduler, sizing_mode="stretch_both")
         gpu_load.update()
         add_periodic_callback(doc, gpu_load, 100)
@@ -186,8 +186,8 @@ def gpu_utilization_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
+@log_errors
 def gpu_doc(scheduler, extra, doc):
-    with log_errors():
         gpu_load = GPUCurrentLoad(scheduler, sizing_mode="stretch_both")
         gpu_load.update()
         add_periodic_callback(doc, gpu_load, 100)

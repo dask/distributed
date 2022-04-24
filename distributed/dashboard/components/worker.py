@@ -54,8 +54,8 @@ template_variables = {"pages": ["status", "system", "profile", "crossfilter"]}
 
 def standard_doc(title, active_page, *, template="simple.html"):
     def decorator(f):
+        @log_errors(unroll_stack=2)
         def wrapper(arg, extra, doc):
-            with log_errors():
                 doc.title = title
                 doc.template = env.get_template(template)
                 if active_page is not None:
@@ -86,8 +86,8 @@ class StateTable(DashboardComponent):
         self.root = table
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             w = self.worker
             d = {
                 "Stored": [len(w.data)],
@@ -101,8 +101,8 @@ class StateTable(DashboardComponent):
 
 
 class CommunicatingStream(DashboardComponent):
+    @log_errors
     def __init__(self, worker, height=300, **kwargs):
-        with log_errors():
             self.worker = worker
             names = [
                 "start",
@@ -167,8 +167,8 @@ class CommunicatingStream(DashboardComponent):
             self.who = dict()
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             outgoing = self.worker.outgoing_transfer_log
             n = self.worker.outgoing_count - self.last_outgoing
             outgoing = [outgoing[-i].copy() for i in range(1, n + 1)]
@@ -244,8 +244,8 @@ class CommunicatingTimeSeries(DashboardComponent):
         self.root = fig
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             self.source.stream(
                 {
                     "x": [time() * 1000],
@@ -281,16 +281,16 @@ class ExecutingTimeSeries(DashboardComponent):
         self.root = fig
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             self.source.stream(
                 {"x": [time() * 1000], "y": [self.worker.executing_count]}, 1000
             )
 
 
 class CrossFilter(DashboardComponent):
+    @log_errors
     def __init__(self, worker, **kwargs):
-        with log_errors():
             self.worker = worker
 
             quantities = ["nbytes", "duration", "bandwidth", "count", "start", "stop"]
@@ -339,8 +339,8 @@ class CrossFilter(DashboardComponent):
             self.root = self.layout
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             outgoing = self.worker.outgoing_transfer_log
             n = self.worker.outgoing_count - self.last_outgoing
             n = min(n, 1000)
@@ -377,8 +377,8 @@ class CrossFilter(DashboardComponent):
                 else:
                     self.source.stream(out, rollover=1000)
 
+    @log_errors
     def create_figure(self, **kwargs):
-        with log_errors():
             fig = figure(title="", tools="", **kwargs)
             fig.circle(
                 source=self.source,
@@ -402,8 +402,8 @@ class CrossFilter(DashboardComponent):
             return fig
 
     @without_property_validation
+    @log_errors
     def update_figure(self, attr, old, new):
-        with log_errors():
             fig = self.create_figure(**self.kwargs)
             self.layout.children[1] = fig
 
@@ -459,8 +459,8 @@ class Counters(DashboardComponent):
                 sizing_mode=sizing_mode,
             )
 
+    @log_errors
     def add_digest_figure(self, name):
-        with log_errors():
             n = len(self.server.digests[name].intervals)
             sources = {i: ColumnDataSource({"x": [], "y": []}) for i in range(n)}
 
@@ -491,8 +491,8 @@ class Counters(DashboardComponent):
             self.digest_figures[name] = fig
             return fig
 
+    @log_errors
     def add_counter_figure(self, name):
-        with log_errors():
             n = len(self.server.counters[name].intervals)
             sources = {
                 i: ColumnDataSource({"x": [], "y": [], "y-center": [], "counts": []})
@@ -532,8 +532,8 @@ class Counters(DashboardComponent):
             return fig
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
             for name, fig in self.digest_figures.items():
                 digest = self.server.digests[name]
                 d = {}

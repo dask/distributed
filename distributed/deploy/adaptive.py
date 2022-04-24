@@ -183,10 +183,11 @@ class Adaptive(AdaptiveCore):
             **self._workers_to_close_kwargs,
         )
 
+    @log_errors
     async def scale_down(self, workers):
-        if not workers:
-            return
-        with log_errors():
+            if not workers:
+                return
+
             logger.info("Retiring workers %s", workers)
             # Ask scheduler to cleanly retire workers
             await self.scheduler.retire_workers(

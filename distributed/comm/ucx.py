@@ -231,13 +231,13 @@ class UCX(Comm):
     def peer_address(self) -> str:
         return self._peer_addr
 
+    @log_errors
     async def write(
         self,
         msg: dict,
         serializers=("cuda", "dask", "pickle", "error"),
         on_error: str = "message",
     ):
-        with log_errors():
             if self.closed():
                 raise CommClosedError("Endpoint is closed -- unable to send message")
             try:
@@ -290,8 +290,8 @@ class UCX(Comm):
                 self.abort()
                 raise CommClosedError("While writing, the connection was closed")
 
+    @log_errors
     async def read(self, deserializers=("cuda", "dask", "pickle", "error")):
-        with log_errors():
             if deserializers is None:
                 deserializers = ("cuda", "dask", "pickle", "error")
 

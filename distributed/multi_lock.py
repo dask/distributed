@@ -110,8 +110,8 @@ class MultiLockExtension:
         for waiter in waiters_ready:
             self.scheduler.loop.add_callback(self.events[waiter].set)
 
+    @log_errors
     async def acquire(self, locks=None, id=None, timeout=None, num_locks=None):
-        with log_errors():
             if not self._request_locks(locks, id, num_locks):
                 assert id not in self.events
                 event = asyncio.Event()
@@ -130,8 +130,8 @@ class MultiLockExtension:
             assert self.requests_left[id] == 0
             return True
 
+    @log_errors
     def release(self, id=None):
-        with log_errors():
             self._refain_locks(self.requests[id], id)
 
 

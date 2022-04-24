@@ -58,12 +58,12 @@ class EventExtension:
             }
         )
 
+    @log_errors
     async def event_wait(self, name=None, timeout=None):
-        """Wait until the event is set to true.
-        Returns false, when this did not happen in the given time
-        and true otherwise.
-        """
-        with log_errors():
+            """Wait until the event is set to true.
+            Returns false, when this did not happen in the given time
+            and true otherwise.
+            """
             name = self._normalize_name(name)
 
             event = self._events[name]
@@ -87,20 +87,20 @@ class EventExtension:
 
             return True
 
+    @log_errors
     def event_set(self, name=None):
-        """Set the event with the given name to true.
+            """Set the event with the given name to true.
 
-        All waiters on this event will be notified.
-        """
-        with log_errors():
+            All waiters on this event will be notified.
+            """
             name = self._normalize_name(name)
             # No matter if someone is listening or not,
             # we set the event to true
             self._events[name].set()
 
+    @log_errors
     def event_clear(self, name=None):
-        """Set the event with the given name to false."""
-        with log_errors():
+            """Set the event with the given name to false."""
             name = self._normalize_name(name)
             if not self._waiter_count[name]:
                 # No one is waiting for this
@@ -119,8 +119,8 @@ class EventExtension:
                 event = self._events[name]
                 event.clear()
 
+    @log_errors
     def event_is_set(self, name=None):
-        with log_errors():
             name = self._normalize_name(name)
             # the default flag value is false
             # we could also let the defaultdict

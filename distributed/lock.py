@@ -30,8 +30,8 @@ class LockExtension:
             {"lock_acquire": self.acquire, "lock_release": self.release}
         )
 
+    @log_errors
     async def acquire(self, name=None, id=None, timeout=None):
-        with log_errors():
             if isinstance(name, list):
                 name = tuple(name)
             if name not in self.ids:
@@ -58,8 +58,8 @@ class LockExtension:
                 self.ids[name] = id
             return result
 
+    @log_errors
     def release(self, name=None, id=None):
-        with log_errors():
             if isinstance(name, list):
                 name = tuple(name)
             if self.ids.get(name) != id:

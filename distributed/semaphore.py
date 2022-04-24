@@ -106,8 +106,8 @@ class SemaphoreExtension:
                     % (max_leases, self.max_leases[name])
                 )
 
+    @log_errors
     def refresh_leases(self, name=None, lease_ids=None):
-        with log_errors():
             now = time()
             logger.debug(
                 "Refresh leases for %s with ids %s at %s", name, lease_ids, now
@@ -142,8 +142,8 @@ class SemaphoreExtension:
             return False
         return True
 
+    @log_errors
     async def acquire(self, name=None, timeout=None, lease_id=None):
-        with log_errors():
             if not self._semaphore_exists(name):
                 raise RuntimeError(f"Semaphore `{name}` not known or already closed.")
 
@@ -192,8 +192,8 @@ class SemaphoreExtension:
 
                 return result
 
+    @log_errors
     def release(self, name=None, lease_id=None):
-        with log_errors():
             if not self._semaphore_exists(name):
                 logger.warning(
                     f"Tried to release semaphore `{name}` but it is not known or already closed."
@@ -239,9 +239,9 @@ class SemaphoreExtension:
                     )
                     self._release_value(name=name, lease_id=_id)
 
+    @log_errors
     def close(self, name=None):
-        """Hard close the semaphore without warning clients which still hold a lease."""
-        with log_errors():
+            """Hard close the semaphore without warning clients which still hold a lease."""
             if not self._semaphore_exists(name):
                 return
 

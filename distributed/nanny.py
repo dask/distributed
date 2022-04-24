@@ -428,8 +428,8 @@ class Nanny(ServerNode):
                 raise
         return result
 
+    @log_errors
     async def plugin_add(self, plugin=None, name=None):
-        with log_errors(pdb=False):
             if isinstance(plugin, bytes):
                 plugin = pickle.loads(plugin)
 
@@ -454,8 +454,8 @@ class Nanny(ServerNode):
 
             return {"status": "OK"}
 
+    @log_errors
     async def plugin_remove(self, name=None):
-        with log_errors(pdb=False):
             logger.info(f"Removing Nanny plugin {name}")
             try:
                 plugin = self.plugins.pop(name)
@@ -507,8 +507,8 @@ class Nanny(ServerNode):
     def _on_exit_sync(self, exitcode):
         self.loop.add_callback(self._on_exit, exitcode)
 
+    @log_errors
     async def _on_exit(self, exitcode):
-        with log_errors():
             if self.status not in (
                 Status.init,
                 Status.closing,
