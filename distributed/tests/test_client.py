@@ -5535,13 +5535,14 @@ async def test_config_scheduler_address(s, a, b):
 
 @gen_cluster(client=True)
 async def test_warn_when_submitting_large_values(c, s, a, b):
-    with pytest.warns(
-        UserWarning,
-        match=r"Large object of size (2\.00 MB|1.91 MiB) detected in task graph:"
-        r" \n  \(b'00000000000000000000000000000000000000000000000 \.\.\. 000000000000',\)"
-        r"\nConsider scattering large objects ahead of time.*",
-    ):
-        future = c.submit(lambda x: x + 1, b"0" * 2000000)
+    with pytest.warns(UserWarning) as info:
+        future = c.submit(lambda x: x + 1, b"0" * 20000000)
+
+    [info] = info
+
+    assert "large" in str(info.message).lower()
+    assert "MiB" in str(info.message)
+    assert "scatter" in str(info.message).lower()
 
     with warnings.catch_warnings(record=True) as record:
         data = b"0" * 2000000
@@ -6501,9 +6502,7 @@ async def test_annotations_task_state(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         x = await x.persist()
 
-    assert all(
-        {"qux": "bar", "priority": 100} == ts.annotations for ts in s.tasks.values()
-    )
+    assert all(ts.annotations["qux"] == "bar" for ts in s.tasks.values())
 
 
 @pytest.mark.parametrize("fn", ["compute", "persist"])
@@ -6553,7 +6552,6 @@ async def test_annotations_priorities(c, s, a, b):
 
     assert all("15" in str(ts.priority) for ts in s.tasks.values())
     assert all(ts.priority[0] == -15 for ts in s.tasks.values())
-    assert all({"priority": 15} == ts.annotations for ts in s.tasks.values())
 
 
 @gen_cluster(client=True)
