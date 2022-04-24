@@ -34,6 +34,7 @@ from distributed.utils import (
     is_kernel,
     is_valid_xml,
     iscoroutinefunction,
+    log_errors,
     nbytes,
     offload,
     open_port,
@@ -783,3 +784,112 @@ def test_recursive_to_dict_no_nest():
         ],
     }
     assert recursive_to_dict(info) == expect
+
+
+@gen_test()
+async def test_log_errors():
+    class CustomError(Exception):
+        pass
+
+    # Use the logger of the caller module
+    with captured_logger("test_utils") as caplog:
+
+        # Context manager
+        with log_errors():
+            pass
+
+        with log_errors():
+            with log_errors():
+                pass
+
+        with log_errors(pdb=True):
+            pass
+
+        with pytest.raises(CustomError):
+            with log_errors():
+                raise CustomError("err1")
+
+        with pytest.raises(CustomError):
+            with log_errors():
+                with log_errors():
+                    raise CustomError("err2")
+
+        # Bare decorator
+        @log_errors
+        def _():
+            return 123
+
+        assert _() == 123
+
+        @log_errors
+        def _():
+            raise CustomError("err3")
+
+        with pytest.raises(CustomError):
+            _()
+
+        @log_errors
+        def inner():
+            raise CustomError("err4")
+
+        @log_errors
+        def outer():
+            inner()
+
+        with pytest.raises(CustomError):
+            outer()
+
+        # Decorator with parameters
+        @log_errors()
+        def _():
+            return 456
+
+        assert _() == 456
+
+        @log_errors()
+        def _():
+            with log_errors():
+                raise CustomError("err5")
+
+        with pytest.raises(CustomError):
+            _()
+
+        @log_errors(pdb=True)
+        def _():
+            return 789
+
+        assert _() == 789
+
+        # Decorate async function
+        @log_errors
+        async def _():
+            return 123
+
+        assert await _() == 123
+
+        @log_errors
+        async def _():
+            raise CustomError("err6")
+
+        with pytest.raises(CustomError):
+            await _()
+
+    assert [row for row in caplog.getvalue().splitlines() if row.startswith("err")] == [
+        "err1",
+        "err2",
+        "err2",
+        "err3",
+        "err4",
+        "err4",
+        "err5",
+        "err5",
+        "err6",
+    ]
+
+    # Test unroll_stack
+    with captured_logger("distributed.utils") as caplog:
+        with pytest.raises(CustomError):
+            with log_errors(unroll_stack=0):
+                raise CustomError("err7")
+
+    assert caplog.getvalue().startswith("err7\n")

@@ -130,32 +130,30 @@ class ActiveMemoryManagerExtension:
         self.policies.add(policy)
         policy.manager = self
 
+    @log_errors
     def run_once(self) -> None:
         """Run all policies once and asynchronously (fire and forget) enact their
         recommendations to replicate/drop tasks
         """
-        with log_errors():
-            ts_start = time()
-            # This should never fail since this is a synchronous method
-            assert not hasattr(self, "pending")
+        ts_start = time()
+        # This should never fail since this is a synchronous method
+        assert not hasattr(self, "pending")
 
-            self.pending = {}
-            self.workers_memory = {
-                w: w.memory.optimistic for w in self.scheduler.workers.values()
-            }
-            try:
-                # populate self.pending
-                self._run_policies()
+        self.pending = {}
+        self.workers_memory = {
+            w: w.memory.optimistic for w in self.scheduler.workers.values()
+        }
+        try:
+            # populate self.pending
+            self._run_policies()
 
-                if self.pending:
-                    self._enact_suggestions()
-            finally:
-                del self.workers_memory
-                del self.pending
-            ts_stop = time()
-            logger.debug(
-                "Active Memory Manager run in %.0fms", (ts_stop - ts_start) * 1000
-            )
+            if self.pending:
+                self._enact_suggestions()
+        finally:
+            del self.workers_memory
+            del self.pending
+        ts_stop = time()
+        logger.debug("Active Memory Manager run in %.0fms", (ts_stop - ts_start) * 1000)
 
     def _run_policies(self) -> None:
         """Sequentially run ActiveMemoryManagerPolicy.run() for all registered policies,
