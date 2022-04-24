@@ -10,7 +10,7 @@ import pytest
 from distributed.client import _as_completed, _first_completed, as_completed, wait
 from distributed.metrics import time
 from distributed.utils import CancelledError
-from distributed.utils_test import gen_cluster, inc, throws
+from distributed.utils_test import gen_cluster, inc, slowinc, throws
 
 
 @gen_cluster(client=True)
@@ -241,11 +241,11 @@ async def test_str(c, s, a, b):
 @gen_cluster(client=True)
 async def test_as_completed_with_results_no_raise_async(c, s, a, b):
     x = c.submit(throws, 1)
-    y = c.submit(inc, 5)
+    y = c.submit(slowinc, 5, delay=1)
     z = c.submit(inc, 1)
 
     ac = as_completed([x, y, z], with_results=True, raise_errors=False)
-    c.loop.add_callback(y.cancel)
+    await y.cancel()
     res = [el async for el in ac]
 
     dd = {r[0]: r[1:] for r in res}
