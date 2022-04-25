@@ -692,7 +692,7 @@ async def test_pause_while_spilling(c, s, a):
         "distributed.worker.memory.monitor-interval": "10ms",
     },
 )
-async def test_release_evloop(c, s, a):
+async def test_release_evloop_while_spilling(c, s, a):
     N = 100
 
     def get_process_memory():
@@ -722,9 +722,13 @@ async def test_release_evloop(c, s, a):
     # https://github.com/dask/distributed/issues/1371).
     # We should regain control of the event loop every 0.5s.
     c = Counter(round(t1 - t0, 1) for t0, t1 in zip(ts, ts[1:]))
-    # with sleep(0) every 0.5s:  {0.0: 315, 0.5: 4}
-    # with sleep(0) every cycle: {0.0: 233}
-    # without any sleep:         {0.0: 359, 2.0: 1}
+    # Depending on the implementation of WorkerMemoryMonitor._maybe_spill:
+    # if it calls sleep(0) every 0.5s:
+    #   {0.0: 315, 0.5: 4}
+    # if it calls sleep(0) after spilling each key:
+    #   {0.0: 233}
+    # if it never yields:
+    #   {0.0: 359, 2.0: 1}
     # Make sure we remain in the first use case.
     assert 1 < sum(v for k, v in c.items() if 0.5 <= k <= 1.9), dict(c)
     assert not any(v for k, v in c.items() if k >= 2.0), dict(c)
