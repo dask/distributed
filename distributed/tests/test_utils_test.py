@@ -39,12 +39,15 @@ def test_bare_cluster(loop):
         pass
 
 
-def test_cluster(loop):
+def test_cluster(cleanup):
+    async def identity():
+        async with rpc(s["address"]) as scheduler_rpc:
+            return await scheduler_rpc.identity()
+
     with cluster() as (s, [a, b]):
-        with rpc(s["address"]) as s:
-            ident = loop.run_sync(s.identity)
-            assert ident["type"] == "Scheduler"
-            assert len(ident["workers"]) == 2
+        ident = asyncio.run(identity())
+        assert ident["type"] == "Scheduler"
+        assert len(ident["workers"]) == 2
 
 
 @gen_cluster(client=True)
@@ -636,4 +639,25 @@ def test_invalid_transitions(capsys):
     out, err = capsys.readouterr()
 
     assert "foo" in out + err
+    assert "task-name" in out + err
+
+
+def test_invalid_worker_states(capsys):
+    @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+    async def test_log_invalid_worker_task_states(c, s, a):
+        x = c.submit(inc, 1, key="task-name")
+        await x
+        a.tasks[x.key].state = "released"
+        with pytest.raises(Exception):
+            a.validate_task(a.tasks[x.key])
+
+        while not s.events["invalid-worker-task-states"]:
+            await asyncio.sleep(0.01)
+
+    with pytest.raises(Exception) as info:
+        test_log_invalid_worker_task_states()
+
+    out, err = capsys.readouterr()
+
+    assert "released" in out + err
     assert "task-name" in out + err

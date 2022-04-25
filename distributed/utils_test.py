@@ -765,7 +765,7 @@ async def disconnect(addr, timeout=3, rpc_kwargs=None):
     rpc_kwargs = rpc_kwargs or {}
 
     async def do_disconnect():
-        with rpc(addr, **rpc_kwargs) as w:
+        async with rpc(addr, **rpc_kwargs) as w:
             # If the worker was killed hard (e.g. sigterm) during test runtime,
             # we do not know at this point and may not be able to connect
             with suppress(EnvironmentError, CommClosedError):
@@ -866,11 +866,12 @@ async def start_cluster(
             await asyncio.gather(*(w.close(timeout=1) for w in workers))
             await s.close(fast=True)
             check_invalid_worker_transitions(s)
+            check_invalid_task_states(s)
             raise TimeoutError("Cluster creation timeout")
     return s, workers
 
 
-def check_invalid_worker_transitions(s):
+def check_invalid_worker_transitions(s: Scheduler) -> None:
     if not s.events.get("invalid-worker-transition"):
         return
 
@@ -884,6 +885,19 @@ def check_invalid_worker_transitions(s):
     )
 
 
+def check_invalid_task_states(s: Scheduler) -> None:
+    if not s.events.get("invalid-worker-task-states"):
+        return
+
+    for timestamp, msg in s.events["invalid-worker-task-states"]:
+        print("Worker:", msg["worker"])
+        print("State:", msg["state"])
+        for line in msg["story"]:
+            print(line)
+
+    raise ValueError("Invalid worker task state")
+
+
 async def end_cluster(s, workers):
     logger.debug("Closing out test cluster")
 
@@ -895,6 +909,7 @@ async def end_cluster(s, workers):
     await s.close()  # wait until scheduler stops completely
     s.stop()
     check_invalid_worker_transitions(s)
+    check_invalid_task_states(s)
 
 
 def gen_cluster(

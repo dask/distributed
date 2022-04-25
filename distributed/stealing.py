@@ -354,26 +354,33 @@ class WorkStealing(SchedulerPlugin):
         def combined_occupancy(ws):
             return ws.occupancy + self.in_flight_occupancy[ws]
 
-        def maybe_move_task(level, ts, sat, idl, duration, cost_multiplier):
-            occ_idl = combined_occupancy(idl)
-            occ_sat = combined_occupancy(sat)
+        def maybe_move_task(
+            level,
+            ts,
+            victim,
+            thief,
+            duration: float,
+            cost_multiplier: float,
+        ):
+            occ_thief = combined_occupancy(thief)
+            occ_victim = combined_occupancy(victim)
 
-            if occ_idl + cost_multiplier * duration <= occ_sat - duration / 2:
-                self.move_task_request(ts, sat, idl)
+            if occ_thief + cost_multiplier * duration <= occ_victim - duration / 2:
+                self.move_task_request(ts, victim, thief)
                 log.append(
                     (
                         start,
                         level,
                         ts.key,
                         duration,
-                        sat.address,
-                        occ_sat,
-                        idl.address,
-                        occ_idl,
+                        victim.address,
+                        occ_victim,
+                        thief.address,
+                        occ_thief,
                     )
                 )
-                s.check_idle_saturated(sat, occ=occ_sat)
-                s.check_idle_saturated(idl, occ=occ_idl)
+                s.check_idle_saturated(victim, occ=occ_victim)
+                s.check_idle_saturated(thief, occ=occ_thief)
 
         with log_errors():
             i = 0
@@ -401,13 +408,16 @@ class WorkStealing(SchedulerPlugin):
             for level, cost_multiplier in enumerate(self.cost_multipliers):
                 if not idle:
                     break
-                for sat in list(saturated):
-                    stealable = self.stealable[sat.address][level]
+                for victim in list(saturated):
+                    stealable = self.stealable[victim.address][level]
                     if not stealable or not idle:
                         continue
 
                     for ts in list(stealable):
-                        if ts not in self.key_stealable or ts.processing_on is not sat:
+                        if (
+                            ts not in self.key_stealable
+                            or ts.processing_on is not victim
+                        ):
                             stealable.discard(ts)
                             continue
                         i += 1
@@ -419,13 +429,13 @@ class WorkStealing(SchedulerPlugin):
                             break
                         thief = thieves[i % len(thieves)]
 
-                        duration = sat.processing.get(ts)
+                        duration = victim.processing.get(ts)
                         if duration is None:
                             stealable.discard(ts)
                             continue
 
                         maybe_move_task(
-                            level, ts, sat, thief, duration, cost_multiplier
+                            level, ts, victim, thief, duration, cost_multiplier
                         )
 
                 if self.cost_multipliers[level] < 20:  # don't steal from public at cost
@@ -437,13 +447,13 @@ class WorkStealing(SchedulerPlugin):
                             stealable.discard(ts)
                             continue
 
-                        sat = ts.processing_on
-                        if sat is None:
+                        victim = ts.processing_on
+                        if victim is None:
                             stealable.discard(ts)
                             continue
-                        if combined_occupancy(sat) < 0.2:
+                        if combined_occupancy(victim) < 0.2:
                             continue
-                        if len(sat.processing) <= sat.nthreads:
+                        if len(victim.processing) <= victim.nthreads:
                             continue
 
                         i += 1
@@ -451,10 +461,10 @@ class WorkStealing(SchedulerPlugin):
                         if not thieves:
                             continue
                         thief = thieves[i % len(thieves)]
-                        duration = sat.processing[ts]
+                        duration = victim.processing[ts]
 
                         maybe_move_task(
-                            level, ts, sat, thief, duration, cost_multiplier
+                            level, ts, victim, thief, duration, cost_multiplier
                         )
 
             if log:
