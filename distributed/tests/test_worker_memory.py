@@ -487,7 +487,9 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
     },
 )
 async def test_pause_prevents_deps_fetch(c, s, a, b):
-    """A worker is paused while there are dependencies ready to fetch, but all other workers are in flight"""
+    """A worker is paused while there are dependencies ready to fetch, but all other
+    workers are in flight
+    """
     a_addr = a.address
 
     class X:
@@ -513,11 +515,14 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
 
     # - z reaches worker a with higher priority than w
     # - z and w respectively make x and y go into fetch state.
-    #   z has a higher priority than w, therefore z's dependency x has a higher priority than w's dependency y.
+    #   z has a higher priority than w, therefore z's dependency x has a higher priority
+    #   than w's dependency y.
     #   a.data_needed = ["x", "y"]
-    # - ensure_communicating decides not to fetch additional keys together with x, as it thinks it's 1TB in size
+    # - ensure_communicating decides not to fetch additional keys together with x, as it
+    #   thinks it's 1TB in size
     # - x fetch->flight; a is added to in_flight_workers
-    # - y is skipped by ensure_communicating since all workers that hold a replica are in flight
+    # - y is skipped by ensure_communicating since all workers that hold a replica are
+    #   in flight
     # - x reaches a and sends a into paused state
     # - x flight->memory; a is removed from in_flight_workers
     # - ensure_communicating is triggered again
