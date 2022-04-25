@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import Counter, UserDict
-from time import monotonic, sleep
+from time import sleep
 
 import pytest
 
@@ -12,6 +12,7 @@ import dask.config
 import distributed.system
 from distributed import Client, Event, Nanny, Worker, wait
 from distributed.core import Status
+from distributed.metrics import monotonic
 from distributed.spill import has_zict_210
 from distributed.utils_test import captured_logger, gen_cluster, inc
 from distributed.worker_memory import parse_memory_limit

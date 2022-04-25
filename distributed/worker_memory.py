@@ -28,7 +28,6 @@ import warnings
 from collections.abc import Callable, MutableMapping
 from contextlib import suppress
 from functools import partial
-from time import monotonic
 from typing import TYPE_CHECKING, Any, Container, Literal, cast
 
 import psutil
@@ -40,6 +39,7 @@ from dask.utils import format_bytes, parse_bytes, parse_timedelta
 
 from distributed import system
 from distributed.core import Status
+from distributed.metrics import monotonic
 from distributed.spill import ManualEvictProto, SpillBuffer
 from distributed.utils import log_errors
 from distributed.utils_perf import ThrottledGC
