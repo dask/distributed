@@ -3802,8 +3802,6 @@ class Scheduler(SchedulerState, ServerNode):
     def update_graph_hlg(
         self,
         client: str,
-        graph_header: bytes,
-        graph_frames: list[bytes],
         keys: list[str],
         priority=None,
         resources=None,
@@ -3816,28 +3814,36 @@ class Scheduler(SchedulerState, ServerNode):
         workers=None,
         allow_other_workers=None,
         annotations=None,
+        graph: HighLevelGraph = None,
+        graph_header: bytes | None = None,
+        graph_frames: list[bytes] | None = None,
     ):
-        tok = _current_client.set(False)  # type: ignore
-        try:
+        if graph is None:
+            assert graph_header
+            tok = _current_client.set(False)  # type: ignore
+            try:
+                graph_: HighLevelGraph = pickle.loads(
+                    graph_header, buffers=graph_frames
+                )  # type:ignore
+            except Exception as e:
+                text = str(e)
+                exc = pickle.dumps(e)
+                parent: SchedulerState = cast(SchedulerState, self)
+                for key in keys:
+                    ts = parent.new_task(
+                        key, None, "erred", computation=None  # computation
+                    )
+                    ts.exception = exc
+                    ts.exception_text = text
+                    ts.exception_blame = ts
+                    parent.tasks[key] = ts
 
-            graph: HighLevelGraph = pickle.loads(graph_header, buffers=graph_frames)
-        except Exception as e:
-            text = str(e)
-            exc = pickle.dumps(e)
-            parent: SchedulerState = cast(SchedulerState, self)
-            for key in keys:
-                ts = parent.new_task(
-                    key, None, "erred", computation=None  # computation
-                )
-                ts.exception = exc
-                ts.exception_text = text
-                ts.exception_blame = ts
-                parent.tasks[key] = ts
-
-            self.client_desires_keys(keys=keys, client=client)
-            return
-        finally:
-            _current_client.reset(tok)
+                self.client_desires_keys(keys=keys, client=client)
+                return
+            finally:
+                _current_client.reset(tok)
+        else:
+            graph_ = graph
 
         if annotations is None:
             annotations = {}
@@ -3862,7 +3868,7 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             raise TypeError("Workers must be a list or set of workers or None")
 
-        dsk = dict(graph)
+        dsk = dict(graph_)
 
         if allow_other_workers:
             loose_restrictions = set(dsk)
@@ -3887,7 +3893,7 @@ class Scheduler(SchedulerState, ServerNode):
             dependencies[k].update(f.key for f in futures)
 
         pre_stringify = set(dsk)
-        dsk = {stringify(k): stringify(v, exclusive=graph) for k, v in dsk.items()}
+        dsk = {stringify(k): stringify(v, exclusive=graph_) for k, v in dsk.items()}
 
         def process(x, keys=dsk, string_keys=pre_stringify):
             if callable(x):
@@ -3911,7 +3917,7 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             _restrictions = {}
 
-        for layer in graph.layers.values():
+        for layer in graph_.layers.values():
             if layer.annotations and "retries" in layer.annotations:
                 retries = retries or {}
                 d = process(layer.annotations["retries"], keys=layer, string_keys=None)

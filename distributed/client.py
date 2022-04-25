@@ -2872,22 +2872,27 @@ class Client(SyncMethodMixin):
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
 
-            buffers = []
-            out = pickle.dumps(dsk, buffer_callback=buffers.append)
-            buffers = [buffer.raw() for buffer in buffers]
-            nbytes = len(out) + sum(map(len, buffers))
-            if nbytes > 10_000_000:
-                warnings.warn(
-                    f"Sending large graph of {format_bytes(nbytes)}.\n"
-                    "This may cause some slowdown.\n"
-                    "Consider scattering data ahead of time and using futures."
-                )
+            if self.scheduler.address.startswith("inproc://"):
+                kwargs = {"graph": dsk}
+            else:
+                buffers = []
+                out = pickle.dumps(dsk, buffer_callback=buffers.append)
+                buffers = [buffer.raw() for buffer in buffers]
+                nbytes = len(out) + sum(map(len, buffers))
+                if nbytes > 10_000_000:
+                    warnings.warn(
+                        f"Sending large graph of {format_bytes(nbytes)}.\n"
+                        "This may cause some slowdown.\n"
+                        "Consider scattering data ahead of time and using futures."
+                    )
+                kwargs = {
+                    "graph_header": out,
+                    "graph_frames": buffers,
+                }
 
             self._send_to_scheduler(
                 {
                     "op": "update-graph-hlg",
-                    "graph_header": out,
-                    "graph_frames": buffers,
                     "keys": list(map(stringify, keys)),
                     "priority": priority,
                     "submitting_task": getattr(thread_state, "key", None),
@@ -2900,6 +2905,7 @@ class Client(SyncMethodMixin):
                     "workers": workers,
                     "allow_other_workers": allow_other_workers,
                     "annotations": annotations,
+                    **kwargs,
                 }
             )
             return futures

@@ -4,6 +4,7 @@ import uuid
 import warnings
 from asyncio import TimeoutError
 from collections import defaultdict, deque
+from contextlib import suppress
 
 from tornado.ioloop import PeriodicCallback
 
@@ -561,4 +562,5 @@ class Semaphore(SyncMethodMixin):
         return self.sync(self.scheduler.semaphore_close, name=self.name)
 
     def __del__(self):
-        self.refresh_callback.stop()
+        with suppress(AttributeError):
+            self.refresh_callback.stop()
