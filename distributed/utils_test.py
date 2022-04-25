@@ -483,28 +483,28 @@ def run_worker(q, scheduler_q, config, **kwargs):
                         loop.close(all_fds=True)
 
 
+@log_errors
 def run_nanny(q, scheduler_q, config, **kwargs):
     with dask.config.set(config):
-        with log_errors():
-            with pristine_loop() as loop:
-                scheduler_addr = scheduler_q.get()
+        with pristine_loop() as loop:
+            scheduler_addr = scheduler_q.get()
 
-                async def _():
-                    pid = os.getpid()
-                    try:
-                        worker = await Nanny(scheduler_addr, validate=True, **kwargs)
-                    except Exception as exc:
-                        q.put((pid, exc))
-                    else:
-                        q.put((pid, worker.address))
-                        await worker.finished()
+            async def _():
+                pid = os.getpid()
+                try:
+                    worker = await Nanny(scheduler_addr, validate=True, **kwargs)
+                except Exception as exc:
+                    q.put((pid, exc))
+                else:
+                    q.put((pid, worker.address))
+                    await worker.finished()
 
-                # Scheduler might've failed
-                if isinstance(scheduler_addr, str):
-                    try:
-                        loop.run_sync(_)
-                    finally:
-                        loop.close(all_fds=True)
+            # Scheduler might've failed
+            if isinstance(scheduler_addr, str):
+                try:
+                    loop.run_sync(_)
+                finally:
+                    loop.close(all_fds=True)
 
 
 @contextmanager
