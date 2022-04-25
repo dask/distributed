@@ -2617,7 +2617,7 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
                 import time
 
                 time.sleep(delay)
-                return SlowDeserializeCallable(delay)
+                self.__init__(delay)
 
             def __call__(self, *args, **kwargs):
                 return 41
