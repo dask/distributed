@@ -3138,10 +3138,10 @@ class Worker(ServerNode):
 
             self.ensure_communicating()
 
+    @log_errors
     def _readd_busy_worker(self, worker: str) -> None:
-        with log_errors():
-            self.busy_workers.remove(worker)
-            self.ensure_communicating()
+        self.busy_workers.remove(worker)
+        self.ensure_communicating()
 
     @log_errors
     async def find_missing(self) -> None:
