@@ -848,10 +848,15 @@ class WorkerProcess:
                 Wait for an incoming stop message and then stop the
                 worker cleanly.
                 """
-                msg = child_stop_q.get()
-                child_stop_q.close()
-                assert msg.pop("op") == "stop"
-                loop.add_callback(do_stop, **msg)
+                try:
+                    msg = child_stop_q.get()
+                except (TypeError, OSError):
+                    logger.error("Worker process died unexpectedly")
+                    msg = {"op": "stop"}
+                finally:
+                    child_stop_q.close()
+                    assert msg.pop("op") == "stop"
+                    loop.add_callback(do_stop, **msg)
 
             thread = threading.Thread(
                 target=watch_stop_q, name="Nanny stop queue watch"
