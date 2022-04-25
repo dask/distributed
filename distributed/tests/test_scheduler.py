@@ -297,7 +297,7 @@ async def test_retire_workers_empty(s):
 
 @gen_cluster()
 async def test_server_listens_to_other_ops(s, a, b):
-    with rpc(s.address) as r:
+    async with rpc(s.address) as r:
         ident = await r.identity()
         assert ident["type"] == "Scheduler"
         assert ident["id"].lower().startswith("scheduler")

@@ -79,7 +79,7 @@ async def test_nanny_process_failure(c, s):
 @gen_cluster(nthreads=[])
 async def test_run(s):
     async with Nanny(s.address, nthreads=2) as n:
-        with rpc(n.address) as nn:
+        async with rpc(n.address) as nn:
             response = await nn.run(function=dumps(lambda: 1))
             assert response["status"] == "OK"
             assert response["result"] == 1
@@ -401,7 +401,7 @@ async def test_lifetime(s):
 @gen_cluster(client=True, nthreads=[])
 async def test_nanny_closes_cleanly_2(c, s):
     async with Nanny(s.address) as n:
-        with c.rpc(n.worker_address) as w:
+        async with c.rpc(n.worker_address) as w:
             IOLoop.current().add_callback(w.terminate)
             start = time()
             while n.status != Status.closed:

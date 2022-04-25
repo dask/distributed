@@ -60,8 +60,9 @@ from distributed.core import (
     coerce_to_address,
     error_message,
     pingpong,
-    send_recv,
 )
+from distributed.core import rpc as RPCType
+from distributed.core import send_recv
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import _get_plugin_name
 from distributed.diskutils import WorkDir, WorkSpace
@@ -4818,7 +4819,7 @@ def benchmark_memory(
 
 async def benchmark_network(
     address: str,
-    rpc: ConnectionPool,
+    rpc: ConnectionPool | Callable[[str], RPCType],
     sizes: Iterable[str] = ("1 kiB", "10 kiB", "100 kiB", "1 MiB", "10 MiB", "50 MiB"),
     duration="1 s",
 ) -> dict[str, float]:
@@ -4833,7 +4834,7 @@ async def benchmark_network(
 
     duration = parse_timedelta(duration)
     out = {}
-    with rpc(address) as r:
+    async with rpc(address) as r:
         for size_str in sizes:
             size = parse_bytes(size_str)
             data = to_serialize(randbytes(size))

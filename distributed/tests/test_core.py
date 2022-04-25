@@ -489,7 +489,7 @@ async def test_errors():
     async with Server({"div": stream_div}) as server:
         await server.listen(0)
 
-        with rpc(("127.0.0.1", server.port)) as r:
+        async with rpc(("127.0.0.1", server.port)) as r:
             with pytest.raises(ZeroDivisionError):
                 await r.div(x=1, y=0)
 
@@ -820,7 +820,7 @@ async def test_compression(compression, serialize):
         async with Server({"echo": serialize}) as server:
             await server.listen("tcp://")
 
-            with rpc(server.address) as r:
+            async with rpc(server.address) as r:
                 data = b"1" * 1000000
                 result = await r.echo(x=to_serialize(data))
                 assert result == {"result": data}
