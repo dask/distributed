@@ -59,7 +59,8 @@ from distributed.utils_test import (
 )
 
 
-def test_All(loop):
+@gen_test()
+async def test_All():
     async def throws():
         1 / 0
 
@@ -69,21 +70,18 @@ def test_All(loop):
     async def inc(x):
         return x + 1
 
-    async def f():
-        results = await All([inc(i) for i in range(10)])
-        assert results == list(range(1, 11))
+    results = await All([inc(i) for i in range(10)])
+    assert results == list(range(1, 11))
 
-        start = time()
-        for tasks in [[throws(), slow()], [slow(), throws()]]:
-            try:
-                await All(tasks)
-                assert False
-            except ZeroDivisionError:
-                pass
-            end = time()
-            assert end - start < 10
-
-    loop.run_sync(f)
+    start = time()
+    for tasks in [[throws(), slow()], [slow(), throws()]]:
+        try:
+            await All(tasks)
+            assert False
+        except ZeroDivisionError:
+            pass
+        end = time()
+        assert end - start < 10
 
 
 def test_sync_error(loop_in_thread):
