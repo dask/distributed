@@ -3717,8 +3717,9 @@ class Scheduler(SchedulerState, ServerNode):
         self._setup_logging(logger)
 
         # Attributes
-        if contact_address:
-            self.contact_address = contact_address
+        if contact_address is None:
+            contact_address = dask.config.get("distributed.scheduler.contact-address")
+        self.contact_address = contact_address
         if allowed_failures is None:
             allowed_failures = dask.config.get("distributed.scheduler.allowed-failures")
         self.allowed_failures = allowed_failures
