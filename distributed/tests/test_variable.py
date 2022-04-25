@@ -2,13 +2,13 @@ import asyncio
 import logging
 import random
 from datetime import timedelta
-from time import monotonic, sleep
+from time import sleep
 
 import pytest
 
 from distributed import Client, Nanny, TimeoutError, Variable, wait, worker_client
 from distributed.compatibility import WINDOWS
-from distributed.metrics import time
+from distributed.metrics import monotonic, time
 from distributed.utils_test import captured_logger, div, gen_cluster, inc, popen
 
 
