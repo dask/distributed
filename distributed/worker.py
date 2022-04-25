@@ -4009,6 +4009,16 @@ class Worker(ServerNode):
 
                 pdb.set_trace()
 
+            self.log_event(
+                "invalid-worker-task-states",
+                {
+                    "key": ts.key,
+                    "state": ts.state,
+                    "story": self.story(ts),
+                    "worker": self.address,
+                },
+            )
+
             raise AssertionError(
                 f"Invalid TaskState encountered for {ts!r}.\nStory:\n{self.story(ts)}\n"
             ) from e
