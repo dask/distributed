@@ -222,7 +222,10 @@ class Worker(ServerNode):
     * **tasks**: ``{key: TaskState}``
         The tasks currently executing on this worker (and any dependencies of those tasks)
     * **data_needed**: UniqueTaskHeap
-        The tasks which still require data in order to execute, prioritized as a heap
+        The tasks which still require data in order to execute and are in memory on at
+        least another worker, prioritized as a heap
+    * **data_needed_per_worker**: ``{worker: UniqueTaskHeap}``
+        Same as data_needed, split by worker
     * **ready**: [keys]
         Keys that are ready to run.  Stored in a LIFO stack
     * **constrained**: [keys]
@@ -237,14 +240,16 @@ class Worker(ServerNode):
         long-running clients.
     * **has_what**: ``{worker: {deps}}``
         The data that we care about that we think a worker has
-    * **pending_data_per_worker**: ``{worker: UniqueTaskHeap}``
-        The data on each worker that we still want, prioritized as a heap
     * **in_flight_tasks**: ``int``
         A count of the number of tasks that are coming to us in current
         peer-to-peer connections
     * **in_flight_workers**: ``{worker: {task}}``
         The workers from which we are currently gathering data and the
-        dependencies we expect from those connections
+        dependencies we expect from those connections. Workers in this dict won't be
+        asked for additional dependencies until the current query returns.
+    * **busy_workers**: ``{worker}``
+        Workers that recently returned a busy status. Workers in this set won't be
+        asked for additional dependencies for some time.
     * **comm_bytes**: ``int``
         The total number of bytes in flight
     * **threads**: ``{key: int}``
@@ -339,11 +344,12 @@ class Worker(ServerNode):
     tasks: dict[str, TaskState]
     waiting_for_data_count: int
     has_what: defaultdict[str, set[str]]  # {worker address: {ts.key, ...}
-    pending_data_per_worker: defaultdict[str, UniqueTaskHeap]
+    data_needed: UniqueTaskHeap
+    data_needed_per_worker: defaultdict[str, UniqueTaskHeap]
     nanny: Nanny | None
     _lock: threading.Lock
-    data_needed: UniqueTaskHeap
     in_flight_workers: dict[str, set[str]]  # {worker address: {ts.key, ...}}
+    busy_workers: set[str]
     total_out_connections: int
     total_in_connections: int
     comm_threshold_bytes: int
@@ -375,7 +381,6 @@ class Worker(ServerNode):
     incoming_count: int
     outgoing_count: int
     outgoing_current_count: int
-    repetitively_busy: int
     bandwidth: float
     latency: float
     profile_cycle_interval: float
@@ -484,13 +489,13 @@ class Worker(ServerNode):
         self.tasks = {}
         self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)
-        self.pending_data_per_worker = defaultdict(UniqueTaskHeap)
+        self.data_needed = UniqueTaskHeap()
+        self.data_needed_per_worker = defaultdict(UniqueTaskHeap)
         self.nanny = nanny
         self._lock = threading.Lock()
 
-        self.data_needed = UniqueTaskHeap()
-
         self.in_flight_workers = {}
+        self.busy_workers = set()
         self.total_out_connections = dask.config.get(
             "distributed.worker.connections.outgoing"
         )
@@ -584,7 +589,6 @@ class Worker(ServerNode):
         self.outgoing_transfer_log = deque(maxlen=100000)
         self.outgoing_count = 0
         self.outgoing_current_count = 0
-        self.repetitively_busy = 0
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
         self.bandwidth_workers = defaultdict(
             lambda: (0, 0)
@@ -1019,13 +1023,14 @@ class Worker(ServerNode):
             "ready": self.ready,
             "constrained": self.constrained,
             "data_needed": list(self.data_needed),
-            "pending_data_per_worker": {
-                w: list(v) for w, v in self.pending_data_per_worker.items()
+            "data_needed_per_worker": {
+                w: list(v) for w, v in self.data_needed_per_worker.items()
             },
             "long_running": self.long_running,
             "executing_count": self.executing_count,
             "in_flight_tasks": self.in_flight_tasks,
             "in_flight_workers": self.in_flight_workers,
+            "busy_workers": self.busy_workers,
             "log": self.log,
             "stimulus_log": self.stimulus_log,
             "tasks": self.tasks,
@@ -1927,6 +1932,8 @@ class Worker(ServerNode):
         ts.state = "fetch"
         ts.done = False
         self.data_needed.push(ts)
+        for w in ts.who_has:
+            self.data_needed_per_worker[w].push(ts)
         return {}, []
 
     def transition_missing_released(
@@ -1962,11 +1969,11 @@ class Worker(ServerNode):
         if self.validate:
             assert ts.state == "released"
             assert ts.priority is not None
-        for w in ts.who_has:
-            self.pending_data_per_worker[w].push(ts)
         ts.state = "fetch"
         ts.done = False
         self.data_needed.push(ts)
+        for w in ts.who_has:
+            self.data_needed_per_worker[w].push(ts)
         return {}, []
 
     def transition_generic_released(
@@ -2402,7 +2409,7 @@ class Worker(ServerNode):
         else:
             self.data_needed.push(ts)
             for w in ts.who_has:
-                self.pending_data_per_worker[w].push(ts)
+                self.data_needed_per_worker[w].push(ts)
         return recommendations, []
 
     def transition_flight_error(
@@ -2710,17 +2717,18 @@ class Worker(ServerNode):
 
     def ensure_communicating(self) -> None:
         stimulus_id = f"ensure-communicating-{time()}"
-        skipped_worker_in_flight = []
+        skipped_worker_in_flight_or_busy = []
 
         while self.data_needed and (
             len(self.in_flight_workers) < self.total_out_connections
             or self.comm_nbytes < self.comm_threshold_bytes
         ):
             logger.debug(
-                "Ensure communicating. Pending: %d. Connections: %d/%d",
+                "Ensure communicating. Pending: %d. Connections: %d/%d. Busy: %d",
                 len(self.data_needed),
                 len(self.in_flight_workers),
                 self.total_out_connections,
+                len(self.busy_workers),
             )
 
             ts = self.data_needed.pop()
@@ -2730,20 +2738,20 @@ class Worker(ServerNode):
 
             if self.validate:
                 assert ts.who_has
+                assert self.address not in ts.who_has
 
-            workers = [w for w in ts.who_has if w not in self.in_flight_workers]
+            workers = [
+                w
+                for w in ts.who_has
+                if w not in self.in_flight_workers and w not in self.busy_workers
+            ]
             if not workers:
-                assert ts.priority is not None
-                skipped_worker_in_flight.append(ts)
+                skipped_worker_in_flight_or_busy.append(ts)
                 continue
 
             host = get_address_host(self.address)
             local = [w for w in workers if get_address_host(w) == host]
-            if local:
-                worker = random.choice(local)
-            else:
-                worker = random.choice(list(workers))
-            assert worker != self.address
+            worker = random.choice(local or workers)
 
             to_gather, total_nbytes = self.select_keys_for_gather(worker, ts.key)
 
@@ -2766,8 +2774,8 @@ class Worker(ServerNode):
                 stimulus_id=stimulus_id,
             )
 
-        for el in skipped_worker_in_flight:
-            self.data_needed.push(el)
+        for ts in skipped_worker_in_flight_or_busy:
+            self.data_needed.push(ts)
 
     def _get_task_finished_msg(self, ts: TaskState) -> TaskFinishedMsg:
         if ts.key not in self.data and ts.key not in self.actors:
@@ -2855,14 +2863,16 @@ class Worker(ServerNode):
         deps = {dep}
 
         total_bytes = self.tasks[dep].get_nbytes()
-        L = self.pending_data_per_worker[worker]
+        tasks = self.data_needed_per_worker[worker]
 
-        while L:
-            ts = L.pop()
+        while tasks:
+            ts = tasks.peek()
             if ts.state != "fetch":
+                tasks.pop()
                 continue
             if total_bytes + ts.get_nbytes() > self.target_message_size:
                 break
+            tasks.pop()
             deps.add(ts.key)
             total_bytes += ts.get_nbytes()
 
@@ -3052,7 +3062,7 @@ class Worker(ServerNode):
         except OSError:
             logger.exception("Worker stream died during communication: %s", worker)
             has_what = self.has_what.pop(worker)
-            self.pending_data_per_worker.pop(worker)
+            self.data_needed_per_worker.pop(worker)
             self.log.append(
                 ("receive-dep-failed", worker, has_what, stimulus_id, time())
             )
@@ -3084,6 +3094,12 @@ class Worker(ServerNode):
                 self.log.append(
                     ("busy-gather", worker, to_gather_keys, stimulus_id, time())
                 )
+                # Avoid hammering the worker. If there are multiple replicas
+                # available, immediately try fetching from a different worker.
+                self.busy_workers.add(worker)
+                self.io_loop.call_later(0.15, self._readd_busy_worker, worker)
+
+            refresh_who_has = set()
 
             for d in self.in_flight_workers.pop(worker):
                 ts = self.tasks[d]
@@ -3097,6 +3113,8 @@ class Worker(ServerNode):
                     recommendations[ts] = ("memory", data[d])
                 elif busy:
                     recommendations[ts] = "fetch"
+                    if not ts.who_has - self.busy_workers:
+                        refresh_who_has.add(ts.key)
                 elif ts not in recommendations:
                     ts.who_has.discard(worker)
                     self.has_what[worker].discard(ts.key)
@@ -3111,16 +3129,20 @@ class Worker(ServerNode):
             del data, response
             self.transitions(recommendations, stimulus_id=stimulus_id)
 
-            if not busy:
-                self.repetitively_busy = 0
-            else:
-                # Exponential backoff to avoid hammering scheduler/worker
-                self.repetitively_busy += 1
-                await asyncio.sleep(0.100 * 1.5**self.repetitively_busy)
-
-                await self.query_who_has(*to_gather_keys)
+            if refresh_who_has:
+                # All workers that hold known replicas of our tasks are busy.
+                # Try querying the scheduler for unknown ones.
+                who_has = await retry_operation(
+                    self.scheduler.who_has, keys=refresh_who_has
+                )
+                self.update_who_has(who_has)
 
             self.ensure_communicating()
+
+    @log_errors
+    def _readd_busy_worker(self, worker: str) -> None:
+        self.busy_workers.remove(worker)
+        self.ensure_communicating()
 
     @log_errors
     async def find_missing(self) -> None:
@@ -3151,12 +3173,6 @@ class Worker(ServerNode):
             ].callback_time = self.periodic_callbacks["heartbeat"].callback_time
             self.ensure_communicating()
 
-    @log_errors
-    async def query_who_has(self, *deps: str) -> dict[str, Collection[str]]:
-        who_has = await retry_operation(self.scheduler.who_has, keys=deps)
-        self.update_who_has(who_has)
-        return who_has
-
     def update_who_has(self, who_has: dict[str, Collection[str]]) -> None:
         try:
             for dep, workers in who_has.items():
@@ -3177,7 +3193,7 @@ class Worker(ServerNode):
 
                     for worker in workers:
                         self.has_what[worker].add(dep)
-                        self.pending_data_per_worker[worker].push(dep_ts)
+                        self.data_needed_per_worker[worker].push(dep_ts)
         except Exception as e:  # pragma: no cover
             logger.exception(e)
             if LOG_PDB:
@@ -3929,7 +3945,7 @@ class Worker(ServerNode):
 
         for w in ts.who_has:
             assert ts.key in self.has_what[w]
-            assert ts in self.pending_data_per_worker[w]
+            assert ts in self.data_needed_per_worker[w]
 
     def validate_task_missing(self, ts):
         assert ts.key not in self.data
