@@ -1880,6 +1880,7 @@ def _reconfigure():
 
 @contextmanager
 def clean(threads=True, instances=True, processes=True):
+    asyncio.set_event_loop(None)
     with check_thread_leak() if threads else nullcontext():
         with check_process_leak(check=processes):
             with check_instances() if instances else nullcontext():
