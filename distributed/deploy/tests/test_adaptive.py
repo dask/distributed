@@ -380,15 +380,19 @@ async def test_adapt_cores_memory():
         assert adapt.maximum == 5
 
 
-def test_adaptive_config():
+@gen_test()
+async def test_adaptive_config():
     with dask.config.set(
         {"distributed.adaptive.minimum": 10, "distributed.adaptive.wait-count": 8}
     ):
-        adapt = Adaptive(interval="5s")
-        assert adapt.minimum == 10
-        assert adapt.maximum == math.inf
-        assert adapt.interval == 5
-        assert adapt.wait_count == 8
+        try:
+            adapt = Adaptive(interval="5s")
+            assert adapt.minimum == 10
+            assert adapt.maximum == math.inf
+            assert adapt.interval == 5
+            assert adapt.wait_count == 8
+        finally:
+            adapt.stop()
 
 
 @gen_test()

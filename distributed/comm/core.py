@@ -202,7 +202,7 @@ class Listener(ABC):
         await self.start()
         return self
 
-    async def __aexit__(self, *exc):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         future = self.stop()
         if inspect.isawaitable(future):
             await future

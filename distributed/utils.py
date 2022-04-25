@@ -20,16 +20,18 @@ import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
 from collections import OrderedDict, UserDict, deque
-from collections.abc import Collection, Container, KeysView, ValuesView
+from collections.abc import Callable, Collection, Container, KeysView, ValuesView
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
+from functools import wraps
 from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
 from types import ModuleType
+from typing import TYPE_CHECKING
 from typing import Any as AnyType
-from typing import ClassVar
+from typing import ClassVar, TypeVar, overload
 
 import click
 import tblib.pickling_support
@@ -64,6 +66,13 @@ else:
 
 logger = _logger = logging.getLogger(__name__)
 
+
+if TYPE_CHECKING:
+    # TODO: import from typing (requires Python >=3.10)
+    from typing_extensions import ParamSpec
+
+    P = ParamSpec("P")
+    T = TypeVar("T")
 
 no_default = "__no_default__"
 
@@ -685,24 +694,102 @@ def key_split_group(x) -> str:
         return "Other"
 
 
-@contextmanager
-def log_errors(pdb=False):
-    from distributed.comm import CommClosedError
+@overload
+def log_errors(func: Callable[P, T], /) -> Callable[P, T]:
+    ...
 
-    try:
-        yield
-    except (CommClosedError, gen.Return):
-        raise
-    except Exception as e:
+
+@overload
+def log_errors(*, pdb: bool = False, unroll_stack: int = 1) -> _LogErrors:
+    ...
+
+
+def log_errors(func=None, /, *, pdb=False, unroll_stack=1):
+    """Log any errors and then reraise them.
+
+    This can be used:
+
+    - As a context manager::
+
+        with log_errors(...):
+            ...
+
+    - As a bare function decorator::
+
+        @log_errors
+        def func(...):
+            ...
+
+    - As a function decorator with parameters::
+
+        @log_errors(...)
+        def func(...):
+            ...
+
+    Parameters
+    ----------
+    pdb: bool, optional
+        Set to True to break into the debugger in case of exception
+    unroll_stack: int, optional
+        Number of levels of stack to unroll when determining the module's name for the
+        purpose of logging. Normally you should omit this. Set to 2 if you are writing a
+        helper function, context manager, or decorator.
+    """
+    le = _LogErrors(pdb=pdb, unroll_stack=unroll_stack)
+    return le(func) if func else le
+
+
+class _LogErrors:
+    __slots__ = ("pdb", "unroll_stack")
+
+    pdb: bool
+    unroll_stack: int
+
+    def __init__(self, pdb: bool, unroll_stack: int):
+        self.pdb = pdb
+        self.unroll_stack = unroll_stack
+
+    def __call__(self, func: Callable[P, T], /) -> Callable[P, T]:
+        self.unroll_stack += 1
+
+        if inspect.iscoroutinefunction(func):
+
+            async def wrapper(*args, **kwargs):
+                with self:
+                    return await func(*args, **kwargs)
+
+        else:
+
+            def wrapper(*args, **kwargs):
+                with self:
+                    return func(*args, **kwargs)
+
+        return wraps(func)(wrapper)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        from distributed.comm import CommClosedError
+
+        if not exc_type or issubclass(exc_type, (CommClosedError, gen.Return)):
+            return
+
+        stack = inspect.stack()
+        frame = stack[self.unroll_stack]
+        mod = inspect.getmodule(frame[0])
+        modname = mod.__name__
+
         try:
-            logger.exception(e)
-        except TypeError:  # logger becomes None during process cleanup
-            pass
-        if pdb:
-            import pdb
+            logger = logging.getLogger(modname)
+            logger.exception(exc_value)
+        except Exception:  # Interpreter teardown
+            pass  # pragma: nocover
 
-            pdb.set_trace()
-        raise
+        if self.pdb:
+            import pdb  # pragma: nocover
+
+            pdb.set_trace()  # pragma: nocover
 
 
 def silence_logging(level, root="distributed"):
@@ -1312,7 +1399,7 @@ def import_term(name: str):
 
 
 async def offload(fn, *args, **kwargs):
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     # Retain context vars while deserializing; see https://bugs.python.org/issue34014
     context = contextvars.copy_context()
     return await loop.run_in_executor(
@@ -1324,13 +1411,13 @@ class EmptyContext:
     def __enter__(self):
         pass
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_value, traceback):
         pass
 
     async def __aenter__(self):
         pass
 
-    async def __aexit__(self, *args):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         pass
 
 

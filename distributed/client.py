@@ -1207,38 +1207,38 @@ class Client(SyncMethodMixin):
 
         return self
 
+    @log_errors
     async def _reconnect(self):
-        with log_errors():
-            assert self.scheduler_comm.comm.closed()
+        assert self.scheduler_comm.comm.closed()
 
-            self.status = "connecting"
-            self.scheduler_comm = None
+        self.status = "connecting"
+        self.scheduler_comm = None
 
-            for st in self.futures.values():
-                st.cancel()
-            self.futures.clear()
+        for st in self.futures.values():
+            st.cancel()
+        self.futures.clear()
 
-            timeout = self._timeout
-            deadline = time() + timeout
-            while timeout > 0 and self.status == "connecting":
-                try:
-                    await self._ensure_connected(timeout=timeout)
-                    break
-                except OSError:
-                    # Wait a bit before retrying
-                    await asyncio.sleep(0.1)
-                    timeout = deadline - time()
-                except ImportError:
-                    await self._close()
-                    break
-
-            else:
-                logger.error(
-                    "Failed to reconnect to scheduler after %.2f "
-                    "seconds, closing client",
-                    self._timeout,
-                )
+        timeout = self._timeout
+        deadline = time() + timeout
+        while timeout > 0 and self.status == "connecting":
+            try:
+                await self._ensure_connected(timeout=timeout)
+                break
+            except OSError:
+                # Wait a bit before retrying
+                await asyncio.sleep(0.1)
+                timeout = deadline - time()
+            except ImportError:
                 await self._close()
+                break
+
+        else:
+            logger.error(
+                "Failed to reconnect to scheduler after %.2f "
+                "seconds, closing client",
+                self._timeout,
+            )
+            await self._close()
 
     async def _ensure_connected(self, timeout=None):
         if (
@@ -1351,10 +1351,10 @@ class Client(SyncMethodMixin):
         await self
         return self
 
-    async def __aexit__(self, typ, value, traceback):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         await self._close()
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback):
         self.close()
 
     def __del__(self):
@@ -1385,54 +1385,54 @@ class Client(SyncMethodMixin):
                 {"op": "client-releases-keys", "keys": [key], "client": self.id}
             )
 
+    @log_errors
     async def _handle_report(self):
         """Listen to scheduler"""
-        with log_errors():
-            try:
-                while True:
-                    if self.scheduler_comm is None:
+        try:
+            while True:
+                if self.scheduler_comm is None:
+                    break
+                try:
+                    msgs = await self.scheduler_comm.comm.read()
+                except CommClosedError:
+                    if is_python_shutting_down():
+                        return
+                    if self.status == "running":
+                        logger.info("Client report stream closed to scheduler")
+                        logger.info("Reconnecting...")
+                        self.status = "connecting"
+                        await self._reconnect()
+                        continue
+                    else:
                         break
+                if not isinstance(msgs, (list, tuple)):
+                    msgs = (msgs,)
+
+                breakout = False
+                for msg in msgs:
+                    logger.debug("Client receives message %s", msg)
+
+                    if "status" in msg and "error" in msg["status"]:
+                        typ, exc, tb = clean_exception(**msg)
+                        raise exc.with_traceback(tb)
+
+                    op = msg.pop("op")
+
+                    if op == "close" or op == "stream-closed":
+                        breakout = True
+                        break
+
                     try:
-                        msgs = await self.scheduler_comm.comm.read()
-                    except CommClosedError:
-                        if is_python_shutting_down():
-                            return
-                        if self.status == "running":
-                            logger.info("Client report stream closed to scheduler")
-                            logger.info("Reconnecting...")
-                            self.status = "connecting"
-                            await self._reconnect()
-                            continue
-                        else:
-                            break
-                    if not isinstance(msgs, (list, tuple)):
-                        msgs = (msgs,)
-
-                    breakout = False
-                    for msg in msgs:
-                        logger.debug("Client receives message %s", msg)
-
-                        if "status" in msg and "error" in msg["status"]:
-                            typ, exc, tb = clean_exception(**msg)
-                            raise exc.with_traceback(tb)
-
-                        op = msg.pop("op")
-
-                        if op == "close" or op == "stream-closed":
-                            breakout = True
-                            break
-
-                        try:
-                            handler = self._stream_handlers[op]
-                            result = handler(**msg)
-                            if inspect.isawaitable(result):
-                                await result
-                        except Exception as e:
-                            logger.exception(e)
-                    if breakout:
-                        break
-            except CancelledError:
-                pass
+                        handler = self._stream_handlers[op]
+                        result = handler(**msg)
+                        if inspect.isawaitable(result):
+                            await result
+                    except Exception as e:
+                        logger.exception(e)
+                if breakout:
+                    break
+        except CancelledError:
+            pass
 
     def _handle_key_in_memory(self, key=None, type=None, workers=None):
         state = self.futures.get(key)
@@ -2444,37 +2444,37 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self._retry, futures, asynchronous=asynchronous)
 
+    @log_errors
     async def _publish_dataset(self, *args, name=None, override=False, **kwargs):
-        with log_errors():
-            coroutines = []
+        coroutines = []
 
-            def add_coro(name, data):
-                keys = [stringify(f.key) for f in futures_of(data)]
-                coroutines.append(
-                    self.scheduler.publish_put(
-                        keys=keys,
-                        name=name,
-                        data=to_serialize(data),
-                        override=override,
-                        client=self.id,
-                    )
+        def add_coro(name, data):
+            keys = [stringify(f.key) for f in futures_of(data)]
+            coroutines.append(
+                self.scheduler.publish_put(
+                    keys=keys,
+                    name=name,
+                    data=to_serialize(data),
+                    override=override,
+                    client=self.id,
                 )
+            )
 
-            if name:
-                if len(args) == 0:
-                    raise ValueError(
-                        "If name is provided, expecting call signature like"
-                        " publish_dataset(df, name='ds')"
-                    )
-                # in case this is a singleton, collapse it
-                elif len(args) == 1:
-                    args = args[0]
-                add_coro(name, args)
+        if name:
+            if len(args) == 0:
+                raise ValueError(
+                    "If name is provided, expecting call signature like"
+                    " publish_dataset(df, name='ds')"
+                )
+            # in case this is a singleton, collapse it
+            elif len(args) == 1:
+                args = args[0]
+            add_coro(name, args)
 
-            for name, data in kwargs.items():
-                add_coro(name, data)
+        for name, data in kwargs.items():
+            add_coro(name, data)
 
-            await asyncio.gather(*coroutines)
+        await asyncio.gather(*coroutines)
 
     def publish_dataset(self, *args, **kwargs):
         """
@@ -5173,7 +5173,7 @@ class get_task_stream:
         self.start = time()
         return self
 
-    def __exit__(self, typ, value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback):
         L = self.client.get_task_stream(
             start=self.start, plot=self._plot, filename=self._filename
         )
@@ -5184,7 +5184,7 @@ class get_task_stream:
     async def __aenter__(self):
         return self
 
-    async def __aexit__(self, typ, value, traceback):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         L = await self.client.get_task_stream(
             start=self.start, plot=self._plot, filename=self._filename
         )
@@ -5237,7 +5237,7 @@ class performance_report:
         )
         await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
 
-    async def __aexit__(self, typ, value, traceback, code=None):
+    async def __aexit__(self, exc_type, exc_value, traceback, code=None):
         client = get_client()
         if code is None:
             code = client._get_computation_code(self._stacklevel + 1)
@@ -5250,10 +5250,10 @@ class performance_report:
     def __enter__(self):
         get_client().sync(self.__aenter__)
 
-    def __exit__(self, typ, value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback):
         client = get_client()
         code = client._get_computation_code(self._stacklevel + 1)
-        client.sync(self.__aexit__, type, value, traceback, code=code)
+        client.sync(self.__aexit__, exc_type, exc_value, traceback, code=code)
 
 
 class get_task_metadata:
@@ -5283,7 +5283,7 @@ class get_task_metadata:
         await get_client().scheduler.start_task_metadata(name=self.name)
         return self
 
-    async def __aexit__(self, typ, value, traceback):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         response = await get_client().scheduler.stop_task_metadata(name=self.name)
         self.metadata = response["metadata"]
         self.state = response["state"]
@@ -5291,8 +5291,8 @@ class get_task_metadata:
     def __enter__(self):
         return get_client().sync(self.__aenter__)
 
-    def __exit__(self, typ, value, traceback):
-        return get_client().sync(self.__aexit__, type, value, traceback)
+    def __exit__(self, exc_type, exc_value, traceback):
+        return get_client().sync(self.__aexit__, exc_type, exc_value, traceback)
 
 
 @contextmanager

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import uuid
 from collections import defaultdict, deque
 from collections.abc import Container
 from math import log2
@@ -78,7 +77,7 @@ class WorkStealing(SchedulerPlugin):
         # { worker state: occupancy }
         self.in_flight_occupancy = defaultdict(lambda: 0)
         self._in_flight_event = asyncio.Event()
-
+        self._request_counter = 0
         self.scheduler.stream_handlers["steal-response"] = self.move_task_confirm
 
     async def start(self, scheduler=None):
@@ -220,7 +219,8 @@ class WorkStealing(SchedulerPlugin):
                 return "in-flight"
             # Stimulus IDs are used to verify the response, see
             # `move_task_confirm`. Therefore, this must be truly unique.
-            stimulus_id = f"steal-{uuid.uuid4().hex}"
+            stimulus_id = f"steal-{self._request_counter}"
+            self._request_counter += 1
 
             key = ts.key
             self.remove_key_from_stealable(ts)
