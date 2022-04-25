@@ -636,20 +636,19 @@ async def test_nanny_terminate(c, s, a):
     assert "memory" in out.lower()
 
 
-@pytest.mark.slow
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
     worker_kwargs={"memory_limit": "10 GiB"},
     config={
         "distributed.worker.memory.target": False,
-        "distributed.worker.memory.spill": 0.3,
-        "distributed.worker.memory.pause": 0.5,
+        "distributed.worker.memory.spill": 0.7,
+        "distributed.worker.memory.pause": 0.9,
         "distributed.worker.memory.monitor-interval": "10ms",
     },
 )
 async def test_pause_while_spilling(c, s, a):
-    N = 10
+    N = 50
 
     def get_process_memory():
         if len(a.data) < N:
@@ -657,26 +656,28 @@ async def test_pause_while_spilling(c, s, a):
             return 0
         elif a.data.fast and not a.data.slow:
             # Trigger spilling
-            return 4 * 2**30
-        elif a.data.fast:
-            # Trigger pause, but only after we started spilling
-            return 6 * 2**30
+            return 8 * 2**30
         else:
-            return 0
+            # Trigger pause, but only after we started spilling
+            return 10 * 2**30
 
     a.monitor.get_process_memory = get_process_memory
 
     class SlowSpill:
-        def __reduce__(self):
-            sleep(0.1)
-            return SlowSpill, ()
+        def __init__(self, _, paused: bool = False):
+            self.paused = paused
 
-    futs = [c.submit(SlowSpill, pure=False) for _ in range(N)]
-    while a.status != Status.paused:
+        def __reduce__(self):
+            paused = distributed.get_worker().status == Status.paused
+            if not paused:
+                sleep(0.1)
+            return SlowSpill, (None, paused)
+
+    futs = c.map(SlowSpill, range(N))
+    while len(a.data.slow) < N:
         await asyncio.sleep(0.01)
-        # The initial spill still hasn't finished
-        assert a.data.fast
-    assert a.data.fast
+    assert a.status == Status.paused
+    assert any(sp.paused for sp in a.data.values())
 
 
 @pytest.mark.slow
