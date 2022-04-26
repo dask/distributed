@@ -169,6 +169,13 @@ def fail_hard(method):
                 return await method(self, *args, **kwargs)
             except Exception as e:
                 logger.exception(e)
+                self.log_event(
+                    "worker-fail-hard",
+                    {
+                        **error_message(e),
+                        "worker": self.address,
+                    },
+                )
                 # TODO: send event to scheduler
                 await self.close(nanny=False, executor_wait=False)
                 raise
@@ -181,6 +188,13 @@ def fail_hard(method):
                 return method(self, *args, **kwargs)
             except Exception as e:
                 logger.exception(e)
+                self.log_event(
+                    "worker-fail-hard",
+                    {
+                        **error_message(e),
+                        "worker": self.address,
+                    },
+                )
                 # TODO: send event to scheduler
                 self.loop.add_callback(self.close, nanny=False, executor_wait=False)
                 raise
@@ -931,14 +945,15 @@ class Worker(ServerNode):
         return self._deque_handler.deque
 
     def log_event(self, topic, msg):
-        self.loop.add_callback(
-            self.batched_stream.send,
-            {
-                "op": "log-event",
-                "topic": topic,
-                "msg": msg,
-            },
-        )
+        full_msg = {
+            "op": "log-event",
+            "topic": topic,
+            "msg": msg,
+        }
+        if self.thread_id == threading.get_ident():
+            self.batched_stream.send(full_msg)
+        else:
+            self.loop.add_callback(self.batched_stream.send, full_msg)
 
     @property
     def executing_count(self) -> int:
@@ -4138,7 +4153,6 @@ class Worker(ServerNode):
 
         except Exception as e:
             logger.error("Validate state failed.  Closing.", exc_info=e)
-            self.loop.add_callback(self.close)
             logger.exception(e)
             if LOG_PDB:
                 import pdb

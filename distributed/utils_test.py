@@ -50,13 +50,21 @@ from distributed.comm import Comm
 from distributed.comm.tcp import TCP
 from distributed.compatibility import WINDOWS
 from distributed.config import initialize_logging
-from distributed.core import CommClosedError, ConnectionPool, Status, connect, rpc
+from distributed.core import (
+    CommClosedError,
+    ConnectionPool,
+    Status,
+    clean_exception,
+    connect,
+    rpc,
+)
 from distributed.deploy import SpecCluster
 from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
 from distributed.nanny import Nanny
 from distributed.node import ServerNode
 from distributed.proctitle import enable_proctitle_on_children
+from distributed.protocol import deserialize
 from distributed.security import Security
 from distributed.utils import (
     DequeHandler,
@@ -867,6 +875,7 @@ async def start_cluster(
             await s.close(fast=True)
             check_invalid_worker_transitions(s)
             check_invalid_task_states(s)
+            check_worker_fail_hard(s)
             raise TimeoutError("Cluster creation timeout")
     return s, workers
 
@@ -898,6 +907,20 @@ def check_invalid_task_states(s: Scheduler) -> None:
     raise ValueError("Invalid worker task state")
 
 
+def check_worker_fail_hard(s: Scheduler) -> None:
+    if not s.events.get("worker-fail-hard"):
+        return
+
+    for timestamp, msg in s.events["worker-fail-hard"]:
+        msg = msg.copy()
+        worker = msg.pop("worker")
+        msg["exception"] = deserialize(msg["exception"].header, msg["exception"].frames)
+        msg["traceback"] = deserialize(msg["traceback"].header, msg["traceback"].frames)
+        print("Failed worker", worker)
+        typ, exc, tb = clean_exception(**msg)
+        raise exc.with_traceback(tb)
+
+
 async def end_cluster(s, workers):
     logger.debug("Closing out test cluster")
 
@@ -910,6 +933,7 @@ async def end_cluster(s, workers):
     s.stop()
     check_invalid_worker_transitions(s)
     check_invalid_task_states(s)
+    check_worker_fail_hard(s)
 
 
 def gen_cluster(

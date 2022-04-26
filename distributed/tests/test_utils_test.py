@@ -679,3 +679,17 @@ def test_invalid_worker_states(capsys):
 
     assert "released" in out + err
     assert "task-name" in out + err
+
+
+def test_worker_fail_hard(capsys):
+    @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+    async def test_fail_hard(c, s, a):
+        with pytest.raises(Exception):
+            await a.gather_dep(
+                worker="abcd", to_gather=["x"], total_nbytes=0, stimulus_id="foo"
+            )
+
+    with pytest.raises(Exception) as info:
+        test_fail_hard()
+
+    assert "abcd" in str(info.value)
