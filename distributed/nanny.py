@@ -858,7 +858,8 @@ class WorkerProcess:
                     msg = {"op": "stop"}
                 finally:
                     child_stop_q.close()
-                    assert msg.pop("op") == "stop"
+                    assert msg["op"] == "stop", msg
+                    del msg["op"]
                     loop.add_callback(do_stop, **msg)
 
             thread = threading.Thread(
