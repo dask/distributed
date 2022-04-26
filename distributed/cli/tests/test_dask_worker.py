@@ -704,7 +704,7 @@ def test_timeout(nanny):
 @gen_cluster(client=True, nthreads=[])
 async def test_sigint(c, s, nanny):
     with popen(["dask-worker", s.address, nanny], flush_output=False) as worker:
-        await c.wait_for_workers(2)
+        await c.wait_for_workers(1)
         worker.send_signal(signal.SIGINT)
         logs = [worker.stdout.readline().decode().lower() for _ in range(25)]
         assert not any("timed out" in log for log in logs)
