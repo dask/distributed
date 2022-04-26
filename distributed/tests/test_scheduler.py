@@ -313,7 +313,7 @@ async def test_remove_worker_from_scheduler(s, a, b):
     )
 
     assert a.address in s.stream_comms
-    await s.remove_worker(address=a.address)
+    await s.remove_worker(address=a.address, stimulus_id="test")
     assert a.address not in s.workers
     assert len(s.workers[b.address].processing) == len(dsk)  # b owns everything
 
@@ -321,9 +321,12 @@ async def test_remove_worker_from_scheduler(s, a, b):
 @gen_cluster()
 async def test_remove_worker_by_name_from_scheduler(s, a, b):
     assert a.address in s.stream_comms
-    assert await s.remove_worker(address=a.name) == "OK"
+    assert await s.remove_worker(address=a.name, stimulus_id="test") == "OK"
     assert a.address not in s.workers
-    assert await s.remove_worker(address=a.address) == "already-removed"
+    assert (
+        await s.remove_worker(address=a.address, stimulus_id="test")
+        == "already-removed"
+    )
 
 
 @gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "10 ms"})
@@ -333,7 +336,7 @@ async def test_clear_events_worker_removal(s, a, b):
     assert b.address in s.events
     assert b.address in s.workers
 
-    await s.remove_worker(address=a.address)
+    await s.remove_worker(address=a.address, stimulus_id="test")
     # Shortly after removal, the events should still be there
     assert a.address in s.events
     assert a.address not in s.workers
@@ -596,7 +599,7 @@ async def test_ready_remove_worker(s, a, b):
 
     assert all(len(w.processing) > w.nthreads for w in s.workers.values())
 
-    await s.remove_worker(address=a.address)
+    await s.remove_worker(address=a.address, stimulus_id="test")
 
     assert set(s.workers) == {b.address}
     assert all(len(w.processing) > w.nthreads for w in s.workers.values())
@@ -789,7 +792,7 @@ async def test_story(c, s, a, b):
     story = s.story(x.key)
     assert all(line in s.transition_log for line in story)
     assert len(story) < len(s.transition_log)
-    assert all(x.key == line[0] or x.key in line[-2] for line in story)
+    assert all(x.key == line[0] or x.key in line[3] for line in story)
 
     assert len(s.story(x.key, y.key)) > len(story)
 
@@ -1212,7 +1215,7 @@ async def test_run_on_scheduler_disabled(c, s, a, b):
 async def test_close_worker(c, s, a, b):
     assert len(s.workers) == 2
 
-    await s.close_worker(worker=a.address)
+    await s.close_worker(worker=a.address, stimulus_id="test")
 
     assert len(s.workers) == 1
     assert a.address not in s.workers
@@ -1230,7 +1233,7 @@ async def test_close_nanny(c, s, a, b):
     assert a.process.is_alive()
     a_worker_address = a.worker_address
     start = time()
-    await s.close_worker(worker=a_worker_address)
+    await s.close_worker(worker=a_worker_address, stimulus_id="test")
 
     assert len(s.workers) == 1
     assert a_worker_address not in s.workers
@@ -3094,7 +3097,9 @@ async def test_rebalance_dead_recipient(client, s, a, b, c):
     await c.close()
     assert s.workers.keys() == {a.address, b.address}
 
-    out = await s._rebalance_move_data([(a_ws, b_ws, x_ts), (a_ws, c_ws, y_ts)])
+    out = await s._rebalance_move_data(
+        [(a_ws, b_ws, x_ts), (a_ws, c_ws, y_ts)], stimulus_id="test"
+    )
     assert out == {"status": "partial-fail", "keys": [y.key]}
     assert a.data == {y.key: "y"}
     assert b.data == {x.key: "x"}
@@ -3113,7 +3118,7 @@ async def test_delete_worker_data(c, s, a, b):
     assert b.data == {y.key: "y"}
     assert s.tasks.keys() == {x.key, y.key, z.key}
 
-    await s.delete_worker_data(a.address, [x.key, y.key])
+    await s.delete_worker_data(a.address, [x.key, y.key], stimulus_id="test")
     assert a.data == {z.key: "z"}
     assert b.data == {y.key: "y"}
     assert s.tasks.keys() == {y.key, z.key}
@@ -3127,8 +3132,8 @@ async def test_delete_worker_data_double_delete(c, s, a):
     """
     x, y = await c.scatter(["x", "y"])
     await asyncio.gather(
-        s.delete_worker_data(a.address, [x.key]),
-        s.delete_worker_data(a.address, [x.key]),
+        s.delete_worker_data(a.address, [x.key], stimulus_id="test"),
+        s.delete_worker_data(a.address, [x.key], stimulus_id="test"),
     )
     assert a.data == {y.key: "y"}
     a_ws = s.workers[a.address]
@@ -3143,7 +3148,7 @@ async def test_delete_worker_data_bad_worker(s, a, b):
     """
     await a.close()
     assert s.workers.keys() == {b.address}
-    await s.delete_worker_data(a.address, ["x"])
+    await s.delete_worker_data(a.address, ["x"], stimulus_id="test")
 
 
 @pytest.mark.parametrize("bad_first", [False, True])
@@ -3158,7 +3163,7 @@ async def test_delete_worker_data_bad_task(c, s, a, bad_first):
     assert s.tasks.keys() == {x.key, y.key}
 
     keys = ["notexist", x.key] if bad_first else [x.key, "notexist"]
-    await s.delete_worker_data(a.address, keys)
+    await s.delete_worker_data(a.address, keys, stimulus_id="test")
     assert a.data == {y.key: "y"}
     assert s.tasks.keys() == {y.key}
     assert s.workers[a.address].nbytes == s.tasks[y.key].nbytes
@@ -3243,13 +3248,13 @@ async def test_worker_reconnect_task_memory(c, s, a):
     while not a.executing_count and not a.data:
         await asyncio.sleep(0.001)
 
-    await s.remove_worker(address=a.address, close=False)
+    await s.remove_worker(address=a.address, close=False, stimulus_id="test")
     while not res.done():
         await a.heartbeat()
 
     await res
     assert ("no-worker", "memory") in {
-        (start, finish) for (_, start, finish, _, _) in s.transition_log
+        (start, finish) for (_, start, finish, _, _, _) in s.transition_log
     }
 
 
@@ -3267,13 +3272,13 @@ async def test_worker_reconnect_task_memory_with_resources(c, s, a):
         while not b.executing_count and not b.data:
             await asyncio.sleep(0.001)
 
-        await s.remove_worker(address=b.address, close=False)
+        await s.remove_worker(address=b.address, close=False, stimulus_id="test")
         while not res.done():
             await b.heartbeat()
 
         await res
         assert ("no-worker", "memory") in {
-            (start, finish) for (_, start, finish, _, _) in s.transition_log
+            (start, finish) for (_, start, finish, _, _, _) in s.transition_log
         }
 
 

@@ -4,7 +4,7 @@ import distributed
 from distributed import Event, Worker
 from distributed.utils_test import (
     _LockedCommPool,
-    assert_worker_story,
+    assert_story,
     gen_cluster,
     inc,
     slowinc,
@@ -80,7 +80,7 @@ async def test_abort_execution_to_fetch(c, s, a, b):
     while "f1" in a.tasks:
         await asyncio.sleep(0.01)
 
-    assert_worker_story(
+    assert_story(
         a.story("f1"),
         [
             ("f1", "compute-task"),
@@ -156,7 +156,7 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
         await wait_for_state(fut1.key, "flight", b)
 
         # Close in scheduler to ensure we transition and reschedule task properly
-        await s.close_worker(worker=a.address)
+        await s.close_worker(worker=a.address, stimulus_id="test")
         await wait_for_state(fut1.key, "resumed", b)
 
         lock.release()
