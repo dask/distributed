@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import sys
 from multiprocessing import cpu_count
 from time import sleep
@@ -682,3 +683,45 @@ def dask_setup(worker):
         await c.wait_for_workers(1)
         [foo] = (await c.run(lambda dask_worker: dask_worker.foo)).values()
         assert foo == "setup"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+def test_timeout(nanny):
+    with popen(
+        ["dask-worker", "192.168.1.100:7777", nanny, "--death-timeout=1"],
+        flush_output=False,
+    ) as worker:
+        logs = [worker.stdout.readline().decode().lower() for _ in range(15)]
+
+        assert any("timed out starting worker" in log for log in logs)
+        assert any("end worker" in log for log in logs)
+        assert worker.returncode != 0
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+@gen_cluster(client=True, nthreads=[])
+async def test_sigint(c, s, nanny):
+    with popen(["dask-worker", s.address, nanny], flush_output=False) as worker:
+        await c.wait_for_workers(2)
+        worker.send_signal(signal.SIGINT)
+        logs = [worker.stdout.readline().decode().lower() for _ in range(25)]
+        assert not any("timed out" in log for log in logs)
+        assert not any(f"signal {signal.SIGINT}" in log for log in logs)
+        assert any("end worker" in log for log in logs)
+        assert worker.returncode != 0
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+@gen_cluster(client=True, nthreads=[])
+async def test_sigterm(c, s, nanny):
+    with popen(["dask-worker", s.address, nanny], flush_output=False) as worker:
+        await c.wait_for_workers(1)
+        worker.send_signal(signal.SIGTERM)
+        logs = [worker.stdout.readline().decode().lower() for _ in range(25)]
+        assert not any("timed out" in log for log in logs)
+        assert any(f"signal {signal.SIGTERM}" in log for log in logs)
+        assert any("end worker" in log for log in logs)
+        assert worker.returncode != 0

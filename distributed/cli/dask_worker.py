@@ -475,7 +475,7 @@ def main(
 
     try:
         loop.run_sync(run)
-    except TimeoutError:
+    except (TimeoutError, asyncio.TimeoutError):
         # We already log the exception in nanny / worker. Don't do it again.
         if not signal_fired:
             logger.info("Timed out starting worker")
