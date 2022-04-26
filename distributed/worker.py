@@ -161,43 +161,24 @@ def fail_hard(method):
     """
     Decorator to close the worker if this method encounters an exception
     """
-    if iscoroutinefunction(method):
+    assert iscoroutinefunction(method)
 
-        @functools.wraps(method)
-        async def wrapper(self, *args, **kwargs):
-            try:
-                return await method(self, *args, **kwargs)
-            except Exception as e:
-                logger.exception(e)
-                self.log_event(
-                    "worker-fail-hard",
-                    {
-                        **error_message(e),
-                        "worker": self.address,
-                    },
-                )
-                # TODO: send event to scheduler
-                await self.close(nanny=False, executor_wait=False)
-                raise
-
-    else:
-
-        @functools.wraps(method)
-        def wrapper(self, *args, **kwargs):
-            try:
-                return method(self, *args, **kwargs)
-            except Exception as e:
-                logger.exception(e)
-                self.log_event(
-                    "worker-fail-hard",
-                    {
-                        **error_message(e),
-                        "worker": self.address,
-                    },
-                )
-                # TODO: send event to scheduler
-                self.loop.add_callback(self.close, nanny=False, executor_wait=False)
-                raise
+    @functools.wraps(method)
+    async def wrapper(self, *args, **kwargs):
+        try:
+            return await method(self, *args, **kwargs)
+        except Exception as e:
+            logger.exception(e)
+            self.log_event(
+                "worker-fail-hard",
+                {
+                    **error_message(e),
+                    "worker": self.address,
+                },
+            )
+            # TODO: send event to scheduler
+            await self.close(nanny=False, executor_wait=False)
+            raise
 
     return wrapper
 
