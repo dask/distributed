@@ -1245,6 +1245,7 @@ class Worker(ServerNode):
         finally:
             self.heartbeat_active = False
 
+    @fail_hard
     async def handle_scheduler(self, comm):
         try:
             await self.handle_stream(comm, every_cycle=[self.ensure_communicating])
@@ -2693,7 +2694,6 @@ class Worker(ServerNode):
         self._handle_instructions(instructions)
         self.transitions(recs, stimulus_id=stimulus_id)
 
-    @fail_hard
     def transitions(self, recommendations: Recs, *, stimulus_id: str) -> None:
         """Process transitions until none are left
 
@@ -4119,7 +4119,6 @@ class Worker(ServerNode):
                 f"Invalid TaskState encountered for {ts!r}.\nStory:\n{self.story(ts)}\n"
             ) from e
 
-    @fail_hard
     def validate_state(self):
         if self.status not in Status.ANY_RUNNING:
             return
