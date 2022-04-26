@@ -4276,6 +4276,31 @@ class Client(SyncMethodMixin):
         """Convert many collections into a single dask graph, after optimization"""
         return collections_to_dsk(collections, *args, **kwargs)
 
+    async def _story(self, keys=(), on_error="raise"):
+        assert on_error in ("raise", "ignore")
+
+        try:
+            flat_stories = await self.scheduler.get_story(keys=keys)
+            flat_stories = [("scheduler", *msg) for msg in flat_stories]
+        except Exception:
+            if on_error == "raise":
+                raise
+            elif on_error == "ignore":
+                flat_stories = []
+            else:
+                raise ValueError(f"on_error not in {'raise', 'ignore'}")
+
+        responses = await self.scheduler.broadcast(
+            msg={"op": "get_story", "keys": keys}, on_error=on_error
+        )
+        for worker, stories in responses.items():
+            flat_stories.extend((worker, *msg) for msg in stories)
+        return flat_stories
+
+    def story(self, *keys_or_stimulus_ids, on_error="raise"):
+        """Returns a cluster-wide story for the given keys or simtulus_id's"""
+        return self.sync(self._story, keys=keys_or_stimulus_ids, on_error=on_error)
+
     def get_task_stream(
         self,
         start=None,
