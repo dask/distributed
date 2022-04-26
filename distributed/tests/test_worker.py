@@ -1819,7 +1819,7 @@ async def test_gather_dep_local_workers_first(c, s, a, lw, *rws):
     )["f"]
     g = c.submit(inc, f, key="g", workers=[a.address])
     assert await g == 2
-    assert_worker_story(a.story("f"), [("receive-dep", lw.address, {"f"})])
+    assert_story(a.story("f"), [("receive-dep", lw.address, {"f"})])
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
@@ -1846,7 +1846,7 @@ async def test_gather_dep_from_remote_workers_if_all_local_workers_are_busy(
     assert sorted(ev[1] for ev in a.story("busy-gather")) == sorted(
         w.address for w in lws
     )
-    assert_worker_story(a.story("receive-dep"), [("receive-dep", rw.address, {"f"})])
+    assert_story(a.story("receive-dep"), [("receive-dep", rw.address, {"f"})])
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 0)])
