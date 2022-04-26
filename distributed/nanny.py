@@ -853,7 +853,7 @@ class WorkerProcess:
                 """
                 try:
                     msg = child_stop_q.get()
-                except (TypeError, OSError):
+                except (TypeError, OSError, EOFError):
                     logger.error("Worker process died unexpectedly")
                     msg = {"op": "stop"}
                 finally:
