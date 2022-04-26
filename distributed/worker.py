@@ -157,6 +157,37 @@ DEFAULT_METRICS: dict[str, Callable[[Worker], Any]] = {}
 DEFAULT_STARTUP_INFORMATION: dict[str, Callable[[Worker], Any]] = {}
 
 
+def fail_hard(method):
+    """
+    Decorator to close the worker if this method encounters an exception
+    """
+    if iscoroutinefunction(method):
+
+        @functools.wraps(method)
+        async def wrapper(self, *args, **kwargs):
+            try:
+                return await method(self, *args, **kwargs)
+            except Exception as e:
+                logger.exception(e)
+                # TODO: send event to scheduler
+                await self.close(nanny=False, executor_wait=False)
+                raise
+
+    else:
+
+        @functools.wraps(method)
+        def wrapper(self, *args, **kwargs):
+            try:
+                return method(self, *args, **kwargs)
+            except Exception as e:
+                logger.exception(e)
+                # TODO: send event to scheduler
+                self.loop.add_callback(self.close, nanny=False, executor_wait=False)
+                raise
+
+    return wrapper
+
+
 class Worker(ServerNode):
     """Worker node in a Dask distributed cluster
 
@@ -2642,6 +2673,7 @@ class Worker(ServerNode):
         self._handle_instructions(instructions)
         self.transitions(recs, stimulus_id=stimulus_id)
 
+    @fail_hard
     def transitions(self, recommendations: Recs, *, stimulus_id: str) -> None:
         """Process transitions until none are left
 
@@ -3020,6 +3052,7 @@ class Worker(ServerNode):
         self.counters["transfer-count"].add(len(data))
         self.incoming_count += 1
 
+    @fail_hard
     @log_errors
     async def gather_dep(
         self,
@@ -4063,6 +4096,7 @@ class Worker(ServerNode):
                 f"Invalid TaskState encountered for {ts!r}.\nStory:\n{self.story(ts)}\n"
             ) from e
 
+    @fail_hard
     def validate_state(self):
         if self.status not in Status.ANY_RUNNING:
             return
