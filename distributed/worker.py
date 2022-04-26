@@ -1769,7 +1769,6 @@ class Worker(ServerNode):
         self._handle_instructions(instructions)
         return {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
 
-    @fail_hard
     def handle_free_keys(self, keys: list[str], stimulus_id: str) -> None:
         """
         Handler to be called by the scheduler.
@@ -1790,7 +1789,6 @@ class Worker(ServerNode):
 
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
-    @fail_hard
     def handle_remove_replicas(self, keys: list[str], stimulus_id: str) -> str:
         """Stream handler notifying the worker that it might be holding unreferenced,
         superfluous data.
@@ -1853,7 +1851,6 @@ class Worker(ServerNode):
     # Task Management #
     ###################
 
-    @fail_hard
     def handle_cancel_compute(self, key: str, stimulus_id: str) -> None:
         """
         Cancel a task on a best effort basis. This is only possible while a task
@@ -1862,7 +1859,6 @@ class Worker(ServerNode):
         """
         self.handle_stimulus(CancelComputeEvent(key=key, stimulus_id=stimulus_id))
 
-    @fail_hard
     def handle_acquire_replicas(
         self,
         *,
@@ -1902,7 +1898,6 @@ class Worker(ServerNode):
         self.log.append((key, "ensure-task-exists", ts.state, stimulus_id, time()))
         return ts
 
-    @fail_hard
     def handle_compute_task(
         self,
         *,
@@ -2727,7 +2722,6 @@ class Worker(ServerNode):
         else:
             self._handle_instructions(instructions)
 
-    @fail_hard
     @log_errors
     def handle_stimulus(self, stim: StateMachineEvent) -> None:
         self.stimulus_log.append(stim.to_loggable(handled=time()))
@@ -3296,7 +3290,6 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    @fail_hard
     def handle_steal_request(self, key: str, stimulus_id: str) -> None:
         # There may be a race condition between stealing and releasing a task.
         # In this case the self.tasks is already cleared. The `None` will be
@@ -3319,7 +3312,6 @@ class Worker(ServerNode):
             # `transition_constrained_executing`
             self.transition(ts, "released", stimulus_id=stimulus_id)
 
-    @fail_hard
     def handle_worker_status_change(self, status: str, stimulus_id: str) -> None:
         new_status = Status.lookup[status]  # type: ignore
 
