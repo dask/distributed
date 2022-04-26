@@ -4493,7 +4493,7 @@ class Scheduler(SchedulerState, ServerNode):
                 pdb.set_trace()
             raise
 
-    def validate_state(self, allow_overlap=False):
+    def validate_state(self, allow_overlap: bool = False) -> None:
         validate_state(self.tasks, self.workers, self.clients)
 
         if not (set(self.workers) == set(self.stream_comms)):
@@ -4537,7 +4537,14 @@ class Scheduler(SchedulerState, ServerNode):
 
         actual_total_occupancy = 0
         for worker, ws in self.workers.items():
-            assert abs(sum(ws.processing.values()) - ws.occupancy) < 1e-8
+            ws_processing_total = sum(
+                cost for ts, cost in ws.processing.items() if ts not in ws.long_running
+            )
+            assert abs(ws_processing_total - ws.occupancy) < 1e-8, (
+                worker,
+                ws_processing_total,
+                ws.occupancy,
+            )
             actual_total_occupancy += ws.occupancy
 
         assert abs(actual_total_occupancy - self.total_occupancy) < 1e-8, (
