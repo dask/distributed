@@ -455,8 +455,7 @@ def main(
 
     async def close_all():
         # Unregister all workers from scheduler
-        if nanny:
-            await asyncio.gather(*(n.close(timeout=2) for n in nannies))
+        await asyncio.gather(*(n.close(timeout=2) for n in nannies))
 
     signal_fired = False
 
