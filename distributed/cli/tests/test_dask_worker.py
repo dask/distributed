@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+import subprocess
 import sys
 from multiprocessing import cpu_count
 from time import sleep
@@ -594,7 +595,7 @@ def test_worker_timeout(no_nanny):
     if no_nanny:
         args.append("--no-nanny")
     result = runner.invoke(main, args)
-    assert result.exit_code != 0
+    assert result.exit_code == 1
 
 
 def test_bokeh_deprecation():
@@ -688,40 +689,73 @@ def dask_setup(worker):
 @pytest.mark.slow
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 def test_timeout(nanny):
-    with popen(
+    worker = subprocess.run(
         ["dask-worker", "192.168.1.100:7777", nanny, "--death-timeout=1"],
-        flush_output=False,
-    ) as worker:
-        logs = [worker.stdout.readline().decode().lower() for _ in range(15)]
+        text=True,
+        encoding="utf8",
+        capture_output=True,
+    )
 
-        assert any("timed out starting worker" in log for log in logs)
-        assert any("end worker" in log for log in logs)
-        assert worker.returncode != 0
+    assert "timed out starting worker" in worker.stderr.lower()
+    assert "end worker" in worker.stderr.lower()
+    assert worker.returncode == 1
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 @gen_cluster(client=True, nthreads=[])
 async def test_sigint(c, s, nanny):
-    with popen(["dask-worker", s.address, nanny], flush_output=False) as worker:
+    try:
+        worker = subprocess.Popen(
+            ["dask-worker", s.address, nanny],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
         await c.wait_for_workers(1)
         worker.send_signal(signal.SIGINT)
-        logs = [worker.stdout.readline().decode().lower() for _ in range(25)]
-        assert not any("timed out" in log for log in logs)
-        assert not any(f"signal {signal.SIGINT}" in log for log in logs)
-        assert any("end worker" in log for log in logs)
-        assert worker.returncode != 0
+        stdout, stderr = worker.communicate()
+        logs = stdout.decode().lower()
+        assert stderr is None
+        if nanny == "--nanny":
+            assert "closing nanny" in logs
+        else:
+            assert "nanny" not in logs
+        assert "stopping worker" in logs
+        assert "end worker" in logs
+        assert "timed out" not in logs
+        assert f"signal {signal.SIGINT}" not in logs
+        assert "error" not in logs
+        assert "exception" not in logs
+        assert worker.returncode == 0
+    finally:
+        worker.kill()
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 @gen_cluster(client=True, nthreads=[])
 async def test_sigterm(c, s, nanny):
-    with popen(["dask-worker", s.address, nanny], flush_output=False) as worker:
+    try:
+        worker = subprocess.Popen(
+            ["dask-worker", s.address, nanny],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
         await c.wait_for_workers(1)
         worker.send_signal(signal.SIGTERM)
-        logs = [worker.stdout.readline().decode().lower() for _ in range(25)]
-        assert not any("timed out" in log for log in logs)
-        assert any(f"signal {signal.SIGTERM}" in log for log in logs)
-        assert any("end worker" in log for log in logs)
-        assert worker.returncode != 0
+        stdout, stderr = worker.communicate()
+        logs = stdout.decode().lower()
+        assert stderr is None
+        assert f"signal {signal.SIGTERM}" in logs
+        if nanny == "--nanny":
+            assert "closing nanny" in logs
+        else:
+            assert "nanny" not in logs
+        assert "stopping worker" in logs
+        assert "end worker" in logs
+        assert "timed out" not in logs
+        assert "error" not in logs
+        assert "exception" not in logs
+        assert worker.returncode == 0
+    finally:
+        worker.kill()
