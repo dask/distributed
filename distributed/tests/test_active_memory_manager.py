@@ -9,10 +9,11 @@ from typing import Literal
 
 import pytest
 
-from distributed import Nanny, wait
+from distributed import Event, Nanny, wait
 from distributed.active_memory_manager import (
     ActiveMemoryManagerExtension,
     ActiveMemoryManagerPolicy,
+    RetireWorker,
 )
 from distributed.core import Status
 from distributed.utils_test import captured_logger, gen_cluster, inc, slowinc
@@ -901,6 +902,90 @@ async def test_RetireWorker_all_recipients_are_paused(c, s, a, b):
     while ws_a.status != Status.running:
         await asyncio.sleep(0.01)
     assert await c.submit(inc, 1) == 2
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.scheduler.active-memory-manager.start": True,
+        # "distributed.scheduler.active-memory-manager.interval": 999,
+        "distributed.scheduler.active-memory-manager.policies": [],
+        # "distributed.worker.memory.pause": False,
+    },
+)
+async def test_RetireWorker_other_worker_dies_after_replication(c, s, a, b):
+    ws_a = s.workers[a.address]
+    ws_b = s.workers[b.address]
+
+    # b.status = Status.paused
+    # while ws_b.status != Status.paused:
+    #     await asyncio.sleep(0.01)
+
+    event = Event()
+
+    print(0)
+    xs = c.map(lambda x: x, range(200), workers=[a.address])
+    y = c.submit(lambda _: event.wait(), xs, workers=[a.address])
+
+    while y.key not in s.tasks:
+        await asyncio.sleep(0.01)
+    y_ts = s.tasks[y.key]
+
+    print(1)
+    while y_ts.state != "processing":
+        await asyncio.sleep(0.5)
+    print(2)
+
+    t = asyncio.create_task(c.retire_workers([a.address]))
+    print(3)
+
+    # Wait for all `xs` to be replicated. They can't be dropped yet, because `y` is queued on the same worker
+    while not all(len(ts.who_has) == 2 for ts in ws_a.has_what):
+        await asyncio.sleep(0.01)
+    print(4)
+
+    # `_track_retire_worker` _should_ now be sleeping for 0.5s, because there are >=200 keys on A.
+
+    # Let `y` complete.
+    await event.set()
+    print(5)
+    while not y_ts.state == "memory":
+        await asyncio.sleep(0.01)
+    print(6)
+    del y
+    while y_ts.who_has:
+        await asyncio.sleep(0.01)
+    print(7)
+
+    amm: ActiveMemoryManagerExtension = s.extensions["amm"]
+    assert len(amm.policies) == 1
+    policy = next(iter(amm.policies))
+    assert isinstance(policy, RetireWorker)
+
+    print(8)
+    # The policy runs again. Because the default 2s AMM interval is 4x longer than the 0.5s wait,
+    # what we're about to trigger is unlikely, but still theoretically possible.
+    amm.run_once()
+    print(9)
+
+    assert policy.done(), {ts.key: len(ts.who_has) for ts in ws_a.has_what}
+    assert not amm.policies
+    print(10)
+
+    # The policy is done and removed. But `_track_retire_worker` is still sleeping.
+    # What if worker B leaves before it wakes up?
+
+    assert len(b.data) == 200
+    await b.close()
+    print(11)
+
+    # Policy is no longer done. But it's also not running anymore.
+    # So it won't have the opportunity for `no_recipients` to get set.
+    assert not policy.done(), {ts.key: ts.who_has for ts in ws_a.has_what}
+    print(12)
+
+    # This will deadlock
+    res = await t
 
 
 # FIXME can't drop runtime of this test below 10s; see distributed#5585
