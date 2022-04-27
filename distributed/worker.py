@@ -2748,6 +2748,9 @@ class Worker(ServerNode):
         return [ev for ev in self.stimulus_log if getattr(ev, "key", None) in keys]
 
     def ensure_communicating(self) -> None:
+        if self.status != Status.running:
+            return
+
         stimulus_id = f"ensure-communicating-{time()}"
         skipped_worker_in_flight_or_busy = []
 
@@ -3489,7 +3492,7 @@ class Worker(ServerNode):
             raise
 
     def _ensure_computing(self) -> RecsInstrs:
-        if self.status in (Status.paused, Status.closing_gracefully):
+        if self.status != Status.running:
             return {}, []
 
         recs: Recs = {}
