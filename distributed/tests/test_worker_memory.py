@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import UserDict
+import threading
+from collections import Counter, UserDict
 from time import sleep
 
 import pytest
@@ -12,6 +13,7 @@ import dask.config
 import distributed.system
 from distributed import Client, Event, Nanny, Worker, wait
 from distributed.core import Status
+from distributed.metrics import monotonic
 from distributed.spill import has_zict_210
 from distributed.utils_test import captured_logger, gen_cluster, inc
 from distributed.worker_memory import parse_memory_limit
@@ -634,6 +636,117 @@ async def test_nanny_terminate(c, s, a):
     out = logger.getvalue()
     assert "restart" in out.lower()
     assert "memory" in out.lower()
+
+
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    worker_kwargs={"memory_limit": "10 GiB"},
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": 0.7,
+        "distributed.worker.memory.pause": 0.9,
+        "distributed.worker.memory.monitor-interval": "10ms",
+    },
+)
+async def test_pause_while_spilling(c, s, a):
+    N_PAUSE = 3
+    N_TOTAL = 5
+
+    def get_process_memory():
+        if len(a.data) < N_PAUSE:
+            # Don't trigger spilling until after all tasks have completed
+            return 0
+        elif a.data.fast and not a.data.slow:
+            # Trigger spilling
+            return 8 * 2**30
+        else:
+            # Trigger pause, but only after we started spilling
+            return 10 * 2**30
+
+    a.monitor.get_process_memory = get_process_memory
+
+    class SlowSpill:
+        def __init__(self, _):
+            # Can't pickle a Semaphore, so instead of a default value, we create it
+            # here. Don't worry about race conditions; the worker is single-threaded.
+            if not hasattr(type(self), "sem"):
+                type(self).sem = threading.Semaphore(N_PAUSE)
+            # Block if there are N_PAUSE tasks in a.data.fast
+            self.sem.acquire()
+
+        def __reduce__(self):
+            paused = distributed.get_worker().status == Status.paused
+            if not paused:
+                sleep(0.1)
+            self.sem.release()
+            return bool, (paused,)
+
+    futs = c.map(SlowSpill, range(N_TOTAL))
+    while len(a.data.slow) < N_PAUSE + 1:
+        await asyncio.sleep(0.01)
+
+    assert a.status == Status.paused
+    # Worker should have become paused after the first `SlowSpill` was evicted, because
+    # the spill to disk took longer than the memory monitor interval.
+    assert len(a.data.fast) == 0
+    assert len(a.data.slow) == N_PAUSE + 1
+    n_spilled_while_paused = sum(paused is True for paused in a.data.slow.values())
+    assert N_PAUSE <= n_spilled_while_paused <= N_PAUSE + 1
+
+
+@pytest.mark.slow
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    worker_kwargs={"memory_limit": "10 GiB"},
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": 0.6,
+        "distributed.worker.memory.pause": False,
+        "distributed.worker.memory.monitor-interval": "10ms",
+    },
+)
+async def test_release_evloop_while_spilling(c, s, a):
+    N = 100
+
+    def get_process_memory():
+        if len(a.data) < N:
+            # Don't trigger spilling until after all tasks have completed
+            return 0
+        return 10 * 2**30
+
+    a.monitor.get_process_memory = get_process_memory
+
+    class SlowSpill:
+        def __reduce__(self):
+            sleep(0.01)
+            return SlowSpill, ()
+
+    futs = [c.submit(SlowSpill, pure=False) for _ in range(N)]
+    while len(a.data) < N:
+        await asyncio.sleep(0)
+
+    ts = [monotonic()]
+    while a.data.fast:
+        await asyncio.sleep(0)
+        ts.append(monotonic())
+
+    # 100 tasks taking 0.01s to pickle each = 2s to spill everything
+    # (this is because everything is pickled twice:
+    # https://github.com/dask/distributed/issues/1371).
+    # We should regain control of the event loop every 0.5s.
+    c = Counter(round(t1 - t0, 1) for t0, t1 in zip(ts, ts[1:]))
+    # Depending on the implementation of WorkerMemoryMonitor._maybe_spill:
+    # if it calls sleep(0) every 0.5s:
+    #   {0.0: 315, 0.5: 4}
+    # if it calls sleep(0) after spilling each key:
+    #   {0.0: 233}
+    # if it never yields:
+    #   {0.0: 359, 2.0: 1}
+    # Make sure we remain in the first use case.
+    assert 1 < sum(v for k, v in c.items() if 0.5 <= k <= 1.9), dict(c)
+    assert not any(v for k, v in c.items() if k >= 2.0), dict(c)
 
 
 @pytest.mark.parametrize(
