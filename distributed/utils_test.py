@@ -85,6 +85,7 @@ try:
 except ImportError:
     pass
 
+from pytest_timeout import is_debugging
 
 logger = logging.getLogger(__name__)
 
@@ -806,6 +807,8 @@ def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"
     )
+    if is_debugging():
+        timeout = 3600
 
     def _(func):
         def test_func(*args, **kwargs):
@@ -980,6 +983,8 @@ def gen_cluster(
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"
     )
+    if is_debugging():
+        timeout = 3600
 
     scheduler_kwargs = merge(
         {"dashboard": False, "dashboard_address": ":0"}, scheduler_kwargs

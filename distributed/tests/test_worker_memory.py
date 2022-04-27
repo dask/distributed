@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import UserDict
+import threading
+from collections import Counter, UserDict
 from time import sleep
 
 import pytest
@@ -12,6 +13,7 @@ import dask.config
 import distributed.system
 from distributed import Client, Event, Nanny, Worker, wait
 from distributed.core import Status
+from distributed.metrics import monotonic
 from distributed.spill import has_zict_210
 from distributed.utils_test import captured_logger, gen_cluster, inc
 from distributed.worker_memory import parse_memory_limit
@@ -480,6 +482,73 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
 
 @gen_cluster(
     client=True,
+    nthreads=[("", 1), ("", 1)],
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": False,
+        "distributed.worker.memory.pause": False,
+    },
+)
+async def test_pause_prevents_deps_fetch(c, s, a, b):
+    """A worker is paused while there are dependencies ready to fetch, but all other
+    workers are in flight
+    """
+    a_addr = a.address
+
+    class X:
+        def __sizeof__(self):
+            return 2**40  # Disable clustering in select_keys_for_gather
+
+        def __reduce__(self):
+            return X.pause_on_unpickle, ()
+
+        @staticmethod
+        def pause_on_unpickle():
+            # Note: outside of task execution, distributed.get_worker()
+            # returns a random worker running in the process
+            for w in Worker._instances:
+                if w.address == a_addr:
+                    w.status = Status.paused
+                    return X()
+            assert False
+
+    x = c.submit(X, key="x", workers=[b.address])
+    y = c.submit(inc, 1, key="y", workers=[b.address])
+    await wait([x, y])
+    w = c.submit(lambda _: None, x, key="w", priority=1, workers=[a.address])
+    z = c.submit(inc, y, key="z", priority=0, workers=[a.address])
+
+    # - w and z reach worker a within the same message
+    # - w and z respectively make x and y go into fetch state.
+    #   w has a higher priority than z, therefore w's dependency x has a higher priority
+    #   than z's dependency y.
+    #   a.data_needed = ["x", "y"]
+    # - ensure_communicating decides to fetch x but not to fetch y together with it, as
+    #   it thinks x is 1TB in size
+    # - x fetch->flight; a is added to in_flight_workers
+    # - y is skipped by ensure_communicating since all workers that hold a replica are
+    #   in flight
+    # - x reaches a and sends a into paused state
+    # - x flight->memory; a is removed from in_flight_workers
+    # - ensure_communicating is triggered again
+    # - ensure_communicating refuses to fetch y because the worker is paused
+
+    while "y" not in a.tasks or a.tasks["y"].state != "fetch":
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.1)
+    assert a.tasks["y"].state == "fetch"
+    assert "y" not in a.data
+    assert [ts.key for ts in a.data_needed] == ["y"]
+
+    # Unpausing kicks off ensure_communicating again
+    a.status = Status.running
+    assert await z == 3
+    assert a.tasks["y"].state == "memory"
+    assert "y" in a.data
+
+
+@gen_cluster(
+    client=True,
     nthreads=[("", 1)],
     worker_kwargs={"memory_limit": 0},
     config={"distributed.worker.memory.monitor-interval": "10ms"},
@@ -634,6 +703,117 @@ async def test_nanny_terminate(c, s, a):
     out = logger.getvalue()
     assert "restart" in out.lower()
     assert "memory" in out.lower()
+
+
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    worker_kwargs={"memory_limit": "10 GiB"},
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": 0.7,
+        "distributed.worker.memory.pause": 0.9,
+        "distributed.worker.memory.monitor-interval": "10ms",
+    },
+)
+async def test_pause_while_spilling(c, s, a):
+    N_PAUSE = 3
+    N_TOTAL = 5
+
+    def get_process_memory():
+        if len(a.data) < N_PAUSE:
+            # Don't trigger spilling until after all tasks have completed
+            return 0
+        elif a.data.fast and not a.data.slow:
+            # Trigger spilling
+            return 8 * 2**30
+        else:
+            # Trigger pause, but only after we started spilling
+            return 10 * 2**30
+
+    a.monitor.get_process_memory = get_process_memory
+
+    class SlowSpill:
+        def __init__(self, _):
+            # Can't pickle a Semaphore, so instead of a default value, we create it
+            # here. Don't worry about race conditions; the worker is single-threaded.
+            if not hasattr(type(self), "sem"):
+                type(self).sem = threading.Semaphore(N_PAUSE)
+            # Block if there are N_PAUSE tasks in a.data.fast
+            self.sem.acquire()
+
+        def __reduce__(self):
+            paused = distributed.get_worker().status == Status.paused
+            if not paused:
+                sleep(0.1)
+            self.sem.release()
+            return bool, (paused,)
+
+    futs = c.map(SlowSpill, range(N_TOTAL))
+    while len(a.data.slow) < N_PAUSE + 1:
+        await asyncio.sleep(0.01)
+
+    assert a.status == Status.paused
+    # Worker should have become paused after the first `SlowSpill` was evicted, because
+    # the spill to disk took longer than the memory monitor interval.
+    assert len(a.data.fast) == 0
+    assert len(a.data.slow) == N_PAUSE + 1
+    n_spilled_while_paused = sum(paused is True for paused in a.data.slow.values())
+    assert N_PAUSE <= n_spilled_while_paused <= N_PAUSE + 1
+
+
+@pytest.mark.slow
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    worker_kwargs={"memory_limit": "10 GiB"},
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": 0.6,
+        "distributed.worker.memory.pause": False,
+        "distributed.worker.memory.monitor-interval": "10ms",
+    },
+)
+async def test_release_evloop_while_spilling(c, s, a):
+    N = 100
+
+    def get_process_memory():
+        if len(a.data) < N:
+            # Don't trigger spilling until after all tasks have completed
+            return 0
+        return 10 * 2**30
+
+    a.monitor.get_process_memory = get_process_memory
+
+    class SlowSpill:
+        def __reduce__(self):
+            sleep(0.01)
+            return SlowSpill, ()
+
+    futs = [c.submit(SlowSpill, pure=False) for _ in range(N)]
+    while len(a.data) < N:
+        await asyncio.sleep(0)
+
+    ts = [monotonic()]
+    while a.data.fast:
+        await asyncio.sleep(0)
+        ts.append(monotonic())
+
+    # 100 tasks taking 0.01s to pickle each = 2s to spill everything
+    # (this is because everything is pickled twice:
+    # https://github.com/dask/distributed/issues/1371).
+    # We should regain control of the event loop every 0.5s.
+    c = Counter(round(t1 - t0, 1) for t0, t1 in zip(ts, ts[1:]))
+    # Depending on the implementation of WorkerMemoryMonitor._maybe_spill:
+    # if it calls sleep(0) every 0.5s:
+    #   {0.0: 315, 0.5: 4}
+    # if it calls sleep(0) after spilling each key:
+    #   {0.0: 233}
+    # if it never yields:
+    #   {0.0: 359, 2.0: 1}
+    # Make sure we remain in the first use case.
+    assert 1 < sum(v for k, v in c.items() if 0.5 <= k <= 1.9), dict(c)
+    assert not any(v for k, v in c.items() if k >= 2.0), dict(c)
 
 
 @pytest.mark.parametrize(

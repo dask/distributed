@@ -39,6 +39,7 @@ from dask.utils import format_bytes, parse_bytes, parse_timedelta
 
 from distributed import system
 from distributed.core import Status
+from distributed.metrics import monotonic
 from distributed.spill import ManualEvictProto, SpillBuffer
 from distributed.utils import log_errors
 from distributed.utils_perf import ThrottledGC
@@ -234,6 +235,8 @@ class WorkerMemoryManager:
         )
         count = 0
         need = memory - target
+        last_checked_for_pause = last_yielded = monotonic()
+
         while memory > target:
             if not data.fast:
                 logger.warning(
@@ -255,7 +258,6 @@ class WorkerMemoryManager:
 
             total_spilled += weight
             count += 1
-            await asyncio.sleep(0)
 
             memory = worker.monitor.get_process_memory()
             if total_spilled > need and memory > target:
@@ -265,7 +267,23 @@ class WorkerMemoryManager:
                 self._throttled_gc.collect()
                 memory = worker.monitor.get_process_memory()
 
-        self._maybe_pause_or_unpause(worker, memory)
+            now = monotonic()
+
+            # Spilling may potentially take multiple seconds; we may pass the pause
+            # threshold in the meantime.
+            if now - last_checked_for_pause > self.memory_monitor_interval:
+                self._maybe_pause_or_unpause(worker, memory)
+                last_checked_for_pause = now
+
+            # Increase spilling aggressiveness when the fast buffer is filled with a lot
+            # of small values. This artificially chokes the rest of the event loop -
+            # namely, the reception of new data from other workers. While this is
+            # somewhat of an ugly hack,  DO NOT tweak this without a thorough cycle of
+            # stress testing. See: https://github.com/dask/distributed/issues/6110.
+            if now - last_yielded > 0.5:
+                await asyncio.sleep(0)
+                last_yielded = monotonic()
+
         if count:
             logger.debug(
                 "Moved %d tasks worth %s to disk",
