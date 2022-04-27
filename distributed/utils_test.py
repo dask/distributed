@@ -77,7 +77,15 @@ try:
 except ImportError:
     pass
 
-from pytest_timeout import is_debugging
+try:
+    from pytest_timeout import is_debugging
+except ImportError:
+
+    def is_debugging() -> bool:
+        # The pytest_timeout logic is more sophisticated. Not only debuggers
+        # attach a trace callback but vendoring the entire logic is not worth it
+        return sys.gettrace() is not None
+
 
 logger = logging.getLogger(__name__)
 
