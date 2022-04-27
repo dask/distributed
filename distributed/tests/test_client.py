@@ -7172,16 +7172,25 @@ def test_dump_cluster_state_write_from_scheduler(
     assert (scheduler_dir / "scheduler-explicit.msgpack.gz").is_file()
 
 
+@pytest.mark.parametrize("all_workers", [True, False])
 @pytest.mark.parametrize("local", [True, False])
 @pytest.mark.parametrize("_format", ["msgpack", "yaml"])
-def test_dump_cluster_state_sync(c, s, a, b, tmp_path, _format, local):
+def test_dump_cluster_state_sync(c, s, a, b, tmp_path, _format, local, all_workers):
     filename = tmp_path / "foo"
     if not local:
         pytest.importorskip("fsspec")
         # Make it look like an fsspec path
         filename = f"file://{filename}"
-    c.dump_cluster_state(filename, format=_format)
-    _verify_cluster_dump(filename, _format, {a["address"], b["address"]})
+
+    if all_workers:
+        workers = None
+        addrs = {a["address"], b["address"]}
+    else:
+        workers = [a["address"]]
+        addrs = set(workers)
+
+    c.dump_cluster_state(filename, format=_format, workers=workers)
+    _verify_cluster_dump(filename, _format, addrs)
 
 
 @pytest.mark.parametrize("local", [True, False])

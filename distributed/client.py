@@ -3826,6 +3826,7 @@ class Client(SyncMethodMixin):
         write_from_scheduler: bool | None = None,
         exclude: Collection[str] = ("run_spec",),
         format: Literal["msgpack", "yaml"] = "msgpack",
+        workers: list[str] | None = None,
         **storage_options,
     ):
         """Extract a dump of the entire cluster state and persist to disk or a URL.
@@ -3903,6 +3904,8 @@ class Client(SyncMethodMixin):
                     from yaml import Loader
                 with open("filename") as fd:
                     state = yaml.load(fd, Loader=Loader)
+        workers:
+            List of worker addresses. If None, all workers will be used.
         **storage_options:
             Any additional arguments to :func:`fsspec.open` when writing to a URL.
         """
@@ -3912,6 +3915,7 @@ class Client(SyncMethodMixin):
             write_from_scheduler=write_from_scheduler,
             exclude=exclude,
             format=format,
+            workers=workers,
             **storage_options,
         )
 
@@ -3921,6 +3925,7 @@ class Client(SyncMethodMixin):
         write_from_scheduler: bool | None = None,
         exclude: Collection[str] = cluster_dump.DEFAULT_CLUSTER_DUMP_EXCLUDE,
         format: Literal["msgpack", "yaml"] = cluster_dump.DEFAULT_CLUSTER_DUMP_FORMAT,
+        workers: list[str] | None = None,
         **storage_options,
     ):
         filename = str(filename)
@@ -3932,11 +3937,14 @@ class Client(SyncMethodMixin):
                 url=filename,
                 exclude=exclude,
                 format=format,
+                workers=workers,
                 **storage_options,
             )
         else:
             await cluster_dump.write_state(
-                partial(self.scheduler.get_cluster_state, exclude=exclude),
+                partial(
+                    self.scheduler.get_cluster_state, exclude=exclude, workers=workers
+                ),
                 filename,
                 format,
                 **storage_options,
