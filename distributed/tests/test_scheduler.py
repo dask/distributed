@@ -1682,12 +1682,20 @@ async def test_closing_scheduler_closes_workers(s, a, b):
     client=True, nthreads=[("127.0.0.1", 1)], worker_kwargs={"resources": {"A": 1}}
 )
 async def test_resources_reset_after_cancelled_task(c, s, w):
-    future = c.submit(sleep, 0.2, resources={"A": 1})
+    lock = Lock()
+
+    def block(lock):
+        with lock:
+            return
+
+    await lock.acquire()
+    future = c.submit(block, lock, resources={"A": 1})
 
     while not w.executing_count:
         await asyncio.sleep(0.01)
 
     await future.cancel()
+    await lock.release()
 
     while w.executing_count:
         await asyncio.sleep(0.01)

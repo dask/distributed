@@ -605,7 +605,6 @@ class Worker(ServerNode):
             validate = dask.config.get("distributed.scheduler.validate")
         self.validate = validate
         self._transitions_table = {
-            ("cancelled", "resumed"): self.transition_cancelled_resumed,
             ("cancelled", "fetch"): self.transition_cancelled_fetch,
             ("cancelled", "released"): self.transition_cancelled_released,
             ("cancelled", "waiting"): self.transition_cancelled_waiting,
@@ -614,7 +613,7 @@ class Worker(ServerNode):
             ("cancelled", "error"): self.transition_cancelled_error,
             ("resumed", "memory"): self.transition_generic_memory,
             ("resumed", "error"): self.transition_generic_error,
-            ("resumed", "released"): self.transition_generic_released,
+            ("resumed", "released"): self.transition_resumed_released,
             ("resumed", "waiting"): self.transition_resumed_waiting,
             ("resumed", "fetch"): self.transition_resumed_fetch,
             ("resumed", "missing"): self.transition_resumed_missing,
@@ -2207,29 +2206,24 @@ class Worker(ServerNode):
         *,
         stimulus_id: str,
     ) -> RecsInstrs:
-        recs: Recs = {}
-        instructions: Instructions = []
-        if ts._previous == "executing":
-            recs, instructions = self.transition_executing_error(
-                ts,
-                exception,
-                traceback,
-                exception_text,
-                traceback_text,
-                stimulus_id=stimulus_id,
-            )
-        elif ts._previous == "flight":
-            recs, instructions = self.transition_flight_error(
-                ts,
-                exception,
-                traceback,
-                exception_text,
-                traceback_text,
-                stimulus_id=stimulus_id,
-            )
-        if ts._next:
-            recs[ts] = ts._next
-        return recs, instructions
+        assert ts._previous == "executing" or ts.key in self.long_running
+        # We'll ignore instructions, i.e. we choose to not submit the failure
+        # message to the scheudler since from the schedulers POV it already
+        # released this task
+        recs, _ = self.transition_executing_error(
+            ts,
+            exception,
+            traceback,
+            exception_text,
+            traceback_text,
+            stimulus_id=stimulus_id,
+        )
+        # Workers should never "retry" tasks. A transition to error should, by
+        # default, be the end. Since cancelled indicates that the scheduler lost
+        # interest, we can transition straight to released
+        assert ts not in recs
+        recs[ts] = "released"
+        return recs, []
 
     def transition_generic_error(
         self,
@@ -2286,7 +2280,7 @@ class Worker(ServerNode):
         )
 
     def _transition_from_resumed(
-        self, ts: TaskState, finish: TaskStateState, *, stimulus_id: str
+        self, ts: TaskState, finish: TaskStateState, *args, stimulus_id: str
     ) -> RecsInstrs:
         """`resumed` is an intermediate degenerate state which splits further up
         into two states depending on what the last signal / next state is
@@ -2309,18 +2303,29 @@ class Worker(ServerNode):
         """
         recs: Recs = {}
         instructions: Instructions = []
-        if ts.done:
+
+        if ts._previous == finish:
+            # We're back where we started. We should forget about the entire
+            # cancellation attempt
+            ts.state = finish
+            ts._next = None
+            ts._previous = None
+        elif not ts.done:
+            # If we're not done, yet, just remember where we want to be next
+            ts._next = finish
+        else:
+            # Flight/executing finished unsuccesfully, i.e. not in memory
+            assert finish != "memory"
             next_state = ts._next
-            # if the next state is already intended to be waiting or if the
-            # coro/thread is still running (ts.done==False), this is a noop
-            if ts._next != finish:
+            assert next_state in {"waiting", "fetch"}, next_state
+            assert ts._previous in {"executing", "flight"}, ts._previous
+
+            if next_state != finish:
                 recs, instructions = self.transition_generic_released(
                     ts, stimulus_id=stimulus_id
                 )
-            assert next_state
             recs[ts] = next_state
-        else:
-            ts._next = finish
+
         return recs, instructions
 
     def transition_resumed_fetch(
@@ -2339,7 +2344,19 @@ class Worker(ServerNode):
         """
         return self._transition_from_resumed(ts, "missing", stimulus_id=stimulus_id)
 
-    def transition_resumed_waiting(self, ts: TaskState, *, stimulus_id: str):
+    def transition_resumed_released(
+        self, ts: TaskState, *, stimulus_id: str
+    ) -> RecsInstrs:
+        if not ts.done:
+            ts.state = "cancelled"
+            ts._next = None
+            return {}, []
+        else:
+            return self.transition_generic_released(ts, stimulus_id=stimulus_id)
+
+    def transition_resumed_waiting(
+        self, ts: TaskState, *, stimulus_id: str
+    ) -> RecsInstrs:
         """
         See Worker._transition_from_resumed
         """
@@ -2355,14 +2372,9 @@ class Worker(ServerNode):
             return {}, []
         else:
             assert ts._previous == "executing"
-            return {ts: ("resumed", "fetch")}, []
-
-    def transition_cancelled_resumed(
-        self, ts: TaskState, next: TaskStateState, *, stimulus_id: str
-    ) -> RecsInstrs:
-        ts._next = next
-        ts.state = "resumed"
-        return {}, []
+            ts.state = "resumed"
+            ts._next = "fetch"
+            return {}, []
 
     def transition_cancelled_waiting(
         self, ts: TaskState, *, stimulus_id: str
@@ -2374,7 +2386,9 @@ class Worker(ServerNode):
             return {}, []
         else:
             assert ts._previous == "flight"
-            return {ts: ("resumed", "waiting")}, []
+            ts.state = "resumed"
+            ts._next = "waiting"
+            return {}, []
 
     def transition_cancelled_forgotten(
         self, ts: TaskState, *, stimulus_id: str
@@ -2390,24 +2404,19 @@ class Worker(ServerNode):
         if not ts.done:
             ts._next = "released"
             return {}, []
-        next_state = ts._next
-        assert next_state
         self._executing.discard(ts)
         self._in_flight_tasks.discard(ts)
 
         for resource, quantity in ts.resource_restrictions.items():
             self.available_resources[resource] += quantity
 
-        return merge_recs_instructions(
-            self.transition_generic_released(ts, stimulus_id=stimulus_id),
-            ({ts: next_state} if next_state != "released" else {}, []),
-        )
+        return self.transition_generic_released(ts, stimulus_id=stimulus_id)
 
     def transition_executing_released(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         ts._previous = ts.state
-        ts._next = "released"
+        ts._next = None
         # See https://github.com/dask/distributed/pull/5046#discussion_r685093940
         ts.state = "cancelled"
         ts.done = False
@@ -2546,16 +2555,18 @@ class Worker(ServerNode):
             return self.transition_generic_released(ts, stimulus_id=stimulus_id)
         else:
             ts._previous = "flight"
-            ts._next = "released"
+            ts._next = None
             # See https://github.com/dask/distributed/pull/5046#discussion_r685093940
             ts.state = "cancelled"
             return {}, []
 
-    def transition_cancelled_memory(
-        self, ts: TaskState, value, *, stimulus_id: str
-    ) -> RecsInstrs:
-        assert ts._next
-        return {ts: ts._next}, []
+    def transition_cancelled_memory(self, ts, value, *, stimulus_id):
+        # We only need this because the to-memory signatures require a value but
+        # we do not want to store a cancelled result and want to release
+        # immediately
+        assert ts.done
+
+        return self.transition_cancelled_released(ts, stimulus_id=stimulus_id)
 
     def transition_executing_long_running(
         self, ts: TaskState, compute_duration: float, *, stimulus_id: str
@@ -4082,7 +4093,7 @@ class Worker(ServerNode):
     def validate_task_cancelled(self, ts):
         assert ts.key not in self.data
         assert ts._previous
-        assert ts._next
+        assert ts._next is None  # We'll always transition to released after it is done
 
     def validate_task_resumed(self, ts):
         assert ts.key not in self.data
