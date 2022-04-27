@@ -661,6 +661,8 @@ class RetireWorker(ActiveMemoryManagerPolicy):
 
     def done(self) -> bool:
         """Return True if it is safe to close the worker down; False otherwise"""
+        if self not in self.manager.policies:
+            return True
         ws = self.manager.scheduler.workers.get(self.address)
         if ws is None:
             return True
