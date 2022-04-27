@@ -691,7 +691,8 @@ async def test_pause_while_spilling(c, s, a):
     # the spill to disk took longer than the memory monitor interval.
     assert len(a.data.fast) == 0
     assert len(a.data.slow) == N_PAUSE + 1
-    assert sum(paused is True for paused in a.data.slow.values()) == N_PAUSE
+    n_spilled_while_paused = sum(paused is True for paused in a.data.slow.values())
+    assert N_PAUSE <= n_spilled_while_paused <= N_PAUSE + 1
 
 
 @pytest.mark.slow
