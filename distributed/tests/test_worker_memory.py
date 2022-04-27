@@ -521,8 +521,8 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
     #   w has a higher priority than z, therefore w's dependency x has a higher priority
     #   than z's dependency y.
     #   a.data_needed = ["x", "y"]
-    # - ensure_communicating decides not to fetch additional keys together with x, as it
-    #   thinks it's 1TB in size
+    # - ensure_communicating decides to fetch x but not to fetch y together with it, as
+    #   it thinks x is 1TB in size
     # - x fetch->flight; a is added to in_flight_workers
     # - y is skipped by ensure_communicating since all workers that hold a replica are
     #   in flight
@@ -537,6 +537,8 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
     assert a.tasks["y"].state == "fetch"
     assert "y" not in a.data
     assert [ts.key for ts in a.data_needed] == ["y"]
+
+    # Unpausing kicks off ensure_communicating again
     a.status = Status.running
     assert await z == 3
     assert a.tasks["y"].state == "memory"
