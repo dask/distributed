@@ -159,28 +159,68 @@ DEFAULT_STARTUP_INFORMATION: dict[str, Callable[[Worker], Any]] = {}
 
 def fail_hard(method):
     """
-    Decorator to close the worker if this method encounters an exception
+    Decorator to close the worker if this method encounters an exception.
     """
-    assert iscoroutinefunction(method)
+    if iscoroutinefunction(method):
 
-    @functools.wraps(method)
-    async def wrapper(self, *args, **kwargs):
-        try:
-            return await method(self, *args, **kwargs)
-        except Exception as e:
-            logger.exception(e)
-            self.log_event(
-                "worker-fail-hard",
-                {
-                    **error_message(e),
-                    "worker": self.address,
-                },
-            )
-            # TODO: send event to scheduler
-            await self.close(nanny=False, executor_wait=False)
-            raise
+        @functools.wraps(method)
+        async def wrapper(self, *args, **kwargs):
+            try:
+                return await method(self, *args, **kwargs)
+            except Exception as e:
+                if self.status not in (Status.closed, Status.closing):
+                    self.log_event(
+                        "worker-fail-hard",
+                        {
+                            **error_message(e),
+                            "worker": self.address,
+                        },
+                    )
+                    logger.exception(e)
+                await _force_close(self)
+
+    else:
+
+        @functools.wraps(method)
+        def wrapper(self, *args, **kwargs):
+            try:
+                return method(self, *args, **kwargs)
+            except Exception as e:
+                if self.status not in (Status.closed, Status.closing):
+                    self.log_event(
+                        "worker-fail-hard",
+                        {
+                            **error_message(e),
+                            "worker": self.address,
+                        },
+                    )
+                    logger.exception(e)
+                else:
+                    self.loop.add_callback(_force_close, self)
 
     return wrapper
+
+
+async def _force_close(self):
+    """
+    Used with the fail_hard decorator defined above
+
+    1.  Wait for a worker to close
+    2.  If it doesn't, log and kill the process
+    """
+    try:
+        await asyncio.wait_for(self.close(nanny=False, executor_wait=False), 30)
+    except (Exception, BaseException):  # <-- include BaseException here or not??
+        # Worker is in a very broken state if closing fails. We need to shut down immediately,
+        # to ensure things don't get even worse and this worker potentially deadlocks the cluster.
+        logger.critical(
+            "Error trying close worker in response to broken internal state. "
+            "Forcibly exiting worker NOW",
+            exc_info=True,
+        )
+        # use `os._exit` instead of `sys.exit` because of uncertainty
+        # around propagating `SystemExit` from asyncio callbacks
+        os._exit(1)
 
 
 class Worker(ServerNode):
@@ -1682,7 +1722,9 @@ class Worker(ServerNode):
             assert response == "OK", response
         except OSError:
             logger.exception(
-                "failed during get data with %s -> %s", self.address, who, exc_info=True
+                "failed during get data with %s -> %s",
+                self.address,
+                who,
             )
             comm.abort()
             raise
@@ -2710,6 +2752,7 @@ class Worker(ServerNode):
         self.transitions(recs, stimulus_id=stim.stimulus_id)
         self._handle_instructions(instructions)
 
+    @fail_hard
     @log_errors
     def _handle_stimulus_from_task(
         self, task: asyncio.Task[StateMachineEvent | None]
@@ -2723,6 +2766,7 @@ class Worker(ServerNode):
         if stim:
             self.handle_stimulus(stim)
 
+    @fail_hard
     def _handle_instructions(self, instructions: Instructions) -> None:
         # TODO this method is temporary.
         #      See final design: https://github.com/dask/distributed/issues/5894
@@ -3577,6 +3621,7 @@ class Worker(ServerNode):
 
         return recs, []
 
+    @fail_hard
     async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent | None:
         if self.status in {Status.closing, Status.closed, Status.closing_gracefully}:
             return None
