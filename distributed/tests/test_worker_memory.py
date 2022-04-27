@@ -480,6 +480,7 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
 
 @gen_cluster(
     client=True,
+    nthreads=[("", 1), ("", 1)],
     config={
         "distributed.worker.memory.target": False,
         "distributed.worker.memory.spill": False,
@@ -512,11 +513,13 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
     x = c.submit(X, key="x", workers=[b.address])
     y = c.submit(inc, 1, key="y", workers=[b.address])
     await wait([x, y])
+    w = c.submit(lambda _: None, x, key="w", priority=1, workers=[a.address])
+    z = c.submit(inc, y, key="z", priority=0, workers=[a.address])
 
-    # - z reaches worker a with higher priority than w
-    # - z and w respectively make x and y go into fetch state.
-    #   z has a higher priority than w, therefore z's dependency x has a higher priority
-    #   than w's dependency y.
+    # - w and z reach worker a within the same message
+    # - w and z respectively make x and y go into fetch state.
+    #   w has a higher priority than z, therefore w's dependency x has a higher priority
+    #   than z's dependency y.
     #   a.data_needed = ["x", "y"]
     # - ensure_communicating decides not to fetch additional keys together with x, as it
     #   thinks it's 1TB in size
@@ -528,9 +531,6 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
     # - ensure_communicating is triggered again
     # - ensure_communicating refuses to fetch y because the worker is paused
 
-    w = c.submit(inc, y, key="w", workers=[a.address])
-    z = c.submit(lambda _: None, x, key="z", workers=[a.address])
-
     while "y" not in a.tasks or a.tasks["y"].state != "fetch":
         await asyncio.sleep(0.01)
     await asyncio.sleep(0.1)
@@ -538,7 +538,7 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
     assert "y" not in a.data
     assert [ts.key for ts in a.data_needed] == ["y"]
     a.status = Status.running
-    assert await w == 3
+    assert await z == 3
     assert a.tasks["y"].state == "memory"
     assert "y" in a.data
 
