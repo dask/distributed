@@ -343,14 +343,15 @@ async def test_cuda_context():
                 assert list(worker_cuda_context.values())[0] == 0
 
 
-@gen_test()
+@pytest.mark.flaky(reruns=3)
+@gen_test(timeout=120)
 async def test_transpose():
     da = pytest.importorskip("dask.array")
 
     async with LocalCluster(protocol="ucx", asynchronous=True) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             assert cluster.scheduler_address.startswith("ucx://")
-            x = da.ones((1000, 1000), chunks=(200, 200)).persist()
+            x = da.ones((10000, 10000), chunks=(1000, 1000)).persist()
             await x
             y = (x + x.T).sum()
             await y
