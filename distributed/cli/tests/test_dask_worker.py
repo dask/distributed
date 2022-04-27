@@ -15,7 +15,7 @@ from dask.utils import tmpfile
 
 from distributed import Client
 from distributed.cli.dask_worker import _apportion_ports, main
-from distributed.compatibility import LINUX, to_thread
+from distributed.compatibility import LINUX, WINDOWS, to_thread
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, popen, requires_ipv6
@@ -706,13 +706,20 @@ def test_timeout(nanny):
 @gen_cluster(client=True, nthreads=[])
 async def test_sigint(c, s, nanny):
     try:
+        kwargs = {}
+        if WINDOWS:
+            # Allow using CTRL_C_EVENT / CTRL_BREAK_EVENT
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+
         worker = subprocess.Popen(
             ["dask-worker", s.address, nanny],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            **kwargs,
         )
         await c.wait_for_workers(1)
-        worker.send_signal(signal.SIGINT)
+        sig = signal.CTRL_C_EVENT if WINDOWS else signal.SIGINT
+        worker.send_signal(sig)
         stdout, stderr = worker.communicate()
         logs = stdout.decode().lower()
         assert stderr is None
@@ -736,17 +743,24 @@ async def test_sigint(c, s, nanny):
 @gen_cluster(client=True, nthreads=[])
 async def test_sigterm(c, s, nanny):
     try:
+        kwargs = {}
+        if WINDOWS:
+            # Allow using CTRL_C_EVENT / CTRL_BREAK_EVENT
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         worker = subprocess.Popen(
             ["dask-worker", s.address, nanny],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            **kwargs,
         )
         await c.wait_for_workers(1)
-        worker.send_signal(signal.SIGTERM)
+        sig = signal.CTRL_C_EVENT if WINDOWS else signal.SIGINT
+
+        worker.send_signal(sig)
         stdout, stderr = worker.communicate()
         logs = stdout.decode().lower()
         assert stderr is None
-        assert f"signal {signal.SIGTERM}" in logs
+        assert f"signal {sig}" in logs
         if nanny == "--nanny":
             assert "closing nanny" in logs
         else:
