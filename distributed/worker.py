@@ -558,6 +558,7 @@ class Worker(ServerNode):
         # Parameters to Server
         **kwargs,
     ):
+        self._background_tasks: set[asyncio.Task] = set()
         self.tasks = {}
         self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)
@@ -1007,11 +1008,16 @@ class Worker(ServerNode):
         prev_status = self.status
         ServerNode.status.__set__(self, value)
         stimulus_id = f"worker-status-change-{time()}"
-        self._send_worker_status_change(stimulus_id)
+        self._background_tasks.add(
+            asyncio.create_task(
+                self._send_worker_status_change(stimulus_id),
+                name="send-worker-status-change",
+            )
+        )
         if prev_status == Status.paused and value == Status.running:
             self.handle_stimulus(UnpauseEvent(stimulus_id=stimulus_id))
 
-    def _send_worker_status_change(self, stimulus_id: str) -> None:
+    async def _send_worker_status_change(self, stimulus_id: str) -> None:
         if (
             self.batched_stream
             and self.batched_stream.comm
@@ -1025,7 +1031,8 @@ class Worker(ServerNode):
                 },
             )
         elif self._status != Status.closed:
-            self.loop.call_later(0.05, self._send_worker_status_change, stimulus_id)
+            await asyncio.sleep(0.05)
+            await self._send_worker_status_change(stimulus_id=stimulus_id)
 
     async def get_metrics(self) -> dict:
         try:
@@ -1607,6 +1614,7 @@ class Worker(ServerNode):
 
         self.status = Status.closed
         await super().close()
+        await asyncio.gather(*self._background_tasks)
 
         setproctitle("dask-worker [closed]")
         return "OK"
@@ -3354,7 +3362,12 @@ class Worker(ServerNode):
                 "Invalid Worker.status transition: %s -> %s", self._status, new_status
             )
             # Reiterate the current status to the scheduler to restore sync
-            self._send_worker_status_change(stimulus_id)
+            self._background_tasks.add(
+                asyncio.create_task(
+                    self._send_worker_status_change(stimulus_id),
+                    name="send-worker-status-change",
+                )
+            )
         else:
             # Update status and send confirmation to the Scheduler (see status.setter)
             self.status = new_status
