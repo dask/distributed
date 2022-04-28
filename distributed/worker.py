@@ -1268,21 +1268,17 @@ class Worker(ServerNode):
 
     @fail_hard
     async def handle_scheduler(self, comm):
-        try:
-            await self.handle_stream(comm, every_cycle=[self.ensure_communicating])
-        except Exception as e:
-            logger.exception(e)
-            raise
-        finally:
-            if self.reconnect and self.status in Status.ANY_RUNNING:
-                logger.info("Connection to scheduler broken.  Reconnecting...")
-                self.loop.add_callback(self.heartbeat)
-            else:
-                logger.info(
-                    "Connection to scheduler broken. Closing without reporting.  Status: %s",
-                    self.status,
-                )
-                await self.close(report=False)
+        await self.handle_stream(comm, every_cycle=[self.ensure_communicating])
+
+        if self.reconnect and self.status in Status.ANY_RUNNING:
+            logger.info("Connection to scheduler broken.  Reconnecting...")
+            self.loop.add_callback(self.heartbeat)
+        else:
+            logger.info(
+                "Connection to scheduler broken. Closing without reporting.  Status: %s",
+                self.status,
+            )
+            await self.close(report=False)
 
     async def upload_file(self, comm, filename=None, data=None, load=True):
         out_filename = os.path.join(self.local_directory, filename)
