@@ -769,40 +769,6 @@ async def test_sigterm(c, s, nanny):
 @pytest.mark.skipif(not WINDOWS, reason="Windows only")
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 @gen_cluster(client=True, nthreads=[])
-async def test_ctrl_c_event(c, s, nanny):
-    try:
-        worker = subprocess.Popen(
-            ["dask-worker", s.address, nanny],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            # Allow using CTRL_C_EVENT / CTRL_BREAK_EVENT
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-        )
-        await c.wait_for_workers(1)
-
-        worker.send_signal(signal.CTRL_C_EVENT)
-        stdout, stderr = worker.communicate()
-        logs = stdout.decode().lower()
-        assert stderr is None
-        if nanny == "--nanny":
-            assert "closing nanny" in logs
-        else:
-            assert "nanny" not in logs
-        assert "stopping worker" in logs
-        assert "end worker" in logs
-        assert "signal" not in logs
-        assert "timed out" not in logs
-        assert "error" not in logs
-        assert "exception" not in logs
-        assert worker.returncode == 0
-    finally:
-        worker.kill()
-
-
-@pytest.mark.slow
-@pytest.mark.skipif(not WINDOWS, reason="Windows only")
-@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
-@gen_cluster(client=True, nthreads=[])
 async def test_ctrl_break_event(c, s, nanny):
     try:
         worker = subprocess.Popen(
