@@ -3905,7 +3905,7 @@ class Client(SyncMethodMixin):
                 with open("filename") as fd:
                     state = yaml.load(fd, Loader=Loader)
         workers:
-            List of worker addresses. If None, all workers will be used.
+            List of address of workers to dump. If None, the state of all workers will be dumped.
         **storage_options:
             Any additional arguments to :func:`fsspec.open` when writing to a URL.
         """
