@@ -1540,12 +1540,13 @@ class Worker(ServerNode):
         setproctitle("dask-worker [closed]")
         return "OK"
 
-    async def close_gracefully(self, restart=None):
+    async def close_gracefully(self, restart=None, timeout="60 s"):
         """Gracefully shut down a worker
 
         This first informs the scheduler that we're shutting down, and asks it
         to move our data elsewhere.  Afterwards, we close as normal
         """
+        timeout = parse_timedelta(timeout)
         if self.status in (Status.closing, Status.closing_gracefully):
             await self.finished()
 
@@ -1559,13 +1560,18 @@ class Worker(ServerNode):
         # Wait for all tasks to leave the worker and don't accept any new ones.
         # Scheduler.retire_workers will set the status to closing_gracefully and push it
         # back to this worker.
-        await self.scheduler.retire_workers(
-            workers=[self.address],
-            close_workers=False,
-            remove=False,
-            stimulus_id=f"worker-close-gracefully-{time()}",
-        )
-        await self.close(safe=True, nanny=not restart)
+        try:
+            await asyncio.wait_for(
+                self.scheduler.retire_workers(
+                    workers=[self.address],
+                    close_workers=False,
+                    remove=False,
+                    stimulus_id=f"worker-close-gracefully-{time()}",
+                ),
+                timeout=timeout,
+            )
+        finally:
+            await self.close(safe=True, nanny=not restart)
 
     async def wait_until_closed(self):
         warnings.warn("wait_until_closed has moved to finished()")

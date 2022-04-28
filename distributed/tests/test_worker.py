@@ -3550,3 +3550,22 @@ async def test_broken_comm(c, s, a, b):
     )
     s = df.shuffle("id", shuffle="tasks")
     await c.compute(s.size)
+
+
+@gen_test()
+async def test_close_gracefully_timeout():
+    class SlowRetireScheduler(Scheduler):
+        async def retire_workers(self, *args, **kwargs):
+            await asyncio.sleep(5)
+            await super().retire_workers(*args, **kwargs)
+
+    async with SlowRetireScheduler() as s:
+        async with Worker(s.address) as w:
+            try:
+                await w.close_gracefully(timeout="1ms")
+            except TimeoutError:
+                pass
+            else:
+                raise Exception()
+            finally:
+                assert w.status == Status.closed
