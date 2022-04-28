@@ -20,7 +20,7 @@ import dask
 from dask.system import CPU_COUNT
 
 from distributed import Nanny
-from distributed.cli.utils import install_signal_handlers
+from distributed.cli.utils import install_signal_handlers2 as install_signal_handlers
 from distributed.comm import get_address_host_port
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.preloading import validate_preload_argv
@@ -404,8 +404,6 @@ def main(
     else:
         resources = None
 
-    loop = IOLoop.current()
-
     worker_class = import_term(worker_class)
 
     port_kwargs = _apportion_ports(worker_port, nanny_port, n_workers, nanny)
@@ -432,48 +430,50 @@ def main(
     with suppress(TypeError, ValueError):
         name = int(name)
 
-    nannies = [
-        t(
-            scheduler,
-            scheduler_file=scheduler_file,
-            nthreads=nthreads,
-            loop=loop,
-            resources=resources,
-            security=sec,
-            contact_address=contact_address,
-            host=host,
-            dashboard=dashboard,
-            dashboard_address=dashboard_address,
-            name=name
-            if n_workers == 1 or name is None or name == ""
-            else str(name) + "-" + str(i),
-            **kwargs,
-            **port_kwargs_i,
-        )
-        for i, port_kwargs_i in enumerate(port_kwargs)
-    ]
-
-    async def close_all():
-        # Unregister all workers from scheduler
-        await asyncio.gather(*(n.close(timeout=2) for n in nannies))
-
     signal_fired = False
 
-    def on_signal(signum):
-        nonlocal signal_fired
-        signal_fired = True
-        if signum != signal.SIGINT:
-            logger.info("Exiting on signal %d", signum)
-        return asyncio.ensure_future(close_all())
-
     async def run():
+        loop = IOLoop.current()
+
+        nannies = [
+            t(
+                scheduler,
+                scheduler_file=scheduler_file,
+                nthreads=nthreads,
+                loop=loop,
+                resources=resources,
+                security=sec,
+                contact_address=contact_address,
+                host=host,
+                dashboard=dashboard,
+                dashboard_address=dashboard_address,
+                name=name
+                if n_workers == 1 or name is None or name == ""
+                else str(name) + "-" + str(i),
+                **kwargs,
+                **port_kwargs_i,
+            )
+            for i, port_kwargs_i in enumerate(port_kwargs)
+        ]
+
+        async def close_all():
+            # Unregister all workers from scheduler
+            await asyncio.gather(*(n.close(timeout=2) for n in nannies))
+
+        def on_signal(signum):
+            nonlocal signal_fired
+            signal_fired = True
+            if signum != signal.SIGINT:
+                logger.info("Exiting on signal %d", signum)
+            return asyncio.ensure_future(close_all())
+
+        install_signal_handlers(loop, cleanup=on_signal)
+
         await asyncio.gather(*nannies)
         await asyncio.gather(*(n.finished() for n in nannies))
 
-    install_signal_handlers(loop, cleanup=on_signal)
-
     try:
-        loop.run_sync(run)
+        asyncio.run(run())
     except (TimeoutError, asyncio.TimeoutError):
         # We already log the exception in nanny / worker. Don't do it again.
         if not signal_fired:

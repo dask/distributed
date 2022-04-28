@@ -20,8 +20,31 @@ def install_signal_handlers(loop=None, cleanup=None):
                     await cleanup(sig)
             finally:
                 loop.stop()
+            loop.add_callback_from_signal(lambda: cleanup(sig))
 
-        loop.add_callback_from_signal(cleanup_and_stop)
+        # Restore old signal handler to allow for a quicker exit
+        # if the user sends the signal again.
+        signal.signal(sig, old_handlers[sig])
+
+    for sig in [signal.SIGINT, signal.SIGTERM]:
+        old_handlers[sig] = signal.signal(sig, handle_signal)
+
+
+def install_signal_handlers2(loop=None, cleanup=None):
+    """
+    Install global signal handlers to halt the Tornado IOLoop in case of
+    a SIGINT or SIGTERM.  *cleanup* is an optional callback called,
+    before the loop stops, with a single signal number argument.
+    """
+    import signal
+
+    loop = loop or IOLoop.current()
+
+    old_handlers = {}
+
+    def handle_signal(sig, frame):
+        if cleanup is not None:
+            loop.add_callback_from_signal(lambda: cleanup(sig))
         # Restore old signal handler to allow for a quicker exit
         # if the user sends the signal again.
         signal.signal(sig, old_handlers[sig])
