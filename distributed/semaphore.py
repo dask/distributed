@@ -11,7 +11,7 @@ import dask
 from dask.utils import parse_timedelta
 
 from distributed.metrics import time
-from distributed.utils import SyncMethodMixin, log_errors
+from distributed.utils import SyncMethodMixin, log_errors, wait_for
 from distributed.utils_comm import retry_operation
 from distributed.worker import get_client, get_worker
 
@@ -169,9 +169,7 @@ class SemaphoreExtension:
                 # If acquiring fails, we wait for the event to be set, i.e. something has
                 # been released and we can try to acquire again (continue loop)
                 if not result:
-                    future = asyncio.wait_for(
-                        self.events[name].wait(), timeout=w.leftover()
-                    )
+                    future = wait_for(self.events[name].wait(), timeout=w.leftover())
                     try:
                         await future
                         continue

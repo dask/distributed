@@ -97,6 +97,7 @@ from distributed.utils import (
     no_default,
     recursive_to_dict,
     validate_key,
+    wait_for,
 )
 from distributed.utils_comm import (
     gather_from_workers,
@@ -5361,7 +5362,7 @@ class Scheduler(SchedulerState, ServerNode):
                     ]
                 )
                 try:
-                    resps = await asyncio.wait_for(resps, timeout)
+                    resps = await wait_for(resps, timeout)
                 except TimeoutError:
                     logger.error(
                         "Nannies didn't report back restarted within "

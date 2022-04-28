@@ -20,6 +20,7 @@ from distributed.metrics import time
 from distributed.profile import wait_profiler
 from distributed.scheduler import key_split
 from distributed.system import MEMORY_LIMIT
+from distributed.utils import wait_for
 from distributed.utils_test import (
     captured_logger,
     gen_cluster,
@@ -204,7 +205,7 @@ async def test_allow_tasks_stolen_before_first_completes(c, s, a, b):
             await asyncio.sleep(0.001)
         # Ensure the task is indeed blocked
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(first, 0.01)
+            await wait_for(first, 0.01)
 
         more_tasks = c.map(
             blocked_task,

@@ -44,7 +44,7 @@ from distributed.metrics import time
 from distributed.profile import wait_profiler
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
-from distributed.utils import TimeoutError
+from distributed.utils import TimeoutError, wait_for
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _LockedCommPool,
@@ -328,7 +328,7 @@ async def test_worker_waits_for_scheduler(connect_timeout):
         w = Worker("127.0.0.1:8724")
 
         with pytest.raises(TimeoutError):
-            await asyncio.wait_for(w, 3)
+            await wait_for(w, 3)
 
         assert w.status not in (Status.closed, Status.running, Status.paused)
         await w.close()
@@ -1829,7 +1829,7 @@ async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     assert f.key != g.key
     h = c.submit(add, f, g, workers=[b.address])
 
-    fut = asyncio.wait_for(h, 0.1)
+    fut = wait_for(h, 0.1)
 
     while h.key not in b.tasks:
         await asyncio.sleep(0.01)

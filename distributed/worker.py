@@ -94,6 +94,7 @@ from distributed.utils import (
     recursive_to_dict,
     silence_logging,
     thread_state,
+    wait_for,
     warn_on_duration,
 )
 from distributed.utils_comm import gather_from_workers, pack_data, retry_operation
@@ -1480,7 +1481,7 @@ class Worker(ServerNode):
 
             with suppress(EnvironmentError, TimeoutError):
                 if report and self.contact_address is not None:
-                    await asyncio.wait_for(
+                    await wait_for(
                         self.scheduler.unregister(
                             address=self.contact_address, safe=safe
                         ),

@@ -17,7 +17,7 @@ from distributed import Client, Nanny, Scheduler, Worker, config, default_client
 from distributed.compatibility import WINDOWS
 from distributed.core import Server, rpc
 from distributed.metrics import time
-from distributed.utils import mp_context
+from distributed.utils import mp_context, wait_for
 from distributed.utils_test import (
     _LockedCommPool,
     _UnhashableCallable,
@@ -341,7 +341,7 @@ async def test_locked_comm_intercept_read(loop):
             await asyncio.sleep(0.001)
 
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(asyncio.shield(fut), 0.01)
+            await wait_for(asyncio.shield(fut), 0.01)
 
         assert await read_queue.get() == (b.address, "pong")
         read_event.set()
@@ -365,7 +365,7 @@ async def test_locked_comm_intercept_write(loop):
         fut = asyncio.create_task(ping_pong())
 
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(asyncio.shield(fut), 0.01)
+            await wait_for(asyncio.shield(fut), 0.01)
         # Write was blocked. The remote hasn't received the message, yet
         assert b.counter == 0
         assert await write_queue.get() == (b.address, {"op": "ping", "reply": True})

@@ -303,7 +303,7 @@ class SyncMethodMixin:
         if asynchronous:
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
+                future = wait_for(future, callback_timeout)
             return future
         else:
             return sync(
@@ -344,7 +344,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             yield gen.moment
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
+                future = wait_for(future, callback_timeout)
             future = asyncio.ensure_future(future)
             result = yield future
         except Exception:
@@ -1626,15 +1626,10 @@ def is_python_shutting_down() -> bool:
 T = TypeVar("T")
 
 
-async def ensure_cancellation(coro: CoroutineType[None, None, T]) -> T:
-    """Ensure that the wrapped coro will raise a CancelledError even if its
-    result is already set.
-
-    See https://github.com/python/cpython/issues/86296
-    """
+async def _ensure_cancellation(coro: CoroutineType[None, None, T]) -> T:
     watcher = asyncio.Event()
 
-    task = asyncio.create_task(coro)
+    task = asyncio.ensure_future(coro)
     task.add_done_callback(lambda _: watcher.set())
 
     try:
@@ -1645,3 +1640,13 @@ async def ensure_cancellation(coro: CoroutineType[None, None, T]) -> T:
         raise
 
     return task.result()
+
+
+async def wait_for(fut, timeout):
+    """Ensure that the wrapped coro will raise a CancelledError even if its
+    result is already set.
+
+    See https://github.com/python/cpython/issues/86296
+    """
+    task = _ensure_cancellation(fut)
+    return await asyncio.wait_for(task, timeout)

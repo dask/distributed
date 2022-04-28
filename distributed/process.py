@@ -11,7 +11,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from distributed.utils import TimeoutError, mp_context
+from distributed.utils import TimeoutError, mp_context, wait_for
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +267,7 @@ class AsyncProcess:
             try:
                 # Shield otherwise the timeout cancels the future and our
                 # on_exit callback will try to set a result on a canceled future
-                await asyncio.wait_for(asyncio.shield(self._exit_future), timeout)
+                await wait_for(asyncio.shield(self._exit_future), timeout)
             except TimeoutError:
                 pass
 

@@ -29,6 +29,7 @@ from typing import Any, Literal
 
 from distributed.compatibility import MACOS
 from distributed.scheduler import Scheduler
+from distributed.utils import wait_for
 
 try:
     import ssl
@@ -524,7 +525,7 @@ def check_active_rpc(loop, active_rpc_timeout=1):
         )
 
     async def wait():
-        await async_wait_for(
+        await async_wait_for_condition(
             lambda: len(set(rpc.active) - active_before) == 0,
             timeout=active_rpc_timeout,
             fail_func=fail,
@@ -774,7 +775,7 @@ async def disconnect(addr, timeout=3, rpc_kwargs=None):
                 # the timeout
                 await w.terminate(reply=False)
 
-    await asyncio.wait_for(do_disconnect(), timeout=timeout)
+    await wait_for(do_disconnect(), timeout=timeout)
 
 
 async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
@@ -999,7 +1000,7 @@ def gen_cluster(
                         try:
                             coro = func(*args, *outer_args, **kwargs)
                             task = asyncio.create_task(coro)
-                            coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
+                            coro2 = wait_for(asyncio.shield(task), timeout)
                             result = await coro2
                             if s.validate:
                                 s.validate_state()
@@ -1050,7 +1051,7 @@ def gen_cluster(
                             if client and c.status not in ("closing", "closed"):
                                 await c._close(fast=s.status == Status.closed)
                             await end_cluster(s, workers)
-                            await asyncio.wait_for(cleanup_global_workers(), 1)
+                            await wait_for(cleanup_global_workers(), 1)
 
                         try:
                             c = await default_client()
@@ -1242,7 +1243,7 @@ def popen(args: list[str], flush_output: bool = True, **kwargs):
                 print("-" * 80)
 
 
-def wait_for(predicate, timeout, fail_func=None, period=0.05):
+def wait_for_condition(predicate, timeout, fail_func=None, period=0.05):
     deadline = time() + timeout
     while not predicate():
         sleep(period)
@@ -1252,7 +1253,7 @@ def wait_for(predicate, timeout, fail_func=None, period=0.05):
             pytest.fail(f"condition not reached until {timeout} seconds")
 
 
-async def async_wait_for(predicate, timeout, fail_func=None, period=0.05):
+async def async_wait_for_condition(predicate, timeout, fail_func=None, period=0.05):
     deadline = time() + timeout
     while not predicate():
         await asyncio.sleep(period)
@@ -1851,7 +1852,7 @@ class _LockedCommPool(ConnectionPool):
     >>> async def ping_pong():
             return await w.rpc(remote_address).ping()
     >>> with pytest.raises(asyncio.TimeoutError):
-    >>>     await asyncio.wait_for(ping_pong(), 0.01)
+    >>>     await wait_for(ping_pong(), 0.01)
     >>> read_event.set()
     >>> await ping_pong()
     """

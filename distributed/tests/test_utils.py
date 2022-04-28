@@ -25,9 +25,9 @@ from distributed.utils import (
     Logs,
     LoopRunner,
     TimeoutError,
+    _ensure_cancellation,
     _maybe_complex,
     ensure_bytes,
-    ensure_cancellation,
     ensure_ip,
     format_dashboard_link,
     get_ip_interface,
@@ -806,7 +806,7 @@ def test_ensure_cancellation():
             await task
         ev.clear()
 
-        task = asyncio.create_task(ensure_cancellation(f()))
+        task = asyncio.create_task(_ensure_cancellation(f()))
         await ev.wait()
         await asyncio.sleep(0)
         task.cancel()
@@ -814,7 +814,7 @@ def test_ensure_cancellation():
             await task
 
         ev.clear()
-        task = asyncio.create_task(ensure_cancellation(g()))
+        task = asyncio.create_task(_ensure_cancellation(g()))
         await ev.wait()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -824,6 +824,6 @@ def test_ensure_cancellation():
             await asyncio.sleep(0)
             return 1
 
-        assert await ensure_cancellation(h()) == 1
+        assert await _ensure_cancellation(h()) == 1
 
     asyncio.run(_())

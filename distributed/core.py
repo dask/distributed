@@ -44,6 +44,7 @@ from distributed.utils import (
     is_coroutine_function,
     recursive_to_dict,
     truncate_exception,
+    wait_for,
 )
 
 
@@ -296,7 +297,7 @@ class Server:
                     return self
                 if timeout:
                     try:
-                        await asyncio.wait_for(self.start(), timeout=timeout)
+                        await wait_for(self.start(), timeout=timeout)
                         self.status = Status.running
                     except Exception:
                         await self.close(timeout=1)
