@@ -13,7 +13,7 @@ from dask.utils import tmpfile
 
 from distributed import Client
 from distributed.cli.dask_worker import _apportion_ports, main
-from distributed.compatibility import LINUX, to_thread
+from distributed.compatibility import LINUX
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, popen, requires_ipv6
@@ -271,30 +271,6 @@ async def test_memory_limit(c, s):
 async def test_no_nanny(c, s):
     with popen(["dask-worker", s.address, "--no-nanny", "--no-dashboard"]):
         await c.wait_for_workers(1)
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
-@gen_cluster(client=True, nthreads=[])
-async def test_no_reconnect(c, s, nanny):
-    with popen(
-        [
-            "dask-worker",
-            s.address,
-            "--no-reconnect",
-            nanny,
-            "--no-dashboard",
-        ]
-    ) as worker:
-        # roundtrip works
-        assert await c.submit(lambda x: x + 1, 10) == 11
-
-        (comm,) = s.stream_comms.values()
-        comm.abort()
-
-        # worker terminates as soon as the connection is aborted
-        await to_thread(worker.wait, timeout=5)
-        assert worker.returncode == 0
 
 
 @pytest.mark.slow
