@@ -16,7 +16,9 @@ from distributed.active_memory_manager import (
     RetireWorker,
 )
 from distributed.core import Status
+from distributed.scheduler import Scheduler
 from distributed.utils_test import captured_logger, gen_cluster, inc, slowinc
+from distributed.worker import Worker
 
 NO_AMM_START = {"distributed.scheduler.active-memory-manager.start": False}
 
@@ -908,84 +910,82 @@ async def test_RetireWorker_all_recipients_are_paused(c, s, a, b):
     client=True,
     config={
         "distributed.scheduler.active-memory-manager.start": True,
-        # "distributed.scheduler.active-memory-manager.interval": 999,
         "distributed.scheduler.active-memory-manager.policies": [],
-        # "distributed.worker.memory.pause": False,
     },
+    timeout=15,
 )
-async def test_RetireWorker_other_worker_dies_after_replication(c, s, a, b):
+async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(
+    c, s: Scheduler, a: Worker, b: Worker
+):
+    """
+    If all keys have been moved off a worker, but then new keys arrive (due to task completion or `gather_dep`)
+    before the worker has actually closed, make sure we still retire it (instead of hanging forever).
+
+    This test is timing-sensitive. If it runs too slowly, it *should* `pytest.skip` itself.
+    However, this won't work until https://github.com/dask/distributed/issues/6239 is fixed.
+    So it may get stuck and fail at the 15s test timeout.
+
+    See https://github.com/dask/distributed/issues/6223 for motivation.
+    """
     ws_a = s.workers[a.address]
     ws_b = s.workers[b.address]
-
-    # b.status = Status.paused
-    # while ws_b.status != Status.paused:
-    #     await asyncio.sleep(0.01)
-
     event = Event()
 
-    print(0)
+    # Put 200 keys on the worker, so `_track_retire_worker` will sleep for 0.5s
+    # (Note that if you decrease the 200 to a very small value (say 2), this test will time out.
+    # But just because `extra` is restricted to only run on worker A, and A gets closed before `extra` can run,
+    # so not a deadlock (just user error)).
     xs = c.map(lambda x: x, range(200), workers=[a.address])
-    y = c.submit(lambda _: event.wait(), xs, workers=[a.address])
 
-    while y.key not in s.tasks:
+    while len(a.data) < len(xs):
+        await asyncio.sleep(0.1)
+
+    extra = c.submit(lambda: print(event.wait("2s")), workers=[a.address])
+
+    while extra.key not in a.tasks or a.tasks[extra.key].state != "executing":
         await asyncio.sleep(0.01)
-    y_ts = s.tasks[y.key]
-
-    print(1)
-    while y_ts.state != "processing":
-        await asyncio.sleep(0.5)
-    print(2)
 
     t = asyncio.create_task(c.retire_workers([a.address]))
-    print(3)
 
-    # Wait for all `xs` to be replicated. They can't be dropped yet, because `y` is queued on the same worker
-    while not all(len(ts.who_has) == 2 for ts in ws_a.has_what):
+    # Wait for all `xs` to be replicated.
+    while not len(ws_b.has_what) == len(xs):
         await asyncio.sleep(0.01)
-    print(4)
 
-    # `_track_retire_worker` _should_ now be sleeping for 0.5s, because there are >=200 keys on A.
+    # `_track_retire_worker` _should_ now be sleeping for 0.5s, because there were >=200 keys on A.
+    # In this test, everything from here on needs to happen within 0.5s.
 
-    # Let `y` complete.
-    await event.set()
-    print(5)
-    while not y_ts.state == "memory":
-        await asyncio.sleep(0.01)
-    print(6)
-    del y
-    while y_ts.who_has:
-        await asyncio.sleep(0.01)
-    print(7)
-
+    # The policy runs again. Because the default 2s AMM interval is 4x longer than the 0.5s wait,
+    # what we're about to trigger is unlikely, but still theoretically possible for the times to line up.
     amm: ActiveMemoryManagerExtension = s.extensions["amm"]
     assert len(amm.policies) == 1
     policy = next(iter(amm.policies))
     assert isinstance(policy, RetireWorker)
 
-    print(8)
-    # The policy runs again. Because the default 2s AMM interval is 4x longer than the 0.5s wait,
-    # what we're about to trigger is unlikely, but still theoretically possible.
+    # This will drop all the `xs` from A (since they're already replicated on B).
     amm.run_once()
-    print(9)
 
-    assert policy.done(), {ts.key: len(ts.who_has) for ts in ws_a.has_what}
+    # The policy has removed itself, because there's no more data in need of replication.
+    assert not ws_a.has_what
     assert not amm.policies
-    print(10)
+    assert policy.done(), {ts.key: ts.who_has for ts in ws_a.has_what}
 
-    # The policy is done and removed. But `_track_retire_worker` is still sleeping.
-    # What if worker B leaves before it wakes up?
+    # But what if a new key arrives now?
+    # Let `extra` complete.
+    await event.set()
+    # ^ FIXME: this can hang forever if the worker is actually closing right now, see #6239.
+    while not s.tasks[extra.key].state == "memory":
+        await asyncio.sleep(0.01)
+        if a.address not in s.workers:
+            # It took more than 0.5s to get here, and the scheduler closed our worker. Dang.
+            # FIXME unreachable until https://github.com/dask/distributed/issues/6239 is fixed.
+            pytest.skip("Timing didn't work out.")
 
-    assert len(b.data) == 200
-    await b.close()
-    print(11)
+    # Worker A is no longer empty
+    assert s.tasks[extra.key].who_has == {ws_a}
 
-    # Policy is no longer done. But it's also not running anymore.
-    # So it won't have the opportunity for `no_recipients` to get set.
-    assert not policy.done(), {ts.key: ts.who_has for ts in ws_a.has_what}
-    print(12)
-
-    # This will deadlock
-    res = await t
+    # Nonetheless, it should still retire.
+    while a.address in s.workers:
+        await asyncio.sleep(0.1)
 
 
 # FIXME can't drop runtime of this test below 10s; see distributed#5585
