@@ -64,9 +64,8 @@ from distributed.client import (
     wait,
 )
 from distributed.cluster_dump import load_cluster_dump
-from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import Server, Status
+from distributed.core import Status
 from distributed.metrics import time
 from distributed.profile import wait_profiler
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
@@ -3574,74 +3573,6 @@ async def test_persist_optimize_graph(c, s, a, b):
 async def test_scatter_raises_if_no_workers(c, s):
     with pytest.raises(TimeoutError):
         await c.scatter(1, timeout=0.5)
-
-
-@pytest.mark.flaky(reruns=2)
-@gen_test()
-async def test_reconnect():
-    port = random.randint(10000, 50000)
-
-    async def hard_stop(s):
-        for pc in s.periodic_callbacks.values():
-            pc.stop()
-
-        s.stop_services()
-        for comm in list(s.stream_comms.values()):
-            comm.abort()
-        for comm in list(s.client_comms.values()):
-            comm.abort()
-
-        await s.rpc.close()
-        s.stop()
-        await Server.close(s)
-
-    futures = []
-    w = Worker(f"127.0.0.1:{port}")
-    futures.append(asyncio.ensure_future(w.start()))
-
-    s = await Scheduler(port=port)
-    c = await Client(f"127.0.0.1:{port}", asynchronous=True)
-    await c.wait_for_workers(1, timeout=10)
-    x = c.submit(inc, 1)
-    assert (await x) == 2
-    await hard_stop(s)
-
-    start = time()
-    while c.status != "connecting":
-        assert time() < start + 10
-        await asyncio.sleep(0.01)
-
-    assert x.status == "cancelled"
-    with pytest.raises(CancelledError):
-        await x
-
-    s = await Scheduler(port=port)
-    start = time()
-    while c.status != "running":
-        await asyncio.sleep(0.1)
-        assert time() < start + 10
-    start = time()
-    while len(await c.nthreads()) != 1:
-        await asyncio.sleep(0.05)
-        assert time() < start + 10
-
-    x = c.submit(inc, 1)
-    assert (await x) == 2
-    await hard_stop(s)
-
-    start = time()
-    while True:
-        assert time() < start + 10
-        try:
-            await x
-            assert False
-        except CommClosedError:
-            continue
-        except CancelledError:
-            break
-
-    await w.close(report=False)
-    await c._close(fast=True)
 
 
 class UnhandledException(Exception):
