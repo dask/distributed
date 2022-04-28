@@ -1258,16 +1258,9 @@ def test_localcluster_start_exception(loop):
             plugins={MyPlugin()},
             loop=loop,
         ):
-            pass
+            return
 
 
-def test_localcluster_get_client(loop):
-    with LocalCluster(
-        n_workers=0, asynchronous=False, dashboard_address=":0", loop=loop
-    ) as cluster:
-        with cluster.get_client() as client1:
-            assert client1.cluster == cluster
-
-            with Client(cluster) as client2:
-                assert client1 != client2
-                assert client2 == cluster.get_client()
+def test_dashboard_address_is_None():
+    with LocalCluster(n_workers=1, dashboard_address=None) as cluster1:
+        assert cluster1.dashboard_link is None

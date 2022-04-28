@@ -360,13 +360,20 @@ class Cluster(SyncMethodMixin):
 
     @property
     def dashboard_link(self):
-        try:
-            port = self.scheduler_info["services"]["dashboard"]
-        except KeyError:
-            return ""
-        else:
-            host = self.scheduler_address.split("://")[1].split("/")[0].split(":")[0]
-            return format_dashboard_link(host, port)
+        if hasattr(self, "scheduler_spec"):
+            use_dashboard = self.scheduler_spec["options"]["dashboard"]
+
+        if use_dashboard:
+            try:
+                # self.scheduler_info["services"] <- from Node class
+                port = self.scheduler_info["services"]["dashboard"]
+            except KeyError:
+                return ""
+            else:
+                host = (
+                    self.scheduler_address.split("://")[1].split("/")[0].split(":")[0]
+                )
+                return format_dashboard_link(host, port)
 
     def _scaling_status(self):
         if self._adaptive and self._adaptive.periodic_callback:
