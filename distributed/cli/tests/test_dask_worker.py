@@ -298,34 +298,6 @@ async def test_no_reconnect(c, s, nanny):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
-@gen_cluster(client=True, nthreads=[])
-async def test_reconnect(c, s, nanny):
-    with popen(
-        [
-            "dask-worker",
-            s.address,
-            "--reconnect",
-            nanny,
-            "--no-dashboard",
-        ]
-    ) as worker:
-        # roundtrip works
-        assert await c.submit(lambda x: x + 1, 10) == 11
-
-        (comm,) = s.stream_comms.values()
-        comm.abort()
-
-        # roundtrip still works, which means the worker reconnected
-        assert await c.submit(lambda x: x + 1, 11) == 12
-
-        # closing the scheduler cleanly does terminate the worker
-        await s.close()
-        await to_thread(worker.wait, timeout=5)
-        assert worker.returncode == 0
-
-
-@pytest.mark.slow
 @gen_cluster(client=True, nthreads=[])
 async def test_resources(c, s):
     with popen(
