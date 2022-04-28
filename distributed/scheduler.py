@@ -6184,23 +6184,23 @@ class Scheduler(SchedulerState, ServerNode):
         stimulus_id: str,
     ) -> tuple:  # tuple[str | None, dict]
         while not policy.done():
-            if policy.no_recipients:
-                # Abort retirement. This time we don't need to worry about race
-                # conditions and we can wait for a scheduler->worker->scheduler
-                # round-trip.
-                self.stream_comms[ws.address].send(
-                    {
-                        "op": "worker-status-change",
-                        "status": prev_status.name,
-                        "stimulus_id": stimulus_id,
-                    }
-                )
-                return None, {}
-
             # Sleep 0.01s when there are 4 tasks or less
             # Sleep 0.5s when there are 200 or more
             poll_interval = max(0.01, min(0.5, len(ws.has_what) / 400))
             await asyncio.sleep(poll_interval)
+
+        if policy.no_recipients:
+            # Abort retirement. This time we don't need to worry about race
+            # conditions and we can wait for a scheduler->worker->scheduler
+            # round-trip.
+            self.stream_comms[ws.address].send(
+                {
+                    "op": "worker-status-change",
+                    "status": prev_status.name,
+                    "stimulus_id": stimulus_id,
+                }
+            )
+            return None, {}
 
         logger.debug(
             "All unique keys on worker %s have been replicated elsewhere", ws.address
