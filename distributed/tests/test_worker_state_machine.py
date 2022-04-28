@@ -115,15 +115,19 @@ def test_slots(cls):
 
 def test_sendmsg_to_dict():
     # Arbitrary sample class
-    smsg = ReleaseWorkerDataMsg(key="x")
-    assert smsg.to_dict() == {"op": "release-worker-data", "key": "x"}
+    smsg = ReleaseWorkerDataMsg(key="x", stimulus_id="test")
+    assert smsg.to_dict() == {
+        "op": "release-worker-data",
+        "key": "x",
+        "stimulus_id": "test",
+    }
 
 
 def test_merge_recs_instructions():
     x = TaskState("x")
     y = TaskState("y")
-    instr1 = RescheduleMsg(key="foo", worker="a")
-    instr2 = RescheduleMsg(key="bar", worker="b")
+    instr1 = RescheduleMsg(key="foo", worker="a", stimulus_id="test")
+    instr2 = RescheduleMsg(key="bar", worker="b", stimulus_id="test")
     assert merge_recs_instructions(
         ({x: "memory"}, [instr1]),
         ({y: "released"}, [instr2]),

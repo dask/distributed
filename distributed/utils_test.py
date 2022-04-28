@@ -77,6 +77,15 @@ try:
 except ImportError:
     pass
 
+try:
+    from pytest_timeout import is_debugging
+except ImportError:
+
+    def is_debugging() -> bool:
+        # The pytest_timeout logic is more sophisticated. Not only debuggers
+        # attach a trace callback but vendoring the entire logic is not worth it
+        return sys.gettrace() is not None
+
 
 logger = logging.getLogger(__name__)
 
@@ -798,6 +807,8 @@ def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"
     )
+    if is_debugging():
+        timeout = 3600
 
     def _(func):
         def test_func(*args, **kwargs):
@@ -956,6 +967,8 @@ def gen_cluster(
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"
     )
+    if is_debugging():
+        timeout = 3600
 
     scheduler_kwargs = merge(
         {"dashboard": False, "dashboard_address": ":0"}, scheduler_kwargs
@@ -1906,17 +1919,72 @@ def xfail_ssl_issue5601():
         raise
 
 
-def assert_worker_story(
-    story: list[tuple], expect: list[tuple], *, strict: bool = False
+def assert_valid_story(story, ordered_timestamps=True):
+    """Test that a story is well formed.
+
+    Parameters
+    ----------
+    story: list[tuple]
+        Output of Worker.story
+    ordered_timestamps: bool, optional
+        If False, timestamps are not required to be monotically increasing.
+        Useful for asserting stories composed from the scheduler and
+        multiple workers
+    """
+
+    now = time()
+    prev_ts = 0.0
+    for ev in story:
+        try:
+            assert len(ev) > 2, "too short"
+            assert isinstance(ev, tuple), "not a tuple"
+            assert isinstance(ev[-2], str) and ev[-2], "stimulus_id not a string"
+            assert isinstance(ev[-1], float), "Timestamp is not a float"
+            if ordered_timestamps:
+                assert prev_ts <= ev[-1], "Timestamps are not monotonically ascending"
+            # Timestamps are within the last hour. It's been observed that a
+            # timestamp generated in a Nanny process can be a few milliseconds
+            # in the future.
+            assert now - 3600 < ev[-1] <= now + 1, "Timestamps is too old"
+            prev_ts = ev[-1]
+        except AssertionError as err:
+            raise AssertionError(
+                f"Malformed story event: {ev}\nProblem: {err}.\nin story:\n{_format_story(story)}"
+            )
+
+
+def assert_story(
+    story: list[tuple],
+    expect: list[tuple],
+    *,
+    strict: bool = False,
+    ordered_timestamps: bool = True,
 ) -> None:
-    """Test the output of ``Worker.story``
+    """Test the output of ``Worker.story`` or ``Scheduler.story``
+
+    Warning
+    =======
+
+    Tests with overly verbose stories introduce maintenance cost and should
+    therefore be used with caution. This should only be used for very specific
+    unit tests where the exact order of events is crucial and there is no other
+    practical way to assert or observe what happened.
+    A typical use case involves testing for race conditions where subtle changes
+    of event ordering would cause harm.
 
     Parameters
     ==========
     story: list[tuple]
         Output of Worker.story
     expect: list[tuple]
-        Expected events. Each expected event must contain exactly 2 less fields than the
+        Expected events.
+        The expected events either need to be exact matches or are allowed to
+        not provide a stimulus_id and timestamp.
+        e.g.
+        `("log", "entry", "stim-id-9876", 1234)`
+        is equivalent to
+        `("log", "entry")`
+
         story (the last two fields are always the stimulus_id and the timestamp).
 
         Elements of the expect tuples can be
@@ -1937,24 +2005,17 @@ def assert_worker_story(
         If True, the story must contain exactly as many events as expect.
         If False (the default), the story may contain more events than expect; extra
         events are ignored.
+    ordered_timestamps: bool, optional
+        If False, timestamps are not required to be monotically increasing.
+        Useful for asserting stories composed from the scheduler and
+        multiple workers
     """
-    now = time()
-    prev_ts = 0.0
-    for ev in story:
-        try:
-            assert len(ev) > 2
-            assert isinstance(ev, tuple)
-            assert isinstance(ev[-2], str) and ev[-2]  # stimulus_id
-            assert isinstance(ev[-1], float)  # timestamp
-            assert prev_ts <= ev[-1]  # Timestamps are monotonic ascending
-            # Timestamps are within the last hour. It's been observed that a timestamp
-            # generated in a Nanny process can be a few milliseconds in the future.
-            assert now - 3600 < ev[-1] <= now + 1
-            prev_ts = ev[-1]
-        except AssertionError:
-            raise AssertionError(
-                f"Malformed story event: {ev}\nin story:\n{_format_story(story)}"
-            )
+    assert_valid_story(story, ordered_timestamps=ordered_timestamps)
+
+    def _valid_event(event, ev_expect):
+        return len(event) == len(ev_expect) and all(
+            ex(ev) if callable(ex) else ev == ex for ev, ex in zip(event, ev_expect)
+        )
 
     try:
         if strict and len(story) != len(expect):
@@ -1963,16 +2024,16 @@ def assert_worker_story(
         for ev_expect in expect:
             while True:
                 event = next(story_it)
-                # Ignore (stimulus_id, timestamp)
-                event = event[:-2]
-                if len(event) == len(ev_expect) and all(
-                    ex(ev) if callable(ex) else ev == ex
-                    for ev, ex in zip(event, ev_expect)
+
+                if (
+                    _valid_event(event, ev_expect)
+                    # Ignore (stimulus_id, timestamp)
+                    or _valid_event(event[:-2], ev_expect)
                 ):
                     break
     except StopIteration:
         raise AssertionError(
-            f"assert_worker_story({strict=}) failed\n"
+            f"assert_story({strict=}) failed\n"
             f"story:\n{_format_story(story)}\n"
             f"expect:\n{_format_story(expect)}"
         ) from None

@@ -48,7 +48,7 @@ from distributed.utils import TimeoutError
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _LockedCommPool,
-    assert_worker_story,
+    assert_story,
     captured_logger,
     dec,
     div,
@@ -810,9 +810,8 @@ async def test_hold_onto_dependents(c, s, a, b):
         await asyncio.sleep(0.1)
 
 
-# Normally takes >2s but it has been observed to take >30s occasionally
-@pytest.mark.slow
-@gen_test(timeout=120)
+@pytest.mark.xfail(reason="asyncio.wait_for bug")
+@gen_test()
 async def test_worker_death_timeout():
     w = Worker("tcp://127.0.0.1:12345", death_timeout=0.1)
     with pytest.raises(TimeoutError) as info:
@@ -1410,7 +1409,7 @@ def assert_amm_transfer_story(key: str, w_from: Worker, w_to: Worker) -> None:
     """Test that an in-memory key was transferred from worker w_from to worker w_to by
     the Active Memory Manager and it was not recalculated on w_to
     """
-    assert_worker_story(
+    assert_story(
         w_to.story(key),
         [
             (key, "ensure-task-exists", "released"),
@@ -1733,50 +1732,6 @@ async def test_story(c, s, w):
     assert w.story(ts) == w.story(ts.key)
 
 
-@gen_cluster(client=True)
-async def test_story_with_deps(c, s, a, b):
-    """
-    Assert that the structure of the story does not change unintentionally and
-    expected subfields are actually filled
-    """
-    dep = c.submit(inc, 1, workers=[a.address], key="dep")
-    res = c.submit(inc, dep, workers=[b.address], key="res")
-    await res
-
-    story = a.story("res")
-    assert story == []
-    story = b.story("res")
-
-    # Story now includes randomized stimulus_ids and timestamps.
-    stimulus_ids = {ev[-2] for ev in story}
-    assert len(stimulus_ids) == 2, stimulus_ids
-    # This is a simple transition log
-    expected = [
-        ("res", "compute-task"),
-        ("res", "released", "waiting", "waiting", {"dep": "fetch"}),
-        ("res", "waiting", "ready", "ready", {"res": "executing"}),
-        ("res", "ready", "executing", "executing", {}),
-        ("res", "put-in-memory"),
-        ("res", "executing", "memory", "memory", {}),
-    ]
-    assert_worker_story(story, expected, strict=True)
-
-    story = b.story("dep")
-    stimulus_ids = {ev[-2] for ev in story}
-    assert len(stimulus_ids) == 2, stimulus_ids
-    expected = [
-        ("dep", "ensure-task-exists", "released"),
-        ("dep", "released", "fetch", "fetch", {}),
-        ("gather-dependencies", a.address, {"dep"}),
-        ("dep", "fetch", "flight", "flight", {}),
-        ("request-dep", a.address, {"dep"}),
-        ("receive-dep", a.address, {"dep"}),
-        ("dep", "put-in-memory"),
-        ("dep", "flight", "memory", "memory", {"res": "ready"}),
-    ]
-    assert_worker_story(story, expected, strict=True)
-
-
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_stimulus_story(c, s, a):
     class C:
@@ -1864,7 +1819,7 @@ async def test_gather_dep_local_workers_first(c, s, a, lw, *rws):
     )["f"]
     g = c.submit(inc, f, key="g", workers=[a.address])
     assert await g == 2
-    assert_worker_story(a.story("f"), [("receive-dep", lw.address, {"f"})])
+    assert_story(a.story("f"), [("receive-dep", lw.address, {"f"})])
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
@@ -1891,7 +1846,7 @@ async def test_gather_dep_from_remote_workers_if_all_local_workers_are_busy(
     assert sorted(ev[1] for ev in a.story("busy-gather")) == sorted(
         w.address for w in lws
     )
-    assert_worker_story(a.story("receive-dep"), [("receive-dep", rw.address, {"f"})])
+    assert_story(a.story("receive-dep"), [("receive-dep", rw.address, {"f"})])
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 0)])
@@ -2738,7 +2693,7 @@ async def test_gather_dep_exception_one_task_2(c, s, a, b):
     while fut1.key not in b.tasks or b.tasks[fut1.key].state == "flight":
         await asyncio.sleep(0)
 
-    s.handle_missing_data(key="f1", errant_worker=a.address)
+    s.handle_missing_data(key="f1", errant_worker=a.address, stimulus_id="test")
 
     await fut2
 
@@ -2783,7 +2738,7 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
     # same communication channel
 
     for fut in (futA, futB):
-        assert_worker_story(
+        assert_story(
             b.story(fut.key),
             [
                 ("gather-dependencies", a.address, {fut.key}),
@@ -2842,7 +2797,7 @@ async def test_acquire_replicas_already_in_flight(c, s, *nannies):
     assert await y == 123
 
     story = await c.run(lambda dask_worker: dask_worker.story("x"))
-    assert_worker_story(
+    assert_story(
         story[b],
         [
             ("x", "ensure-task-exists", "released"),
@@ -3019,7 +2974,7 @@ async def test_who_has_consistent_remove_replicas(c, s, *workers):
 
     await f2
 
-    assert_worker_story(a.story(f1.key), [(f1.key, "missing-dep")])
+    assert_story(a.story(f1.key), [(f1.key, "missing-dep")])
     assert a.tasks[f1.key].suspicious_count == 0
     assert s.tasks[f1.key].suspicious == 0
 
@@ -3100,7 +3055,7 @@ async def test_missing_released_zombie_tasks_2(c, s, b):
         while b.tasks:
             await asyncio.sleep(0.01)
 
-        assert_worker_story(
+        assert_story(
             b.story(ts),
             [("f1", "missing", "released", "released", {"f1": "forgotten"})],
         )
@@ -3212,7 +3167,7 @@ async def test_task_flight_compute_oserror(c, s, a, b):
         ("f1", "put-in-memory"),
         ("f1", "executing", "memory", "memory", {}),
     ]
-    assert_worker_story(sum_story, expected_sum_story, strict=True)
+    assert_story(sum_story, expected_sum_story, strict=True)
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -3432,7 +3387,9 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
 
         await in_gather_dep.wait()
 
-        await s.remove_worker(address=x.address, safe=True, close=close_worker)
+        await s.remove_worker(
+            address=x.address, safe=True, close=close_worker, stimulus_id="test"
+        )
 
         await _wait_for_state(fut2_key, b, intermediate_state)
 
