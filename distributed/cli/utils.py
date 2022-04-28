@@ -20,7 +20,7 @@ def install_signal_handlers(loop=None, cleanup=None):
                     await cleanup(sig)
             finally:
                 loop.stop()
-            loop.add_callback_from_signal(lambda: cleanup(sig))
+            loop.add_callback_from_signal(cleanup_and_stop)
 
         # Restore old signal handler to allow for a quicker exit
         # if the user sends the signal again.
