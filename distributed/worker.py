@@ -1525,6 +1525,7 @@ class Worker(ServerNode):
         for executor in self.executors.values():
             if executor is utils._offload_executor:
                 continue  # Never shutdown the offload executor
+
             def _close():
                 if isinstance(executor, ThreadPoolExecutor):
                     executor._work_queue.queue.clear()
