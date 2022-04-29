@@ -53,7 +53,7 @@ from distributed.batched import BatchedSend
 from distributed.comm import connect, get_address_host
 from distributed.comm.addressing import address_from_user_args, parse_address
 from distributed.comm.utils import OFFLOAD_THRESHOLD
-from distributed.compatibility import randbytes
+from distributed.compatibility import randbytes, to_thread
 from distributed.core import (
     CommClosedError,
     ConnectionPool,
@@ -155,6 +155,72 @@ DEFAULT_EXTENSIONS: dict[str, type] = {
 DEFAULT_METRICS: dict[str, Callable[[Worker], Any]] = {}
 
 DEFAULT_STARTUP_INFORMATION: dict[str, Callable[[Worker], Any]] = {}
+
+
+def fail_hard(method):
+    """
+    Decorator to close the worker if this method encounters an exception.
+    """
+    if iscoroutinefunction(method):
+
+        @functools.wraps(method)
+        async def wrapper(self, *args, **kwargs):
+            try:
+                return await method(self, *args, **kwargs)
+            except Exception as e:
+                if self.status not in (Status.closed, Status.closing):
+                    self.log_event(
+                        "worker-fail-hard",
+                        {
+                            **error_message(e),
+                            "worker": self.address,
+                        },
+                    )
+                    logger.exception(e)
+                await _force_close(self)
+
+    else:
+
+        @functools.wraps(method)
+        def wrapper(self, *args, **kwargs):
+            try:
+                return method(self, *args, **kwargs)
+            except Exception as e:
+                if self.status not in (Status.closed, Status.closing):
+                    self.log_event(
+                        "worker-fail-hard",
+                        {
+                            **error_message(e),
+                            "worker": self.address,
+                        },
+                    )
+                    logger.exception(e)
+                else:
+                    self.loop.add_callback(_force_close, self)
+
+    return wrapper
+
+
+async def _force_close(self):
+    """
+    Used with the fail_hard decorator defined above
+
+    1.  Wait for a worker to close
+    2.  If it doesn't, log and kill the process
+    """
+    try:
+        await asyncio.wait_for(self.close(nanny=False, executor_wait=False), 30)
+    except (Exception, BaseException):  # <-- include BaseException here or not??
+        # Worker is in a very broken state if closing fails. We need to shut down immediately,
+        # to ensure things don't get even worse and this worker potentially deadlocks the cluster.
+        logger.critical(
+            "Error trying close worker in response to broken internal state. "
+            "Forcibly exiting worker NOW",
+            exc_info=True,
+        )
+        # use `os._exit` instead of `sys.exit` because of uncertainty
+        # around propagating `SystemExit` from asyncio callbacks
+        os._exit(1)
 
 
 class Worker(ServerNode):
@@ -900,14 +966,15 @@ class Worker(ServerNode):
         return self._deque_handler.deque
 
     def log_event(self, topic, msg):
-        self.loop.add_callback(
-            self.batched_stream.send,
-            {
-                "op": "log-event",
-                "topic": topic,
-                "msg": msg,
-            },
-        )
+        full_msg = {
+            "op": "log-event",
+            "topic": topic,
+            "msg": msg,
+        }
+        if self.thread_id == threading.get_ident():
+            self.batched_stream.send(full_msg)
+        else:
+            self.loop.add_callback(self.batched_stream.send, full_msg)
 
     @property
     def executing_count(self) -> int:
@@ -1199,22 +1266,19 @@ class Worker(ServerNode):
         finally:
             self.heartbeat_active = False
 
+    @fail_hard
     async def handle_scheduler(self, comm):
-        try:
-            await self.handle_stream(comm, every_cycle=[self.ensure_communicating])
-        except Exception as e:
-            logger.exception(e)
-            raise
-        finally:
-            if self.reconnect and self.status in Status.ANY_RUNNING:
-                logger.info("Connection to scheduler broken.  Reconnecting...")
-                self.loop.add_callback(self.heartbeat)
-            else:
-                logger.info(
-                    "Connection to scheduler broken. Closing without reporting.  Status: %s",
-                    self.status,
-                )
-                await self.close(report=False)
+        await self.handle_stream(comm, every_cycle=[self.ensure_communicating])
+
+        if self.reconnect and self.status in Status.ANY_RUNNING:
+            logger.info("Connection to scheduler broken.  Reconnecting...")
+            self.loop.add_callback(self.heartbeat)
+        else:
+            logger.info(
+                "Connection to scheduler broken. Closing without reporting.  Status: %s",
+                self.status,
+            )
+            await self.close(report=False)
 
     async def upload_file(self, comm, filename=None, data=None, load=True):
         out_filename = os.path.join(self.local_directory, filename)
@@ -1525,11 +1589,19 @@ class Worker(ServerNode):
         for executor in self.executors.values():
             if executor is utils._offload_executor:
                 continue  # Never shutdown the offload executor
-            if isinstance(executor, ThreadPoolExecutor):
-                executor._work_queue.queue.clear()
-                executor.shutdown(wait=executor_wait, timeout=timeout)
-            else:
-                executor.shutdown(wait=executor_wait)
+
+            def _close():
+                if isinstance(executor, ThreadPoolExecutor):
+                    executor._work_queue.queue.clear()
+                    executor.shutdown(wait=executor_wait, timeout=timeout)
+                else:
+                    executor.shutdown(wait=executor_wait)
+
+            # Waiting for the shutdown can block the event loop causing
+            # weird deadlocks particularly if the task that is executing in
+            # the thread is waiting for a server reply, e.g. when using
+            # worker clients, semaphores, etc.
+            await to_thread(_close)
 
         self.stop()
         await self.rpc.close()
@@ -1654,7 +1726,9 @@ class Worker(ServerNode):
             assert response == "OK", response
         except OSError:
             logger.exception(
-                "failed during get data with %s -> %s", self.address, who, exc_info=True
+                "failed during get data with %s -> %s",
+                self.address,
+                who,
             )
             comm.abort()
             raise
@@ -2682,6 +2756,7 @@ class Worker(ServerNode):
         self.transitions(recs, stimulus_id=stim.stimulus_id)
         self._handle_instructions(instructions)
 
+    @fail_hard
     @log_errors
     def _handle_stimulus_from_task(
         self, task: asyncio.Task[StateMachineEvent | None]
@@ -2695,6 +2770,7 @@ class Worker(ServerNode):
         if stim:
             self.handle_stimulus(stim)
 
+    @fail_hard
     def _handle_instructions(self, instructions: Instructions) -> None:
         # TODO this method is temporary.
         #      See final design: https://github.com/dask/distributed/issues/5894
@@ -3023,6 +3099,7 @@ class Worker(ServerNode):
         self.counters["transfer-count"].add(len(data))
         self.incoming_count += 1
 
+    @fail_hard
     @log_errors
     async def gather_dep(
         self,
@@ -3548,6 +3625,7 @@ class Worker(ServerNode):
 
         return recs, []
 
+    @fail_hard
     async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent | None:
         if self.status in {Status.closing, Status.closed, Status.closing_gracefully}:
             return None
@@ -4107,7 +4185,6 @@ class Worker(ServerNode):
 
         except Exception as e:
             logger.error("Validate state failed.  Closing.", exc_info=e)
-            self.loop.add_callback(self.close)
             logger.exception(e)
             if LOG_PDB:
                 import pdb

@@ -3539,3 +3539,23 @@ async def test_repr(s, a):
             repr(ws_b)
             == f"<WorkerState {b.address!r}, status: running, memory: 0, processing: 0>"
         )
+
+
+@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "2s"})
+async def test_ensure_events_dont_include_taskstate_objects(c, s, a, b):
+
+    event = Event()
+
+    def block(x, event):
+        event.wait()
+        return x
+
+    futs = c.map(block, range(100), event=event)
+    while not a.tasks:
+        await asyncio.sleep(0.1)
+
+    await a.close(executor_wait=False)
+    await event.set()
+    await c.gather(futs)
+
+    assert "TaskState" not in str(s.events)

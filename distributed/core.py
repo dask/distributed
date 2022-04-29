@@ -634,7 +634,6 @@ class Server:
                         func()
 
         except OSError:
-            # FIXME: This is silently ignored, is this intentional?
             pass
         except Exception as e:
             logger.exception(e)
