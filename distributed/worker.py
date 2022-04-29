@@ -2636,18 +2636,28 @@ class Worker(ServerNode):
                 recs, instructions = self._transition(
                     ts, "released", stimulus_id=stimulus_id
                 )
-                v = recs.get(ts, (finish, *args))
                 v_state: str
                 v_args: list | tuple
-                if isinstance(v, tuple):
-                    v_state, *v_args = v
-                else:
-                    v_state, v_args = v, ()
-                b_recs, b_instructions = self._transition(
-                    ts, v_state, *v_args, stimulus_id=stimulus_id
+                while v := recs.pop(ts, None):
+                    if isinstance(v, tuple):
+                        v_state, *v_args = v
+                    else:
+                        v_state, v_args = v, ()
+                    if v_state == "forgotten":
+                        # We do not want to forget. The purpose of this
+                        # transition path is to get to `finish`
+                        continue
+                    b_recs, b_instructions = self._transition(
+                        ts, v_state, *v_args, stimulus_id=stimulus_id
+                    )
+                    recs.update(b_recs)
+                    instructions += b_instructions
+
+                c_recs, c_instructions = self._transition(
+                    ts, finish, *args, stimulus_id=stimulus_id
                 )
-                recs.update(b_recs)
-                instructions += b_instructions
+                recs.update(c_recs)
+                instructions += c_instructions
             except InvalidTransition:
                 self.log_event(
                     "invalid-worker-transition",
