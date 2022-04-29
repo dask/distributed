@@ -204,22 +204,27 @@ def main(
         )
         logger.info("-" * 47)
 
-        async def wait_and_finish():
+        async def wait_until_shutdown():
+            """Wait until the scheduler finishes or the script receives a SIGINT or SIGTERM
+            which triggers a graceful shutdown of the scheduler
+            """
             wait_for_signal_task = asyncio.create_task(
                 wait_for_signals([signal.SIGINT, signal.SIGTERM])
             )
-            wait_for_scheduler_task = asyncio.create_task(scheduler.finished())
-            _, pending = await asyncio.wait(
-                [wait_for_signal_task, wait_for_scheduler_task],
+            wait_for_scheduler_to_finish_task = asyncio.create_task(
+                scheduler.finished()
+            )
+            done, _ = await asyncio.wait(
+                [wait_for_signal_task, wait_for_scheduler_to_finish_task],
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
-            if wait_for_scheduler_task in pending:
+            if wait_for_signal_task in done:
                 await scheduler.close()
 
         await scheduler
         address = scheduler.address
-        await wait_and_finish()
+        await wait_until_shutdown()
 
     try:
         asyncio.run(run())

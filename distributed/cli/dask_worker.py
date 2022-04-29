@@ -456,17 +456,22 @@ def main(
             for i, port_kwargs_i in enumerate(port_kwargs)
         ]
 
-        async def wait_until_nannies_finish():
+        async def wait_for_nannies_to_finish():
             await asyncio.gather(*(n.finished() for n in nannies))
 
-        async def wait_and_finish():
+        async def wait_until_shutdown():
+            """Wait until all nannies finished or the script receives a SIGINT or SIGTERM
+            which triggers a graceful shutdown of the worker
+            """
             nonlocal signal_fired
             wait_for_signal_task = asyncio.create_task(
                 wait_for_signals([signal.SIGINT, signal.SIGTERM])
             )
-            wait_for_nannies_task = asyncio.create_task(wait_until_nannies_finish())
+            wait_for_nannies_to_finish_task = asyncio.create_task(
+                wait_for_nannies_to_finish()
+            )
             done, _ = await asyncio.wait(
-                [wait_for_signal_task, wait_for_nannies_task],
+                [wait_for_signal_task, wait_for_nannies_to_finish_task],
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
@@ -476,7 +481,7 @@ def main(
                 await asyncio.gather(*(n.close(timeout=2) for n in nannies))
 
         await asyncio.gather(*nannies)
-        await wait_and_finish()
+        await wait_until_shutdown()
 
     try:
         asyncio.run(run())
