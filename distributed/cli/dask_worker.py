@@ -5,7 +5,6 @@ import atexit
 import gc
 import logging
 import os
-import signal
 import sys
 import warnings
 from collections.abc import Iterator
@@ -20,7 +19,7 @@ import dask
 from dask.system import CPU_COUNT
 
 from distributed import Nanny
-from distributed.cli.utils import install_signal_handlers2 as install_signal_handlers
+from distributed.cli.utils import wait_for_signal
 from distributed.comm import get_address_host_port
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.preloading import validate_preload_argv
@@ -456,21 +455,23 @@ def main(
             for i, port_kwargs_i in enumerate(port_kwargs)
         ]
 
-        async def close_all():
-            # Unregister all workers from scheduler
-            await asyncio.gather(*(n.close(timeout=2) for n in nannies))
+        async def wait_until_nannies_finish():
+            await asyncio.gather(*(n.finished() for n in nannies))
 
-        def on_signal(signum):
-            nonlocal signal_fired
-            signal_fired = True
-            if signum != signal.SIGINT:
-                logger.info("Exiting on signal %d", signum)
-            return asyncio.ensure_future(close_all())
+        async def wait_and_finish():
+            wait_for_signal_task = asyncio.create_task(wait_for_signal())
+            wait_for_nannies_task = asyncio.create_task(wait_until_nannies_finish())
+            _, pending = await asyncio.wait(
+                [wait_for_signal_task, wait_for_nannies_task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
 
-        install_signal_handlers(loop, cleanup=on_signal)
+            if wait_for_nannies_task in pending:
+                # Unregister all workers from scheduler
+                await asyncio.gather(*(n.close(timeout=2) for n in nannies))
 
         await asyncio.gather(*nannies)
-        await asyncio.gather(*(n.finished() for n in nannies))
+        await wait_and_finish()
 
     try:
         asyncio.run(run())

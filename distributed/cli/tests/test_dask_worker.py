@@ -704,8 +704,9 @@ def test_timeout(nanny):
 @pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="POSIX only")
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+@pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
 @gen_cluster(client=True, nthreads=[])
-async def test_sigint(c, s, nanny):
+async def test_signal_handling(c, s, nanny, sig):
     try:
         worker = subprocess.Popen(
             ["dask-worker", s.address, nanny],
@@ -713,44 +714,12 @@ async def test_sigint(c, s, nanny):
             stderr=subprocess.STDOUT,
         )
         await c.wait_for_workers(1)
-        worker.send_signal(signal.SIGINT)
+
+        worker.send_signal(sig)
         stdout, stderr = worker.communicate()
         logs = stdout.decode().lower()
         assert stderr is None
-        if nanny == "--nanny":
-            assert "closing nanny" in logs
-        else:
-            assert "nanny" not in logs
-        assert "stopping worker" in logs
-        assert "end worker" in logs
-        assert "timed out" not in logs
-        assert "signal" not in logs
-        assert "error" not in logs
-        assert "exception" not in logs
-        assert worker.returncode == 0
-    finally:
-        worker.kill()
-
-
-@pytest.mark.slow
-@pytest.mark.skipif(WINDOWS, reason="POSIX only")
-@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
-@gen_cluster(client=True, nthreads=[])
-async def test_sigterm(c, s, nanny):
-    try:
-        kwargs = {}
-        worker = subprocess.Popen(
-            ["dask-worker", s.address, nanny],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
-        await c.wait_for_workers(1)
-
-        worker.send_signal(signal.SIGTERM)
-        stdout, stderr = worker.communicate()
-        logs = stdout.decode().lower()
-        assert stderr is None
-        assert f"signal {signal.SIGTERM}" in logs
+        assert f"signal {sig}" in logs
         if nanny == "--nanny":
             assert "closing nanny" in logs
         else:
