@@ -2325,7 +2325,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
         h.key: "memory",
         res.key: "error",
     }
-    await assert_task_states_on_worker(expected_states_B, b)
+    await assert_task_states_on_worker(expected_states_B, b), b.tasks
 
     g.release()
 
@@ -3157,7 +3157,10 @@ async def test_task_flight_compute_oserror(c, s, a, b):
         # inc is lost and needs to be recomputed. Therefore, sum is released
         ("free-keys", ("f1",)),
         ("f1", "release-key"),
-        ("f1", "waiting", "released", "released", {"f1": "forgotten"}),
+        # The recommendations here are hard to predict. Whatever key is
+        # currently scheduled to be fetched, if any, will be recommended to be
+        # released.
+        ("f1", "waiting", "released", "released", lambda msg: msg["f1"] == "forgotten"),
         ("f1", "released", "forgotten", "forgotten", {}),
         # Now, we actually compute the task *once*. This must not cycle back
         ("f1", "compute-task"),
