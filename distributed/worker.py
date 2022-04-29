@@ -602,6 +602,7 @@ class Worker(ServerNode):
             ("cancelled", "resumed"): self.transition_cancelled_resumed,
             ("cancelled", "fetch"): self.transition_cancelled_fetch,
             ("cancelled", "released"): self.transition_cancelled_released,
+            ("cancelled", "missing"): self.transition_cancelled_released,
             ("cancelled", "waiting"): self.transition_cancelled_waiting,
             ("cancelled", "forgotten"): self.transition_cancelled_forgotten,
             ("cancelled", "memory"): self.transition_cancelled_memory,
@@ -2836,8 +2837,11 @@ class Worker(ServerNode):
     def ensure_communicating(self) -> None:
         if self.status != Status.running:
             return
+        if not hasattr(self, "_stim_counter"):
+            self._stim_counter = 0
+        self._stim_counter += 1
 
-        stimulus_id = f"ensure-communicating-{time()}"
+        stimulus_id = f"ensure-communicating-{self._stim_counter}"
         skipped_worker_in_flight_or_busy = []
 
         while self.data_needed and (
@@ -3194,7 +3198,12 @@ class Worker(ServerNode):
             for d in has_what:
                 ts = self.tasks[d]
                 ts.who_has.remove(worker)
-                if not ts.who_has and ts.state not in ("released", "memory"):
+                if not ts.who_has and ts.state in (
+                    "fetch",
+                    "flight",
+                    "resumed",
+                    "cancelled",
+                ):
                     recommendations[ts] = "missing"
                     self.log.append(
                         ("missing-who-has", worker, ts.key, stimulus_id, time())
