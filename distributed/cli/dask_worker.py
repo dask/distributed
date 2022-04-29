@@ -5,6 +5,7 @@ import atexit
 import gc
 import logging
 import os
+import signal
 import sys
 import warnings
 from collections.abc import Iterator
@@ -19,7 +20,7 @@ import dask
 from dask.system import CPU_COUNT
 
 from distributed import Nanny
-from distributed.cli.utils import wait_for_signal
+from distributed.cli.utils import wait_for_signals
 from distributed.comm import get_address_host_port
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.preloading import validate_preload_argv
@@ -460,7 +461,9 @@ def main(
 
         async def wait_and_finish():
             nonlocal signal_fired
-            wait_for_signal_task = asyncio.create_task(wait_for_signal())
+            wait_for_signal_task = asyncio.create_task(
+                wait_for_signals([signal.SIGINT, signal.SIGTERM])
+            )
             wait_for_nannies_task = asyncio.create_task(wait_until_nannies_finish())
             done, _ = await asyncio.wait(
                 [wait_for_signal_task, wait_for_nannies_task],

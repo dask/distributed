@@ -4,6 +4,7 @@ import gc
 import logging
 import os
 import re
+import signal
 import sys
 import warnings
 
@@ -11,7 +12,7 @@ import click
 from tornado.ioloop import IOLoop
 
 from distributed import Scheduler
-from distributed.cli.utils import wait_for_signal
+from distributed.cli.utils import wait_for_signals
 from distributed.preloading import validate_preload_argv
 from distributed.proctitle import (
     enable_proctitle_on_children,
@@ -204,7 +205,9 @@ def main(
         logger.info("-" * 47)
 
         async def wait_and_finish():
-            wait_for_signal_task = asyncio.create_task(wait_for_signal())
+            wait_for_signal_task = asyncio.create_task(
+                wait_for_signals([signal.SIGINT, signal.SIGTERM])
+            )
             wait_for_scheduler_task = asyncio.create_task(scheduler.finished())
             _, pending = await asyncio.wait(
                 [wait_for_signal_task, wait_for_scheduler_task],
