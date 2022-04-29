@@ -59,7 +59,13 @@ def dask_loads(header, frames):
 
 def pickle_dumps(x, context=None):
     frames = [None]
-    buffer_callback = lambda f: frames.append(memoryview(f))
+    writeable = []
+
+    def buffer_callback(f):
+        f = memoryview(f)
+        frames.append(f)
+        writeable.append(not f.readonly)
+
     frames[0] = pickle.dumps(
         x,
         buffer_callback=buffer_callback,
@@ -67,8 +73,9 @@ def pickle_dumps(x, context=None):
     )
     header = {
         "serializer": "pickle",
-        "writeable": tuple(not f.readonly for f in frames[1:]),
+        "writeable": tuple(writeable),
     }
+
     return header, frames
 
 
