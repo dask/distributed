@@ -1318,7 +1318,11 @@ class Client(SyncMethodMixin):
 
         def running_workers(info):
             return len(
-                [ws["status"] == Status.running for ws in info["workers"].values()]
+                [
+                    ws
+                    for ws in info["workers"].values()
+                    if ws["status"] == Status.running.name
+                ]
             )
 
         while n_workers and running_workers(info) < n_workers:

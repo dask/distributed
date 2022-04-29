@@ -162,7 +162,7 @@ class Server:
         timeout=None,
         io_loop=None,
     ):
-        self.status = Status.init
+        self._status = Status.init
         self.handlers = {
             "identity": self.identity,
             "echo": self.echo,
@@ -302,25 +302,16 @@ class Server:
 
     async def start(self):
         async with self._startup_lock:
-            if self._status in [
-                Status.running,
-                Status.closed,
-                Status.closing,
-                Status.closing_gracefully,
-                Status.stopped,
-                Status.stopping,
-            ]:
-                return self
-            elif self._status == Status.failed:
+            if self.status == Status.failed:
                 assert self.__startup_exc is not None
                 raise self.__startup_exc
-            elif self._status != Status.init:
-                raise RuntimeError(f"Unknown status encountered {self._status=}")
+            elif self.status != Status.init:
+                return self
             timeout = getattr(self, "death_timeout", None)
 
             async def _close_on_failure(exc: Exception):
                 await self.close()
-                self._status = Status.failed
+                self.status = Status.failed
                 self.__startup_exc = exc
 
             try:
@@ -333,7 +324,7 @@ class Server:
             except Exception as exc:
                 await _close_on_failure(exc)
                 raise RuntimeError(f"{type(self).__name__} failed to start.") from exc
-            self._status = Status.running
+            self.status = Status.running
             self.__started.set()
         return self
 
@@ -514,7 +505,8 @@ class Server:
 
         logger.debug("Connection from %r to %s", address, type(self).__name__)
         self._comms[comm] = op
-        await self.__started.wait()
+
+        await self
         try:
             while True:
                 try:
