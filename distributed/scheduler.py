@@ -2199,12 +2199,6 @@ class SchedulerState:
                         worker_msgs,
                     )  # don't try to recreate
 
-            for dts in ts.waiters:
-                if dts.state in ("no-worker", "processing"):
-                    recommendations[dts.key] = "waiting"
-                elif dts.state == "waiting":
-                    dts.waiting_on.add(ts)
-
             # XXX factor this out?
             worker_msg = {
                 "op": "free-keys",
@@ -2228,6 +2222,12 @@ class SchedulerState:
                 recommendations[key] = "forgotten"
             elif ts.who_wants or ts.waiters:
                 recommendations[key] = "waiting"
+
+            for dts in ts.waiters:
+                if dts.state in ("no-worker", "processing"):
+                    recommendations[dts.key] = "waiting"
+                elif dts.state == "waiting":
+                    dts.waiting_on.add(ts)
 
             if self.validate:
                 assert not ts.waiting_on
