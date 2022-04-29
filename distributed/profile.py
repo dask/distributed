@@ -396,7 +396,8 @@ def watch(
     - dict[str, Any] (output of ``create()``)
     """
     log: deque[tuple[float, dict[str, Any]]] = deque(maxlen=maxlen)
-
+    # Disable the profiler. It is just creating noise for the refcounting
+    return log
     thread = threading.Thread(
         target=_watch,
         name="Profile",

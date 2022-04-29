@@ -49,7 +49,6 @@ class SemaphoreExtension:
     """
 
     def __init__(self, scheduler):
-        self.scheduler = scheduler
 
         # {semaphore_name: asyncio.Event}
         self.events = defaultdict(asyncio.Event)
@@ -58,7 +57,7 @@ class SemaphoreExtension:
         # {semaphore_name: {lease_id: lease_last_seen_timestamp}}
         self.leases = defaultdict(dict)
 
-        self.scheduler.handlers.update(
+        scheduler.handlers.update(
             {
                 "semaphore_register": self.create,
                 "semaphore_acquire": self.acquire,

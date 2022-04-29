@@ -28,6 +28,7 @@ from time import sleep
 from typing import Any, Literal
 
 from distributed.compatibility import MACOS
+from distributed.profile import wait_profiler
 from distributed.scheduler import Scheduler
 
 try:
@@ -57,6 +58,7 @@ from distributed.metrics import time
 from distributed.nanny import Nanny
 from distributed.node import ServerNode
 from distributed.proctitle import enable_proctitle_on_children
+from distributed.scheduler import TaskState
 from distributed.security import Security
 from distributed.utils import (
     DequeHandler,
@@ -1717,6 +1719,7 @@ def check_process_leak(
 @contextmanager
 def check_instances():
     Client._instances.clear()
+    TaskState._instances.clear()
     Worker._instances.clear()
     Scheduler._instances.clear()
     SpecCluster._instances.clear()
@@ -1768,8 +1771,17 @@ def check_instances():
     assert all(c.status == Status.closed for c in SpecCluster._instances), list(
         SpecCluster._instances
     )
-    SpecCluster._instances.clear()
+    # The scheduler holds on to a lot of cyclic refs
+    wait_profiler()
+    gc.collect()
+    if TaskState._instances:
+        ts = TaskState._instances.pop()
+        import objgraph
 
+        objgraph.show_backrefs([ts], filename="taskstate.png")
+    assert not TaskState._instances
+
+    SpecCluster._instances.clear()
     Nanny._instances.clear()
     DequeHandler.clear_all_instances()
 

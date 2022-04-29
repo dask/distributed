@@ -191,6 +191,9 @@ class ClientState:
             members=True,
         )
 
+    def clear(self):
+        self.wants_what.clear()
+
 
 class MemoryState:
     """Memory readings on a worker or on the whole cluster.
@@ -528,6 +531,12 @@ class WorkerState:
             managed_spilled=self.metrics["spilled_nbytes"]["disk"],
             unmanaged_old=self._memory_unmanaged_old,
         )
+
+    def clear(self):
+        self._has_what.clear()
+        self.processing.clear()
+        self.executing.clear()
+        self.long_running.clear()
 
     def clean(self) -> WorkerState:
         """Return a version of this object that is appropriate for serialization"""
@@ -1171,7 +1180,9 @@ class TaskState:
         "group",
         "metadata",
         "annotations",
+        "__weakref__",
     )
+    _instances: weakref.WeakSet[TaskState] = weakref.WeakSet()
 
     def __init__(self, key: str, run_spec: object):
         self.key = key
@@ -1207,6 +1218,7 @@ class TaskState:
         self.metadata = {}  # type: ignore
         self.annotations = {}  # type: ignore
         self.erred_on: set[str] = set()
+        TaskState._instances.add(self)
 
     def __hash__(self):
         return self._hash
@@ -1396,6 +1408,7 @@ class SchedulerState:
         tasks: dict,
         unrunnable: set,
         validate: bool,
+        unknown_durations: dict[str, set[TaskState]],
         plugins: Iterable[SchedulerPlugin] = (),
         **kwargs,  # Passed verbatim to Server.__init__()
     ):
@@ -1439,7 +1452,7 @@ class SchedulerState:
             ("memory", "released"): self.transition_memory_released,
             ("released", "erred"): self.transition_released_erred,
         }
-        self.unknown_durations: dict[str, set[TaskState]] = {}
+        self.unknown_durations = unknown_durations
         self.unrunnable = unrunnable
         self.validate = validate
         self.workers = workers
@@ -3065,7 +3078,7 @@ class Scheduler(SchedulerState, ServerNode):
         unrunnable = set()
 
         self.datasets = {}
-
+        unknown_durations = {}
         # Prefix-keyed containers
 
         # Client state
@@ -3078,7 +3091,7 @@ class Scheduler(SchedulerState, ServerNode):
         resources = {}
         aliases = {}
 
-        self._task_state_collections = [unrunnable]
+        self._task_state_collections = [unrunnable, tasks, unknown_durations]
 
         self._worker_collections = [
             workers,
@@ -3200,6 +3213,7 @@ class Scheduler(SchedulerState, ServerNode):
             tasks=tasks,
             unrunnable=unrunnable,
             validate=validate,
+            unknown_durations=unknown_durations,
             plugins=plugins,
         )
         ServerNode.__init__(
@@ -3503,11 +3517,12 @@ class Scheduler(SchedulerState, ServerNode):
             comm.abort()
 
         await self.rpc.close()
-
         self.status = Status.closed
         self.stop()
         await super().close()
 
+        self.clear_task_state()
+        self._deque_handler.clear()
         setproctitle("dask-scheduler [closed]")
         disable_gc_diagnosis()
 
@@ -4302,7 +4317,7 @@ class Scheduler(SchedulerState, ServerNode):
         event_msg["worker"] = address
         self.log_event("all", event_msg)
 
-        logger.info("Remove worker %s", ws)
+        # logger.info("Remove worker %s", ws)
         if close:
             with suppress(AttributeError, CommClosedError):
                 self.stream_comms[address].send({"op": "close", "report": False})
@@ -4377,16 +4392,23 @@ class Scheduler(SchedulerState, ServerNode):
             self.bandwidth_workers.pop((address, w), None)
             self.bandwidth_workers.pop((w, address), None)
 
-        def remove_worker_from_events():
-            # If the worker isn't registered anymore after the delay, remove from events
-            if address not in self.workers and address in self.events:
-                del self.events[address]
+        # This way, the tornado callback does not hold a reference to the
+        # Scheduler instance
+        # However, the WorkerState objects themselves hold refs to TaskState
+        # We need to ensure this callback is cancelled before closing to ensure
+        # proper GC
+        # _workers = self.workers
+        # _events = self.events
+        # def remove_worker_from_events():
+        #     # If the worker isn't registered anymore after the delay, remove from events
+        #     if address not in _workers and address in _events:
+        #         del _events[address]
 
-        cleanup_delay = parse_timedelta(
-            dask.config.get("distributed.scheduler.events-cleanup-delay")
-        )
-        self.loop.call_later(cleanup_delay, remove_worker_from_events)
-        logger.debug("Removed worker %s", ws)
+        # cleanup_delay = parse_timedelta(
+        #     dask.config.get("distributed.scheduler.events-cleanup-delay")
+        # )
+        # self.loop.call_later(cleanup_delay, remove_worker_from_events)
+        # logger.debug("Removed worker %s", ws)
 
         return "OK"
 
@@ -4725,16 +4747,22 @@ class Scheduler(SchedulerState, ServerNode):
                     plugin.remove_client(scheduler=self, client=client)
                 except Exception as e:
                     logger.exception(e)
+        # This way, the tornado callback does not hold a reference to the
+        # Scheduler instance
+        # However, the ClientState objects themselves hold refs to TaskState
+        # We need to ensure this callback is cancelled before closing to ensure
+        # proper GC
+        # _clients = self.clients
+        # _events = self.events
+        # def remove_client_from_events():
+        #     # If the client isn't registered anymore after the delay, remove from events
+        #     if client not in _clients and client in _events:
+        #         del _events[client]
 
-        def remove_client_from_events():
-            # If the client isn't registered anymore after the delay, remove from events
-            if client not in self.clients and client in self.events:
-                del self.events[client]
-
-        cleanup_delay = parse_timedelta(
-            dask.config.get("distributed.scheduler.events-cleanup-delay")
-        )
-        self.loop.call_later(cleanup_delay, remove_client_from_events)
+        # cleanup_delay = parse_timedelta(
+        #     dask.config.get("distributed.scheduler.events-cleanup-delay")
+        # )
+        # self.loop.call_later(cleanup_delay, remove_client_from_events)
 
     def send_task_to_worker(self, worker, ts: TaskState, duration: float = -1):
         """Send a single computational task to a worker"""
@@ -5193,6 +5221,10 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Clear task state")
         for collection in self._task_state_collections:
             collection.clear()
+        for ws in self.workers.values():
+            ws.clear()
+        for cs in self.clients.values():
+            cs.clear()
 
     @log_errors
     async def restart(self, client=None, timeout=30):
@@ -6202,9 +6234,9 @@ class Scheduler(SchedulerState, ServerNode):
             poll_interval = max(0.01, min(0.5, len(ws.has_what) / 400))
             await asyncio.sleep(poll_interval)
 
-        logger.debug(
-            "All unique keys on worker %s have been replicated elsewhere", ws.address
-        )
+        # logger.debug(
+        #     "All unique keys on worker %s have been replicated elsewhere", ws.address
+        # )
 
         if close_workers and ws.address in self.workers:
             await self.close_worker(
