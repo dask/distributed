@@ -4296,7 +4296,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         event_msg = {
             "action": "remove-worker",
-            "processing-tasks": dict(ws.processing),
+            "processing-tasks": {ts.key: cost for ts, cost in ws.processing.items()},
         }
         self.log_event(address, event_msg.copy())
         event_msg["worker"] = address
