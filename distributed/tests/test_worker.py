@@ -883,7 +883,7 @@ def test_worker_dir(worker):
         test_worker_dir()
 
 
-@gen_cluster(nthreads=[])
+@gen_cluster(nthreads=[], config={"temporary-directory": None})
 async def test_false_worker_dir(s):
     async with Worker(s.address, local_directory="") as w:
         local_directory = w.local_directory
