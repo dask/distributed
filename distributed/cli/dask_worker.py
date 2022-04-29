@@ -459,14 +459,16 @@ def main(
             await asyncio.gather(*(n.finished() for n in nannies))
 
         async def wait_and_finish():
+            nonlocal signal_fired
             wait_for_signal_task = asyncio.create_task(wait_for_signal())
             wait_for_nannies_task = asyncio.create_task(wait_until_nannies_finish())
-            _, pending = await asyncio.wait(
+            done, _ = await asyncio.wait(
                 [wait_for_signal_task, wait_for_nannies_task],
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
-            if wait_for_nannies_task in pending:
+            if wait_for_signal_task in done:
+                signal_fired = True
                 # Unregister all workers from scheduler
                 await asyncio.gather(*(n.close(timeout=2) for n in nannies))
 
@@ -480,8 +482,6 @@ def main(
         if not signal_fired:
             logger.info("Timed out starting worker")
         sys.exit(1)
-    except KeyboardInterrupt:  # pragma: no cover
-        pass
     finally:
         logger.info("End worker")
 
