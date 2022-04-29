@@ -1,6 +1,80 @@
 Changelog
 =========
 
+.. _v2022.04.2:
+
+2022.04.2
+---------
+
+Released on April 29, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Unblock event loop while waiting for ``ThreadpoolExecutor`` to shut down (:pr:`6091`) `Florian Jetter`_
+- ``RetireWorker`` policy is done if removed (:pr:`6234`) `Gabe Joseph`_
+- Pause to disable dependency gathering (:pr:`6195`) `crusaderky`_
+- Add ``EOFError`` to nanny ``multiprocessing.queue`` except list (:pr:`6213`) `Matthew Rocklin`_
+- Re-interpret error in lost worker scenario (:pr:`6193`) `Matthew Rocklin`_
+- Add Stimulus IDs to Scheduler (:pr:`6161`) `Florian Jetter`_
+- Set a five minute TTL for Dask workers (:pr:`6200`) `Matthew Rocklin`_
+- Add ``distributed.metrics.monotonic`` (:pr:`6181`) `crusaderky`_
+- Send worker validation errors to scheduler and err on test completion (:pr:`6192`) `Matthew Rocklin`_
+- Redesign worker exponential backoff on busy-gather (:pr:`6173`) `crusaderky`_
+- Log all invalid worker transitions to scheduler (:pr:`6134`) `Matthew Rocklin`_
+- Make Graph dashboard plot have invisible axes (:pr:`6149`) `Matthew Rocklin`_
+- Remove ``Nanny`` ``auto_restart`` state (:pr:`6138`) `Matthew Rocklin`_
+
+Bug Fixes
+^^^^^^^^^
+- Ensure scheduler events do not hold on to ``TaskState`` objects (:pr:`6226`) `Florian Jetter`_
+- Allow pausing and choke event loop while spilling (:pr:`6189`) `crusaderky`_
+- Do not use UUID in stealing (:pr:`6179`) `Florian Jetter`_
+- Handle int worker names in info page (:pr:`6158`) `Brett Naul`_
+- Fix ``psutil`` dio counters none (:pr:`6093`) `ungarj`_
+- Join ``Nanny`` watch thread (:pr:`6146`) `Matthew Rocklin`_
+- Improve logging when closing workers (:pr:`6129`) `Matthew Rocklin`_
+- Avoid stack overflow in profiling (:pr:`6141`) `Matthew Rocklin`_
+- Clean up ``SSHCluster`` if failure to start (:pr:`6130`) `Matthew Rocklin`_
+
+Deprecations
+^^^^^^^^^^^^
+- Deprecate ``rpc`` synchronous context manager (:pr:`6171`) `Thomas Grainger`_
+
+Documentation
+^^^^^^^^^^^^^
+- Update ``actors.rst`` (:pr:`6167`) `Scott Sievert`_
+
+Maintenance
+^^^^^^^^^^^
+- Add ``fail_hard`` decorator for worker methods (:pr:`6210`) `Matthew Rocklin`_
+- Do not require ``pytest_timeout`` (:pr:`6224`) `Florian Jetter`_
+- Remove remaining ``run_sync`` calls from tests (:pr:`6196`) `Thomas Grainger`_
+- Increase test timeout if debugger is running (:pr:`6218`) `Florian Jetter`_
+- Do not list closes keyword in list of bullet points (:pr:`6219`) `Florian Jetter`_
+- Harmonize (:pr:`6161`) and (:pr:`6173`) (:pr:`6207`) `crusaderky`_
+- Xfail ``test_worker_death_timeout`` (:pr:`6186`) `Matthew Rocklin`_
+- Use random port in ``test_dask_spec.py::test_text`` (:pr:`6187`) `Matthew Rocklin`_
+- Mark all websocket tests as flaky (:pr:`6188`) `Matthew Rocklin`_
+- Fix flaky ``test_dont_steal_long_running_tasks`` (:pr:`6197`) `crusaderky`_
+- Cleanup names in stealing (:pr:`6185`) `Matthew Rocklin`_
+- ``log_errors`` decorator (:pr:`6184`) `crusaderky`_
+- Pass ``mypy`` validation on Windows (:pr:`6180`) `crusaderky`_
+- Add ``locket`` as a dependency instead of vendoring (:pr:`6166`) `Michael Adkins`_
+- Remove unittestmock for ``gather_dep`` and ``get_data_from_worker`` (:pr:`6172`) `Florian Jetter`_
+- ``mypy`` tweaks (:pr:`6175`) `crusaderky`_
+- Avoid easy deprecated calls to ``asyncio.get_event_loop()`` (:pr:`6170`) `Thomas Grainger`_
+- Fix flaky ``test_cancel_fire_and_forget`` (:pr:`6099`) `crusaderky`_
+- Remove deprecated code (:pr:`6144`) `Matthew Rocklin`_
+- Update link of test badge (:pr:`6154`) `Florian Jetter`_
+- Remove legacy state mappings (:pr:`6145`) `Matthew Rocklin`_
+- Fix ``test_worker_waits_for_scheduler`` (:pr:`6155`) `Matthew Rocklin`_
+- Disallow leaked threads on windows (:pr:`6152`) `Thomas Grainger`_
+- Review annotations and docstrings in ``scheduler.py``, part 1 (:pr:`6132`) `crusaderky`_
+- Relax ``test_asyncprocess.py::test_simple`` (:pr:`6150`) `Matthew Rocklin`_
+- Drop ``cast`` ing which is effectively a no-op (:pr:`6101`) `jakirkham`_
+- Mark tests that use a specific port as flaky (:pr:`6139`) `Matthew Rocklin`_
+- AMM Suggestion namedtuples (:pr:`6108`) `crusaderky`_
+
 .. _v2022.04.1:
 
 2022.04.1
@@ -3511,3 +3585,4 @@ significantly without many new features.
 .. _`Andrii Oriekhov`: https://github.com/andriyor
 .. _`Duncan McGregor`: https://github.com/dmcg
 .. _`Eric Engestrom`: https://github.com/lace
+.. _`ungarj`: https://github.com/ungarj
