@@ -360,8 +360,11 @@ class Cluster(SyncMethodMixin):
 
     @property
     def dashboard_link(self):
-        if hasattr(self, "scheduler_spec"):
-            use_dashboard = self.scheduler_spec["options"]["dashboard"]
+        use_dashboard = (
+            getattr(self, "scheduler_spec", {})
+            .get("options", {})
+            .get("dashboard", True)
+        )
 
         if use_dashboard:
             try:
