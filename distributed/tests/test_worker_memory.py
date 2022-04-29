@@ -12,6 +12,7 @@ import dask.config
 
 import distributed.system
 from distributed import Client, Event, Nanny, Worker, wait
+from distributed.compatibility import MACOS
 from distributed.core import Status
 from distributed.metrics import monotonic
 from distributed.spill import has_zict_210
@@ -763,6 +764,7 @@ async def test_pause_while_spilling(c, s, a):
 
 
 @pytest.mark.slow
+@pytest.mark.skipif(MACOS, reason="https://github.com/dask/distributed/issues/6233")
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
