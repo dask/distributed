@@ -622,7 +622,7 @@ class Worker(ServerNode):
             ("executing", "released"): self.transition_executing_released,
             ("executing", "rescheduled"): self.transition_executing_rescheduled,
             ("fetch", "flight"): self.transition_fetch_flight,
-            ("fetch", "missing"): self.transition_fetch_missing,
+            ("fetch", "missing"): self.transition_generic_to_missing,
             ("fetch", "released"): self.transition_generic_released,
             ("flight", "error"): self.transition_flight_error,
             ("flight", "fetch"): self.transition_flight_fetch,
@@ -642,6 +642,7 @@ class Worker(ServerNode):
             ("ready", "released"): self.transition_generic_released,
             ("released", "error"): self.transition_generic_error,
             ("released", "fetch"): self.transition_released_fetch,
+            ("released", "missing"): self.transition_released_fetch,
             ("released", "forgotten"): self.transition_released_forgotten,
             ("released", "memory"): self.transition_released_memory,
             ("released", "waiting"): self.transition_released_waiting,
@@ -2018,6 +2019,7 @@ class Worker(ServerNode):
         if self.validate:
             assert ts.state == "missing"
             assert ts.priority is not None
+            assert ts.who_has
 
         self._missing_dep_flight.discard(ts)
         ts.state = "fetch"
@@ -2046,7 +2048,7 @@ class Worker(ServerNode):
         ts.done = False
         return {}, []
 
-    def transition_fetch_missing(
+    def transition_generic_to_missing(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         ts.state = "missing"
@@ -2060,6 +2062,8 @@ class Worker(ServerNode):
         if self.validate:
             assert ts.state == "released"
             assert ts.priority is not None
+        if not ts.who_has:
+            return {ts: "missing"}, []
         ts.state = "fetch"
         ts.done = False
         self.data_needed.push(ts)
@@ -3261,10 +3265,7 @@ class Worker(ServerNode):
                             "stimulus_id": stimulus_id,
                         }
                     )
-                    if ts.who_has:
-                        recommendations[ts] = "fetch"
-                    elif ts.state not in ("released", "memory"):
-                        recommendations[ts] = "missing"
+                    recommendations[ts] = "fetch"
             del data, response
             self.transitions(recommendations, stimulus_id=stimulus_id)
 
