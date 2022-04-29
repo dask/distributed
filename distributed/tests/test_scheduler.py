@@ -8,7 +8,7 @@ import sys
 from itertools import product
 from textwrap import dedent
 from time import sleep
-from typing import Collection, Iterable, Mapping
+from typing import Collection
 from unittest import mock
 
 import cloudpickle
@@ -34,7 +34,7 @@ from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps, loads
-from distributed.scheduler import MemoryState, Scheduler, TaskState
+from distributed.scheduler import MemoryState, Scheduler
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
     BrokenComm,
@@ -3558,31 +3558,4 @@ async def test_ensure_events_dont_include_taskstate_objects(c, s, a, b):
     await event.set()
     await c.gather(futs)
 
-    def _recursive_isin(iterable, type_):
-        if isinstance(iterable, Mapping):
-            for key, value in iterable.items():
-                assert not isinstance(key, type_), iterable
-                _recursive_isin(value, type_)
-        elif isinstance(iterable, Iterable) and not isinstance(iterable, str):
-            for el in iterable:
-                _recursive_isin(el, type_)
-        else:
-            assert not isinstance(iterable, type_), iterable
-
-    with pytest.raises(AssertionError):
-        _recursive_isin(["foo", TaskState("foo", None)], TaskState)
-    with pytest.raises(AssertionError):
-        _recursive_isin(["foo", (TaskState("foo", None),)], TaskState)
-    with pytest.raises(AssertionError):
-        _recursive_isin({"foo": (TaskState("foo", None),)}, TaskState)
-    with pytest.raises(AssertionError):
-        _recursive_isin(
-            {
-                "foo": (
-                    "bar",
-                    TaskState("foo", None),
-                )
-            },
-            TaskState,
-        )
-    _recursive_isin(s.events, TaskState)
+    assert "TaskState" not in str(s.events)
