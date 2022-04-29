@@ -463,14 +463,16 @@ def test_multiple_workers(loop):
 @pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="POSIX only")
 @pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
-def test_signal_handling(sig):
+def test_signal_handling(loop, sig):
     try:
         scheduler = subprocess.Popen(
             ["dask-scheduler"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
-        sleep(1)
+        # Wait for scheduler to start
+        with Client(f"127.0.0.1:{Scheduler.default_port}", loop=loop):
+            pass
         scheduler.send_signal(sig)
         stdout, stderr = scheduler.communicate()
         logs = stdout.decode().lower()
