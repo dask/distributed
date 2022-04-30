@@ -179,9 +179,10 @@ async def test_separate_thread_false(c, s, a):
 
 
 @gen_cluster(client=True)
-async def test_client_executor(c, s, a, b):
+@pytest.mark.parametrize("separate_thread", [True, False])
+async def test_client_executor(c, s, a, b, separate_thread):
     def mysum():
-        with worker_client() as c:
+        with worker_client(separate_thread=separate_thread) as c:
             with c.get_executor() as e:
                 return sum(e.map(double, range(30)))
 
@@ -339,3 +340,40 @@ async def test_secede_does_not_claim_worker(c, s, a, b):
     assert len(res) == 2
     assert res[a.address] > 25
     assert res[b.address] > 25
+
+
+@pytest.mark.parametrize("separate_thread", [True, False])
+def test_sync_func_on_main_thread(client, separate_thread):
+    """A synchronous client running a worker that calls an async task which submits its own task to
+    the scheduler should not fail"""
+    # https://github.com/dask/distributed/issues/5513
+
+    async def inc(n):
+        return n + 1
+
+    async def f():
+        with worker_client(separate_thread=separate_thread) as c:
+            m = c.submit(inc, 1)
+            return m
+
+    res = client.submit(f)
+    assert res.exception() is None
+
+
+@gen_cluster(client=True)
+@pytest.mark.parametrize("separate_thread", [True, False])
+async def test_async_func_on_main_thread(c, s, a, b, separate_thread):
+    """An asynchronous client running a worker that calls an async task which submits its own task to
+    the scheduler should not fail"""
+    # https://github.com/dask/distributed/issues/5513
+
+    async def inc(n):
+        return n + 1
+
+    async def f():
+        with worker_client(separate_thread=separate_thread) as client:
+            m = await client.submit(inc, 1)
+            return m
+
+    res = await c.submit(f)
+    assert res == 2
