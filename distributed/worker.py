@@ -1601,7 +1601,10 @@ class Worker(ServerNode):
             # weird deadlocks particularly if the task that is executing in
             # the thread is waiting for a server reply, e.g. when using
             # worker clients, semaphores, etc.
-            await to_thread(_close)
+            try:
+                await to_thread(_close)
+            except RuntimeError:  # Are we shutting down the process?
+                _close()  # Just run it directly
 
         self.stop()
         await self.rpc.close()
