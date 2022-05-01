@@ -10,6 +10,8 @@ def dump_batch(batch, file, schema=None) -> None:
     """
     Dump a batch to file, if we're the first, also write the schema
 
+    This function is with respect to the open file object
+
     See Also
     --------
     load_arrow

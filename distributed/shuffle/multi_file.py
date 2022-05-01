@@ -35,13 +35,8 @@ class MultiFile:
 
     State
     -----
-
     memory_limit: str
         A maximum amount of memory to use, like "1 GiB"
-    max_connections: int
-        The maximum number of connections to have out at once
-    max_message_size: str
-        The maximum size of a single message that we want to send
 
     Parameters
     ----------
@@ -87,7 +82,6 @@ class MultiFile:
 
         self._done = False
         self._futures = set()
-        self.active = set()
         self.diagnostics = defaultdict(float)
 
         self._communicate_future = asyncio.create_task(self.communicate())
@@ -130,7 +124,7 @@ class MultiFile:
 
         del data, shard
 
-        while MultiFile.total_size > self.memory_limit:
+        while MultiFile.total_size > MultiFile.memory_limit:
             with self.time("waiting-on-memory"):
                 async with self.condition:
 
@@ -191,11 +185,6 @@ class MultiFile:
 
         with log_errors():
             # Consider boosting total_size a bit here to account for duplication
-            while id in self.active:
-                await asyncio.sleep(0.01)
-
-            self.active.add(id)
-
             start = time.time()
             try:
                 with self.time("write"):
@@ -218,7 +207,6 @@ class MultiFile:
                 "avg_duration"
             ] + 0.02 * (stop - start)
 
-            self.active.remove(id)
             self.bytes_written += size
             self.total_size -= size
             MultiFile.total_size -= size
@@ -275,7 +263,8 @@ class MultiFile:
 
     def close(self):
         self._done = True
-        shutil.rmtree(self.directory)
+        with contextlib.suppress(FileNotFoundError):
+            shutil.rmtree(self.directory)
 
     def __enter__(self):
         return self

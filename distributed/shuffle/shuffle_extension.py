@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
+import logging
 import os
 import time
 from collections import defaultdict
@@ -24,15 +25,14 @@ from distributed.utils import log_errors, sync
 
 if TYPE_CHECKING:
     import pandas as pd
-
-    try:
-        import pyarrow as pa
-    except ImportError:
-        raise ImportError("PyArrow is needed for fast shuffling")
+    import pyarrow as pa
 
     from distributed.worker import Worker
 
 ShuffleId = NewType("ShuffleId", str)
+
+
+logger = logging.getLogger(__name__)
 
 
 class Shuffle:
@@ -75,7 +75,7 @@ class Shuffle:
             loop=self.worker.io_loop,
         )
 
-        async def send(address, shards):
+        async def send(address: str, shards: list[bytes]) -> None:
             return await self.worker.rpc(address).shuffle_receive(
                 data=to_serialize(shards),
                 shuffle_id=self.id,
@@ -85,7 +85,8 @@ class Shuffle:
             send=send,
             loop=self.worker.io_loop,
         )
-        MultiComm.max_connections = min(len(self.partitions_of), 10)
+        # TODO: reduce number of connections to number of workers
+        # MultiComm.max_connections = min(10, n_workers)
 
         self.diagnostics: dict[str, float] = defaultdict(float)
         self.output_partitions_left = len(
@@ -118,7 +119,7 @@ class Shuffle:
                 "buckets": len(self.multi_file.shards),
                 "written": self.multi_file.bytes_written,
                 "read": self.multi_file.bytes_read,
-                "active": len(self.multi_file.active),
+                "active": 0,
                 "diagnostics": self.multi_file.diagnostics,
                 "memory_limit": self.multi_file.memory_limit,
             },
@@ -249,12 +250,12 @@ class ShuffleWorkerExtension:
         Using an unknown ``shuffle_id`` is an error.
         """
         shuffle = await self._get_shuffle(shuffle_id)
-        future = asyncio.ensure_future(shuffle.receive(data))
+        task = asyncio.create_task(shuffle.receive(data))
         if (
             shuffle.multi_file.total_size + sum(map(len, data))
             > shuffle.multi_file.memory_limit
         ):
-            await future  # backpressure
+            await task  # backpressure
 
     async def shuffle_inputs_done(self, comm: object, shuffle_id: ShuffleId) -> None:
         """
@@ -355,6 +356,12 @@ class ShuffleWorkerExtension:
                     column=column,
                 )
             except KeyError:
+                # Even the scheduler doesn't know about this shuffle
+                # Let's hand this back to the scheduler and let it figure
+                # things out
+                logger.info(
+                    "Worker Shuffle unable to get information from scheduler, rescheduling"
+                )
                 from distributed.worker import Reschedule
 
                 raise Reschedule()
@@ -385,6 +392,9 @@ class ShuffleWorkerExtension:
 
     def close(self):
         self.executor.shutdown()
+        while self.shuffles:
+            _, shuffle = self.shuffles.popitem()
+            shuffle.close()
 
 
 class ShuffleSchedulerExtension:
@@ -459,6 +469,7 @@ class ShuffleSchedulerExtension:
     def register_complete(self, id: ShuffleId, worker: str):
         """Learn from a worker that it has completed all reads of a shuffle"""
         if id not in self.completed_workers:
+            logger.info("Worker shuffle reported complete after shuffle was removed")
             return
         self.completed_workers[id].add(worker)
 

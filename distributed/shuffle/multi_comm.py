@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import threading
 import time
 import weakref
 from collections import defaultdict
+from typing import Awaitable, Callable, Sequence
 
 from dask.utils import parse_bytes
 
@@ -30,45 +33,51 @@ class MultiComm:
 
     State
     -----
-
     memory_limit: str
-        A maximum amount of memory to use, like "1 GiB"
+        A maximum amount of memory to use across the process, like "1 GiB"
+        This includes both data in shards and also in network communications
     max_connections: int
         The maximum number of connections to have out at once
     max_message_size: str
         The maximum size of a single message that we want to send
+    queue: asyncio.Queue
+        A queue holding tokens used to limit concurrency
 
     Parameters
     ----------
     send: callable
         How to send a list of shards to a worker
+        Expects an address of the target worker (string)
+        and a payload of shards (list of bytes) to send to that worker
     """
 
     max_message_size = parse_bytes("2 MiB")
     memory_limit = parse_bytes("100 MiB")
     max_connections = 10
-    _queues: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Queue] = weakref.WeakKeyDictionary()
+    _queues: weakref.WeakKeyDictionary[
+        asyncio.AbstractEventLoop, asyncio.Queue
+    ] = weakref.WeakKeyDictionary()
     total_size = 0
     lock = threading.Lock()
 
     def __init__(
         self,
-        send=None,
+        send: Callable[[str, list[bytes]], Awaitable[None]],
         loop=None,
     ):
         self.send = send
-        self.shards = defaultdict(list)
-        self.sizes = defaultdict(int)
+        self.shards: dict[str, list[bytes]] = defaultdict(list)
+        self.sizes: dict[str, int] = defaultdict(int)
         self.total_size = 0
         self.total_moved = 0
         self.thread_condition = threading.Condition()
-        self._futures = set()
+        self._futures: set[asyncio.Task] = set()
         self._done = False
-        self.diagnostics = defaultdict(float)
+        self.diagnostics: dict[str, float] = defaultdict(float)
         self._loop = loop or asyncio.get_event_loop()
 
-        self._communicate_future = asyncio.create_task(self.communicate())
-        self._exception = None
+        self._communicate_task = asyncio.create_task(self.communicate())
+        self._exception: Exception | None = None
 
     @property
     def queue(self):
@@ -103,7 +112,7 @@ class MultiComm:
 
         del data
 
-        while MultiComm.total_size > self.memory_limit:
+        while MultiComm.total_size > MultiComm.memory_limit:
             with self.time("waiting-on-memory"):
                 with self.thread_condition:
                     self.thread_condition.wait(1)  # Block until memory calms down
@@ -153,9 +162,9 @@ class MultiComm:
 
                 assert set(self.sizes) == set(self.shards)
                 assert shards
-                future = asyncio.create_task(self.process(address, shards, size))
+                task = asyncio.create_task(self.process(address, shards, size))
                 del shards
-                self._futures.add(future)
+                self._futures.add(task)
 
     async def process(self, address: str, shards: list, size: int):
         """Send one message off to a neighboring worker"""
@@ -181,8 +190,9 @@ class MultiComm:
                     "avg_duration"
                 ] + 0.02 * (stop - start)
             finally:
-                self.total_size -= size
-                MultiComm.total_size -= size
+                with self.lock:
+                    self.total_size -= size
+                    MultiComm.total_size -= size
                 with self.thread_condition:
                     self.thread_condition.notify()
                 await self.queue.put(None)
@@ -192,7 +202,7 @@ class MultiComm:
         We don't expect any more data, wait until everything is flushed through
         """
         if self._exception:
-            await self._communicate_future
+            await self._communicate_task
             await asyncio.gather(*self._futures)
             raise self._exception
 
@@ -205,7 +215,7 @@ class MultiComm:
         assert not self.total_size
 
         self._done = True
-        await self._communicate_future
+        await self._communicate_task
 
     @contextlib.contextmanager
     def time(self, name: str):

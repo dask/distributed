@@ -441,3 +441,23 @@ async def test_add_some_results(c, s, a, b):
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
+
+
+@gen_cluster(client=True)
+async def test_clean_after_close(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    x = dd.shuffle.shuffle(df, "x", shuffle="p2p").persist()
+
+    while not s.tasks or not any(ts.state == "memory" for ts in s.tasks.values()):
+        await asyncio.sleep(0.01)
+
+    await a.close()
+    clean_worker(a)
+
+    # clean_scheduler(s)  # TODO
+    # clean_worker(b)  # TODO

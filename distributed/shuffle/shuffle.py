@@ -88,10 +88,7 @@ def rearrange_by_column_p2p(
     dsk = {
         (name, i): (shuffle_unpack, token, i, barrier_key) for i in range(npartitions)
     }
-    import dask
-
-    with dask.annotate(shuffle=lambda key: key[1]):
-        layer = MaterializedLayer(dsk)
+    layer = MaterializedLayer(dsk, annotations={"shuffle": lambda key: key[1]})
     # TODO: update to use blockwise.
     # Changes task names, so breaks setting worker restrictions at the moment.
     # Also maybe would be nice if the `DataFrameIOLayer` interface supported this?
