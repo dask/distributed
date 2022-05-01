@@ -50,13 +50,21 @@ from distributed.comm import Comm
 from distributed.comm.tcp import TCP
 from distributed.compatibility import WINDOWS
 from distributed.config import initialize_logging
-from distributed.core import CommClosedError, ConnectionPool, Status, connect, rpc
+from distributed.core import (
+    CommClosedError,
+    ConnectionPool,
+    Status,
+    clean_exception,
+    connect,
+    rpc,
+)
 from distributed.deploy import SpecCluster
 from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
 from distributed.nanny import Nanny
 from distributed.node import ServerNode
 from distributed.proctitle import enable_proctitle_on_children
+from distributed.protocol import deserialize
 from distributed.security import Security
 from distributed.utils import (
     DequeHandler,
@@ -76,6 +84,15 @@ try:
     import dask.array  # register config
 except ImportError:
     pass
+
+try:
+    from pytest_timeout import is_debugging
+except ImportError:
+
+    def is_debugging() -> bool:
+        # The pytest_timeout logic is more sophisticated. Not only debuggers
+        # attach a trace callback but vendoring the entire logic is not worth it
+        return sys.gettrace() is not None
 
 
 logger = logging.getLogger(__name__)
@@ -765,7 +782,7 @@ async def disconnect(addr, timeout=3, rpc_kwargs=None):
     rpc_kwargs = rpc_kwargs or {}
 
     async def do_disconnect():
-        with rpc(addr, **rpc_kwargs) as w:
+        async with rpc(addr, **rpc_kwargs) as w:
             # If the worker was killed hard (e.g. sigterm) during test runtime,
             # we do not know at this point and may not be able to connect
             with suppress(EnvironmentError, CommClosedError):
@@ -798,6 +815,8 @@ def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"
     )
+    if is_debugging():
+        timeout = 3600
 
     def _(func):
         def test_func(*args, **kwargs):
@@ -866,11 +885,13 @@ async def start_cluster(
             await asyncio.gather(*(w.close(timeout=1) for w in workers))
             await s.close(fast=True)
             check_invalid_worker_transitions(s)
+            check_invalid_task_states(s)
+            check_worker_fail_hard(s)
             raise TimeoutError("Cluster creation timeout")
     return s, workers
 
 
-def check_invalid_worker_transitions(s):
+def check_invalid_worker_transitions(s: Scheduler) -> None:
     if not s.events.get("invalid-worker-transition"):
         return
 
@@ -884,6 +905,33 @@ def check_invalid_worker_transitions(s):
     )
 
 
+def check_invalid_task_states(s: Scheduler) -> None:
+    if not s.events.get("invalid-worker-task-states"):
+        return
+
+    for timestamp, msg in s.events["invalid-worker-task-states"]:
+        print("Worker:", msg["worker"])
+        print("State:", msg["state"])
+        for line in msg["story"]:
+            print(line)
+
+    raise ValueError("Invalid worker task state")
+
+
+def check_worker_fail_hard(s: Scheduler) -> None:
+    if not s.events.get("worker-fail-hard"):
+        return
+
+    for timestamp, msg in s.events["worker-fail-hard"]:
+        msg = msg.copy()
+        worker = msg.pop("worker")
+        msg["exception"] = deserialize(msg["exception"].header, msg["exception"].frames)
+        msg["traceback"] = deserialize(msg["traceback"].header, msg["traceback"].frames)
+        print("Failed worker", worker)
+        typ, exc, tb = clean_exception(**msg)
+        raise exc.with_traceback(tb)
+
+
 async def end_cluster(s, workers):
     logger.debug("Closing out test cluster")
 
@@ -895,6 +943,8 @@ async def end_cluster(s, workers):
     await s.close()  # wait until scheduler stops completely
     s.stop()
     check_invalid_worker_transitions(s)
+    check_invalid_task_states(s)
+    check_worker_fail_hard(s)
 
 
 def gen_cluster(
@@ -941,6 +991,8 @@ def gen_cluster(
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"
     )
+    if is_debugging():
+        timeout = 3600
 
     scheduler_kwargs = merge(
         {"dashboard": False, "dashboard_address": ":0"}, scheduler_kwargs
@@ -1891,17 +1943,72 @@ def xfail_ssl_issue5601():
         raise
 
 
-def assert_worker_story(
-    story: list[tuple], expect: list[tuple], *, strict: bool = False
+def assert_valid_story(story, ordered_timestamps=True):
+    """Test that a story is well formed.
+
+    Parameters
+    ----------
+    story: list[tuple]
+        Output of Worker.story
+    ordered_timestamps: bool, optional
+        If False, timestamps are not required to be monotically increasing.
+        Useful for asserting stories composed from the scheduler and
+        multiple workers
+    """
+
+    now = time()
+    prev_ts = 0.0
+    for ev in story:
+        try:
+            assert len(ev) > 2, "too short"
+            assert isinstance(ev, tuple), "not a tuple"
+            assert isinstance(ev[-2], str) and ev[-2], "stimulus_id not a string"
+            assert isinstance(ev[-1], float), "Timestamp is not a float"
+            if ordered_timestamps:
+                assert prev_ts <= ev[-1], "Timestamps are not monotonically ascending"
+            # Timestamps are within the last hour. It's been observed that a
+            # timestamp generated in a Nanny process can be a few milliseconds
+            # in the future.
+            assert now - 3600 < ev[-1] <= now + 1, "Timestamps is too old"
+            prev_ts = ev[-1]
+        except AssertionError as err:
+            raise AssertionError(
+                f"Malformed story event: {ev}\nProblem: {err}.\nin story:\n{_format_story(story)}"
+            )
+
+
+def assert_story(
+    story: list[tuple],
+    expect: list[tuple],
+    *,
+    strict: bool = False,
+    ordered_timestamps: bool = True,
 ) -> None:
-    """Test the output of ``Worker.story``
+    """Test the output of ``Worker.story`` or ``Scheduler.story``
+
+    Warning
+    =======
+
+    Tests with overly verbose stories introduce maintenance cost and should
+    therefore be used with caution. This should only be used for very specific
+    unit tests where the exact order of events is crucial and there is no other
+    practical way to assert or observe what happened.
+    A typical use case involves testing for race conditions where subtle changes
+    of event ordering would cause harm.
 
     Parameters
     ==========
     story: list[tuple]
         Output of Worker.story
     expect: list[tuple]
-        Expected events. Each expected event must contain exactly 2 less fields than the
+        Expected events.
+        The expected events either need to be exact matches or are allowed to
+        not provide a stimulus_id and timestamp.
+        e.g.
+        `("log", "entry", "stim-id-9876", 1234)`
+        is equivalent to
+        `("log", "entry")`
+
         story (the last two fields are always the stimulus_id and the timestamp).
 
         Elements of the expect tuples can be
@@ -1922,24 +2029,17 @@ def assert_worker_story(
         If True, the story must contain exactly as many events as expect.
         If False (the default), the story may contain more events than expect; extra
         events are ignored.
+    ordered_timestamps: bool, optional
+        If False, timestamps are not required to be monotically increasing.
+        Useful for asserting stories composed from the scheduler and
+        multiple workers
     """
-    now = time()
-    prev_ts = 0.0
-    for ev in story:
-        try:
-            assert len(ev) > 2
-            assert isinstance(ev, tuple)
-            assert isinstance(ev[-2], str) and ev[-2]  # stimulus_id
-            assert isinstance(ev[-1], float)  # timestamp
-            assert prev_ts <= ev[-1]  # Timestamps are monotonic ascending
-            # Timestamps are within the last hour. It's been observed that a timestamp
-            # generated in a Nanny process can be a few milliseconds in the future.
-            assert now - 3600 < ev[-1] <= now + 1
-            prev_ts = ev[-1]
-        except AssertionError:
-            raise AssertionError(
-                f"Malformed story event: {ev}\nin story:\n{_format_story(story)}"
-            )
+    assert_valid_story(story, ordered_timestamps=ordered_timestamps)
+
+    def _valid_event(event, ev_expect):
+        return len(event) == len(ev_expect) and all(
+            ex(ev) if callable(ex) else ev == ex for ev, ex in zip(event, ev_expect)
+        )
 
     try:
         if strict and len(story) != len(expect):
@@ -1948,16 +2048,16 @@ def assert_worker_story(
         for ev_expect in expect:
             while True:
                 event = next(story_it)
-                # Ignore (stimulus_id, timestamp)
-                event = event[:-2]
-                if len(event) == len(ev_expect) and all(
-                    ex(ev) if callable(ex) else ev == ex
-                    for ev, ex in zip(event, ev_expect)
+
+                if (
+                    _valid_event(event, ev_expect)
+                    # Ignore (stimulus_id, timestamp)
+                    or _valid_event(event[:-2], ev_expect)
                 ):
                     break
     except StopIteration:
         raise AssertionError(
-            f"assert_worker_story({strict=}) failed\n"
+            f"assert_story({strict=}) failed\n"
             f"story:\n{_format_story(story)}\n"
             f"expect:\n{_format_story(expect)}"
         ) from None

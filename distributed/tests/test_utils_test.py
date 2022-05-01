@@ -21,7 +21,7 @@ from distributed.utils import mp_context
 from distributed.utils_test import (
     _LockedCommPool,
     _UnhashableCallable,
-    assert_worker_story,
+    assert_story,
     check_process_leak,
     cluster,
     dump_cluster_state,
@@ -39,12 +39,15 @@ def test_bare_cluster(loop):
         pass
 
 
-def test_cluster(loop):
+def test_cluster(cleanup):
+    async def identity():
+        async with rpc(s["address"]) as scheduler_rpc:
+            return await scheduler_rpc.identity()
+
     with cluster() as (s, [a, b]):
-        with rpc(s["address"]) as s:
-            ident = loop.run_sync(s.identity)
-            assert ident["type"] == "Scheduler"
-            assert len(ident["workers"]) == 2
+        ident = asyncio.run(identity())
+        assert ident["type"] == "Scheduler"
+        assert len(ident["workers"]) == 2
 
 
 @gen_cluster(client=True)
@@ -407,7 +410,7 @@ def test_dump_cluster_state_timeout(tmp_path):
     assert "workers" in state
 
 
-def test_assert_worker_story():
+def test_assert_story():
     now = time()
     story = [
         ("foo", "id1", now - 600),
@@ -415,38 +418,38 @@ def test_assert_worker_story():
         ("baz", {1: 2}, "id2", now),
     ]
     # strict=False
-    assert_worker_story(story, [("foo",), ("bar",), ("baz", {1: 2})])
-    assert_worker_story(story, [])
-    assert_worker_story(story, [("foo",)])
-    assert_worker_story(story, [("foo",), ("bar",)])
-    assert_worker_story(story, [("baz", lambda d: d[1] == 2)])
+    assert_story(story, [("foo",), ("bar",), ("baz", {1: 2})])
+    assert_story(story, [])
+    assert_story(story, [("foo",)])
+    assert_story(story, [("foo",), ("bar",)])
+    assert_story(story, [("baz", lambda d: d[1] == 2)])
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("foo", "nomatch")])
+        assert_story(story, [("foo", "nomatch")])
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("baz",)])
+        assert_story(story, [("baz",)])
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("baz", {1: 3})])
+        assert_story(story, [("baz", {1: 3})])
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("foo",), ("bar",), ("baz", "extra"), ("+1",)])
+        assert_story(story, [("foo",), ("bar",), ("baz", "extra"), ("+1",)])
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("baz", lambda d: d[1] == 3)])
+        assert_story(story, [("baz", lambda d: d[1] == 3)])
     with pytest.raises(KeyError):  # Faulty lambda
-        assert_worker_story(story, [("baz", lambda d: d[2] == 1)])
-    assert_worker_story([], [])
-    assert_worker_story([("foo", "id1", now)], [("foo",)])
+        assert_story(story, [("baz", lambda d: d[2] == 1)])
+    assert_story([], [])
+    assert_story([("foo", "id1", now)], [("foo",)])
     with pytest.raises(AssertionError):
-        assert_worker_story([], [("foo",)])
+        assert_story([], [("foo",)])
 
     # strict=True
-    assert_worker_story([], [], strict=True)
-    assert_worker_story([("foo", "id1", now)], [("foo",)])
-    assert_worker_story(story, [("foo",), ("bar",), ("baz", {1: 2})], strict=True)
+    assert_story([], [], strict=True)
+    assert_story([("foo", "id1", now)], [("foo",)])
+    assert_story(story, [("foo",), ("bar",), ("baz", {1: 2})], strict=True)
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("foo",), ("bar",)], strict=True)
+        assert_story(story, [("foo",), ("bar",)], strict=True)
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("foo",), ("baz", {1: 2})], strict=True)
+        assert_story(story, [("foo",), ("baz", {1: 2})], strict=True)
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [], strict=True)
+        assert_story(story, [], strict=True)
 
 
 @pytest.mark.parametrize(
@@ -467,11 +470,29 @@ def test_assert_worker_story():
         ),
     ],
 )
-def test_assert_worker_story_malformed_story(story_factory):
+def test_assert_story_malformed_story(story_factory):
     # defer the calls to time() to when the test runs rather than collection
     story = story_factory()
     with pytest.raises(AssertionError, match="Malformed story event"):
-        assert_worker_story(story, [])
+        assert_story(story, [])
+
+
+@pytest.mark.parametrize("strict", [True, False])
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_assert_story_identity(c, s, a, strict):
+    f1 = c.submit(inc, 1, key="f1")
+    f2 = c.submit(inc, f1, key="f2")
+    assert await f2 == 3
+    scheduler_story = s.story(f2.key)
+    assert scheduler_story
+    worker_story = a.story(f2.key)
+    assert worker_story
+    assert_story(worker_story, worker_story, strict=strict)
+    assert_story(scheduler_story, scheduler_story, strict=strict)
+    with pytest.raises(AssertionError):
+        assert_story(scheduler_story, worker_story, strict=strict)
+    with pytest.raises(AssertionError):
+        assert_story(worker_story, scheduler_story, strict=strict)
 
 
 @gen_cluster()
@@ -637,3 +658,38 @@ def test_invalid_transitions(capsys):
 
     assert "foo" in out + err
     assert "task-name" in out + err
+
+
+def test_invalid_worker_states(capsys):
+    @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+    async def test_log_invalid_worker_task_states(c, s, a):
+        x = c.submit(inc, 1, key="task-name")
+        await x
+        a.tasks[x.key].state = "released"
+        with pytest.raises(Exception):
+            a.validate_task(a.tasks[x.key])
+
+        while not s.events["invalid-worker-task-states"]:
+            await asyncio.sleep(0.01)
+
+    with pytest.raises(Exception) as info:
+        test_log_invalid_worker_task_states()
+
+    out, err = capsys.readouterr()
+
+    assert "released" in out + err
+    assert "task-name" in out + err
+
+
+def test_worker_fail_hard(capsys):
+    @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+    async def test_fail_hard(c, s, a):
+        with pytest.raises(Exception):
+            await a.gather_dep(
+                worker="abcd", to_gather=["x"], total_nbytes=0, stimulus_id="foo"
+            )
+
+    with pytest.raises(Exception) as info:
+        test_fail_hard()
+
+    assert "abcd" in str(info.value)

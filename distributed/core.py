@@ -634,7 +634,6 @@ class Server:
                         func()
 
         except OSError:
-            # FIXME: This is silently ignored, is this intentional?
             pass
         except Exception as e:
             logger.exception(e)
@@ -884,6 +883,11 @@ class rpc:
         return await asyncio.gather(*self.close_comms())
 
     def __enter__(self):
+        warnings.warn(
+            "the rpc synchronous context manager is deprecated",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -949,9 +953,20 @@ class PooledRPCCall:
 
     # For compatibility with rpc()
     def __enter__(self):
+        warnings.warn(
+            "the rpc synchronous context manager is deprecated",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
         pass
 
     def __repr__(self):

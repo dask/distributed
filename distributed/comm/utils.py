@@ -27,7 +27,7 @@ try:
     import numpy
 
     def numpy_host_array(n: int) -> memoryview:
-        return memoryview(numpy.empty((n,), dtype="u1"))  # type: ignore
+        return numpy.empty((n,), dtype="u1").data
 
     host_array = numpy_host_array
 except ImportError:
