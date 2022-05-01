@@ -47,7 +47,7 @@ class MultiComm:
     max_message_size = parse_bytes("2 MiB")
     memory_limit = parse_bytes("100 MiB")
     max_connections = 10
-    _queues: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+    _queues: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Queue] = weakref.WeakKeyDictionary()
     total_size = 0
     lock = threading.Lock()
 
@@ -81,7 +81,7 @@ class MultiComm:
             MultiComm._queues[self._loop] = queue
             return queue
 
-    def put(self, data: dict):
+    def put(self, data: dict[str, Sequence[bytes]]):
         """
         Put a dict of shards into our buffers
 

@@ -27,11 +27,11 @@ class MultiFile:
 
     -   shards: dict[str, list[bytes]]
 
-        This is our in-memory buffer of data waiting to be sent to other workers.
+        This is our in-memory buffer of data waiting to be written to files.
 
     -   sizes: dict[str, int]
 
-        The size of each list of shards.  We find the largest and send data from that buffer
+        The size of each list of shards.  We find the largest and write data from that buffer
 
     State
     -----
@@ -51,8 +51,6 @@ class MultiFile:
         Writes an object to a file, like pickle.dump
     load: callable
         Reads an object from that file, like pickle.load
-    send: callable
-        How to send a list of shards to a worker
     sizeof: callable
         Measures the size of an object in memory
     """
