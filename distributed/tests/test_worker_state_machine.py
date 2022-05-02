@@ -5,7 +5,7 @@ import pytest
 
 from distributed.protocol.serialize import Serialize
 from distributed.utils import recursive_to_dict
-from distributed.utils_test import gen_cluster, inc
+from distributed.utils_test import assert_story, gen_cluster, inc
 from distributed.worker_state_machine import (
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -262,6 +262,25 @@ async def test_fetch_to_compute(c, s, a, b):
     b.comm_threshold_bytes = old_comm_threshold
 
     await f2
+
+    assert_story(
+        b.log,
+        # FIXME: This log should be replaced with an
+        # StateMachineEvent/Instruction log
+        [
+            (f2.key, "compute-task"),
+            # This is a "please fetch" request. We don't have anything like
+            # this, yet. We don't see the request-dep signal in here because we
+            # do not wait for the key to be actually scheduled
+            (f1.key, "ensure-task-exists", "released"),
+            # After the worker failed, we're instructed to forget f2 before
+            # something new comes in
+            ("free-keys", (f2.key,)),
+            (f1.key, "compute-task"),
+            (f1.key, "put-in-memory"),
+            (f2.key, "compute-task"),
+        ],
+    )
 
 
 @gen_cluster(client=True)
