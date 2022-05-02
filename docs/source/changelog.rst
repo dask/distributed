@@ -1,6 +1,27 @@
 Changelog
 =========
 
+.. _v2022.05.0:
+
+2022.05.0
+---------
+
+Released on May 2, 2022
+
+Highlights
+^^^^^^^^^^
+This is a bugfix release for `this issue <https://github.com/dask/distributed/issues/6255>`_.
+
+Enhancements
+^^^^^^^^^^^^
+- Handle ``writeable`` in ``buffer_callback`` (:pr:`6238`) `jakirkham`_
+- Use ``.data`` with NumPy array allocation (:pr:`6242`) `jakirkham`_
+
+Bug Fixes
+^^^^^^^^^
+- Close executor in event loop if interpreter is closing (:pr:`6256`) `Matthew Rocklin`_
+
+
 .. _v2022.04.2:
 
 2022.04.2
