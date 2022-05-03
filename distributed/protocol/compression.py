@@ -41,6 +41,17 @@ with suppress(ImportError):
 with suppress(ImportError):
     import snappy
 
+    # In python-snappy 0.5.3, support for the Python Buffer Protocol was added.
+    # This is needed to handle other objects (like `memoryview`s) without
+    # copying to `bytes` first.
+    #
+    # Note: `snappy.__version__` doesn't exist in a release yet.
+    #       So do a little test that will fail if snappy is not 0.5.3 or later.
+    try:
+        snappy.compress(memoryview(b""))
+    except TypeError:
+        raise ImportError("Need snappy >= 0.5.3")
+
     compressions["snappy"] = {
         "compress": snappy.compress,
         "decompress": snappy.decompress,
