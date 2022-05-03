@@ -41,15 +41,9 @@ with suppress(ImportError):
 with suppress(ImportError):
     import snappy
 
-    def _fixed_snappy_decompress(data):
-        # snappy.decompress() doesn't accept memoryviews
-        if isinstance(data, (memoryview, bytearray)):
-            data = bytes(data)
-        return snappy.decompress(data)
-
     compressions["snappy"] = {
         "compress": snappy.compress,
-        "decompress": _fixed_snappy_decompress,
+        "decompress": snappy.decompress,
     }
     default_compression = "snappy"
 
