@@ -19,7 +19,7 @@ dependencies:
   - ipywidgets
   - jinja2
   - locket >=1.0
-  - lz4  # Only tested here
+  - lz4 >=0.23.1  # Only tested here
   - msgpack-python
   - netcdf4
   - paramiko
@@ -32,7 +32,7 @@ dependencies:
   - pytest-repeat
   - pytest-rerunfailures
   - pytest-timeout
-  - python-snappy  # Only tested here
+  - python-snappy >=0.5.3  # Only tested here
   - pytorch  # Only tested here
   - requests
   - s3fs
