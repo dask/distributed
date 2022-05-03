@@ -11,6 +11,8 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import Literal
 
+from packaging.version import parse as parse_version
+
 from tlz import identity
 
 import dask
@@ -52,6 +54,12 @@ with suppress(ImportError):
     default_compression = "snappy"
 
 with suppress(ImportError):
+    import lz4
+
+    # Required to use `lz4.block` APIs and Python Buffer Protocol support.
+    if parse_version(lz4.__version__) < parse_version("0.23.1"):
+        raise ImportError("Need lz4 >= 0.23.1")
+
     from lz4.block import compress as lz4_compress, decompress as lz4_decompress
 
     compressions["lz4"] = {
