@@ -75,10 +75,6 @@ jobs:
         if: ${{ matrix.os == 'windows-latest' && matrix.python-version == '3.9' }}
         run: mamba uninstall ipython
 
-      - name: Install dask branch
-        shell: bash -l {0}
-        run: python -m pip install --no-deps git+https://github.com/mrocklin/dask@p2p-shuffle
-
       - name: Install
         shell: bash -l {0}
         run: |
