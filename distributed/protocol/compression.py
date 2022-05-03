@@ -77,6 +77,10 @@ with suppress(ImportError):
 with suppress(ImportError):
     import zstandard
 
+    # Required for Python Buffer Protocol support.
+    if parse_version(zstandard.__version__) < parse_version("0.9.0"):
+        raise ImportError("Need zstandard >= 0.9.0")
+
     zstd_compressor = zstandard.ZstdCompressor(
         level=dask.config.get("distributed.comm.zstd.level"),
         threads=dask.config.get("distributed.comm.zstd.threads"),
