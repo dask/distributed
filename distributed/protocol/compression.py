@@ -54,30 +54,9 @@ with suppress(ImportError):
 with suppress(ImportError):
     from lz4.block import compress as lz4_compress, decompress as lz4_decompress
 
-    # helper to bypass missing memoryview support in current lz4
-    # (fixed in later versions)
-
-    def _fixed_lz4_compress(data):
-        try:
-            return lz4_compress(data)
-        except TypeError:
-            if isinstance(data, (memoryview, bytearray)):
-                return lz4_compress(bytes(data))
-            else:
-                raise
-
-    def _fixed_lz4_decompress(data):
-        try:
-            return lz4_decompress(data)
-        except (ValueError, TypeError):
-            if isinstance(data, (memoryview, bytearray)):
-                return lz4_decompress(bytes(data))
-            else:
-                raise
-
     compressions["lz4"] = {
-        "compress": _fixed_lz4_compress,
-        "decompress": _fixed_lz4_decompress,
+        "compress": lz4_compress,
+        "decompress": lz4_decompress,
     }
     default_compression = "lz4"
 
