@@ -52,18 +52,7 @@ with suppress(ImportError):
     default_compression = "snappy"
 
 with suppress(ImportError):
-    import lz4
-
-    try:
-        # try using the new lz4 API
-        import lz4.block
-
-        lz4_compress = lz4.block.compress
-        lz4_decompress = lz4.block.decompress
-    except ImportError:
-        # fall back to old one
-        lz4_compress = lz4.LZ4_compress
-        lz4_decompress = lz4.LZ4_uncompress
+    from lz4.block import compress as lz4_compress, decompress as lz4_decompress
 
     # helper to bypass missing memoryview support in current lz4
     # (fixed in later versions)
