@@ -12,8 +12,6 @@ import weakref
 from ssl import SSLCertVerificationError, SSLError
 from typing import Any, ClassVar
 
-from tornado import gen
-
 try:
     import ssl
 except ImportError:
