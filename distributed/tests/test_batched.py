@@ -42,10 +42,10 @@ async def test_BatchedSend():
     async with EchoServer() as e:
         comm = await connect(e.address)
 
-        b = BatchedSend(interval=10)
+        b = BatchedSend(comm, interval=10)
         assert str(len(b.buffer)) in str(b)
         assert str(len(b.buffer)) in repr(b)
-        b.start(comm)
+        b.start()
 
         await asyncio.sleep(0.020)
 
@@ -70,12 +70,12 @@ async def test_send_before_start():
     async with EchoServer() as e:
         comm = await connect(e.address)
 
-        b = BatchedSend(interval=10)
+        b = BatchedSend(comm, interval=10)
 
         b.send("hello")
         b.send("world")
 
-        b.start(comm)
+        b.start()
         result = await comm.read()
         assert result == ("hello", "world")
         await comm.close()
@@ -86,9 +86,9 @@ async def test_send_after_stream_start():
     async with EchoServer() as e:
         comm = await connect(e.address)
 
-        b = BatchedSend(interval=10)
+        b = BatchedSend(comm, interval=10)
 
-        b.start(comm)
+        b.start()
         b.send("hello")
         b.send("world")
         result = await comm.read()
@@ -103,8 +103,8 @@ async def test_send_before_close():
     async with EchoServer() as e:
         comm = await connect(e.address)
 
-        b = BatchedSend(interval=10)
-        b.start(comm)
+        b = BatchedSend(comm, interval=10)
+        b.start()
 
         cnt = int(e.count)
         b.send("hello")
@@ -125,8 +125,8 @@ async def test_close_closed():
     async with EchoServer() as e:
         comm = await connect(e.address)
 
-        b = BatchedSend(interval=10)
-        b.start(comm)
+        b = BatchedSend(comm, interval=10)
+        b.start()
 
         b.send(123)
         await comm.close()  # external closing
@@ -137,18 +137,12 @@ async def test_close_closed():
 
 
 @gen_test()
-async def test_close_not_started():
-    b = BatchedSend(interval=10)
-    await b.close()
-
-
-@gen_test()
 async def test_close_twice():
     async with EchoServer() as e:
         comm = await connect(e.address)
 
-        b = BatchedSend(interval=10)
-        b.start(comm)
+        b = BatchedSend(comm, interval=10)
+        b.start()
         await b.close()
         await b.close()
 
@@ -161,8 +155,8 @@ async def test_stress():
         L = []
 
         async def send():
-            b = BatchedSend(interval=3)
-            b.start(comm)
+            b = BatchedSend(comm, interval=3)
+            b.start()
             for i in range(0, 10000, 2):
                 b.send(i)
                 b.send(i + 1)
@@ -190,8 +184,8 @@ async def run_traffic_jam(nsends, nbytes):
     async with EchoServer() as e:
         comm = await connect(e.address)
 
-        b = BatchedSend(interval=0.01)
-        b.start(comm)
+        b = BatchedSend(comm, interval=0.01)
+        b.start()
 
         msg = {"x": to_serialize(data)}
         for i in range(nsends):
@@ -234,8 +228,8 @@ async def test_serializers():
     async with EchoServer() as e:
         comm = await connect(e.address)
 
-        b = BatchedSend(interval="10ms", serializers=["msgpack"])
-        b.start(comm)
+        b = BatchedSend(comm, interval="10ms", serializers=["msgpack"])
+        b.start()
 
         b.send({"x": to_serialize(123)})
         b.send({"x": to_serialize("hello")})

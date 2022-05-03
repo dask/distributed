@@ -3640,7 +3640,7 @@ class Scheduler(SchedulerState, ServerNode):
     @log_errors
     async def add_worker(
         self,
-        comm=None,
+        comm,
         *,
         address: str,
         status: str,
@@ -3732,7 +3732,7 @@ class Scheduler(SchedulerState, ServerNode):
         # for key in keys:  # TODO
         #     self.mark_key_in_memory(key, [address])
 
-        self.stream_comms[address] = BatchedSend(interval="5ms", loop=self.loop)
+        self.stream_comms[address] = BatchedSend(comm, interval="5ms")
 
         if ws.nthreads > len(ws.processing):
             self.idle[ws.address] = ws
@@ -3812,8 +3812,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
         msg.update(version_warning)
 
-        if comm:
-            await comm.write(msg)
+        await comm.write(msg)
 
         await self.handle_worker(comm=comm, worker=address, stimulus_id=stimulus_id)
 
@@ -4672,8 +4671,8 @@ class Scheduler(SchedulerState, ServerNode):
                 logger.exception(e)
 
         try:
-            bcomm = BatchedSend(interval="2ms", loop=self.loop)
-            bcomm.start(comm)
+            bcomm = BatchedSend(comm, interval="2ms")
+            bcomm.start()
             self.client_comms[client] = bcomm
             msg = {"op": "stream-start"}
             version_warning = version_module.error_message(
@@ -4907,13 +4906,14 @@ class Scheduler(SchedulerState, ServerNode):
         assert stimulus_id
         comm.name = "Scheduler connection to worker"
         worker_comm = self.stream_comms[worker]
-        worker_comm.start(comm)
+        worker_comm.start()
+        # FIXME: This log is not accurate anymore
         logger.info("Starting worker compute stream, %s", worker)
         try:
             await self.handle_stream(comm=comm, extra={"worker": worker})
         finally:
             if worker in self.stream_comms:
-                worker_comm.abort()
+                self.stream_comms[worker].abort()
                 await self.remove_worker(address=worker, stimulus_id=stimulus_id)
 
     def add_plugin(
@@ -7700,8 +7700,8 @@ class WorkerStatusPlugin(SchedulerPlugin):
     name = "worker-status"
 
     def __init__(self, scheduler, comm):
-        self.bcomm = BatchedSend(interval="5ms")
-        self.bcomm.start(comm)
+        self.bcomm = BatchedSend(comm=comm, interval="5ms")
+        self.bcomm.start()
 
         self.scheduler = scheduler
         self.scheduler.add_plugin(self)

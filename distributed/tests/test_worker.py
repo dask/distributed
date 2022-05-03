@@ -2435,8 +2435,8 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
                 await asyncio.sleep(0.01)
 
             await s.stream_comms[a.address].close()
-
-            assert len(s.workers) == 1
+            while not len(s.workers) == 1:
+                await asyncio.sleep(0.1)
             a.heartbeat_active = False
             await a.heartbeat()
             assert len(s.workers) == 2
@@ -2515,7 +2515,8 @@ async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, 
             # The only way to get f3 to complete is for Worker A to reconnect.
 
             f1.release()
-            assert len(s.workers) == 1
+            while len(s.workers) != 1:
+                await asyncio.sleep(0.1)
             story = s.story(f1.key)
             while len(story) == len(story_before):
                 story = s.story(f1.key)

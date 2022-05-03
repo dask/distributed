@@ -1,8 +1,8 @@
+from __future__ import annotations
+
+import asyncio
 import logging
 from collections import deque
-
-from tornado import gen, locks
-from tornado.ioloop import IOLoop
 
 import dask
 from dask.utils import parse_timedelta
@@ -36,17 +36,13 @@ class BatchedSend:
         ['Hello,', 'world!']
     """
 
-    # XXX why doesn't BatchedSend follow either the IOStream or Comm API?
-
-    def __init__(self, interval, loop=None, serializers=None):
-        # XXX is the loop arg useful?
-        self.loop = loop or IOLoop.current()
+    def __init__(self, comm, interval, serializers=None):
+        self.comm = comm
         self.interval = parse_timedelta(interval, default="ms")
-        self.waker = locks.Event()
-        self.stopped = locks.Event()
+        self.waker = asyncio.Event()
+        self.stopped = asyncio.Event()
         self.please_stop = False
         self.buffer = []
-        self.comm = None
         self.message_count = 0
         self.batch_count = 0
         self.byte_count = 0
@@ -57,9 +53,11 @@ class BatchedSend:
         self.serializers = serializers
         self._consecutive_failures = 0
 
-    def start(self, comm):
-        self.comm = comm
-        self.loop.add_callback(self._background_send)
+    def start(self):
+        assert not self.closed()
+        self._background_task = asyncio.create_task(
+            self._background_send(), name="batched-send"
+        )
 
     def closed(self):
         return self.comm and self.comm.closed()
@@ -72,13 +70,19 @@ class BatchedSend:
 
     __str__ = __repr__
 
-    @gen.coroutine
-    def _background_send(self):
+    async def _background_send(self):
         while not self.please_stop:
             try:
-                yield self.waker.wait(self.next_deadline)
+                await asyncio.wait_for(
+                    self.waker.wait(),
+                    timeout=(
+                        float(time() - self.next_deadline)
+                        if self.next_deadline
+                        else None
+                    ),
+                )
                 self.waker.clear()
-            except gen.TimeoutError:
+            except asyncio.TimeoutError:
                 pass
             if not self.buffer:
                 # Nothing to send
@@ -91,7 +95,7 @@ class BatchedSend:
             self.batch_count += 1
             self.next_deadline = time() + self.interval
             try:
-                nbytes = yield self.comm.write(
+                nbytes = await self.comm.write(
                     payload, serializers=self.serializers, on_error="raise"
                 )
                 if nbytes < 1e6:
@@ -142,8 +146,7 @@ class BatchedSend:
         if self.next_deadline is None:
             self.waker.set()
 
-    @gen.coroutine
-    def close(self, timeout=None):
+    async def close(self, timeout=None):
         """Flush existing messages and then close comm
 
         If set, raises `tornado.util.TimeoutError` after a timeout.
@@ -152,17 +155,19 @@ class BatchedSend:
             return
         self.please_stop = True
         self.waker.set()
-        yield self.stopped.wait(timeout=timeout)
+        await asyncio.wait_for(
+            self.stopped.wait(), timeout=timeout.total_seconds() if timeout else None
+        )
         if not self.comm.closed():
             try:
                 if self.buffer:
                     self.buffer, payload = [], self.buffer
-                    yield self.comm.write(
+                    await self.comm.write(
                         payload, serializers=self.serializers, on_error="raise"
                     )
             except CommClosedError:
                 pass
-            yield self.comm.close()
+            await self.comm.close()
 
     def abort(self):
         if self.comm is None:

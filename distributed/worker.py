@@ -598,6 +598,7 @@ class Worker(ServerNode):
         if validate is None:
             validate = dask.config.get("distributed.scheduler.validate")
         self.validate = validate
+        self.batched_stream = None  # type: ignore
         self._transitions_table = {
             ("cancelled", "resumed"): self.transition_cancelled_resumed,
             ("cancelled", "fetch"): self.transition_cancelled_fetch,
@@ -776,7 +777,6 @@ class Worker(ServerNode):
                 self.nthreads, thread_name_prefix="Dask-Default-Threads"
             )
 
-        self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
         self.name = name
         self.scheduler_delay = 0
         self.stream_comms = {}
@@ -1195,8 +1195,8 @@ class Worker(ServerNode):
 
             logger.info("        Registered to: %26s", self.scheduler.address)
             logger.info("-" * 49)
-
-        self.batched_stream.start(comm)
+        self.batched_stream = BatchedSend(comm=comm, interval="2ms")
+        self.batched_stream.start()
         self.periodic_callbacks["keep-alive"].start()
         self.periodic_callbacks["heartbeat"].start()
         self.loop.add_callback(self.handle_scheduler, comm)
@@ -1269,7 +1269,8 @@ class Worker(ServerNode):
     @fail_hard
     async def handle_scheduler(self, comm):
         await self.handle_stream(comm, every_cycle=[self.ensure_communicating])
-
+        if self.batched_stream:
+            self.batched_stream.abort()
         if self.reconnect and self.status in Status.ANY_RUNNING:
             logger.info("Connection to scheduler broken.  Reconnecting...")
             self.loop.add_callback(self.heartbeat)
@@ -1653,21 +1654,21 @@ class Worker(ServerNode):
 
     def send_to_worker(self, address, msg):
         if address not in self.stream_comms:
-            bcomm = BatchedSend(interval="1ms", loop=self.loop)
-            self.stream_comms[address] = bcomm
 
             async def batched_send_connect():
                 comm = await connect(
                     address, **self.connection_args  # TODO, serialization
                 )
+                bcomm = BatchedSend(comm, interval="1ms", loop=self.loop)
+                self.stream_comms[address] = bcomm
                 comm.name = "Worker->Worker"
                 await comm.write({"op": "connection_stream"})
 
-                bcomm.start(comm)
+                bcomm.start()
 
             self.loop.add_callback(batched_send_connect)
-
-        self.stream_comms[address].send(msg)
+        else:
+            self.stream_comms[address].send(msg)
 
     async def get_data(
         self, comm, keys=None, who=None, serializers=None, max_connections=None

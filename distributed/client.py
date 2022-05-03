@@ -1287,8 +1287,8 @@ class Client(SyncMethodMixin):
         if msg[0].get("warning"):
             warnings.warn(version_module.VersionMismatchWarning(msg[0]["warning"]))
 
-        bcomm = BatchedSend(interval="10ms", loop=self.loop)
-        bcomm.start(comm)
+        bcomm = BatchedSend(comm=comm, interval="10ms")
+        bcomm.start()
         self.scheduler_comm = bcomm
         if self._set_as_default:
             _set_global_client(self)
