@@ -41,7 +41,7 @@ dependencies:
   - toolz
   - tornado
   - zict
-  - zstandard
+  - zstandard >=0.9.0
   - pip:
       - git+https://github.com/dask/dask
       - git+https://github.com/jcrist/crick  # Only tested here
