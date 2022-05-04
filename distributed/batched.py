@@ -1,8 +1,6 @@
+import asyncio
 import logging
 from collections import deque
-
-from tornado import gen, locks
-from tornado.ioloop import IOLoop
 
 import dask
 from dask.utils import parse_timedelta
@@ -36,14 +34,9 @@ class BatchedSend:
         ['Hello,', 'world!']
     """
 
-    # XXX why doesn't BatchedSend follow either the IOStream or Comm API?
-
-    def __init__(self, interval, loop=None, serializers=None):
-        # XXX is the loop arg useful?
-        self.loop = loop or IOLoop.current()
+    def __init__(self, interval, serializers=None):
         self.interval = parse_timedelta(interval, default="ms")
-        self.waker = locks.Event()
-        self.stopped = locks.Event()
+        self.waker = asyncio.Event()
         self.please_stop = False
         self.buffer = []
         self.comm = None
@@ -55,11 +48,20 @@ class BatchedSend:
             maxlen=dask.config.get("distributed.comm.recent-messages-log-length")
         )
         self.serializers = serializers
-        self._consecutive_failures = 0
+        self._background_task = None
 
     def start(self, comm):
+        if self._background_task and not self._background_task.done():
+            raise RuntimeError("Background task still running")
+        self.please_stop = False
+        self.waker.set()
+        self.next_deadline = None
         self.comm = comm
-        self.loop.add_callback(self._background_send)
+
+        self._background_task = asyncio.create_task(
+            self._background_send(),
+            name="background-send",
+        )
 
     def closed(self):
         return self.comm and self.comm.closed()
@@ -72,13 +74,15 @@ class BatchedSend:
 
     __str__ = __repr__
 
-    @gen.coroutine
-    def _background_send(self):
+    async def _background_send(self):
         while not self.please_stop:
             try:
-                yield self.waker.wait(self.next_deadline)
+                timeout = None
+                if self.next_deadline:
+                    timeout = self.next_deadline - time()
+                await asyncio.wait_for(self.waker.wait(), timeout=timeout)
                 self.waker.clear()
-            except gen.TimeoutError:
+            except asyncio.TimeoutError:
                 pass
             if not self.buffer:
                 # Nothing to send
@@ -90,8 +94,9 @@ class BatchedSend:
             payload, self.buffer = self.buffer, []
             self.batch_count += 1
             self.next_deadline = time() + self.interval
+
             try:
-                nbytes = yield self.comm.write(
+                nbytes = await self.comm.write(
                     payload, serializers=self.serializers, on_error="raise"
                 )
                 if nbytes < 1e6:
@@ -100,7 +105,12 @@ class BatchedSend:
                     self.recent_message_log.append("large-message")
                 self.byte_count += nbytes
             except CommClosedError:
-                logger.info("Batched Comm Closed %r", self.comm, exc_info=True)
+                logger.info(
+                    "Batched Comm Closed %r. Lost %s messages.",
+                    self.comm,
+                    len(payload),
+                    exc_info=True,
+                )
                 break
             except Exception:
                 # We cannot safely retry self.comm.write, as we have no idea
@@ -115,7 +125,6 @@ class BatchedSend:
                 payload = None  # lose ref
         else:
             # nobreak. We've been gracefully closed.
-            self.stopped.set()
             return
 
         # If we've reached here, it means `break` was hit above and
@@ -125,7 +134,6 @@ class BatchedSend:
         # This means that any messages in our buffer our lost.
         # To propagate exceptions, we rely on subsequent `BatchedSend.send`
         # calls to raise CommClosedErrors.
-        self.stopped.set()
         self.abort()
 
     def send(self, *msgs: dict) -> None:
@@ -133,42 +141,36 @@ class BatchedSend:
 
         This completes quickly and synchronously
         """
-        if self.comm is not None and self.comm.closed():
-            raise CommClosedError(f"Comm {self.comm!r} already closed.")
 
         self.message_count += len(msgs)
         self.buffer.extend(msgs)
         # Avoid spurious wakeups if possible
-        if self.next_deadline is None:
+
+        if self.comm and not self.comm.closed() and self.next_deadline is None:
             self.waker.set()
 
-    @gen.coroutine
-    def close(self, timeout=None):
-        """Flush existing messages and then close comm
-
-        If set, raises `tornado.util.TimeoutError` after a timeout.
-        """
-        if self.comm is None:
-            return
+    async def close(self):
+        """Flush existing messages and then close comm"""
         self.please_stop = True
         self.waker.set()
-        yield self.stopped.wait(timeout=timeout)
-        if not self.comm.closed():
+
+        if self._background_task:
+            await self._background_task
+
+        if self.comm and not self.comm.closed():
             try:
                 if self.buffer:
                     self.buffer, payload = [], self.buffer
-                    yield self.comm.write(
+                    await self.comm.write(
                         payload, serializers=self.serializers, on_error="raise"
                     )
             except CommClosedError:
                 pass
-            yield self.comm.close()
+            await self.comm.close()
 
     def abort(self):
-        if self.comm is None:
-            return
         self.please_stop = True
         self.buffer = []
         self.waker.set()
-        if not self.comm.closed():
+        if self.comm and not self.comm.closed():
             self.comm.abort()

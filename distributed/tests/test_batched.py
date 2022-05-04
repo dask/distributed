@@ -116,9 +116,6 @@ async def test_send_before_close():
             await asyncio.sleep(0.01)
             assert time() < start + 5
 
-        with pytest.raises(CommClosedError):
-            b.send("123")
-
 
 @gen_test()
 async def test_close_closed():
@@ -252,3 +249,41 @@ async def test_serializers():
         assert "function" in value
 
         assert comm.closed()
+
+
+@gen_test()
+async def test_restart():
+    async with EchoServer() as e:
+        comm = await connect(e.address)
+
+        b = BatchedSend(interval="2ms")
+        b.start(comm)
+        b.send(123)
+        assert await comm.read() == (123,)
+        await b.close()
+        assert b.closed()
+
+        # We can buffer stuff even while it is closed
+        b.send(345)
+
+        new_comm = await connect(e.address)
+        b.start(new_comm)
+
+        assert await new_comm.read() == (345,)
+        await b.close()
+        assert new_comm.closed()
+
+
+@gen_test()
+async def test_restart_fails_if_still_running():
+    async with EchoServer() as e:
+        comm = await connect(e.address)
+
+        b = BatchedSend(interval="2ms")
+        b.start(comm)
+        with pytest.raises(RuntimeError):
+            b.start(comm)
+
+        b.send(123)
+        assert await comm.read() == (123,)
+        await b.close()

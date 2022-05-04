@@ -1287,7 +1287,7 @@ class Client(SyncMethodMixin):
         if msg[0].get("warning"):
             warnings.warn(version_module.VersionMismatchWarning(msg[0]["warning"]))
 
-        bcomm = BatchedSend(interval="10ms", loop=self.loop)
+        bcomm = BatchedSend(interval="10ms")
         bcomm.start(comm)
         self.scheduler_comm = bcomm
         if self._set_as_default:
@@ -1533,11 +1533,7 @@ class Client(SyncMethodMixin):
                 with suppress(asyncio.CancelledError, TimeoutError):
                     await asyncio.wait_for(asyncio.shield(handle_report_task), 0.1)
 
-            if (
-                self.scheduler_comm
-                and self.scheduler_comm.comm
-                and not self.scheduler_comm.comm.closed()
-            ):
+            if self.scheduler_comm:
                 await self.scheduler_comm.close()
 
             for key in list(self.futures):

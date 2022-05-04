@@ -3501,7 +3501,7 @@ class Scheduler(SchedulerState, ServerNode):
             await future
 
         for comm in self.client_comms.values():
-            comm.abort()
+            await comm.close()
 
         await self.rpc.close()
 
@@ -3641,7 +3641,7 @@ class Scheduler(SchedulerState, ServerNode):
     @log_errors
     async def add_worker(
         self,
-        comm=None,
+        comm,
         *,
         address: str,
         status: str,
@@ -3733,7 +3733,7 @@ class Scheduler(SchedulerState, ServerNode):
         # for key in keys:  # TODO
         #     self.mark_key_in_memory(key, [address])
 
-        self.stream_comms[address] = BatchedSend(interval="5ms", loop=self.loop)
+        self.stream_comms[address] = BatchedSend(interval="5ms")
 
         if ws.nthreads > len(ws.processing):
             self.idle[ws.address] = ws
@@ -3766,7 +3766,19 @@ class Scheduler(SchedulerState, ServerNode):
                             nbytes=nbytes[key],
                             typename=types[key],
                         )
-                        recommendations, client_msgs, worker_msgs = t
+                        recommendations, new_cmsgs, new_wmsgs = t
+                        for c, new_msgs in new_cmsgs.items():
+                            msgs = client_msgs.get(c)  # type: ignore
+                            if msgs is not None:
+                                msgs.extend(new_msgs)
+                            else:
+                                client_msgs[c] = new_msgs
+                        for w, new_msgs in new_wmsgs.items():
+                            msgs = worker_msgs.get(w)  # type: ignore
+                            if msgs is not None:
+                                msgs.extend(new_msgs)
+                            else:
+                                worker_msgs[w] = new_msgs
                         self._transitions(
                             recommendations, client_msgs, worker_msgs, stimulus_id
                         )
@@ -4305,7 +4317,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         logger.info("Remove worker %s", ws)
         if close:
-            with suppress(AttributeError, CommClosedError):
+            with suppress(AttributeError):
                 self.stream_comms[address].send({"op": "close", "report": False})
 
         self.remove_resources(address)
@@ -4319,6 +4331,7 @@ class Scheduler(SchedulerState, ServerNode):
             del self.host_info[host]
 
         self.rpc.remove(address)
+        await self.stream_comms[address].close()
         del self.stream_comms[address]
         del self.aliases[ws.name]
         self.idle.pop(ws.address, None)
@@ -4673,7 +4686,7 @@ class Scheduler(SchedulerState, ServerNode):
                 logger.exception(e)
 
         try:
-            bcomm = BatchedSend(interval="2ms", loop=self.loop)
+            bcomm = BatchedSend(interval="2ms")
             bcomm.start(comm)
             self.client_comms[client] = bcomm
             msg = {"op": "stream-start"}
@@ -5021,13 +5034,7 @@ class Scheduler(SchedulerState, ServerNode):
         c = client_comms.get(client)
         if c is None:
             return
-        try:
-            c.send(msg)
-        except CommClosedError:
-            if self.status == Status.running:
-                logger.critical(
-                    "Closed comm %r while trying to write %s", c, msg, exc_info=True
-                )
+        c.send(msg)
 
     def send_all(self, client_msgs: dict, worker_msgs: dict):
         """Send messages to client and workers"""
@@ -5057,7 +5064,7 @@ class Scheduler(SchedulerState, ServerNode):
             except KeyError:
                 # worker already gone
                 pass
-            except (CommClosedError, AttributeError):
+            except AttributeError:
                 self.loop.add_callback(
                     self.remove_worker,
                     address=worker,

@@ -2399,10 +2399,6 @@ async def test_hold_on_to_replicas(c, s, *workers):
         await asyncio.sleep(0.01)
 
 
-@pytest.mark.xfail(
-    WINDOWS and sys.version_info[:2] == (3, 8),
-    reason="https://github.com/dask/distributed/issues/5621",
-)
 @gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
 async def test_worker_reconnects_mid_compute(c, s, a, b):
     """Ensure that, if a worker disconnects while computing a result, the scheduler will
@@ -2448,7 +2444,8 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
 
             await s.stream_comms[a.address].close()
 
-            assert len(s.workers) == 1
+            while len(s.workers) == 1:
+                await asyncio.sleep(0.1)
             a.heartbeat_active = False
             await a.heartbeat()
             assert len(s.workers) == 2
@@ -2471,10 +2468,6 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
         await asyncio.sleep(0.001)
 
 
-@pytest.mark.xfail(
-    WINDOWS and sys.version_info[:2] == (3, 8),
-    reason="https://github.com/dask/distributed/issues/5621",
-)
 @gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
 async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, a, b):
     """
@@ -2501,12 +2494,9 @@ async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, 
 
         def fast_on_a(lock):
             w = get_worker()
-            import time
 
             if w.address != a_address:
                 lock.acquire()
-            else:
-                time.sleep(1)
 
         lock = Lock()
         # We want to be sure that A is the only one computing this result
@@ -2527,7 +2517,8 @@ async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, 
             # The only way to get f3 to complete is for Worker A to reconnect.
 
             f1.release()
-            assert len(s.workers) == 1
+            while len(s.workers) != 1:
+                await asyncio.sleep(0.01)
             story = s.story(f1.key)
             while len(story) == len(story_before):
                 story = s.story(f1.key)
@@ -2556,6 +2547,33 @@ async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, 
     del f1, f2, f3
     while any(w.tasks for w in [a, b]):
         await asyncio.sleep(0.001)
+
+
+@pytest.mark.parametrize("close_on_scheduler", [True, False])
+@gen_cluster(
+    client=True,
+    nthreads=[
+        ("", 1),
+    ],
+)
+async def test_worker_batched_send_broken(
+    c: Client, s: Scheduler, a: Worker, close_on_scheduler: bool
+):
+    fs = c.map(slowinc, range(20))
+    while not a.data:
+        await asyncio.sleep(0.01)
+
+    if close_on_scheduler:
+        # "Temporary network blip" from the worker's perspective
+        s.stream_comms[a.address].comm.abort()
+    else:
+        a.batched_stream.comm.abort()
+
+    await c.gather(fs)
+
+    # Should work the second time
+    fs = c.map(slowinc, fs)
+    await c.gather(fs)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])

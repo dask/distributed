@@ -25,7 +25,6 @@ from collections.abc import (
 )
 from concurrent.futures import Executor
 from contextlib import suppress
-from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
@@ -201,8 +200,7 @@ def fail_hard(method):
                         },
                     )
                     logger.exception(e)
-                else:
-                    self.loop.add_callback(_force_close, self)
+                self.loop.add_callback(_force_close, self)
 
     return wrapper
 
@@ -782,7 +780,7 @@ class Worker(ServerNode):
                 self.nthreads, thread_name_prefix="Dask-Default-Threads"
             )
 
-        self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
+        self.batched_stream = BatchedSend(interval="2ms")
         self.name = name
         self.scheduler_delay = 0
         self.stream_comms = {}
@@ -1276,6 +1274,7 @@ class Worker(ServerNode):
     async def handle_scheduler(self, comm):
         await self.handle_stream(comm, every_cycle=[self.ensure_communicating])
 
+        await self.batched_stream.close()
         if self.reconnect and self.status in WORKER_ANY_RUNNING:
             logger.info("Connection to scheduler broken.  Reconnecting...")
             self.loop.add_callback(self.heartbeat)
@@ -1584,8 +1583,7 @@ class Worker(ServerNode):
             self.batched_stream.send({"op": "close-stream"})
 
         if self.batched_stream:
-            with suppress(TimeoutError):
-                await self.batched_stream.close(timedelta(seconds=timeout))
+            await self.batched_stream.close()
 
         for executor in self.executors.values():
             if executor is utils._offload_executor:
@@ -1654,7 +1652,7 @@ class Worker(ServerNode):
 
     def send_to_worker(self, address, msg):
         if address not in self.stream_comms:
-            bcomm = BatchedSend(interval="1ms", loop=self.loop)
+            bcomm = BatchedSend(interval="1ms")
             self.stream_comms[address] = bcomm
 
             async def batched_send_connect():
@@ -2745,13 +2743,7 @@ class Worker(ServerNode):
             for ts in tasks:
                 self.validate_task(ts)
 
-        if self.batched_stream.closed():
-            logger.debug(
-                "BatchedSend closed while transitioning tasks. %d tasks not sent.",
-                len(instructions),
-            )
-        else:
-            self._handle_instructions(instructions)
+        self._handle_instructions(instructions)
 
     @log_errors
     def handle_stimulus(self, stim: StateMachineEvent) -> None:
