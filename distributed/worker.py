@@ -195,8 +195,7 @@ def fail_hard(method):
                         },
                     )
                     logger.exception(e)
-                else:
-                    self.loop.add_callback(_force_close, self)
+                self.loop.add_callback(_force_close, self)
 
     return wrapper
 
