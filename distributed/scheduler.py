@@ -2800,7 +2800,7 @@ class SchedulerState:
         """
         dts: TaskState
         comm_bytes: int = 0
-        xfers: int = 0
+        xfers = 0
         for dts in ts.dependencies:
             if ws not in dts.who_has:
                 nbytes = dts.get_nbytes()
