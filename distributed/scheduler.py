@@ -2688,7 +2688,7 @@ class SchedulerState:
         for dts in deps:
             nbytes += dts.nbytes
         # Add a fixed 10ms penalty per transfer. See distributed#5324
-        return nbytes / self._bandwidth + 0.01 * len(deps)
+        return nbytes / self.bandwidth + 0.01 * len(deps)
 
     def get_task_duration(self, ts: TaskState) -> float:
         """Get the estimated computation cost of the given task (not including
