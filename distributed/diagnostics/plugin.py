@@ -108,6 +108,9 @@ class SchedulerPlugin:
     def remove_client(self, scheduler: Scheduler, client: str) -> None:
         """Run when a client disconnects"""
 
+    async def teardown(self):
+        pass
+
 
 class WorkerPlugin:
     """Interface to extend the Worker

@@ -2745,7 +2745,7 @@ class Worker(ServerNode):
             for ts in tasks:
                 self.validate_task(ts)
 
-        if self.batched_stream.closed():
+        if self.batched_stream is not None and self.batched_stream.closed():
             logger.debug(
                 "BatchedSend closed while transitioning tasks. %d tasks not sent.",
                 len(instructions),

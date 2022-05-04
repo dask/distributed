@@ -56,7 +56,7 @@ class BatchedSend:
     def start(self):
         assert not self.closed()
         self._background_task = asyncio.create_task(
-            self._background_send(), name="batched-send"
+            self._background_send(), name=f"batched-send-{self.comm.name}"
         )
 
     def closed(self):
@@ -168,6 +168,7 @@ class BatchedSend:
             except CommClosedError:
                 pass
             await self.comm.close()
+        await self._background_task
 
     def abort(self):
         if self.comm is None:

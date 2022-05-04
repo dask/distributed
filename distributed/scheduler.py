@@ -3460,6 +3460,12 @@ class Scheduler(SchedulerState, ServerNode):
         for preload in self.preloads:
             await preload.teardown()
 
+        for plugin in self.plugins.values():
+            with suppress(AttributeError):
+                res = plugin.teardown()
+                if inspect.isawaitable(res):
+                    await res
+
         if close_workers:
             await self.broadcast(msg={"op": "close_gracefully"}, nanny=True)
             for worker in self.workers:
@@ -4317,6 +4323,7 @@ class Scheduler(SchedulerState, ServerNode):
             del self.host_info[host]
 
         self.rpc.remove(address)
+        await self.stream_comms[address].close()
         del self.stream_comms[address]
         del self.aliases[ws.name]
         self.idle.pop(ws.address, None)
@@ -4968,6 +4975,9 @@ class Scheduler(SchedulerState, ServerNode):
         assert name is not None
 
         try:
+            plugin = self.plugins[name]
+            if hasattr(plugin, "teardown"):
+                self.loop.add_callback(plugin.teardown)
             del self.plugins[name]
         except KeyError:
             raise ValueError(
@@ -7700,6 +7710,7 @@ class WorkerStatusPlugin(SchedulerPlugin):
     name = "worker-status"
 
     def __init__(self, scheduler, comm):
+        return
         self.bcomm = BatchedSend(comm=comm, interval="5ms")
         self.bcomm.start()
 
@@ -7707,6 +7718,7 @@ class WorkerStatusPlugin(SchedulerPlugin):
         self.scheduler.add_plugin(self)
 
     def add_worker(self, worker=None, **kwargs):
+        return
         ident = self.scheduler.workers[worker].identity()
         del ident["metrics"]
         del ident["last_seen"]
@@ -7716,13 +7728,14 @@ class WorkerStatusPlugin(SchedulerPlugin):
             self.scheduler.remove_plugin(name=self.name)
 
     def remove_worker(self, worker=None, **kwargs):
+        return
         try:
             self.bcomm.send(["remove", worker])
         except CommClosedError:
             self.scheduler.remove_plugin(name=self.name)
 
-    def teardown(self):
-        self.bcomm.close()
+    async def teardown(self):
+        await self.bcomm.close()
 
 
 class CollectTaskMetaDataPlugin(SchedulerPlugin):

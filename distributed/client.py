@@ -1358,10 +1358,7 @@ class Client(SyncMethodMixin):
         self.close()
 
     def __del__(self):
-        # If the loop never got assigned, we failed early in the constructor,
-        # nothing to do
-        if hasattr(self, "loop"):
-            self.close()
+        self.close()
 
     def _inc_ref(self, key):
         with self._refcount_lock:
@@ -1506,8 +1503,8 @@ class Client(SyncMethodMixin):
 
             if (
                 self.scheduler_comm
-                and self.scheduler_comm.comm
-                and not self.scheduler_comm.comm.closed()
+                and self.scheduler_comm
+                and not self.scheduler_comm.closed()
             ):
                 self._send_to_scheduler({"op": "close-client"})
                 self._send_to_scheduler({"op": "close-stream"})
@@ -1525,8 +1522,8 @@ class Client(SyncMethodMixin):
 
             if (
                 self.scheduler_comm
-                and self.scheduler_comm.comm
-                and not self.scheduler_comm.comm.closed()
+                and self.scheduler_comm
+                and not self.scheduler_comm.closed()
             ):
                 await self.scheduler_comm.close()
 
