@@ -2808,8 +2808,8 @@ class SchedulerState:
                 comm_bytes += nbytes / len(dts.waiters)
                 xfers += 1
 
-        stack_time: double = ws.occupancy / ws.nthreads
-        start_time: double = stack_time + comm_bytes / self.bandwidth + xfers * 0.01
+        stack_time = ws.occupancy / ws.nthreads
+        start_time = stack_time + comm_bytes / self.bandwidth + xfers * 0.01
 
         if ts.actor:
             return (len(ws.actors), start_time, ws.nbytes)
