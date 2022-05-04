@@ -1,15 +1,16 @@
-from . import config  # isort:skip; load distributed configuration first
-from . import widgets  # isort:skip; load distributed widgets second
-import dask
-from dask.config import config
-from dask.utils import import_required
+from distributed import config  # isort:skip; load distributed configuration first
+from distributed import widgets  # isort:skip; load distributed widgets second
 
-from ._version import get_versions
-from .actor import Actor, ActorFuture
-from .client import (
+import atexit
+
+import dask
+from dask.config import config  # type: ignore
+
+from distributed._version import get_versions
+from distributed.actor import Actor, ActorFuture, BaseActorFuture
+from distributed.client import (
     Client,
     CompatibleExecutor,
-    Executor,
     Future,
     as_completed,
     default_client,
@@ -20,9 +21,9 @@ from .client import (
     performance_report,
     wait,
 )
-from .core import Status, connect, rpc
-from .deploy import Adaptive, LocalCluster, SpecCluster, SSHCluster
-from .diagnostics.plugin import (
+from distributed.core import Status, connect, rpc
+from distributed.deploy import Adaptive, LocalCluster, SpecCluster, SSHCluster
+from distributed.diagnostics.plugin import (
     Environ,
     NannyPlugin,
     PipInstall,
@@ -31,44 +32,65 @@ from .diagnostics.plugin import (
     UploadFile,
     WorkerPlugin,
 )
-from .diagnostics.progressbar import progress
-from .event import Event
-from .lock import Lock
-from .multi_lock import MultiLock
-from .nanny import Nanny
-from .pubsub import Pub, Sub
-from .queues import Queue
-from .scheduler import Scheduler
-from .security import Security
-from .semaphore import Semaphore
-from .threadpoolexecutor import rejoin
-from .utils import CancelledError, TimeoutError, sync
-from .variable import Variable
-from .worker import Reschedule, Worker, get_client, get_worker, print, secede, warn
-from .worker_client import local_client, worker_client
+from distributed.diagnostics.progressbar import progress
+from distributed.event import Event
+from distributed.lock import Lock
+from distributed.multi_lock import MultiLock
+from distributed.nanny import Nanny
+from distributed.pubsub import Pub, Sub
+from distributed.queues import Queue
+from distributed.scheduler import KilledWorker, Scheduler
+from distributed.security import Security
+from distributed.semaphore import Semaphore
+from distributed.threadpoolexecutor import rejoin
+from distributed.utils import CancelledError, TimeoutError, sync
+from distributed.variable import Variable
+from distributed.worker import (
+    Reschedule,
+    Worker,
+    get_client,
+    get_worker,
+    print,
+    secede,
+    warn,
+)
+from distributed.worker_client import local_client, worker_client
 
-versions = get_versions()
-__version__ = versions["version"]
-__git_revision__ = versions["full-revisionid"]
-del get_versions, versions
 
-if dask.config.get("distributed.admin.event-loop") in ("asyncio", "tornado"):
-    pass
-elif dask.config.get("distributed.admin.event-loop") == "uvloop":
-    import_required(
-        "uvloop",
-        "The distributed.admin.event-loop configuration value "
-        "is set to 'uvloop' but the uvloop module is not installed"
-        "\n\n"
-        "Please either change the config value or install one of the following\n"
-        "    conda install uvloop\n"
-        "    pip install uvloop",
-    )
-    import uvloop
+def __getattr__(name):
+    global __version__, __git_revision__
 
-    uvloop.install()
-else:
-    raise ValueError(
-        "Expected distributed.admin.event-loop to be in ('asyncio', 'tornado', 'uvloop'), got %s"
-        % dask.config.get("distributed.admin.event-loop")
-    )
+    if name == "__version__":
+        from importlib.metadata import version
+
+        __version__ = version("distributed")
+        return __version__
+
+    if name == "__git_revision__":
+        from distributed._version import get_versions
+
+        __git_revision__ = get_versions()["full-revisionid"]
+        return __git_revision__
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+_python_shutting_down = False
+
+
+@atexit.register
+def _():
+    """Set a global when Python shuts down.
+
+    Note
+    ----
+    This function must be registered with atexit *after* any class that invokes
+    ``dstributed.utils.is_python_shutting_down`` has been defined. This way it
+    will be called before the ``__del__`` method of those classes.
+
+    See Also
+    --------
+    distributed.utils.is_python_shutting_down
+    """
+    global _python_shutting_down
+    _python_shutting_down = True

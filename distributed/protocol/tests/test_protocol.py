@@ -2,7 +2,15 @@ import pytest
 
 from distributed.protocol import dumps, loads, maybe_compress, msgpack, to_serialize
 from distributed.protocol.compression import compressions
-from distributed.protocol.serialize import Serialize, Serialized, deserialize, serialize
+from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
+from distributed.protocol.serialize import (
+    Serialize,
+    Serialized,
+    dask_deserialize,
+    dask_serialize,
+    deserialize,
+    serialize,
+)
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import nbytes
 
@@ -72,8 +80,7 @@ def test_maybe_compress(lib, compression):
 
         payload = b"0" * 10000
         rc, rd = maybe_compress(f(payload), compression=compression)
-        # For some reason compressing memoryviews can force blosc...
-        assert rc in (compression, "blosc")
+        assert rc == compression
         assert compressions[rc]["decompress"](rd) == payload
 
 
@@ -210,11 +217,32 @@ def test_maybe_compress_memoryviews():
     pytest.importorskip("lz4")
     x = np.arange(1000000, dtype="int64")
     compression, payload = maybe_compress(x.data)
-    try:
-        import blosc  # noqa: F401
-    except ImportError:
-        assert compression == "lz4"
-        assert len(payload) < x.nbytes * 0.75
-    else:
-        assert compression == "blosc"
-        assert len(payload) < x.nbytes / 10
+    assert compression == "lz4"
+    assert len(payload) < x.nbytes * 0.75
+
+
+@pytest.mark.parametrize("serializers", [("dask",), ("cuda",)])
+def test_preserve_header(serializers):
+    """
+    Test that a serialization family doesn't overwrite the headers
+    of the underlying registered dumps/loads functions.
+    """
+
+    class MyObj:
+        pass
+
+    @cuda_serialize.register(MyObj)
+    @dask_serialize.register(MyObj)
+    def _(x):
+        return {}, []
+
+    @cuda_deserialize.register(MyObj)
+    @dask_deserialize.register(MyObj)
+    def _(header, frames):
+        assert header == {}
+        assert frames == []
+        return MyObj()
+
+    header, frames = serialize(MyObj(), serializers=serializers)
+    o = deserialize(header, frames)
+    assert isinstance(o, MyObj)

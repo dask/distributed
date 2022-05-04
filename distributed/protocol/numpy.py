@@ -2,9 +2,9 @@ import math
 
 import numpy as np
 
-from ..utils import log_errors
-from . import pickle
-from .serialize import dask_deserialize, dask_serialize
+from distributed.protocol import pickle
+from distributed.protocol.serialize import dask_deserialize, dask_serialize
+from distributed.utils import log_errors
 
 
 def itemsize(dt):
@@ -107,32 +107,32 @@ def serialize_numpy_ndarray(x, context=None):
 
 
 @dask_deserialize.register(np.ndarray)
+@log_errors
 def deserialize_numpy_ndarray(header, frames):
-    with log_errors():
-        if header.get("pickle"):
-            return pickle.loads(frames[0], buffers=frames[1:])
+    if header.get("pickle"):
+        return pickle.loads(frames[0], buffers=frames[1:])
 
-        (frame,) = frames
-        (writeable,) = header["writeable"]
+    (frame,) = frames
+    (writeable,) = header["writeable"]
 
-        is_custom, dt = header["dtype"]
-        if is_custom:
-            dt = pickle.loads(dt)
-        else:
-            dt = np.dtype(dt)
+    is_custom, dt = header["dtype"]
+    if is_custom:
+        dt = pickle.loads(dt)
+    else:
+        dt = np.dtype(dt)
 
-        if header.get("broadcast_to"):
-            shape = header["broadcast_to"]
-        else:
-            shape = header["shape"]
+    if header.get("broadcast_to"):
+        shape = header["broadcast_to"]
+    else:
+        shape = header["shape"]
 
-        x = np.ndarray(shape, dtype=dt, buffer=frame, strides=header["strides"])
-        if not writeable:
-            x.flags.writeable = False
-        else:
-            x = np.require(x, requirements=["W"])
+    x = np.ndarray(shape, dtype=dt, buffer=frame, strides=header["strides"])
+    if not writeable:
+        x.flags.writeable = False
+    else:
+        x = np.require(x, requirements=["W"])
 
-        return x
+    return x
 
 
 @dask_serialize.register(np.ma.core.MaskedConstant)

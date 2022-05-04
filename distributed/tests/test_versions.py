@@ -2,6 +2,7 @@ import re
 import sys
 
 import pytest
+import tornado
 
 from distributed import Client, Worker
 from distributed.utils_test import gen_cluster
@@ -10,9 +11,6 @@ from distributed.versions import error_message, get_versions
 # if one of the nodes reports this version, there's a mismatch
 mismatched_version = get_versions()
 mismatched_version["packages"]["distributed"] = "0.0.0.dev0"
-
-# for really old versions, the `package` key is missing - version is UNKNOWN
-key_err_version = {}
 
 # if no key is available for one package, we assume it's MISSING
 missing_version = get_versions()
@@ -53,7 +51,7 @@ def kwargs_not_matching(kwargs_matching, node, effect):
     affected_version = {
         "MISMATCHED": mismatched_version,
         "MISSING": missing_version,
-        "KEY_ERROR": key_err_version,
+        "KEY_ERROR": {},
         "NONE": unknown_version,
     }[effect]
     kwargs = kwargs_matching
@@ -125,8 +123,8 @@ def test_python_mismatch(kwargs_matching):
 async def test_version_warning_in_cluster(s, a, b):
     s.workers[a.address].versions["packages"]["dask"] = "0.0.0"
 
-    with pytest.warns(None) as record:
-        async with Client(s.address, asynchronous=True) as client:
+    with pytest.warns(Warning) as record:
+        async with Client(s.address, asynchronous=True):
             pass
 
     assert record
@@ -141,5 +139,23 @@ async def test_version_warning_in_cluster(s, a, b):
 
 def test_python_version():
     required = get_versions()["packages"]
-    assert "python" in required
     assert required["python"] == ".".join(map(str, sys.version_info))
+
+
+def test_version_custom_pkgs():
+    out = get_versions(
+        [
+            # Use custom function
+            ("distributed", lambda mod: "123"),
+            # Use version_of_package
+            "notexist",
+            ("pytest", None),  # has __version__
+            "tornado",  # has version
+            "math",  # has nothing
+        ]
+    )["packages"]
+    assert out["distributed"] == "123"
+    assert out["notexist"] is None
+    assert out["pytest"] == pytest.__version__
+    assert out["tornado"] == tornado.version
+    assert out["math"] is None

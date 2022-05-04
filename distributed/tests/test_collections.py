@@ -1,6 +1,5 @@
-from distutils.version import LooseVersion
-
 import pytest
+from packaging.version import parse as parse_version
 
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
@@ -12,8 +11,8 @@ import dask.dataframe as dd
 from distributed.client import wait
 from distributed.utils_test import gen_cluster
 
-PANDAS_VERSION = LooseVersion(pd.__version__)
-PANDAS_GT_100 = PANDAS_VERSION >= LooseVersion("1.0.0")
+PANDAS_VERSION = parse_version(pd.__version__)
+PANDAS_GT_100 = PANDAS_VERSION >= parse_version("1.0.0")
 
 if PANDAS_GT_100:
     import pandas.testing as tm  # noqa: F401
@@ -169,7 +168,7 @@ def test_dataframe_groupby_tasks(client):
 
     for ind in [lambda x: "A", lambda x: x.A]:
         a = df.groupby(ind(df)).apply(len)
-        b = ddf.groupby(ind(ddf)).apply(len, meta=int)
+        b = ddf.groupby(ind(ddf)).apply(len, meta=(None, int))
         assert_equal(a, b.compute(scheduler="sync").sort_index())
         assert not any("partd" in k[0] for k in b.dask)
 
@@ -182,7 +181,7 @@ def test_dataframe_groupby_tasks(client):
         ddf.groupby(ddf[["A", "B"]]).apply(len, meta=int)
 
     a = df.groupby(["A", "B"]).apply(len)
-    b = ddf.groupby(["A", "B"]).apply(len, meta=int)
+    b = ddf.groupby(["A", "B"]).apply(len, meta=(None, int))
 
     assert_equal(a, b.compute(scheduler="sync").sort_index())
 

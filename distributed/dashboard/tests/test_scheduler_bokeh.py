@@ -23,7 +23,9 @@ from distributed.dashboard.components.scheduler import (
     ClusterMemory,
     ComputePerKey,
     CurrentLoad,
+    EventLoop,
     Events,
+    Hardware,
     MemoryByKey,
     Occupancy,
     ProcessingHistogram,
@@ -48,7 +50,8 @@ from distributed.metrics import time
 from distributed.utils import format_dashboard_link
 from distributed.utils_test import dec, div, gen_cluster, get_cert, inc, slowinc
 
-scheduler.PROFILING = False
+# Imported from distributed.dashboard.utils
+scheduler.PROFILING = False  # type: ignore
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
@@ -74,7 +77,13 @@ async def test_simple(c, s, a, b):
 
 @gen_cluster(client=True, worker_kwargs={"dashboard": True})
 async def test_basic(c, s, a, b):
-    for component in [TaskStream, SystemMonitor, Occupancy, StealingTimeSeries]:
+    for component in [
+        TaskStream,
+        SystemMonitor,
+        Occupancy,
+        StealingTimeSeries,
+        EventLoop,
+    ]:
         ss = component(s)
 
         ss.update()
@@ -529,26 +538,26 @@ async def test_SystemTimeseries(c, s, a, b):
 
     assert all(len(v) == 1 for v in systs.source.data.values())
     assert systs.source.data["read_bytes"][0] == sum(
-        [ws.metrics["read_bytes"] for ws in workers]
+        ws.metrics["read_bytes"] for ws in workers
     ) / len(workers)
     assert systs.source.data["write_bytes"][0] == sum(
-        [ws.metrics["write_bytes"] for ws in workers]
+        ws.metrics["write_bytes"] for ws in workers
     ) / len(workers)
     assert systs.source.data["cpu"][0] == sum(
-        [ws.metrics["cpu"] for ws in workers]
+        ws.metrics["cpu"] for ws in workers
     ) / len(workers)
     assert systs.source.data["memory"][0] == sum(
-        [ws.metrics["memory"] for ws in workers]
+        ws.metrics["memory"] for ws in workers
     ) / len(workers)
     assert systs.source.data["read_bytes_disk"][0] == sum(
-        [ws.metrics["read_bytes_disk"] for ws in workers]
+        ws.metrics["read_bytes_disk"] for ws in workers
     ) / len(workers)
     assert systs.source.data["write_bytes_disk"][0] == sum(
-        [ws.metrics["write_bytes_disk"] for ws in workers]
+        ws.metrics["write_bytes_disk"] for ws in workers
     ) / len(workers)
     assert (
         systs.source.data["time"][0]
-        == sum([ws.metrics["time"] for ws in workers]) / len(workers) * 1000
+        == sum(ws.metrics["time"] for ws in workers) / len(workers) * 1000
     )
 
     # Update worker system monitors and send updated metrics to the scheduler
@@ -559,26 +568,26 @@ async def test_SystemTimeseries(c, s, a, b):
 
     assert all(len(v) == 2 for v in systs.source.data.values())
     assert systs.source.data["read_bytes"][1] == sum(
-        [ws.metrics["read_bytes"] for ws in workers]
+        ws.metrics["read_bytes"] for ws in workers
     ) / len(workers)
     assert systs.source.data["write_bytes"][1] == sum(
-        [ws.metrics["write_bytes"] for ws in workers]
+        ws.metrics["write_bytes"] for ws in workers
     ) / len(workers)
     assert systs.source.data["cpu"][1] == sum(
-        [ws.metrics["cpu"] for ws in workers]
+        ws.metrics["cpu"] for ws in workers
     ) / len(workers)
     assert systs.source.data["memory"][1] == sum(
-        [ws.metrics["memory"] for ws in workers]
+        ws.metrics["memory"] for ws in workers
     ) / len(workers)
     assert systs.source.data["read_bytes_disk"][1] == sum(
-        [ws.metrics["read_bytes_disk"] for ws in workers]
+        ws.metrics["read_bytes_disk"] for ws in workers
     ) / len(workers)
     assert systs.source.data["write_bytes_disk"][1] == sum(
-        [ws.metrics["write_bytes_disk"] for ws in workers]
+        ws.metrics["write_bytes_disk"] for ws in workers
     ) / len(workers)
     assert (
         systs.source.data["time"][1]
-        == sum([ws.metrics["time"] for ws in workers]) / len(workers) * 1000
+        == sum(ws.metrics["time"] for ws in workers) / len(workers) * 1000
     )
 
 
@@ -770,7 +779,7 @@ async def test_TaskGroupGraph_arrows(c, s, a, b):
     while s.task_groups:
         await asyncio.sleep(0.01)
 
-    tgg.update()  ###for some reason after deleting the futures the tgg.node_source.data.values are not clear.
+    tgg.update()  # for some reason after deleting the futures the tgg.node_source.data.values are not clear.
     assert not any(tgg.nodes_source.data.values())
     assert not any(tgg.arrows_source.data.values())
 
@@ -950,6 +959,12 @@ async def test_aggregate_action(c, s, a, b):
     assert ("transfer") in mbk.action_source.data["names"]
     assert ("compute") in mbk.action_source.data["names"]
 
+    [title_line] = [
+        line for line in response.body.decode().split("\n") if "<title>" in line
+    ]
+    assert "AggregateAction" in title_line
+    assert "Bokeh" not in title_line
+
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 async def test_compute_per_key(c, s, a, b):
@@ -990,3 +1005,11 @@ async def test_prefix_bokeh(s, a, b):
     bokeh_app = s.http_application.applications[0]
     assert isinstance(bokeh_app, BokehTornado)
     assert bokeh_app.prefix == f"/{prefix}"
+
+
+@gen_cluster(client=True, nthreads=[], scheduler_kwargs={"dashboard": True})
+async def test_hardware(c, s):
+    plot = Hardware(s)
+    while not plot.disk_data:
+        await asyncio.sleep(0.1)
+        plot.update()

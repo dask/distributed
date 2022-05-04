@@ -29,8 +29,11 @@ async def test_simple(c, s, a, b):
     await z
 
     assert counter.count == 3
-    s.remove_plugin(name="counter")
+    s.remove_plugin("counter")
     assert counter not in s.plugins
+
+    with pytest.raises(ValueError, match="Could not find plugin 'counter'") as e:
+        s.remove_plugin("counter")
 
 
 @gen_cluster(nthreads=[])
@@ -67,7 +70,7 @@ async def test_add_remove_worker(s):
     ]
 
     events[:] = []
-    s.remove_plugin(name=plugin.name)
+    s.remove_plugin(plugin.name)
     a = await Worker(s.address)
     await a.close()
     assert events == []
@@ -104,24 +107,10 @@ async def test_async_add_remove_worker(s):
     }
 
     events[:] = []
-    s.remove_plugin(name=plugin.name)
+    s.remove_plugin(plugin.name)
     async with Worker(s.address):
         pass
     assert events == []
-
-    class UnnamedPlugin(SchedulerPlugin):
-        async def start(self, scheduler):
-            self.scheduler = scheduler
-
-    plugin = UnnamedPlugin()
-    s.add_plugin(plugin)
-    s.add_plugin(plugin, name="another")
-    with pytest.warns(FutureWarning, match="Removing scheduler plugins by value"):
-        with pytest.raises(ValueError) as excinfo:
-            s.remove_plugin(plugin)
-
-    msg = str(excinfo.value)
-    assert "Multiple instances of" in msg
 
 
 @gen_test()
@@ -154,11 +143,11 @@ async def test_register_scheduler_plugin(c, s, a, b):
             scheduler.foo = "bar"
 
     assert not hasattr(s, "foo")
-    await c.register_scheduler_plugin(Dummy1)
+    await c.register_scheduler_plugin(Dummy1())
     assert s.foo == "bar"
 
     with pytest.warns(UserWarning) as w:
-        await c.register_scheduler_plugin(Dummy1)
+        await c.register_scheduler_plugin(Dummy1())
     assert "Scheduler already contains" in w[0].message.args[0]
 
     class Dummy2(SchedulerPlugin):
@@ -169,7 +158,7 @@ async def test_register_scheduler_plugin(c, s, a, b):
 
     n_plugins = len(s.plugins)
     with pytest.raises(RuntimeError, match="raising in start method"):
-        await c.register_scheduler_plugin(Dummy2)
+        await c.register_scheduler_plugin(Dummy2())
     # total number of plugins should be unchanged
     assert n_plugins == len(s.plugins)
 
@@ -182,7 +171,7 @@ async def test_register_scheduler_plugin_pickle_disabled(c, s, a, b):
 
     n_plugins = len(s.plugins)
     with pytest.raises(ValueError) as excinfo:
-        await c.register_scheduler_plugin(Dummy1)
+        await c.register_scheduler_plugin(Dummy1())
 
     msg = str(excinfo.value)
     assert "disallowed from deserializing" in msg

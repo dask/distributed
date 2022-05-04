@@ -7,7 +7,8 @@ from tornado.ioloop import IOLoop
 import dask
 from dask.utils import parse_timedelta
 
-from .core import CommClosedError
+from distributed.core import CommClosedError
+from distributed.metrics import time
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class BatchedSend:
 
     Examples
     --------
-    >>> stream = yield connect(address)
+    >>> stream = await connect(address)
     >>> bstream = BatchedSend(interval='10 ms')
     >>> bstream.start(stream)
     >>> bstream.send('Hello,')
@@ -83,12 +84,12 @@ class BatchedSend:
                 # Nothing to send
                 self.next_deadline = None
                 continue
-            if self.next_deadline is not None and self.loop.time() < self.next_deadline:
+            if self.next_deadline is not None and time() < self.next_deadline:
                 # Send interval not expired yet
                 continue
             payload, self.buffer = self.buffer, []
             self.batch_count += 1
-            self.next_deadline = self.loop.time() + self.interval
+            self.next_deadline = time() + self.interval
             try:
                 nbytes = yield self.comm.write(
                     payload, serializers=self.serializers, on_error="raise"
@@ -127,7 +128,7 @@ class BatchedSend:
         self.stopped.set()
         self.abort()
 
-    def send(self, *msgs):
+    def send(self, *msgs: dict) -> None:
         """Schedule a message for sending to the other side
 
         This completes quickly and synchronously

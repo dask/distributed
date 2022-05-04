@@ -3,17 +3,16 @@ import itertools
 import logging
 import os
 import threading
-import warnings
 import weakref
 from collections import deque, namedtuple
 
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
 
-from ..protocol import nested_deserialize
-from ..utils import get_ip
-from .core import Comm, CommClosedError, Connector, Listener
-from .registry import Backend, backends
+from distributed.comm.core import Comm, CommClosedError, Connector, Listener
+from distributed.comm.registry import Backend, backends
+from distributed.protocol import nested_deserialize
+from distributed.utils import get_ip
 
 logger = logging.getLogger(__name__)
 
@@ -30,15 +29,17 @@ class Manager:
     def __init__(self):
         self.listeners = weakref.WeakValueDictionary()
         self.addr_suffixes = itertools.count(1)
-        with warnings.catch_warnings():
-            # Avoid immediate warning for unreachable network
-            # (will still warn for other get_ip() calls when actually used)
-            warnings.simplefilter("ignore")
-            try:
-                self.ip = get_ip()
-            except OSError:
-                self.ip = "127.0.0.1"
+        self._ip = None
         self.lock = threading.Lock()
+
+    @property
+    def ip(self):
+        if not self._ip:
+            try:
+                self._ip = get_ip()
+            except OSError:
+                self._ip = "127.0.0.1"
+        return self._ip
 
     def add_listener(self, addr, listener):
         with self.lock:
@@ -153,12 +154,17 @@ class InProc(Comm):
     _initialized = False
 
     def __init__(
-        self, local_addr, peer_addr, read_q, write_q, write_loop, deserialize=True
+        self,
+        local_addr: str,
+        peer_addr: str,
+        read_q,
+        write_q,
+        write_loop,
+        deserialize: bool = True,
     ):
-        super().__init__()
+        super().__init__(deserialize=deserialize)
         self._local_addr = local_addr
         self._peer_addr = peer_addr
-        self.deserialize = deserialize
         self._read_q = read_q
         self._write_q = write_q
         self._write_loop = write_loop
@@ -176,11 +182,11 @@ class InProc(Comm):
         return finalize
 
     @property
-    def local_address(self):
+    def local_address(self) -> str:
         return self._local_addr
 
     @property
-    def peer_address(self):
+    def peer_address(self) -> str:
         return self._peer_addr
 
     async def read(self, deserializers="ignored"):
@@ -246,6 +252,14 @@ class InProcListener(Listener):
         self.deserialize = deserialize
         self.listen_q = Queue()
 
+    async def _handle_stream(self, comm):
+        try:
+            await self.on_connection(comm)
+        except CommClosedError:
+            logger.debug("Connection closed before handshake completed")
+            return
+        await self.comm_handler(comm)
+
     async def _listen(self):
         while True:
             conn_req = await self.listen_q.get()
@@ -261,12 +275,7 @@ class InProcListener(Listener):
             )
             # Notify connector
             conn_req.c_loop.add_callback(conn_req.conn_event.set)
-            try:
-                await self.on_connection(comm)
-            except CommClosedError:
-                logger.debug("Connection closed before handshake completed")
-                return
-            IOLoop.current().add_callback(self.comm_handler, comm)
+            IOLoop.current().add_callback(self._handle_stream, comm)
 
     def connect_threadsafe(self, conn_req):
         self.loop.add_callback(self.listen_q.put_nowait, conn_req)

@@ -120,7 +120,7 @@ Client Side
        await comm.close()
        print(result)
 
-   >>> asyncio.get_event_loop().run_until_complete(g())
+   >>> asyncio.get_event_loop().run_until_complete(f())
    3
 
    async def g():
@@ -154,7 +154,7 @@ with the stream data case above.
        # comm = await connect('tcp://127.0.0.1', 8888)
        # await comm.write({'op': 'add', 'x': 1, 'y': 2})
        # result = await comm.read()
-       with rpc('tcp://127.0.0.1:8888') as r:
+       async with rpc('tcp://127.0.0.1:8888') as r:
            result = await r.add(x=1, y=2)
 
        print(result)

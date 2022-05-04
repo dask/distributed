@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import asyncio
 import ctypes
 import errno
 import functools
@@ -7,13 +10,14 @@ import struct
 import sys
 import weakref
 from ssl import SSLCertVerificationError, SSLError
+from typing import Any, ClassVar
 
 from tornado import gen
 
 try:
     import ssl
 except ImportError:
-    ssl = None
+    ssl = None  # type: ignore
 
 from tlz import sliding_window
 from tornado import netutil
@@ -24,19 +28,37 @@ from tornado.tcpserver import TCPServer
 import dask
 from dask.utils import parse_timedelta
 
-from ..protocol.utils import pack_frames_prelude, unpack_frames
-from ..system import MEMORY_LIMIT
-from ..threadpoolexecutor import ThreadPoolExecutor
-from ..utils import ensure_ip, get_ip, get_ipv6, nbytes
-from .addressing import parse_host_port, unparse_host_port
-from .core import Comm, CommClosedError, Connector, FatalCommClosedError, Listener
-from .registry import Backend, backends
-from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to_frames
+from distributed.comm.addressing import parse_host_port, unparse_host_port
+from distributed.comm.core import (
+    Comm,
+    CommClosedError,
+    Connector,
+    FatalCommClosedError,
+    Listener,
+)
+from distributed.comm.registry import Backend
+from distributed.comm.utils import (
+    ensure_concrete_host,
+    from_frames,
+    get_tcp_server_address,
+    host_array,
+    to_frames,
+)
+from distributed.protocol.utils import pack_frames_prelude, unpack_frames
+from distributed.system import MEMORY_LIMIT
+from distributed.utils import ensure_ip, get_ip, get_ipv6, nbytes
 
 logger = logging.getLogger(__name__)
 
 
-C_INT_MAX = 256 ** ctypes.sizeof(ctypes.c_int) // 2 - 1
+# Workaround for OpenSSL 1.0.2.
+# Can drop with OpenSSL 1.1.1 used by Python 3.10+.
+# ref: https://bugs.python.org/issue42853
+if sys.version_info < (3, 10):
+    OPENSSL_MAX_CHUNKSIZE = 256 ** ctypes.sizeof(ctypes.c_int) // 2 - 1
+else:
+    OPENSSL_MAX_CHUNKSIZE = 256 ** ctypes.sizeof(ctypes.c_size_t) - 1
+
 MAX_BUFFER_SIZE = MEMORY_LIMIT / 2
 
 
@@ -147,16 +169,21 @@ class TCP(Comm):
 
     max_shard_size = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
 
-    def __init__(self, stream, local_addr, peer_addr, deserialize=True):
+    def __init__(
+        self,
+        stream,
+        local_addr: str,
+        peer_addr: str,
+        deserialize: bool = True,
+    ):
         self._closed = False
-        super().__init__()
+        super().__init__(deserialize=deserialize)
         self._local_addr = local_addr
         self._peer_addr = peer_addr
         self.stream = stream
-        self.deserialize = deserialize
         self._finalizer = weakref.finalize(self, self._get_finalizer())
         self._finalizer.atexit = False
-        self._extra = {}
+        self._extra: dict = {}
 
         ref = weakref.ref(self)
 
@@ -171,7 +198,8 @@ class TCP(Comm):
 
     def _get_finalizer(self):
         def finalize(stream=self.stream, r=repr(self)):
-            # stream is None if a StreamClosedError is raised during interpreter shutdown
+            # stream is None if a StreamClosedError is raised during interpreter
+            # shutdown
             if stream is not None and not stream.closed():
                 logger.warning(f"Closing dangling stream in {r}")
                 stream.close()
@@ -179,11 +207,11 @@ class TCP(Comm):
         return finalize
 
     @property
-    def local_address(self):
+    def local_address(self) -> str:
         return self._local_addr
 
     @property
-    def peer_address(self):
+    def peer_address(self) -> str:
         return self._peer_addr
 
     async def read(self, deserializers=None):
@@ -198,10 +226,10 @@ class TCP(Comm):
             frames_nbytes = await stream.read_bytes(fmt_size)
             (frames_nbytes,) = struct.unpack(fmt, frames_nbytes)
 
-            frames = memoryview(bytearray(frames_nbytes))
-            # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
+            frames = host_array(frames_nbytes)
             for i, j in sliding_window(
-                2, range(0, frames_nbytes + C_INT_MAX, C_INT_MAX)
+                2,
+                range(0, frames_nbytes + OPENSSL_MAX_CHUNKSIZE, OPENSSL_MAX_CHUNKSIZE),
             ):
                 chunk = frames[i:j]
                 chunk_nbytes = len(chunk)
@@ -262,7 +290,7 @@ class TCP(Comm):
         frames_nbytes = [nbytes(header), *frames_nbytes]
         frames_nbytes_total += frames_nbytes[0]
 
-        if frames_nbytes_total < 2 ** 17:  # 128kiB
+        if frames_nbytes_total < 2**17:  # 128kiB
             # small enough, send in one go
             frames = [b"".join(frames)]
             frames_nbytes = [frames_nbytes_total]
@@ -338,8 +366,7 @@ class TLS(TCP):
     A TLS-specific version of TCP.
     """
 
-    # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
-    max_shard_size = min(C_INT_MAX, TCP.max_shard_size)
+    max_shard_size = min(OPENSSL_MAX_CHUNKSIZE, TCP.max_shard_size)
 
     def _read_extra(self):
         TCP._read_extra(self)
@@ -362,7 +389,7 @@ def _expect_tls_context(connection_args):
         raise TypeError(
             "TLS expects a `ssl_context` argument of type "
             "ssl.SSLContext (perhaps check your TLS configuration?)"
-            "  Instead got %s" % str(ctx)
+            f" Instead got {ctx!r}"
         )
     return ctx
 
@@ -377,10 +404,31 @@ class RequireEncryptionMixin:
             )
 
 
+class _DefaultLoopResolver(netutil.Resolver):
+    """
+    Resolver implementation using `asyncio.loop.getaddrinfo`.
+    backport from Tornado 6.2+
+    https://github.com/tornadoweb/tornado/blob/3de78b7a15ba7134917a18b0755ea24d7f8fde94/tornado/netutil.py#L416-L432
+    """
+
+    async def resolve(
+        self, host: str, port: int, family: socket.AddressFamily = socket.AF_UNSPEC
+    ) -> list[tuple[int, Any]]:
+        # On Solaris, getaddrinfo fails if the given port is not found
+        # in /etc/services and no socket type is given, so we must pass
+        # one here.  The socket type used here doesn't seem to actually
+        # matter (we discard the one we get back in the results),
+        # so the addresses we return should still be usable with SOCK_DGRAM.
+        return [
+            (fam, address)
+            for fam, _, _, _, address in await asyncio.get_running_loop().getaddrinfo(
+                host, port, family=family, type=socket.SOCK_STREAM
+            )
+        ]
+
+
 class BaseTCPConnector(Connector, RequireEncryptionMixin):
-    _executor = ThreadPoolExecutor(2, thread_name_prefix="TCP-Executor")
-    _resolver = netutil.ExecutorResolver(close_executor=False, executor=_executor)
-    client = TCPClient(resolver=_resolver)
+    client: ClassVar[TCPClient] = TCPClient(resolver=_DefaultLoopResolver())
 
     async def connect(self, address, deserialize=True, **connection_args):
         self._check_encryption(address, connection_args)
@@ -391,8 +439,8 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
             stream = await self.client.connect(
                 ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
             )
-            # Under certain circumstances tornado will have a closed connnection with an error and not raise
-            # a StreamClosedError.
+            # Under certain circumstances tornado will have a closed connnection with an
+            # error and not raise a StreamClosedError.
             #
             # This occurs with tornado 5.x and openssl 1.1+
             if stream.closed() and stream.error:
@@ -615,7 +663,3 @@ class TCPBackend(BaseTCPBackend):
 class TLSBackend(BaseTCPBackend):
     _connector_class = TLSConnector
     _listener_class = TLSListener
-
-
-backends["tcp"] = TCPBackend()
-backends["tls"] = TLSBackend()

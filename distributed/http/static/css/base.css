@@ -124,6 +124,8 @@ body {
   min-width: 160px;
   box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
   z-index: 2;
+  max-height: 90%;
+  overflow-y: scroll;
 }
 
 .dropdown-content ul li {

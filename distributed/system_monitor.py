@@ -2,13 +2,13 @@ from collections import deque
 
 import psutil
 
-from .compatibility import WINDOWS
-from .metrics import time
+from distributed.compatibility import WINDOWS
+from distributed.metrics import time
 
 try:
-    from .diagnostics import nvml
+    from distributed.diagnostics import nvml
 except Exception:
-    nvml = None
+    nvml = None  # type: ignore
 
 
 class SystemMonitor:
@@ -72,10 +72,18 @@ class SystemMonitor:
         except IndexError:
             return {k: None for k, v in self.quantities.items()}
 
+    def get_process_memory(self) -> int:
+        """Sample process memory, as reported by the OS.
+        This one-liner function exists so that it can be easily mocked in unit tests,
+        as the OS allocating and releasing memory is highly volatile and a constant
+        source of flakiness.
+        """
+        return self.proc.memory_info().rss
+
     def update(self):
         with self.proc.oneshot():
             cpu = self.proc.cpu_percent()
-            memory = self.proc.memory_info().rss
+            memory = self.get_process_memory()
         now = time()
 
         self.cpu.append(cpu)
@@ -108,20 +116,23 @@ class SystemMonitor:
             except Exception:
                 pass
             else:
-                last_disk = self._last_disk_io_counters
-                duration_disk = now - self.last_time_disk
-                read_bytes_disk = (disk_ioc.read_bytes - last_disk.read_bytes) / (
-                    duration_disk or 0.5
-                )
-                write_bytes_disk = (disk_ioc.write_bytes - last_disk.write_bytes) / (
-                    duration_disk or 0.5
-                )
-                self.last_time_disk = now
-                self._last_disk_io_counters = disk_ioc
-                self.read_bytes_disk.append(read_bytes_disk)
-                self.write_bytes_disk.append(write_bytes_disk)
-                result["read_bytes_disk"] = read_bytes_disk
-                result["write_bytes_disk"] = write_bytes_disk
+                if disk_ioc is None:  # diskless machine
+                    self._collect_disk_io_counters = False
+                else:
+                    last_disk = self._last_disk_io_counters
+                    duration_disk = now - self.last_time_disk
+                    read_bytes_disk = (disk_ioc.read_bytes - last_disk.read_bytes) / (
+                        duration_disk or 0.5
+                    )
+                    write_bytes_disk = (
+                        disk_ioc.write_bytes - last_disk.write_bytes
+                    ) / (duration_disk or 0.5)
+                    self.last_time_disk = now
+                    self._last_disk_io_counters = disk_ioc
+                    self.read_bytes_disk.append(read_bytes_disk)
+                    self.write_bytes_disk.append(write_bytes_disk)
+                    result["read_bytes_disk"] = read_bytes_disk
+                    result["write_bytes_disk"] = write_bytes_disk
 
         if not WINDOWS:
             num_fds = self.proc.num_fds()

@@ -66,7 +66,9 @@ Tasks flow along the following states with the following allowed transitions:
 *  *No-worker*: Ready to be computed, but no appropriate worker exists
    (for example because of resource restrictions, or because no worker is
    connected at all).
-*  *Processing*: Actively being computed by one or more workers
+*  *Processing*: All dependencies are available and the task is assigned to a
+   worker for compute (the scheduler doesn't know whether it's in a worker
+   queue or actively being computed).
 *  *Memory*: In memory on one or more workers
 *  *Erred*: Task computation, or one of its dependencies, has encountered an error
 *  *Forgotten* (not actually a state): Task is no longer needed by any client
@@ -106,7 +108,7 @@ This information is involved in deciding
 :ref:`which worker to run a task on <decide-worker>`.
 
 .. autoclass:: WorkerState
-
+    :members:
 
 In addition to individual worker state, the scheduler maintains two
 containers to help with scheduling tasks:
@@ -137,6 +139,7 @@ Information about each individual client of the scheduler is kept
 in a :class:`ClientState` object:
 
 .. autoclass:: ClientState
+    :members:
 
 
 .. XXX list invariants somewhere?
@@ -313,3 +316,5 @@ API
    :inherited-members:
 
 .. autofunction:: decide_worker
+
+.. autoclass:: MemoryState

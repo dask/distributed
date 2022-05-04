@@ -1,21 +1,23 @@
+from __future__ import annotations
+
 import asyncio
 import inspect
 import logging
 import random
 import sys
 import weakref
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
 from contextlib import suppress
+from typing import ClassVar
 
 import dask
 from dask.utils import parse_timedelta
 
-from ..metrics import time
-from ..protocol import pickle
-from ..protocol.compression import get_default_compression
-from ..utils import TimeoutError
-from . import registry
-from .addressing import parse_address
+from distributed.comm import registry
+from distributed.comm.addressing import parse_address
+from distributed.metrics import time
+from distributed.protocol import pickle
+from distributed.protocol.compression import get_default_compression
 
 logger = logging.getLogger(__name__)
 
@@ -40,15 +42,21 @@ class Comm(ABC):
     depending on the underlying transport's characteristics.
     """
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[Comm]] = weakref.WeakSet()
+    name: str | None
+    local_info: dict
+    remote_info: dict
+    handshake_options: dict
+    deserialize: bool
 
-    def __init__(self):
+    def __init__(self, deserialize: bool = True):
         self._instances.add(self)
         self.allow_offload = True  # for deserialization in utils.from_frames
         self.name = None
         self.local_info = {}
         self.remote_info = {}
         self.handshake_options = {}
+        self.deserialize = deserialize
 
     # XXX add set_close_callback()?
 
@@ -61,7 +69,7 @@ class Comm(ABC):
 
         Parameters
         ----------
-        deserializers : Optional[Dict[str, Tuple[Callable, Callable, bool]]]
+        deserializers : dict[str, tuple[Callable, Callable, bool]] | None
             An optional dict appropriate for distributed.protocol.deserialize.
             See :ref:`serialization` for more.
         """
@@ -76,7 +84,7 @@ class Comm(ABC):
         Parameters
         ----------
         msg
-        on_error : Optional[str]
+        on_error : str | None
             The behavior when serialization fails. See
             ``distributed.protocol.core.dumps`` for valid values.
         """
@@ -99,21 +107,17 @@ class Comm(ABC):
 
     @abstractmethod
     def closed(self):
-        """
-        Return whether the stream is closed.
-        """
+        """Return whether the stream is closed."""
 
-    @abstractproperty
-    def local_address(self):
-        """
-        The local address.  For logging and debugging purposes only.
-        """
+    @property
+    @abstractmethod
+    def local_address(self) -> str:
+        """The local address. For logging and debugging purposes only."""
 
-    @abstractproperty
-    def peer_address(self):
-        """
-        The peer's address.  For logging and debugging purposes only.
-        """
+    @property
+    @abstractmethod
+    def peer_address(self) -> str:
+        """The peer's address. For logging and debugging purposes only."""
 
     @property
     def extra_info(self):
@@ -178,13 +182,15 @@ class Listener(ABC):
         communications, but prevents accepting new ones.
         """
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def listen_address(self):
         """
         The listening address as a URI string.
         """
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def contact_address(self):
         """
         An address this listener can be contacted on.  This can be
@@ -196,7 +202,7 @@ class Listener(ABC):
         await self.start()
         return self
 
-    async def __aexit__(self, *exc):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         future = self.stop()
         if inspect.isawaitable(future):
             await future
@@ -227,9 +233,9 @@ class Listener(ABC):
             raise CommClosedError(f"Comm {comm!r} closed.") from e
 
         comm.remote_info = handshake
-        comm.remote_info["address"] = comm._peer_addr
+        comm.remote_info["address"] = comm.peer_address
         comm.local_info = local_info
-        comm.local_info["address"] = comm._local_addr
+        comm.local_info["address"] = comm.local_address
 
         comm.handshake_options = comm.handshake_configuration(
             comm.local_info, comm.remote_info
@@ -287,16 +293,18 @@ async def connect(
             break
         except FatalCommClosedError:
             raise
-        # CommClosed, EnvironmentError inherit from OSError
-        except (TimeoutError, OSError) as exc:
+        # Note: CommClosed inherits from OSError
+        except (asyncio.TimeoutError, OSError) as exc:
             active_exception = exc
 
-            # The intermediate capping is mostly relevant for the initial
-            # connect. Afterwards we should be more forgiving
-            intermediate_cap = intermediate_cap * 1.5
+            # As descibed above, the intermediate timeout is used to distributed
+            # initial, bulk connect attempts homogeneously. In particular with
+            # the jitter upon retries we should not be worred about overloading
+            # any more DNS servers
+            intermediate_cap = timeout
             # FullJitter see https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
 
-            upper_cap = min(time_left(), backoff_base * (2 ** attempt))
+            upper_cap = min(time_left(), backoff_base * (2**attempt))
             backoff = random.uniform(0, upper_cap)
             attempt += 1
             logger.debug(

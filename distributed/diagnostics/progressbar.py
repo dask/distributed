@@ -10,11 +10,16 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from ..client import default_client, futures_of
-from ..core import CommClosedError, coerce_to_address, connect
-from ..protocol.pickle import dumps
-from ..utils import LoopRunner, is_kernel, key_split
-from .progress import MultiProgress, Progress, format_time
+from distributed.client import default_client, futures_of
+from distributed.core import (
+    CommClosedError,
+    clean_exception,
+    coerce_to_address,
+    connect,
+)
+from distributed.diagnostics.progress import MultiProgress, Progress, format_time
+from distributed.protocol.pickle import dumps
+from distributed.utils import LoopRunner, is_kernel, key_split
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +180,7 @@ class ProgressWidget(ProgressBar):
 
     def _draw_stop(self, remaining, status, exception=None, **kwargs):
         if status == "error":
+            _, exception, _ = clean_exception(exception)
             self.bar.bar_style = "danger"
             self.elapsed_time.value = (
                 '<div style="padding: 0px 10px 5px 10px"><b>Exception</b> '
@@ -361,6 +367,7 @@ class MultiProgressWidget(MultiProgressBar):
                 self.bars[k].bar_style = "danger"
 
         if status == "error":
+            _, exception, _ = clean_exception(exception)
             # self.bars[self.func(key)].bar_style = 'danger'  # TODO
             self.elapsed_time.value = (
                 '<div style="padding: 0px 10px 5px 10px"><b>Exception</b> '
