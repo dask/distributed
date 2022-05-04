@@ -1339,7 +1339,7 @@ class Client(SyncMethodMixin):
         return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
 
     def _heartbeat(self):
-        if self.scheduler_comm:
+        if self.scheduler_comm is not None:
             self.scheduler_comm.send({"op": "heartbeat-client"})
 
     def __enter__(self):
@@ -1501,11 +1501,7 @@ class Client(SyncMethodMixin):
             if self.get == dask.config.get("get", None):
                 del dask.config.config["get"]
 
-            if (
-                self.scheduler_comm
-                and self.scheduler_comm
-                and not self.scheduler_comm.closed()
-            ):
+            if self.scheduler_comm is not None:
                 self._send_to_scheduler({"op": "close-client"})
                 self._send_to_scheduler({"op": "close-stream"})
 
@@ -1520,11 +1516,7 @@ class Client(SyncMethodMixin):
                 with suppress(asyncio.CancelledError, TimeoutError):
                     await asyncio.wait_for(asyncio.shield(handle_report_task), 0.1)
 
-            if (
-                self.scheduler_comm
-                and self.scheduler_comm
-                and not self.scheduler_comm.closed()
-            ):
+            if self.scheduler_comm is not None:
                 await self.scheduler_comm.close()
 
             for key in list(self.futures):
