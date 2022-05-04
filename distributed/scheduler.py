@@ -2809,6 +2809,7 @@ class SchedulerState:
                 xfers += 1
 
         stack_time = ws.occupancy / ws.nthreads
+        # Add a fixed 10ms penalty per transfer. See distributed#5324
         start_time = stack_time + comm_bytes / self.bandwidth + xfers * 0.01
 
         if ts.actor:
