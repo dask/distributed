@@ -1512,7 +1512,9 @@ class Worker(ServerNode):
 
         for extension in self.extensions.values():
             if hasattr(extension, "close"):
-                await extension.close()
+                result = extension.close()
+                if isawaitable(result):
+                    result = await result
 
         if nanny and self.nanny:
             with self.rpc(self.nanny) as r:

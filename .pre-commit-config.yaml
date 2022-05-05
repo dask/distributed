@@ -49,3 +49,4 @@ repos:
           - dask
           - tornado
           - zict
+          - pyarrow
