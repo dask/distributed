@@ -161,10 +161,10 @@ def maybe_compress(
         return the original
     4.  We return the compressed result
     """
-    if compression == "auto":
-        compression = default_compression
     if not compression:
         return None, payload
+    if compression == "auto":
+        compression = default_compression
 
     # Store size as it is used in a few cases.
     payload_nbytes = nbytes(payload)
