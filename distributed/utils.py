@@ -1013,6 +1013,15 @@ def ensure_bytes(s):
             ) from e
 
 
+def ensure_memoryview(obj):
+    """Ensure `obj` is a memoryview of datatype bytes"""
+    ret = memoryview(obj)
+    if ret.nbytes:
+        return ret.cast("B")
+    else:
+        return ret
+
+
 def open_port(host=""):
     """Return a probably-open port
 
