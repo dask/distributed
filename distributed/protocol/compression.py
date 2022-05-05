@@ -124,6 +124,9 @@ def byte_sample(b, size, n):
     n : int
         number of samples to collect
     """
+    if n == 0:
+        return b""
+
     b = ensure_memoryview(b)
 
     starts = [random.randint(0, len(b) - size) for j in range(n)]
@@ -133,9 +136,7 @@ def byte_sample(b, size, n):
     ends.append(starts[-1] + size)
 
     parts = [b[start:end] for start, end in zip(starts, ends)]
-    if n == 0:
-        return b""
-    elif n == 1:
+    if n == 1:
         return parts[0]
     else:
         return b"".join(parts)
