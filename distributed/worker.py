@@ -622,7 +622,7 @@ class Worker(ServerNode):
             ("executing", "released"): self.transition_executing_released,
             ("executing", "rescheduled"): self.transition_executing_rescheduled,
             ("fetch", "flight"): self.transition_fetch_flight,
-            ("fetch", "missing"): self.transition_generic_to_missing,
+            ("fetch", "missing"): self.transition_generic_missing,
             ("fetch", "released"): self.transition_generic_released,
             ("flight", "error"): self.transition_flight_error,
             ("flight", "fetch"): self.transition_flight_fetch,
@@ -2048,7 +2048,7 @@ class Worker(ServerNode):
         ts.done = False
         return {}, []
 
-    def transition_generic_to_missing(
+    def transition_generic_missing(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         ts.state = "missing"
@@ -2652,17 +2652,14 @@ class Worker(ServerNode):
                         # We do not want to forget. The purpose of this
                         # transition path is to get to `finish`
                         continue
-                    b_recs, b_instructions = self._transition(
-                        ts, v_state, *v_args, stimulus_id=stimulus_id
+                    recs, instructions = merge_recs_instructions(
+                        (recs, instructions),
+                        self._transition(ts, v_state, *v_args, stimulus_id=stimulus_id),
                     )
-                    recs.update(b_recs)
-                    instructions += b_instructions
-
-                c_recs, c_instructions = self._transition(
-                    ts, finish, *args, stimulus_id=stimulus_id
+                recs, instructions = merge_recs_instructions(
+                    (recs, instructions),
+                    self._transition(ts, finish, *args, stimulus_id=stimulus_id),
                 )
-                recs.update(c_recs)
-                instructions += c_instructions
             except InvalidTransition:
                 self.log_event(
                     "invalid-worker-transition",
