@@ -58,9 +58,19 @@ def test_compression_2():
     pytest.importorskip("lz4")
     np = pytest.importorskip("numpy")
     x = np.random.random(10000)
-    msg = dumps(to_serialize(x.tobytes()))
+    msg = dumps(to_serialize(x.data))
     compression = msgpack.loads(msg[1]).get("compression")
     assert all(c is None for c in compression)
+
+
+def test_compression_3():
+    pytest.importorskip("lz4")
+    np = pytest.importorskip("numpy")
+    x = np.ones(1000000)
+    frames = dumps({"x": Serialize(x.data)})
+    assert sum(map(nbytes, frames)) < x.nbytes
+    y = loads(frames)
+    assert {"x": x.data} == y
 
 
 def test_compression_without_deserialization():
