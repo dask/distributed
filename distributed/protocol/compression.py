@@ -164,9 +164,9 @@ def maybe_compress(
     """
     if not compression:
         return None, payload
-
-    # Either too small to bother or too large; compression libraries often fail
     if not (min_size < nbytes(payload) < 2**31):
+        # Either too small to bother
+        # or too large (compression libraries often fail)
         return None, payload
 
     # Normalize function arguments
