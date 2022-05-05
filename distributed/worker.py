@@ -2208,7 +2208,7 @@ class Worker(ServerNode):
     ) -> RecsInstrs:
         assert ts._previous == "executing" or ts.key in self.long_running
         # We'll ignore instructions, i.e. we choose to not submit the failure
-        # message to the scheudler since from the schedulers POV it already
+        # message to the scheduler since from the schedulers POV it already
         # released this task
         recs, _ = self.transition_executing_error(
             ts,
