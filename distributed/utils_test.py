@@ -28,6 +28,7 @@ from time import sleep
 from typing import Any, Literal
 
 from distributed.compatibility import MACOS
+from distributed.profile import wait_profiler
 from distributed.scheduler import Scheduler
 
 try:
@@ -1769,6 +1770,14 @@ def check_instances():
 
     _global_clients.clear()
 
+    for s in Scheduler._instances:
+        s.extensions.clear()
+        s.plugins.clear()
+        s.services.clear()
+        # No close methods, destroy them
+        del s.http_application
+        del s.http_server
+
     for w in Worker._instances:
         with suppress(RuntimeError):  # closed IOLoop
             w.loop.add_callback(w.close, report=False, executor_wait=False)
@@ -1800,8 +1809,22 @@ def check_instances():
     assert all(c.status == Status.closed for c in SpecCluster._instances), list(
         SpecCluster._instances
     )
-    SpecCluster._instances.clear()
+    wait_profiler()
+    gc.collect()
+    if Scheduler._instances:
+        s = next(iter(Scheduler._instances))
+        import objgraph
 
+        def ignore(obj):
+            return (
+                # ignore bound methods temporarily
+                not (inspect.ismethod(obj) and obj.__self__ is s))
+
+        objgraph.show_backrefs([s], filename="scheduler.png", filter=ignore)
+    assert not Scheduler._instances
+
+
+    SpecCluster._instances.clear()
     Nanny._instances.clear()
     DequeHandler.clear_all_instances()
 
