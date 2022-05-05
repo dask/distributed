@@ -163,8 +163,6 @@ def maybe_compress(
     """
     if not compression:
         return None, payload
-    if compression == "auto":
-        compression = default_compression
 
     # Store size as it is used in a few cases.
     payload_nbytes = nbytes(payload)
@@ -173,8 +171,10 @@ def maybe_compress(
     if not (min_size < payload_nbytes < 2**31):
         return None, payload
 
+    # Normalize function arguments
     sample_size = int(sample_size)
-
+    if compression == "auto":
+        compression = default_compression
     compress = compressions[compression]["compress"]
 
     # Take a view of payload for efficient usage
