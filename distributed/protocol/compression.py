@@ -164,11 +164,8 @@ def maybe_compress(
     if not compression:
         return None, payload
 
-    # Store size as it is used in a few cases.
-    payload_nbytes = nbytes(payload)
-
     # Either too small to bother or too large; compression libraries often fail
-    if not (min_size < payload_nbytes < 2**31):
+    if not (min_size < nbytes(payload) < 2**31):
         return None, payload
 
     # Normalize function arguments
