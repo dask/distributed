@@ -1021,7 +1021,9 @@ def ensure_memoryview(obj):
     else:
         mv = memoryview(obj)
 
-    if mv.nbytes and mv.contiguous:
+    if not mv.nbytes:
+        return memoryview(b"")
+    elif mv.contiguous:
         return mv.cast("B")
     else:
         return memoryview(mv.tobytes())
