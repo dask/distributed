@@ -99,17 +99,15 @@ with suppress(ImportError):
 
 def get_default_compression():
     default = dask.config.get("distributed.comm.compression")
-    if default != "auto":
-        if default in compressions:
-            return default
-        else:
-            raise ValueError(
-                "Default compression '%s' not found.\n"
-                "Choices include auto, %s"
-                % (default, ", ".join(sorted(map(str, compressions))))
-            )
-    else:
+    if default == "auto":
         return default_compression
+    if default in compressions:
+        return default
+    raise ValueError(
+        "Default compression '%s' not found.\n"
+        "Choices include auto, %s"
+        % (default, ", ".join(sorted(map(str, compressions))))
+    )
 
 
 get_default_compression()
