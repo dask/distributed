@@ -230,6 +230,7 @@ class SpecCluster(Cluster):
         name=None,
         shutdown_on_close=True,
         scheduler_sync_interval=1,
+        show_dashboard=True,
     ):
         if loop is None and asynchronous:
             loop = IOLoop.current()
@@ -261,6 +262,7 @@ class SpecCluster(Cluster):
             loop=loop,
             name=name,
             scheduler_sync_interval=scheduler_sync_interval,
+            show_dashboard=show_dashboard,
         )
 
         try:

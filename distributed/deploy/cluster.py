@@ -65,6 +65,7 @@ class Cluster(SyncMethodMixin):
         quiet=False,
         name=None,
         scheduler_sync_interval=1,
+        show_dashboard=True,
     ):
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
 
@@ -80,6 +81,7 @@ class Cluster(SyncMethodMixin):
             scheduler_sync_interval, default="seconds"
         )
         self._sync_cluster_info_task = None
+        self.show_dashboard = show_dashboard
 
         if name is None:
             name = str(uuid.uuid4())[:8]
@@ -360,13 +362,7 @@ class Cluster(SyncMethodMixin):
 
     @property
     def dashboard_link(self):
-        use_dashboard = (
-            getattr(self, "scheduler_spec", {})
-            .get("options", {})
-            .get("dashboard", True)
-        )
-
-        if use_dashboard:
+        if self.show_dashboard:
             try:
                 # self.scheduler_info["services"] <- from Node class
                 port = self.scheduler_info["services"]["dashboard"]

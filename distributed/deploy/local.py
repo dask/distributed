@@ -258,6 +258,7 @@ class LocalCluster(SpecCluster):
             silence_logs=silence_logs,
             security=security,
             scheduler_sync_interval=scheduler_sync_interval,
+            show_dashboard=dashboard_address is not None,
         )
 
     def start_worker(self, *args, **kwargs):
