@@ -5,7 +5,7 @@ import psutil
 __all__ = ("memory_limit", "MEMORY_LIMIT")
 
 
-def memory_limit():
+def memory_limit() -> int:
     """Get the memory limit (in bytes) for this system.
 
     Takes the minimum value from the following locations:
@@ -30,7 +30,7 @@ def memory_limit():
     try:
         import resource
 
-        hard_limit = resource.getrlimit(resource.RLIMIT_RSS)[1]
+        hard_limit = resource.getrlimit(resource.RLIMIT_RSS)[1]  # type: ignore
         if hard_limit > 0:
             limit = min(limit, hard_limit)
     except (ImportError, OSError):

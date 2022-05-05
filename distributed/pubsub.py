@@ -6,10 +6,10 @@ from collections import defaultdict, deque
 
 from dask.utils import parse_timedelta
 
-from .core import CommClosedError
-from .metrics import time
-from .protocol.serialize import to_serialize
-from .utils import TimeoutError, sync
+from distributed.core import CommClosedError
+from distributed.metrics import time
+from distributed.protocol.serialize import to_serialize
+from distributed.utils import TimeoutError, sync
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +34,7 @@ class PubSubSchedulerExtension:
             }
         )
 
-        self.scheduler.extensions["pubsub"] = self
-
-    def add_publisher(self, comm=None, name=None, worker=None):
+    def add_publisher(self, name=None, worker=None):
         logger.debug("Add publisher: %s %s", name, worker)
         self.publishers[name].add(worker)
         return {
@@ -45,7 +43,7 @@ class PubSubSchedulerExtension:
             and len(self.client_subscribers[name]) > 0,
         }
 
-    def add_subscriber(self, comm=None, name=None, worker=None, client=None):
+    def add_subscriber(self, name=None, worker=None, client=None):
         if worker:
             logger.debug("Add worker subscriber: %s %s", name, worker)
             self.subscribers[name].add(worker)
@@ -63,7 +61,7 @@ class PubSubSchedulerExtension:
                 )
             self.client_subscribers[name].add(client)
 
-    def remove_publisher(self, comm=None, name=None, worker=None):
+    def remove_publisher(self, name=None, worker=None):
         if worker in self.publishers[name]:
             logger.debug("Remove publisher: %s %s", name, worker)
             self.publishers[name].remove(worker)
@@ -72,7 +70,7 @@ class PubSubSchedulerExtension:
                 del self.subscribers[name]
                 del self.publishers[name]
 
-    def remove_subscriber(self, comm=None, name=None, worker=None, client=None):
+    def remove_subscriber(self, name=None, worker=None, client=None):
         if worker:
             logger.debug("Remove worker subscriber: %s %s", name, worker)
             self.subscribers[name].remove(worker)
@@ -178,7 +176,6 @@ class PubSubClientExtension:
         self.client._stream_handlers.update({"pubsub-msg": self.handle_message})
 
         self.subscribers = defaultdict(weakref.WeakSet)
-        self.client.extensions["pubsub"] = self  # TODO: circular reference
 
     async def handle_message(self, name=None, msg=None):
         for sub in self.subscribers[name]:

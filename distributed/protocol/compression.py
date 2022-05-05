@@ -3,27 +3,25 @@ Record known compressors
 
 Includes utilities for determining whether or not to compress
 """
+from __future__ import annotations
+
 import logging
 import random
+from collections.abc import Callable
 from contextlib import suppress
-from functools import partial
+from typing import Literal
 
+from packaging.version import parse as parse_version
 from tlz import identity
 
 import dask
 
-try:
-    import blosc
+from distributed.utils import ensure_bytes
 
-    n = blosc.set_nthreads(2)
-    if hasattr("blosc", "releasegil"):
-        blosc.set_releasegil(True)
-except ImportError:
-    blosc = False
-
-from ..utils import ensure_bytes
-
-compressions = {None: {"compress": identity, "decompress": identity}}
+compressions: dict[
+    str | None | Literal[False],
+    dict[Literal["compress", "decompress"], Callable[[bytes], bytes]],
+] = {None: {"compress": identity, "decompress": identity}}
 
 compressions[False] = compressions[None]  # alias
 
@@ -42,62 +40,46 @@ with suppress(ImportError):
 with suppress(ImportError):
     import snappy
 
-    def _fixed_snappy_decompress(data):
-        # snappy.decompress() doesn't accept memoryviews
-        if isinstance(data, (memoryview, bytearray)):
-            data = bytes(data)
-        return snappy.decompress(data)
+    # In python-snappy 0.5.3, support for the Python Buffer Protocol was added.
+    # This is needed to handle other objects (like `memoryview`s) without
+    # copying to `bytes` first.
+    #
+    # Note: `snappy.__version__` doesn't exist in a release yet.
+    #       So do a little test that will fail if snappy is not 0.5.3 or later.
+    try:
+        snappy.compress(memoryview(b""))
+    except TypeError:
+        raise ImportError("Need snappy >= 0.5.3")
 
     compressions["snappy"] = {
         "compress": snappy.compress,
-        "decompress": _fixed_snappy_decompress,
+        "decompress": snappy.decompress,
     }
     default_compression = "snappy"
 
 with suppress(ImportError):
     import lz4
 
-    try:
-        # try using the new lz4 API
-        import lz4.block
+    # Required to use `lz4.block` APIs and Python Buffer Protocol support.
+    if parse_version(lz4.__version__) < parse_version("0.23.1"):
+        raise ImportError("Need lz4 >= 0.23.1")
 
-        lz4_compress = lz4.block.compress
-        lz4_decompress = lz4.block.decompress
-    except ImportError:
-        # fall back to old one
-        lz4_compress = lz4.LZ4_compress
-        lz4_decompress = lz4.LZ4_uncompress
-
-    # helper to bypass missing memoryview support in current lz4
-    # (fixed in later versions)
-
-    def _fixed_lz4_compress(data):
-        try:
-            return lz4_compress(data)
-        except TypeError:
-            if isinstance(data, (memoryview, bytearray)):
-                return lz4_compress(bytes(data))
-            else:
-                raise
-
-    def _fixed_lz4_decompress(data):
-        try:
-            return lz4_decompress(data)
-        except (ValueError, TypeError):
-            if isinstance(data, (memoryview, bytearray)):
-                return lz4_decompress(bytes(data))
-            else:
-                raise
+    from lz4.block import compress as lz4_compress
+    from lz4.block import decompress as lz4_decompress
 
     compressions["lz4"] = {
-        "compress": _fixed_lz4_compress,
-        "decompress": _fixed_lz4_decompress,
+        "compress": lz4_compress,
+        "decompress": lz4_decompress,
     }
     default_compression = "lz4"
 
 
 with suppress(ImportError):
     import zstandard
+
+    # Required for Python Buffer Protocol support.
+    if parse_version(zstandard.__version__) < parse_version("0.9.0"):
+        raise ImportError("Need zstandard >= 0.9.0")
 
     zstd_compressor = zstandard.ZstdCompressor(
         level=dask.config.get("distributed.comm.zstd.level"),
@@ -115,28 +97,17 @@ with suppress(ImportError):
     compressions["zstd"] = {"compress": zstd_compress, "decompress": zstd_decompress}
 
 
-with suppress(ImportError):
-    import blosc
-
-    compressions["blosc"] = {
-        "compress": partial(blosc.compress, clevel=5, cname="lz4"),
-        "decompress": blosc.decompress,
-    }
-
-
 def get_default_compression():
     default = dask.config.get("distributed.comm.compression")
-    if default != "auto":
-        if default in compressions:
-            return default
-        else:
-            raise ValueError(
-                "Default compression '%s' not found.\n"
-                "Choices include auto, %s"
-                % (default, ", ".join(sorted(map(str, compressions))))
-            )
-    else:
+    if default == "auto":
         return default_compression
+    if default in compressions:
+        return default
+    raise ValueError(
+        "Default compression '%s' not found.\n"
+        "Choices include auto, %s"
+        % (default, ", ".join(sorted(map(str, compressions))))
+    )
 
 
 get_default_compression()
@@ -187,7 +158,7 @@ def maybe_compress(
         return None, payload
     if len(payload) < min_size:
         return None, payload
-    if len(payload) > 2 ** 31:  # Too large, compression libraries often fail
+    if len(payload) > 2**31:  # Too large, compression libraries often fail
         return None, payload
 
     min_size = int(min_size)
@@ -205,14 +176,7 @@ def maybe_compress(
     else:
         nbytes = len(payload)
 
-    if default_compression and blosc and type(payload) is memoryview:
-        # Blosc does itemsize-aware shuffling, resulting in better compression
-        compressed = blosc.compress(
-            payload, typesize=payload.itemsize, cname="lz4", clevel=5
-        )
-        compression = "blosc"
-    else:
-        compressed = compress(ensure_bytes(payload))
+    compressed = compress(ensure_bytes(payload))
 
     if len(compressed) > 0.9 * nbytes:  # full data not very compressible
         return None, payload

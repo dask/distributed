@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import atexit
 import gc
@@ -6,7 +8,9 @@ import os
 import signal
 import sys
 import warnings
+from collections.abc import Iterator
 from contextlib import suppress
+from typing import Any
 
 import click
 from tlz import valmap
@@ -16,7 +20,7 @@ import dask
 from dask.system import CPU_COUNT
 
 from distributed import Nanny
-from distributed.cli.utils import check_python_3, install_signal_handlers
+from distributed.cli.utils import install_signal_handlers
 from distributed.comm import get_address_host_port
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.preloading import validate_preload_argv
@@ -24,7 +28,7 @@ from distributed.proctitle import (
     enable_proctitle_on_children,
     enable_proctitle_on_current,
 )
-from distributed.utils import import_term
+from distributed.utils import import_term, parse_ports
 
 logger = logging.getLogger("distributed.dask_worker")
 
@@ -56,7 +60,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--worker-port",
     default=None,
     help="Serving computation port, defaults to random. "
-    "When creating multiple workers with --nprocs, a sequential range of "
+    "When creating multiple workers with --nworkers, a sequential range of "
     "worker ports may be used by specifying the first and last available "
     "ports like <first-port>:<last-port>. For example, --worker-port=3000:3026 "
     "will use ports 3000, 3001, ..., 3025, 3026.",
@@ -65,7 +69,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--nanny-port",
     default=None,
     help="Serving nanny port, defaults to random. "
-    "When creating multiple nannies with --nprocs, a sequential range of "
+    "When creating multiple nannies with --nworkers, a sequential range of "
     "nanny ports may be used by specifying the first and last available "
     "ports like <first-port>:<last-port>. For example, --nanny-port=3000:3026 "
     "will use ports 3000, 3001, ..., 3025, 3026.",
@@ -127,18 +131,28 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option(
     "--nprocs",
     type=str,
-    default=1,
+    default=None,
+    show_default=True,
+    help="Deprecated. Use '--nworkers' instead. Number of worker processes to "
+    "launch. If negative, then (CPU_COUNT + 1 + nprocs) is used. "
+    "Set to 'auto' to set nprocs and nthreads dynamically based on CPU_COUNT",
+)
+@click.option(
+    "--nworkers",
+    "n_workers",  # This sets the Python argument name
+    type=str,
+    default=None,
     show_default=True,
     help="Number of worker processes to launch. "
-    "If negative, then (CPU_COUNT + 1 + nprocs) is used. "
-    "Set to 'auto' to set nprocs and nthreads dynamically based on CPU_COUNT",
+    "If negative, then (CPU_COUNT + 1 + nworkers) is used. "
+    "Set to 'auto' to set nworkers and nthreads dynamically based on CPU_COUNT",
 )
 @click.option(
     "--name",
     type=str,
     default=None,
     help="A unique name for this worker like 'worker-1'. "
-    "If used with --nprocs then the process number "
+    "If used with --nworkers then the process number "
     "will be appended like name-0, name-1, name-2, ...",
 )
 @click.option(
@@ -174,7 +188,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     default=None,
     help='Resources for task constraints like "GPU=2 MEM=10e9". '
     "Resources are applied separately to each worker process "
-    "(only relevant when starting multiple worker processes with '--nprocs').",
+    "(only relevant when starting multiple worker processes with '--nworkers').",
 )
 @click.option(
     "--scheduler-file",
@@ -244,12 +258,13 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 def main(
     scheduler,
     host,
-    worker_port,
+    worker_port: str | None,
     listen_address,
     contact_address,
-    nanny_port,
+    nanny_port: str | None,
     nthreads,
     nprocs,
+    n_workers,
     nanny,
     name,
     pid_file,
@@ -273,7 +288,7 @@ def main(
     enable_proctitle_on_current()
     enable_proctitle_on_children()
 
-    if bokeh_port is not None:
+    if bokeh_port is not None:  # pragma: no cover
         warnings.warn(
             "The --bokeh-port flag has been renamed to --dashboard-address. "
             "Consider adding ``--dashboard-address :%d`` " % bokeh_port
@@ -295,23 +310,38 @@ def main(
         if v is not None
     }
 
-    if nprocs == "auto":
-        nprocs, nthreads = nprocesses_nthreads()
-    else:
-        nprocs = int(nprocs)
-
-    if nprocs < 0:
-        nprocs = CPU_COUNT + 1 + nprocs
-
-    if nprocs <= 0:
+    if nprocs is not None and n_workers is not None:
         logger.error(
-            "Failed to launch worker. Must specify --nprocs so that there's at least one process."
+            "Both --nprocs and --nworkers were specified. Use --nworkers only."
+        )
+        sys.exit(1)
+    elif nprocs is not None:
+        warnings.warn(
+            "The --nprocs flag will be removed in a future release. It has been "
+            "renamed to --nworkers.",
+            FutureWarning,
+        )
+        n_workers = nprocs
+
+    if n_workers == "auto":
+        n_workers, nthreads = nprocesses_nthreads()
+    elif n_workers is None:
+        n_workers = 1
+    else:
+        n_workers = int(n_workers)
+
+    if n_workers < 0:
+        n_workers = CPU_COUNT + 1 + n_workers
+
+    if n_workers <= 0:
+        logger.error(
+            "Failed to launch worker. Must specify --nworkers so that there's at least one process."
         )
         sys.exit(1)
 
-    if nprocs > 1 and not nanny:
+    if n_workers > 1 and not nanny:
         logger.error(
-            "Failed to launch worker.  You cannot use the --no-nanny argument when nprocs > 1."
+            "Failed to launch worker.  You cannot use the --no-nanny argument when n_workers > 1."
         )
         sys.exit(1)
 
@@ -322,10 +352,10 @@ def main(
         )
         sys.exit(1)
 
-    if nprocs > 1 and listen_address:
+    if n_workers > 1 and listen_address:
         logger.error(
             "Failed to launch worker. "
-            "You cannot specify --listen-address when nprocs > 1."
+            "You cannot specify --listen-address when n_workers > 1."
         )
         sys.exit(1)
 
@@ -338,7 +368,8 @@ def main(
 
     try:
         if listen_address:
-            (host, worker_port) = get_address_host_port(listen_address, strict=True)
+            host, _ = get_address_host_port(listen_address, strict=True)
+            worker_port = str(_)
             if ":" in host:
                 # IPv6 -- bracket to pass as user args
                 host = f"[{host}]"
@@ -349,17 +380,12 @@ def main(
         else:
             # if contact address is not present we use the listen_address for contact
             contact_address = listen_address
-    except ValueError as e:
+    except ValueError as e:  # pragma: no cover
         logger.error("Failed to launch worker. " + str(e))
         sys.exit(1)
 
-    if nanny:
-        port = nanny_port
-    else:
-        port = worker_port
-
     if not nthreads:
-        nthreads = CPU_COUNT // nprocs
+        nthreads = CPU_COUNT // n_workers
 
     if pid_file:
         with open(pid_file, "w") as f:
@@ -381,16 +407,16 @@ def main(
     loop = IOLoop.current()
 
     worker_class = import_term(worker_class)
+
+    port_kwargs = _apportion_ports(worker_port, nanny_port, n_workers, nanny)
+    assert len(port_kwargs) == n_workers
+
     if nanny:
         kwargs["worker_class"] = worker_class
         kwargs["preload_nanny"] = preload_nanny
-
-    if nanny:
-        kwargs.update({"worker_port": worker_port, "listen_address": listen_address})
+        kwargs["listen_address"] = listen_address
         t = Nanny
     else:
-        if nanny_port:
-            kwargs["service_ports"] = {"nanny": nanny_port}
         t = worker_class
 
     if (
@@ -416,21 +442,21 @@ def main(
             security=sec,
             contact_address=contact_address,
             host=host,
-            port=port,
             dashboard=dashboard,
             dashboard_address=dashboard_address,
             name=name
-            if nprocs == 1 or name is None or name == ""
+            if n_workers == 1 or name is None or name == ""
             else str(name) + "-" + str(i),
             **kwargs,
+            **port_kwargs_i,
         )
-        for i in range(nprocs)
+        for i, port_kwargs_i in enumerate(port_kwargs)
     ]
 
     async def close_all():
         # Unregister all workers from scheduler
         if nanny:
-            await asyncio.gather(*[n.close(timeout=2) for n in nannies])
+            await asyncio.gather(*(n.close(timeout=2) for n in nannies))
 
     signal_fired = False
 
@@ -443,7 +469,7 @@ def main(
 
     async def run():
         await asyncio.gather(*nannies)
-        await asyncio.gather(*[n.finished() for n in nannies])
+        await asyncio.gather(*(n.finished() for n in nannies))
 
     install_signal_handlers(loop, cleanup=on_signal)
 
@@ -454,16 +480,94 @@ def main(
         if not signal_fired:
             logger.info("Timed out starting worker")
         sys.exit(1)
-    except KeyboardInterrupt:
+    except KeyboardInterrupt:  # pragma: no cover
         pass
     finally:
         logger.info("End worker")
 
 
-def go():
-    check_python_3()
-    main()
+def _apportion_ports(
+    worker_port: str | None, nanny_port: str | None, n_workers: int, nanny: bool
+) -> list[dict[str, Any]]:
+    """Spread out evenly --worker-port and/or --nanny-port ranges to the workers and
+    nannies, avoiding overlap.
+
+    Returns
+    =======
+    List of kwargs to pass to the Worker or Nanny construtors
+    """
+    seen = set()
+
+    def parse_unique(s: str | None) -> Iterator[int | None]:
+        ports = parse_ports(s)
+        if ports in ([0], [None]):
+            for _ in range(n_workers):
+                yield ports[0]
+        else:
+            for port in ports:
+                if port not in seen:
+                    seen.add(port)
+                    yield port
+
+    worker_ports_iter = parse_unique(worker_port)
+    nanny_ports_iter = parse_unique(nanny_port)
+
+    # [(worker ports, nanny ports), ...]
+    ports: list[tuple[set[int | None], set[int | None]]] = [
+        (set(), set()) for _ in range(n_workers)
+    ]
+
+    ports_iter = iter(ports)
+    more_wps = True
+    more_nps = True
+    while more_wps or more_nps:
+        try:
+            worker_ports_i, nanny_ports_i = next(ports_iter)
+        except StopIteration:
+            # Start again in round-robin
+            ports_iter = iter(ports)
+            continue
+
+        try:
+            worker_ports_i.add(next(worker_ports_iter))
+        except StopIteration:
+            more_wps = False
+        try:
+            nanny_ports_i.add(next(nanny_ports_iter))
+        except StopIteration:
+            more_nps = False
+
+    kwargs = []
+    for worker_ports_i, nanny_ports_i in ports:
+        if not worker_ports_i or not nanny_ports_i:
+            if nanny:
+                raise ValueError(
+                    f"Not enough ports in range --worker_port {worker_port} "
+                    f"--nanny_port {nanny_port} for {n_workers} workers"
+                )
+            else:
+                raise ValueError(
+                    f"Not enough ports in range --worker_port {worker_port} "
+                    f"for {n_workers} workers"
+                )
+
+        # None and int can't be sorted together,
+        # but None and 0 are guaranteed to be alone
+        wp: Any = sorted(worker_ports_i)
+        if len(wp) == 1:
+            wp = wp[0]
+        if nanny:
+            np: Any = sorted(nanny_ports_i)
+            if len(np) == 1:
+                np = np[0]
+            kwargs_i = {"port": np, "worker_port": wp}
+        else:
+            kwargs_i = {"port": wp}
+
+        kwargs.append(kwargs_i)
+
+    return kwargs
 
 
 if __name__ == "__main__":
-    go()
+    main()  # pragma: no cover

@@ -1,15 +1,12 @@
 import asyncio
-import gc
 import subprocess
 import sys
 import unittest
-import weakref
-from distutils.version import LooseVersion
 from threading import Lock
 from time import sleep
+from urllib.parse import urlparse
 
 import pytest
-import tornado
 from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
@@ -21,7 +18,6 @@ from distributed.core import Status
 from distributed.deploy.local import LocalCluster
 from distributed.deploy.utils_test import ClusterTest
 from distributed.metrics import time
-from distributed.scheduler import COMPILED
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import TimeoutError, sync
 from distributed.utils_test import (
@@ -35,6 +31,7 @@ from distributed.utils_test import (
     inc,
     slowinc,
     tls_only_security,
+    xfail_ssl_issue5601,
 )
 
 
@@ -174,7 +171,7 @@ def test_transports_tcp_port():
 
 
 class LocalTest(ClusterTest, unittest.TestCase):
-    Cluster = LocalCluster
+    Cluster = LocalCluster  # type: ignore
     kwargs = {"silence_logs": False, "dashboard_address": ":0", "processes": False}
 
 
@@ -263,6 +260,7 @@ def test_Client_twice(loop):
 
 @gen_test()
 async def test_client_constructor_with_temporary_security():
+    xfail_ssl_issue5601()
     pytest.importorskip("cryptography")
     async with Client(
         security=True, silence_logs=False, dashboard_address=":0", asynchronous=True
@@ -354,7 +352,7 @@ async def test_worker_params():
         memory_limit=500,
         asynchronous=True,
     ) as c:
-        assert [w.memory_limit for w in c.workers.values()] == [500] * 2
+        assert [w.memory_manager.memory_limit for w in c.workers.values()] == [500] * 2
 
 
 @gen_test()
@@ -369,7 +367,7 @@ async def test_memory_limit_none():
     ) as c:
         w = c.workers[0]
         assert type(w.data) is dict
-        assert w.memory_limit is None
+        assert w.memory_manager.memory_limit is None
 
 
 def test_cleanup():
@@ -444,7 +442,7 @@ async def test_scale_up_and_down():
             cluster.scale(2)
             await cluster
             assert len(cluster.workers) == 2
-            assert len(cluster.scheduler.nthreads) == 2
+            assert len(cluster.scheduler.workers) == 2
 
             cluster.scale(1)
             await cluster
@@ -452,12 +450,6 @@ async def test_scale_up_and_down():
             assert len(cluster.workers) == 1
 
 
-@pytest.mark.xfail(
-    sys.version_info >= (3, 8) and LooseVersion(tornado.version) < "6.0.3",
-    reason="Known issue with Python 3.8 and Tornado < 6.0.3. "
-    "See https://github.com/tornadoweb/tornado/pull/2683.",
-    strict=True,
-)
 def test_silent_startup():
     code = """if 1:
         from time import sleep
@@ -507,7 +499,10 @@ def test_memory(loop, n_workers):
         dashboard_address=":0",
         loop=loop,
     ) as cluster:
-        assert sum(w.memory_limit for w in cluster.workers.values()) <= MEMORY_LIMIT
+        assert (
+            sum(w.memory_manager.memory_limit for w in cluster.workers.values())
+            <= MEMORY_LIMIT
+        )
 
 
 @pytest.mark.parametrize("n_workers", [None, 3])
@@ -535,7 +530,6 @@ def test_death_timeout_raises(loop):
             loop=loop,
         ) as cluster:
             pass
-    LocalCluster._instances.clear()  # ignore test hygiene checks
 
 
 @gen_test()
@@ -650,18 +644,9 @@ def test_adapt(loop):
         cluster.adapt(minimum=0, maximum=2, interval="10ms")
         assert cluster._adaptive.minimum == 0
         assert cluster._adaptive.maximum == 2
-        ref = weakref.ref(cluster._adaptive)
 
         cluster.adapt(minimum=1, maximum=2, interval="10ms")
         assert cluster._adaptive.minimum == 1
-        gc.collect()
-
-        # the old Adaptive class sticks around, not sure why
-        # start = time()
-        # while ref():
-        #     sleep(0.01)
-        #     gc.collect()
-        #     assert time() < start + 5
 
         start = time()
         while len(cluster.scheduler.workers) != 1:
@@ -706,6 +691,7 @@ def test_adapt_then_manual(loop):
 @pytest.mark.parametrize("temporary", [True, False])
 def test_local_tls(loop, temporary):
     if temporary:
+        xfail_ssl_issue5601()
         pytest.importorskip("cryptography")
         security = True
     else:
@@ -775,7 +761,6 @@ async def test_scale_retires_workers():
     await cluster.close()
 
 
-@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 def test_local_tls_restart(loop):
     from distributed.utils_test import tls_only_security
 
@@ -947,9 +932,9 @@ async def test_scale_memory_cores():
         assert len(cluster.worker_spec) == 4
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("memory_limit", ["2 GiB", None])
-async def test_repr(memory_limit, cleanup):
+@gen_test()
+async def test_repr(memory_limit):
     async with LocalCluster(
         n_workers=2,
         processes=False,
@@ -984,10 +969,11 @@ async def test_threads_per_worker_set_to_0():
             assert all(w.nthreads < CPU_COUNT for w in cluster.workers.values())
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("temporary", [True, False])
-async def test_capture_security(cleanup, temporary):
+@gen_test()
+async def test_capture_security(temporary):
     if temporary:
+        xfail_ssl_issue5601()
         pytest.importorskip("cryptography")
         security = True
     else:
@@ -1054,28 +1040,29 @@ async def test_cluster_names():
             assert unnamed_cluster2 != unnamed_cluster
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("nanny", [True, False])
+@gen_test()
 async def test_local_cluster_redundant_kwarg(nanny):
-    with pytest.raises(TypeError, match="unexpected keyword argument"):
-        # Extra arguments are forwarded to the worker class. Depending on
-        # whether we use the nanny or not, the error treatment is quite
-        # different and we should assert that an exception is raised
-        async with await LocalCluster(
-            typo_kwarg="foo",
-            processes=nanny,
-            n_workers=1,
-            dashboard_address=":0",
-        ) as cluster:
+    cluster = LocalCluster(
+        typo_kwarg="foo",
+        processes=nanny,
+        n_workers=1,
+        dashboard_address=":0",
+        asynchronous=True,
+    )
+    try:
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
+            # Extra arguments are forwarded to the worker class. Depending on
+            # whether we use the nanny or not, the error treatment is quite
+            # different and we should assert that an exception is raised
+            async with cluster:
+                pass
+    finally:
+        # FIXME: LocalCluster leaks if LocalCluster.__aenter__ raises
+        await cluster.close()
 
-            # This will never work but is a reliable way to block without hard
-            # coding any sleep values
-            async with Client(cluster) as c:
-                f = c.submit(sleep, 0)
-                await f
 
-
-@pytest.mark.asyncio
+@gen_test()
 async def test_cluster_info_sync():
     async with LocalCluster(
         processes=False, asynchronous=True, scheduler_sync_interval="1ms"
@@ -1100,3 +1087,71 @@ async def test_cluster_info_sync():
 
         info = cluster.scheduler.get_metadata(keys=["cluster-manager-info"])
         assert info["foo"] == "bar"
+
+
+@gen_test()
+async def test_cluster_info_sync_is_robust_to_network_blips(monkeypatch):
+    async with LocalCluster(
+        processes=False, asynchronous=True, scheduler_sync_interval="1ms"
+    ) as cluster:
+        assert cluster._cluster_info["name"] == cluster.name
+
+        error_called = False
+
+        async def error(*args, **kwargs):
+            nonlocal error_called
+            await asyncio.sleep(0.001)
+            error_called = True
+            raise OSError
+
+        # Temporarily patch the `set_metadata` RPC to error
+        with monkeypatch.context() as patch:
+            patch.setattr(cluster.scheduler_comm, "set_metadata", error)
+
+            # Set a new cluster_info value
+            cluster._cluster_info["foo"] = "bar"
+
+            # Wait for the bad method to be called at least once
+            while not error_called:
+                await asyncio.sleep(0.01)
+
+        # Check that cluster_info is resynced after the error condition is fixed
+        while "foo" not in cluster.scheduler.get_metadata(
+            keys=["cluster-manager-info"]
+        ):
+            await asyncio.sleep(0.01)
+
+        info = cluster.scheduler.get_metadata(keys=["cluster-manager-info"])
+        assert info["foo"] == "bar"
+
+
+@pytest.mark.parametrize("host", [None, "127.0.0.1"])
+@pytest.mark.parametrize("use_nanny", [True, False])
+@gen_test()
+async def test_cluster_host_used_throughout_cluster(host, use_nanny):
+    """Ensure that the `host` kwarg is propagated through scheduler, nanny, and workers"""
+    async with LocalCluster(host=host, asynchronous=True) as cluster:
+        url = urlparse(cluster.scheduler_address)
+        assert url.hostname == "127.0.0.1"
+        for worker in cluster.workers.values():
+            url = urlparse(worker.address)
+            assert url.hostname == "127.0.0.1"
+
+            if use_nanny:
+                url = urlparse(worker.process.worker_address)
+                assert url.hostname == "127.0.0.1"
+
+
+@gen_test()
+async def test_connect_to_closed_cluster():
+    async with LocalCluster(processes=False, asynchronous=True) as cluster:
+        async with Client(cluster, asynchronous=True) as c1:
+            assert await c1.submit(inc, 1) == 2
+
+    with pytest.raises(
+        RuntimeError,
+        match="Trying to connect to an already closed or closing Cluster",
+    ):
+        # Raises during init without actually connecting since we're not
+        # awaiting anything
+        Client(cluster, asynchronous=True)

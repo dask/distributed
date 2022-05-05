@@ -21,14 +21,6 @@ class MyWorker(Worker):
     pass
 
 
-class BrokenWorker(Worker):
-    def __await__(self):
-        async def _():
-            raise Exception("Worker Broken")
-
-        return _().__await__()
-
-
 worker_spec = {
     0: {"cls": "dask.distributed.Worker", "options": {"nthreads": 1}},
     1: {"cls": Worker, "options": {"nthreads": 2}},
@@ -210,20 +202,31 @@ async def test_restart():
 
 
 @pytest.mark.skipif(WINDOWS, reason="HTTP Server doesn't close out")
-# FIXME cleanup fails:
-#       some RPCs left active by test: {<rpc to 'tcp://10.19.0.6:35045', 1 comms>}
-# @gen_test()
-@pytest.mark.asyncio
+@gen_test()
 async def test_broken_worker():
-    with pytest.raises(Exception) as info:
-        async with SpecCluster(
-            asynchronous=True,
-            workers={"good": {"cls": Worker}, "bad": {"cls": BrokenWorker}},
-            scheduler=scheduler,
-        ):
-            pass
+    class BrokenWorkerException(Exception):
+        pass
 
-    assert "Broken" in str(info.value)
+    class BrokenWorker(Worker):
+        def __await__(self):
+            async def _():
+                self.status = Status.closed
+                raise BrokenWorkerException("Worker Broken")
+
+            return _().__await__()
+
+    cluster = SpecCluster(
+        asynchronous=True,
+        workers={"good": {"cls": Worker}, "bad": {"cls": BrokenWorker}},
+        scheduler=scheduler,
+    )
+    try:
+        with pytest.raises(BrokenWorkerException, match=r"Worker Broken"):
+            async with cluster:
+                pass
+    finally:
+        # FIXME: SpecCluster leaks if SpecCluster.__aenter__ raises
+        await cluster.close()
 
 
 @pytest.mark.skipif(WINDOWS, reason="HTTP Server doesn't close out")
@@ -396,6 +399,10 @@ class MultiWorker(Worker, ProcessInterface):
     def status(self):
         return self.workers[0].status
 
+    @status.setter
+    def status(self, value):
+        raise NotImplementedError()
+
     def __str__(self):
         return "<MultiWorker n=%d>" % len(self.workers)
 
@@ -405,7 +412,7 @@ class MultiWorker(Worker, ProcessInterface):
         await asyncio.gather(*self.workers)
 
     async def close(self):
-        await asyncio.gather(*[w.close() for w in self.workers])
+        await asyncio.gather(*(w.close() for w in self.workers))
 
 
 @gen_test()
@@ -464,9 +471,9 @@ async def test_MultiWorker():
 async def test_run_spec(c, s):
     workers = await run_spec(worker_spec, s.address)
     await c.wait_for_workers(len(worker_spec))
-    await asyncio.gather(*[w.close() for w in workers.values()])
+    await asyncio.gather(*(w.close() for w in workers.values()))
     assert not s.workers
-    await asyncio.gather(*[w.finished() for w in workers.values()])
+    await asyncio.gather(*(w.finished() for w in workers.values()))
 
 
 @gen_test()

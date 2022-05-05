@@ -1,10 +1,14 @@
 import array
 import asyncio
+import contextvars
+import functools
 import io
 import os
 import queue
 import socket
 import traceback
+import warnings
+from collections import deque
 from time import sleep
 
 import pytest
@@ -30,11 +34,13 @@ from distributed.utils import (
     is_kernel,
     is_valid_xml,
     iscoroutinefunction,
+    log_errors,
     nbytes,
     offload,
     open_port,
     parse_ports,
     read_block,
+    recursive_to_dict,
     seek_delimiter,
     set_thread_state,
     sync,
@@ -53,7 +59,8 @@ from distributed.utils_test import (
 )
 
 
-def test_All(loop):
+@gen_test()
+async def test_All():
     async def throws():
         1 / 0
 
@@ -63,21 +70,18 @@ def test_All(loop):
     async def inc(x):
         return x + 1
 
-    async def f():
-        results = await All([inc(i) for i in range(10)])
-        assert results == list(range(1, 11))
+    results = await All([inc(i) for i in range(10)])
+    assert results == list(range(1, 11))
 
-        start = time()
-        for tasks in [[throws(), slow()], [slow(), throws()]]:
-            try:
-                await All(tasks)
-                assert False
-            except ZeroDivisionError:
-                pass
-            end = time()
-            assert end - start < 10
-
-    loop.run_sync(f)
+    start = time()
+    for tasks in [[throws(), slow()], [slow(), throws()]]:
+        try:
+            await All(tasks)
+            assert False
+        except ZeroDivisionError:
+            pass
+        end = time()
+        assert end - start < 10
 
 
 def test_sync_error(loop_in_thread):
@@ -117,10 +121,11 @@ def test_sync_timeout(loop_in_thread):
 
 
 def test_sync_closed_loop():
-    loop = IOLoop.current()
+    async def get_loop():
+        return IOLoop.current()
+
+    loop = asyncio.run(get_loop())
     loop.close()
-    IOLoop.clear_current()
-    IOLoop.clear_instance()
 
     with pytest.raises(RuntimeError) as exc_info:
         sync(loop, inc, 1)
@@ -456,31 +461,30 @@ async def test_loop_runner_gen():
 
 
 @gen_test()
-async def test_all_exceptions_logging():
-    async def throws():
-        raise Exception("foo1234")
+async def test_all_quiet_exceptions():
+    class CustomError(Exception):
+        pass
+
+    async def throws(msg):
+        raise CustomError(msg)
 
     with captured_logger("") as sio:
-        try:
-            await All([throws() for _ in range(5)], quiet_exceptions=Exception)
-        except Exception:
-            pass
+        with pytest.raises(CustomError):
+            await All([throws("foo") for _ in range(5)])
+        with pytest.raises(CustomError):
+            await All([throws("bar") for _ in range(5)], quiet_exceptions=CustomError)
 
-        import gc
-
-        gc.collect()
-        await asyncio.sleep(0.1)
-
-    assert "foo1234" not in sio.getvalue()
+    assert "bar" not in sio.getvalue()
+    assert "foo" in sio.getvalue()
 
 
 def test_warn_on_duration():
-    with pytest.warns(None) as record:
+    with warnings.catch_warnings(record=True) as record:
         with warn_on_duration("10s", "foo"):
             pass
     assert not record
 
-    with pytest.warns(None) as record:
+    with pytest.warns(UserWarning, match=r"foo") as record:
         with warn_on_duration("1ms", "foo"):
             sleep(0.100)
 
@@ -524,9 +528,22 @@ def test_parse_ports():
     assert parse_ports(23) == [23]
     assert parse_ports("45") == [45]
     assert parse_ports("100:103") == [100, 101, 102, 103]
+    assert parse_ports([100, 101, 102, 103]) == [100, 101, 102, 103]
+
+    out = parse_ports((100, 101, 102, 103))
+    assert out == [100, 101, 102, 103]
+    assert isinstance(out, list)
 
     with pytest.raises(ValueError, match="port_stop must be greater than port_start"):
         parse_ports("103:100")
+    with pytest.raises(TypeError):
+        parse_ports(100.5)
+    with pytest.raises(TypeError):
+        parse_ports([100, 100.5])
+    with pytest.raises(ValueError):
+        parse_ports("foo")
+    with pytest.raises(ValueError):
+        parse_ports("100.5")
 
 
 def test_lru():
@@ -547,10 +564,22 @@ def test_lru():
     assert list(l.keys()) == ["c", "a", "d"]
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_offload():
     assert (await offload(inc, 1)) == 2
     assert (await offload(lambda x, y: x + y, 1, y=2)) == 3
+
+
+@gen_test()
+async def test_offload_preserves_contextvars():
+    var = contextvars.ContextVar("var")
+
+    async def set_var(v: str):
+        var.set(v)
+        r = await offload(var.get)
+        assert r == v
+
+    await asyncio.gather(set_var("foo"), set_var("bar"))
 
 
 def test_serialize_for_cli_deprecated():
@@ -601,6 +630,264 @@ def test_typename_deprecated():
     assert typename is dask.utils.typename
 
 
+def test_tmpfile_deprecated():
+    with pytest.warns(FutureWarning, match="tmpfile is deprecated"):
+        from distributed.utils import tmpfile
+    assert tmpfile is dask.utils.tmpfile
+
+
 def test_iscoroutinefunction_unhashable_input():
     # Ensure iscoroutinefunction can handle unhashable callables
     assert not iscoroutinefunction(_UnhashableCallable())
+
+
+def test_iscoroutinefunction_nested_partial():
+    async def my_async_callable(x, y, z):
+        pass
+
+    assert iscoroutinefunction(
+        functools.partial(functools.partial(my_async_callable, 1), 2)
+    )
+
+
+def test_recursive_to_dict():
+    class C:
+        def __init__(self, x):
+            self.x = x
+
+        def __repr__(self):
+            return "<C>"
+
+        def _to_dict(self, *, exclude):
+            assert exclude == ["foo"]
+            return ["C:", recursive_to_dict(self.x, exclude=exclude)]
+
+    class D:
+        def __repr__(self):
+            return "<D>"
+
+    class E:
+        def __init__(self):
+            self.x = 1  # Public attribute; dump
+            self._y = 2  # Private attribute; don't dump
+            self.foo = 3  # In exclude; don't dump
+
+        @property
+        def z(self):  # Public property; dump
+            return 4
+
+        def f(self):  # Callable; don't dump
+            return 5
+
+        def _to_dict(self, *, exclude):
+            # Output: {"x": 1, "z": 4}
+            return recursive_to_dict(self, exclude=exclude, members=True)
+
+    inp = [
+        1,
+        1.1,
+        True,
+        False,
+        None,
+        "foo",
+        b"bar",
+        C,
+        C(1),
+        D(),
+        (1, 2),
+        [3, 4],
+        {5, 6},
+        frozenset([7, 8]),
+        deque([9, 10]),
+        {3: 4, 1: 2}.keys(),
+        {3: 4, 1: 2}.values(),
+        E(),
+    ]
+    expect = [
+        1,
+        1.1,
+        True,
+        False,
+        None,
+        "foo",
+        "b'bar'",
+        "<class 'test_utils.test_recursive_to_dict.<locals>.C'>",
+        ["C:", 1],
+        "<D>",
+        [1, 2],
+        [3, 4],
+        list({5, 6}),
+        list(frozenset([7, 8])),
+        [9, 10],
+        [3, 1],
+        [4, 2],
+        {"x": 1, "z": 4},
+    ]
+    assert recursive_to_dict(inp, exclude=["foo"]) == expect
+
+    # Test recursion
+    a = []
+    c = C(a)
+    a += [c, c]
+    # The blocklist of already-seen objects is reentrant: a is converted to string when
+    # found inside itself; c must *not* be converted to string the second time it's
+    # found, because it's outside of itself.
+    assert recursive_to_dict(a, exclude=["foo"]) == [
+        ["C:", "[<C>, <C>]"],
+        ["C:", "[<C>, <C>]"],
+    ]
+
+
+def test_recursive_to_dict_no_nest():
+    class Person:
+        def __init__(self, name):
+            self.name = name
+            self.children = []
+            self.pets = []
+            ...
+
+        def _to_dict_no_nest(self, exclude=()):
+            return recursive_to_dict(self.__dict__, exclude=exclude)
+
+        def __repr__(self):
+            return self.name
+
+    class Pet:
+        def __init__(self, name):
+            self.name = name
+            self.owners = []
+            ...
+
+        def _to_dict_no_nest(self, exclude=()):
+            return recursive_to_dict(self.__dict__, exclude=exclude)
+
+        def __repr__(self):
+            return self.name
+
+    alice = Person("Alice")
+    bob = Person("Bob")
+    charlie = Pet("Charlie")
+    alice.children.append(bob)
+    alice.pets.append(charlie)
+    bob.pets.append(charlie)
+    charlie.owners[:] = [alice, bob]
+    info = {"people": [alice, bob], "pets": [charlie]}
+    expect = {
+        "people": [
+            {"name": "Alice", "children": ["Bob"], "pets": ["Charlie"]},
+            {"name": "Bob", "children": [], "pets": ["Charlie"]},
+        ],
+        "pets": [
+            {"name": "Charlie", "owners": ["Alice", "Bob"]},
+        ],
+    }
+    assert recursive_to_dict(info) == expect
+
+
+@gen_test()
+async def test_log_errors():
+    class CustomError(Exception):
+        pass
+
+    # Use the logger of the caller module
+    with captured_logger("test_utils") as caplog:
+
+        # Context manager
+        with log_errors():
+            pass
+
+        with log_errors():
+            with log_errors():
+                pass
+
+        with log_errors(pdb=True):
+            pass
+
+        with pytest.raises(CustomError):
+            with log_errors():
+                raise CustomError("err1")
+
+        with pytest.raises(CustomError):
+            with log_errors():
+                with log_errors():
+                    raise CustomError("err2")
+
+        # Bare decorator
+        @log_errors
+        def _():
+            return 123
+
+        assert _() == 123
+
+        @log_errors
+        def _():
+            raise CustomError("err3")
+
+        with pytest.raises(CustomError):
+            _()
+
+        @log_errors
+        def inner():
+            raise CustomError("err4")
+
+        @log_errors
+        def outer():
+            inner()
+
+        with pytest.raises(CustomError):
+            outer()
+
+        # Decorator with parameters
+        @log_errors()
+        def _():
+            return 456
+
+        assert _() == 456
+
+        @log_errors()
+        def _():
+            with log_errors():
+                raise CustomError("err5")
+
+        with pytest.raises(CustomError):
+            _()
+
+        @log_errors(pdb=True)
+        def _():
+            return 789
+
+        assert _() == 789
+
+        # Decorate async function
+        @log_errors
+        async def _():
+            return 123
+
+        assert await _() == 123
+
+        @log_errors
+        async def _():
+            raise CustomError("err6")
+
+        with pytest.raises(CustomError):
+            await _()
+
+    assert [row for row in caplog.getvalue().splitlines() if row.startswith("err")] == [
+        "err1",
+        "err2",
+        "err2",
+        "err3",
+        "err4",
+        "err4",
+        "err5",
+        "err5",
+        "err6",
+    ]
+
+    # Test unroll_stack
+    with captured_logger("distributed.utils") as caplog:
+        with pytest.raises(CustomError):
+            with log_errors(unroll_stack=0):
+                raise CustomError("err7")
+
+    assert caplog.getvalue().startswith("err7\n")

@@ -1,1 +1,1 @@
-from .utils import get_handlers
+from distributed.http.utils import get_handlers

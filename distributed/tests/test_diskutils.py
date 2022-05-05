@@ -12,8 +12,10 @@ import pytest
 
 import dask
 
+from distributed.compatibility import WINDOWS
 from distributed.diskutils import WorkSpace
 from distributed.metrics import time
+from distributed.profile import wait_profiler
 from distributed.utils import mp_context
 from distributed.utils_test import captured_logger
 
@@ -51,6 +53,7 @@ def test_workdir_simple(tmpdir):
     a.release()
     assert_contents(["bb", "bb.dirlock"])
     del b
+    wait_profiler()
     gc.collect()
     assert_contents([])
 
@@ -86,9 +89,11 @@ def test_two_workspaces_in_same_directory(tmpdir):
 
     del ws
     del b
+    wait_profiler()
     gc.collect()
     assert_contents(["aa", "aa.dirlock"], trials=5)
     del a
+    wait_profiler()
     gc.collect()
     assert_contents([], trials=5)
 
@@ -168,7 +173,7 @@ def test_locking_disabled(tmpdir):
     base_dir = str(tmpdir)
 
     with dask.config.set({"distributed.worker.use-file-locking": False}):
-        with mock.patch("distributed.diskutils.locket.lock_file") as lock_file:
+        with mock.patch("locket.lock_file") as lock_file:
             assert_contents = functools.partial(assert_directory_contents, base_dir)
 
             ws = WorkSpace(base_dir)
@@ -183,6 +188,7 @@ def test_locking_disabled(tmpdir):
             a.release()
             assert_contents(["bb"])
             del b
+            wait_profiler()
             gc.collect()
             assert_contents([])
 
@@ -214,8 +220,7 @@ def _workspace_concurrency(base_dir, purged_q, err_q, stop_evt, barrier):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("timeout,max_procs", [(5.0, 6), (10.0, 16)])
-def test_workspace_concurrency(tmpdir, timeout, max_procs):
+def test_workspace_concurrency(tmpdir):
     """WorkSpace concurrency test. We merely check that no exception or
     deadlock happens.
     """
@@ -227,6 +232,10 @@ def test_workspace_concurrency(tmpdir, timeout, max_procs):
     ws = WorkSpace(base_dir)
     # Make sure purging only happens in the child processes
     ws._purge_leftovers = lambda: None
+
+    # Windows (or at least Windows GitHub CI) has been observed to be exceptionally
+    # slow. Don't stress it too much.
+    max_procs = 2 if WINDOWS else 16
 
     # Run a bunch of child processes that will try to purge concurrently
     barrier = mp_context.Barrier(parties=max_procs + 1)
@@ -244,14 +253,16 @@ def test_workspace_concurrency(tmpdir, timeout, max_procs):
     n_purged = 0
     t1 = time()
     try:
-        while time() - t1 < timeout:
-            # Add a bunch of locks, and simulate forgetting them.
+        # On Linux, you will typically end with n_created > 10.000
+        # On Windows, it can take 60 seconds to create 50 locks!
+        while time() - t1 < 10:
+            # Add a bunch of locks and simulate forgetting them.
             # The concurrent processes should try to purge them.
-            for i in range(50):
+            for _ in range(100):
                 d = ws.new_work_dir(prefix="workspace-concurrency-")
                 d._finalizer.detach()
                 n_created += 1
-            sleep(0.01)
+
     finally:
         stop_evt.set()
         for p in processes:
@@ -270,6 +281,6 @@ def test_workspace_concurrency(tmpdir, timeout, max_procs):
             n_purged += purged_q.get_nowait()
     except queue.Empty:
         pass
-    assert n_created >= 100
+
     # We attempted to purge most directories at some point
     assert n_purged >= 0.5 * n_created > 0
