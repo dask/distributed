@@ -125,6 +125,7 @@ def byte_sample(b, size, n):
         number of samples to collect
     """
     b = ensure_memoryview(b)
+
     starts = [random.randint(0, len(b) - size) for j in range(n)]
     ends = []
     for i, start in enumerate(starts[:-1]):
