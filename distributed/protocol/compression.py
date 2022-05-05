@@ -180,10 +180,10 @@ def maybe_compress(
 
     # Try compressing a sample to see if it compresses well
     sample = byte_sample(mv, sample_size, nsamples)
-    if len(compress(sample)) <= 0.9 * len(sample):  # sample is compressible
+    if len(compress(sample)) <= 0.9 * len(sample):
         # Try compressing the real thing and check how compressed it is
         compressed = compress(mv)
-        if len(compressed) <= 0.9 * payload_nbytes:  # full data is compressible
+        if len(compressed) <= 0.9 * payload_nbytes:
             return compression, compressed
     # Sample or payload didn't compress well. Skip compressing.
     return None, payload
