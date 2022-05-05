@@ -2207,10 +2207,7 @@ class Worker(ServerNode):
         stimulus_id: str,
     ) -> RecsInstrs:
         assert ts._previous == "executing" or ts.key in self.long_running
-        # We'll ignore instructions, i.e. we choose to not submit the failure
-        # message to the scheduler since from the schedulers POV it already
-        # released this task
-        recs, _ = self.transition_executing_error(
+        recs, instructions = self.transition_executing_error(
             ts,
             exception,
             traceback,
@@ -2218,12 +2215,20 @@ class Worker(ServerNode):
             traceback_text,
             stimulus_id=stimulus_id,
         )
+        # We'll ignore instructions, i.e. we choose to not submit the failure
+        # message to the scheduler since from the schedulers POV it already
+        # released this task
+        if self.validate:
+            assert len(instructions) == 1
+            assert isinstance(instructions[0], TaskErredMsg)
+            assert instructions[0].key == ts.key
+        instructions.clear()
         # Workers should never "retry" tasks. A transition to error should, by
         # default, be the end. Since cancelled indicates that the scheduler lost
         # interest, we can transition straight to released
         assert ts not in recs
         recs[ts] = "released"
-        return recs, []
+        return recs, instructions
 
     def transition_generic_error(
         self,
