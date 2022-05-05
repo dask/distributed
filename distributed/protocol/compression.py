@@ -131,7 +131,8 @@ def byte_sample(b, size, n):
 
     b = ensure_memoryview(b)
 
-    starts = [randint(0, b.nbytes - size) for j in range(n)]
+    max_start = b.nbytes - size
+    starts = [randint(0, max_start) for j in range(n)]
     ends = []
     for i, start in enumerate(islice(starts, n - 1)):
         ends.append(min(start + size, starts[i + 1]))
