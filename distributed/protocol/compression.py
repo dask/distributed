@@ -6,10 +6,10 @@ Includes utilities for determining whether or not to compress
 from __future__ import annotations
 
 import logging
-import random
 from collections.abc import Callable
 from contextlib import suppress
 from itertools import islice
+from random import randint
 from typing import Literal
 
 from packaging.version import parse as parse_version
@@ -131,7 +131,7 @@ def byte_sample(b, size, n):
     assert size > 0 and n > 0
     b = ensure_memoryview(b)
 
-    starts = [random.randint(0, b.nbytes - size) for j in range(n)]
+    starts = [randint(0, b.nbytes - size) for j in range(n)]
     ends = []
     for i, start in enumerate(islice(starts, n - 1)):
         ends.append(min(start + size, starts[i + 1]))
