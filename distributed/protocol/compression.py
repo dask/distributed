@@ -178,17 +178,15 @@ def maybe_compress(
     # Take a view of payload for efficient usage
     mv = ensure_memoryview(payload)
 
-    # Compress a sample, return original if not very compressed
+    # Try compressing a sample to see if it compresses well
     sample = byte_sample(mv, sample_size, nsamples)
-    if len(compress(sample)) > 0.9 * len(sample):  # sample not very compressible
-        return None, payload
-
-    # Try compressing the real thing
-    compressed = compress(mv)
-    if len(compressed) > 0.9 * payload_nbytes:  # full data not very compressible
-        return None, payload
-    else:
-        return compression, compressed
+    if len(compress(sample)) <= 0.9 * len(sample):  # sample is compressible
+        # Try compressing the real thing and check how compressed it is
+        compressed = compress(mv)
+        if len(compressed) <= 0.9 * payload_nbytes:  # full data is compressible
+            return compression, compressed
+    # Sample or payload didn't compress well. Skip compressing.
+    return None, payload
 
 
 def decompress(header, frames):
