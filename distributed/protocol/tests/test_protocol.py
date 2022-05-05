@@ -1,7 +1,13 @@
 import pytest
 
+import dask
+
 from distributed.protocol import dumps, loads, maybe_compress, msgpack, to_serialize
-from distributed.protocol.compression import compressions
+from distributed.protocol.compression import (
+    compressions,
+    default_compression,
+    get_default_compression,
+)
 from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
 from distributed.protocol.serialize import (
     Serialize,
@@ -18,6 +24,24 @@ from distributed.utils import nbytes
 def test_protocol():
     for msg in [1, "a", b"a", {"x": 1}, {b"x": 1}, {"x": b""}, {}]:
         assert loads(dumps(msg)) == msg
+
+
+@pytest.mark.parametrize(
+    "config,default",
+    [
+        ("auto", default_compression),
+        (None, None),
+        ("zlib", "zlib"),
+        ("foo", ValueError),
+    ],
+)
+def test_compression_config(config, default):
+    with dask.config.set({"distributed.comm.compression": config}):
+        if type(default) is type and issubclass(default, Exception):
+            with pytest.raises(default):
+                assert get_default_compression()
+        else:
+            assert get_default_compression() == default
 
 
 def test_compression_1():
