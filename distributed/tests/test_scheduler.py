@@ -46,6 +46,7 @@ from distributed.utils_test import (
     gen_test,
     inc,
     nodebug,
+    raises_with_cause,
     slowadd,
     slowdec,
     slowinc,
@@ -693,7 +694,7 @@ async def test_worker_name(s):
     assert s.workers[w.address].name == "alice"
     assert s.aliases["alice"] == w.address
 
-    with pytest.raises(ValueError):
+    with raises_with_cause(RuntimeError, None, ValueError, None):
         w2 = await Worker(s.address, name="alice")
         await w2.close()
 
@@ -1910,7 +1911,8 @@ async def test_finished():
 @gen_cluster(nthreads=[], client=True)
 async def test_retire_names_str(c, s):
     async with Worker(s.address, name="0") as a, Worker(s.address, name="1") as b:
-        futures = c.map(inc, range(10))
+        futures = c.map(inc, range(5), workers=[a.address])
+        futures.extend(c.map(inc, range(5, 10), workers=[b.address]))
         await wait(futures)
         assert a.data and b.data
         await s.retire_workers(names=[0])
@@ -2324,7 +2326,9 @@ async def test_worker_name_collision(s, a):
     # and leaves the data structures of Scheduler in a good state
     # is not updated by the second worker
     with captured_logger(logging.getLogger("distributed.scheduler")) as log:
-        with pytest.raises(ValueError, match=f"name taken, {a.name!r}"):
+        with raises_with_cause(
+            RuntimeError, None, ValueError, f"name taken, {a.name!r}"
+        ):
             await Worker(s.address, name=a.name, loop=s.loop, host="127.0.0.1")
 
     s.validate_state()

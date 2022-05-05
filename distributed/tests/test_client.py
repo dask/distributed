@@ -4254,6 +4254,7 @@ async def test_retire_workers_2(c, s, a, b):
 
     await s.retire_workers(workers=[a.address])
     assert b.data == {x.key: 1}
+
     assert {ws.address for ws in s.tasks[x.key].who_has} == {b.address}
     assert {ts.key for ts in s.workers[b.address].has_what} == {x.key}
 
@@ -7376,3 +7377,27 @@ async def test_wait_for_workers_updates_info(c, s):
     async with Worker(s.address):
         await c.wait_for_workers(1)
         assert c.scheduler_info()["workers"]
+
+
+client_script = """
+from dask.distributed import Client
+if __name__ == "__main__":
+    client = Client(processes=%s, n_workers=1)
+"""
+
+
+@pytest.mark.parametrize("processes", [True, False])
+def test_quiet_close_process(processes, tmp_path):
+    with open(tmp_path / "script.py", mode="w") as f:
+        f.write(client_script % processes)
+
+    proc = subprocess.Popen(
+        [sys.executable, tmp_path / "script.py"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    out, err = proc.communicate(timeout=10)
+
+    assert not out
+    assert not err

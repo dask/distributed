@@ -150,6 +150,7 @@ class MyServer(Server):
     default_port = 8756
 
 
+@pytest.mark.slow
 @gen_test()
 async def test_server_listen():
     """
@@ -384,7 +385,7 @@ async def check_rpc_with_many_connections(listen_arg):
         for i in range(10):
             await remote.ping()
 
-    server = Server({"ping": pingpong})
+    server = await Server({"ping": pingpong})
     await server.listen(listen_arg)
 
     async with rpc(server.address) as remote:
@@ -552,6 +553,7 @@ async def test_connection_pool():
 
     servers = [Server({"ping": ping}) for i in range(10)]
     for server in servers:
+        await server
         await server.listen(0)
 
     rpc = await ConnectionPool(limit=5)
@@ -717,6 +719,7 @@ async def test_connection_pool_tls():
 
     servers = [Server({"ping": ping}) for i in range(10)]
     for server in servers:
+        await server
         await server.listen("tls://", **listen_args)
 
     rpc = await ConnectionPool(limit=5, connection_args=connection_args)
@@ -738,6 +741,7 @@ async def test_connection_pool_remove():
 
     servers = [Server({"ping": ping}) for i in range(5)]
     for server in servers:
+        await server
         await server.listen(0)
 
     rpc = await ConnectionPool(limit=10)

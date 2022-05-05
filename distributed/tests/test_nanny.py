@@ -27,7 +27,12 @@ from distributed.metrics import time
 from distributed.profile import wait_profiler
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, parse_ports
-from distributed.utils_test import captured_logger, gen_cluster, gen_test
+from distributed.utils_test import (
+    captured_logger,
+    gen_cluster,
+    gen_test,
+    raises_with_cause,
+)
 
 pytestmark = pytest.mark.ci1
 
@@ -139,7 +144,7 @@ async def test_nanny_death_timeout(s):
     with pytest.raises(TimeoutError):
         await w
 
-    assert w.status == Status.closed
+    assert w.status == Status.failed
 
 
 @gen_cluster(client=True, Worker=Nanny)
@@ -426,8 +431,11 @@ async def test_nanny_port_range(c, s):
         assert n1.port == 9867  # Selects first port in range
         async with Nanny(s.address, port=nanny_port, worker_port=worker_port) as n2:
             assert n2.port == 9868  # Selects next port in range
-            with pytest.raises(
-                ValueError, match="Could not start Nanny"
+            with raises_with_cause(
+                RuntimeError,
+                "Nanny failed to start.",
+                ValueError,
+                "with port 9867:9868",
             ):  # No more ports left
                 async with Nanny(s.address, port=nanny_port, worker_port=worker_port):
                     pass
@@ -477,7 +485,7 @@ class BrokenWorker(worker.Worker):
 @gen_cluster(nthreads=[])
 async def test_worker_start_exception(s):
     # make sure this raises the right Exception:
-    with pytest.raises(StartException):
+    with raises_with_cause(RuntimeError, None, StartException, None):
         async with Nanny(s.address, worker_class=BrokenWorker) as n:
             pass
 
