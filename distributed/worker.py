@@ -780,7 +780,7 @@ class Worker(ServerNode):
                 self.nthreads, thread_name_prefix="Dask-Default-Threads"
             )
 
-        self.batched_stream = BatchedSend(interval="2ms")
+        self.batched_stream = BatchedSend(interval="2ms", name="Worker->Scheduler")
         self.name = name
         self.scheduler_delay = 0
         self.stream_comms = {}
@@ -1652,7 +1652,7 @@ class Worker(ServerNode):
 
     def send_to_worker(self, address, msg):
         if address not in self.stream_comms:
-            bcomm = BatchedSend(interval="1ms")
+            bcomm = BatchedSend(interval="1ms", name="send-to-worker")
             self.stream_comms[address] = bcomm
 
             async def batched_send_connect():

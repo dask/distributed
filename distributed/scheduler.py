@@ -3733,7 +3733,10 @@ class Scheduler(SchedulerState, ServerNode):
         # for key in keys:  # TODO
         #     self.mark_key_in_memory(key, [address])
 
-        self.stream_comms[address] = BatchedSend(interval="5ms")
+        self.stream_comms[address] = BatchedSend(
+            interval="5ms",
+            name=f"Scheduler->Worker-{address}",
+        )
 
         if ws.nthreads > len(ws.processing):
             self.idle[ws.address] = ws
@@ -4686,7 +4689,7 @@ class Scheduler(SchedulerState, ServerNode):
                 logger.exception(e)
 
         try:
-            bcomm = BatchedSend(interval="2ms")
+            bcomm = BatchedSend(interval="2ms", name="Scheduler->Client")
             bcomm.start(comm)
             self.client_comms[client] = bcomm
             msg = {"op": "stream-start"}
@@ -4927,7 +4930,7 @@ class Scheduler(SchedulerState, ServerNode):
             await self.handle_stream(comm=comm, extra={"worker": worker})
         finally:
             if worker in self.stream_comms:
-                worker_comm.abort()
+                await worker_comm.close()
                 await self.remove_worker(address=worker, stimulus_id=stimulus_id)
 
     def add_plugin(
@@ -7708,7 +7711,7 @@ class WorkerStatusPlugin(SchedulerPlugin):
     name = "worker-status"
 
     def __init__(self, scheduler, comm):
-        self.bcomm = BatchedSend(interval="5ms")
+        self.bcomm = BatchedSend(interval="5ms", name="WorkerStatus")
         self.bcomm.start(comm)
 
         self.scheduler = scheduler
@@ -7729,8 +7732,8 @@ class WorkerStatusPlugin(SchedulerPlugin):
         except CommClosedError:
             self.scheduler.remove_plugin(name=self.name)
 
-    def teardown(self):
-        self.bcomm.close()
+    async def close(self) -> None:
+        await self.bcomm.close()
 
 
 class CollectTaskMetaDataPlugin(SchedulerPlugin):

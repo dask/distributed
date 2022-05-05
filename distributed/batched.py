@@ -34,12 +34,13 @@ class BatchedSend:
         ['Hello,', 'world!']
     """
 
-    def __init__(self, interval, serializers=None):
+    def __init__(self, interval, serializers=None, name=None):
         self.interval = parse_timedelta(interval, default="ms")
         self.waker = asyncio.Event()
         self.please_stop = False
         self.buffer = []
         self.comm = None
+        self.name = name
         self.message_count = 0
         self.batch_count = 0
         self.byte_count = 0
@@ -60,7 +61,7 @@ class BatchedSend:
 
         self._background_task = asyncio.create_task(
             self._background_send(),
-            name="background-send",
+            name=f"background-send-{self.name}",
         )
 
     def closed(self):
