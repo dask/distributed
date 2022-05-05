@@ -133,7 +133,12 @@ def byte_sample(b, size, n):
     ends.append(starts[-1] + size)
 
     parts = [b[start:end] for start, end in zip(starts, ends)]
-    return b"".join(parts)
+    if n == 0:
+        return b""
+    elif n == 1:
+        return parts[0]
+    else:
+        return b"".join(parts)
 
 
 def maybe_compress(
