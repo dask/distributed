@@ -161,7 +161,6 @@ def maybe_compress(
     if len(payload) > 2**31:  # Too large, compression libraries often fail
         return None, payload
 
-    min_size = int(min_size)
     sample_size = int(sample_size)
 
     compress = compressions[compression]["compress"]
