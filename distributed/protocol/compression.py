@@ -124,7 +124,7 @@ def byte_sample(b, size, n):
     n : int
         number of samples to collect
     """
-    if n == 0:
+    if size == 0 or n == 0:
         return memoryview(b"")
 
     b = ensure_memoryview(b)
