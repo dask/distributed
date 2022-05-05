@@ -129,7 +129,7 @@ def byte_sample(b, size, n):
 
     b = ensure_memoryview(b)
 
-    starts = [random.randint(0, len(b) - size) for j in range(n)]
+    starts = [random.randint(0, b.nbytes - size) for j in range(n)]
     ends = []
     for i, start in enumerate(starts[:-1]):
         ends.append(min(start + size, starts[i + 1]))
@@ -180,7 +180,7 @@ def maybe_compress(
 
     # Try compressing a sample to see if it compresses well
     sample = byte_sample(mv, sample_size, nsamples)
-    if len(compress(sample)) <= 0.9 * len(sample):
+    if len(compress(sample)) <= 0.9 * sample.nbytes:
         # Try compressing the real thing and check how compressed it is
         compressed = compress(mv)
         if len(compressed) <= 0.9 * payload_nbytes:
