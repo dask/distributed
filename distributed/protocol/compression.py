@@ -185,7 +185,7 @@ def maybe_compress(
     if len(compress(sample)) <= 0.9 * sample.nbytes:
         # Try compressing the real thing and check how compressed it is
         compressed = compress(mv)
-        if len(compressed) <= 0.9 * payload_nbytes:
+        if len(compressed) <= 0.9 * mv.nbytes:
             return compression, compressed
     # Sample or payload didn't compress well. Skip compressing.
     return None, payload
