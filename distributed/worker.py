@@ -550,6 +550,7 @@ class Worker(ServerNode):
         memory_pause_fraction: float | Literal[False] | None = None,
         ###################################
         # Parameters to Server
+        scheduler_sni: str | None = None,
         **kwargs,
     ):
         self.tasks = {}
@@ -749,10 +750,11 @@ class Worker(ServerNode):
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
-
         self.actors = {}
         self.loop = loop or IOLoop.current()
         self.reconnect = reconnect
+        if scheduler_sni:
+            self.connection_args["server_hostname"] = scheduler_sni
 
         # Common executors always available
         self.executors = {

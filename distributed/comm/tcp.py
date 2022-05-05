@@ -436,9 +436,17 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         kwargs = self._get_connect_args(**connection_args)
 
         try:
-            stream = await self.client.connect(
-                ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
-            )
+            # server_hostname option (for SNI) only works with tornado.iostream.IOStream
+            if "server_hostname" in kwargs:
+                plain_stream = await self.client.connect(
+                    ip, port, max_buffer_size=MAX_BUFFER_SIZE
+                )
+                stream = await plain_stream.start_tls(False, **kwargs)
+            else:
+                stream = await self.client.connect(
+                    ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
+                )
+
             # Under certain circumstances tornado will have a closed connnection with an
             # error and not raise a StreamClosedError.
             #
@@ -480,8 +488,10 @@ class TLSConnector(BaseTCPConnector):
     encrypted = True
 
     def _get_connect_args(self, **connection_args):
-        ctx = _expect_tls_context(connection_args)
-        return {"ssl_options": ctx}
+        tls_args = {"ssl_options": _expect_tls_context(connection_args)}
+        if connection_args.get("server_hostname"):
+            tls_args["server_hostname"] = connection_args["server_hostname"]
+        return tls_args
 
 
 class BaseTCPListener(Listener, RequireEncryptionMixin):

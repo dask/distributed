@@ -38,6 +38,24 @@ def test_basic(loop):
                 wait_for_cores(c)
 
 
+def test_sni(loop):
+    with popen(["dask-scheduler", "--no-dashboard"] + tls_args) as s:
+        with popen(
+            [
+                "dask-worker",
+                "--no-dashboard",
+                "--scheduler-sni",
+                "localhost",
+                "tls://127.0.0.1:8786",
+            ]
+            + tls_args
+        ) as w:
+            with Client(
+                "tls://127.0.0.1:8786", loop=loop, security=tls_security()
+            ) as c:
+                wait_for_cores(c)
+
+
 def test_nanny(loop):
     with popen(["dask-scheduler", "--no-dashboard"] + tls_args) as s:
         with popen(

@@ -254,6 +254,12 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     help="Module that should be loaded by each nanny "
     'like "foo.bar" or "/path/to/foo.py"',
 )
+@click.option(
+    "--scheduler-sni",
+    type=str,
+    default=None,
+    help="Scheduler SNI (if different from scheduler hostname)",
+)
 @click.version_option()
 def main(
     scheduler,
