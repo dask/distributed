@@ -125,7 +125,7 @@ def byte_sample(b, size, n):
         number of samples to collect
     """
     if n == 0:
-        return b""
+        return memoryview(b"")
 
     b = ensure_memoryview(b)
 
@@ -139,7 +139,7 @@ def byte_sample(b, size, n):
     if n == 1:
         return parts[0]
     else:
-        return b"".join(parts)
+        return memoryview(b"".join(parts))
 
 
 def maybe_compress(
