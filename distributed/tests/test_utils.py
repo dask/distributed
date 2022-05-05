@@ -270,6 +270,12 @@ def test_ensure_bytes_pyarrow_buffer():
     assert isinstance(result, bytes)
 
 
+def test_ensure_memoryview_empty():
+    result = ensure_memoryview(b"")
+    assert isinstance(result, memoryview)
+    assert result == memoryview(b"")
+
+
 def test_ensure_memoryview():
     data = [b"1", memoryview(b"1"), bytearray(b"1"), array.array("b", [49])]
     for d in data:
