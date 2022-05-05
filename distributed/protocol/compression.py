@@ -127,6 +127,7 @@ def byte_sample(b, size, n):
     if size == 0 or n == 0:
         return memoryview(b"")
 
+    assert size > 0 and n > 0
     b = ensure_memoryview(b)
 
     starts = [random.randint(0, b.nbytes - size) for j in range(n)]
