@@ -1024,7 +1024,7 @@ def ensure_memoryview(obj):
     if mv.nbytes and mv.contiguous:
         return mv.cast("B")
     else:
-        return mv
+        return memoryview(mv.tobytes())
 
 
 def open_port(host=""):
