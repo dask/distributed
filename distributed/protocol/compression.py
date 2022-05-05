@@ -153,7 +153,6 @@ def maybe_compress(
     """
     if compression == "auto":
         compression = default_compression
-
     if not compression:
         return None, payload
     if len(payload) < min_size:
