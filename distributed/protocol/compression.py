@@ -167,7 +167,7 @@ def maybe_compress(
     # Store size as it is used in a few cases.
     payload_nbytes = nbytes(payload)
 
-    # Either too small to bother or too large, compression libraries often fail
+    # Either too small to bother or too large; compression libraries often fail
     if not (min_size < payload_nbytes < 2**31):
         return None, payload
 
