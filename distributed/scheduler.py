@@ -3830,6 +3830,7 @@ class Scheduler(SchedulerState, ServerNode):
         if comm:
             await comm.write(msg)
 
+        del ws
         await self.handle_worker(comm=comm, worker=address, stimulus_id=stimulus_id)
 
     async def add_nanny(self, comm):
