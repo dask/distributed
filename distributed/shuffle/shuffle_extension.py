@@ -8,7 +8,7 @@ import os
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, NewType
+from typing import TYPE_CHECKING, Coroutine, NewType
 
 import toolz
 
@@ -95,7 +95,8 @@ class Shuffle:
         self.transferred = False
         self.total_recvd = 0
         self.start_time = time.time()
-        self._exception: Exception | None = None
+        self._tasks: set[asyncio.Task] = set()
+        self._exception: BaseException | None = None
 
     @contextlib.contextmanager
     def time(self, name: str):
@@ -136,14 +137,39 @@ class Shuffle:
             "start": self.start_time,
         }
 
+    def _handle_async_error(self, task: asyncio.Task, event: asyncio.Event):
+        event.set()
+        self._tasks.discard(task)
+        if task.cancelled():
+            return
+        if exc := task.exception():
+            for t in self._tasks:
+                t.cancel(msg="foo")
+            self._tasks.clear()
+
+            self._exception = exc
+
+    def _create_task(self, coro: Coroutine) -> asyncio.Event:
+        "Create a asyncio Task, keep track of it in `self._tasks`, return an Event that's set when the task is done."
+        task = asyncio.create_task(coro)
+        event = asyncio.Event()
+        task.add_done_callback(functools.partial(self._handle_async_error, event=event))
+        self._tasks.add(task)
+        return event
+
     async def receive(self, data: list[pa.Buffer]) -> None:
+        event = self._create_task(self._receive(data))
+        if (
+            self.multi_file.total_size + sum(map(len, data))
+            > self.multi_file.memory_limit
+        ):
+            await event.wait()  # backpressure
+
+    async def _receive(self, data: list[pa.Buffer]) -> None:
         # This is actually ok.  Our local barrier might have finished,
         # but barriers on other workers might still be running and sending us
         # data
         # assert not self.transferred, "`receive` called after barrier task"
-        if self._exception:
-            raise self._exception
-
         self.total_recvd += sum(map(len, data))
         # An ugly way of turning these batches back into an arrow table
         with self.time("cpu"):
@@ -165,12 +191,11 @@ class Shuffle:
                     for k, v in groups.items()
                 }
             )
-        try:
             await self.multi_file.put(groups)
-        except Exception as e:
-            self._exception = e
 
     def add_partition(self, data: pd.DataFrame) -> None:
+        if self._exception:
+            raise self._exception
         with self.time("cpu"):
             out = split_by_worker(
                 data,
@@ -184,6 +209,8 @@ class Shuffle:
         self.multi_comm.put(out)
 
     def get_output_partition(self, i: int) -> pd.DataFrame:
+        if self._exception:
+            raise self._exception
         assert self.transferred, "`get_output_partition` called before barrier task"
 
         assert self.worker_for[i] == self.worker.address, (
@@ -207,14 +234,24 @@ class Shuffle:
         self.output_partitions_left -= 1
         return out
 
-    def inputs_done(self) -> None:
+    async def inputs_done(self) -> None:
         assert not self.transferred, "`inputs_done` called multiple times"
         self.transferred = True
+        await self.multi_comm.flush()
+        if self.done():
+            # If the shuffle has no output partitions, remove it now;
+            # `get_output_partition` will never be called.
+            # This happens when there are fewer output partitions than workers.
+            assert not self.multi_file.shards
+        if self._exception:
+            raise self._exception
 
     def done(self) -> bool:
         return self.transferred and self.output_partitions_left == 0
 
-    def close(self):
+    async def close(self):
+        # TODO `multi_file.flush()` should just be part of `multi_file.close()`?
+        await self.multi_file.flush()
         self.multi_file.close()
 
 
@@ -250,12 +287,7 @@ class ShuffleWorkerExtension:
         Using an unknown ``shuffle_id`` is an error.
         """
         shuffle = await self._get_shuffle(shuffle_id)
-        task = asyncio.create_task(shuffle.receive(data))
-        if (
-            shuffle.multi_file.total_size + sum(map(len, data))
-            > shuffle.multi_file.memory_limit
-        ):
-            await task  # backpressure
+        await shuffle.receive(data)
 
     async def shuffle_inputs_done(self, comm: object, shuffle_id: ShuffleId) -> None:
         """
@@ -264,16 +296,10 @@ class ShuffleWorkerExtension:
         """
         with log_errors():
             shuffle = await self._get_shuffle(shuffle_id)
-            await shuffle.multi_comm.flush()
-            shuffle.inputs_done()
+            await shuffle.inputs_done()
             if shuffle.done():
-                # If the shuffle has no output partitions, remove it now;
-                # `get_output_partition` will never be called.
-                # This happens when there are fewer output partitions than workers.
-                assert not shuffle.multi_file.shards
-                await shuffle.multi_file.flush()
                 del self.shuffles[shuffle_id]
-                shuffle.close()
+                await shuffle.close()
 
     def add_partition(
         self,
@@ -324,7 +350,10 @@ class ShuffleWorkerExtension:
             shuffle = self.shuffles.pop(shuffle_id, None)
             # key missing if another thread got to it first
             if shuffle:
-                shuffle.close()
+                sync(
+                    self.worker.loop,
+                    shuffle.close,
+                )
                 sync(
                     self.worker.loop,
                     self.worker.scheduler.shuffle_register_complete,
@@ -385,16 +414,16 @@ class ShuffleWorkerExtension:
         empty: pd.DataFrame | None = None,
         column=None,
         npartitions: int = None,
-    ):
+    ) -> Shuffle:
         return sync(
             self.worker.loop, self._get_shuffle, shuffle_id, empty, column, npartitions
-        )
+        )  # type: ignore
 
-    def close(self):
+    async def close(self):
         self.executor.shutdown()
         while self.shuffles:
             _, shuffle = self.shuffles.popitem()
-            shuffle.close()
+            await shuffle.close()
 
 
 class ShuffleSchedulerExtension:
