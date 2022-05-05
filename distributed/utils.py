@@ -1014,7 +1014,7 @@ def ensure_bytes(s):
 
 
 def ensure_memoryview(obj):
-    """Ensure `obj` is a memoryview of datatype bytes"""
+    """Ensure `obj` is a `memoryview` that is 1-D contiguous of `uint8` type"""
     mv: memoryview
     if type(obj) is memoryview:
         mv = obj
@@ -1022,10 +1022,14 @@ def ensure_memoryview(obj):
         mv = memoryview(obj)
 
     if not mv.nbytes:
+        # empty
         return memoryview(b"")
     elif mv.contiguous:
+        # can reshape & cast zero-copy
         return mv.cast("B")
     else:
+        # `memoryview` is non-trivial & not contiguous.
+        # Copy it to contiguous form of the expected type.
         return memoryview(mv.tobytes())
 
 
