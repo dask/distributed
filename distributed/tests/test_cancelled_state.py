@@ -194,6 +194,9 @@ async def test_executing_cancelled_error(c, s, w):
 
     fut = c.submit(wait_and_raise)
     await wait_for_state(fut.key, "executing", w)
+    # Queue up another task to ensure this is not affected by our error handling
+    fut2 = c.submit(inc, 1)
+    await wait_for_state(fut2.key, "ready", w)
 
     fut.release()
     await wait_for_state(fut.key, "cancelled", w)
@@ -206,6 +209,7 @@ async def test_executing_cancelled_error(c, s, w):
     while fut.key in w.tasks:
         await asyncio.sleep(0.01)
 
+    assert await fut2 == 2
     # Everything should still be executing as usual after this
     await c.submit(sum, c.map(inc, range(10))) == sum(map(inc, range(10)))
 
