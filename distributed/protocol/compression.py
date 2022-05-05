@@ -16,7 +16,7 @@ from tlz import identity
 
 import dask
 
-from distributed.utils import ensure_bytes
+from distributed.utils import ensure_bytes, nbytes
 
 compressions: dict[
     str | None | Literal[False],
@@ -155,9 +155,13 @@ def maybe_compress(
         compression = default_compression
     if not compression:
         return None, payload
-    if len(payload) < min_size:
+
+    # Store size as it is used in a few cases.
+    payload_nbytes = nbytes(payload)
+
+    if payload_nbytes < min_size:
         return None, payload
-    if len(payload) > 2**31:  # Too large, compression libraries often fail
+    if payload_nbytes > 2**31:  # Too large, compression libraries often fail
         return None, payload
 
     sample_size = int(sample_size)
@@ -169,14 +173,9 @@ def maybe_compress(
     if len(compress(sample)) > 0.9 * len(sample):  # sample not very compressible
         return None, payload
 
-    if type(payload) is memoryview:
-        nbytes = payload.itemsize * len(payload)
-    else:
-        nbytes = len(payload)
-
     compressed = compress(ensure_bytes(payload))
 
-    if len(compressed) > 0.9 * nbytes:  # full data not very compressible
+    if len(compressed) > 0.9 * payload_nbytes:  # full data not very compressible
         return None, payload
     else:
         return compression, compressed
