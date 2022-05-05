@@ -290,7 +290,6 @@ async def test_failed_worker(c, s, a, b):
 
     assert "actor" in str(info.value).lower()
     assert "worker" in str(info.value).lower()
-    assert "lost" in str(info.value).lower()
 
 
 @gen_cluster(client=True)

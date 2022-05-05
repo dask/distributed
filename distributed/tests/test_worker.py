@@ -44,7 +44,6 @@ from distributed.metrics import time
 from distributed.profile import wait_profiler
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
-from distributed.utils import TimeoutError
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _LockedCommPool,
@@ -57,6 +56,7 @@ from distributed.utils_test import (
     inc,
     mul,
     nodebug,
+    raises_with_cause,
     slowinc,
     slowsum,
 )
@@ -314,8 +314,8 @@ async def test_worker_port_range(s):
         assert w1.port == 9867  # Selects first port in range
         async with Worker(s.address, port=port) as w2:
             assert w2.port == 9868  # Selects next port in range
-            with pytest.raises(
-                ValueError, match="Could not start Worker"
+            with raises_with_cause(
+                RuntimeError, None, ValueError, match_cause="Could not start Worker"
             ):  # No more ports left
                 async with Worker(s.address, port=port):
                     pass
@@ -403,7 +403,9 @@ async def test_plugin_exception():
             raise ValueError("Setup failed")
 
     async with Scheduler(port=0) as s:
-        with pytest.raises(ValueError, match="Setup failed"):
+        with raises_with_cause(
+            RuntimeError, "Worker failed to start", ValueError, "Setup failed"
+        ):
             async with Worker(
                 s.address,
                 plugins={
@@ -425,7 +427,12 @@ async def test_plugin_multiple_exceptions():
 
     async with Scheduler(port=0) as s:
         # There's no guarantee on the order of which exception is raised first
-        with pytest.raises((ValueError, RuntimeError), match="MyPlugin.* Error"):
+        with raises_with_cause(
+            RuntimeError,
+            None,
+            (ValueError, RuntimeError),
+            match_cause="MyPlugin.* Error",
+        ):
             with captured_logger("distributed.worker") as logger:
                 async with Worker(
                     s.address,
@@ -444,7 +451,12 @@ async def test_plugin_multiple_exceptions():
 @gen_test()
 async def test_plugin_internal_exception():
     async with Scheduler(port=0) as s:
-        with pytest.raises(UnicodeDecodeError, match="codec can't decode"):
+        with raises_with_cause(
+            RuntimeError,
+            "Worker failed to start",
+            UnicodeDecodeError,
+            match_cause="codec can't decode",
+        ):
             async with Worker(
                 s.address,
                 plugins={
@@ -814,12 +826,12 @@ async def test_hold_onto_dependents(c, s, a, b):
 @gen_test()
 async def test_worker_death_timeout():
     w = Worker("tcp://127.0.0.1:12345", death_timeout=0.1)
-    with pytest.raises(TimeoutError) as info:
+    with pytest.raises(asyncio.TimeoutError) as info:
         await w
 
     assert "Worker" in str(info.value)
-    assert "timed out" in str(info.value) or "failed to start" in str(info.value)
-    assert w.status == Status.closed
+    assert "timed out" in str(info.value)
+    assert w.status == Status.failed
 
 
 @gen_cluster(client=True)
@@ -3081,7 +3093,7 @@ async def test_worker_status_sync(s, a):
         {"action": "add-worker"},
         {
             "action": "worker-status-change",
-            "prev-status": "undefined",
+            "prev-status": "init",
             "status": "running",
         },
         {

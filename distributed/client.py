@@ -1315,11 +1315,21 @@ class Client(SyncMethodMixin):
             deadline = time() + parse_timedelta(timeout)
         else:
             deadline = None
-        while n_workers and len(info["workers"]) < n_workers:
+
+        def running_workers(info):
+            return len(
+                [
+                    ws
+                    for ws in info["workers"].values()
+                    if ws["status"] == Status.running.name
+                ]
+            )
+
+        while n_workers and running_workers(info) < n_workers:
             if deadline and time() > deadline:
                 raise TimeoutError(
                     "Only %d/%d workers arrived after %s"
-                    % (len(info["workers"]), n_workers, timeout)
+                    % (running_workers(info), n_workers, timeout)
                 )
             await asyncio.sleep(0.1)
             info = await self.scheduler.identity()

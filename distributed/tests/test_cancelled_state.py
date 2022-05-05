@@ -1,7 +1,7 @@
 import asyncio
 
 import distributed
-from distributed import Event, Worker
+from distributed import Event, Lock, Worker
 from distributed.utils_test import (
     _LockedCommPool,
     assert_story,
@@ -138,28 +138,44 @@ async def test_worker_stream_died_during_comm(c, s, a, b):
     assert any("receive-dep-failed" in msg for msg in b.log)
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
+@gen_cluster(client=True, nthreads=[("", 1)], timeout=4)
 async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
 
-    lock = asyncio.Lock()
-    await lock.acquire()
+    block_get_data = asyncio.Lock()
+    block_compute = Lock()
+    enter_get_data = asyncio.Event()
+    await block_get_data.acquire()
 
     class BrokenWorker(Worker):
         async def get_data(self, comm, *args, **kwargs):
-            async with lock:
+            enter_get_data.set()
+            async with block_get_data:
                 comm.abort()
 
+    def blockable_compute(x, lock):
+        with lock:
+            return x + 1
+
     async with BrokenWorker(s.address) as a:
-        fut1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
+        await c.wait_for_workers(2)
+        fut1 = c.submit(
+            blockable_compute,
+            1,
+            lock=block_compute,
+            workers=[a.address],
+            allow_other_workers=True,
+        )
         fut2 = c.submit(inc, fut1, workers=[b.address])
 
-        await wait_for_state(fut1.key, "flight", b)
+        await enter_get_data.wait()
+        await block_compute.acquire()
 
         # Close in scheduler to ensure we transition and reschedule task properly
         await s.close_worker(worker=a.address, stimulus_id="test")
         await wait_for_state(fut1.key, "resumed", b)
 
-        lock.release()
+        block_get_data.release()
+        await block_compute.release()
         assert await fut2 == 3
 
         b_story = b.story(fut1.key)
@@ -224,6 +240,7 @@ async def test_flight_cancelled_error(c, s, b):
             return await super().get_data(comm, *args, **kwargs)
 
     async with BrokenWorker(s.address) as a:
+        await c.wait_for_workers(2)
         fut1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
         fut2 = c.submit(inc, fut1, workers=[b.address])
         await wait_for_state(fut1.key, "flight", b)

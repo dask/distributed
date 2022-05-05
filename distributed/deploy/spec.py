@@ -325,10 +325,7 @@ class SpecCluster(Cluster):
                     for w in to_close
                     if w in self.workers
                 ]
-                await asyncio.wait(tasks)
-                for task in tasks:  # for tornado gen.coroutine support
-                    with suppress(RuntimeError):
-                        await task
+                await asyncio.gather(*tasks)
             for name in to_close:
                 if name in self.workers:
                     del self.workers[name]
@@ -417,7 +414,7 @@ class SpecCluster(Cluster):
 
             await self.scheduler.close()
             for w in self._created:
-                assert w.status == Status.closed, w.status
+                assert w.status in {Status.closed, Status.failed}, w.status
 
         if hasattr(self, "_old_logging_level"):
             silence_logging(self._old_logging_level)

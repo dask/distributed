@@ -94,7 +94,6 @@ class Nanny(ServerNode):
 
     _instances: ClassVar[weakref.WeakSet[Nanny]] = weakref.WeakSet()
     process = None
-    status = Status.undefined
     memory_manager: NannyMemoryManager
 
     # Inputs to parse_ports()
@@ -269,7 +268,6 @@ class Nanny(ServerNode):
 
         self._listen_address = listen_address
         Nanny._instances.add(self)
-        self.status = Status.init
 
     # Deprecated attributes; use Nanny.memory_manager.<name> instead
     memory_limit = DeprecatedMemoryManagerAttribute()
@@ -309,10 +307,10 @@ class Nanny(ServerNode):
         warnings.warn("The local_dir attribute has moved to local_directory")
         return self.local_directory
 
-    async def start(self):
+    async def start_unsafe(self):
         """Start nanny, start local process, start watching"""
 
-        await super().start()
+        await super().start_unsafe()
 
         ports = parse_ports(self._start_port)
         for port in ports:
@@ -337,7 +335,7 @@ class Nanny(ServerNode):
                 break
         else:
             raise ValueError(
-                f"Could not start Nanny on host {self._start_host}"
+                f"Could not start Nanny on host {self._start_host} "
                 f"with port {self._start_port}"
             )
 
@@ -352,11 +350,12 @@ class Nanny(ServerNode):
 
         logger.info("        Start Nanny at: %r", self.address)
         response = await self.instantiate()
-        if response == Status.running:
-            assert self.worker_address
-            self.status = Status.running
-        else:
+
+        if response != Status.running:
             await self.close()
+            return
+
+        assert self.worker_address
 
         self.start_periodic_callbacks()
 
@@ -571,7 +570,9 @@ class Nanny(ServerNode):
 
         self.status = Status.closing
         logger.info(
-            f"Closing Nanny at {self.address!r}. Report closure to scheduler: {report}"
+            "Closing Nanny at %r. Report closure to scheduler: %s",
+            self.address_safe,
+            report,
         )
 
         for preload in self.preloads:
