@@ -1774,6 +1774,9 @@ def check_instances():
         s.extensions.clear()
         s.plugins.clear()
         s.services.clear()
+        s.handlers.clear()
+        s.stream_handlers.clear()
+        s.stream_comms.clear()
         # No close methods, destroy them
         del s.http_application
         del s.http_server
