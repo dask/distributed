@@ -1028,7 +1028,7 @@ def ensure_memoryview(obj):
         # Perform zero-copy reshape & cast
         return mv.cast("B")
     else:
-        # Copy to contiguous form of expected type
+        # Copy to contiguous form of expected shape & type
         return memoryview(mv.tobytes())
 
 
