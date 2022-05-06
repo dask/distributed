@@ -120,7 +120,8 @@ def byte_sample(b, size, n):
     ----------
     b : bytes or memoryview
     size : int
-        size of each sample to collect
+        target size of each sample to collect
+        (may be smaller if samples collide)
     n : int
         number of samples to collect
     """
