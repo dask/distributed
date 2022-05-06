@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import importlib
 import traceback
 from array import array
@@ -11,7 +12,7 @@ import msgpack
 
 import dask
 from dask.base import normalize_token
-from dask.utils import ensure_bytes, typename
+from dask.utils import typename
 
 from distributed.protocol import pickle
 from distributed.protocol.compression import decompress, maybe_compress
@@ -179,7 +180,7 @@ def msgpack_loads(header, frames):
 
 
 def serialization_error_loads(header, frames):
-    msg = "\n".join([ensure_bytes(frame).decode("utf8") for frame in frames])
+    msg = "\n".join([codecs.decode(frame, "utf8") for frame in frames])
     raise TypeError(msg)
 
 

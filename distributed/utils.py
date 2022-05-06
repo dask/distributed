@@ -1011,6 +1011,25 @@ def ensure_bytes(s):
     return _ensure_bytes(s)
 
 
+def ensure_memoryview(obj):
+    """Ensure `obj` is a 1-D contiguous `uint8` `memoryview`"""
+    mv: memoryview
+    if type(obj) is memoryview:
+        mv = obj
+    else:
+        mv = memoryview(obj)
+
+    if not mv.nbytes:
+        # Drop `obj` reference to permit freeing underlying data
+        return memoryview(b"")
+    elif mv.contiguous:
+        # Perform zero-copy reshape & cast
+        return mv.cast("B")
+    else:
+        # Copy to contiguous form of expected shape & type
+        return memoryview(mv.tobytes())
+
+
 def open_port(host=""):
     """Return a probably-open port
 
