@@ -272,31 +272,44 @@ class PipInstall(WorkerPlugin):
 
     async def setup(self, worker):
         from distributed.lock import Lock
+        lock = Lock(socket.gethostname())
+        try:
+            await lock.acquire(1)  # don't clobber one installation
+        except:
+            # skip trying to install, another process on this worker already grabbed the lock
+            return
+        # skip trying to install, another process already installed successfully.
+        marker_file = '.pip_install'
+        if os.path.exists(marker_file):
+            return
 
-        async with Lock(socket.gethostname()):  # don't clobber one installation
-            logger.info("Pip installing the following packages: %s", self.packages)
-            proc = subprocess.Popen(
-                [sys.executable, "-m", "pip", "install"]
-                + self.pip_options
-                + self.packages,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+        logger.info("Pip installing the following packages: %s", self.packages)
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "pip", "install"]
+            + self.pip_options
+            + self.packages,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             )
-            stdout, stderr = proc.communicate()
-            returncode = proc.wait()
+        stdout, stderr = proc.communicate()
+        returncode = proc.wait()
+        logger.info("Pip stdout:" + stdout.decode().strip())
+        if returncode:
+            logger.error("Pip install failed with '%s'", stderr.decode().strip())
+            return
 
-            if returncode:
-                logger.error("Pip install failed with '%s'", stderr.decode().strip())
-                return
+        with open(marker_file, 'w'):
+            pass
 
-            if self.restart and worker.nanny:
-                lines = stdout.strip().split(b"\n")
-                if not all(
+        if self.restart and worker.nanny:
+            lines = stdout.strip().split(b"\n")
+            if not all(
                     line.startswith(b"Requirement already satisfied") for line in lines
-                ):
-                    worker.loop.add_callback(
-                        worker.close_gracefully, restart=True
-                    )  # restart
+            ):
+                worker.loop.add_callback(
+                    worker.close_gracefully, restart=True
+                )  # restart
+        await lock.release()
 
 
 # Adapted from https://github.com/dask/distributed/issues/3560#issuecomment-596138522
