@@ -132,13 +132,13 @@ def byte_sample(b, size, n):
 
     parts = []
     max_start = b.nbytes - size
-    next_start = randint(0, max_start)
+    start = randint(0, max_start)
     for i in range(n - 1):
-        start = next_start
         next_start = randint(0, max_start)
         end = min(start + size, next_start)
         parts.append(b[start:end])
-    parts.append(b[next_start : next_start + size])
+        start = next_start
+    parts.append(b[start : start + size])
 
     if n == 1:
         return parts[0]
