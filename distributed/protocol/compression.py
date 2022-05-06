@@ -187,7 +187,7 @@ def maybe_compress(
         compressed = compress(mv)
         if len(compressed) <= 0.9 * mv.nbytes:
             return compression, compressed
-    # Skip compression as `sample` or `payload` didn't compress well
+    # Skip compression as the sample or the data didn't compress well
     return None, payload
 
 
