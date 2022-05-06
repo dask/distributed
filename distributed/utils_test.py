@@ -1815,11 +1815,11 @@ def check_instances():
     )
     wait_profiler()
     gc.collect()
-    if Scheduler._instances:
-        s = next(iter(Scheduler._instances))
-        import objgraph
+    # if Scheduler._instances:
+    #     s = next(iter(Scheduler._instances))
+    #     import objgraph
 
-        objgraph.show_backrefs([s], filename="scheduler.png")
+    #     objgraph.show_backrefs([s], filename="scheduler.png")
     assert not Scheduler._instances
 
     SpecCluster._instances.clear()
