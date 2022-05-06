@@ -138,7 +138,7 @@ async def test_worker_stream_died_during_comm(c, s, a, b):
     assert any("receive-dep-failed" in msg for msg in b.log)
 
 
-@gen_cluster(client=True, nthreads=[("", 1)], timeout=4)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
 
     block_get_data = asyncio.Lock()
