@@ -259,18 +259,13 @@ class Instruction:
     __slots__ = ()
 
 
-# TODO https://github.com/dask/distributed/issues/5736
-
-# @dataclass
-# class GatherDep(Instruction):
-#    __slots__ = ("worker", "to_gather")
-#    worker: str
-#    to_gather: set[str]
-
-
-# @dataclass
-# class FindMissing(Instruction):
-#    __slots__ = ()
+@dataclass
+class GatherDep(Instruction):
+    worker: str
+    to_gather: set[str]
+    total_nbytes: int
+    stimulus_id: str
+    __slots__ = tuple(__annotations__)  # type: ignore
 
 
 @dataclass
@@ -431,6 +426,13 @@ class StateMachineEvent:
 
 @dataclass
 class UnpauseEvent(StateMachineEvent):
+    __slots__ = ()
+
+
+@dataclass
+class GatherDepDoneEvent(StateMachineEvent):
+    """Temporary hack - to be removed"""
+
     __slots__ = ()
 
 
