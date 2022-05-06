@@ -149,8 +149,8 @@ def byte_sample(b, size, n):
 
 def maybe_compress(
     payload,
-    min_size=1e4,
-    sample_size=1e4,
+    min_size=10_000,
+    sample_size=10_000,
     nsamples=5,
     compression=dask.config.get("distributed.comm.compression"),
 ):
@@ -172,7 +172,6 @@ def maybe_compress(
         return None, payload
 
     # Normalize function arguments
-    sample_size = int(sample_size)
     if compression == "auto":
         compression = default_compression
     compress = compressions[compression]["compress"]
