@@ -1022,14 +1022,13 @@ def ensure_memoryview(obj):
         mv = memoryview(obj)
 
     if not mv.nbytes:
-        # Drop `obj` reference so underlying data can be freed.
+        # Drop `obj` reference to allow freeing underlying data
         return memoryview(b"")
     elif mv.contiguous:
-        # Perform zero-copy reshape & cast.
+        # Perform zero-copy reshape & cast
         return mv.cast("B")
     else:
-        # `memoryview` is non-trivial & not contiguous.
-        # Copy it to contiguous form of the expected type.
+        # Copy to contiguous form of expected type
         return memoryview(mv.tobytes())
 
 
