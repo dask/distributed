@@ -11,7 +11,7 @@ import msgpack
 
 import dask
 from dask.base import normalize_token
-from dask.utils import typename
+from dask.utils import ensure_bytes, typename
 
 from distributed.protocol import pickle
 from distributed.protocol.compression import decompress, maybe_compress
@@ -22,7 +22,7 @@ from distributed.protocol.utils import (
     pack_frames_prelude,
     unpack_frames,
 )
-from distributed.utils import ensure_bytes, has_keyword
+from distributed.utils import has_keyword
 
 dask_serialize = dask.utils.Dispatch("dask_serialize")
 dask_deserialize = dask.utils.Dispatch("dask_deserialize")

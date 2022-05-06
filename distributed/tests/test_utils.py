@@ -1,4 +1,3 @@
-import array
 import asyncio
 import contextvars
 import functools
@@ -26,7 +25,6 @@ from distributed.utils import (
     LoopRunner,
     TimeoutError,
     _maybe_complex,
-    ensure_bytes,
     ensure_ip,
     format_dashboard_link,
     get_ip_interface,
@@ -246,27 +244,6 @@ def test_seek_delimiter_endline():
     f.seek(5)
     seek_delimiter(f, b"\n", 5)
     assert f.tell() == 7
-
-
-def test_ensure_bytes():
-    data = [b"1", "1", memoryview(b"1"), bytearray(b"1"), array.array("b", [49])]
-    for d in data:
-        result = ensure_bytes(d)
-        assert isinstance(result, bytes)
-        assert result == b"1"
-
-
-def test_ensure_bytes_ndarray():
-    np = pytest.importorskip("numpy")
-    result = ensure_bytes(np.arange(12))
-    assert isinstance(result, bytes)
-
-
-def test_ensure_bytes_pyarrow_buffer():
-    pa = pytest.importorskip("pyarrow")
-    buf = pa.py_buffer(b"123")
-    result = ensure_bytes(buf)
-    assert isinstance(result, bytes)
 
 
 def test_nbytes():

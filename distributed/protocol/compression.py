@@ -15,8 +15,7 @@ from packaging.version import parse as parse_version
 from tlz import identity
 
 import dask
-
-from distributed.utils import ensure_bytes
+from dask.utils import ensure_bytes
 
 compressions: dict[
     str | None | Literal[False],

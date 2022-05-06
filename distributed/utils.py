@@ -972,47 +972,6 @@ def read_block(f, offset, length, delimiter=None):
     return bytes
 
 
-def ensure_bytes(s):
-    """Attempt to turn `s` into bytes.
-
-    Parameters
-    ----------
-    s : Any
-        The object to be converted. Will correctly handled
-
-        * str
-        * bytes
-        * objects implementing the buffer protocol (memoryview, ndarray, etc.)
-
-    Returns
-    -------
-    b : bytes
-
-    Raises
-    ------
-    TypeError
-        When `s` cannot be converted
-
-    Examples
-    --------
-    >>> ensure_bytes('123')
-    b'123'
-    >>> ensure_bytes(b'123')
-    b'123'
-    """
-    if isinstance(s, bytes):
-        return s
-    elif hasattr(s, "encode"):
-        return s.encode()
-    else:
-        try:
-            return bytes(s)
-        except Exception as e:
-            raise TypeError(
-                "Object %s is neither a bytes object nor has an encode method" % s
-            ) from e
-
-
 def open_port(host=""):
     """Return a probably-open port
 

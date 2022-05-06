@@ -15,6 +15,7 @@ from tornado.iostream import StreamClosedError
 from tornado.websocket import WebSocketClosedError, WebSocketHandler, websocket_connect
 
 import dask
+from dask.utils import ensure_bytes
 
 from distributed.comm.addressing import parse_host_port, unparse_host_port
 from distributed.comm.core import (
@@ -36,7 +37,7 @@ from distributed.comm.utils import (
     get_tcp_server_address,
     to_frames,
 )
-from distributed.utils import ensure_bytes, nbytes
+from distributed.utils import nbytes
 
 logger = logging.getLogger(__name__)
 
