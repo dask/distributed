@@ -1777,6 +1777,7 @@ def check_instances():
         s.handlers.clear()
         s.stream_handlers.clear()
         s.stream_comms.clear()
+        s.transitions_table.clear()
         # No close methods, destroy them
         del s.http_application
         del s.http_server
@@ -1818,12 +1819,7 @@ def check_instances():
         s = next(iter(Scheduler._instances))
         import objgraph
 
-        def ignore(obj):
-            return (
-                # ignore bound methods temporarily
-                not (inspect.ismethod(obj) and obj.__self__ is s))
-
-        objgraph.show_backrefs([s], filename="scheduler.png", filter=ignore)
+        objgraph.show_backrefs([s], filename="scheduler.png")
     assert not Scheduler._instances
 
 
