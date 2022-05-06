@@ -607,6 +607,7 @@ class Worker(ServerNode):
         self._transitions_table = {
             ("cancelled", "fetch"): self.transition_cancelled_fetch,
             ("cancelled", "released"): self.transition_cancelled_released,
+            ("cancelled", "missing"): self.transition_cancelled_released,
             ("cancelled", "waiting"): self.transition_cancelled_waiting,
             ("cancelled", "forgotten"): self.transition_cancelled_forgotten,
             ("cancelled", "memory"): self.transition_cancelled_memory,
@@ -626,7 +627,7 @@ class Worker(ServerNode):
             ("executing", "released"): self.transition_executing_released,
             ("executing", "rescheduled"): self.transition_executing_rescheduled,
             ("fetch", "flight"): self.transition_fetch_flight,
-            ("fetch", "missing"): self.transition_fetch_missing,
+            ("fetch", "missing"): self.transition_generic_missing,
             ("fetch", "released"): self.transition_generic_released,
             ("flight", "error"): self.transition_flight_error,
             ("flight", "fetch"): self.transition_flight_fetch,
@@ -646,6 +647,7 @@ class Worker(ServerNode):
             ("ready", "released"): self.transition_generic_released,
             ("released", "error"): self.transition_generic_error,
             ("released", "fetch"): self.transition_released_fetch,
+            ("released", "missing"): self.transition_released_fetch,
             ("released", "forgotten"): self.transition_released_forgotten,
             ("released", "memory"): self.transition_released_memory,
             ("released", "waiting"): self.transition_released_waiting,
@@ -2020,6 +2022,7 @@ class Worker(ServerNode):
         if self.validate:
             assert ts.state == "missing"
             assert ts.priority is not None
+            assert ts.who_has
 
         self._missing_dep_flight.discard(ts)
         ts.state = "fetch"
@@ -2048,7 +2051,7 @@ class Worker(ServerNode):
         ts.done = False
         return {}, []
 
-    def transition_fetch_missing(
+    def transition_generic_missing(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         ts.state = "missing"
@@ -2062,6 +2065,8 @@ class Worker(ServerNode):
         if self.validate:
             assert ts.state == "released"
             assert ts.priority is not None
+        if not ts.who_has:
+            return {ts: "missing"}, []
         ts.state = "fetch"
         ts.done = False
         self.data_needed.push(ts)
@@ -2656,18 +2661,25 @@ class Worker(ServerNode):
                 recs, instructions = self._transition(
                     ts, "released", stimulus_id=stimulus_id
                 )
-                v = recs.get(ts, (finish, *args))
                 v_state: str
                 v_args: list | tuple
-                if isinstance(v, tuple):
-                    v_state, *v_args = v
-                else:
-                    v_state, v_args = v, ()
-                b_recs, b_instructions = self._transition(
-                    ts, v_state, *v_args, stimulus_id=stimulus_id
+                while v := recs.pop(ts, None):
+                    if isinstance(v, tuple):
+                        v_state, *v_args = v
+                    else:
+                        v_state, v_args = v, ()
+                    if v_state == "forgotten":
+                        # We do not want to forget. The purpose of this
+                        # transition path is to get to `finish`
+                        continue
+                    recs, instructions = merge_recs_instructions(
+                        (recs, instructions),
+                        self._transition(ts, v_state, *v_args, stimulus_id=stimulus_id),
+                    )
+                recs, instructions = merge_recs_instructions(
+                    (recs, instructions),
+                    self._transition(ts, finish, *args, stimulus_id=stimulus_id),
                 )
-                recs.update(b_recs)
-                instructions += b_instructions
             except InvalidTransition:
                 self.log_event(
                     "invalid-worker-transition",
@@ -3204,7 +3216,12 @@ class Worker(ServerNode):
             for d in has_what:
                 ts = self.tasks[d]
                 ts.who_has.remove(worker)
-                if not ts.who_has and ts.state not in ("released", "memory"):
+                if not ts.who_has and ts.state in (
+                    "fetch",
+                    "flight",
+                    "resumed",
+                    "cancelled",
+                ):
                     recommendations[ts] = "missing"
                     self.log.append(
                         ("missing-who-has", worker, ts.key, stimulus_id, time())
@@ -3262,10 +3279,7 @@ class Worker(ServerNode):
                             "stimulus_id": stimulus_id,
                         }
                     )
-                    if ts.who_has:
-                        recommendations[ts] = "fetch"
-                    elif ts.state not in ("released", "memory"):
-                        recommendations[ts] = "missing"
+                    recommendations[ts] = "fetch"
             del data, response
             self.transitions(recommendations, stimulus_id=stimulus_id)
 
