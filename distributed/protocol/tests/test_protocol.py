@@ -48,10 +48,11 @@ def test_compression_1():
     pytest.importorskip("lz4")
     np = pytest.importorskip("numpy")
     x = np.ones(1000000)
-    frames = dumps({"x": Serialize(x.tobytes())})
-    assert sum(map(nbytes, frames)) < x.nbytes
+    b = x.tobytes()
+    frames = dumps({"x": Serialize(b)})
+    assert sum(map(nbytes, frames)) < nbytes(b)
     y = loads(frames)
-    assert {"x": x.tobytes()} == y
+    assert {"x": b} == y
 
 
 def test_compression_2():
