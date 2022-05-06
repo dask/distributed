@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from contextlib import suppress
-from itertools import islice
 from random import randint
 from typing import Literal
 
@@ -131,14 +130,16 @@ def byte_sample(b, size, n):
 
     b = ensure_memoryview(b)
 
+    parts = []
     max_start = b.nbytes - size
-    starts = [randint(0, max_start) for j in range(n)]
-    ends = []
-    for i, start in enumerate(islice(starts, n - 1)):
-        ends.append(min(start + size, starts[i + 1]))
-    ends.append(starts[-1] + size)
+    next_start = randint(0, max_start)
+    for i in range(n - 1):
+        start = next_start
+        next_start = randint(0, max_start)
+        end = min(start + size, next_start)
+        parts.append(b[start:end])
+    parts.append(b[next_start : next_start + size])
 
-    parts = [b[start:end] for start, end in zip(starts, ends)]
     if n == 1:
         return parts[0]
     else:
