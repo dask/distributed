@@ -1774,6 +1774,7 @@ def check_instances():
         s.extensions.clear()
         s.plugins.clear()
         s.services.clear()
+        s.listeners.clear()
         s.handlers.clear()
         s.stream_handlers.clear()
         s.stream_comms.clear()
@@ -1781,6 +1782,7 @@ def check_instances():
         # No close method, cut the loop
         del s.http_application
         del s.http_server
+        del s
 
     for w in Worker._instances:
         with suppress(RuntimeError):  # closed IOLoop
@@ -1815,11 +1817,11 @@ def check_instances():
     )
     wait_profiler()
     gc.collect()
-    # if Scheduler._instances:
-    #     s = next(iter(Scheduler._instances))
-    #     import objgraph
+    if Scheduler._instances:
+        s = next(iter(Scheduler._instances))
+        import objgraph
 
-    #     objgraph.show_backrefs([s], filename="scheduler.png")
+        objgraph.show_backrefs([s], filename="scheduler.png")
     assert not Scheduler._instances
 
     SpecCluster._instances.clear()
