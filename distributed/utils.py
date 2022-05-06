@@ -1014,7 +1014,7 @@ def ensure_bytes(s):
 
 
 def ensure_memoryview(obj):
-    """Ensure `obj` is a `memoryview` that is 1-D contiguous of `uint8` type"""
+    """Ensure `obj` is a 1-D contiguous `uint8` `memoryview`"""
     mv: memoryview
     if type(obj) is memoryview:
         mv = obj
