@@ -1778,7 +1778,7 @@ def check_instances():
         s.stream_handlers.clear()
         s.stream_comms.clear()
         s.transitions_table.clear()
-        # No close methods, destroy them
+        # No close method, cut the loop
         del s.http_application
         del s.http_server
 
@@ -1822,7 +1822,6 @@ def check_instances():
         objgraph.show_backrefs([s], filename="scheduler.png")
     assert not Scheduler._instances
 
-
     SpecCluster._instances.clear()
     Nanny._instances.clear()
     DequeHandler.clear_all_instances()
@@ -1831,9 +1830,9 @@ def check_instances():
 @contextmanager
 def clean(threads=True, instances=True, timeout=1, processes=True):
     with check_thread_leak() if threads else nullcontext():
-        with pristine_loop() as loop:
-            with check_process_leak(check=processes):
-                with check_instances() if instances else nullcontext():
+        with check_instances() if instances else nullcontext():
+            with pristine_loop() as loop:
+                with check_process_leak(check=processes):
                     with check_active_rpc(loop, timeout):
                         reset_config()
 
