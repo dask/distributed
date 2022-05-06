@@ -164,7 +164,7 @@ def error_message(scheduler, workers, client, client_name="client"):
         err_table = asciitable(
             ["Package", client_name, "scheduler", "workers", "level"], errs
         )
-        err_msg = f"Mismatched package versions found, this may cause instability. Please address critical mismatches before continuing.\n\n{err_table}"
+        err_msg = f"We recommend fixing any critical mismatches before continuing.\n\n{err_table}"
         if notes:
             err_msg += "\nNotes: \n{}".format("\n".join(notes))
         out["warning"] += err_msg

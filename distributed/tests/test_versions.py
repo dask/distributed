@@ -77,7 +77,7 @@ def test_version_mismatch(node, effect, kwargs_not_matching, pattern):
     column_matching = {"client": 1, "scheduler": 2, "workers": 3}
     msg = error_message(**kwargs_not_matching)
     i = column_matching.get(node, 3)
-    assert "Mismatched package versions found" in msg["warning"]
+    assert "We recommend fixing any critical mismatches" in msg["warning"]
     assert "distributed" in msg["warning"]
     assert "Critical" in msg["warning"]
     assert (
@@ -108,10 +108,12 @@ def test_scheduler_additional_irrelevant_package(kwargs_matching):
 
 def test_python_mismatch(kwargs_matching):
     kwargs_matching["client"]["packages"]["python"] = "0.0.0"
+    kwargs_matching["client"]["packages"]["tornado"] = "0.0.0"
     msg = error_message(**kwargs_matching)
-    assert "Mismatched package versions found" in msg["warning"]
+    assert "We recommend fixing any critical mismatches" in msg["warning"]
     assert "python" in msg["warning"]
     assert "Critical" in msg["warning"]
+    assert "Warning" in msg["warning"]
     assert (
         "0.0.0"
         in re.search(r"python\s+(?:(?:\|[^|\r\n]*)+\|(?:\r?\n|\r)?)+", msg["warning"])
