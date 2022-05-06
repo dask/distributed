@@ -137,6 +137,9 @@ async def test_decide_worker_with_restrictions(client, s, a, b, c):
     ],
 )
 def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
+    if ndeps >= len(nthreads):
+        pytest.skip()
+
     @gen_cluster(
         client=True,
         nthreads=nthreads,
@@ -238,6 +241,153 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         assert len(unexpected_transfers) <= 3, unexpected_transfers
 
     test_decide_worker_coschedule_order_neighbors_()
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4)
+async def test_decide_worker_common_dep_ignored(client, s, *workers):
+    r"""
+    When we have basic linear chains, but all the downstream tasks also share a common dependency, ignore that dependency.
+
+    i  j  k  l   m  n  o  p
+    \__\__\__\___/__/__/__/
+    |  |  |  | | |  |  |  |
+    |  |  |  | X |  |  |  |
+    a  b  c  d   e  f  g  h
+
+               ^ Ignore the location of X when picking a worker for i..p.
+                 It will end up being copied to all workers anyway.
+
+    If a dependency will end up on every worker regardless, because many things depend on it,
+    we should ignore it when selecting our candidate workers. Otherwise, we'll end up considering
+    every worker as a candidate, which is 1) slow and 2) often leads to poor choices.
+    """
+    roots = [
+        delayed(slowinc)(1, 0.1 / (i + 1), dask_key_name=f"root-{i}") for i in range(16)
+    ]
+    # This shared dependency will get copied to all workers, eventually making all workers valid candidates for each dep
+    everywhere = delayed(None, name="everywhere")
+    deps = [
+        delayed(lambda x, y: None)(r, everywhere, dask_key_name=f"dep-{i}")
+        for i, r in enumerate(roots)
+    ]
+
+    rs, ds = dask.persist(roots, deps)
+    await wait(ds)
+
+    keys = {
+        worker.name: dict(
+            root_keys=sorted(
+                [int(k.split("-")[1]) for k in worker.data if k.startswith("root")]
+            ),
+            deps_of_root=sorted(
+                [int(k.split("-")[1]) for k in worker.data if k.startswith("dep")]
+            ),
+        )
+        for worker in workers
+    }
+
+    for k in keys.values():
+        assert k["root_keys"] == k["deps_of_root"]
+
+    for worker in workers:
+        log = worker.incoming_transfer_log
+        if log:
+            assert len(log) == 1
+            assert list(log[0]["keys"]) == ["everywhere"]
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4)
+async def test_decide_worker_large_subtrees_colocated(client, s, *workers):
+    r"""
+    Ensure that the above "ignore common dependencies" logic doesn't affect wide (but isolated) subtrees.
+
+    ........  ........  ........  ........
+    \\\\////  \\\\////  \\\\////  \\\\////
+       a         b         c         d
+
+    Each one of a, b, etc. has more dependents than there are workers. But just because a has
+    lots of dependents doesn't necessarily mean it will end up copied to every worker.
+    Because a also has a few siblings, a's dependents shouldn't spread out over the whole cluster.
+    """
+    roots = [delayed(inc)(i, dask_key_name=f"root-{i}") for i in range(len(workers))]
+    deps = [
+        delayed(inc)(r, dask_key_name=f"dep-{i}-{j}")
+        for i, r in enumerate(roots)
+        for j in range(len(workers) * 2)
+    ]
+
+    rs, ds = dask.persist(roots, deps)
+    await wait(ds)
+
+    keys = {
+        worker.name: dict(
+            root_keys={
+                int(k.split("-")[1]) for k in worker.data if k.startswith("root")
+            },
+            deps_of_root={
+                int(k.split("-")[1]) for k in worker.data if k.startswith("dep")
+            },
+        )
+        for worker in workers
+    }
+
+    for k in keys.values():
+        assert k["root_keys"] == k["deps_of_root"]
+        assert len(k["root_keys"]) == len(roots) / len(workers)
+
+    for worker in workers:
+        assert not worker.incoming_transfer_log
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 4,
+    config={"distributed.scheduler.work-stealing": False},
+)
+async def test_decide_worker_large_multiroot_subtrees_colocated(client, s, *workers):
+    r"""
+    Same as the above test, but also check isolated trees with multiple roots.
+
+    ........  ........  ........  ........
+    \\\\////  \\\\////  \\\\////  \\\\////
+       a b      c d       e f       g h
+    """
+    roots = [
+        delayed(inc)(i, dask_key_name=f"root-{i}") for i in range(len(workers) * 2)
+    ]
+    deps = [
+        delayed(lambda x, y: None)(
+            r, roots[i * 2 + 1], dask_key_name=f"dep-{i * 2}-{j}"
+        )
+        for i, r in enumerate(roots[::2])
+        for j in range(len(workers) * 2)
+    ]
+
+    rs, ds = dask.persist(roots, deps)
+    await wait(ds)
+
+    keys = {
+        worker.name: dict(
+            root_keys={
+                int(k.split("-")[1]) for k in worker.data if k.startswith("root")
+            },
+            deps_of_root=set().union(
+                *(
+                    (int(k.split("-")[1]), int(k.split("-")[1]) + 1)
+                    for k in worker.data
+                    if k.startswith("dep")
+                )
+            ),
+        )
+        for worker in workers
+    }
+
+    for k in keys.values():
+        assert k["root_keys"] == k["deps_of_root"]
+        assert len(k["root_keys"]) == len(roots) / len(workers)
+
+    for worker in workers:
+        assert not worker.incoming_transfer_log
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)

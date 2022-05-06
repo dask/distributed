@@ -819,6 +819,19 @@ class TaskGroup:
         "last_worker_tasks_left",
     ]
 
+    name: str
+    prefix: TaskPrefix | None
+    states: dict[str, int]
+    dependencies: set[TaskGroup]
+    nbytes_total: int
+    duration: float
+    types: set[str]
+    start: float
+    stop: float
+    all_durations: defaultdict[str, float]
+    last_worker: WorkerState | None
+    last_worker_tasks_left: int
+
     def __init__(self, name: str):
         self.name = name
         self.prefix: TaskPrefix | None = None
@@ -831,7 +844,7 @@ class TaskGroup:
         self.start: float = 0.0
         self.stop: float = 0.0
         self.all_durations: defaultdict[str, float] = defaultdict(float)
-        self.last_worker = None  # type: ignore
+        self.last_worker = None
         self.last_worker_tasks_left = 0
 
     def add_duration(self, action: str, start: float, stop: float):
@@ -1866,7 +1879,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def decide_worker(self, ts: TaskState) -> WorkerState:  # -> WorkerState | None
+    def decide_worker(self, ts: TaskState) -> WorkerState | None:
         """
         Decide on a worker for task *ts*. Return a WorkerState.
 
@@ -1880,9 +1893,8 @@ class SchedulerState:
         in a round-robin fashion.
         """
         if not self.workers:
-            return None  # type: ignore
+            return None
 
-        ws: WorkerState
         tg: TaskGroup = ts.group
         valid_workers: set = self.valid_workers(ts)
 
@@ -1893,15 +1905,15 @@ class SchedulerState:
         ):
             self.unrunnable.add(ts)
             ts.state = "no-worker"
-            return None  # type: ignore
+            return None
 
-        # Group is larger than cluster with few dependencies?
-        # Minimize future data transfers.
+        # Group fills the cluster and dependencies are much smaller than cluster? Minimize future data transfers.
+        ndeps_cutoff: int = min(5, len(self.workers))
         if (
             valid_workers is None
-            and len(tg) > self.total_nthreads * 2
-            and len(tg.dependencies) < 5
-            and sum(map(len, tg.dependencies)) < 5
+            and len(tg) >= self.total_nthreads
+            and len(tg.dependencies) < ndeps_cutoff
+            and sum(map(len, tg.dependencies)) < ndeps_cutoff
         ):
             ws = tg.last_worker
 
@@ -1956,7 +1968,8 @@ class SchedulerState:
                 type(ws),
                 ws,
             )
-            assert ws.address in self.workers
+            if ws:
+                assert ws.address in self.workers
 
         return ws
 
@@ -7487,8 +7500,11 @@ def _task_to_client_msgs(state: SchedulerState, ts: TaskState) -> dict:
 
 
 def decide_worker(
-    ts: TaskState, all_workers, valid_workers: set | None, objective
-) -> WorkerState:  # -> WorkerState | None
+    ts: TaskState,
+    all_workers: Collection[WorkerState],
+    valid_workers: set[WorkerState] | None,
+    objective,
+) -> WorkerState | None:
     """
     Decide which worker should take task *ts*.
 
@@ -7504,16 +7520,34 @@ def decide_worker(
     of bytes sent between workers.  This is determined by calling the
     *objective* function.
     """
-    ws: WorkerState = None  # type: ignore
+    ws: WorkerState | None = None
     wws: WorkerState
     dts: TaskState
     deps: set = ts.dependencies
     candidates: set
+    n_workers: int = len(valid_workers if valid_workers is not None else all_workers)
     assert all([dts.who_has for dts in deps])
     if ts.actor:
         candidates = set(all_workers)
     else:
-        candidates = {wws for dts in deps for wws in dts.who_has}
+        candidates = {
+            wws
+            for dts in deps
+            # Ignore dependencies that will need to be, or already are, copied to all workers
+            if len(dts.who_has) < n_workers
+            and not (
+                len(dts.dependents) >= n_workers
+                and len(dts.group) < n_workers // 2
+                # Really want something like:
+                # map(len, dts.group.dependents) >= nthreads and len(dts.group) < n_workers // 2
+                # Or at least
+                # len(dts.dependents) * len(dts.group) >= nthreads and len(dts.group) < n_workers // 2
+                # But `nthreads` is O(k) to calculate if given `valid_workers`.
+                # and the `map(len, dts.group.dependents)` could be extremely expensive since we can't put
+                # much of an upper bound on it.
+            )
+            for wws in dts.who_has
+        }
     if valid_workers is None:
         if not candidates:
             candidates = set(all_workers)
