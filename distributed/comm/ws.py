@@ -36,7 +36,7 @@ from distributed.comm.utils import (
     get_tcp_server_address,
     to_frames,
 )
-from distributed.utils import ensure_bytes, nbytes
+from distributed.utils import nbytes
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,9 @@ class WSHandlerComm(Comm):
         try:
             await self.handler.write_message(n, binary=True)
             for frame in frames:
-                await self.handler.write_message(ensure_bytes(frame), binary=True)
+                if type(frame) is not bytes:
+                    frame = bytes(frame)
+                await self.handler.write_message(frame, binary=True)
         except WebSocketClosedError as e:
             raise CommClosedError(str(e))
 
@@ -229,7 +231,9 @@ class WS(Comm):
         try:
             await self.sock.write_message(n, binary=True)
             for frame in frames:
-                await self.sock.write_message(ensure_bytes(frame), binary=True)
+                if type(frame) is not bytes:
+                    frame = bytes(frame)
+                await self.sock.write_message(frame, binary=True)
         except WebSocketClosedError as e:
             raise CommClosedError(e)
 
