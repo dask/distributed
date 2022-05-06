@@ -2912,6 +2912,12 @@ class Scheduler(SchedulerState, ServerNode):
     Users typically do not interact with the scheduler directly but rather with
     the client object ``Client``.
 
+    The ``contact_address`` parameter allows to advertise a specific address to
+    the workers for communication with the scheduler, which is different than
+    the address the scheduler binds to. This is useful when the scheduler
+    listens on a private address, which therefore cannot be used by the workers
+    to contact it.
+
     **State**
 
     The scheduler contains the following state variables.  Each variable is
@@ -2976,11 +2982,15 @@ class Scheduler(SchedulerState, ServerNode):
         preload=None,
         preload_argv=(),
         plugins=(),
+        contact_address=None,
         **kwargs,
     ):
         self._setup_logging(logger)
 
         # Attributes
+        if contact_address is None:
+            contact_address = dask.config.get("distributed.scheduler.contact-address")
+        self.contact_address = contact_address
         if allowed_failures is None:
             allowed_failures = dask.config.get("distributed.scheduler.allowed-failures")
         self.allowed_failures = allowed_failures
