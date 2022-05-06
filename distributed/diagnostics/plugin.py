@@ -279,15 +279,13 @@ class PipInstall(WorkerPlugin):
             # skip trying to install, another process on this worker already grabbed the lock
             return
         # skip trying to install, another process already installed successfully.
-        marker_file = '.pip_install'
+        marker_file = ".pip_install"
         if os.path.exists(marker_file):
             return
 
         logger.info("Pip installing the following packages: %s", self.packages)
         proc = subprocess.Popen(
-            [sys.executable, "-m", "pip", "install"]
-            + self.pip_options
-            + self.packages,
+            [sys.executable, "-m", "pip", "install"] + self.pip_options + self.packages,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             )
@@ -298,13 +296,13 @@ class PipInstall(WorkerPlugin):
             logger.error("Pip install failed with '%s'", stderr.decode().strip())
             return
 
-        with open(marker_file, 'w'):
+        with open(marker_file, "w"):
             pass
 
         if self.restart and worker.nanny:
             lines = stdout.strip().split(b"\n")
             if not all(
-                    line.startswith(b"Requirement already satisfied") for line in lines
+                line.startswith(b"Requirement already satisfied") for line in lines
             ):
                 worker.loop.add_callback(
                     worker.close_gracefully, restart=True
