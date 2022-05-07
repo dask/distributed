@@ -32,7 +32,7 @@ from distributed.protocol import (
     to_serialize,
 )
 from distributed.protocol.serialize import check_dask_serializable
-from distributed.utils import nbytes
+from distributed.utils import ensure_memoryview, nbytes
 from distributed.utils_test import gen_test, inc
 
 
@@ -105,7 +105,8 @@ def test_serialize_arrays(typecode):
     # split up frames to test joining them back together
     header, frames = serialize(a)
     (f,) = frames
-    frames = [f[:2], f[2:]]
+    f = ensure_memoryview(f) 
+    frames = [f[:1], f[1:2], f[2:-1], f[-1:]]
     a3 = deserialize(header, frames)
     assert type(a3) == type(a)
     assert a3.typecode == a.typecode

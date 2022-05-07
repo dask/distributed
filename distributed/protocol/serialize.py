@@ -765,8 +765,30 @@ def _serialize_array(obj):
 @dask_deserialize.register(array)
 def _deserialize_array(header, frames):
     a = array(header["typecode"])
+    f_rem = array("B")
     for f in frames:
-        a.frombytes(ensure_memoryview(f))
+        f = ensure_memoryview(f)
+        # `array.frombytes(...)` only takes `bytes`-like data
+        # that has `len` exactly divisible by `array.itemsize`.
+        if f_rem:
+            # Try to add enough to `f_rem` to equal one item in `a`.
+            i = a.itemsize - len(f_rem)
+            f_rem.frombytes(f[:i])
+            f = f[i:]
+            if len(f_rem) < a.itemsize:
+                # `f_rem` contains all of `f`, but is still too small to add.
+                # Grab next `f` from `frames` and try again.
+                continue
+            a.frombytes(f_rem)
+            del f_rem[:]
+        # Split frame into elements to add now & any remainder to handle later.
+        j = f.nbytes % a.itemsize
+        f_rem.frombytes(f[-j:])
+        f = f[:-j]
+        if f:
+            a.frombytes(f)
+    if f_rem:
+        a.frombytes(f_rem)
     return a
 
 
