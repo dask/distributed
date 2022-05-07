@@ -106,10 +106,10 @@ def test_serialize_arrays(typecode):
     header, frames = serialize(a)
     (f,) = frames
     frames = [f[:2], f[2:]]
-    a2 = deserialize(header, frames)
-    assert type(a2) == type(a)
-    assert a2.typecode == a.typecode
-    assert a2 == a
+    a3 = deserialize(header, frames)
+    assert type(a3) == type(a)
+    assert a3.typecode == a.typecode
+    assert a3 == a
 
 
 def test_Serialize():
