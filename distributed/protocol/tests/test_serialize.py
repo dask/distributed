@@ -92,8 +92,7 @@ def test_serialize_bytestrings():
     "typecode", ["b", "B", "h", "H", "i", "I", "l", "L", "q", "Q", "f", "d"]
 )
 def test_serialize_arrays(typecode):
-    a = array(typecode)
-    a.extend(range(5))
+    a = array(typecode, range(5))
 
     # handle normal round trip through serialization
     header, frames = serialize(a)
