@@ -94,8 +94,19 @@ def test_serialize_bytestrings():
 def test_serialize_arrays(typecode):
     a = array(typecode)
     a.extend(range(5))
+
+    # handle normal round trip through serialization
     header, frames = serialize(a)
     assert frames[0] == memoryview(a)
+    a2 = deserialize(header, frames)
+    assert type(a2) == type(a)
+    assert a2.typecode == a.typecode
+    assert a2 == a
+
+    # split up frames to test joining them back together
+    header, frames = serialize(a)
+    (f,) = frames
+    frames = [f[:2], f[2:]]
     a2 = deserialize(header, frames)
     assert type(a2) == type(a)
     assert a2.typecode == a.typecode
