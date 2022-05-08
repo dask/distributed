@@ -584,7 +584,8 @@ class Server:
                             self._ongoing_coroutines.add(result)
                             result = await result
                     except CommClosedError:
-                        logger.info("Lost connection to %r", address, exc_info=True)
+                        if self.status == Status.running:
+                            logger.info("Lost connection to %r", address, exc_info=True)
                         break
                     except Exception as e:
                         logger.exception("Exception while handling op %s", op)
