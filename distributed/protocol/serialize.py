@@ -765,8 +765,11 @@ def _serialize_array(obj):
 @dask_deserialize.register(array)
 def _deserialize_array(header, frames):
     a = array(header["typecode"])
-    for f in frames:
-        a.frombytes(ensure_memoryview(f))
+    nframes = len(frames)
+    if nframes == 1:
+        a.frombytes(ensure_memoryview(frames[0]))
+    elif nframes > 1:
+        a.frombytes(b"".join(map(ensure_memoryview, frames)))
     return a
 
 
