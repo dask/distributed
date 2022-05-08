@@ -2018,11 +2018,11 @@ class Worker(ServerNode):
             for key, value in nbytes.items():
                 self.tasks[key].nbytes = value
 
-    def _add_to_data_needed(self, ts: TaskState) -> RecsInstrs:
+    def _add_to_data_needed(self, ts: TaskState, stimulus_id: str) -> RecsInstrs:
         self.data_needed.push(ts)
         for w in ts.who_has:
             self.data_needed_per_worker[w].push(ts)
-        return self._ensure_communicating()
+        return self._ensure_communicating(stimulus_id=stimulus_id)
 
     def transition_missing_fetch(
         self, ts: TaskState, *, stimulus_id: str
@@ -2035,7 +2035,7 @@ class Worker(ServerNode):
         self._missing_dep_flight.discard(ts)
         ts.state = "fetch"
         ts.done = False
-        return self._add_to_data_needed(ts)
+        return self._add_to_data_needed(ts, stimulus_id=stimulus_id)
 
     def transition_missing_released(
         self, ts: TaskState, *, stimulus_id: str
@@ -2074,7 +2074,7 @@ class Worker(ServerNode):
             return {ts: "missing"}, []
         ts.state = "fetch"
         ts.done = False
-        return self._add_to_data_needed(ts)
+        return self._add_to_data_needed(ts, stimulus_id=stimulus_id)
 
     def transition_generic_released(
         self, ts: TaskState, *, stimulus_id: str
@@ -2529,7 +2529,7 @@ class Worker(ServerNode):
         ts.coming_from = None
         ts.done = False
         if ts.who_has:
-            return self._add_to_data_needed(ts)
+            return self._add_to_data_needed(ts, stimulus_id=stimulus_id)
         else:
             return {ts: "missing"}, []
 
@@ -2870,11 +2870,10 @@ class Worker(ServerNode):
         keys = {e.key if isinstance(e, TaskState) else e for e in keys_or_tasks}
         return [ev for ev in self.stimulus_log if getattr(ev, "key", None) in keys]
 
-    def _ensure_communicating(self) -> RecsInstrs:
+    def _ensure_communicating(self, *, stimulus_id: str) -> RecsInstrs:
         if self.status != Status.running:
             return {}, []
 
-        stimulus_id = f"ensure-communicating-{time()}"
         skipped_worker_in_flight_or_busy = []
 
         recommendations: Recs = {}
@@ -3197,6 +3196,10 @@ class Worker(ServerNode):
         response = {}
         to_gather_keys: set[str] = set()
         cancelled_keys: set[str] = set()
+
+        def done_event():
+            return GatherDepDoneEvent(stimulus_id=f"gather-dep-done-{time()}")
+
         try:
             to_gather_keys, cancelled_keys, cause = self._filter_deps_for_fetch(
                 to_gather
@@ -3206,7 +3209,7 @@ class Worker(ServerNode):
                 self.log.append(
                     ("nothing-to-gather", worker, to_gather, stimulus_id, time())
                 )
-                return GatherDepDoneEvent(stimulus_id=stimulus_id)
+                return done_event()
 
             assert cause
             # Keep namespace clean since this func is long and has many
@@ -3229,7 +3232,7 @@ class Worker(ServerNode):
             )
             stop = time()
             if response["status"] == "busy":
-                return GatherDepDoneEvent(stimulus_id=stimulus_id)
+                return done_event()
 
             self._update_metrics_received_data(
                 start=start,
@@ -3241,7 +3244,7 @@ class Worker(ServerNode):
             self.log.append(
                 ("receive-dep", worker, set(response["data"]), stimulus_id, time())
             )
-            return GatherDepDoneEvent(stimulus_id=stimulus_id)
+            return done_event()
 
         except OSError:
             logger.exception("Worker stream died during communication: %s", worker)
@@ -3263,7 +3266,7 @@ class Worker(ServerNode):
                     self.log.append(
                         ("missing-who-has", worker, ts.key, stimulus_id, time())
                     )
-            return GatherDepDoneEvent(stimulus_id=stimulus_id)
+            return done_event()
 
         except Exception as e:
             logger.exception(e)
@@ -3275,7 +3278,7 @@ class Worker(ServerNode):
             for k in self.in_flight_workers[worker]:
                 ts = self.tasks[k]
                 recommendations[ts] = tuple(msg.values())
-            return GatherDepDoneEvent(stimulus_id=stimulus_id)
+            return done_event()
 
         finally:
             self.comm_nbytes -= total_nbytes
@@ -3839,13 +3842,13 @@ class Worker(ServerNode):
         assert self.status == Status.running
         return merge_recs_instructions(
             self._ensure_computing(),
-            self._ensure_communicating(),
+            self._ensure_communicating(stimulus_id=ev.stimulus_id),
         )
 
     @handle_event.register
     def _(self, ev: GatherDepDoneEvent) -> RecsInstrs:
         """Temporary hack - to be removed"""
-        return self._ensure_communicating()
+        return self._ensure_communicating(stimulus_id=ev.stimulus_id)
 
     @handle_event.register
     def _(self, ev: CancelComputeEvent) -> RecsInstrs:
