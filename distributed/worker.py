@@ -111,6 +111,7 @@ from distributed.worker_state_machine import (
     AddKeysMsg,
     AlreadyCancelledEvent,
     CancelComputeEvent,
+    EnsureCommunicatingLater,
     Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -2022,7 +2023,12 @@ class Worker(ServerNode):
         self.data_needed.push(ts)
         for w in ts.who_has:
             self.data_needed_per_worker[w].push(ts)
-        return self._ensure_communicating(stimulus_id=stimulus_id)
+        # This is the same as `return self._ensure_communicating()`, except that when
+        # many tasks transition to fetch at the same time, e.g. from a single
+        # compute-task or acquire-replicas command from the scheduler, it allows
+        # clustering the transfers into less GatherDep instructions; see
+        # _select_keys_for_gather().
+        return {}, [EnsureCommunicatingLater(stimulus_id=stimulus_id)]
 
     def transition_missing_fetch(
         self, ts: TaskState, *, stimulus_id: str
@@ -2802,12 +2808,25 @@ class Worker(ServerNode):
 
     @fail_hard
     def _handle_instructions(self, instructions: Instructions) -> None:
-        # TODO this method is temporary.
-        #      See final design: https://github.com/dask/distributed/issues/5894
+        ensure_communicating = False
         for inst in instructions:
             task = None
             if isinstance(inst, SendMessageToScheduler):
                 self.batched_stream.send(inst.to_dict())
+            elif isinstance(inst, EnsureCommunicatingLater):
+                # _ensure_communicating is a no-op if it runs twice in a row.
+                # The guard here is to avoid a O(n^2) condition when
+                # 1. there are many fetches queued because all workers are in flight
+                # 2. a single compute-task or acquire-replicas command just sent many
+                #    dependencies to fetch at once.
+                if not ensure_communicating:
+                    ensure_communicating = True
+                    recs, instructions = self._ensure_communicating(
+                        stimulus_id=inst.stimulus_id
+                    )
+                    self.transitions(recs, stimulus_id=inst.stimulus_id)
+                    self._handle_instructions(instructions)
+
             elif isinstance(inst, Execute):
                 task = asyncio.create_task(
                     self.execute(inst.key, stimulus_id=inst.stimulus_id),

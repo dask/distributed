@@ -288,6 +288,12 @@ class SendMessageToScheduler(Instruction):
 
 
 @dataclass
+class EnsureCommunicatingLater(Instruction):
+    __slots__ = ("stimulus_id",)
+    stimulus_id: str
+
+
+@dataclass
 class TaskFinishedMsg(SendMessageToScheduler):
     op = "task-finished"
 
