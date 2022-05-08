@@ -3051,7 +3051,7 @@ async def test_missing_released_zombie_tasks_2(c, s, b):
             await asyncio.sleep(0)
 
         ts = b.tasks[f1.key]
-        assert ts.state == "fetch"
+        assert ts.state == "flight"
 
         while ts.state != "missing":
             # If we sleep for a longer time, the worker will spin into an
