@@ -714,27 +714,32 @@ async def test_clean_nbytes(c, s, a, b):
     )
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 20)
-async def test_gather_many_small(c, s, a, *workers):
+@pytest.mark.parametrize("as_deps", [True, False])
+@gen_cluster(client=True, nthreads=[("", 1)] * 20)
+async def test_gather_many_small(c, s, a, *workers, as_deps):
     """If the dependencies of a given task are very small, do not limit the
     number of concurrent outgoing connections
     """
     a.total_out_connections = 2
-    futures = await c._scatter(list(range(100)))
-
+    futures = await c.scatter(
+        {f"x{i}": i for i in range(100)},
+        workers=[w.address for w in workers],
+    )
     assert all(w.data for w in workers)
 
-    def f(*args):
-        return 10
-
-    future = c.submit(f, *futures, workers=a.address)
-    await wait(future)
+    if as_deps:
+        future = c.submit(lambda _: None, futures, key="y", workers=[a.address])
+        await wait(future)
+    else:
+        s.request_acquire_replicas(a.address, list(futures), stimulus_id="test")
+        while len(a.data) < 100:
+            await asyncio.sleep(0.01)
 
     types = list(pluck(0, a.log))
     req = [i for i, t in enumerate(types) if t == "request-dep"]
     recv = [i for i, t in enumerate(types) if t == "receive-dep"]
+    assert len(req) == len(recv) == 19
     assert min(recv) > max(req)
-
     assert a.comm_nbytes == 0
 
 
