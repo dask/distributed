@@ -631,11 +631,13 @@ async def test_clean(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_message_breakup(c, s, a, b):
-    n = 100000
+    n = 100_000
     a.target_message_size = 10 * n
     b.target_message_size = 10 * n
-    xs = [c.submit(mul, b"%d" % i, n, workers=a.address) for i in range(30)]
-    y = c.submit(lambda *args: None, xs, workers=b.address)
+    xs = [
+        c.submit(mul, b"%d" % i, n, key=f"x{i}", workers=[a.address]) for i in range(30)
+    ]
+    y = c.submit(lambda _: None, xs, key="y", workers=[b.address])
     await y
 
     assert 2 <= len(b.incoming_transfer_log) <= 20

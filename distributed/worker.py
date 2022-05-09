@@ -1992,6 +1992,10 @@ class Worker(ServerNode):
             ts.dependencies.add(dep_ts)
             dep_ts.dependents.add(ts)
 
+        if nbytes is not None:
+            for key, value in nbytes.items():
+                self.tasks[key].nbytes = value
+
         if ts.state in READY | {"executing", "waiting", "resumed"}:
             pass
         elif ts.state == "memory":
@@ -2014,10 +2018,6 @@ class Worker(ServerNode):
         self._handle_instructions(instructions)
         self.update_who_has(who_has)
         self.transitions(recommendations, stimulus_id=stimulus_id)
-
-        if nbytes is not None:
-            for key, value in nbytes.items():
-                self.tasks[key].nbytes = value
 
     def _add_to_data_needed(self, ts: TaskState, stimulus_id: str) -> RecsInstrs:
         self.data_needed.push(ts)
