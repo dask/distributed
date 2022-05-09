@@ -223,7 +223,6 @@ def main(
         await wait_until_shutdown()
         logger.info("Stopped scheduler at %r", scheduler.address)
 
-
     try:
         asyncio.run(run())
     finally:
