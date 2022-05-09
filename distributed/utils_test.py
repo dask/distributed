@@ -1803,8 +1803,20 @@ def check_instances():
     assert all(c.status == Status.closed for c in SpecCluster._instances), list(
         SpecCluster._instances
     )
+
+    DequeHandler.clear_all_instances()
+
+    from _pytest.logging import LogCaptureHandler
+
+    for v in logging.Logger.manager.loggerDict.values():
+        if not isinstance(v, logging.PlaceHolder):
+            for h in v.handlers:
+                if isinstance(h, LogCaptureHandler):
+                    h.reset()
+
     wait_profiler()
     gc.collect()
+
     if Scheduler._instances:
         s = next(iter(Scheduler._instances))
         import objgraph
@@ -1814,7 +1826,6 @@ def check_instances():
 
     SpecCluster._instances.clear()
     Nanny._instances.clear()
-    DequeHandler.clear_all_instances()
 
 
 @contextmanager
