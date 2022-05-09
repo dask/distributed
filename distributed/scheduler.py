@@ -7259,6 +7259,27 @@ class Scheduler(SchedulerState, ServerNode):
             }
         )
 
+    def clear_instance(self):
+        self.extensions.clear()
+        self.plugins.clear()
+        self.services.clear()
+        self.listeners.clear()
+        self.handlers.clear()
+        self.periodic_callbacks.clear()
+        self.stream_handlers.clear()
+        self.stream_comms.clear()
+        self.transitions_table.clear()
+        self.log.clear()
+        self.transition_log.clear()
+
+        del self.http_application
+        del self.http_server
+
+    @classmethod
+    def clear_instances(cls):
+        for instance in cls._instances:
+            instance.clear_instance()
+
 
 def _remove_from_processing(
     state: SchedulerState, ts: TaskState

@@ -1770,19 +1770,7 @@ def check_instances():
 
     _global_clients.clear()
 
-    for s in Scheduler._instances:
-        s.extensions.clear()
-        s.plugins.clear()
-        s.services.clear()
-        s.listeners.clear()
-        s.handlers.clear()
-        s.stream_handlers.clear()
-        s.stream_comms.clear()
-        s.transitions_table.clear()
-        # No close method, cut the loop
-        del s.http_application
-        del s.http_server
-        del s
+    Scheduler.clear_instances()
 
     for w in Worker._instances:
         with suppress(RuntimeError):  # closed IOLoop
