@@ -77,7 +77,7 @@ async def test_prefix(c, s, a, b):
             assert is_valid_xml(body)
 
 
-@gen_cluster(client=True, clean_kwargs={"threads": False})
+@gen_cluster(client=True, clean_kwargs={"threads": False, "instances": False})
 async def test_prometheus(c, s, a, b):
     pytest.importorskip("prometheus_client")
     from prometheus_client.parser import text_string_to_metric_families
@@ -103,7 +103,7 @@ async def test_prometheus(c, s, a, b):
         assert client.samples[0].value == 1.0
 
 
-@gen_cluster(client=True, clean_kwargs={"threads": False})
+@gen_cluster(client=True, clean_kwargs={"threads": False, "instances": False})
 async def test_prometheus_collect_task_states(c, s, a, b):
     pytest.importorskip("prometheus_client")
     from prometheus_client.parser import text_string_to_metric_families

@@ -55,7 +55,9 @@ from distributed.utils_test import dec, div, gen_cluster, get_cert, inc, slowinc
 scheduler.PROFILING = False  # type: ignore
 
 
-@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
+@gen_cluster(
+    client=True, scheduler_kwargs={"dashboard": True}, clean_kwargs={"instances": False}
+)
 async def test_simple(c, s, a, b):
     port = s.http_server.port
 
@@ -883,6 +885,7 @@ async def test_lots_of_tasks(c, s, a, b):
 @gen_cluster(
     client=True,
     scheduler_kwargs={"dashboard": True},
+    clean_kwargs={"instances": False},
     config={
         "distributed.scheduler.dashboard.tls.key": get_cert("tls-key.pem"),
         "distributed.scheduler.dashboard.tls.cert": get_cert("tls-cert.pem"),

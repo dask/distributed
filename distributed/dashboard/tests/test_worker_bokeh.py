@@ -153,7 +153,9 @@ async def test_CommunicatingStream(c, s, a, b):
 
 
 @gen_cluster(
-    client=True, clean_kwargs={"threads": False}, worker_kwargs={"dashboard": True}
+    client=True,
+    clean_kwargs={"threads": False, "instances": False},
+    worker_kwargs={"dashboard": True},
 )
 async def test_prometheus(c, s, a, b):
     pytest.importorskip("prometheus_client")

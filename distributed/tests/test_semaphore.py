@@ -189,7 +189,7 @@ async def test_access_semaphore_by_name(c, s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, timeout=120)
+@gen_cluster(client=True, timeout=120, clean_kwargs={"instances": False})
 async def test_close_async(c, s, a, b):
     sem = await Semaphore(name="test")
 

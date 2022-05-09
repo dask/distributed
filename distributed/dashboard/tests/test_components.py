@@ -30,7 +30,7 @@ async def test_profile_plot(c, s, a, b):
     assert len(p.source.data["left"]) >= 1
 
 
-@gen_cluster(client=True, clean_kwargs={"threads": False})
+@gen_cluster(client=True, clean_kwargs={"threads": False, "instances": False})
 async def test_profile_time_plot(c, s, a, b):
     from bokeh.io import curdoc
 

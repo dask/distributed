@@ -371,7 +371,7 @@ async def test_memory_limit_none():
 
 
 def test_cleanup():
-    with clean(threads=False):
+    with clean(threads=False, instances=False):
         c = LocalCluster(n_workers=2, silence_logs=False, dashboard_address=":0")
         port = c.scheduler.port
         c.close()
@@ -882,7 +882,7 @@ def test_starts_up_sync(loop):
 def test_dont_select_closed_worker():
     # Make sure distributed does not try to reuse a client from a
     # closed cluster (https://github.com/dask/distributed/issues/2840).
-    with clean(threads=False):
+    with clean(threads=False, instances=False):
         cluster = LocalCluster(n_workers=0, dashboard_address=":0")
         c = Client(cluster)
         cluster.scale(2)

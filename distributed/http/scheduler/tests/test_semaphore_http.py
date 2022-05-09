@@ -5,7 +5,7 @@ from distributed import Semaphore
 from distributed.utils_test import gen_cluster
 
 
-@gen_cluster(client=True, clean_kwargs={"threads": False})
+@gen_cluster(client=True, clean_kwargs={"threads": False, "instances": False})
 async def test_prometheus_collect_task_states(c, s, a, b):
     pytest.importorskip("prometheus_client")
     from prometheus_client.parser import text_string_to_metric_families
