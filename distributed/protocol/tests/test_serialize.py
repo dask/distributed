@@ -88,6 +88,21 @@ def test_serialize_bytestrings():
         assert bb == b
 
 
+def test_serialize_empty_array():
+    a = array("I")
+
+    # serialize array
+    header, frames = serialize(a)
+    assert frames[0] == memoryview(a)
+    # drop empty frame
+    del frames[:]
+    # deserialize with no frames
+    a2 = deserialize(header, frames)
+    assert type(a2) == type(a)
+    assert a2.typecode == a.typecode
+    assert a2 == a
+
+
 @pytest.mark.parametrize(
     "typecode", ["b", "B", "h", "H", "i", "I", "l", "L", "q", "Q", "f", "d"]
 )
