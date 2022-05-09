@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import importlib
 import traceback
 from array import array
@@ -22,7 +23,7 @@ from distributed.protocol.utils import (
     pack_frames_prelude,
     unpack_frames,
 )
-from distributed.utils import ensure_bytes, has_keyword
+from distributed.utils import has_keyword
 
 dask_serialize = dask.utils.Dispatch("dask_serialize")
 dask_deserialize = dask.utils.Dispatch("dask_deserialize")
@@ -179,7 +180,7 @@ def msgpack_loads(header, frames):
 
 
 def serialization_error_loads(header, frames):
-    msg = "\n".join([ensure_bytes(frame).decode("utf8") for frame in frames])
+    msg = "\n".join([codecs.decode(frame, "utf8") for frame in frames])
     raise TypeError(msg)
 
 

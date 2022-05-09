@@ -4259,6 +4259,7 @@ async def test_retire_workers_2(c, s, a, b):
 
     await s.retire_workers(workers=[a.address])
     assert b.data == {x.key: 1}
+
     assert {ws.address for ws in s.tasks[x.key].who_has} == {b.address}
     assert {ts.key for ts in s.workers[b.address].has_what} == {x.key}
 
