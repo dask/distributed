@@ -2811,8 +2811,10 @@ class Worker(ServerNode):
         ensure_communicating = False
         for inst in instructions:
             task = None
+
             if isinstance(inst, SendMessageToScheduler):
                 self.batched_stream.send(inst.to_dict())
+
             elif isinstance(inst, EnsureCommunicatingLater):
                 # _ensure_communicating is a no-op if it runs twice in a row.
                 # The guard here is to avoid a O(n^2) condition when
@@ -2827,11 +2829,6 @@ class Worker(ServerNode):
                     self.transitions(recs, stimulus_id=inst.stimulus_id)
                     self._handle_instructions(instructions)
 
-            elif isinstance(inst, Execute):
-                task = asyncio.create_task(
-                    self.execute(inst.key, stimulus_id=inst.stimulus_id),
-                    name=f"execute({inst.key})",
-                )
             elif isinstance(inst, GatherDep):
                 assert inst.to_gather
                 keys_str = ", ".join(peekn(27, inst.to_gather)[0])
@@ -2846,6 +2843,13 @@ class Worker(ServerNode):
                     ),
                     name=f"gather_dep({inst.worker}, {{{keys_str}}})",
                 )
+
+            elif isinstance(inst, Execute):
+                task = asyncio.create_task(
+                    self.execute(inst.key, stimulus_id=inst.stimulus_id),
+                    name=f"execute({inst.key})",
+                )
+
             else:
                 raise TypeError(inst)  # pragma: nocover
 
@@ -3062,6 +3066,7 @@ class Worker(ServerNode):
         ``target_message_size``.
         """
         deps = {dep}
+
         total_bytes = self.tasks[dep].get_nbytes()
         tasks = self.data_needed_per_worker[worker]
 
