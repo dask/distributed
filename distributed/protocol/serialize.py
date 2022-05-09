@@ -23,7 +23,7 @@ from distributed.protocol.utils import (
     pack_frames_prelude,
     unpack_frames,
 )
-from distributed.utils import has_keyword
+from distributed.utils import ensure_memoryview, has_keyword
 
 dask_serialize = dask.utils.Dispatch("dask_serialize")
 dask_deserialize = dask.utils.Dispatch("dask_deserialize")
@@ -765,12 +765,11 @@ def _serialize_array(obj):
 @dask_deserialize.register(array)
 def _deserialize_array(header, frames):
     a = array(header["typecode"])
-    for f in map(memoryview, frames):
-        try:
-            f = f.cast("B")
-        except TypeError:
-            f = f.tobytes()
-        a.frombytes(f)
+    nframes = len(frames)
+    if nframes == 1:
+        a.frombytes(ensure_memoryview(frames[0]))
+    elif nframes > 1:
+        a.frombytes(b"".join(map(ensure_memoryview, frames)))
     return a
 
 

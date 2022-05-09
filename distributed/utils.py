@@ -47,6 +47,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 from dask import istask
+from dask.utils import ensure_bytes as _ensure_bytes
 from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
@@ -1000,17 +1001,14 @@ def ensure_bytes(s):
     >>> ensure_bytes(b'123')
     b'123'
     """
-    if isinstance(s, bytes):
-        return s
-    elif hasattr(s, "encode"):
-        return s.encode()
-    else:
-        try:
-            return bytes(s)
-        except Exception as e:
-            raise TypeError(
-                "Object %s is neither a bytes object nor has an encode method" % s
-            ) from e
+    warnings.warn(
+        "`distributed.utils.ensure_bytes` is deprecated. "
+        "Please switch to `dask.utils.ensure_bytes`. "
+        "This will be removed in `2022.6.0`.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _ensure_bytes(s)
 
 
 def ensure_memoryview(obj):
