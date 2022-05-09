@@ -185,10 +185,7 @@ def main(
         limit = max(soft, hard // 2)
         resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard))
 
-    address = None
-
     async def run():
-        nonlocal address
         loop = IOLoop.current()
         logger.info("-" * 47)
 
@@ -223,13 +220,14 @@ def main(
                 await scheduler.close()
 
         await scheduler
-        address = scheduler.address
         await wait_until_shutdown()
+        logger.info("Stopped scheduler at %r", scheduler.address)
+
 
     try:
         asyncio.run(run())
     finally:
-        logger.info("End scheduler at %r", address)
+        logger.info("End scheduler")
 
 
 if __name__ == "__main__":
