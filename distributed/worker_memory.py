@@ -344,7 +344,7 @@ class NannyMemoryManager:
         except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
             return  # pragma: nocover
 
-        if proc.pid == self._last_terminated_pid:
+        if process.pid in (self._last_terminated_pid, None):
             # We already sent SIGTERM to the worker, but its handler is still running
             # since the previous iteration of the memory_monitor - for example, it
             # may be taking a long time deleting all the spilled data from disk.
@@ -357,7 +357,7 @@ class NannyMemoryManager:
                 f"{self.memory_terminate_fraction * 100:.0f}% memory budget. "
                 "Restarting...",
             )
-            self._last_terminated_pid = proc.pid
+            self._last_terminated_pid = process.pid
             process.terminate()
 
 
