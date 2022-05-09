@@ -1481,7 +1481,7 @@ async def test_reschedule(c, s, a, b):
         await asyncio.sleep(0.001)
 
     for future in x:
-        s.reschedule(future.key, None, "test")
+        s.reschedule(future.key, stimulus_id="test")
 
     # Worker b gets more of the original tasks
     await wait(x)
@@ -1492,7 +1492,7 @@ async def test_reschedule(c, s, a, b):
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
 async def test_reschedule_warns(c, s, a, b):
     with captured_logger(logging.getLogger("distributed.scheduler")) as sched:
-        s.reschedule("__this-key-does-not-exist__", None, "test")
+        s.reschedule("__this-key-does-not-exist__", stimulus_id="test")
 
     assert "not found on the scheduler" in sched.getvalue()
     assert "Aborting reschedule" in sched.getvalue()
@@ -3301,7 +3301,7 @@ async def test_set_restrictions(c, s, a, b):
     await f
     s.set_restrictions(worker={f.key: a.address})
     assert s.tasks[f.key].worker_restrictions == {a.address}
-    s.reschedule(f, None, "test")
+    s.reschedule(f, stimulus_id="test")
     await f
 
 

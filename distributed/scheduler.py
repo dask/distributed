@@ -6697,7 +6697,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     transition_story = story
 
-    def reschedule(self, key: str, worker: str, stimulus_id: str):
+    def reschedule(self, key: str, worker=None, *, stimulus_id: str):
         """Reschedule a task
 
         Things may have shifted and this task may now be better suited to run
