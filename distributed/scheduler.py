@@ -6688,7 +6688,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     transition_story = story
 
-    def reschedule(self, key=None, worker=None):
+    def reschedule(self, key=None, worker=None, stimulus_id=None):
         """Reschedule a task
 
         Things may have shifted and this task may now be better suited to run
@@ -6706,7 +6706,7 @@ class Scheduler(SchedulerState, ServerNode):
             return
         if worker and ts.processing_on.address != worker:
             return
-        self.transitions({key: "released"}, f"reschedule-{time()}")
+        self.transitions({key: "released"}, stimulus_id or f"reschedule-{time()}")
 
     #####################
     # Utility functions #
