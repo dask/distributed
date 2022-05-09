@@ -140,7 +140,7 @@ async def cleanup_global_workers():
         await worker.close(report=False, executor_wait=False)
 
 
-@pytest.fixture(params={"instances": True})
+@pytest.fixture(params=[{"instances": True}])
 def loop(request):
     instances = request.param["instances"]
 
