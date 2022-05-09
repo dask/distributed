@@ -305,6 +305,7 @@ class NannyMemoryManager:
     memory_limit: int | None
     memory_terminate_fraction: float | Literal[False]
     memory_monitor_interval: float | None
+    _last_terminated_pid: int
 
     def __init__(
         self,
@@ -321,6 +322,8 @@ class NannyMemoryManager:
             default=False,
         )
         assert isinstance(self.memory_monitor_interval, (int, float))
+        self._last_terminated_pid = -1
+
         if self.memory_limit and self.memory_terminate_fraction is not False:
             pc = PeriodicCallback(
                 partial(self.memory_monitor, nanny),
@@ -341,11 +344,20 @@ class NannyMemoryManager:
         except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
             return  # pragma: nocover
 
+        if process.pid in (self._last_terminated_pid, None):
+            # We already sent SIGTERM to the worker, but its handler is still running
+            # since the previous iteration of the memory_monitor - for example, it
+            # may be taking a long time deleting all the spilled data from disk.
+            return
+        self._last_terminated_pid = -1
+
         if memory / self.memory_limit > self.memory_terminate_fraction:
             logger.warning(
-                "Worker exceeded %d%% memory budget. Restarting",
-                100 * self.memory_terminate_fraction,
+                f"Worker {nanny.worker_address} (pid={process.pid}) exceeded "
+                f"{self.memory_terminate_fraction * 100:.0f}% memory budget. "
+                "Restarting...",
             )
+            self._last_terminated_pid = process.pid
             process.terminate()
 
 
