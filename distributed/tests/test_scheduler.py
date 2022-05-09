@@ -2170,7 +2170,11 @@ async def test_gather_no_workers(c, s, a, b):
 @pytest.mark.slow
 @pytest.mark.parametrize("reschedule_different_worker", [True, False])
 @pytest.mark.parametrize("swap_data_insert_order", [True, False])
-@gen_cluster(client=True, client_kwargs={"direct_to_workers": False})
+@gen_cluster(
+    client=True,
+    client_kwargs={"direct_to_workers": False},
+    clean_kwargs={"instances": False},
+)
 async def test_gather_allow_worker_reconnect(
     c, s, a, b, reschedule_different_worker, swap_data_insert_order
 ):
@@ -3243,7 +3247,7 @@ async def test_worker_heartbeat_after_cancel(c, s, *workers):
         await asyncio.gather(*(w.heartbeat() for w in workers))
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
+@gen_cluster(client=True, nthreads=[("", 1)], client_kwargs={"instances": False})
 async def test_worker_reconnect_task_memory(c, s, a):
     a.periodic_callbacks["heartbeat"].stop()
 
