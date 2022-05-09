@@ -141,9 +141,11 @@ async def cleanup_global_workers():
         await worker.close(report=False, executor_wait=False)
 
 
-@pytest.fixture
-def loop():
-    with check_instances():
+@pytest.fixture(params={"instances": True})
+def loop(request):
+    instances = request.param["instances"]
+
+    with check_instances() if instances else nullcontext():
         with pristine_loop() as loop:
             # Monkey-patch IOLoop.start to wait for loop stop
             orig_start = loop.start
