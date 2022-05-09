@@ -1802,12 +1802,8 @@ def check_instances():
         for n in Nanny._instances
     ), {n: n.status for n in Nanny._instances}
 
-    # assert not list(SpecCluster._instances)  # TODO
-    assert all(c.status == Status.closed for c in SpecCluster._instances), list(
-        SpecCluster._instances
-    )
-
-    DequeHandler.clear_all_instances()
+    SpecCluster.clear_instances()
+    DequeHandler.clear_instances()
 
     from _pytest.logging import LogCaptureHandler
 

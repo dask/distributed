@@ -630,6 +630,14 @@ class SpecCluster(Cluster):
         """Create an instance of this class to represent an existing cluster by name."""
         raise NotImplementedError()
 
+    def clear_instance(self):
+        del self.scheduler
+
+    @classmethod
+    def clear_instances(cls):
+        for instance in cls._instances:
+            instance.clear_instance()
+
 
 async def run_spec(spec: dict, *args):
     workers = {}
