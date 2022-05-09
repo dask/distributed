@@ -2888,7 +2888,12 @@ async def test_rebalance(c, s, a, b):
     assert len(b.data) == 50
 
 
-@gen_cluster(nthreads=[("", 1)] * 3, client=True, config=REBALANCE_MANAGED_CONFIG)
+@gen_cluster(
+    nthreads=[("", 1)] * 3,
+    client=True,
+    config=REBALANCE_MANAGED_CONFIG,
+    clean_kwargs={"instances": False},
+)
 async def test_rebalance_workers_and_keys(client, s, a, b, c):
     """Test Client.rebalance(). These are just to test the Client wrapper around
     Scheduler.rebalance(); for more thorough tests on the latter see test_scheduler.py.

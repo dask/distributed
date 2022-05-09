@@ -2794,7 +2794,12 @@ async def test_rebalance_managed_memory(c, s, a, b):
     assert len(b.data) == 50
 
 
-@gen_cluster(nthreads=[("", 1)] * 3, client=True, config=REBALANCE_MANAGED_CONFIG)
+@gen_cluster(
+    nthreads=[("", 1)] * 3,
+    client=True,
+    config=REBALANCE_MANAGED_CONFIG,
+    clean_kwargs={"instances": False},
+)
 async def test_rebalance_workers_and_keys(client, s, a, b, c):
     futures = await client.scatter(range(100), workers=[a.address])
     assert (len(a.data), len(b.data), len(c.data)) == (100, 0, 0)
