@@ -3259,7 +3259,7 @@ async def test_worker_heartbeat_after_cancel(c, s, *workers):
         await asyncio.gather(*(w.heartbeat() for w in workers))
 
 
-@gen_cluster(client=True, nthreads=[("", 1)], client_kwargs={"instances": False})
+@gen_cluster(client=True, nthreads=[("", 1)], clean_kwargs={"instances": False})
 async def test_worker_reconnect_task_memory(c, s, a):
     a.periodic_callbacks["heartbeat"].stop()
 
@@ -3279,7 +3279,7 @@ async def test_worker_reconnect_task_memory(c, s, a):
     }
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
+@gen_cluster(client=True, nthreads=[("", 1)], clean_kwargs={"instances": False})
 async def test_worker_reconnect_task_memory_with_resources(c, s, a):
     async with Worker(s.address, resources={"A": 1}) as b:
         while s.workers[b.address].status != Status.running:

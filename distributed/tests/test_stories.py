@@ -104,7 +104,7 @@ class WorkerBrokenStory(Worker):
         raise CommClosedError
 
 
-@gen_cluster(client=True, Worker=WorkerBrokenStory)
+@gen_cluster(client=True, Worker=WorkerBrokenStory, clean_kwargs={"instances": False})
 @pytest.mark.parametrize("on_error", ["ignore", "raise"])
 async def test_client_story_failed_worker(c, s, a, b, on_error):
     f = c.submit(inc, 1)

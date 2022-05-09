@@ -11,7 +11,7 @@ from distributed.protocol import Serialized
 from distributed.utils_test import gen_cluster, inc
 
 
-@gen_cluster()
+@gen_cluster(clean_kwargs={"instances": False})
 async def test_publish_simple(s, a, b):
     c = Client(s.address, asynchronous=True)
     f = Client(s.address, asynchronous=True)
@@ -259,7 +259,7 @@ async def test_datasets_async(c, s, a, b):
         len(c.datasets)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, clean_kwargs={"instances": False})
 async def test_pickle_safe(c, s, a, b):
     async with Client(s.address, asynchronous=True, serializers=["msgpack"]) as c2:
         await c2.publish_dataset(x=[1, 2, 3])

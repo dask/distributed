@@ -55,7 +55,7 @@ def blocked_inc(x, event):
     return x + 1
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, clean_kwargs={"instances": False})
 async def test_cluster_dump_state(c, s, a, b, tmp_path):
     filename = tmp_path / "dump"
     futs = c.map(inc, range(2))

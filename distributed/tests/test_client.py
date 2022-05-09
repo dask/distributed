@@ -4476,9 +4476,6 @@ def assert_no_data_loss(scheduler):
 
 @gen_cluster(client=True)
 async def test_interleave_computations(c, s, a, b):
-    import distributed
-
-    distributed.g = s
     xs = [delayed(slowinc)(i, delay=0.02) for i in range(30)]
     ys = [delayed(slowdec)(x, delay=0.02) for x in xs]
     zs = [delayed(slowadd)(x, y, delay=0.02) for x, y in zip(xs, ys)]
