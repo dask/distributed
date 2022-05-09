@@ -30,6 +30,7 @@ from typing import Any, Literal
 from distributed.compatibility import MACOS
 from distributed.profile import wait_profiler
 from distributed.scheduler import Scheduler
+from distributed.utils import has_keyword
 
 try:
     import ssl
@@ -1813,6 +1814,8 @@ def check_instances():
             for h in v.handlers:
                 if isinstance(h, LogCaptureHandler):
                     h.reset()
+
+    has_keyword.cache_clear()
 
     wait_profiler()
     gc.collect()
