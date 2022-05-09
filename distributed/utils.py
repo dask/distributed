@@ -1152,7 +1152,7 @@ class DequeHandler(logging.Handler):
         self.deque.clear()
 
     @classmethod
-    def clear_all_instances(cls):
+    def clear_instances(cls):
         """
         Clear the internal storage of all live DequeHandlers.
         """
