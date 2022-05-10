@@ -242,7 +242,7 @@ class WorkerMemoryManager:
                 logger.warning(
                     "Unmanaged memory use is high. This may indicate a memory leak "
                     "or the memory may not be released to the OS; see "
-                    "https://distributed.dask.org/en/latest/worker.html#memtrim "
+                    "https://distributed.dask.org/en/latest/worker-memory.html#memory-not-released-back-to-the-os "
                     "for more information. "
                     "-- Unmanaged memory: %s -- Worker memory limit: %s",
                     format_bytes(memory),
