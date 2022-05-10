@@ -245,3 +245,32 @@ async def test_eventstream(c, s, a, b):
     )
     assert "websocket" in str(s.plugins).lower()
     ws_client.close()
+
+
+@gen_cluster(client=True, clean_kwargs={"threads": False})
+async def test_api(c, s, a, b):
+    http_client = AsyncHTTPClient()
+
+    response = await http_client.fetch(
+        "http://localhost:%d/api/v1" % s.http_server.port
+    )
+    assert response.code == 200
+    assert response.headers["Content-Type"] == "text/plain"
+
+    txt = response.body.decode("utf8")
+    assert txt == "API V1"
+
+
+@gen_cluster(client=True, clean_kwargs={"threads": False})
+async def test_retire_workers(c, s, a, b):
+    assert True
+
+
+@gen_cluster(client=True, clean_kwargs={"threads": False})
+async def test_get_workers(c, s, a, b):
+    assert True
+
+
+@gen_cluster(client=True, clean_kwargs={"threads": False})
+async def test_adaptive_target(c, s, a, b):
+    assert True

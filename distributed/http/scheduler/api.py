@@ -24,14 +24,19 @@ class RetireWorkersHandler(RequestHandler):
             self.set_status(400, str(e))
             self.write(json.dumps({"Error": "Bad request"}))
 
+
 class GetWorkersHandler(RequestHandler):
     def get(self):
         scheduler = self.server
         response = {
             "num_workers": len(scheduler.workers),
-            "workers": [{"name": ws.name, "address": ws.address} for ws in scheduler.workers.values()]
+            "workers": [
+                {"name": ws.name, "address": ws.address}
+                for ws in scheduler.workers.values()
+            ],
         }
         self.write(response)
+
 
 class AdaptiveTargetHandler(RequestHandler):
     def get(self):
@@ -41,6 +46,7 @@ class AdaptiveTargetHandler(RequestHandler):
             "desired_workers": desired_workers,
         }
         self.write(response)
+
 
 routes: list[tuple] = [
     ("/api/v1", APIHandler, {}),
