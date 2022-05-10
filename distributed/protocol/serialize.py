@@ -91,7 +91,7 @@ def pickle_loads(header, frames):
     memoryviews = map(memoryview, buffers)
     for w, mv in zip(writeable, memoryviews):
         if w == mv.readonly:
-            if mv.readonly:
+            if w:
                 mv = memoryview(bytearray(mv))
             else:
                 mv = memoryview(bytes(mv))
