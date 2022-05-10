@@ -12,7 +12,6 @@ from dask import delayed
 from distributed import Client, Nanny, wait
 from distributed.chaos import KillWorker
 from distributed.compatibility import WINDOWS
-from distributed.config import config
 from distributed.metrics import time
 from distributed.utils import CancelledError
 from distributed.utils_test import (
@@ -121,13 +120,11 @@ async def test_stress_creation_and_deletion(c, s):
         assert await c.compute(z) == 8000884.93
 
 
-@gen_cluster(nthreads=[("127.0.0.1", 1)] * 10, client=True, timeout=60)
+@gen_cluster(nthreads=[("", 1)] * 10, client=True)
 async def test_stress_scatter_death(c, s, *workers):
-    import random
-
     s.allowed_failures = 1000
     np = pytest.importorskip("numpy")
-    L = await c.scatter([np.random.random(10000) for i in range(len(workers))])
+    L = await c.scatter([np.random.random(10000) for _ in range(len(workers))])
     await c.replicate(L, n=2)
 
     adds = [
@@ -135,43 +132,27 @@ async def test_stress_scatter_death(c, s, *workers):
             random.choice(L),
             random.choice(L),
             delay=0.05,
-            dask_key_name="slowadd-1-%d" % i,
+            dask_key_name=f"slowadd-1-{i}",
         )
         for i in range(50)
     ]
 
     adds = [
-        delayed(slowadd, pure=True)(a, b, delay=0.02, dask_key_name="slowadd-2-%d" % i)
+        delayed(slowadd, pure=True)(a, b, delay=0.02, dask_key_name=f"slowadd-2-{i}")
         for i, (a, b) in enumerate(sliding_window(2, adds))
     ]
 
     futures = c.compute(adds)
-    L = adds = None
+    del L
+    del adds
 
-    alive = list(workers)
-
-    from distributed.scheduler import logger
-
-    for i in range(7):
+    for w in random.sample(workers, 7):
         await asyncio.sleep(0.1)
-        try:
-            s.validate_state()
-        except Exception as c:
-            logger.exception(c)
-            if config.get("log-on-err"):
-                import pdb
-
-                pdb.set_trace()
-            else:
-                raise
-        w = random.choice(alive)
+        s.validate_state()
         await w.close()
-        alive.remove(w)
 
     with suppress(CancelledError):
         await c.gather(futures)
-
-    futures = None
 
 
 def vsum(*args):
