@@ -3500,7 +3500,7 @@ class Scheduler(SchedulerState, ServerNode):
         for future in futures:  # TODO: do all at once
             await future
 
-        for comm in self.client_comms.values():
+        for comm in self.client_comms.values():  # TODO: do all at once
             await comm.close()
 
         await self.rpc.close()
