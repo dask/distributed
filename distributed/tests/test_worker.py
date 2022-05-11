@@ -631,11 +631,13 @@ async def test_clean(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_message_breakup(c, s, a, b):
-    n = 100000
+    n = 100_000
     a.target_message_size = 10 * n
     b.target_message_size = 10 * n
-    xs = [c.submit(mul, b"%d" % i, n, workers=a.address) for i in range(30)]
-    y = c.submit(lambda *args: None, xs, workers=b.address)
+    xs = [
+        c.submit(mul, b"%d" % i, n, key=f"x{i}", workers=[a.address]) for i in range(30)
+    ]
+    y = c.submit(lambda _: None, xs, key="y", workers=[b.address])
     await y
 
     assert 2 <= len(b.incoming_transfer_log) <= 20
@@ -714,27 +716,32 @@ async def test_clean_nbytes(c, s, a, b):
     )
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 20)
-async def test_gather_many_small(c, s, a, *workers):
+@pytest.mark.parametrize("as_deps", [True, False])
+@gen_cluster(client=True, nthreads=[("", 1)] * 20)
+async def test_gather_many_small(c, s, a, *workers, as_deps):
     """If the dependencies of a given task are very small, do not limit the
     number of concurrent outgoing connections
     """
     a.total_out_connections = 2
-    futures = await c._scatter(list(range(100)))
-
+    futures = await c.scatter(
+        {f"x{i}": i for i in range(100)},
+        workers=[w.address for w in workers],
+    )
     assert all(w.data for w in workers)
 
-    def f(*args):
-        return 10
-
-    future = c.submit(f, *futures, workers=a.address)
-    await wait(future)
+    if as_deps:
+        future = c.submit(lambda _: None, futures, key="y", workers=[a.address])
+        await wait(future)
+    else:
+        s.request_acquire_replicas(a.address, list(futures), stimulus_id="test")
+        while len(a.data) < 100:
+            await asyncio.sleep(0.01)
 
     types = list(pluck(0, a.log))
     req = [i for i, t in enumerate(types) if t == "request-dep"]
     recv = [i for i, t in enumerate(types) if t == "receive-dep"]
+    assert len(req) == len(recv) == 19
     assert min(recv) > max(req)
-
     assert a.comm_nbytes == 0
 
 
@@ -1424,21 +1431,13 @@ def assert_amm_transfer_story(key: str, w_from: Worker, w_to: Worker) -> None:
     assert_story(
         w_to.story(key),
         [
-            (key, "ensure-task-exists", "released"),
-            (key, "released", "fetch", "fetch", {}),
-            ("gather-dependencies", w_from.address, lambda set_: key in set_),
             (key, "fetch", "flight", "flight", {}),
             ("request-dep", w_from.address, lambda set_: key in set_),
             ("receive-dep", w_from.address, lambda set_: key in set_),
             (key, "put-in-memory"),
             (key, "flight", "memory", "memory", {}),
         ],
-        # There may be additional ('missing', 'fetch', 'fetch') events if transfers
-        # are slow enough that the Active Memory Manager ends up requesting them a
-        # second time. Here we're asserting that no matter how slow CI is, all
-        # transfers will be completed within 2 seconds (hardcoded interval in
-        # Scheduler.retire_worker when AMM is not enabled).
-        strict=True,
+        strict=False,
     )
     assert key in w_to.data
     # The key may or may not still be in w_from.data, depending if the AMM had the
@@ -3076,7 +3075,7 @@ async def test_missing_released_zombie_tasks_2(c, s, b):
             await asyncio.sleep(0)
 
         ts = b.tasks[f1.key]
-        assert ts.state == "fetch"
+        assert ts.state == "flight"
 
         while ts.state != "missing":
             # If we sleep for a longer time, the worker will spin into an
@@ -3191,7 +3190,10 @@ async def test_task_flight_compute_oserror(c, s, a, b):
         # inc is lost and needs to be recomputed. Therefore, sum is released
         ("free-keys", ("f1",)),
         ("f1", "release-key"),
-        ("f1", "waiting", "released", "released", {"f1": "forgotten"}),
+        # The recommendations here are hard to predict. Whatever key is
+        # currently scheduled to be fetched, if any, will be recommended to be
+        # released.
+        ("f1", "waiting", "released", "released", lambda msg: msg["f1"] == "forgotten"),
         ("f1", "released", "forgotten", "forgotten", {}),
         # Now, we actually compute the task *once*. This must not cycle back
         ("f1", "compute-task"),

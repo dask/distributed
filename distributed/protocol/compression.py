@@ -6,9 +6,9 @@ Includes utilities for determining whether or not to compress
 from __future__ import annotations
 
 import logging
-import random
 from collections.abc import Callable
 from contextlib import suppress
+from random import randint
 from typing import Literal
 
 from packaging.version import parse as parse_version
@@ -16,7 +16,7 @@ from tlz import identity
 
 import dask
 
-from distributed.utils import ensure_bytes
+from distributed.utils import ensure_memoryview, nbytes
 
 compressions: dict[
     str | None | Literal[False],
@@ -120,24 +120,37 @@ def byte_sample(b, size, n):
     ----------
     b : bytes or memoryview
     size : int
-        size of each sample to collect
+        target size of each sample to collect
+        (may be smaller if samples collide)
     n : int
         number of samples to collect
     """
-    starts = [random.randint(0, len(b) - size) for j in range(n)]
-    ends = []
-    for i, start in enumerate(starts[:-1]):
-        ends.append(min(start + size, starts[i + 1]))
-    ends.append(starts[-1] + size)
+    assert size >= 0 and n >= 0
+    if size == 0 or n == 0:
+        return memoryview(b"")
 
-    parts = [b[start:end] for start, end in zip(starts, ends)]
-    return b"".join(map(ensure_bytes, parts))
+    b = ensure_memoryview(b)
+
+    parts = n * [None]
+    max_start = b.nbytes - size
+    start = randint(0, max_start)
+    for i in range(n - 1):
+        next_start = randint(0, max_start)
+        end = min(start + size, next_start)
+        parts[i] = b[start:end]
+        start = next_start
+    parts[-1] = b[start : start + size]
+
+    if n == 1:
+        return parts[0]
+    else:
+        return memoryview(b"".join(parts))
 
 
 def maybe_compress(
     payload,
-    min_size=1e4,
-    sample_size=1e4,
+    min_size=10_000,
+    sample_size=10_000,
     nsamples=5,
     compression=dask.config.get("distributed.comm.compression"),
 ):
@@ -151,37 +164,30 @@ def maybe_compress(
         return the original
     4.  We return the compressed result
     """
-    if compression == "auto":
-        compression = default_compression
-
     if not compression:
         return None, payload
-    if len(payload) < min_size:
-        return None, payload
-    if len(payload) > 2**31:  # Too large, compression libraries often fail
+    if not (min_size <= nbytes(payload) <= 2**31):
+        # Either too small to bother
+        # or too large (compression libraries often fail)
         return None, payload
 
-    min_size = int(min_size)
-    sample_size = int(sample_size)
-
+    # Normalize function arguments
+    if compression == "auto":
+        compression = default_compression
     compress = compressions[compression]["compress"]
 
-    # Compress a sample, return original if not very compressed
-    sample = byte_sample(payload, sample_size, nsamples)
-    if len(compress(sample)) > 0.9 * len(sample):  # sample not very compressible
-        return None, payload
+    # Take a view of payload for efficient usage
+    mv = ensure_memoryview(payload)
 
-    if type(payload) is memoryview:
-        nbytes = payload.itemsize * len(payload)
-    else:
-        nbytes = len(payload)
-
-    compressed = compress(ensure_bytes(payload))
-
-    if len(compressed) > 0.9 * nbytes:  # full data not very compressible
-        return None, payload
-    else:
-        return compression, compressed
+    # Try compressing a sample to see if it compresses well
+    sample = byte_sample(mv, sample_size, nsamples)
+    if len(compress(sample)) <= 0.9 * sample.nbytes:
+        # Try compressing the real thing and check how compressed it is
+        compressed = compress(mv)
+        if len(compressed) <= 0.9 * mv.nbytes:
+            return compression, compressed
+    # Skip compression as the sample or the data didn't compress well
+    return None, payload
 
 
 def decompress(header, frames):

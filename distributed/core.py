@@ -584,7 +584,7 @@ class Server:
                             self._ongoing_coroutines.add(result)
                             result = await result
                     except CommClosedError:
-                        if self.status in Status.ANY_RUNNING:
+                        if self.status == Status.running:
                             logger.info("Lost connection to %r", address, exc_info=True)
                         break
                     except Exception as e:
@@ -623,7 +623,7 @@ class Server:
                         "Failed while closing connection to %r: %s", address, e
                     )
 
-    async def handle_stream(self, comm, extra=None, every_cycle=()):
+    async def handle_stream(self, comm, extra=None):
         extra = extra or {}
         logger.info("Starting established connection")
 
@@ -652,12 +652,6 @@ class Server:
                         else:
                             logger.error("odd message %s", msg)
                     await asyncio.sleep(0)
-
-                for func in every_cycle:
-                    if is_coroutine_function(func):
-                        self.loop.add_callback(func)
-                    else:
-                        func()
 
         except OSError:
             pass

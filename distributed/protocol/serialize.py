@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import importlib
 import traceback
 from array import array
@@ -22,7 +23,7 @@ from distributed.protocol.utils import (
     pack_frames_prelude,
     unpack_frames,
 )
-from distributed.utils import ensure_bytes, has_keyword
+from distributed.utils import ensure_memoryview, has_keyword
 
 dask_serialize = dask.utils.Dispatch("dask_serialize")
 dask_deserialize = dask.utils.Dispatch("dask_deserialize")
@@ -90,7 +91,7 @@ def pickle_loads(header, frames):
     memoryviews = map(memoryview, buffers)
     for w, mv in zip(writeable, memoryviews):
         if w == mv.readonly:
-            if mv.readonly:
+            if w:
                 mv = memoryview(bytearray(mv))
             else:
                 mv = memoryview(bytes(mv))
@@ -179,7 +180,7 @@ def msgpack_loads(header, frames):
 
 
 def serialization_error_loads(header, frames):
-    msg = "\n".join([ensure_bytes(frame).decode("utf8") for frame in frames])
+    msg = "\n".join([codecs.decode(frame, "utf8") for frame in frames])
     raise TypeError(msg)
 
 
@@ -764,12 +765,11 @@ def _serialize_array(obj):
 @dask_deserialize.register(array)
 def _deserialize_array(header, frames):
     a = array(header["typecode"])
-    for f in map(memoryview, frames):
-        try:
-            f = f.cast("B")
-        except TypeError:
-            f = f.tobytes()
-        a.frombytes(f)
+    nframes = len(frames)
+    if nframes == 1:
+        a.frombytes(ensure_memoryview(frames[0]))
+    elif nframes > 1:
+        a.frombytes(b"".join(map(ensure_memoryview, frames)))
     return a
 
 
