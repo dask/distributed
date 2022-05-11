@@ -65,7 +65,9 @@ class BatchedSend:
         )
 
     def closed(self):
-        return self.comm and self.comm.closed()
+        return (self.comm is None or self.comm.closed()) and (
+            self._background_task is None or self._background_task.done()
+        )
 
     def __repr__(self):
         if self.closed():
@@ -157,6 +159,7 @@ class BatchedSend:
 
         if self._background_task:
             await self._background_task
+            self._background_task = None
 
         if self.comm and not self.comm.closed():
             try:

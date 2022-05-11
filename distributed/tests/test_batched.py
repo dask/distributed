@@ -43,9 +43,11 @@ async def test_BatchedSend():
         comm = await connect(e.address)
 
         b = BatchedSend(interval=10)
+        assert b.closed()
+        b.start(comm)
+        assert not b.closed()
         assert str(len(b.buffer)) in str(b)
         assert str(len(b.buffer)) in repr(b)
-        b.start(comm)
 
         await asyncio.sleep(0.020)
 
@@ -62,7 +64,8 @@ async def test_BatchedSend():
         assert result == ("HELLO", "HELLO")
 
         assert b.byte_count > 1
-        await comm.close()
+        await b.close()
+        assert b.closed()
 
 
 @gen_test()
@@ -110,6 +113,7 @@ async def test_send_before_close():
         b.send("hello")
         await b.close()  # close immediately after sending
         assert not b.buffer
+        assert b.closed()
 
         start = time()
         while e.count != cnt + 1:
@@ -131,6 +135,23 @@ async def test_close_closed():
         await b.close()
         assert "closed" in repr(b)
         assert "closed" in str(b)
+
+
+@gen_test()
+async def test_abort_not_immediately_closed():
+    async with EchoServer() as e:
+        comm = await connect(e.address)
+
+        b = BatchedSend(interval=10)
+        b.start(comm)
+
+        b.send(123)
+        assert not b.closed()
+        b.abort()
+        assert not b.closed()
+
+        while not b.closed():
+            await asyncio.sleep(0.01)
 
 
 @gen_test()
@@ -268,10 +289,12 @@ async def test_restart():
 
         new_comm = await connect(e.address)
         b.start(new_comm)
+        assert not b.closed()
 
         assert await new_comm.read() == (345,)
         await b.close()
         assert new_comm.closed()
+        assert b.closed()
 
 
 @gen_test()
