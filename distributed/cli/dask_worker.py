@@ -479,7 +479,7 @@ def main(
                 signal_fired = True
                 if nanny:
                     # Unregister all workers from scheduler
-                    await asyncio.gather(*(n.close(timeout=2) for n in nannies))
+                    await asyncio.gather(*(n.close(timeout=10) for n in nannies))
 
         await asyncio.gather(*nannies)
         await wait_until_shutdown()
