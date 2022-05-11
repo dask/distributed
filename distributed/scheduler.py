@@ -4678,6 +4678,10 @@ class Scheduler(SchedulerState, ServerNode):
         We listen to all future messages from this Comm.
         """
         assert client is not None
+        assert client not in self.clients, f"Client {client!r} already exists"
+        assert (
+            client not in self.client_comms
+        ), f"Connection to client {client!r} already exists"
         comm.name = "Scheduler->Client"
         logger.info("Receive client connection: %s", client)
         self.log_event(["all", client], {"action": "add-client", "client": client})
@@ -4689,8 +4693,8 @@ class Scheduler(SchedulerState, ServerNode):
             except Exception as e:
                 logger.exception(e)
 
+        bcomm = BatchedSend(interval="2ms", name="Scheduler->Client")
         try:
-            bcomm = BatchedSend(interval="2ms", name="Scheduler->Client")
             bcomm.start(comm)
             self.client_comms[client] = bcomm
             msg = {"op": "stream-start"}
@@ -4708,12 +4712,15 @@ class Scheduler(SchedulerState, ServerNode):
                 self.remove_client(client=client, stimulus_id=f"remove-client-{time()}")
                 logger.debug("Finished handling client %s", client)
         finally:
-            if not comm.closed():
-                self.client_comms[client].send({"op": "stream-closed"})
+            if not bcomm.closed():
+                bcomm.send({"op": "stream-closed"})
             try:
                 if not sys.is_finalizing():
-                    bcomm = self.client_comms.pop(client)
-                    await bcomm.close()
+                    current_bcomm = self.client_comms.pop(client)
+                    assert (
+                        current_bcomm is bcomm
+                    ), f"BatchedSend for {client!r} has changed from {bcomm!r} to {current_bcomm!r}"
+                    await current_bcomm.close()
                     if self.status == Status.running:
                         logger.info("Close client connection: %s", client)
             except TypeError:  # comm becomes None during GC
