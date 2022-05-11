@@ -4712,8 +4712,8 @@ class Scheduler(SchedulerState, ServerNode):
                 self.client_comms[client].send({"op": "stream-closed"})
             try:
                 if not sys.is_finalizing():
-                    await self.client_comms[client].close()
-                    del self.client_comms[client]
+                    bcomm = self.client_comms.pop(client)
+                    await bcomm.close()
                     if self.status == Status.running:
                         logger.info("Close client connection: %s", client)
             except TypeError:  # comm becomes None during GC
