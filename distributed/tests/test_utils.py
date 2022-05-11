@@ -255,7 +255,7 @@ def test_ensure_memoryview_empty():
 
 
 def test_ensure_memoryview():
-    data = [b"1", memoryview(b"1"), bytearray(b"1"), array.array("B", [49])]
+    data = [b"1", memoryview(b"1"), bytearray(b"1"), array.array("B", b"1")]
     for d in data:
         result = ensure_memoryview(d)
         assert isinstance(result, memoryview)
