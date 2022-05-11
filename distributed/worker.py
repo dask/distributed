@@ -248,7 +248,7 @@ class Worker(ServerNode):
 
         $ dask-worker --help
 
-    The rest of this docstring is about the internal state the the worker uses
+    The rest of this docstring is about the internal state that the worker uses
     to manage and track internal computations.
 
     **State**
@@ -287,7 +287,7 @@ class Worker(ServerNode):
     **Volatile State**
 
     These attributes track the progress of tasks that this worker is trying to
-    complete.  In the descriptions below a ``key`` is the name of a task that
+    complete. In the descriptions below a ``key`` is the name of a task that
     we want to compute and ``dep`` is the name of a piece of dependent data
     that we want to collect from others.
 
@@ -357,7 +357,7 @@ class Worker(ServerNode):
     memory_target_fraction: float or False
         Fraction of memory to try to stay beneath
         (default: read from config key distributed.worker.memory.target)
-    memory_spill_fraction: float or false
+    memory_spill_fraction: float or False
         Fraction of memory at which we start spilling to disk
         (default: read from config key distributed.worker.memory.spill)
     memory_pause_fraction: float or False
@@ -1621,7 +1621,7 @@ class Worker(ServerNode):
         """Gracefully shut down a worker
 
         This first informs the scheduler that we're shutting down, and asks it
-        to move our data elsewhere.  Afterwards, we close as normal
+        to move our data elsewhere. Afterwards, we close as normal
         """
         if self.status in (Status.closing, Status.closing_gracefully):
             await self.finished()
@@ -2306,7 +2306,7 @@ class Worker(ServerNode):
 
         executing -> cancelled -> resumed(fetch)
 
-        depending on the origin. Equally, only `fetch`, `waiting` or `released`
+        depending on the origin. Equally, only `fetch`, `waiting`, or `released`
         are allowed output states.
 
         See also `transition_resumed_waiting`
@@ -2324,7 +2324,7 @@ class Worker(ServerNode):
             # If we're not done, yet, just remember where we want to be next
             ts._next = finish
         else:
-            # Flight/executing finished unsuccesfully, i.e. not in memory
+            # Flight/executing finished unsuccessfully, i.e. not in memory
             assert finish != "memory"
             next_state = ts._next
             assert next_state in {"waiting", "fetch"}, next_state
@@ -2341,17 +2341,13 @@ class Worker(ServerNode):
     def transition_resumed_fetch(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
-        """
-        See Worker._transition_from_resumed
-        """
+        """See Worker._transition_from_resumed"""
         return self._transition_from_resumed(ts, "fetch", stimulus_id=stimulus_id)
 
     def transition_resumed_missing(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
-        """
-        See Worker._transition_from_resumed
-        """
+        """See Worker._transition_from_resumed"""
         return self._transition_from_resumed(ts, "missing", stimulus_id=stimulus_id)
 
     def transition_resumed_released(
@@ -2367,9 +2363,7 @@ class Worker(ServerNode):
     def transition_resumed_waiting(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
-        """
-        See Worker._transition_from_resumed
-        """
+        """See Worker._transition_from_resumed"""
         return self._transition_from_resumed(ts, "waiting", stimulus_id=stimulus_id)
 
     def transition_cancelled_fetch(
