@@ -53,7 +53,7 @@ class BatchedSend:
 
     def start(self, comm):
         if self._background_task and not self._background_task.done():
-            raise RuntimeError("Background task still running")
+            raise RuntimeError(f"Background task still running for {self!r}")
         self.please_stop = False
         self.waker.set()
         self.next_deadline = None
@@ -69,9 +69,9 @@ class BatchedSend:
 
     def __repr__(self):
         if self.closed():
-            return "<BatchedSend: closed>"
+            return f"<BatchedSend {self.name!r}: closed>"
         else:
-            return "<BatchedSend: %d in buffer>" % len(self.buffer)
+            return f"<BatchedSend {self.name!r}: {len(self.buffer)} in buffer>"
 
     __str__ = __repr__
 
