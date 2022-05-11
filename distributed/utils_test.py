@@ -27,14 +27,6 @@ from itertools import count
 from time import sleep
 from typing import Any, Generator, Literal
 
-from distributed.compatibility import MACOS
-from distributed.scheduler import Scheduler
-
-try:
-    import ssl
-except ImportError:
-    ssl = None  # type: ignore
-
 import pytest
 import yaml
 from tlz import assoc, memoize, merge
@@ -43,12 +35,12 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from distributed import system
+from distributed import Scheduler, system
 from distributed import versions as version_module
 from distributed.client import Client, _global_clients, default_client
 from distributed.comm import Comm
 from distributed.comm.tcp import TCP
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import MACOS, WINDOWS
 from distributed.config import initialize_logging
 from distributed.core import (
     CommClosedError,
@@ -78,6 +70,11 @@ from distributed.utils import (
     sync,
 )
 from distributed.worker import WORKER_ANY_RUNNING, InvalidTransition, Worker
+
+try:
+    import ssl
+except ImportError:
+    ssl = None  # type: ignore
 
 try:
     import dask.array  # register config
@@ -447,8 +444,6 @@ async def readone(comm):
 
 def run_scheduler(q, nputs, config, port=0, **kwargs):
     with dask.config.set(config):
-        from distributed import Scheduler
-
         # On Python 2.7 and Unix, fork() is used to spawn child processes,
         # so avoid inheriting the parent's IO loop.
         with pristine_loop() as loop:
@@ -999,6 +994,7 @@ def gen_cluster(
     worker_kwargs = merge(
         {"memory_limit": system.MEMORY_LIMIT, "death_timeout": 15}, worker_kwargs
     )
+    config = merge({"distributed.admin.transition-counter-max": 50_000}, config)
 
     def _(func):
         if not iscoroutinefunction(func):
@@ -1054,6 +1050,9 @@ def gen_cluster(
                             result = await coro2
                             if s.validate:
                                 s.validate_state()
+                                for w in workers:
+                                    if w.validate and hasattr(w, "validate_state"):
+                                        w.validate_state()
 
                         except asyncio.TimeoutError:
                             assert task

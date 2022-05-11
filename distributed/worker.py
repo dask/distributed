@@ -129,6 +129,7 @@ from distributed.worker_state_machine import (
     TaskFinishedMsg,
     TaskState,
     TaskStateState,
+    TransitionCounterMaxExceeded,
     UniqueTaskHeap,
     UnpauseEvent,
     merge_recs_instructions,
@@ -449,7 +450,8 @@ class Worker(ServerNode):
     target_message_size: int
     validate: bool
     _transitions_table: dict[tuple[str, str], Callable]
-    _transition_counter: int
+    transition_counter: int
+    transition_counter_max: int | Literal[False]
     incoming_count: int
     outgoing_count: int
     outgoing_current_count: int
@@ -656,7 +658,10 @@ class Worker(ServerNode):
             ("waiting", "released"): self.transition_generic_released,
         }
 
-        self._transition_counter = 0
+        self.transition_counter = 0
+        self.transition_counter_max = dask.config.get(
+            "distributed.admin.transition-counter-max"
+        )
         self.incoming_transfer_log = deque(maxlen=100000)
         self.incoming_count = 0
         self.outgoing_transfer_log = deque(maxlen=100000)
@@ -1113,6 +1118,7 @@ class Worker(ServerNode):
             "busy_workers": self.busy_workers,
             "log": self.log,
             "stimulus_log": self.stimulus_log,
+            "transition_counter": self.transition_counter,
             "tasks": self.tasks,
             "logs": self.get_logs(),
             "config": dask.config.config,
@@ -2650,8 +2656,29 @@ class Worker(ServerNode):
         start = ts.state
         func = self._transitions_table.get((start, cast(str, finish)))
 
+        # Notes:
+        # - in case of transition through released, this counter is incremented by 2
+        # - this increase happens before the actual transitions, so that it can
+        #   catch potential infinite recursions
+        self.transition_counter += 1
+        if (
+            self.validate
+            and self.transition_counter_max
+            and self.transition_counter >= self.transition_counter_max
+        ):
+            self.log_event(
+                "transition-counter-max-exceeded",
+                {
+                    "key": ts.key,
+                    "start": start,
+                    "finish": finish,
+                    "story": self.story(ts),
+                    "worker": self.address,
+                },
+            )
+            raise TransitionCounterMaxExceeded(ts.key, start, finish, self.story(ts))
+
         if func is not None:
-            self._transition_counter += 1
             recs, instructions = func(ts, *args, stimulus_id=stimulus_id, **kwargs)
             self._notify_plugins("transition", ts.key, start, finish, **kwargs)
 
@@ -4209,13 +4236,17 @@ class Worker(ServerNode):
                         or ts_wait in self._missing_dep_flight
                         or ts_wait.who_has.issubset(self.in_flight_workers)
                     ), (ts, ts_wait, self.story(ts), self.story(ts_wait))
-            assert self.waiting_for_data_count == waiting_for_data_count
+            # FIXME https://github.com/dask/distributed/issues/6319
+            # assert self.waiting_for_data_count == waiting_for_data_count
             for worker, keys in self.has_what.items():
                 for k in keys:
                     assert worker in self.tasks[k].who_has
 
             for ts in self.tasks.values():
                 self.validate_task(ts)
+
+            if self.transition_counter_max:
+                assert self.transition_counter < self.transition_counter_max
 
         except Exception as e:
             logger.error("Validate state failed.  Closing.", exc_info=e)
