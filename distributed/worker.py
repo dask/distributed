@@ -2811,7 +2811,7 @@ class Worker(ServerNode):
         while instructions:
             ensure_communicating = None
             for inst in instructions:
-                task = None
+                task: asyncio.Task | None = None
 
                 if isinstance(inst, SendMessageToScheduler):
                     self.batched_stream.send(inst.to_dict())
