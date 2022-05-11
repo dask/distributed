@@ -701,18 +701,16 @@ def test_timeout(nanny):
     assert worker.returncode == 1
 
 
-@pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="POSIX only")
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 @pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
 @gen_cluster(client=True, nthreads=[])
 async def test_signal_handling(c, s, nanny, sig):
-    try:
-        worker = subprocess.Popen(
-            ["dask-worker", s.address, nanny],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
+    with subprocess.Popen(
+        ["dask-worker", s.address, nanny],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    ) as worker:
         await c.wait_for_workers(1)
 
         worker.send_signal(sig)
@@ -730,5 +728,3 @@ async def test_signal_handling(c, s, nanny, sig):
         assert "timed out" not in logs
         assert "error" not in logs
         assert "exception" not in logs
-    finally:
-        worker.kill()

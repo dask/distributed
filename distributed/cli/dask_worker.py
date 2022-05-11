@@ -457,32 +457,31 @@ def main(
         ]
 
         async def wait_for_nannies_to_finish():
+            """Wait for nannies to initialize and finish"""
+            await asyncio.gather(*nannies)
             await asyncio.gather(*(n.finished() for n in nannies))
 
-        async def wait_until_shutdown():
-            """Wait until all nannies finished or the script receives a SIGINT or SIGTERM
-            which triggers a graceful shutdown of the worker
-            """
+        async def wait_for_signals_and_close():
+            """Wait for SIGINT or SIGTERM and close nannies upon receiving one of those signals"""
             nonlocal signal_fired
-            wait_for_signal_task = asyncio.create_task(
-                wait_for_signals([signal.SIGINT, signal.SIGTERM])
-            )
-            wait_for_nannies_to_finish_task = asyncio.create_task(
-                wait_for_nannies_to_finish()
-            )
-            done, _ = await asyncio.wait(
-                [wait_for_signal_task, wait_for_nannies_to_finish_task],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
+            await wait_for_signals([signal.SIGINT, signal.SIGTERM])
 
-            if wait_for_signal_task in done:
-                signal_fired = True
-                if nanny:
-                    # Unregister all workers from scheduler
-                    await asyncio.gather(*(n.close(timeout=10) for n in nannies))
+            signal_fired = True
+            if nanny:
+                # Unregister all workers from scheduler
+                await asyncio.gather(*(n.close(timeout=10) for n in nannies))
 
-        await asyncio.gather(*nannies)
-        await wait_until_shutdown()
+        wait_for_signals_and_close_task = asyncio.create_task(
+            wait_for_signals_and_close()
+        )
+        wait_for_nannies_to_finish_task = asyncio.create_task(
+            wait_for_nannies_to_finish()
+        )
+
+        await asyncio.wait(
+            [wait_for_signals_and_close_task, wait_for_nannies_to_finish_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
 
     try:
         asyncio.run(run())
