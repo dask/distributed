@@ -1048,11 +1048,7 @@ def gen_cluster(
                             task = asyncio.create_task(coro)
                             coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
                             result = await coro2
-                            if s.validate:
-                                s.validate_state()
-                                for w in workers:
-                                    if w.validate and hasattr(w, "validate_state"):
-                                        w.validate_state()
+                            validate_state(s, *workers)
 
                         except asyncio.TimeoutError:
                             assert task
@@ -1071,6 +1067,10 @@ def gen_cluster(
                             task.cancel()
                             while not task.cancelled():
                                 await asyncio.sleep(0.01)
+
+                            # Hopefully, the hang has been caused by inconsistent state,
+                            # which should be much more meaningful than the timeout
+                            validate_state(s, *workers)
 
                             # Remove as much of the traceback as possible; it's
                             # uninteresting boilerplate from utils_test and asyncio and
@@ -1202,6 +1202,15 @@ async def dump_cluster_state(
     with open(fname, "w") as fh:
         yaml.safe_dump(state, fh)  # Automatically convert tuples to lists
     print(f"Dumped cluster state to {fname}")
+
+
+def validate_state(*servers: Scheduler | Worker | Nanny) -> None:
+    """Run validate_state() on the Scheduler and all the Workers of the cluster.
+    Excludes workers wrapped by Nannies and workers manually started by the test.
+    """
+    for s in servers:
+        if s.validate and hasattr(s, "validate_state"):
+            s.validate_state()  # type: ignore
 
 
 def raises(func, exc=Exception):
