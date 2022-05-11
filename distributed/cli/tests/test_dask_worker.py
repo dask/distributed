@@ -690,7 +690,14 @@ def dask_setup(worker):
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 def test_timeout(nanny):
     worker = subprocess.run(
-        ["dask-worker", "192.168.1.100:7777", nanny, "--death-timeout=1"],
+        [
+            "python",
+            "-m",
+            "distributed.cli.dask_worker",
+            "192.168.1.100:7777",
+            nanny,
+            "--death-timeout=1",
+        ],
         text=True,
         encoding="utf8",
         capture_output=True,
