@@ -1542,7 +1542,7 @@ class Worker(ServerNode):
                 for c in Worker._initialized_clients:
                     # Regardless of what the client was initialized with
                     # we'll require the result as a future. This is
-                    # necessary since the heursitics of asynchronous are not
+                    # necessary since the heuristics of asynchronous are not
                     # reliable and we might deadlock here
                     c._asynchronous = True
                     if c.asynchronous:
