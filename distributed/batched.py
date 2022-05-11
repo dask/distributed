@@ -107,9 +107,8 @@ class BatchedSend:
                 self.byte_count += nbytes
             except CommClosedError:
                 logger.info(
-                    "Batched Comm Closed %r. Lost %s messages.",
-                    self.comm,
-                    len(payload),
+                    f"Batched Comm Closed {self.comm!r} in {self!r}. Lost {len(payload)} messages, ",
+                    f"plus {len(self.buffer)} in buffer.",  # <-- due to upcoming `abort()`
                     exc_info=True,
                 )
                 break
@@ -120,7 +119,10 @@ class BatchedSend:
                 # header has been written, but not the frame payload), therefore
                 # the only safe thing to do here is to abort the stream without
                 # any attempt to re-try `write`.
-                logger.exception("Error in batched write")
+                logger.exception(
+                    f"Error in batched write in {self!r}. Lost {len(payload)} messages, "
+                    f"plus {len(self.buffer)} in buffer."
+                )
                 break
             finally:
                 payload = None  # lose ref
