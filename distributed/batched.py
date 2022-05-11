@@ -140,7 +140,7 @@ class BatchedSend:
         # The exception will not be propagated.
         self.abort()
 
-    def send(self, *msgs: dict) -> None:
+    def send(self, *msgs: object) -> None:
         """Schedule a message for sending to the other side
 
         This completes quickly and synchronously. (However, note that like all
