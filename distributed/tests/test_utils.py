@@ -1,4 +1,3 @@
-import array
 import asyncio
 import contextvars
 import functools
@@ -8,6 +7,7 @@ import queue
 import socket
 import traceback
 import warnings
+from array import array
 from collections import deque
 from time import sleep
 
@@ -255,7 +255,7 @@ def test_ensure_memoryview_empty():
 
 
 def test_ensure_memoryview():
-    data = [b"1", memoryview(b"1"), bytearray(b"1"), array.array("B", b"1")]
+    data = [b"1", memoryview(b"1"), bytearray(b"1"), array("B", b"1")]
     for d in data:
         result = ensure_memoryview(d)
         assert isinstance(result, memoryview)
