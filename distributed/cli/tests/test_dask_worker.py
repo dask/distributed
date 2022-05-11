@@ -722,9 +722,9 @@ async def test_signal_handling(c, s, nanny, sig):
         assert f"signal {sig}" in logs
         if nanny == "--nanny":
             assert "closing nanny" in logs
+            assert "stopping worker" in logs
         else:
             assert "nanny" not in logs
-        assert "stopping worker" in logs
         assert "end worker" in logs
         assert "timed out" not in logs
         assert "error" not in logs
