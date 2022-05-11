@@ -2863,6 +2863,8 @@ class Worker(ServerNode):
                     stimulus_id=ensure_communicating.stimulus_id
                 )
                 self.transitions(recs, stimulus_id=ensure_communicating.stimulus_id)
+            else:
+                instructions = []
 
     def maybe_transition_long_running(
         self, ts: TaskState, *, compute_duration: float, stimulus_id: str
