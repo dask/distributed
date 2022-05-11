@@ -2964,9 +2964,9 @@ class Worker(ServerNode):
                     assert d_ts not in recommendations
                 recommendations[d_ts] = ("flight", worker)
 
-            # A single invocation of _ensure_communicating may generate up to 1 GatherDep
-            # instruction per worker. Multiple tasks from the same worker may be
-            # clustered in the same instruction by _select_keys_for_gather. But once
+            # A single invocation of _ensure_communicating may generate up to one
+            # GatherDep instruction per worker. Multiple tasks from the same worker may
+            # be clustered in the same instruction by _select_keys_for_gather. But once
             # a worker has been selected for a GatherDep and added to in_flight_workers,
             # it won't be selected again until the gather completes.
             instructions.append(
