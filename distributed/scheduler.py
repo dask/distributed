@@ -7524,7 +7524,7 @@ def validate_state(
     """Validate a current runtime state.
 
     This performs a sequence of checks on the entire graph, running in about linear
-    time.  This raises assert errors if anything doesn't check out.
+    time. This raises assert errors if anything doesn't check out.
     """
     for ts in tasks.values():
         validate_task_state(ts)
