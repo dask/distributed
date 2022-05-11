@@ -465,7 +465,7 @@ def test_multiple_workers(loop):
 @pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
 def test_signal_handling(loop, sig):
     with subprocess.Popen(
-        ["dask-scheduler"],
+        ["python", "-m", "distributed.cli.dask_scheduler"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     ) as scheduler:

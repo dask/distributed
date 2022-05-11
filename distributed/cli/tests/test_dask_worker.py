@@ -707,7 +707,7 @@ def test_timeout(nanny):
 @gen_cluster(client=True, nthreads=[])
 async def test_signal_handling(c, s, nanny, sig):
     with subprocess.Popen(
-        ["dask-worker", s.address, nanny],
+        ["python", "-m", "distributed.cli.dask_worker", s.address, nanny],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     ) as worker:
