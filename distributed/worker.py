@@ -111,7 +111,7 @@ from distributed.worker_state_machine import (
     AddKeysMsg,
     AlreadyCancelledEvent,
     CancelComputeEvent,
-    EnsureCommunicatingLater,
+    EnsureCommunicatingAfterTransitions,
     Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -2028,7 +2028,7 @@ class Worker(ServerNode):
         # compute-task or acquire-replicas command from the scheduler, it allows
         # clustering the transfers into less GatherDep instructions; see
         # _select_keys_for_gather().
-        return {}, [EnsureCommunicatingLater(stimulus_id=stimulus_id)]
+        return {}, [EnsureCommunicatingAfterTransitions(stimulus_id=stimulus_id)]
 
     def transition_missing_fetch(
         self, ts: TaskState, *, stimulus_id: str
@@ -2808,54 +2808,61 @@ class Worker(ServerNode):
 
     @fail_hard
     def _handle_instructions(self, instructions: Instructions) -> None:
-        ensure_communicating = False
-        for inst in instructions:
-            task = None
+        while instructions:
+            ensure_communicating = None
+            for inst in instructions:
+                task = None
 
-            if isinstance(inst, SendMessageToScheduler):
-                self.batched_stream.send(inst.to_dict())
+                if isinstance(inst, SendMessageToScheduler):
+                    self.batched_stream.send(inst.to_dict())
 
-            elif isinstance(inst, EnsureCommunicatingLater):
-                # _ensure_communicating is a no-op if it runs twice in a row.
-                # The guard here is to avoid a O(n^2) condition when
-                # 1. there are many fetches queued because all workers are in flight
-                # 2. a single compute-task or acquire-replicas command just sent many
-                #    dependencies to fetch at once.
-                if not ensure_communicating:
-                    ensure_communicating = True
-                    recs, instructions = self._ensure_communicating(
-                        stimulus_id=inst.stimulus_id
+                elif isinstance(inst, EnsureCommunicatingAfterTransitions):
+                    # A single compute-task or acquire-replicas command may cause
+                    # multiple tasks to transition to fetch; this in turn means that we
+                    # will receive multiple instances of this instruction.
+                    # _ensure_communicating is a no-op if it runs twice in a row; we're
+                    # not calling it inside the for loop to avoid a O(n^2) condition
+                    # when
+                    # 1. there are many fetches queued because all workers are in flight
+                    # 2. a single compute-task or acquire-replicas command just sent
+                    #    many dependencies to fetch at once.
+                    ensure_communicating = inst
+
+                elif isinstance(inst, GatherDep):
+                    assert inst.to_gather
+                    keys_str = ", ".join(peekn(27, inst.to_gather)[0])
+                    if len(keys_str) > 80:
+                        keys_str = keys_str[:77] + "..."
+                    task = asyncio.create_task(
+                        self.gather_dep(
+                            inst.worker,
+                            inst.to_gather,
+                            total_nbytes=inst.total_nbytes,
+                            stimulus_id=inst.stimulus_id,
+                        ),
+                        name=f"gather_dep({inst.worker}, {{{keys_str}}})",
                     )
-                    self.transitions(recs, stimulus_id=inst.stimulus_id)
-                    self._handle_instructions(instructions)
 
-            elif isinstance(inst, GatherDep):
-                assert inst.to_gather
-                keys_str = ", ".join(peekn(27, inst.to_gather)[0])
-                if len(keys_str) > 80:
-                    keys_str = keys_str[:77] + "..."
-                task = asyncio.create_task(
-                    self.gather_dep(
-                        inst.worker,
-                        inst.to_gather,
-                        total_nbytes=inst.total_nbytes,
-                        stimulus_id=inst.stimulus_id,
-                    ),
-                    name=f"gather_dep({inst.worker}, {{{keys_str}}})",
+                elif isinstance(inst, Execute):
+                    task = asyncio.create_task(
+                        self.execute(inst.key, stimulus_id=inst.stimulus_id),
+                        name=f"execute({inst.key})",
+                    )
+
+                else:
+                    raise TypeError(inst)  # pragma: nocover
+
+                if task is not None:
+                    self._async_instructions.add(task)
+                    task.add_done_callback(self._handle_stimulus_from_task)
+
+            if ensure_communicating:
+                # Potentially re-fill instructions, causing a second iteration of `while
+                # instructions` at the top of this method
+                recs, instructions = self._ensure_communicating(
+                    stimulus_id=ensure_communicating.stimulus_id
                 )
-
-            elif isinstance(inst, Execute):
-                task = asyncio.create_task(
-                    self.execute(inst.key, stimulus_id=inst.stimulus_id),
-                    name=f"execute({inst.key})",
-                )
-
-            else:
-                raise TypeError(inst)  # pragma: nocover
-
-            if task is not None:
-                self._async_instructions.add(task)
-                task.add_done_callback(self._handle_stimulus_from_task)
+                self.transitions(recs, stimulus_id=ensure_communicating.stimulus_id)
 
     def maybe_transition_long_running(
         self, ts: TaskState, *, compute_duration: float, stimulus_id: str
@@ -2955,9 +2962,9 @@ class Worker(ServerNode):
                     assert d_ts not in recommendations
                 recommendations[d_ts] = ("flight", worker)
 
-            # Note: given n tasks that must be fetched from the same worker, this method
-            # may generate anywhere between 1 and n GatherDep instructions, as multiple
-            # tasks may be clustered in the same instruction by _select_keys_for_gather
+            # A single iteration of _ensure_communicating may generate up to 1 GatherDep
+            # instruction per worker. Multiple tasks from the same worker may be
+            # clustered in the same instruction by _select_keys_for_gather.
             instructions.append(
                 GatherDep(
                     worker=worker,
@@ -3073,6 +3080,7 @@ class Worker(ServerNode):
         while tasks:
             ts = tasks.peek()
             if ts.state != "fetch" or ts.key in all_keys_to_gather:
+                # Do not acquire the same key twice if multiple workers holds replicas
                 tasks.pop()
                 continue
             if total_bytes + ts.get_nbytes() > self.target_message_size:

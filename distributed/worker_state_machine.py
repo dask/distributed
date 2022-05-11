@@ -288,7 +288,7 @@ class SendMessageToScheduler(Instruction):
 
 
 @dataclass
-class EnsureCommunicatingLater(Instruction):
+class EnsureCommunicatingAfterTransitions(Instruction):
     __slots__ = ("stimulus_id",)
     stimulus_id: str
 
