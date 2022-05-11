@@ -73,8 +73,6 @@ class BatchedSend:
         else:
             return f"<BatchedSend {self.name!r}: {len(self.buffer)} in buffer>"
 
-    __str__ = __repr__
-
     async def _background_send(self):
         while not self.please_stop:
             try:
