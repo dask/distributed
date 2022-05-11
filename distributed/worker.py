@@ -652,7 +652,7 @@ class Worker(ServerNode):
             ("ready", "released"): self.transition_generic_released,
             ("released", "error"): self.transition_generic_error,
             ("released", "fetch"): self.transition_released_fetch,
-            ("released", "missing"): self.transition_released_fetch,
+            ("released", "missing"): self.transition_generic_missing,
             ("released", "forgotten"): self.transition_released_forgotten,
             ("released", "memory"): self.transition_released_memory,
             ("released", "waiting"): self.transition_released_waiting,
