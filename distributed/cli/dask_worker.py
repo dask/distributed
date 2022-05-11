@@ -457,12 +457,12 @@ def main(
         ]
 
         async def wait_for_nannies_to_finish():
-            """Wait for nannies to initialize and finish"""
+            """Wait for all nannies to initialize and finish"""
             await asyncio.gather(*nannies)
             await asyncio.gather(*(n.finished() for n in nannies))
 
         async def wait_for_signals_and_close():
-            """Wait for SIGINT or SIGTERM and close nannies upon receiving one of those signals"""
+            """Wait for SIGINT or SIGTERM and close all nannies upon receiving one of those signals"""
             nonlocal signal_fired
             await wait_for_signals([signal.SIGINT, signal.SIGTERM])
 

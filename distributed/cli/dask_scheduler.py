@@ -201,26 +201,27 @@ def main(
         )
         logger.info("-" * 47)
 
-        async def wait_until_shutdown():
-            """Wait until the scheduler finishes or the script receives a SIGINT or SIGTERM
-            which triggers a graceful shutdown of the scheduler
-            """
-            wait_for_signal_task = asyncio.create_task(
-                wait_for_signals([signal.SIGINT, signal.SIGTERM])
-            )
-            wait_for_scheduler_to_finish_task = asyncio.create_task(
-                scheduler.finished()
-            )
-            done, _ = await asyncio.wait(
-                [wait_for_signal_task, wait_for_scheduler_to_finish_task],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
+        async def wait_for_scheduler_to_finish():
+            """Wait for the scheduler to initialize and finish"""
+            await scheduler
+            await scheduler.finished()
 
-            if wait_for_signal_task in done:
-                await scheduler.close()
+        async def wait_for_signals_and_close():
+            """Wait for SIGINT or SIGTERM and close the scheduler upon receiving one of those signals"""
+            await wait_for_signals([signal.SIGINT, signal.SIGTERM])
+            await scheduler.close()
 
-        await scheduler
-        await wait_until_shutdown()
+        wait_for_signals_and_close_task = asyncio.create_task(
+            wait_for_signals_and_close()
+        )
+        wait_for_scheduler_to_finish_task = asyncio.create_task(
+            wait_for_scheduler_to_finish()
+        )
+
+        await asyncio.wait(
+            [wait_for_signals_and_close_task, wait_for_scheduler_to_finish_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
         logger.info("Stopped scheduler at %r", scheduler.address)
 
     try:
