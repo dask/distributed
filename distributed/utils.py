@@ -47,6 +47,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 from dask import istask
+from dask.utils import ensure_bytes as _ensure_bytes
 from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
@@ -1000,17 +1001,33 @@ def ensure_bytes(s):
     >>> ensure_bytes(b'123')
     b'123'
     """
-    if isinstance(s, bytes):
-        return s
-    elif hasattr(s, "encode"):
-        return s.encode()
+    warnings.warn(
+        "`distributed.utils.ensure_bytes` is deprecated. "
+        "Please switch to `dask.utils.ensure_bytes`. "
+        "This will be removed in `2022.6.0`.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _ensure_bytes(s)
+
+
+def ensure_memoryview(obj):
+    """Ensure `obj` is a 1-D contiguous `uint8` `memoryview`"""
+    mv: memoryview
+    if type(obj) is memoryview:
+        mv = obj
     else:
-        try:
-            return bytes(s)
-        except Exception as e:
-            raise TypeError(
-                "Object %s is neither a bytes object nor has an encode method" % s
-            ) from e
+        mv = memoryview(obj)
+
+    if not mv.nbytes:
+        # Drop `obj` reference to permit freeing underlying data
+        return memoryview(b"")
+    elif mv.contiguous:
+        # Perform zero-copy reshape & cast
+        return mv.cast("B")
+    else:
+        # Copy to contiguous form of expected shape & type
+        return memoryview(mv.tobytes())
 
 
 def open_port(host=""):

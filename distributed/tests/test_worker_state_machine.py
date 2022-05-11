@@ -1,9 +1,11 @@
+import asyncio
 from itertools import chain
 
 import pytest
 
 from distributed.protocol.serialize import Serialize
 from distributed.utils import recursive_to_dict
+from distributed.utils_test import assert_story, gen_cluster, inc
 from distributed.worker_state_machine import (
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -17,6 +19,11 @@ from distributed.worker_state_machine import (
     UniqueTaskHeap,
     merge_recs_instructions,
 )
+
+
+async def wait_for_state(key, state, dask_worker):
+    while key not in dask_worker.tasks or dask_worker.tasks[key].state != state:
+        await asyncio.sleep(0.005)
 
 
 def test_TaskState_get_nbytes():
@@ -236,3 +243,62 @@ def test_executefailure_to_dict():
     assert ev3.traceback is None
     assert ev3.exception_text == "exc text"
     assert ev3.traceback_text == "tb text"
+
+
+@gen_cluster(client=True)
+async def test_fetch_to_compute(c, s, a, b):
+    # Block ensure_communicating to ensure we indeed know that the task is in
+    # fetch and doesn't leave it accidentally
+    old_out_connections, b.total_out_connections = b.total_out_connections, 0
+    old_comm_threshold, b.comm_threshold_bytes = b.comm_threshold_bytes, 0
+
+    f1 = c.submit(inc, 1, workers=[a.address], key="f1", allow_other_workers=True)
+    f2 = c.submit(inc, f1, workers=[b.address], key="f2")
+
+    await wait_for_state(f1.key, "fetch", b)
+    await a.close()
+
+    b.total_out_connections = old_out_connections
+    b.comm_threshold_bytes = old_comm_threshold
+
+    await f2
+
+    assert_story(
+        b.log,
+        # FIXME: This log should be replaced with an
+        # StateMachineEvent/Instruction log
+        [
+            (f2.key, "compute-task"),
+            # This is a "please fetch" request. We don't have anything like
+            # this, yet. We don't see the request-dep signal in here because we
+            # do not wait for the key to be actually scheduled
+            (f1.key, "ensure-task-exists", "released"),
+            # After the worker failed, we're instructed to forget f2 before
+            # something new comes in
+            ("free-keys", (f2.key,)),
+            (f1.key, "compute-task"),
+            (f1.key, "put-in-memory"),
+            (f2.key, "compute-task"),
+        ],
+    )
+
+
+@gen_cluster(client=True)
+async def test_fetch_via_amm_to_compute(c, s, a, b):
+    # Block ensure_communicating to ensure we indeed know that the task is in
+    # fetch and doesn't leave it accidentally
+    old_out_connections, b.total_out_connections = b.total_out_connections, 0
+    old_comm_threshold, b.comm_threshold_bytes = b.comm_threshold_bytes, 0
+
+    f1 = c.submit(inc, 1, workers=[a.address], key="f1", allow_other_workers=True)
+
+    await f1
+    s.request_acquire_replicas(b.address, [f1.key], stimulus_id="test")
+
+    await wait_for_state(f1.key, "fetch", b)
+    await a.close()
+
+    b.total_out_connections = old_out_connections
+    b.comm_threshold_bytes = old_comm_threshold
+
+    await f1

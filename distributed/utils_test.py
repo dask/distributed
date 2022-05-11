@@ -25,7 +25,7 @@ from collections.abc import Callable
 from contextlib import contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
-from typing import Any, Literal
+from typing import Any, Generator, Literal
 
 from distributed.compatibility import MACOS
 from distributed.scheduler import Scheduler
@@ -50,17 +50,24 @@ from distributed.comm import Comm
 from distributed.comm.tcp import TCP
 from distributed.compatibility import WINDOWS
 from distributed.config import initialize_logging
-from distributed.core import CommClosedError, ConnectionPool, Status, connect, rpc
+from distributed.core import (
+    CommClosedError,
+    ConnectionPool,
+    Status,
+    clean_exception,
+    connect,
+    rpc,
+)
 from distributed.deploy import SpecCluster
 from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
 from distributed.nanny import Nanny
 from distributed.node import ServerNode
 from distributed.proctitle import enable_proctitle_on_children
+from distributed.protocol import deserialize
 from distributed.security import Security
 from distributed.utils import (
     DequeHandler,
-    TimeoutError,
     _offload_executor,
     get_ip,
     get_ipv6,
@@ -70,7 +77,7 @@ from distributed.utils import (
     reset_logger_locks,
     sync,
 )
-from distributed.worker import InvalidTransition, Worker
+from distributed.worker import WORKER_ANY_RUNNING, InvalidTransition, Worker
 
 try:
     import dask.array  # register config
@@ -158,7 +165,7 @@ def loop():
             except RuntimeError as e:
                 if not re.match("IOLoop is clos(ed|ing)", str(e)):
                     raise
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 pass
             else:
                 is_stopped.wait()
@@ -728,7 +735,7 @@ def cluster(
                 async def wait_for_workers():
                     async with rpc(saddr, **rpc_kwargs) as s:
                         while True:
-                            nthreads = await s.ncores()
+                            nthreads = await s.ncores_running()
                             if len(nthreads) == nworkers:
                                 break
                             if time() - start > 5:
@@ -878,6 +885,7 @@ async def start_cluster(
             await s.close(fast=True)
             check_invalid_worker_transitions(s)
             check_invalid_task_states(s)
+            check_worker_fail_hard(s)
             raise TimeoutError("Cluster creation timeout")
     return s, workers
 
@@ -909,11 +917,25 @@ def check_invalid_task_states(s: Scheduler) -> None:
     raise ValueError("Invalid worker task state")
 
 
+def check_worker_fail_hard(s: Scheduler) -> None:
+    if not s.events.get("worker-fail-hard"):
+        return
+
+    for timestamp, msg in s.events["worker-fail-hard"]:
+        msg = msg.copy()
+        worker = msg.pop("worker")
+        msg["exception"] = deserialize(msg["exception"].header, msg["exception"].frames)
+        msg["traceback"] = deserialize(msg["traceback"].header, msg["traceback"].frames)
+        print("Failed worker", worker)
+        typ, exc, tb = clean_exception(**msg)
+        raise exc.with_traceback(tb)
+
+
 async def end_cluster(s, workers):
     logger.debug("Closing out test cluster")
 
     async def end_worker(w):
-        with suppress(TimeoutError, CommClosedError, EnvironmentError):
+        with suppress(asyncio.TimeoutError, CommClosedError, EnvironmentError):
             await w.close(report=False)
 
     await asyncio.gather(*(end_worker(w) for w in workers))
@@ -921,6 +943,7 @@ async def end_cluster(s, workers):
     s.stop()
     check_invalid_worker_transitions(s)
     check_invalid_task_states(s)
+    check_worker_fail_hard(s)
 
 
 def gen_cluster(
@@ -1053,7 +1076,7 @@ def gen_cluster(
                             # Remove as much of the traceback as possible; it's
                             # uninteresting boilerplate from utils_test and asyncio and
                             # not from the code being tested.
-                            raise TimeoutError(
+                            raise asyncio.TimeoutError(
                                 f"Test timeout after {timeout}s.\n"
                                 "========== Test stack trace starts here ==========\n"
                                 f"{buffer.getvalue()}"
@@ -1748,7 +1771,7 @@ def check_instances():
     for w in Worker._instances:
         with suppress(RuntimeError):  # closed IOLoop
             w.loop.add_callback(w.close, report=False, executor_wait=False)
-            if w.status in Status.ANY_RUNNING:
+            if w.status in WORKER_ANY_RUNNING:
                 w.loop.add_callback(w.close)
     Worker._instances.clear()
 
@@ -1769,7 +1792,8 @@ def check_instances():
         raise ValueError("Unclosed Comms", L)
 
     assert all(
-        n.status == Status.closed or n.status == Status.init for n in Nanny._instances
+        n.status in {Status.closed, Status.init, Status.failed}
+        for n in Nanny._instances
     ), {n: n.status for n in Nanny._instances}
 
     # assert not list(SpecCluster._instances)  # TODO
@@ -2074,3 +2098,29 @@ def has_pytestmark(test_func: Callable, name: str) -> bool:
     """
     marks = getattr(test_func, "pytestmark", [])
     return any(mark.name == name for mark in marks)
+
+
+@contextmanager
+def raises_with_cause(
+    expected_exception: type[BaseException] | tuple[type[BaseException], ...],
+    match: str | None,
+    expected_cause: type[BaseException] | tuple[type[BaseException], ...],
+    match_cause: str | None,
+) -> Generator[None, None, None]:
+    """Contextmanager to assert that a certain exception with cause was raised
+
+    Parameters
+    ----------
+    exc_type:
+    """
+    with pytest.raises(expected_exception, match=match) as exc_info:
+        yield
+
+    exc = exc_info.value
+    assert exc.__cause__
+    if not isinstance(exc.__cause__, expected_cause):
+        raise exc
+    if match_cause:
+        assert re.search(
+            match_cause, str(exc.__cause__)
+        ), f"Pattern ``{match_cause}`` not found in ``{exc.__cause__}``"

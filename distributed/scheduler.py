@@ -83,6 +83,7 @@ from distributed.queues import QueueExtension
 from distributed.recreate_tasks import ReplayTaskScheduler
 from distributed.security import Security
 from distributed.semaphore import SemaphoreExtension
+from distributed.shuffle import ShuffleSchedulerExtension
 from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
@@ -123,6 +124,7 @@ DEFAULT_EXTENSIONS = {
     "events": EventExtension,
     "amm": ActiveMemoryManagerExtension,
     "memory_sampler": MemorySamplerExtension,
+    "shuffle": ShuffleSchedulerExtension,
     "stealing": WorkStealing,
 }
 
@@ -582,6 +584,7 @@ class WorkerState:
             "last_seen": self.last_seen,
             "services": self.services,
             "metrics": self.metrics,
+            "status": self.status.name,
             "nanny": self.nanny,
             **self.extra,
         }
@@ -2199,12 +2202,6 @@ class SchedulerState:
                         worker_msgs,
                     )  # don't try to recreate
 
-            for dts in ts.waiters:
-                if dts.state in ("no-worker", "processing"):
-                    recommendations[dts.key] = "waiting"
-                elif dts.state == "waiting":
-                    dts.waiting_on.add(ts)
-
             # XXX factor this out?
             worker_msg = {
                 "op": "free-keys",
@@ -2228,6 +2225,12 @@ class SchedulerState:
                 recommendations[key] = "forgotten"
             elif ts.who_wants or ts.waiters:
                 recommendations[key] = "waiting"
+
+            for dts in ts.waiters:
+                if dts.state in ("no-worker", "processing"):
+                    recommendations[dts.key] = "waiting"
+                elif dts.state == "waiting":
+                    dts.waiting_on.add(ts)
 
             if self.validate:
                 assert not ts.waiting_on
@@ -2909,6 +2912,12 @@ class Scheduler(SchedulerState, ServerNode):
     Users typically do not interact with the scheduler directly but rather with
     the client object ``Client``.
 
+    The ``contact_address`` parameter allows to advertise a specific address to
+    the workers for communication with the scheduler, which is different than
+    the address the scheduler binds to. This is useful when the scheduler
+    listens on a private address, which therefore cannot be used by the workers
+    to contact it.
+
     **State**
 
     The scheduler contains the following state variables.  Each variable is
@@ -2973,11 +2982,15 @@ class Scheduler(SchedulerState, ServerNode):
         preload=None,
         preload_argv=(),
         plugins=(),
+        contact_address=None,
         **kwargs,
     ):
         self._setup_logging(logger)
 
         # Attributes
+        if contact_address is None:
+            contact_address = dask.config.get("distributed.scheduler.contact-address")
+        self.contact_address = contact_address
         if allowed_failures is None:
             allowed_failures = dask.config.get("distributed.scheduler.allowed-failures")
         self.allowed_failures = allowed_failures
@@ -3233,7 +3246,6 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle("dask-scheduler [not started]")
         Scheduler._instances.add(self)
         self.rpc.allow_offload = False
-        self.status = Status.undefined
 
     ##################
     # Administration #
@@ -3241,7 +3253,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def __repr__(self):
         return (
-            f"<Scheduler {self.address!r}, "
+            f"<Scheduler {self.address_safe!r}, "
             f"workers: {len(self.workers)}, "
             f"cores: {self.total_nthreads}, "
             f"tasks: {len(self.tasks)}>"
@@ -3374,10 +3386,9 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             return ws.host, port
 
-    async def start(self):
+    async def start_unsafe(self):
         """Clear out old state and restart all running coroutines"""
-        await super().start()
-        assert self.status != Status.running
+        await super().start_unsafe()
 
         enable_gc_diagnosis()
 

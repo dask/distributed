@@ -26,8 +26,8 @@ from distributed.utils import (
     LoopRunner,
     TimeoutError,
     _maybe_complex,
-    ensure_bytes,
     ensure_ip,
+    ensure_memoryview,
     format_dashboard_link,
     get_ip_interface,
     get_traceback,
@@ -248,25 +248,34 @@ def test_seek_delimiter_endline():
     assert f.tell() == 7
 
 
-def test_ensure_bytes():
-    data = [b"1", "1", memoryview(b"1"), bytearray(b"1"), array.array("b", [49])]
+def test_ensure_memoryview_empty():
+    result = ensure_memoryview(b"")
+    assert isinstance(result, memoryview)
+    assert result == memoryview(b"")
+
+
+def test_ensure_memoryview():
+    data = [b"1", memoryview(b"1"), bytearray(b"1"), array.array("b", [49])]
     for d in data:
-        result = ensure_bytes(d)
-        assert isinstance(result, bytes)
-        assert result == b"1"
+        result = ensure_memoryview(d)
+        assert isinstance(result, memoryview)
+        assert result == memoryview(b"1")
 
 
-def test_ensure_bytes_ndarray():
+def test_ensure_memoryview_ndarray():
     np = pytest.importorskip("numpy")
-    result = ensure_bytes(np.arange(12))
-    assert isinstance(result, bytes)
+    result = ensure_memoryview(np.arange(12).reshape(3, 4)[:, ::2].T)
+    assert isinstance(result, memoryview)
+    assert result.ndim == 1
+    assert result.format == "B"
+    assert result.contiguous
 
 
-def test_ensure_bytes_pyarrow_buffer():
+def test_ensure_memoryview_pyarrow_buffer():
     pa = pytest.importorskip("pyarrow")
     buf = pa.py_buffer(b"123")
-    result = ensure_bytes(buf)
-    assert isinstance(result, bytes)
+    result = ensure_memoryview(buf)
+    assert isinstance(result, memoryview)
 
 
 def test_nbytes():

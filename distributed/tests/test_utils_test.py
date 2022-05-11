@@ -29,6 +29,7 @@ from distributed.utils_test import (
     gen_test,
     inc,
     new_config,
+    raises_with_cause,
     tls_only_security,
 )
 from distributed.worker import InvalidTransition
@@ -619,7 +620,11 @@ def test_check_process_leak_post_cleanup(ignore_sigterm):
 
 @pytest.mark.parametrize("nanny", [True, False])
 def test_start_failure_worker(nanny):
-    with pytest.raises(TypeError):
+    if nanny:
+        ctx = raises_with_cause(RuntimeError, None, TypeError, None)
+    else:
+        ctx = pytest.raises(TypeError)
+    with ctx:
         with cluster(nanny=nanny, worker_kwargs={"foo": "bar"}):
             return
 
@@ -679,3 +684,54 @@ def test_invalid_worker_states(capsys):
 
     assert "released" in out + err
     assert "task-name" in out + err
+
+
+def test_raises_with_cause():
+    with raises_with_cause(RuntimeError, "exception", ValueError, "cause"):
+        raise RuntimeError("exception") from ValueError("cause")
+
+    with raises_with_cause(RuntimeError, "exception", ValueError, "tial mat"):
+        raise RuntimeError("exception") from ValueError("partial match")
+
+    with raises_with_cause(RuntimeError, None, ValueError, "cause"):
+        raise RuntimeError("exception") from ValueError("cause")
+
+    with raises_with_cause(RuntimeError, "exception", ValueError, None):
+        raise RuntimeError("exception") from ValueError("bar")
+
+    with raises_with_cause(RuntimeError, None, ValueError, None):
+        raise RuntimeError("foo") from ValueError("bar")
+
+    # we're trying to stick to pytest semantics
+    # If the exception types don't match, raise the original exception
+    # If the text doesn't match, raise an assert
+
+    with pytest.raises(RuntimeError):
+        with raises_with_cause(RuntimeError, "exception", ValueError, "cause"):
+            raise RuntimeError("exception") from OSError("cause")
+
+    with pytest.raises(ValueError):
+        with raises_with_cause(RuntimeError, "exception", ValueError, "cause"):
+            raise ValueError("exception") from ValueError("cause")
+
+    with pytest.raises(AssertionError):
+        with raises_with_cause(RuntimeError, "exception", ValueError, "foo"):
+            raise RuntimeError("exception") from ValueError("cause")
+
+    with pytest.raises(AssertionError):
+        with raises_with_cause(RuntimeError, "foo", ValueError, "cause"):
+            raise RuntimeError("exception") from ValueError("cause")
+
+
+def test_worker_fail_hard(capsys):
+    @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+    async def test_fail_hard(c, s, a):
+        with pytest.raises(Exception):
+            await a.gather_dep(
+                worker="abcd", to_gather=["x"], total_nbytes=0, stimulus_id="foo"
+            )
+
+    with pytest.raises(Exception) as info:
+        test_fail_hard()
+
+    assert "abcd" in str(info.value)

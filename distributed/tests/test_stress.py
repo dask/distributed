@@ -295,7 +295,7 @@ async def test_no_delay_during_large_transfer(c, s, w):
 async def test_chaos_rechunk(c, s, *workers):
     s.allowed_failures = 10000
 
-    plugin = KillWorker(delay="4 s", mode="graceful")
+    plugin = KillWorker(delay="4 s", mode="sys.exit")
 
     await c.register_worker_plugin(plugin, name="kill")
 

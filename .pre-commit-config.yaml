@@ -45,7 +45,9 @@ repos:
           - types-psutil
           - types-setuptools
           # Typed libraries
-          - numpy
           - dask
+          - numpy
+          - pytest
           - tornado
           - zict
+          - pyarrow

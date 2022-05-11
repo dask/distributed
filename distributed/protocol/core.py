@@ -17,17 +17,9 @@ from distributed.protocol.serialize import (
     serialize_and_split,
 )
 from distributed.protocol.utils import msgpack_opts
+from distributed.utils import ensure_memoryview
 
 logger = logging.getLogger(__name__)
-
-
-def ensure_memoryview(obj):
-    """Ensure `obj` is a memoryview of datatype bytes"""
-    ret = memoryview(obj)
-    if ret.nbytes:
-        return ret.cast("B")
-    else:
-        return ret
 
 
 def dumps(
