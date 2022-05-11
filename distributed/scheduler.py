@@ -4930,7 +4930,6 @@ class Scheduler(SchedulerState, ServerNode):
             await self.handle_stream(comm=comm, extra={"worker": worker})
         finally:
             if worker in self.stream_comms:
-                await worker_comm.close()
                 await self.remove_worker(address=worker, stimulus_id=stimulus_id)
 
     def add_plugin(
