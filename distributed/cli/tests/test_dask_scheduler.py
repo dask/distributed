@@ -477,9 +477,9 @@ def test_signal_handling(loop, sig):
         stdout, stderr = scheduler.communicate()
         logs = stdout.decode().lower()
         assert stderr is None
+        assert scheduler.returncode == 0
         assert f"signal {sig}" in logs
         assert "scheduler closing" in logs
         assert "end scheduler" in logs
-        assert scheduler.returncode == 0
     finally:
         scheduler.kill()

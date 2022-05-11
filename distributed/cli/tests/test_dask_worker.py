@@ -719,6 +719,7 @@ async def test_signal_handling(c, s, nanny, sig):
         stdout, stderr = worker.communicate()
         logs = stdout.decode().lower()
         assert stderr is None
+        assert worker.returncode == 0
         assert f"signal {sig}" in logs
         if nanny == "--nanny":
             assert "closing nanny" in logs
@@ -729,6 +730,5 @@ async def test_signal_handling(c, s, nanny, sig):
         assert "timed out" not in logs
         assert "error" not in logs
         assert "exception" not in logs
-        assert worker.returncode == 0
     finally:
         worker.kill()
