@@ -52,6 +52,8 @@ class BatchedSend:
         self._background_task = None
 
     def start(self, comm):
+        # A `BatchedSend` instance can be closed and restarted multiple times with new `comm` objects.
+        # However, calling `start` on an already-running `BatchedSend` is an error.
         if self._background_task and not self._background_task.done():
             raise RuntimeError(f"Background task still running for {self!r}")
         self.please_stop = False
@@ -135,14 +137,31 @@ class BatchedSend:
         # We can't close gracefully via `.close()` since we can't send messages.
         # So we just abort.
         # This means that any messages in our buffer our lost.
-        # To propagate exceptions, we rely on subsequent `BatchedSend.send`
-        # calls to raise CommClosedErrors.
+        # The exception will not be propagated.
         self.abort()
 
     def send(self, *msgs: dict) -> None:
         """Schedule a message for sending to the other side
 
-        This completes quickly and synchronously
+        This completes quickly and synchronously. (However, note that like all
+        `BatchedSend` methods, `send` is not threadsafe.)
+
+        Message delivery is *not* gauranteed. There is no way for callers to know when,
+        or whether, a particular message was received by the other side. When the
+        underlying comm closes, any currently-buffered messages (as well as data in the
+        socket's underlying buffer) will be lost.
+
+        `send` will never raise an error, even if the `BatchedSend` or underlying comm
+        is in a closed state.
+
+        While `closed` is True, all calls to `send` will be buffered until the next call
+        to `start`. However, calls to `send` made after the underlying comm has closed,
+        but before ``await close()`` has returned, may or may not be dropped.
+
+        Because `BatchedSend` will drop messages when the comm closes, users of
+        `BatchedSend` are expected to be implementing their own reconnection logic,
+        triggered when the comm closes. Reconnection often involves application logic
+        reconciling state, then calling `start` again with a new comm object.
         """
 
         self.message_count += len(msgs)
