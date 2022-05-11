@@ -2809,7 +2809,7 @@ class Worker(ServerNode):
     @fail_hard
     def _handle_instructions(self, instructions: Instructions) -> None:
         while instructions:
-            ensure_communicating = None
+            ensure_communicating: EnsureCommunicatingAfterTransitions | None = None
             for inst in instructions:
                 task: asyncio.Task | None = None
 
