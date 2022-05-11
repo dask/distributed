@@ -4334,8 +4334,6 @@ class Scheduler(SchedulerState, ServerNode):
             del self.host_info[host]
 
         self.rpc.remove(address)
-        await self.stream_comms[address].close()
-        del self.stream_comms[address]
         del self.aliases[ws.name]
         self.idle.pop(ws.address, None)
         self.saturated.discard(ws)
@@ -4379,6 +4377,16 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
+        if not self.workers:
+            logger.info("Lost all workers")
+
+        for w in self.workers:
+            self.bandwidth_workers.pop((address, w), None)
+            self.bandwidth_workers.pop((w, address), None)
+
+        bcomm = self.stream_comms.pop(address)
+        await bcomm.close()
+
         for plugin in list(self.plugins.values()):
             try:
                 result = plugin.remove_worker(scheduler=self, worker=address)
@@ -4386,13 +4394,6 @@ class Scheduler(SchedulerState, ServerNode):
                     await result
             except Exception as e:
                 logger.exception(e)
-
-        if not self.workers:
-            logger.info("Lost all workers")
-
-        for w in self.workers:
-            self.bandwidth_workers.pop((address, w), None)
-            self.bandwidth_workers.pop((w, address), None)
 
         def remove_worker_from_events():
             # If the worker isn't registered anymore after the delay, remove from events
