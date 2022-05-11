@@ -607,8 +607,7 @@ class WorkerState:
 
 
 class Computation:
-    """
-    Collection tracking a single compute or persist call
+    """Collection tracking a single compute or persist call
 
     See also
     --------
@@ -617,27 +616,31 @@ class Computation:
     TaskState
     """
 
-    __slots__ = ["start", "groups", "code", "id"]
+    start: float
+    groups: set[TaskGroup]
+    code: SortedSet
+    id: uuid.UUID
+
+    __slots__ = tuple(__annotations__)  # type: ignore
 
     def __init__(self):
         self.start = time()
-        self.groups: set[TaskGroup] = set()
+        self.groups = set()
         self.code = SortedSet()
         self.id = uuid.uuid4()
 
     @property
-    def stop(self):
+    def stop(self) -> float:
         if self.groups:
             return max(tg.stop for tg in self.groups)
         else:
             return -1
 
     @property
-    def states(self):
-        tg: TaskGroup
-        return merge_with(sum, [tg.states for tg in self.groups])
+    def states(self) -> dict[str, int]:
+        return merge_with(sum, (tg.states for tg in self.groups))
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<Computation {self.id}: "
             + "Tasks: "
@@ -664,39 +667,33 @@ class TaskPrefix:
     Keys often have a structure like ``("x-123", 0)``
     A group takes the first section, like ``"x"``
 
-    .. attribute:: name: str
-
-       The name of a group of tasks.
-       For a task like ``("x-123", 0)`` this is the text ``"x"``
-
-    .. attribute:: states: dict[str, int]
-
-       The number of tasks in each state,
-       like ``{"memory": 10, "processing": 3, "released": 4, ...}``
-
-    .. attribute:: duration_average: float
-
-       An exponentially weighted moving average duration of all tasks with this prefix
-
-    .. attribute:: suspicious: int
-
-       Numbers of times a task was marked as suspicious with this prefix
-
-
     See Also
     --------
     TaskGroup
     """
 
-    __slots__ = ["name", "all_durations", "duration_average", "suspicious", "groups"]
+    #: The name of a group of tasks.
+    #: For a task like ``("x-123", 0)`` this is the text ``"x"``
+    name: str
+
+    #: An exponentially weighted moving average duration of all tasks with this prefix
+    duration_average: float
+
+    #: Numbers of times a task was marked as suspicious with this prefix
+    suspicious: int
+
+    #: Store timings for each prefix-action
+    all_durations: defaultdict[str, float]
+
+    #: Task groups associated to this prefix
+    groups: list[TaskGroup]
+
+    __slots__ = tuple(__annotations__)  # type: ignore
 
     def __init__(self, name: str):
         self.name = name
-        self.groups: list[TaskGroup] = []
-
-        # store timings for each prefix-action
-        self.all_durations: defaultdict[str, float] = defaultdict(float)
-
+        self.groups = []
+        self.all_durations = defaultdict(float)
         task_durations = dask.config.get("distributed.scheduler.default-task-durations")
         if self.name in task_durations:
             self.duration_average = parse_timedelta(task_durations[self.name])
@@ -704,7 +701,7 @@ class TaskPrefix:
             self.duration_average = -1
         self.suspicious = 0
 
-    def add_duration(self, action: str, start: float, stop: float):
+    def add_duration(self, action: str, start: float, stop: float) -> None:
         duration = stop - start
         self.all_durations[action] += duration
         if action == "compute":
@@ -715,7 +712,10 @@ class TaskPrefix:
                 self.duration_average = 0.5 * duration + 0.5 * old
 
     @property
-    def states(self):
+    def states(self) -> dict[str, int]:
+        """The number of tasks in each state,
+        like ``{"memory": 10, "processing": 3, "released": 4, ...}``
+        """
         return merge_with(sum, [tg.states for tg in self.groups])
 
     @property
@@ -723,14 +723,14 @@ class TaskPrefix:
         return [
             tg
             for tg in self.groups
-            if any([v != 0 for k, v in tg.states.items() if k != "forgotten"])
+            if any(k != "forgotten" and v != 0 for k, v in tg.states.items())
         ]
 
     @property
-    def active_states(self):
+    def active_states(self) -> dict[str, int]:
         return merge_with(sum, [tg.states for tg in self.active])
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             "<"
             + self.name
@@ -742,19 +742,19 @@ class TaskPrefix:
         )
 
     @property
-    def nbytes_total(self):
+    def nbytes_total(self) -> int:
         return sum([tg.nbytes_total for tg in self.groups])
 
-    def __len__(self):
+    def __len__(self) -> int:
         return sum(map(len, self.groups))
 
     @property
-    def duration(self):
+    def duration(self) -> float:
         return sum([tg.duration for tg in self.groups])
 
     @property
-    def types(self):
-        return set().union(*[tg.types for tg in self.groups])
+    def types(self) -> set[str]:
+        return {typ for tg in self.groups for typ in tg.types}
 
 
 class TaskGroup:
@@ -763,78 +763,62 @@ class TaskGroup:
     Keys often have a structure like ``("x-123", 0)``
     A group takes the first section, like ``"x-123"``
 
-    .. attribute:: name: str
-
-       The name of a group of tasks.
-       For a task like ``("x-123", 0)`` this is the text ``"x-123"``
-
-    .. attribute:: states: dict[str, int]
-
-       The number of tasks in each state,
-       like ``{"memory": 10, "processing": 3, "released": 4, ...}``
-
-    .. attribute:: dependencies: Set[TaskGroup]
-
-       The other TaskGroups on which this one depends
-
-    .. attribute:: nbytes_total: int
-
-       The total number of bytes that this task group has produced
-
-    .. attribute:: duration: float
-
-       The total amount of time spent on all tasks in this TaskGroup
-
-    .. attribute:: types: Set[str]
-
-       The result types of this TaskGroup
-
-    .. attribute:: last_worker: WorkerState
-
-       The worker most recently assigned a task from this group, or None when the group
-       is not identified to be root-like by `SchedulerState.decide_worker`.
-
-    .. attribute:: last_worker_tasks_left: int
-
-       If `last_worker` is not None, the number of times that worker should be assigned
-       subsequent tasks until a new worker is chosen.
-
     See also
     --------
     TaskPrefix
     """
 
-    __slots__ = [
-        "name",
-        "prefix",
-        "states",
-        "dependencies",
-        "nbytes_total",
-        "duration",
-        "types",
-        "start",
-        "stop",
-        "all_durations",
-        "last_worker",
-        "last_worker_tasks_left",
-    ]
+    #: The name of a group of tasks.
+    #: For a task like ``("x-123", 0)`` this is the text ``"x-123"``
+    name: str
+
+    #: The number of tasks in each state,
+    #: like ``{"memory": 10, "processing": 3, "released": 4, ...}``
+    states: dict[str, int]
+
+    #: The other TaskGroups on which this one depends
+    dependencies: set[TaskGroup]
+
+    #: The total number of bytes that this task group has produced
+    nbytes_total: int
+
+    #: The total amount of time spent on all tasks in this TaskGroup
+    duration: float
+
+    #: The result types of this TaskGroup
+    types: set[str]
+
+    #: The worker most recently assigned a task from this group, or None when the group
+    #: is not identified to be root-like by `SchedulerState.decide_worker`.
+    last_worker: WorkerState | None
+
+    #: If `last_worker` is not None, the number of times that worker should be assigned
+    #: subsequent tasks until a new worker is chosen.
+    last_worker_tasks_left: int
+
+    prefix: TaskPrefix | None
+    start: float
+    stop: float
+    all_durations: defaultdict[str, float]
+
+    __slots__ = tuple(__annotations__)  # type: ignore
 
     def __init__(self, name: str):
         self.name = name
-        self.prefix: TaskPrefix | None = None
-        self.states: dict[str, int] = {state: 0 for state in ALL_TASK_STATES}
+        self.prefix = None
+        self.states = {state: 0 for state in ALL_TASK_STATES}
         self.states["forgotten"] = 0
-        self.dependencies: set[TaskGroup] = set()
-        self.nbytes_total: int = 0
-        self.duration: float = 0
-        self.types: set[str] = set()
-        self.start: float = 0.0
-        self.stop: float = 0.0
-        self.all_durations: defaultdict[str, float] = defaultdict(float)
-        self.last_worker = None  # type: ignore
+        self.dependencies = set()
+        self.nbytes_total = 0
+        self.duration = 0
+        self.types = set()
+        self.start = 0.0
+        self.stop = 0.0
+        self.all_durations = defaultdict(float)
+        self.last_worker = None
         self.last_worker_tasks_left = 0
 
-    def add_duration(self, action: str, start: float, stop: float):
+    def add_duration(self, action: str, start: float, stop: float) -> None:
         duration = stop - start
         self.all_durations[action] += duration
         if action == "compute":
@@ -845,11 +829,11 @@ class TaskGroup:
         assert self.prefix is not None
         self.prefix.add_duration(action, start, stop)
 
-    def add(self, other: TaskState):
+    def add(self, other: TaskState) -> None:
         self.states[other.state] += 1
         other.group = self
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             "<"
             + (self.name or "no-group")
@@ -860,10 +844,10 @@ class TaskGroup:
             + ">"
         )
 
-    def __len__(self):
+    def __len__(self) -> int:
         return sum(self.states.values())
 
-    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict:
+    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict[str, Any]:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -877,312 +861,215 @@ class TaskGroup:
 
 
 class TaskState:
-    """
-    A simple object holding information about a task.
+    """A simple object holding information about a task.
+
     Not to be confused with :class:`distributed.worker_state_machine.TaskState`, which
     holds similar information on the Worker side.
-
-    .. attribute:: key: str
-
-       The key is the unique identifier of a task, generally formed
-       from the name of the function, followed by a hash of the function
-       and arguments, like ``'inc-ab31c010444977004d656610d2d421ec'``.
-
-    .. attribute:: prefix: TaskPrefix
-
-       The broad class of tasks to which this task belongs like "inc" or
-       "read_csv"
-
-    .. attribute:: run_spec: object
-
-       A specification of how to run the task.  The type and meaning of this
-       value is opaque to the scheduler, as it is only interpreted by the
-       worker to which the task is sent for executing.
-
-       As a special case, this attribute may also be ``None``, in which case
-       the task is "pure data" (such as, for example, a piece of data loaded
-       in the scheduler using :meth:`Client.scatter`).  A "pure data" task
-       cannot be computed again if its value is lost.
-
-    .. attribute:: priority: tuple
-
-       The priority provides each task with a relative ranking which is used
-       to break ties when many tasks are being considered for execution.
-
-       This ranking is generally a 2-item tuple.  The first (and dominant)
-       item corresponds to when it was submitted.  Generally, earlier tasks
-       take precedence.  The second item is determined by the client, and is
-       a way to prioritize tasks within a large graph that may be important,
-       such as if they are on the critical path, or good to run in order to
-       release many dependencies.  This is explained further in
-       :doc:`Scheduling Policy <scheduling-policies>`.
-
-    .. attribute:: state: str
-
-       This task's current state.  Valid states include ``released``,
-       ``waiting``, ``no-worker``, ``processing``, ``memory``, ``erred``
-       and ``forgotten``.  If it is ``forgotten``, the task isn't stored
-       in the ``tasks`` dictionary anymore and will probably disappear
-       soon from memory.
-
-    .. attribute:: dependencies: {TaskState}
-
-       The set of tasks this task depends on for proper execution.  Only
-       tasks still alive are listed in this set.  If, for whatever reason,
-       this task also depends on a forgotten task, the
-       :attr:`has_lost_dependencies` flag is set.
-
-       A task can only be executed once all its dependencies have already
-       been successfully executed and have their result stored on at least
-       one worker.  This is tracked by progressively draining the
-       :attr:`waiting_on` set.
-
-    .. attribute:: dependents: {TaskState}
-
-       The set of tasks which depend on this task.  Only tasks still alive
-       are listed in this set.
-
-       This is the reverse mapping of :attr:`dependencies`.
-
-    .. attribute:: has_lost_dependencies: bool
-
-       Whether any of the dependencies of this task has been forgotten.
-       For memory consumption reasons, forgotten tasks are not kept in
-       memory even though they may have dependent tasks.  When a task is
-       forgotten, therefore, each of its dependents has their
-       :attr:`has_lost_dependencies` attribute set to ``True``.
-
-       If :attr:`has_lost_dependencies` is true, this task cannot go
-       into the "processing" state anymore.
-
-    .. attribute:: waiting_on: {TaskState}
-
-       The set of tasks this task is waiting on *before* it can be executed.
-       This is always a subset of :attr:`dependencies`.  Each time one of the
-       dependencies has finished processing, it is removed from the
-       :attr:`waiting_on` set.
-
-       Once :attr:`waiting_on` becomes empty, this task can move from the
-       "waiting" state to the "processing" state (unless one of the
-       dependencies errored out, in which case this task is instead
-       marked "erred").
-
-    .. attribute:: waiters: {TaskState}
-
-       The set of tasks which need this task to remain alive.  This is always
-       a subset of :attr:`dependents`.  Each time one of the dependents
-       has finished processing, it is removed from the :attr:`waiters`
-       set.
-
-       Once both :attr:`waiters` and :attr:`who_wants` become empty, this
-       task can be released (if it has a non-empty :attr:`run_spec`) or
-       forgotten (otherwise) by the scheduler, and by any workers
-       in :attr:`who_has`.
-
-       .. note:: Counter-intuitively, :attr:`waiting_on` and
-          :attr:`waiters` are not reverse mappings of each other.
-
-    .. attribute:: who_wants: {ClientState}
-
-       The set of clients who want this task's result to remain alive.
-       This is the reverse mapping of :attr:`ClientState.wants_what`.
-
-       When a client submits a graph to the scheduler it also specifies
-       which output tasks it desires, such that their results are not released
-       from memory.
-
-       Once a task has finished executing (i.e. moves into the "memory"
-       or "erred" state), the clients in :attr:`who_wants` are notified.
-
-       Once both :attr:`waiters` and :attr:`who_wants` become empty, this
-       task can be released (if it has a non-empty :attr:`run_spec`) or
-       forgotten (otherwise) by the scheduler, and by any workers
-       in :attr:`who_has`.
-
-    .. attribute:: who_has: {WorkerState}
-
-       The set of workers who have this task's result in memory.
-       It is non-empty iff the task is in the "memory" state.  There can be
-       more than one worker in this set if, for example, :meth:`Client.scatter`
-       or :meth:`Client.replicate` was used.
-
-       This is the reverse mapping of :attr:`WorkerState.has_what`.
-
-    .. attribute:: processing_on: WorkerState (or None)
-
-       If this task is in the "processing" state, which worker is currently
-       processing it.  Otherwise this is ``None``.
-
-       This attribute is kept in sync with :attr:`WorkerState.processing`.
-
-    .. attribute:: retries: int
-
-       The number of times this task can automatically be retried in case
-       of failure.  If a task fails executing (the worker returns with
-       an error), its :attr:`retries` attribute is checked.  If it is
-       equal to 0, the task is marked "erred".  If it is greater than 0,
-       the :attr:`retries` attribute is decremented and execution is
-       attempted again.
-
-    .. attribute:: nbytes: int (or None)
-
-       The number of bytes, as determined by ``sizeof``, of the result
-       of a finished task.  This number is used for diagnostics and to
-       help prioritize work.
-
-    .. attribute:: type: str
-
-       The type of the object as a string.  Only present for tasks that have
-       been computed.
-
-    .. attribute:: exception: object
-
-       If this task failed executing, the exception object is stored here.
-       Otherwise this is ``None``.
-
-    .. attribute:: traceback: object
-
-       If this task failed executing, the traceback object is stored here.
-       Otherwise this is ``None``.
-
-    .. attribute:: exception_blame: TaskState (or None)
-
-       If this task or one of its dependencies failed executing, the
-       failed task is stored here (possibly itself).  Otherwise this
-       is ``None``.
-
-    .. attribute:: erred_on: set(str)
-
-        Worker addresses on which errors appeared causing this task to be in an error state.
-
-    .. attribute:: suspicious: int
-
-       The number of times this task has been involved in a worker death.
-
-       Some tasks may cause workers to die (such as calling ``os._exit(0)``).
-       When a worker dies, all of the tasks on that worker are reassigned
-       to others.  This combination of behaviors can cause a bad task to
-       catastrophically destroy all workers on the cluster, one after
-       another.  Whenever a worker dies, we mark each task currently
-       processing on that worker (as recorded by
-       :attr:`WorkerState.processing`) as suspicious.
-
-       If a task is involved in three deaths (or some other fixed constant)
-       then we mark the task as ``erred``.
-
-    .. attribute:: host_restrictions: {hostnames}
-
-       A set of hostnames where this task can be run (or ``None`` if empty).
-       Usually this is empty unless the task has been specifically restricted
-       to only run on certain hosts.  A hostname may correspond to one or
-       several connected workers.
-
-    .. attribute:: worker_restrictions: {worker addresses}
-
-       A set of complete worker addresses where this can be run (or ``None``
-       if empty).  Usually this is empty unless the task has been specifically
-       restricted to only run on certain workers.
-
-       Note this is tracking worker addresses, not worker states, since
-       the specific workers may not be connected at this time.
-
-    .. attribute:: resource_restrictions: {resource: quantity}
-
-       Resources required by this task, such as ``{'gpu': 1}`` or
-       ``{'memory': 1e9}`` (or ``None`` if empty).  These are user-defined
-       names and are matched against the contents of each
-       :attr:`WorkerState.resources` dictionary.
-
-    .. attribute:: loose_restrictions: bool
-
-       If ``False``, each of :attr:`host_restrictions`,
-       :attr:`worker_restrictions` and :attr:`resource_restrictions` is
-       a hard constraint: if no worker is available satisfying those
-       restrictions, the task cannot go into the "processing" state and
-       will instead go into the "no-worker" state.
-
-       If ``True``, the above restrictions are mere preferences: if no worker
-       is available satisfying those restrictions, the task can still go
-       into the "processing" state and be sent for execution to another
-       connected worker.
-
-    .. attribute:: metadata: dict
-
-       Metadata related to task.
-
-    .. attribute:: actor: bool
-
-       Whether or not this task is an Actor.
-
-    .. attribute:: group: TaskGroup
-
-        The group of tasks to which this one belongs.
-
-    .. attribute:: annotations: dict
-
-        Task annotations
     """
 
-    __slots__ = (
-        # === General description ===
-        "actor",
-        # Key name
-        "key",
-        # Hash of the key name
-        "_hash",
-        # Key prefix (see key_split())
-        "prefix",
-        # How to run the task (None if pure data)
-        "run_spec",
-        # Alive dependents and dependencies
-        "dependencies",
-        "dependents",
-        # Compute priority
-        "priority",
-        # Restrictions
-        "host_restrictions",
-        "worker_restrictions",  # not WorkerStates but addresses
-        "resource_restrictions",
-        "loose_restrictions",
-        # === Task state ===
-        "_state",
-        # Whether some dependencies were forgotten
-        "has_lost_dependencies",
-        # If in 'waiting' state, which tasks need to complete
-        # before we can run
-        "waiting_on",
-        # If in 'waiting' or 'processing' state, which tasks needs us
-        # to complete before they can run
-        "waiters",
-        # In in 'processing' state, which worker we are processing on
-        "processing_on",
-        # If in 'memory' state, Which workers have us
-        "who_has",
-        # Which clients want us
-        "who_wants",
-        "exception",
-        "exception_text",
-        "traceback",
-        "traceback_text",
-        "erred_on",
-        "exception_blame",
-        "suspicious",
-        "retries",
-        "nbytes",
-        "type",
-        "group_key",
-        "group",
-        "metadata",
-        "annotations",
-    )
+    #: The key is the unique identifier of a task, generally formed from the name of the
+    #: function, followed by a hash of the function and arguments, like
+    #: ``'inc-ab31c010444977004d656610d2d421ec'``.
+    key: str
+
+    #: The broad class of tasks to which this task belongs like "inc" or "read_csv"
+    prefix: TaskPrefix
+
+    #: A specification of how to run the task.  The type and meaning of this value is
+    #: opaque to the scheduler, as it is only interpreted by the worker to which the
+    #: task is sent for executing.
+    #:
+    #: As a special case, this attribute may also be ``None``, in which case the task is
+    #: "pure data" (such as, for example, a piece of data loaded in the scheduler using
+    #: :meth:`Client.scatter`).  A "pure data" task cannot be computed again if its
+    #: value is lost.
+    run_spec: object
+
+    #: The priority provides each task with a relative ranking which is used to break
+    #: ties when many tasks are being considered for execution.
+    #:
+    #: This ranking is generally a 2-item tuple.  The first (and dominant) item
+    #: corresponds to when it was submitted.  Generally, earlier tasks take precedence.
+    #: The second item is determined by the client, and is a way to prioritize tasks
+    #: within a large graph that may be important, such as if they are on the critical
+    #: path, or good to run in order to release many dependencies.  This is explained
+    #: further in :doc:`Scheduling Policy <scheduling-policies>`.
+    priority: tuple[int, ...]
+
+    # Attribute underlying the state property
+    _state: str
+
+    #: The set of tasks this task depends on for proper execution. Only tasks still
+    #: alive are listed in this set. If, for whatever reason, this task also depends on
+    #: a forgotten task, the :attr:`has_lost_dependencies` flag is set.
+    #:
+    #: A task can only be executed once all its dependencies have already been
+    #: successfully executed and have their result stored on at least one worker. This
+    #: is tracked by progressively draining the :attr:`waiting_on` set.
+    dependencies: set[TaskState]
+
+    #: The set of tasks which depend on this task.  Only tasks still alive are listed in
+    #: this set. This is the reverse mapping of :attr:`dependencies`.
+    dependents: set[TaskState]
+
+    #: Whether any of the dependencies of this task has been forgotten. For memory
+    #: consumption reasons, forgotten tasks are not kept in memory even though they may
+    #: have dependent tasks.  When a task is forgotten, therefore, each of its
+    #: dependents has their :attr:`has_lost_dependencies` attribute set to ``True``.
+    #:
+    #: If :attr:`has_lost_dependencies` is true, this task cannot go into the
+    #: "processing" state anymore.
+    has_lost_dependencies: bool
+
+    #: The set of tasks this task is waiting on *before* it can be executed. This is
+    #: always a subset of :attr:`dependencies`.  Each time one of the dependencies has
+    #: finished processing, it is removed from the :attr:`waiting_on` set.
+    #:
+    #: Once :attr:`waiting_on` becomes empty, this task can move from the "waiting"
+    #: state to the "processing" state (unless one of the dependencies errored out, in
+    #: which case this task is instead marked "erred").
+    waiting_on: set[TaskState]
+
+    #: The set of tasks which need this task to remain alive.  This is always a subset
+    #: of :attr:`dependents`.  Each time one of the dependents has finished processing,
+    #: it is removed from the :attr:`waiters` set.
+    #:
+    #: Once both :attr:`waiters` and :attr:`who_wants` become empty, this task can be
+    #: released (if it has a non-empty :attr:`run_spec`) or forgotten (otherwise) by the
+    #: scheduler, and by any workers in :attr:`who_has`.
+    #:
+    #: .. note::
+    #:    Counter-intuitively, :attr:`waiting_on` and :attr:`waiters` are not reverse
+    #:    mappings of each other.
+    waiters: set[TaskState]
+
+    #: The set of clients who want the result of this task to remain alive.
+    #: This is the reverse mapping of :attr:`ClientState.wants_what`.
+    #:
+    #: When a client submits a graph to the scheduler it also specifies which output
+    #: tasks it desires, such that their results are not released from memory.
+    #:
+    #: Once a task has finished executing (i.e. moves into the "memory" or "erred"
+    #: state), the clients in :attr:`who_wants` are notified.
+    #:
+    #: Once both :attr:`waiters` and :attr:`who_wants` become empty, this task can be
+    #: released (if it has a non-empty :attr:`run_spec`) or forgotten (otherwise) by the
+    #: scheduler, and by any workers in :attr:`who_has`.
+    who_wants: set[ClientState]
+
+    #: The set of workers who have this task's result in memory. It is non-empty iff the
+    #: task is in the "memory" state.  There can be more than one worker in this set if,
+    #: for example, :meth:`Client.scatter` or :meth:`Client.replicate` was used.
+    #:
+    #: This is the reverse mapping of :attr:`WorkerState.has_what`.
+    who_has: set[WorkerState]
+
+    #: If this task is in the "processing" state, which worker is currently processing
+    #: it. This attribute is kept in sync with :attr:`WorkerState.processing`.
+    processing_on: WorkerState | None
+
+    #: The number of times this task can automatically be retried in case of failure.
+    #: If a task fails executing (the worker returns with an error), its :attr:`retries`
+    #: attribute is checked. If it is equal to 0, the task is marked "erred". If it is
+    #: greater than 0, the :attr:`retries` attribute is decremented and execution is
+    #: attempted again.
+    retries: int
+
+    #: The number of bytes, as determined by ``sizeof``, of the result of a finished
+    #: task. This number is used for diagnostics and to help prioritize work.
+    #: Set to -1 for unfinished tasks.
+    nbytes: int
+
+    #: The type of the object as a string. Only present for tasks that have been
+    #: computed.
+    type: str
+
+    #: If this task failed executing, the exception object is stored here.
+    exception: object | None
+
+    #: If this task failed executing, the traceback object is stored here.
+    traceback: object | None
+
+    #: string representation of exception
+    exception_text: str
+
+    #: string representation of traceback
+    traceback_text: str
+
+    #: If this task or one of its dependencies failed executing, the failed task is
+    #: stored here (possibly itself).
+    exception_blame: TaskState | None
+
+    #: Worker addresses on which errors appeared, causing this task to be in an error
+    #: state.
+    erred_on: set[str]
+
+    #: The number of times this task has been involved in a worker death.
+    #:
+    #: Some tasks may cause workers to die (such as calling ``os._exit(0)``). When a
+    #: worker dies, all of the tasks on that worker are reassigned to others. This
+    #: combination of behaviors can cause a bad task to catastrophically destroy all
+    #: workers on the cluster, one after another. Whenever a worker dies, we mark each
+    #: task currently processing on that worker (as recorded by
+    #: :attr:`WorkerState.processing`) as suspicious. If a task is involved in three
+    #: deaths (or some other fixed constant) then we mark the task as ``erred``.
+    suspicious: int
+
+    #: A set of hostnames where this task can be run (or ``None`` if empty). Usually
+    #: this is empty unless the task has been specifically restricted to only run on
+    #: certain hosts. A hostname may correspond to one or several connected workers.
+    host_restrictions: set[str]
+
+    #: A set of complete worker addresses where this can be run (or ``None`` if empty).
+    #: Usually this is empty unless the task has been specifically restricted to only
+    #: run on certain workers.
+    #: Note this is tracking worker addresses, not worker states, since the specific
+    #: workers may not be connected at this time.
+    worker_restrictions: set[str]
+
+    #: Resources required by this task, such as ``{'gpu': 1}`` or ``{'memory': 1e9}``
+    #: These are user-defined names and are matched against the : contents of each
+    #: :attr:`WorkerState.resources` dictionary.
+    resource_restrictions: dict[str, float]
+
+    #: False
+    #:     Each of :attr:`host_restrictions`, :attr:`worker_restrictions` and
+    #:     :attr:`resource_restrictions` is a hard constraint: if no worker is available
+    #:     satisfying those restrictions, the task cannot go into the "processing" state
+    #:     and will instead go into the "no-worker" state.
+    #: True
+    #:     The above restrictions are mere preferences: if no worker is available
+    #:     satisfying those restrictions, the task can still go into the
+    #:     "processing" state and be sent for execution to another connected worker.
+    loose_restrictions: bool
+
+    #: Whether or not this task is an Actor
+    actor: bool
+
+    #: The group of tasks to which this one belongs
+    group: TaskGroup
+
+    #: Same as of group.name
+    group_key: str
+
+    #: Metadata related to task
+    metadata: dict[str, Any]
+
+    #: Task annotations
+    annotations: dict[str, Any]
+
+    #: Cached hash of :attr:`~TaskState.client_key`
+    _hash: int
+
+    __slots__ = tuple(__annotations__)  # type: ignore
 
     def __init__(self, key: str, run_spec: object):
         self.key = key
         self._hash = hash(key)
         self.run_spec = run_spec
-        self._state: str = None  # type: ignore
-        self.exception: str = None  # type: ignore
-        self.exception_blame: TaskState = None  # type: ignore
+        self._state = None  # type: ignore
+        self.exception = None
+        self.exception_blame = None
         self.traceback = None
         self.exception_text = ""
         self.traceback_text = ""
@@ -1190,50 +1077,49 @@ class TaskState:
         self.retries = 0
         self.nbytes = -1
         self.priority = None  # type: ignore
-        self.who_wants: set[ClientState] = set()
-        self.dependencies: set[TaskState] = set()
-        self.dependents: set[TaskState] = set()
-        self.waiting_on: set[TaskState] = set()
-        self.waiters: set[TaskState] = set()
-        self.who_has: set[WorkerState] = set()
-        self.processing_on: WorkerState = None  # type: ignore
+        self.who_wants = set()
+        self.dependencies = set()
+        self.dependents = set()
+        self.waiting_on = set()
+        self.waiters = set()
+        self.who_has = set()
+        self.processing_on = None
         self.has_lost_dependencies = False
         self.host_restrictions = None  # type: ignore
         self.worker_restrictions = None  # type: ignore
         self.resource_restrictions = None  # type: ignore
         self.loose_restrictions = False
         self.actor = False
-        self.prefix: TaskPrefix = None  # type: ignore
-        self.type: str = None  # type: ignore
+        self.prefix = None  # type: ignore
+        self.type = None  # type: ignore
         self.group_key = key_split_group(key)
-        self.group: TaskGroup = None  # type: ignore
-        self.metadata = {}  # type: ignore
-        self.annotations = {}  # type: ignore
-        self.erred_on: set[str] = set()
+        self.group = None  # type: ignore
+        self.metadata = {}
+        self.annotations = {}
+        self.erred_on = set()
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return self._hash
 
-    def __eq__(self, other):
-        typ_self: type = type(self)
-        typ_other: type = type(other)
-        if typ_self == typ_other:
-            other_ts: TaskState = other
-            return self.key == other_ts.key
-        else:
-            return False
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, TaskState) and self.key == other.key
 
     @property
     def state(self) -> str:
+        """This task's current state.  Valid states include ``released``, ``waiting``,
+        ``no-worker``, ``processing``, ``memory``, ``erred`` and ``forgotten``.  If it
+        is ``forgotten``, the task isn't stored in the ``tasks`` dictionary anymore and
+        will probably disappear soon from memory.
+        """
         return self._state
 
     @state.setter
-    def state(self, value: str):
+    def state(self, value: str) -> None:
         self.group.states[self._state] -= 1
         self.group.states[value] += 1
         self._state = value
 
-    def add_dependency(self, other: TaskState):
+    def add_dependency(self, other: TaskState) -> None:
         """Add another task as a dependency of this task"""
         self.dependencies.add(other)
         self.group.dependencies.add(other.group)
@@ -1242,18 +1128,17 @@ class TaskState:
     def get_nbytes(self) -> int:
         return self.nbytes if self.nbytes >= 0 else DEFAULT_DATA_SIZE
 
-    def set_nbytes(self, nbytes: int):
-        diff: int = nbytes
-        old_nbytes: int = self.nbytes
+    def set_nbytes(self, nbytes: int) -> None:
+        diff = nbytes
+        old_nbytes = self.nbytes
         if old_nbytes >= 0:
             diff -= old_nbytes
         self.group.nbytes_total += diff
-        ws: WorkerState
         for ws in self.who_has:
             ws.nbytes += diff
         self.nbytes = nbytes
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<TaskState {self.key!r} {self._state}>"
 
     def _repr_html_(self):
@@ -1263,7 +1148,7 @@ class TaskState:
             key=self.key,
         )
 
-    def validate(self):
+    def validate(self) -> None:
         try:
             for cs in self.who_wants:
                 assert isinstance(cs, ClientState), (repr(cs), self.who_wants)
@@ -1282,12 +1167,9 @@ class TaskState:
                 pdb.set_trace()
 
     def get_nbytes_deps(self):
-        nbytes: int = 0
-        for ts in self.dependencies:
-            nbytes += ts.get_nbytes()
-        return nbytes
+        return sum(ts.get_nbytes() for ts in self.dependencies)
 
-    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict:
+    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict[str, Any]:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -1878,7 +1760,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def decide_worker(self, ts: TaskState) -> WorkerState:  # -> WorkerState | None
+    def decide_worker(self, ts: TaskState) -> WorkerState | None:
         """
         Decide on a worker for task *ts*. Return a WorkerState.
 
@@ -1892,11 +1774,10 @@ class SchedulerState:
         in a round-robin fashion.
         """
         if not self.workers:
-            return None  # type: ignore
+            return None
 
-        ws: WorkerState
-        tg: TaskGroup = ts.group
-        valid_workers: set = self.valid_workers(ts)
+        tg = ts.group
+        valid_workers = self.valid_workers(ts)
 
         if (
             valid_workers is not None
@@ -1905,7 +1786,7 @@ class SchedulerState:
         ):
             self.unrunnable.add(ts)
             ts.state = "no-worker"
-            return None  # type: ignore
+            return None
 
         # Group is larger than cluster with few dependencies?
         # Minimize future data transfers.
@@ -1963,11 +1844,7 @@ class SchedulerState:
             else:  # dumb but fast in large case
                 ws = wp_vals[self.n_tasks % n_workers]
 
-        if self.validate:
-            assert ws is None or isinstance(ws, WorkerState), (
-                type(ws),
-                ws,
-            )
+        if self.validate and ws is not None:
             assert ws.address in self.workers
 
         return ws
@@ -2014,7 +1891,7 @@ class SchedulerState:
                 assert ts not in self.unrunnable
                 assert all([dts.who_has for dts in ts.dependencies])
 
-            ws: WorkerState = self.decide_worker(ts)
+            ws = self.decide_worker(ts)
             if ws is None:
                 return recommendations, client_msgs, worker_msgs
             worker = ws.address
@@ -2132,6 +2009,7 @@ class SchedulerState:
                     ws,
                     key,
                 )
+                assert ts.processing_on
                 worker_msgs[ts.processing_on.address] = [
                     {
                         "op": "cancel-compute",
@@ -2465,6 +2343,7 @@ class SchedulerState:
                 assert not ts.waiting_on
 
             if ts.actor:
+                assert ts.processing_on
                 ws = ts.processing_on
                 ws.actors.remove(ts)
 
@@ -2599,7 +2478,7 @@ class SchedulerState:
 
             _propagate_forgotten(self, ts, recommendations, worker_msgs, stimulus_id)
 
-            client_msgs = _task_to_client_msgs(self, ts)
+            client_msgs = _task_to_client_msgs(ts)
             self.remove_key(key)
 
             return recommendations, client_msgs, worker_msgs
@@ -2637,7 +2516,7 @@ class SchedulerState:
 
             _propagate_forgotten(self, ts, recommendations, worker_msgs, stimulus_id)
 
-            client_msgs = _task_to_client_msgs(self, ts)
+            client_msgs = _task_to_client_msgs(ts)
             self.remove_key(key)
 
             return recommendations, client_msgs, worker_msgs
@@ -6322,10 +6201,10 @@ class Scheduler(SchedulerState, ServerNode):
             assert False, (key, ts)
             return
 
-        if ts is None:
-            report_msg = {"op": "cancelled-key", "key": key}
+        if ts is not None:
+            report_msg = _task_to_report_msg(ts)
         else:
-            report_msg = _task_to_report_msg(self, ts)
+            report_msg = {"op": "cancelled-key", "key": key}
         if report_msg is not None:
             self.report(report_msg, ts=ts, client=client)
 
@@ -7284,19 +7163,19 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
 
-def _remove_from_processing(
-    state: SchedulerState, ts: TaskState
-) -> str:  # -> str | None
-    """
-    Remove *ts* from the set of processing tasks.
+def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str | None:
+    """Remove *ts* from the set of processing tasks.
 
-    See also ``Scheduler.set_duration_estimate``
+    See also
+    --------
+    Scheduler.set_duration_estimate
     """
-    ws: WorkerState = ts.processing_on
-    ts.processing_on = None  # type: ignore
+    ws = ts.processing_on
+    assert ws
+    ts.processing_on = None
 
     if ws.address not in state.workers:  # may have been removed
-        return None  # type: ignore
+        return None
 
     duration = ws.processing.pop(ts)
     if not ws.processing:
@@ -7316,20 +7195,18 @@ def _add_to_memory(
     state: SchedulerState,
     ts: TaskState,
     ws: WorkerState,
-    recommendations: dict,
-    client_msgs: dict,
+    recommendations: dict[str, str],
+    client_msgs: dict[str, list[dict[str, str]]],
     type=None,
     typename: str = None,
-):
-    """
-    Add *ts* to the set of in-memory tasks.
-    """
+) -> None:
+    """Add ts to the set of in-memory tasks"""
     if state.validate:
         assert ts not in ws.has_what
 
     state.add_replica(ts, ws)
 
-    deps: list = list(ts.dependents)
+    deps = list(ts.dependents)
     if len(deps) > 1:
         deps.sort(key=operator.attrgetter("priority"), reverse=True)
 
@@ -7346,7 +7223,7 @@ def _add_to_memory(
         if not s and not dts.who_wants:
             recommendations[dts.key] = "released"
 
-    report_msg: dict = {}
+    report_msg = {}
     if not ts.waiters and not ts.who_wants:
         recommendations[ts.key] = "released"
     else:
@@ -7375,12 +7252,11 @@ def _add_to_memory(
 def _propagate_forgotten(
     state: SchedulerState,
     ts: TaskState,
-    recommendations: dict,
-    worker_msgs: dict,
+    recommendations: dict[str, str],
+    worker_msgs: dict[str, list[dict[str, Any]]],
     stimulus_id: str,
-):
+) -> None:
     ts.state = "forgotten"
-    key: str = ts.key
     for dts in ts.dependents:
         dts.has_lost_dependencies = True
         dts.dependencies.remove(ts)
@@ -7402,12 +7278,11 @@ def _propagate_forgotten(
     ts.waiting_on.clear()
 
     for ws in ts.who_has:
-        w: str = ws.address
-        if w in state.workers:  # in case worker has died
-            worker_msgs[w] = [
+        if ws.address in state.workers:  # in case worker has died
+            worker_msgs[ws.address] = [
                 {
                     "op": "free-keys",
-                    "keys": [key],
+                    "keys": [ts.key],
                     "stimulus_id": stimulus_id,
                 }
             ]
@@ -7415,13 +7290,15 @@ def _propagate_forgotten(
 
 
 def _client_releases_keys(
-    state: SchedulerState, keys: list, cs: ClientState, recommendations: dict
-):
+    state: SchedulerState,
+    keys: Collection[str],
+    cs: ClientState,
+    recommendations: dict[str, str],
+) -> None:
     """Remove keys from client desired list"""
     logger.debug("Client %s releases keys: %s", cs.client_key, keys)
-    ts: TaskState
     for key in keys:
-        ts = state.tasks.get(key)  # type: ignore
+        ts = state.tasks.get(key)
         if ts is not None and ts in cs.wants_what:
             cs.wants_what.remove(ts)
             ts.who_wants.remove(cs)
@@ -7433,16 +7310,16 @@ def _client_releases_keys(
                     recommendations[ts.key] = "released"
 
 
-def _task_to_msg(state: SchedulerState, ts: TaskState, duration: float = -1) -> dict:
+def _task_to_msg(
+    state: SchedulerState, ts: TaskState, duration: float = -1
+) -> dict[str, Any]:
     """Convert a single computational task to a message"""
-    ws: WorkerState
-    dts: TaskState
-
-    # FIXME: The duration attribute is not used on worker. We could safe ourselves the time to compute and submit this
+    # FIXME: The duration attribute is not used on worker. We could save ourselves the
+    #        time to compute and submit this
     if duration < 0:
         duration = state.get_task_duration(ts)
 
-    msg: dict = {
+    msg: dict[str, Any] = {
         "op": "compute-task",
         "key": ts.key,
         "priority": ts.priority,
@@ -7455,7 +7332,7 @@ def _task_to_msg(state: SchedulerState, ts: TaskState, duration: float = -1) -> 
     if ts.actor:
         msg["actor"] = True
 
-    deps: set = ts.dependencies
+    deps = ts.dependencies
     if deps:
         msg["who_has"] = {dts.key: [ws.address for ws in dts.who_has] for dts in deps}
         msg["nbytes"] = {dts.key: dts.nbytes for dts in deps}
@@ -7463,11 +7340,10 @@ def _task_to_msg(state: SchedulerState, ts: TaskState, duration: float = -1) -> 
         if state.validate:
             assert all(msg["who_has"].values())
 
-    task = ts.run_spec
-    if isinstance(task, dict):
-        msg.update(dict(task))
+    if isinstance(ts.run_spec, dict):
+        msg.update(ts.run_spec)
     else:
-        msg["task"] = task
+        msg["task"] = ts.run_spec
 
     if ts.annotations:
         msg["annotations"] = ts.annotations
@@ -7475,13 +7351,14 @@ def _task_to_msg(state: SchedulerState, ts: TaskState, duration: float = -1) -> 
     return msg
 
 
-def _task_to_report_msg(state: SchedulerState, ts: TaskState) -> dict:  # -> dict | None
+def _task_to_report_msg(ts: TaskState) -> dict[str, Any] | None:
     if ts.state == "forgotten":
         return {"op": "cancelled-key", "key": ts.key}
     elif ts.state == "memory":
         return {"op": "key-in-memory", "key": ts.key}
     elif ts.state == "erred":
-        failing_ts: TaskState = ts.exception_blame
+        failing_ts = ts.exception_blame
+        assert failing_ts
         return {
             "op": "task-erred",
             "key": ts.key,
@@ -7489,21 +7366,23 @@ def _task_to_report_msg(state: SchedulerState, ts: TaskState) -> dict:  # -> dic
             "traceback": failing_ts.traceback,
         }
     else:
-        return None  # type: ignore
+        return None
 
 
-def _task_to_client_msgs(state: SchedulerState, ts: TaskState) -> dict:
+def _task_to_client_msgs(ts: TaskState) -> dict[str, list[dict[str, Any]]]:
     if ts.who_wants:
-        report_msg: dict = _task_to_report_msg(state, ts)
+        report_msg = _task_to_report_msg(ts)
         if report_msg is not None:
-            cs: ClientState
             return {cs.client_key: [report_msg] for cs in ts.who_wants}
     return {}
 
 
 def decide_worker(
-    ts: TaskState, all_workers, valid_workers: set | None, objective
-) -> WorkerState:  # -> WorkerState | None
+    ts: TaskState,
+    all_workers: Iterable[WorkerState],
+    valid_workers: set[WorkerState] | None,
+    objective: Callable[[WorkerState], Any],
+) -> WorkerState | None:
     """
     Decide which worker should take task *ts*.
 
@@ -7519,16 +7398,11 @@ def decide_worker(
     of bytes sent between workers.  This is determined by calling the
     *objective* function.
     """
-    ws: WorkerState = None  # type: ignore
-    wws: WorkerState
-    dts: TaskState
-    deps: set = ts.dependencies
-    candidates: set
-    assert all([dts.who_has for dts in deps])
+    assert all(dts.who_has for dts in ts.dependencies)
     if ts.actor:
         candidates = set(all_workers)
     else:
-        candidates = {wws for dts in deps for wws in dts.who_has}
+        candidates = {wws for dts in ts.dependencies for wws in dts.who_has}
     if valid_workers is None:
         if not candidates:
             candidates = set(all_workers)
@@ -7538,27 +7412,18 @@ def decide_worker(
             candidates = valid_workers
             if not candidates:
                 if ts.loose_restrictions:
-                    ws = decide_worker(ts, all_workers, None, objective)
-                return ws
+                    return decide_worker(ts, all_workers, None, objective)
 
-    ncandidates: int = len(candidates)
-    if ncandidates == 0:
-        pass
-    elif ncandidates == 1:
-        for ws in candidates:
-            break
+    if not candidates:
+        return None
+    elif len(candidates) == 1:
+        return next(iter(candidates))
     else:
-        ws = min(candidates, key=objective)
-    return ws
+        return min(candidates, key=objective)
 
 
-def validate_task_state(ts: TaskState):
-    """
-    Validate the given TaskState.
-    """
-    ws: WorkerState
-    dts: TaskState
-
+def validate_task_state(ts: TaskState) -> None:
+    """Validate the given TaskState"""
     assert ts.state in ALL_TASK_STATES or ts.state == "forgotten", ts
 
     if ts.waiting_on:
@@ -7636,25 +7501,23 @@ def validate_task_state(ts: TaskState):
                 str(ws.has_what),
             )
 
-    if ts.who_wants:
-        cs: ClientState
-        for cs in ts.who_wants:
-            assert ts in cs.wants_what, (
-                "not in who_wants' wants_what",
-                str(ts),
-                str(cs),
-                str(cs.wants_what),
-            )
+    for cs in ts.who_wants:
+        assert ts in cs.wants_what, (
+            "not in who_wants' wants_what",
+            str(ts),
+            str(cs),
+            str(cs.wants_what),
+        )
 
     if ts.actor:
         if ts.state == "memory":
             assert sum([ts in ws.actors for ws in ts.who_has]) == 1
         if ts.state == "processing":
+            assert ts.processing_on
             assert ts in ts.processing_on.actors
 
 
-def validate_worker_state(ws: WorkerState):
-    ts: TaskState
+def validate_worker_state(ws: WorkerState) -> None:
     for ts in ws.has_what:
         assert ws in ts.who_has, (
             "not in has_what' who_has",
@@ -7667,22 +7530,22 @@ def validate_worker_state(ws: WorkerState):
         assert ts.state in ("memory", "processing")
 
 
-def validate_state(tasks, workers, clients):
-    """
-    Validate a current runtime state
+def validate_state(
+    tasks: dict[str, TaskState],
+    workers: dict[str, WorkerState],
+    clients: dict[str, ClientState],
+) -> None:
+    """Validate a current runtime state.
 
-    This performs a sequence of checks on the entire graph, running in about
-    linear time.  This raises assert errors if anything doesn't check out.
+    This performs a sequence of checks on the entire graph, running in about linear
+    time. This raises assert errors if anything doesn't check out.
     """
-    ts: TaskState
     for ts in tasks.values():
         validate_task_state(ts)
 
-    ws: WorkerState
     for ws in workers.values():
         validate_worker_state(ws)
 
-    cs: ClientState
     for cs in clients.values():
         for ts in cs.wants_what:
             assert cs in ts.who_wants, (
@@ -7693,10 +7556,8 @@ def validate_state(tasks, workers, clients):
             )
 
 
-def heartbeat_interval(n):
-    """
-    Interval in seconds that we desire heartbeats based on number of workers
-    """
+def heartbeat_interval(n: int) -> float:
+    """Interval in seconds that we desire heartbeats based on number of workers"""
     if n <= 10:
         return 0.5
     elif n < 50:
@@ -7704,67 +7565,82 @@ def heartbeat_interval(n):
     elif n < 200:
         return 2
     else:
-        # no more than 200 hearbeats a second scaled by workers
+        # No more than 200 hearbeats a second scaled by workers
         return n / 200 + 1
 
 
 class KilledWorker(Exception):
-    def __init__(self, task, last_worker):
+    def __init__(self, task: str, last_worker: WorkerState):
         super().__init__(task, last_worker)
-        self.task = task
-        self.last_worker = last_worker
+
+    @property
+    def task(self) -> str:
+        return self.args[0]
+
+    @property
+    def last_worker(self) -> WorkerState:
+        return self.args[1]
 
 
 class WorkerStatusPlugin(SchedulerPlugin):
-    """
-    An plugin to share worker status with a remote observer
+    """A plugin to share worker status with a remote observer
 
-    This is used in cluster managers to keep updated about the status of the
-    scheduler.
+    This is used in cluster managers to keep updated about the status of the scheduler.
     """
 
-    name = "worker-status"
+    name: ClassVar[str] = "worker-status"
+    bcomm: BatchedSend
 
-    def __init__(self, scheduler, comm):
+    def __init__(self, scheduler: Scheduler, comm: Comm):
         self.bcomm = BatchedSend(interval="5ms")
         self.bcomm.start(comm)
+        scheduler.add_plugin(self)
 
-        self.scheduler = scheduler
-        self.scheduler.add_plugin(self)
-
-    def add_worker(self, worker=None, **kwargs):
-        ident = self.scheduler.workers[worker].identity()
+    def add_worker(self, scheduler: Scheduler, worker: str) -> None:
+        ident = scheduler.workers[worker].identity()
         del ident["metrics"]
         del ident["last_seen"]
         try:
             self.bcomm.send(["add", {"workers": {worker: ident}}])
         except CommClosedError:
-            self.scheduler.remove_plugin(name=self.name)
+            scheduler.remove_plugin(name=self.name)
 
-    def remove_worker(self, worker=None, **kwargs):
+    def remove_worker(self, scheduler: Scheduler, worker: str):
         try:
             self.bcomm.send(["remove", worker])
         except CommClosedError:
-            self.scheduler.remove_plugin(name=self.name)
+            scheduler.remove_plugin(name=self.name)
 
     def teardown(self):
         self.bcomm.close()
 
 
 class CollectTaskMetaDataPlugin(SchedulerPlugin):
-    def __init__(self, scheduler, name):
+    scheduler: Scheduler
+    name: str
+    keys: set[str]
+    metadata: dict[str, Any]
+    state: dict[str, str]
+
+    def __init__(self, scheduler: Scheduler, name: str):
         self.scheduler = scheduler
         self.name = name
         self.keys = set()
         self.metadata = {}
         self.state = {}
 
-    def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
+    def update_graph(
+        self,
+        scheduler: Scheduler,
+        keys: set[str],
+        restrictions: dict[str, float],
+        **kwargs,
+    ) -> None:
         self.keys.update(keys)
 
-    def transition(self, key, start, finish, *args, **kwargs):
+    def transition(self, key: str, start: str, finish: str, *args, **kwargs) -> None:
         if finish == "memory" or finish == "erred":
-            ts: TaskState = self.scheduler.tasks.get(key)
+            ts = self.scheduler.tasks.get(key)
             if ts is not None and ts.key in self.keys:
                 self.metadata[key] = ts.metadata
                 self.state[key] = finish
