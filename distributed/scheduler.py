@@ -743,14 +743,14 @@ class TaskPrefix:
 
     @property
     def nbytes_total(self) -> int:
-        return sum([tg.nbytes_total for tg in self.groups])
+        return sum(tg.nbytes_total for tg in self.groups)
 
     def __len__(self) -> int:
         return sum(map(len, self.groups))
 
     @property
     def duration(self) -> float:
-        return sum([tg.duration for tg in self.groups])
+        return sum(tg.duration for tg in self.groups)
 
     @property
     def types(self) -> set[str]:
@@ -1470,13 +1470,13 @@ class SchedulerState:
 
                 recommendations.update(a_recs)
                 for c, new_msgs in a_cmsgs.items():
-                    msgs = client_msgs.get(c)  # type: ignore
+                    msgs = client_msgs.get(c)
                     if msgs is not None:
                         msgs.extend(new_msgs)
                     else:
                         client_msgs[c] = new_msgs
                 for w, new_msgs in a_wmsgs.items():
-                    msgs = worker_msgs.get(w)  # type: ignore
+                    msgs = worker_msgs.get(w)
                     if msgs is not None:
                         msgs.extend(new_msgs)
                     else:
@@ -1484,13 +1484,13 @@ class SchedulerState:
 
                 recommendations.update(b_recs)
                 for c, new_msgs in b_cmsgs.items():
-                    msgs = client_msgs.get(c)  # type: ignore
+                    msgs = client_msgs.get(c)
                     if msgs is not None:
                         msgs.extend(new_msgs)
                     else:
                         client_msgs[c] = new_msgs
                 for w, new_msgs in b_wmsgs.items():
-                    msgs = worker_msgs.get(w)  # type: ignore
+                    msgs = worker_msgs.get(w)
                     if msgs is not None:
                         msgs.extend(new_msgs)
                     else:
@@ -1985,7 +1985,7 @@ class SchedulerState:
                 assert not ts.exception_blame
                 assert ts.state == "processing"
 
-            ws = self.workers.get(worker)  # type: ignore
+            ws = self.workers.get(worker)
             if ws is None:
                 recommendations[key] = "released"
                 return recommendations, client_msgs, worker_msgs
@@ -2312,7 +2312,7 @@ class SchedulerState:
         traceback=None,
         exception_text: str = None,
         traceback_text: str = None,
-        worker: str = None,  # type: ignore
+        worker: str = None,
         **kwargs,
     ):
         ws: WorkerState
@@ -3434,7 +3434,7 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> dict[str, Any]:
         address = self.coerce_address(address, resolve_address)
         address = normalize_address(address)
-        ws: WorkerState = self.workers.get(address)  # type: ignore
+        ws = self.workers.get(address)
         if ws is None:
             return {"status": "missing"}
 
@@ -4755,7 +4755,7 @@ class Scheduler(SchedulerState, ServerNode):
     def handle_worker_status_change(
         self, status: str, worker: str, stimulus_id: str
     ) -> None:
-        ws: WorkerState = self.workers.get(worker)  # type: ignore
+        ws = self.workers.get(worker)
         if not ws:
             return
         prev_status = ws.status
@@ -5267,9 +5267,9 @@ class Scheduler(SchedulerState, ServerNode):
             )
             return set(who_has)
 
-        ws: WorkerState = self.workers.get(worker_address)  # type: ignore
+        ws = self.workers.get(worker_address)
 
-        if ws is None:
+        if not ws:
             logger.warning(f"Worker {worker_address} lost during replication")
             return set(who_has)
         elif result["status"] == "OK":
@@ -5321,8 +5321,8 @@ class Scheduler(SchedulerState, ServerNode):
             )
             return
 
-        ws: WorkerState = self.workers.get(worker_address)  # type: ignore
-        if ws is None:
+        ws = self.workers.get(worker_address)
+        if not ws:
             return
 
         for key in keys:
@@ -5894,9 +5894,9 @@ class Scheduler(SchedulerState, ServerNode):
             groups = groupby(key, self.workers.values())
 
             limit_bytes = {
-                k: sum([ws.memory_limit for ws in v]) for k, v in groups.items()
+                k: sum(ws.memory_limit for ws in v) for k, v in groups.items()
             }
-            group_bytes = {k: sum([ws.nbytes for ws in v]) for k, v in groups.items()}
+            group_bytes = {k: sum(ws.nbytes for ws in v) for k, v in groups.items()}
 
             limit = sum(limit_bytes.values())
             total = sum(group_bytes.values())
@@ -6848,8 +6848,8 @@ class Scheduler(SchedulerState, ServerNode):
             tasks_timings=tasks_timings,
             address=self.address,
             nworkers=len(self.workers),
-            threads=sum([ws.nthreads for ws in self.workers.values()]),
-            memory=format_bytes(sum([ws.memory_limit for ws in self.workers.values()])),
+            threads=sum(ws.nthreads for ws in self.workers.values()),
+            memory=format_bytes(sum(ws.memory_limit for ws in self.workers.values())),
             code=code,
             dask_version=dask.__version__,
             distributed_version=distributed.__version__,
@@ -7083,8 +7083,8 @@ class Scheduler(SchedulerState, ServerNode):
             cpu = max(1, cpu)
 
         # add more workers if more than 60% of memory is used
-        limit = sum([ws.memory_limit for ws in self.workers.values()])
-        used = sum([ws.nbytes for ws in self.workers.values()])
+        limit = sum(ws.memory_limit for ws in self.workers.values())
+        used = sum(ws.nbytes for ws in self.workers.values())
         memory = 0
         if used > 0.6 * limit and limit > 0:
             memory = 2 * len(self.workers)
@@ -7496,7 +7496,7 @@ def validate_task_state(ts: TaskState) -> None:
 
     if ts.actor:
         if ts.state == "memory":
-            assert sum([ts in ws.actors for ws in ts.who_has]) == 1
+            assert sum(ts in ws.actors for ws in ts.who_has) == 1
         if ts.state == "processing":
             assert ts.processing_on
             assert ts in ts.processing_on.actors

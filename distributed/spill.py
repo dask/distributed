@@ -31,7 +31,7 @@ class SpilledSize(NamedTuple):
     def __add__(self, other: SpilledSize) -> SpilledSize:  # type: ignore
         return SpilledSize(self.memory + other.memory, self.disk + other.disk)
 
-    def __sub__(self, other: SpilledSize) -> SpilledSize:  # type: ignore
+    def __sub__(self, other: SpilledSize) -> SpilledSize:
         return SpilledSize(self.memory - other.memory, self.disk - other.disk)
 
 

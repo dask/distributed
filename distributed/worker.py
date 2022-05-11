@@ -3154,7 +3154,7 @@ class Worker(ServerNode):
         total_nbytes : int
             Total number of bytes for all the dependencies in to_gather combined
         """
-        if self.status not in WORKER_ANY_RUNNING:  # type: ignore
+        if self.status not in WORKER_ANY_RUNNING:
             return
 
         recommendations: Recs = {}
@@ -3383,7 +3383,7 @@ class Worker(ServerNode):
 
         if (
             new_status == Status.closing_gracefully
-            and self._status not in WORKER_ANY_RUNNING  # type: ignore
+            and self._status not in WORKER_ANY_RUNNING
         ):
             logger.error(
                 "Invalid Worker.status transition: %s -> %s", self._status, new_status
@@ -3819,7 +3819,7 @@ class Worker(ServerNode):
         """Task is already cancelled by the time execute() runs"""
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
-        ts = self.tasks.get(ev.key)  # type: ignore
+        ts = self.tasks.get(ev.key)
         assert ts, self.story(ev.key)
         ts.done = True
         return {ts: "released"}, []
@@ -3829,7 +3829,7 @@ class Worker(ServerNode):
         """Task completed successfully"""
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
-        ts = self.tasks.get(ev.key)  # type: ignore
+        ts = self.tasks.get(ev.key)
         assert ts, self.story(ev.key)
 
         ts.done = True
@@ -3843,7 +3843,7 @@ class Worker(ServerNode):
         """Task execution failed"""
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
-        ts = self.tasks.get(ev.key)  # type: ignore
+        ts = self.tasks.get(ev.key)
         assert ts, self.story(ev.key)
 
         ts.done = True
@@ -3867,7 +3867,7 @@ class Worker(ServerNode):
         """Task raised Reschedule exception while it was running"""
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
-        ts = self.tasks.get(ev.key)  # type: ignore
+        ts = self.tasks.get(ev.key)
         assert ts, self.story(ev.key)
         return {ts: "rescheduled"}, []
 
@@ -4342,11 +4342,7 @@ def get_worker() -> Worker:
         return thread_state.execution_state["worker"]
     except AttributeError:
         try:
-            return first(
-                w
-                for w in Worker._instances
-                if w.status in WORKER_ANY_RUNNING  # type: ignore
-            )
+            return first(w for w in Worker._instances if w.status in WORKER_ANY_RUNNING)
         except StopIteration:
             raise ValueError("No workers found")
 
