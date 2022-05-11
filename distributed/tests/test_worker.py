@@ -2442,13 +2442,17 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
             while f2.key not in a.tasks:
                 await asyncio.sleep(0.01)
 
+            # Disconnect A
             await s.stream_comms[a.address].close()
-
-            while len(s.workers) == 1:
+            while len(s.workers) != 1:
                 await asyncio.sleep(0.1)
+
+            # Reconnect A
             a.heartbeat_active = False
             await a.heartbeat()
-            assert len(s.workers) == 2
+            while len(s.workers) != 2:
+                await asyncio.sleep(0.1)
+
             # Since B is locked, this is ensured to originate from A
             await f2
 
