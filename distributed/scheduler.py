@@ -1130,7 +1130,7 @@ class TaskState:
 
     def set_nbytes(self, nbytes: int) -> None:
         diff = nbytes
-        old_nbytes: int = self.nbytes
+        old_nbytes = self.nbytes
         if old_nbytes >= 0:
             diff -= old_nbytes
         self.group.nbytes_total += diff
@@ -7191,7 +7191,7 @@ def _add_to_memory(
 
     state.add_replica(ts, ws)
 
-    deps: list = list(ts.dependents)
+    deps = list(ts.dependents)
     if len(deps) > 1:
         deps.sort(key=operator.attrgetter("priority"), reverse=True)
 
@@ -7263,9 +7263,8 @@ def _propagate_forgotten(
     ts.waiting_on.clear()
 
     for ws in ts.who_has:
-        w: str = ws.address
-        if w in state.workers:  # in case worker has died
-            worker_msgs[w] = [
+        if ws.address in state.workers:  # in case worker has died
+            worker_msgs[ws.address] = [
                 {
                     "op": "free-keys",
                     "keys": [ts.key],
