@@ -271,7 +271,8 @@ async def test_retire_workers(c, s, a, b):
             json=params,
         ) as resp:
             assert resp.status == 200
-        assert len(c.scheduler_info()["workers"]) == 0
+            await resp.text()
+            assert len(c.scheduler_info()["workers"]) == 0
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
@@ -293,4 +294,5 @@ async def test_adaptive_target(c, s, a, b):
             "http://localhost:%d/api/v1/adaptive_target" % s.http_server.port
         ) as resp:
             assert resp.status == 200
-            assert int(await resp.text()) == 0
+            num_workers = json.loads(await resp.text())["workers"]
+            assert num_workers == 0
