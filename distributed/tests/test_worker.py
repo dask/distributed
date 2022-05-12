@@ -3434,6 +3434,7 @@ async def test_Worker__to_dict(c, s, a):
         "busy_workers",
         "log",
         "stimulus_log",
+        "transition_counter",
         "tasks",
         "logs",
         "config",

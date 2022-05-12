@@ -27,14 +27,6 @@ from itertools import count
 from time import sleep
 from typing import Any, Generator, Literal
 
-from distributed.compatibility import MACOS
-from distributed.scheduler import Scheduler
-
-try:
-    import ssl
-except ImportError:
-    ssl = None  # type: ignore
-
 import pytest
 import yaml
 from tlz import assoc, memoize, merge
@@ -43,12 +35,12 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from distributed import system
+from distributed import Scheduler, system
 from distributed import versions as version_module
 from distributed.client import Client, _global_clients, default_client
 from distributed.comm import Comm
 from distributed.comm.tcp import TCP
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import MACOS, WINDOWS
 from distributed.config import initialize_logging
 from distributed.core import (
     CommClosedError,
@@ -78,6 +70,11 @@ from distributed.utils import (
     sync,
 )
 from distributed.worker import WORKER_ANY_RUNNING, InvalidTransition, Worker
+
+try:
+    import ssl
+except ImportError:
+    ssl = None  # type: ignore
 
 try:
     import dask.array  # register config
@@ -447,8 +444,6 @@ async def readone(comm):
 
 def run_scheduler(q, nputs, config, port=0, **kwargs):
     with dask.config.set(config):
-        from distributed import Scheduler
-
         # On Python 2.7 and Unix, fork() is used to spawn child processes,
         # so avoid inheriting the parent's IO loop.
         with pristine_loop() as loop:
@@ -999,6 +994,7 @@ def gen_cluster(
     worker_kwargs = merge(
         {"memory_limit": system.MEMORY_LIMIT, "death_timeout": 15}, worker_kwargs
     )
+    config = merge({"distributed.admin.transition-counter-max": 50_000}, config)
 
     def _(func):
         if not iscoroutinefunction(func):
@@ -1052,8 +1048,7 @@ def gen_cluster(
                             task = asyncio.create_task(coro)
                             coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
                             result = await coro2
-                            if s.validate:
-                                s.validate_state()
+                            validate_state(s, *workers)
 
                         except asyncio.TimeoutError:
                             assert task
@@ -1072,6 +1067,10 @@ def gen_cluster(
                             task.cancel()
                             while not task.cancelled():
                                 await asyncio.sleep(0.01)
+
+                            # Hopefully, the hang has been caused by inconsistent state,
+                            # which should be much more meaningful than the timeout
+                            validate_state(s, *workers)
 
                             # Remove as much of the traceback as possible; it's
                             # uninteresting boilerplate from utils_test and asyncio and
@@ -1203,6 +1202,15 @@ async def dump_cluster_state(
     with open(fname, "w") as fh:
         yaml.safe_dump(state, fh)  # Automatically convert tuples to lists
     print(f"Dumped cluster state to {fname}")
+
+
+def validate_state(*servers: Scheduler | Worker | Nanny) -> None:
+    """Run validate_state() on the Scheduler and all the Workers of the cluster.
+    Excludes workers wrapped by Nannies and workers manually started by the test.
+    """
+    for s in servers:
+        if s.validate and hasattr(s, "validate_state"):
+            s.validate_state()  # type: ignore
 
 
 def raises(func, exc=Exception):

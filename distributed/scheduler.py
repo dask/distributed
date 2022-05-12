@@ -1262,6 +1262,7 @@ class SchedulerState:
         "validate",
         "workers",
         "transition_counter",
+        "transition_counter_max",
         "plugins",
         "UNKNOWN_TASK_DURATION",
         "MEMORY_RECENT_TO_OLD_TIME",
@@ -1354,6 +1355,9 @@ class SchedulerState:
             / 2.0
         )
         self.transition_counter = 0
+        self.transition_counter_max = dask.config.get(
+            "distributed.admin.transition-counter-max"
+        )
 
     @property
     def memory(self) -> MemoryState:
@@ -1430,16 +1434,24 @@ class SchedulerState:
         Scheduler.transitions : transitive version of this function
         """
         try:
+            ts: TaskState = self.tasks.get(key)  # type: ignore
+            if ts is None:
+                return {}, {}, {}
+            start = ts._state
+            if start == finish:
+                return {}, {}, {}
+
+            # Notes:
+            # - in case of transition through released, this counter is incremented by 2
+            # - this increase happens before the actual transitions, so that it can
+            #   catch potential infinite recursions
+            self.transition_counter += 1
+            if self.transition_counter_max:
+                assert self.transition_counter < self.transition_counter_max
+
             recommendations = {}  # type: ignore
             worker_msgs = {}  # type: ignore
             client_msgs = {}  # type: ignore
-
-            ts: TaskState = self.tasks.get(key)  # type: ignore
-            if ts is None:
-                return recommendations, client_msgs, worker_msgs
-            start = ts._state
-            if start == finish:
-                return recommendations, client_msgs, worker_msgs
 
             if self.plugins:
                 dependents = set(ts.dependents)
@@ -1451,7 +1463,7 @@ class SchedulerState:
                 recommendations, client_msgs, worker_msgs = func(
                     key, stimulus_id, *args, **kwargs
                 )  # type: ignore
-                self.transition_counter += 1
+
             elif "released" not in start_finish:
                 assert not args and not kwargs, (args, kwargs, start_finish)
                 a_recs: dict
@@ -3173,6 +3185,7 @@ class Scheduler(SchedulerState, ServerNode):
         info = super()._to_dict(exclude=exclude)
         extra = {
             "transition_log": self.transition_log,
+            "transition_counter": self.transition_counter,
             "log": self.log,
             "tasks": self.tasks,
             "task_groups": self.task_groups,
@@ -4496,6 +4509,8 @@ class Scheduler(SchedulerState, ServerNode):
             actual_total_occupancy,
             self.total_occupancy,
         )
+        if self.transition_counter_max:
+            assert self.transition_counter < self.transition_counter_max
 
     ###################
     # Manage Messages #

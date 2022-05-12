@@ -1027,6 +1027,13 @@ properties:
             type: boolean
             description: Enter Python Debugger on scheduling error
 
+          transition-counter-max:
+            oneOf:
+              - enum: [false]
+              - type: integer
+            description: Cause the scheduler or workers to break if they reach this
+              number of transitions
+
           system-monitor:
             type: object
             description: |

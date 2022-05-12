@@ -75,13 +75,17 @@ class InvalidTransition(Exception):
 
     def __repr__(self):
         return (
-            f"InvalidTransition: {self.key} :: {self.start}->{self.finish}"
+            f"{self.__class__.__name__}: {self.key} :: {self.start}->{self.finish}"
             + "\n"
             + "  Story:\n    "
             + "\n    ".join(map(str, self.story))
         )
 
     __str__ = __repr__
+
+
+class TransitionCounterMaxExceeded(InvalidTransition):
+    pass
 
 
 @lru_cache
