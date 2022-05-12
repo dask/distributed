@@ -25,15 +25,7 @@ from collections.abc import Callable
 from contextlib import contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
-from typing import Any, Literal
-
-from distributed.compatibility import MACOS
-from distributed.scheduler import Scheduler
-
-try:
-    import ssl
-except ImportError:
-    ssl = None  # type: ignore
+from typing import Any, Generator, Literal
 
 import pytest
 import yaml
@@ -43,12 +35,12 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from distributed import system
+from distributed import Scheduler, system
 from distributed import versions as version_module
 from distributed.client import Client, _global_clients, default_client
 from distributed.comm import Comm
 from distributed.comm.tcp import TCP
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import MACOS, WINDOWS
 from distributed.config import initialize_logging
 from distributed.core import (
     CommClosedError,
@@ -68,7 +60,6 @@ from distributed.protocol import deserialize
 from distributed.security import Security
 from distributed.utils import (
     DequeHandler,
-    TimeoutError,
     _offload_executor,
     get_ip,
     get_ipv6,
@@ -78,7 +69,12 @@ from distributed.utils import (
     reset_logger_locks,
     sync,
 )
-from distributed.worker import InvalidTransition, Worker
+from distributed.worker import WORKER_ANY_RUNNING, InvalidTransition, Worker
+
+try:
+    import ssl
+except ImportError:
+    ssl = None  # type: ignore
 
 try:
     import dask.array  # register config
@@ -166,7 +162,7 @@ def loop():
             except RuntimeError as e:
                 if not re.match("IOLoop is clos(ed|ing)", str(e)):
                     raise
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 pass
             else:
                 is_stopped.wait()
@@ -448,8 +444,6 @@ async def readone(comm):
 
 def run_scheduler(q, nputs, config, port=0, **kwargs):
     with dask.config.set(config):
-        from distributed import Scheduler
-
         # On Python 2.7 and Unix, fork() is used to spawn child processes,
         # so avoid inheriting the parent's IO loop.
         with pristine_loop() as loop:
@@ -736,7 +730,7 @@ def cluster(
                 async def wait_for_workers():
                     async with rpc(saddr, **rpc_kwargs) as s:
                         while True:
-                            nthreads = await s.ncores()
+                            nthreads = await s.ncores_running()
                             if len(nthreads) == nworkers:
                                 break
                             if time() - start > 5:
@@ -936,7 +930,7 @@ async def end_cluster(s, workers):
     logger.debug("Closing out test cluster")
 
     async def end_worker(w):
-        with suppress(TimeoutError, CommClosedError, EnvironmentError):
+        with suppress(asyncio.TimeoutError, CommClosedError, EnvironmentError):
             await w.close(report=False)
 
     await asyncio.gather(*(end_worker(w) for w in workers))
@@ -1000,6 +994,7 @@ def gen_cluster(
     worker_kwargs = merge(
         {"memory_limit": system.MEMORY_LIMIT, "death_timeout": 15}, worker_kwargs
     )
+    config = merge({"distributed.admin.transition-counter-max": 50_000}, config)
 
     def _(func):
         if not iscoroutinefunction(func):
@@ -1053,8 +1048,7 @@ def gen_cluster(
                             task = asyncio.create_task(coro)
                             coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
                             result = await coro2
-                            if s.validate:
-                                s.validate_state()
+                            validate_state(s, *workers)
 
                         except asyncio.TimeoutError:
                             assert task
@@ -1074,10 +1068,14 @@ def gen_cluster(
                             while not task.cancelled():
                                 await asyncio.sleep(0.01)
 
+                            # Hopefully, the hang has been caused by inconsistent state,
+                            # which should be much more meaningful than the timeout
+                            validate_state(s, *workers)
+
                             # Remove as much of the traceback as possible; it's
                             # uninteresting boilerplate from utils_test and asyncio and
                             # not from the code being tested.
-                            raise TimeoutError(
+                            raise asyncio.TimeoutError(
                                 f"Test timeout after {timeout}s.\n"
                                 "========== Test stack trace starts here ==========\n"
                                 f"{buffer.getvalue()}"
@@ -1204,6 +1202,15 @@ async def dump_cluster_state(
     with open(fname, "w") as fh:
         yaml.safe_dump(state, fh)  # Automatically convert tuples to lists
     print(f"Dumped cluster state to {fname}")
+
+
+def validate_state(*servers: Scheduler | Worker | Nanny) -> None:
+    """Run validate_state() on the Scheduler and all the Workers of the cluster.
+    Excludes workers wrapped by Nannies and workers manually started by the test.
+    """
+    for s in servers:
+        if s.validate and hasattr(s, "validate_state"):
+            s.validate_state()  # type: ignore
 
 
 def raises(func, exc=Exception):
@@ -1772,7 +1779,7 @@ def check_instances():
     for w in Worker._instances:
         with suppress(RuntimeError):  # closed IOLoop
             w.loop.add_callback(w.close, report=False, executor_wait=False)
-            if w.status in Status.ANY_RUNNING:
+            if w.status in WORKER_ANY_RUNNING:
                 w.loop.add_callback(w.close)
     Worker._instances.clear()
 
@@ -1793,7 +1800,8 @@ def check_instances():
         raise ValueError("Unclosed Comms", L)
 
     assert all(
-        n.status == Status.closed or n.status == Status.init for n in Nanny._instances
+        n.status in {Status.closed, Status.init, Status.failed}
+        for n in Nanny._instances
     ), {n: n.status for n in Nanny._instances}
 
     # assert not list(SpecCluster._instances)  # TODO
@@ -2098,3 +2106,29 @@ def has_pytestmark(test_func: Callable, name: str) -> bool:
     """
     marks = getattr(test_func, "pytestmark", [])
     return any(mark.name == name for mark in marks)
+
+
+@contextmanager
+def raises_with_cause(
+    expected_exception: type[BaseException] | tuple[type[BaseException], ...],
+    match: str | None,
+    expected_cause: type[BaseException] | tuple[type[BaseException], ...],
+    match_cause: str | None,
+) -> Generator[None, None, None]:
+    """Contextmanager to assert that a certain exception with cause was raised
+
+    Parameters
+    ----------
+    exc_type:
+    """
+    with pytest.raises(expected_exception, match=match) as exc_info:
+        yield
+
+    exc = exc_info.value
+    assert exc.__cause__
+    if not isinstance(exc.__cause__, expected_cause):
+        raise exc
+    if match_cause:
+        assert re.search(
+            match_cause, str(exc.__cause__)
+        ), f"Pattern ``{match_cause}`` not found in ``{exc.__cause__}``"

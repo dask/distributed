@@ -43,6 +43,17 @@ properties:
 
               For a list of handlers see the `dask.distributed.Scheduler.handlers` attribute.
 
+          contact-address:
+            type:
+            - string
+            - "null"
+            description: |
+              The address that the scheduler advertises to workers for communication with it.
+
+              To be specified when the address to which the scheduler binds cannot be the same
+              as the address that workers use to contact the scheduler (e.g. because the former
+              is private and the scheduler is in a different network than the workers).
+
           default-data-size:
             type:
             - string
@@ -1015,6 +1026,13 @@ properties:
           pdb-on-err:
             type: boolean
             description: Enter Python Debugger on scheduling error
+
+          transition-counter-max:
+            oneOf:
+              - enum: [false]
+              - type: integer
+            description: Cause the scheduler or workers to break if they reach this
+              number of transitions
 
           system-monitor:
             type: object

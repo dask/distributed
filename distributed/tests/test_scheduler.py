@@ -21,6 +21,7 @@ from dask import delayed
 from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
 
 from distributed import (
+    CancelledError,
     Client,
     Event,
     Lock,
@@ -46,6 +47,7 @@ from distributed.utils_test import (
     gen_test,
     inc,
     nodebug,
+    raises_with_cause,
     slowadd,
     slowdec,
     slowinc,
@@ -693,7 +695,7 @@ async def test_worker_name(s):
     assert s.workers[w.address].name == "alice"
     assert s.aliases["alice"] == w.address
 
-    with pytest.raises(ValueError):
+    with raises_with_cause(RuntimeError, None, ValueError, None):
         w2 = await Worker(s.address, name="alice")
         await w2.close()
 
@@ -1681,12 +1683,20 @@ async def test_closing_scheduler_closes_workers(s, a, b):
     client=True, nthreads=[("127.0.0.1", 1)], worker_kwargs={"resources": {"A": 1}}
 )
 async def test_resources_reset_after_cancelled_task(c, s, w):
-    future = c.submit(sleep, 0.2, resources={"A": 1})
+    lock = Lock()
+
+    def block(lock):
+        with lock:
+            return
+
+    await lock.acquire()
+    future = c.submit(block, lock, resources={"A": 1})
 
     while not w.executing_count:
         await asyncio.sleep(0.01)
 
     await future.cancel()
+    await lock.release()
 
     while w.executing_count:
         await asyncio.sleep(0.01)
@@ -1910,7 +1920,8 @@ async def test_finished():
 @gen_cluster(nthreads=[], client=True)
 async def test_retire_names_str(c, s):
     async with Worker(s.address, name="0") as a, Worker(s.address, name="1") as b:
-        futures = c.map(inc, range(10))
+        futures = c.map(inc, range(5), workers=[a.address])
+        futures.extend(c.map(inc, range(5, 10), workers=[b.address]))
         await wait(futures)
         assert a.data and b.data
         await s.retire_workers(names=[0])
@@ -2324,7 +2335,9 @@ async def test_worker_name_collision(s, a):
     # and leaves the data structures of Scheduler in a good state
     # is not updated by the second worker
     with captured_logger(logging.getLogger("distributed.scheduler")) as log:
-        with pytest.raises(ValueError, match=f"name taken, {a.name!r}"):
+        with raises_with_cause(
+            RuntimeError, None, ValueError, f"name taken, {a.name!r}"
+        ):
             await Worker(s.address, name=a.name, loop=s.loop, host="127.0.0.1")
 
     s.validate_state()
@@ -3203,11 +3216,67 @@ async def test_computations_futures(c, s, a, b):
     assert "inc" in str(computation.groups)
 
 
-@gen_cluster(client=True)
-async def test_transition_counter(c, s, a, b):
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_transition_counter(c, s, a):
     assert s.transition_counter == 0
+    assert a.transition_counter == 0
     await c.submit(inc, 1)
     assert s.transition_counter > 1
+    assert a.transition_counter > 1
+
+
+@pytest.mark.slow
+@gen_cluster(client=True)
+async def test_transition_counter_max_scheduler(c, s, a, b):
+    # This is set by @gen_cluster; it's False in production
+    assert s.transition_counter_max > 0
+    s.transition_counter_max = 1
+    with captured_logger("distributed.scheduler") as logger:
+        with pytest.raises(CancelledError):
+            await c.submit(inc, 2)
+    assert s.transition_counter > 1
+    with pytest.raises(AssertionError):
+        s.validate_state()
+    assert "transition_counter_max" in logger.getvalue()
+    # Scheduler state is corrupted. Avoid test failure on gen_cluster teardown.
+    s.validate = False
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_transition_counter_max_worker(c, s, a):
+    # This is set by @gen_cluster; it's False in production
+    assert s.transition_counter_max > 0
+    a.transition_counter_max = 1
+    with captured_logger("distributed.core") as logger:
+        fut = c.submit(inc, 2)
+        while True:
+            try:
+                a.validate_state()
+            except AssertionError:
+                break
+            await asyncio.sleep(0.01)
+
+    assert "TransitionCounterMaxExceeded" in logger.getvalue()
+    # Worker state is corrupted. Avoid test failure on gen_cluster teardown.
+    a.validate = False
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    config={"distributed.admin.transition-counter-max": False},
+)
+async def test_disable_transition_counter_max(c, s, a, b):
+    """Test that the cluster can run indefinitely if transition_counter_max is disabled.
+    This is the default outside of @gen_cluster.
+    """
+    assert s.transition_counter_max is False
+    assert a.transition_counter_max is False
+    assert await c.submit(inc, 1) == 2
+    assert s.transition_counter > 1
+    assert a.transition_counter > 1
+    s.validate_state()
+    a.validate_state()
 
 
 @gen_cluster(
@@ -3327,6 +3396,7 @@ async def test_Scheduler__to_dict(c, s, a):
         "status",
         "thread_id",
         "transition_log",
+        "transition_counter",
         "log",
         "memory",
         "tasks",

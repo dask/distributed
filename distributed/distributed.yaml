@@ -12,6 +12,7 @@ distributed:
     allowed-failures: 3     # number of retries before a task is considered bad
     bandwidth: 100000000    # 100 MB/s estimated worker-worker bandwidth
     blocked-handlers: []
+    contact-address: null
     default-data-size: 1kiB
     # Number of seconds to wait until workers or clients are removed from the events log
     # after they have been removed from the scheduler
@@ -277,6 +278,10 @@ distributed:
     log-length: 10000  # default length of logs to keep in memory
     log-format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     pdb-on-err: False       # enter debug mode on scheduling error
+    # Cause scheduler and workers to break if they reach this many transitions.
+    # Used to debug infinite transition loops.
+    # Note: setting this will cause healthy long-running services to eventually break.
+    transition-counter-max: False
     system-monitor:
       interval: 500ms
     event-loop: tornado
