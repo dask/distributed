@@ -2666,8 +2666,7 @@ class Worker(ServerNode):
         #   catch potential infinite recursions
         self.transition_counter += 1
         if (
-            self.validate
-            and self.transition_counter_max
+            self.transition_counter_max
             and self.transition_counter >= self.transition_counter_max
         ):
             self.log_event(

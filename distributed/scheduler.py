@@ -1446,7 +1446,7 @@ class SchedulerState:
             # - this increase happens before the actual transitions, so that it can
             #   catch potential infinite recursions
             self.transition_counter += 1
-            if self.validate and self.transition_counter_max:
+            if self.transition_counter_max:
                 assert self.transition_counter < self.transition_counter_max
 
             recommendations = {}  # type: ignore
