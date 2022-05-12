@@ -109,8 +109,10 @@ class BatchedSend:
                 self.byte_count += nbytes
             except CommClosedError:
                 logger.info(
-                    f"Batched Comm Closed {self.comm!r} in {self!r}. Lost {len(payload)} messages, ",
-                    f"plus {len(self.buffer)} in buffer.",  # <-- due to upcoming `abort()`
+                    (
+                        f"Batched Comm Closed {self.comm!r} in {self!r}. Lost {len(payload)} messages, "
+                        f"plus {len(self.buffer)} in buffer."  # <-- due to upcoming `abort()`
+                    ),
                     exc_info=True,
                 )
                 break
