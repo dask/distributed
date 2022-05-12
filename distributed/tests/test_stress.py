@@ -128,7 +128,7 @@ async def test_stress_scatter_death(c, s, *workers):
     await c.replicate(L, n=2)
 
     adds = [
-        delayed(slowadd, pure=True)(
+        delayed(slowadd)(
             random.choice(L),
             random.choice(L),
             delay=0.05,
@@ -138,7 +138,7 @@ async def test_stress_scatter_death(c, s, *workers):
     ]
 
     adds = [
-        delayed(slowadd, pure=True)(a, b, delay=0.02, dask_key_name=f"slowadd-2-{i}")
+        delayed(slowadd)(a, b, delay=0.02, dask_key_name=f"slowadd-2-{i}")
         for i, (a, b) in enumerate(sliding_window(2, adds))
     ]
 
@@ -147,8 +147,11 @@ async def test_stress_scatter_death(c, s, *workers):
     del adds
 
     for w in random.sample(workers, 7):
-        await asyncio.sleep(0.1)
         s.validate_state()
+        for w2 in workers:
+            w2.validate_state()
+
+        await asyncio.sleep(0.1)
         await w.close()
 
     with suppress(CancelledError):

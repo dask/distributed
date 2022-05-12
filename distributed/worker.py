@@ -1907,6 +1907,10 @@ class Worker(ServerNode):
         who_has: dict[str, Collection[str]],
         stimulus_id: str,
     ) -> None:
+        if self.validate:
+            assert set(keys) == who_has.keys()
+            assert all(who_has.values())
+
         recommendations: Recs = {}
         for key in keys:
             ts = self.ensure_task_exists(
@@ -1923,6 +1927,10 @@ class Worker(ServerNode):
 
         self.update_who_has(who_has)
         self.transitions(recommendations, stimulus_id=stimulus_id)
+
+        if self.validate:
+            for key in keys:
+                assert self.tasks[key].state != "released", self.story(key)
 
     def ensure_task_exists(
         self, key: str, *, priority: tuple[int, ...], stimulus_id: str
@@ -1944,13 +1952,13 @@ class Worker(ServerNode):
         *,
         key: str,
         who_has: dict[str, Collection[str]],
+        nbytes: dict[str, int],
         priority: tuple[int, ...],
         duration: float,
         function=None,
         args=None,
         kwargs=None,
         task=no_value,  # distributed.scheduler.TaskState.run_spec
-        nbytes: dict[str, int] | None = None,
         resource_restrictions: dict[str, float] | None = None,
         actor: bool = False,
         annotations: dict | None = None,
@@ -1966,46 +1974,12 @@ class Worker(ServerNode):
         except KeyError:
             self.tasks[key] = ts = TaskState(key)
 
-        ts.run_spec = SerializedTask(function, args, kwargs, task)
-
-        assert isinstance(priority, tuple)
-        priority = priority + (self.generation,)
-        self.generation -= 1
-
-        if actor:
-            self.actors[ts.key] = None
-
-        ts.exception = None
-        ts.traceback = None
-        ts.exception_text = ""
-        ts.traceback_text = ""
-        ts.priority = priority
-        ts.duration = duration
-        if resource_restrictions:
-            ts.resource_restrictions = resource_restrictions
-        ts.annotations = annotations
-
         recommendations: Recs = {}
         instructions: Instructions = []
-        for dependency in who_has:
-            dep_ts = self.ensure_task_exists(
-                key=dependency,
-                priority=priority,
-                stimulus_id=stimulus_id,
-            )
 
-            # link up to child / parents
-            ts.dependencies.add(dep_ts)
-            dep_ts.dependents.add(ts)
-
-        if nbytes is not None:
-            for key, value in nbytes.items():
-                self.tasks[key].nbytes = value
-
-        if ts.state in READY | {"executing", "waiting", "resumed"}:
+        if ts.state in READY | {"executing", "long-running", "waiting", "resumed"}:
             pass
         elif ts.state == "memory":
-            recommendations[ts] = "memory"
             instructions.append(
                 self._get_task_finished_msg(ts, stimulus_id=stimulus_id)
             )
@@ -2018,12 +1992,56 @@ class Worker(ServerNode):
             "error",
         }:
             recommendations[ts] = "waiting"
-        else:  # pragma: no cover
+
+            ts.run_spec = SerializedTask(function, args, kwargs, task)
+
+            assert isinstance(priority, tuple)
+            priority = priority + (self.generation,)
+            self.generation -= 1
+
+            if actor:
+                self.actors[ts.key] = None
+
+            ts.exception = None
+            ts.traceback = None
+            ts.exception_text = ""
+            ts.traceback_text = ""
+            ts.priority = priority
+            ts.duration = duration
+            if resource_restrictions:
+                ts.resource_restrictions = resource_restrictions
+            ts.annotations = annotations
+
+            if self.validate:
+                assert who_has.keys() == nbytes.keys()
+                assert all(who_has.values())
+
+            for dep_key, dep_workers in who_has.items():
+                dep_ts = self.ensure_task_exists(
+                    key=dep_key,
+                    priority=priority,
+                    stimulus_id=stimulus_id,
+                )
+                # link up to child / parents
+                ts.dependencies.add(dep_ts)
+                dep_ts.dependents.add(ts)
+
+            for dep_key, value in nbytes.items():
+                self.tasks[dep_key].nbytes = value
+
+            self.update_who_has(who_has)
+        else:  # pragma: nocover
             raise RuntimeError(f"Unexpected task state encountered {ts} {stimulus_id}")
 
-        self._handle_instructions(instructions)
-        self.update_who_has(who_has)
         self.transitions(recommendations, stimulus_id=stimulus_id)
+        self._handle_instructions(instructions)
+
+        if self.validate:
+            # All previously unknown tasks that were created above by
+            # ensure_tasks_exists() have been transitioned to fetch or flight
+            assert ts.state != "released", self.story(ts)
+            for dep_ts in ts.dependencies:
+                assert dep_ts.state != "released", self.story(dep_ts)
 
     def _add_to_data_needed(self, ts: TaskState, stimulus_id: str) -> RecsInstrs:
         self.data_needed.push(ts)
@@ -3417,7 +3435,6 @@ class Worker(ServerNode):
                 self.scheduler.who_has,
                 keys=[ts.key for ts in self._missing_dep_flight],
             )
-            who_has = {k: v for k, v in who_has.items() if v}
             self.update_who_has(who_has)
             recommendations: Recs = {}
             for ts in self._missing_dep_flight:
