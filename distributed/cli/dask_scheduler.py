@@ -218,10 +218,12 @@ def main(
             wait_for_scheduler_to_finish()
         )
 
-        await asyncio.wait(
+        done, _ = await asyncio.wait(
             [wait_for_signals_and_close_task, wait_for_scheduler_to_finish_task],
             return_when=asyncio.FIRST_COMPLETED,
         )
+        # Re-raise exceptions from done tasks
+        [task.result() for task in done]
         logger.info("Stopped scheduler at %r", scheduler.address)
 
     try:
