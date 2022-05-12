@@ -18,7 +18,6 @@ build:
   script: python -m pip install . -vv --no-deps
   entry_points:
     - dask-scheduler = distributed.cli.dask_scheduler:main
-    - dask-ssh = distributed.cli.dask_ssh:main
     - dask-worker = distributed.cli.dask_worker:main
 
 requirements:
@@ -58,7 +57,6 @@ test:
   commands:
     - pip check
     - dask-scheduler --help
-    - dask-ssh --help
     - dask-worker --help
   requires:
     - pip

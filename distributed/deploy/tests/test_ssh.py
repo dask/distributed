@@ -156,42 +156,6 @@ async def test_keywords():
             assert all(v["nthreads"] == 2 for v in d.values())
 
 
-@pytest.mark.avoid_ci
-def test_defer_to_old(loop):
-    with pytest.warns(
-        UserWarning,
-        match=r"Note that the SSHCluster API has been replaced\.  "
-        r"We're routing you to the older implementation\.  "
-        r"This will be removed in the future",
-    ):
-        c = SSHCluster(
-            scheduler_addr="127.0.0.1",
-            scheduler_port=7437,
-            worker_addrs=["127.0.0.1", "127.0.0.1"],
-        )
-    with c:
-        from distributed.deploy.old_ssh import SSHCluster as OldSSHCluster
-
-        assert isinstance(c, OldSSHCluster)
-
-
-@pytest.mark.avoid_ci
-def test_old_ssh_with_local_dir(loop):
-    from distributed.deploy.old_ssh import SSHCluster as OldSSHCluster
-
-    with OldSSHCluster(
-        scheduler_addr="127.0.0.1",
-        scheduler_port=7437,
-        worker_addrs=["127.0.0.1", "127.0.0.1"],
-        local_directory="/tmp",
-    ) as c:
-        assert len(c.workers) == 2
-        with Client(c) as client:
-            result = client.submit(lambda x: x + 1, 10)
-            result = result.result()
-            assert result == 11
-
-
 @gen_test()
 async def test_config_inherited_by_subprocess(loop):
     def f(x):

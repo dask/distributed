@@ -21,7 +21,6 @@ dependencies:
   - locket >=1.0
   - msgpack-python
   - netcdf4
-  - paramiko
   - pre-commit
   - prometheus_client
   - psutil

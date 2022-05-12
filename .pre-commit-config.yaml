@@ -40,7 +40,6 @@ repos:
           # Type stubs
           - types-docutils
           - types-requests
-          - types-paramiko
           - types-PyYAML
           - types-psutil
           - types-setuptools

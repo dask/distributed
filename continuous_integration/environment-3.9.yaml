@@ -22,7 +22,6 @@ dependencies:
   - lz4 >=0.23.1  # Only tested here
   - msgpack-python
   - netcdf4
-  - paramiko
   - pre-commit
   - prometheus_client
   - psutil

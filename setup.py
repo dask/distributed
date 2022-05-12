@@ -62,7 +62,6 @@ setup(
     ],
     entry_points="""
         [console_scripts]
-        dask-ssh=distributed.cli.dask_ssh:main
         dask-scheduler=distributed.cli.dask_scheduler:main
         dask-worker=distributed.cli.dask_worker:main
       """,

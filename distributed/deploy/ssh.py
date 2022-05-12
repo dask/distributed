@@ -274,26 +274,6 @@ class Scheduler(Process):
         await super().start()
 
 
-old_cluster_kwargs = {
-    "scheduler_addr",
-    "scheduler_port",
-    "worker_addrs",
-    "nthreads",
-    "nprocs",
-    "n_workers",
-    "ssh_username",
-    "ssh_port",
-    "ssh_private_key",
-    "nohost",
-    "logdir",
-    "remote_python",
-    "memory_limit",
-    "worker_port",
-    "nanny_port",
-    "remote_dask_worker",
-}
-
-
 def SSHCluster(
     hosts: list[str] | None = None,
     connect_options: dict | list[dict] = {},
@@ -396,17 +376,6 @@ def SSHCluster(
             "worker_module has been deprecated in favor of worker_class. "
             "Please specify a Python class rather than a CLI module."
         )
-
-    if set(kwargs) & old_cluster_kwargs:
-        from distributed.deploy.old_ssh import SSHCluster as OldSSHCluster
-
-        warnings.warn(
-            "Note that the SSHCluster API has been replaced.  "
-            "We're routing you to the older implementation.  "
-            "This will be removed in the future"
-        )
-        kwargs.setdefault("worker_addrs", hosts)
-        return OldSSHCluster(**kwargs)
 
     if not hosts:
         raise ValueError(
