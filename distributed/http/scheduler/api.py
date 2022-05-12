@@ -42,7 +42,7 @@ class AdaptiveTargetHandler(RequestHandler):
         scheduler = self.server
         desired_workers = scheduler.adaptive_target()
         response = {
-            "desired_workers": desired_workers,
+            "workers": desired_workers,
         }
         self.write(response)
 

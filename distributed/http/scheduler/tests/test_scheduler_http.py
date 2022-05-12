@@ -271,8 +271,6 @@ async def test_retire_workers(c, s, a, b):
             json=params,
         ) as resp:
             assert resp.status == 200
-            await resp.text()
-            assert len(c.scheduler_info()["workers"]) == 0
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
