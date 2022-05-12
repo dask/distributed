@@ -21,6 +21,7 @@ from dask import delayed
 from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
 
 from distributed import (
+    CancelledError,
     Client,
     Event,
     Lock,
@@ -3215,11 +3216,67 @@ async def test_computations_futures(c, s, a, b):
     assert "inc" in str(computation.groups)
 
 
-@gen_cluster(client=True)
-async def test_transition_counter(c, s, a, b):
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_transition_counter(c, s, a):
     assert s.transition_counter == 0
+    assert a.transition_counter == 0
     await c.submit(inc, 1)
     assert s.transition_counter > 1
+    assert a.transition_counter > 1
+
+
+@pytest.mark.slow
+@gen_cluster(client=True)
+async def test_transition_counter_max_scheduler(c, s, a, b):
+    # This is set by @gen_cluster; it's False in production
+    assert s.transition_counter_max > 0
+    s.transition_counter_max = 1
+    with captured_logger("distributed.scheduler") as logger:
+        with pytest.raises(CancelledError):
+            await c.submit(inc, 2)
+    assert s.transition_counter > 1
+    with pytest.raises(AssertionError):
+        s.validate_state()
+    assert "transition_counter_max" in logger.getvalue()
+    # Scheduler state is corrupted. Avoid test failure on gen_cluster teardown.
+    s.validate = False
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_transition_counter_max_worker(c, s, a):
+    # This is set by @gen_cluster; it's False in production
+    assert s.transition_counter_max > 0
+    a.transition_counter_max = 1
+    with captured_logger("distributed.core") as logger:
+        fut = c.submit(inc, 2)
+        while True:
+            try:
+                a.validate_state()
+            except AssertionError:
+                break
+            await asyncio.sleep(0.01)
+
+    assert "TransitionCounterMaxExceeded" in logger.getvalue()
+    # Worker state is corrupted. Avoid test failure on gen_cluster teardown.
+    a.validate = False
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    config={"distributed.admin.transition-counter-max": False},
+)
+async def test_disable_transition_counter_max(c, s, a, b):
+    """Test that the cluster can run indefinitely if transition_counter_max is disabled.
+    This is the default outside of @gen_cluster.
+    """
+    assert s.transition_counter_max is False
+    assert a.transition_counter_max is False
+    assert await c.submit(inc, 1) == 2
+    assert s.transition_counter > 1
+    assert a.transition_counter > 1
+    s.validate_state()
+    a.validate_state()
 
 
 @gen_cluster(
@@ -3339,6 +3396,7 @@ async def test_Scheduler__to_dict(c, s, a):
         "status",
         "thread_id",
         "transition_log",
+        "transition_counter",
         "log",
         "memory",
         "tasks",
