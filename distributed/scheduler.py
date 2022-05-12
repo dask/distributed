@@ -4679,53 +4679,48 @@ class Scheduler(SchedulerState, ServerNode):
         self.send_all(client_msgs, worker_msgs)
 
     def handle_missing_data(
-        self, key: str, errant_worker: str, stimulus_id: str, **kwargs
+        self, key: str, worker: str, errant_worker: str, stimulus_id: str
     ) -> None:
-        """Signal that `errant_worker` does not hold `key`
+        """Signal that `errant_worker` does not hold `key`.
 
-        This may either indicate that `errant_worker` is dead or that we may be
-        working with stale data and need to remove `key` from the workers
-        `has_what`.
-
-        If no replica of a task is available anymore, the task is transitioned
-        back to released and rescheduled, if possible.
+        This may either indicate that `errant_worker` is dead or that we may be working
+        with stale data and need to remove `key` from the workers `has_what`. If no
+        replica of a task is available anymore, the task is transitioned back to
+        released and rescheduled, if possible.
 
         Parameters
         ----------
-        key : str, optional
-            Task key that could not be found, by default None
-        errant_worker : str, optional
-            Address of the worker supposed to hold a replica, by default None
+        key : str
+            Task key that could not be found
+        worker : str
+            Address of the worker informing the scheduler
+        errant_worker : str
+            Address of the worker supposed to hold a replica
         """
-        logger.debug("handle missing data key=%s worker=%s", key, errant_worker)
+        logger.debug(f"handle missing data {key=} {worker=} {errant_worker=}")
         self.log_event(errant_worker, {"action": "missing-data", "key": key})
 
-        if key not in self.tasks:
+        ts = self.tasks.get(key)
+        ws = self.workers.get(errant_worker)
+        if not ts or not ws or ws not in ts.who_has:
             return
 
-        ts: TaskState = self.tasks[key]
-        ws: WorkerState = self.workers.get(errant_worker)
-
-        if ws is not None and ws in ts.who_has:
-            self.remove_replica(ts, ws)
+        self.remove_replica(ts, ws)
         if ts.state == "memory" and not ts.who_has:
             if ts.run_spec:
                 self.transitions({key: "released"}, stimulus_id)
             else:
                 self.transitions({key: "forgotten"}, stimulus_id)
 
-    def release_worker_data(self, key, worker, stimulus_id):
-        ws: WorkerState = self.workers.get(worker)
-        ts: TaskState = self.tasks.get(key)
-        if not ws or not ts:
+    def release_worker_data(self, key: str, worker: str, stimulus_id: str) -> None:
+        ts = self.tasks.get(key)
+        ws = self.workers.get(worker)
+        if not ts or not ws or ws not in ts.who_has:
             return
-        recommendations: dict = {}
-        if ws in ts.who_has:
-            self.remove_replica(ts, ws)
-            if not ts.who_has:
-                recommendations[ts.key] = "released"
-        if recommendations:
-            self.transitions(recommendations, stimulus_id)
+
+        self.remove_replica(ts, ws)
+        if not ts.who_has:
+            self.transitions({key: "released"}, stimulus_id)
 
     def handle_long_running(self, key=None, worker=None, compute_duration=None):
         """A task has seceded from the thread pool
@@ -4903,7 +4898,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.add_plugin(plugin, name=name, idempotent=idempotent)
 
-    def worker_send(self, worker, msg):
+    def worker_send(self, worker: str, msg: dict[str, Any]) -> None:
         """Send message to worker
 
         This also handles connection failures by adding a callback to remove

@@ -133,8 +133,8 @@ def test_sendmsg_to_dict():
 def test_merge_recs_instructions():
     x = TaskState("x")
     y = TaskState("y")
-    instr1 = RescheduleMsg(key="foo", worker="a", stimulus_id="test")
-    instr2 = RescheduleMsg(key="bar", worker="b", stimulus_id="test")
+    instr1 = RescheduleMsg(key="foo", stimulus_id="test")
+    instr2 = RescheduleMsg(key="bar", stimulus_id="test")
     assert merge_recs_instructions(
         ({x: "memory"}, [instr1]),
         ({y: "released"}, [instr2]),

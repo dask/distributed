@@ -2696,7 +2696,7 @@ async def test_gather_dep_exception_one_task_2(c, s, a, b):
     See also test_gather_dep_exception_one_task
     """
     # This test does not trigger the condition reliably but is a very easy case
-    # which should function correctly regardles
+    # which should function correctly regardless
 
     fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
     fut2 = c.submit(inc, fut1, workers=[b.address], key="f2")
@@ -2704,7 +2704,9 @@ async def test_gather_dep_exception_one_task_2(c, s, a, b):
     while fut1.key not in b.tasks or b.tasks[fut1.key].state == "flight":
         await asyncio.sleep(0)
 
-    s.handle_missing_data(key="f1", errant_worker=a.address, stimulus_id="test")
+    s.handle_missing_data(
+        key="f1", worker=b.address, errant_worker=a.address, stimulus_id="test"
+    )
 
     await fut2
 
