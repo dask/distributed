@@ -24,6 +24,7 @@ from collections.abc import (
     Hashable,
     Iterable,
     Iterator,
+    Mapping,
     Set,
 )
 from contextlib import suppress
@@ -1256,7 +1257,6 @@ class SchedulerState:
         "replicated_tasks",
         "total_nthreads",
         "total_occupancy",
-        "transitions_table",
         "unknown_durations",
         "unrunnable",
         "validate",
@@ -1308,23 +1308,6 @@ class SchedulerState:
         self.task_metadata = {}  # type: ignore
         self.total_nthreads = 0
         self.total_occupancy = 0.0
-        self.transitions_table = {
-            ("released", "waiting"): self.transition_released_waiting,
-            ("waiting", "released"): self.transition_waiting_released,
-            ("waiting", "processing"): self.transition_waiting_processing,
-            ("waiting", "memory"): self.transition_waiting_memory,
-            ("processing", "released"): self.transition_processing_released,
-            ("processing", "memory"): self.transition_processing_memory,
-            ("processing", "erred"): self.transition_processing_erred,
-            ("no-worker", "released"): self.transition_no_worker_released,
-            ("no-worker", "waiting"): self.transition_no_worker_waiting,
-            ("no-worker", "memory"): self.transition_no_worker_memory,
-            ("released", "forgotten"): self.transition_released_forgotten,
-            ("memory", "forgotten"): self.transition_memory_forgotten,
-            ("erred", "released"): self.transition_erred_released,
-            ("memory", "released"): self.transition_memory_released,
-            ("released", "erred"): self.transition_released_erred,
-        }
         self.unknown_durations: dict[str, set[TaskState]] = {}
         self.unrunnable = unrunnable
         self.validate = validate
@@ -1457,15 +1440,14 @@ class SchedulerState:
                 dependents = set(ts.dependents)
                 dependencies = set(ts.dependencies)
 
-            start_finish = (start, finish)
-            func = self.transitions_table.get(start_finish)
+            func = self.TRANSITIONS_TABLE.get((start, finish))
             if func is not None:
                 recommendations, client_msgs, worker_msgs = func(
-                    key, stimulus_id, *args, **kwargs
+                    self, key, stimulus_id, *args, **kwargs
                 )  # type: ignore
 
-            elif "released" not in start_finish:
-                assert not args and not kwargs, (args, kwargs, start_finish)
+            elif "released" not in (start, finish):
+                assert not args and not kwargs, (args, kwargs, start, finish)
                 a_recs: dict
                 a_cmsgs: dict
                 a_wmsgs: dict
@@ -1473,11 +1455,11 @@ class SchedulerState:
                 a_recs, a_cmsgs, a_wmsgs = a
 
                 v = a_recs.get(key, finish)
-                func = self.transitions_table["released", v]
+                func = self.TRANSITIONS_TABLE["released", v]
                 b_recs: dict
                 b_cmsgs: dict
                 b_wmsgs: dict
-                b: tuple = func(key, stimulus_id)  # type: ignore
+                b: tuple = func(self, key, stimulus_id)  # type: ignore
                 b_recs, b_cmsgs, b_wmsgs = b
 
                 recommendations.update(a_recs)
@@ -1510,7 +1492,7 @@ class SchedulerState:
 
                 start = "released"
             else:
-                raise RuntimeError("Impossible transition from %r to %r" % start_finish)
+                raise RuntimeError(f"Impossible transition from {start} to {finish}")
 
             if not stimulus_id:
                 stimulus_id = STIMULUS_ID_UNSET
@@ -1848,32 +1830,6 @@ class SchedulerState:
             assert ws.address in self.workers
 
         return ws
-
-    def set_duration_estimate(self, ts: TaskState, ws: WorkerState) -> float:
-        """Estimate task duration using worker state and task state.
-
-        If a task takes longer than twice the current average duration we
-        estimate the task duration to be 2x current-runtime, otherwise we set it
-        to be the average duration.
-
-        See also ``_remove_from_processing``
-        """
-        exec_time: float = ws.executing.get(ts, 0)
-        duration: float = self.get_task_duration(ts)
-        total_duration: float
-        if exec_time > 2 * duration:
-            total_duration = 2 * exec_time
-        else:
-            comm: float = self.get_comm_cost(ts, ws)
-            total_duration = duration + comm
-        old = ws.processing.get(ts, 0)
-        ws.processing[ts] = total_duration
-
-        if ts not in ws.long_running:
-            self.total_occupancy += total_duration - old
-            ws.occupancy += total_duration - old
-
-        return total_duration
 
     def transition_waiting_processing(self, key, stimulus_id):
         try:
@@ -2436,7 +2392,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def remove_key(self, key):
+    def _remove_key(self, key):
         ts: TaskState = self.tasks.pop(key)
         assert ts.state == "forgotten"
         self.unrunnable.discard(ts)
@@ -2479,7 +2435,7 @@ class SchedulerState:
             _propagate_forgotten(self, ts, recommendations, worker_msgs, stimulus_id)
 
             client_msgs = _task_to_client_msgs(ts)
-            self.remove_key(key)
+            self._remove_key(key)
 
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
@@ -2517,7 +2473,7 @@ class SchedulerState:
             _propagate_forgotten(self, ts, recommendations, worker_msgs, stimulus_id)
 
             client_msgs = _task_to_client_msgs(ts)
-            self.remove_key(key)
+            self._remove_key(key)
 
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
@@ -2528,9 +2484,61 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    # {
+    #     (start, finish):
+    #     transition_<start>_<finish>(
+    #         self, key: str, stimulus_id: str, *args, **kwargs
+    #     ) -> (recommendations, client_msgs, worker_msgs)
+    # }
+    TRANSITIONS_TABLE: ClassVar[
+        Mapping[tuple[str, str], Callable[..., tuple[dict, dict, dict]]]
+    ] = {
+        ("released", "waiting"): transition_released_waiting,
+        ("waiting", "released"): transition_waiting_released,
+        ("waiting", "processing"): transition_waiting_processing,
+        ("waiting", "memory"): transition_waiting_memory,
+        ("processing", "released"): transition_processing_released,
+        ("processing", "memory"): transition_processing_memory,
+        ("processing", "erred"): transition_processing_erred,
+        ("no-worker", "released"): transition_no_worker_released,
+        ("no-worker", "waiting"): transition_no_worker_waiting,
+        ("no-worker", "memory"): transition_no_worker_memory,
+        ("released", "forgotten"): transition_released_forgotten,
+        ("memory", "forgotten"): transition_memory_forgotten,
+        ("erred", "released"): transition_erred_released,
+        ("memory", "released"): transition_memory_released,
+        ("released", "erred"): transition_released_erred,
+    }
+
     ##############################
     # Assigning Tasks to Workers #
     ##############################
+
+    def set_duration_estimate(self, ts: TaskState, ws: WorkerState) -> float:
+        """Estimate task duration using worker state and task state.
+
+        If a task takes longer than twice the current average duration we
+        estimate the task duration to be 2x current-runtime, otherwise we set it
+        to be the average duration.
+
+        See also ``_remove_from_processing``
+        """
+        exec_time: float = ws.executing.get(ts, 0)
+        duration: float = self.get_task_duration(ts)
+        total_duration: float
+        if exec_time > 2 * duration:
+            total_duration = 2 * exec_time
+        else:
+            comm: float = self.get_comm_cost(ts, ws)
+            total_duration = duration + comm
+        old = ws.processing.get(ts, 0)
+        ws.processing[ts] = total_duration
+
+        if ts not in ws.long_running:
+            self.total_occupancy += total_duration - old
+            ws.occupancy += total_duration - old
+
+        return total_duration
 
     def check_idle_saturated(self, ws: WorkerState, occ: float = -1.0):
         """Update the status of the idle and saturated state

@@ -452,7 +452,6 @@ class Worker(ServerNode):
     outgoing_transfer_log: deque[dict[str, Any]]
     target_message_size: int
     validate: bool
-    _transitions_table: dict[tuple[str, str], Callable]
     transition_counter: int
     transition_counter_max: int | Literal[False]
     incoming_count: int
@@ -609,57 +608,6 @@ class Worker(ServerNode):
         if validate is None:
             validate = dask.config.get("distributed.scheduler.validate")
         self.validate = validate
-        self._transitions_table = {
-            ("cancelled", "fetch"): self.transition_cancelled_fetch,
-            ("cancelled", "released"): self.transition_cancelled_released,
-            ("cancelled", "missing"): self.transition_cancelled_released,
-            ("cancelled", "waiting"): self.transition_cancelled_waiting,
-            ("cancelled", "forgotten"): self.transition_cancelled_forgotten,
-            ("cancelled", "memory"): self.transition_cancelled_memory,
-            ("cancelled", "error"): self.transition_cancelled_error,
-            ("resumed", "memory"): self.transition_generic_memory,
-            ("resumed", "error"): self.transition_generic_error,
-            ("resumed", "released"): self.transition_resumed_released,
-            ("resumed", "waiting"): self.transition_resumed_waiting,
-            ("resumed", "fetch"): self.transition_resumed_fetch,
-            ("resumed", "missing"): self.transition_resumed_missing,
-            ("constrained", "executing"): self.transition_constrained_executing,
-            ("constrained", "released"): self.transition_generic_released,
-            ("error", "released"): self.transition_generic_released,
-            ("executing", "error"): self.transition_executing_error,
-            ("executing", "long-running"): self.transition_executing_long_running,
-            ("executing", "memory"): self.transition_executing_memory,
-            ("executing", "released"): self.transition_executing_released,
-            ("executing", "rescheduled"): self.transition_executing_rescheduled,
-            ("fetch", "flight"): self.transition_fetch_flight,
-            ("fetch", "missing"): self.transition_generic_missing,
-            ("fetch", "released"): self.transition_generic_released,
-            ("flight", "error"): self.transition_flight_error,
-            ("flight", "fetch"): self.transition_flight_fetch,
-            ("flight", "memory"): self.transition_flight_memory,
-            ("flight", "missing"): self.transition_flight_missing,
-            ("flight", "released"): self.transition_flight_released,
-            ("long-running", "error"): self.transition_generic_error,
-            ("long-running", "memory"): self.transition_long_running_memory,
-            ("long-running", "rescheduled"): self.transition_executing_rescheduled,
-            ("long-running", "released"): self.transition_executing_released,
-            ("memory", "released"): self.transition_memory_released,
-            ("missing", "fetch"): self.transition_missing_fetch,
-            ("missing", "released"): self.transition_missing_released,
-            ("missing", "error"): self.transition_generic_error,
-            ("ready", "error"): self.transition_generic_error,
-            ("ready", "executing"): self.transition_ready_executing,
-            ("ready", "released"): self.transition_generic_released,
-            ("released", "error"): self.transition_generic_error,
-            ("released", "fetch"): self.transition_released_fetch,
-            ("released", "missing"): self.transition_released_fetch,
-            ("released", "forgotten"): self.transition_released_forgotten,
-            ("released", "memory"): self.transition_released_memory,
-            ("released", "waiting"): self.transition_released_waiting,
-            ("waiting", "constrained"): self.transition_waiting_constrained,
-            ("waiting", "ready"): self.transition_waiting_ready,
-            ("waiting", "released"): self.transition_generic_released,
-        }
 
         self.transition_counter = 0
         self.transition_counter_max = dask.config.get(
@@ -2025,6 +1973,10 @@ class Worker(ServerNode):
         self.update_who_has(who_has)
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
+    ########################
+    # Worker State Machine #
+    ########################
+
     def _add_to_data_needed(self, ts: TaskState, stimulus_id: str) -> RecsInstrs:
         self.data_needed.push(ts)
         for w in ts.who_has:
@@ -2646,8 +2598,73 @@ class Worker(ServerNode):
         self.tasks.pop(ts.key, None)
         return recommendations, []
 
+    # {
+    #     (start, finish):
+    #     transition_<start>_<finish>(
+    #         self, ts: TaskState, *args, stimulus_id: str
+    #     ) -> (recommendations, instructions)
+    # }
+    TRANSITIONS_TABLE: ClassVar[
+        Mapping[tuple[TaskStateState, TaskStateState], Callable[..., RecsInstrs]]
+    ] = {
+        ("cancelled", "fetch"): transition_cancelled_fetch,
+        ("cancelled", "released"): transition_cancelled_released,
+        ("cancelled", "missing"): transition_cancelled_released,
+        ("cancelled", "waiting"): transition_cancelled_waiting,
+        ("cancelled", "forgotten"): transition_cancelled_forgotten,
+        ("cancelled", "memory"): transition_cancelled_memory,
+        ("cancelled", "error"): transition_cancelled_error,
+        ("resumed", "memory"): transition_generic_memory,
+        ("resumed", "error"): transition_generic_error,
+        ("resumed", "released"): transition_resumed_released,
+        ("resumed", "waiting"): transition_resumed_waiting,
+        ("resumed", "fetch"): transition_resumed_fetch,
+        ("resumed", "missing"): transition_resumed_missing,
+        ("constrained", "executing"): transition_constrained_executing,
+        ("constrained", "released"): transition_generic_released,
+        ("error", "released"): transition_generic_released,
+        ("executing", "error"): transition_executing_error,
+        ("executing", "long-running"): transition_executing_long_running,
+        ("executing", "memory"): transition_executing_memory,
+        ("executing", "released"): transition_executing_released,
+        ("executing", "rescheduled"): transition_executing_rescheduled,
+        ("fetch", "flight"): transition_fetch_flight,
+        ("fetch", "missing"): transition_generic_missing,
+        ("fetch", "released"): transition_generic_released,
+        ("flight", "error"): transition_flight_error,
+        ("flight", "fetch"): transition_flight_fetch,
+        ("flight", "memory"): transition_flight_memory,
+        ("flight", "missing"): transition_flight_missing,
+        ("flight", "released"): transition_flight_released,
+        ("long-running", "error"): transition_generic_error,
+        ("long-running", "memory"): transition_long_running_memory,
+        ("long-running", "rescheduled"): transition_executing_rescheduled,
+        ("long-running", "released"): transition_executing_released,
+        ("memory", "released"): transition_memory_released,
+        ("missing", "fetch"): transition_missing_fetch,
+        ("missing", "released"): transition_missing_released,
+        ("missing", "error"): transition_generic_error,
+        ("ready", "error"): transition_generic_error,
+        ("ready", "executing"): transition_ready_executing,
+        ("ready", "released"): transition_generic_released,
+        ("released", "error"): transition_generic_error,
+        ("released", "fetch"): transition_released_fetch,
+        ("released", "missing"): transition_generic_missing,
+        ("released", "forgotten"): transition_released_forgotten,
+        ("released", "memory"): transition_released_memory,
+        ("released", "waiting"): transition_released_waiting,
+        ("waiting", "constrained"): transition_waiting_constrained,
+        ("waiting", "ready"): transition_waiting_ready,
+        ("waiting", "released"): transition_generic_released,
+    }
+
     def _transition(
-        self, ts: TaskState, finish: str | tuple, *args, stimulus_id: str, **kwargs
+        self,
+        ts: TaskState,
+        finish: TaskStateState | tuple,
+        *args,
+        stimulus_id: str,
+        **kwargs,
     ) -> RecsInstrs:
         if isinstance(finish, tuple):
             # the concatenated transition path might need to access the tuple
@@ -2658,7 +2675,7 @@ class Worker(ServerNode):
             return {}, []
 
         start = ts.state
-        func = self._transitions_table.get((start, cast(str, finish)))
+        func = self.TRANSITIONS_TABLE.get((start, cast(TaskStateState, finish)))
 
         # Notes:
         # - in case of transition through released, this counter is incremented by 2
@@ -2682,7 +2699,9 @@ class Worker(ServerNode):
             raise TransitionCounterMaxExceeded(ts.key, start, finish, self.story(ts))
 
         if func is not None:
-            recs, instructions = func(ts, *args, stimulus_id=stimulus_id, **kwargs)
+            recs, instructions = func(
+                self, ts, *args, stimulus_id=stimulus_id, **kwargs
+            )
             self._notify_plugins("transition", ts.key, start, finish, **kwargs)
 
         elif "released" not in (start, finish):
@@ -2691,7 +2710,7 @@ class Worker(ServerNode):
                 recs, instructions = self._transition(
                     ts, "released", stimulus_id=stimulus_id
                 )
-                v_state: str
+                v_state: TaskStateState
                 v_args: list | tuple
                 while v := recs.pop(ts, None):
                     if isinstance(v, tuple):
@@ -2755,13 +2774,13 @@ class Worker(ServerNode):
         return recs, instructions
 
     def transition(
-        self, ts: TaskState, finish: str, *, stimulus_id: str, **kwargs
+        self, ts: TaskState, finish: TaskStateState, *, stimulus_id: str, **kwargs
     ) -> None:
         """Transition a key from its current state to the finish state
 
         Examples
         --------
-        >>> self.transition('x', 'waiting')
+        >>> self.transition('x', 'waiting', stimulus_id=f"test-{(time()}")
         {'x': 'processing'}
 
         Returns
