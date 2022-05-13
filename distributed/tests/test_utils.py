@@ -285,9 +285,22 @@ def test_ensure_memoryview(data):
         assert not result.readonly
 
 
-def test_ensure_memoryview_ndarray():
+@pytest.mark.parametrize(
+    "dt, nitems, shape, strides",
+    [
+        ("i8", 12, (12,), (8,)),
+        ("i8", 12, (3, 4), (32, 8)),
+        ("i8", 12, (4, 3), (8, 32)),
+        ("i8", 12, (3, 2), (32, 16)),
+        ("i8", 12, (2, 3), (16, 32)),
+    ],
+)
+def test_ensure_memoryview_ndarray(dt, nitems, shape, strides):
     np = pytest.importorskip("numpy")
-    result = ensure_memoryview(np.arange(12).reshape(3, 4)[:, ::2].T)
+    data = np.ndarray(
+        shape, dtype=dt, buffer=np.arange(nitems, dtype=dt), strides=strides
+    )
+    result = ensure_memoryview(data)
     assert isinstance(result, memoryview)
     assert result.ndim == 1
     assert result.format == "B"
