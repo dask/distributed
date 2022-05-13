@@ -27,6 +27,7 @@ from contextvars import ContextVar
 from functools import wraps
 from hashlib import md5
 from importlib.util import cache_from_source
+from pickle import PickleBuffer
 from time import sleep
 from types import ModuleType
 from typing import TYPE_CHECKING
@@ -1027,7 +1028,10 @@ def ensure_memoryview(obj):
         return memoryview(bytearray(mv))
     elif mv.ndim != 1 or mv.format != "B":
         # Perform zero-copy reshape & cast
-        return mv.cast("B")
+        # Use `PickleBuffer.raw()` as `memoryview.cast()` fails with F-order
+        # Pass `mv.obj` so the created `memoryview` has that as its `obj`
+        # xref: https://github.com/python/cpython/issues/91484
+        return PickleBuffer(mv.obj).raw()
     else:
         # Return `memoryview` as it already meets requirements
         return mv
