@@ -26,6 +26,7 @@ class RetireWorkersHandler(RequestHandler):
 
 class GetWorkersHandler(RequestHandler):
     def get(self):
+        self.set_header("Content-Type", "text/json")
         scheduler = self.server
         response = {
             "num_workers": len(scheduler.workers),
@@ -34,17 +35,18 @@ class GetWorkersHandler(RequestHandler):
                 for ws in scheduler.workers.values()
             ],
         }
-        self.write(response)
+        self.write(json.dumps(response))
 
 
 class AdaptiveTargetHandler(RequestHandler):
     def get(self):
+        self.set_header("Content-Type", "text/json")
         scheduler = self.server
         desired_workers = scheduler.adaptive_target()
         response = {
             "workers": desired_workers,
         }
-        self.write(response)
+        self.write(json.dumps(response))
 
 
 routes: list[tuple] = [
