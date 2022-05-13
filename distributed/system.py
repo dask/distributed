@@ -1,4 +1,3 @@
-import resource
 import sys
 
 import psutil
@@ -31,10 +30,12 @@ def memory_limit() -> int:
     # Check rlimit if available
     if sys.platform != "win32":
         try:
+            import resource
+
             hard_limit = resource.getrlimit(resource.RLIMIT_RSS)[1]
             if hard_limit > 0:
                 limit = min(limit, hard_limit)
-        except OSError:
+        except (ImportError, OSError):
             pass
 
     return limit
