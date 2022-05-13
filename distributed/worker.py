@@ -120,6 +120,7 @@ from distributed.worker_state_machine import (
     Instructions,
     InvalidTransition,
     LongRunningMsg,
+    MissingDataMsg,
     Recs,
     RecsInstrs,
     ReleaseWorkerDataMsg,
@@ -2145,7 +2146,7 @@ class Worker(ServerNode):
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         recs: Recs = {ts: "released"}
-        smsg = RescheduleMsg(key=ts.key, worker=self.address, stimulus_id=stimulus_id)
+        smsg = RescheduleMsg(key=ts.key, stimulus_id=stimulus_id)
         return recs, [smsg]
 
     def transition_executing_rescheduled(
@@ -2158,11 +2159,7 @@ class Worker(ServerNode):
         return merge_recs_instructions(
             (
                 {ts: "released"},
-                [
-                    RescheduleMsg(
-                        key=ts.key, worker=self.address, stimulus_id=stimulus_id
-                    )
-                ],
+                [RescheduleMsg(key=ts.key, stimulus_id=stimulus_id)],
             ),
             self._ensure_computing(),
         )
@@ -3285,6 +3282,7 @@ class Worker(ServerNode):
             return None
 
         recommendations: Recs = {}
+        instructions: Instructions = []
         response = {}
         to_gather_keys: set[str] = set()
         cancelled_keys: set[str] = set()
@@ -3406,17 +3404,17 @@ class Worker(ServerNode):
                     ts.who_has.discard(worker)
                     self.has_what[worker].discard(ts.key)
                     self.log.append((d, "missing-dep", stimulus_id, time()))
-                    self.batched_stream.send(
-                        {
-                            "op": "missing-data",
-                            "errant_worker": worker,
-                            "key": d,
-                            "stimulus_id": stimulus_id,
-                        }
+                    instructions.append(
+                        MissingDataMsg(
+                            key=d,
+                            errant_worker=worker,
+                            stimulus_id=stimulus_id,
+                        )
                     )
                     recommendations[ts] = "fetch"
             del data, response
             self.transitions(recommendations, stimulus_id=stimulus_id)
+            self._handle_instructions(instructions)
 
             if refresh_who_has:
                 # All workers that hold known replicas of our tasks are busy.
