@@ -120,6 +120,11 @@ jobs:
           mkdir reports
 
           pytest distributed \
+            distributed/tests/test_client.py::test_retire_workers \
+            distributed/tests/test_scheduler.py::test_retire_workers_close \
+            distributed/tests/test_client.py::test_reconnect_timeout \
+            distributed/tests/test_tls_functional.py::test_retire_workers \
+            distributed/tests/test_stress.py::test_stress_scatter_death \
             -m "not avoid_ci and ${{ matrix.partition }}" --runslow \
             --leaks=fds,processes,threads \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \
