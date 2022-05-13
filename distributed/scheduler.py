@@ -1440,7 +1440,7 @@ class SchedulerState:
                 dependents = set(ts.dependents)
                 dependencies = set(ts.dependencies)
 
-            func = self.TRANSITIONS_TABLE.get((start, finish))
+            func = self._TRANSITIONS_TABLE.get((start, finish))
             if func is not None:
                 recommendations, client_msgs, worker_msgs = func(
                     self, key, stimulus_id, *args, **kwargs
@@ -1455,7 +1455,7 @@ class SchedulerState:
                 a_recs, a_cmsgs, a_wmsgs = a
 
                 v = a_recs.get(key, finish)
-                func = self.TRANSITIONS_TABLE["released", v]
+                func = self._TRANSITIONS_TABLE["released", v]
                 b_recs: dict
                 b_cmsgs: dict
                 b_wmsgs: dict
@@ -2490,7 +2490,7 @@ class SchedulerState:
     #         self, key: str, stimulus_id: str, *args, **kwargs
     #     ) -> (recommendations, client_msgs, worker_msgs)
     # }
-    TRANSITIONS_TABLE: ClassVar[
+    _TRANSITIONS_TABLE: ClassVar[
         Mapping[tuple[str, str], Callable[..., tuple[dict, dict, dict]]]
     ] = {
         ("released", "waiting"): transition_released_waiting,

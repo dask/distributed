@@ -2604,7 +2604,7 @@ class Worker(ServerNode):
     #         self, ts: TaskState, *args, stimulus_id: str
     #     ) -> (recommendations, instructions)
     # }
-    TRANSITIONS_TABLE: ClassVar[
+    _TRANSITIONS_TABLE: ClassVar[
         Mapping[tuple[TaskStateState, TaskStateState], Callable[..., RecsInstrs]]
     ] = {
         ("cancelled", "fetch"): transition_cancelled_fetch,
@@ -2675,7 +2675,7 @@ class Worker(ServerNode):
             return {}, []
 
         start = ts.state
-        func = self.TRANSITIONS_TABLE.get((start, cast(TaskStateState, finish)))
+        func = self._TRANSITIONS_TABLE.get((start, cast(TaskStateState, finish)))
 
         # Notes:
         # - in case of transition through released, this counter is incremented by 2
