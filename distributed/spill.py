@@ -16,8 +16,7 @@ from distributed.sizeof import safe_sizeof
 
 logger = logging.getLogger(__name__)
 has_zict_210 = parse_version(zict.__version__) >= parse_version("2.1.0")
-# At the moment of writing, zict 2.2.0 has not been released yet. Support git tip.
-has_zict_220 = parse_version(zict.__version__) >= parse_version("2.2.0.dev2")
+has_zict_220 = parse_version(zict.__version__) >= parse_version("2.2.0")
 
 
 class SpilledSize(NamedTuple):
