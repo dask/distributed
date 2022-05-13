@@ -1021,13 +1021,13 @@ def ensure_memoryview(obj):
 
     if not mv.nbytes:
         # Drop `obj` reference to permit freeing underlying data
-        return memoryview(b"")
+        return memoryview(bytearray())
     elif mv.contiguous:
         # Perform zero-copy reshape & cast
         return mv.cast("B")
     else:
         # Copy to contiguous form of expected shape & type
-        return memoryview(mv.tobytes())
+        return memoryview(bytearray(mv))
 
 
 def open_port(host=""):
