@@ -3,6 +3,7 @@ import os
 import pathlib
 import signal
 import socket
+import sys
 import threading
 from contextlib import contextmanager
 from time import sleep
@@ -563,9 +564,16 @@ async def test_dump_cluster_unresponsive_remote_worker(c, s, a, b, tmpdir):
     clog_fut.cancel()
 
 
+# Note: can't use WINDOWS constant as it upsets mypy
+if sys.platform == "win32":
+    TERM_SIGNALS = (signal.SIGTERM, signal.SIGINT)
+else:
+    TERM_SIGNALS = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
+
+
 def garbage_process(barrier, ignore_sigterm: bool = False, t: float = 3600) -> None:
     if ignore_sigterm:
-        for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):  # type: ignore
+        for signum in TERM_SIGNALS:
             signal.signal(signum, signal.SIG_IGN)
     barrier.wait()
     sleep(t)

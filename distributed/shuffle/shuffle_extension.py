@@ -197,7 +197,7 @@ class Shuffle:
             self.output_partitions_left > 0
         ), f"No outputs remaining, but requested output partition {i} on {self.worker.address}."
 
-        sync(self.worker.loop, self.multi_file.flush)  # type: ignore
+        sync(self.worker.loop, self.multi_file.flush)
         try:
             df = self.multi_file.read(i)
             with self.time("cpu"):
