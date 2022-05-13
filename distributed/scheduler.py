@@ -1841,7 +1841,7 @@ class SchedulerState:
                 assert not ts.processing_on
                 assert not ts.has_lost_dependencies
                 assert ts not in self.unrunnable
-                assert all([dts.who_has for dts in ts.dependencies])
+                assert all(dts.who_has for dts in ts.dependencies)
 
             ws = self.decide_worker(ts)
             if ws is None:
@@ -7125,6 +7125,9 @@ class Scheduler(SchedulerState, ServerNode):
             ts = self.tasks[key]
             who_has[key] = {ws.address for ws in ts.who_has}
 
+        if self.validate:
+            assert all(who_has.values())
+
         self.stream_comms[addr].send(
             {
                 "op": "acquire-replicas",
@@ -7329,20 +7332,18 @@ def _task_to_msg(
         "priority": ts.priority,
         "duration": duration,
         "stimulus_id": f"compute-task-{time()}",
-        "who_has": {},
+        "who_has": {
+            dts.key: [ws.address for ws in dts.who_has] for dts in ts.dependencies
+        },
+        "nbytes": {dts.key: dts.nbytes for dts in ts.dependencies},
     }
+    if state.validate:
+        assert all(msg["who_has"].values())
+
     if ts.resource_restrictions:
         msg["resource_restrictions"] = ts.resource_restrictions
     if ts.actor:
         msg["actor"] = True
-
-    deps = ts.dependencies
-    if deps:
-        msg["who_has"] = {dts.key: [ws.address for ws in dts.who_has] for dts in deps}
-        msg["nbytes"] = {dts.key: dts.nbytes for dts in deps}
-
-        if state.validate:
-            assert all(msg["who_has"].values())
 
     if isinstance(ts.run_spec, dict):
         msg.update(ts.run_spec)
@@ -7480,7 +7481,7 @@ def validate_task_state(ts: TaskState) -> None:
     assert bool(ts.who_has) == (ts.state == "memory"), (ts, ts.who_has, ts.state)
 
     if ts.state == "processing":
-        assert all([dts.who_has for dts in ts.dependencies]), (
+        assert all(dts.who_has for dts in ts.dependencies), (
             "task processing without all deps",
             str(ts),
             str(ts.dependencies),

@@ -83,7 +83,7 @@ async def test_abort_execution_to_fetch(c, s, a, b):
     assert_story(
         a.story("f1"),
         [
-            ("f1", "compute-task"),
+            ("f1", "compute-task", "released"),
             ("f1", "released", "waiting", "waiting", {"f1": "ready"}),
             ("f1", "waiting", "ready", "ready", {"f1": "executing"}),
             ("f1", "ready", "executing", "executing", {}),
