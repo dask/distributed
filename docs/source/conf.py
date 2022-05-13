@@ -426,7 +426,7 @@ def copy_legacy_redirects(app, docname):
                 f.write(page)
 
 
-from docutils.parsers.rst import directives  # type: ignore
+from docutils.parsers.rst import directives
 
 # -- Configuration to keep autosummary in sync with autoclass::members ----------------------------------------------
 # Fixes issues/3693
