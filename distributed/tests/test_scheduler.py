@@ -370,25 +370,38 @@ async def test_clear_events_client_removal(c, s, a, b):
         assert time() < start + 2
 
 
-@gen_cluster()
-async def test_add_worker(s, a, b):
-    w = Worker(s.address, nthreads=3)
-    w.data["x-5"] = 6
-    w.data["y"] = 1
+@gen_cluster(nthreads=[("", 1)], client=True)
+async def test_add_worker(c, s, a):
+    lock = Lock()
 
-    dsk = {("x-%d" % i): (inc, i) for i in range(10)}
-    s.update_graph(
-        tasks=valmap(dumps_task, dsk),
-        keys=list(dsk),
-        client="client",
-        dependencies={k: set() for k in dsk},
-    )
-    s.validate_state()
-    await w
-    s.validate_state()
+    async with lock:
+        anywhere = c.submit(inc, 0, key="l-0")
+        l1 = c.submit(lock.acquire, key="l-1")
+        l2 = c.submit(lock.acquire, key="l-2")
 
-    assert w.ip in s.host_info
-    assert s.host_info[w.ip]["addresses"] == {a.address, b.address, w.address}
+        while not (sum(t.state == "processing" for t in s.tasks.values()) == 3):
+            await asyncio.sleep(0.01)
+
+        # Simulate a worker joining with necessary and unnecessary data.
+        w = Worker(s.address, nthreads=1)
+        w.update_data({"l-1": 2, "l-2": 3, "x": -1, "y": -2})
+        # `update_data` queues messages to send; we want to purely test `add_worker` logic
+        w.batched_stream.buffer.clear()
+
+        s.validate_state()
+        await w
+        s.validate_state()
+
+        while not len(s.workers) == 2:
+            await asyncio.sleep(0.01)
+
+        assert w.ip in s.host_info
+        assert s.host_info[w.ip]["addresses"] == {a.address, w.address}
+
+        assert await c.gather([anywhere, l1, l2]) == [1, 2, 3]
+        assert "x" not in w.data
+        assert "y" not in w.data
+
     await w.close()
 
 
