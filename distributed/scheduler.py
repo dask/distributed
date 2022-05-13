@@ -1561,7 +1561,6 @@ class SchedulerState:
         """
         keys: set = set()
         recommendations = recommendations.copy()
-        msgs: list
         new_msgs: list
         new: tuple
         new_recs: dict
@@ -1576,13 +1575,13 @@ class SchedulerState:
 
             recommendations.update(new_recs)
             for c, new_msgs in new_cmsgs.items():
-                msgs = client_msgs.get(c)  # type: ignore
+                msgs = client_msgs.get(c)
                 if msgs is not None:
                     msgs.extend(new_msgs)
                 else:
                     client_msgs[c] = new_msgs
             for w, new_msgs in new_wmsgs.items():
-                msgs = worker_msgs.get(w)  # type: ignore
+                msgs = worker_msgs.get(w)
                 if msgs is not None:
                     msgs.extend(new_msgs)
                 else:
@@ -3651,19 +3650,18 @@ class Scheduler(SchedulerState, ServerNode):
             except Exception as e:
                 logger.exception(e)
 
-        recommendations: dict = {}
         client_msgs: dict = {}
         worker_msgs: dict = {}
         if nbytes:
             assert isinstance(nbytes, dict)
             already_released_keys = []
             for key in nbytes:
-                ts: TaskState = self.tasks.get(key)  # type: ignore
+                ts: TaskState | None = self.tasks.get(key)
                 if ts is not None and ts.state != "released":
                     if ts.state == "memory":
                         self.add_keys(worker=address, keys=[key])
                     else:
-                        t: tuple = self._transition(
+                        recommendations, new_cmsgs, new_wmsgs = self._transition(
                             key,
                             "memory",
                             stimulus_id,
@@ -3671,11 +3669,21 @@ class Scheduler(SchedulerState, ServerNode):
                             nbytes=nbytes[key],
                             typename=types[key],
                         )
-                        recommendations, client_msgs, worker_msgs = t
+                        for c, new_msgs in new_cmsgs.items():
+                            msgs = client_msgs.get(c)
+                            if msgs is not None:
+                                msgs.extend(new_msgs)
+                            else:
+                                client_msgs[c] = new_msgs
+                        for w, new_msgs in new_wmsgs.items():
+                            msgs = worker_msgs.get(w)
+                            if msgs is not None:
+                                msgs.extend(new_msgs)
+                            else:
+                                worker_msgs[w] = new_msgs
                         self._transitions(
                             recommendations, client_msgs, worker_msgs, stimulus_id
                         )
-                        recommendations = {}
                 else:
                     already_released_keys.append(key)
             if already_released_keys:
@@ -3690,10 +3698,12 @@ class Scheduler(SchedulerState, ServerNode):
                 )
 
         if ws.status == Status.running:
-            recommendations.update(self.bulk_schedule_after_adding_worker(ws))
-
-        if recommendations:
-            self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
+            self._transitions(
+                self.bulk_schedule_after_adding_worker(ws),
+                client_msgs,
+                worker_msgs,
+                stimulus_id,
+            )
 
         self.send_all(client_msgs, worker_msgs)
 
