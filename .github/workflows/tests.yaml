@@ -119,7 +119,7 @@ jobs:
           set -o pipefail
           mkdir reports
 
-          pytest distributed \
+          pytest \
             distributed/tests/test_client.py::test_retire_workers \
             distributed/tests/test_scheduler.py::test_retire_workers_close \
             distributed/tests/test_client.py::test_reconnect_timeout \
