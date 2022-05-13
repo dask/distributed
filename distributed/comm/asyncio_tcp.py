@@ -27,7 +27,7 @@ from distributed.comm.utils import (
     host_array,
     to_frames,
 )
-from distributed.utils import ensure_ip, get_ip, get_ipv6
+from distributed.utils import ensure_ip, ensure_memoryview, get_ip, get_ipv6
 
 logger = logging.getLogger(__name__)
 
@@ -380,7 +380,9 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             await drain_waiter
 
         # Ensure all memoryviews are in single-byte format
-        frames = [f.cast("B") if isinstance(f, memoryview) else f for f in frames]
+        frames = [
+            ensure_memoryview(f) if isinstance(f, memoryview) else f for f in frames
+        ]
 
         nframes = len(frames)
         frames_nbytes = [len(f) for f in frames]
@@ -852,12 +854,9 @@ class _ZeroCopyWriter:
 
     def _buffer_append(self, data: bytes) -> None:
         """Append new data to the send buffer"""
-        if not isinstance(data, memoryview):
-            data = memoryview(data)
-        if data.format != "B":
-            data = data.cast("B")
-        self._size += len(data)
-        self._buffers.append(data)
+        mv = ensure_memoryview(data)
+        self._size += len(mv)
+        self._buffers.append(mv)
 
     def _buffer_peek(self) -> list[memoryview]:
         """Get one or more buffers to write to the socket"""

@@ -88,7 +88,7 @@ def pickle_loads(header, frames):
         writeable = len(buffers) * (None,)
 
     new = []
-    memoryviews = map(memoryview, buffers)
+    memoryviews = map(ensure_memoryview, buffers)
     for w, mv in zip(writeable, memoryviews):
         if w == mv.readonly:
             if w:
@@ -785,7 +785,7 @@ def _serialize_memoryview(obj):
 @dask_deserialize.register(memoryview)
 def _deserialize_memoryview(header, frames):
     if len(frames) == 1:
-        out = memoryview(frames[0]).cast("B")
+        out = ensure_memoryview(frames[0])
     else:
         out = memoryview(b"".join(frames))
     out = out.cast(header["format"], header["shape"])
