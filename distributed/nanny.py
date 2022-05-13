@@ -926,8 +926,8 @@ class WorkerProcess:
                 loop.run_sync(do_stop)
             finally:
                 with suppress(ValueError):
-                    child_stop_q.put({"op": "close"})  # probably redundant
+                    child_stop_q.put({"op": "stop"})  # usually redundant
                 with suppress(ValueError):
-                    child_stop_q.close()  # probably redundant
+                    child_stop_q.close()  # usually redundant
                 child_stop_q.join_thread()
                 thread.join(timeout=2)
