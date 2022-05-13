@@ -124,7 +124,10 @@ async def test_stress_creation_and_deletion(c, s):
 async def test_stress_scatter_death(c, s, *workers):
     s.allowed_failures = 1000
     np = pytest.importorskip("numpy")
-    L = await c.scatter([np.random.random(10000) for _ in range(len(workers))])
+    L = await c.scatter(
+        {f"scatter-{i}": np.random.random(10000) for i in range(len(workers))}
+    )
+    L = list(L.values())
     await c.replicate(L, n=2)
 
     adds = [
