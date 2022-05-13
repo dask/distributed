@@ -1773,8 +1773,6 @@ def check_instances():
         sleep(0.1)
         assert time() < start + 10
 
-    _global_clients.clear()
-
     wait_profiler()
     gc.collect()
     assert not Nanny._instances
@@ -1808,7 +1806,6 @@ def check_instances():
     )
     SpecCluster._instances.clear()
 
-    Nanny._instances.clear()
     DequeHandler.clear_all_instances()
 
 
