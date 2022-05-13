@@ -57,6 +57,7 @@ Scheduler methods exposed by the API with an example of the request body they ta
 - ``/api/v1/retire_workers`` : retire certain workers on the scheduler
 
 .. code-block:: json
+
     {
         "workers":["tcp://127.0.0.1:53741", "tcp://127.0.0.1:53669"]
     }
@@ -64,6 +65,7 @@ Scheduler methods exposed by the API with an example of the request body they ta
 - ``/api/v1/workers_to_close`` : get a list of n workers that the scheduler can safely close
 
 .. code-block:: json
+
     {
         "n":2
     }
