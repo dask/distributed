@@ -3657,13 +3657,7 @@ def catch_unhandled_exceptions() -> Generator[None, None, None]:
 
     @loop.set_exception_handler
     def _(loop: object, context: dict[str, Any]) -> None:
-        if exc := context.get("exception"):
-            tb = "\n".join(
-                traceback.format_exception(type(exc), exc, exc.__traceback__)
-            )
-        else:
-            tb = None
-        ctxs.append({"message": context["message"], "tb": tb})
+        ctxs.append(context)
 
     try:
         yield
@@ -3676,8 +3670,9 @@ def catch_unhandled_exceptions() -> Generator[None, None, None]:
             print(
                 f"------ Unhandled exception {i}/{len(ctxs)}: {ctx['message']!r} ------"
             )
-            if tb := ctx["tb"]:
-                print(tb)
+            print(ctx)
+            if exc := ctx.get("exception"):
+                traceback.print_exception(type(exc), exc, exc.__traceback__)
 
         raise UnhandledExceptions(", ".join(msgs))
 
