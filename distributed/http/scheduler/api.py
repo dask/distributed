@@ -24,6 +24,20 @@ class RetireWorkersHandler(RequestHandler):
             self.write(json.dumps({"Error": "Bad request"}))
 
 
+class WorkersToCloseHandler(RequestHandler):
+    async def post(self):
+        self.set_header("Content-Type", "text/json")
+        scheduler = self.server
+        try:
+            params = json.loads(self.request.body)
+            workers_to_close = {"workers": scheduler.workers_to_close(**params)}
+            self.write(json.dumps(workers_to_close))
+        except Exception as e:
+            self.set_status(400, str(e))
+            print(str(e))
+            self.write(json.dumps({"Error": "Bad request"}))
+
+
 class GetWorkersHandler(RequestHandler):
     def get(self):
         self.set_header("Content-Type", "text/json")
@@ -52,6 +66,7 @@ class AdaptiveTargetHandler(RequestHandler):
 routes: list[tuple] = [
     ("/api/v1", APIHandler, {}),
     ("/api/v1/retire_workers", RetireWorkersHandler, {}),
+    ("/api/v1/workers_to_close", WorkersToCloseHandler, {}),
     ("/api/v1/get_workers", GetWorkersHandler, {}),
     ("/api/v1/adaptive_target", AdaptiveTargetHandler, {}),
 ]

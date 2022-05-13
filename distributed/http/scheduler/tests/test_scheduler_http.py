@@ -274,6 +274,20 @@ async def test_retire_workers(c, s, a, b):
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
+async def test_workers_to_close(c, s, a, b):
+    async with aiohttp.ClientSession() as session:
+        params = {"n": 2}
+        async with session.post(
+            "http://localhost:%d/api/v1/workers_to_close" % s.http_server.port,
+            json=params,
+        ) as resp:
+            assert resp.status == 200
+            assert resp.headers["Content-Type"] == "text/json"
+            workers_to_close = json.loads(await resp.text())["workers"]
+            assert len(workers_to_close) == 2
+
+
+@gen_cluster(client=True, clean_kwargs={"threads": False})
 async def test_get_workers(c, s, a, b):
     async with aiohttp.ClientSession() as session:
         async with session.get(
