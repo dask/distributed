@@ -48,6 +48,9 @@ Pages and JSON endpoints served by the scheduler
 - ``/sitemap.json``: list of available endpoints
 - ``/statics/()``: static file content (CSS, etc)
 - ``/stealing``: worker occupancy metrics, to evaluate task stealing
+- ``/api/v1/retire_workers`` : retire certain workers on the scheduler
+- ``/api/v1/get_workers`` : get all workers on the scheduler
+- ``/api/v1/adaptive_target`` : get the target number of workers based on the scheduler's load 
 
 Individual bokeh plots
 ----------------------
