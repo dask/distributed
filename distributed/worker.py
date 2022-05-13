@@ -1912,7 +1912,6 @@ class Worker(ServerNode):
         annotations: dict | None = None,
         stimulus_id: str,
     ) -> None:
-        self.log.append((key, "compute-task", stimulus_id, time()))
         try:
             ts = self.tasks[key]
             logger.debug(
@@ -1921,6 +1920,7 @@ class Worker(ServerNode):
             )
         except KeyError:
             self.tasks[key] = ts = TaskState(key)
+        self.log.append((key, "compute-task", ts.state, stimulus_id, time()))
 
         recommendations: Recs = {}
         instructions: Instructions = []
