@@ -1003,14 +1003,15 @@ def gen_cluster(
         @functools.wraps(func)
         def test_func(*outer_args, **kwargs):
             result = None
-            workers = []
             with clean(timeout=active_rpc_timeout, **clean_kwargs) as loop:
 
                 async def coro():
                     with tempfile.TemporaryDirectory() as tmpdir:
                         config2 = merge({"temporary-directory": tmpdir}, config)
                         with dask.config.set(config2):
+                            workers = []
                             s = False
+
                             for _ in range(60):
                                 try:
                                     s, ws = await start_cluster(
@@ -1139,20 +1140,20 @@ def gen_cluster(
                                 Comm._instances.clear()
                                 _global_clients.clear()
 
+                                for w in workers:
+                                    if getattr(w, "data", None):
+                                        try:
+                                            w.data.clear()
+                                        except OSError:
+                                            # zict backends can fail if their storage directory
+                                            # was already removed
+                                            pass
+
                             return result
 
                 result = loop.run_sync(
                     coro, timeout=timeout * 2 if timeout else timeout
                 )
-
-            for w in workers:
-                if getattr(w, "data", None):
-                    try:
-                        w.data.clear()
-                    except OSError:
-                        # zict backends can fail if their storage directory
-                        # was already removed
-                        pass
 
             return result
 
