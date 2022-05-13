@@ -1006,8 +1006,8 @@ def gen_cluster(
             with clean(timeout=active_rpc_timeout, **clean_kwargs) as loop:
 
                 async def coro():
-                    workers = []
                     with dask.config.set(config):
+                        workers = []
                         s = False
                         for _ in range(60):
                             try:
