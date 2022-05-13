@@ -3547,7 +3547,7 @@ class Scheduler(SchedulerState, ServerNode):
     @log_errors
     async def add_worker(
         self,
-        comm=None,
+        comm,
         *,
         address: str,
         status: str,
@@ -3585,8 +3585,7 @@ class Scheduler(SchedulerState, ServerNode):
                 "message": "name taken, %s" % name,
                 "time": time(),
             }
-            if comm:
-                await comm.write(msg)
+            await comm.write(msg)
             return
 
         self.log_event(address, {"action": "add-worker"})
@@ -3719,10 +3718,9 @@ class Scheduler(SchedulerState, ServerNode):
         )
         msg.update(version_warning)
 
-        if comm:
-            await comm.write(msg)
+        await comm.write(msg)
 
-        await self.handle_worker(comm=comm, worker=address, stimulus_id=stimulus_id)
+        await self.handle_worker(comm, address, stimulus_id=stimulus_id)
 
     async def add_nanny(self, comm):
         msg = {
@@ -4803,7 +4801,7 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             self.running.discard(ws)
 
-    async def handle_worker(self, comm=None, worker=None, stimulus_id=None):
+    async def handle_worker(self, comm, worker: str, stimulus_id=None):
         """
         Listen to responses from a single worker
 
