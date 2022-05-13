@@ -52,7 +52,7 @@ from tornado import gen
 from tornado.ioloop import PeriodicCallback
 
 from distributed import cluster_dump, preloading
-from distributed import versions as version_module  # type: ignore
+from distributed import versions as version_module
 from distributed.batched import BatchedSend
 from distributed.cfexecutor import ClientExecutor
 from distributed.core import (

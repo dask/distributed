@@ -6,6 +6,7 @@ import logging
 import os
 import socket
 import struct
+import sys
 import weakref
 from itertools import islice
 from typing import Any
@@ -776,10 +777,14 @@ class _ZeroCopyWriter:
     # (which would be very large), and set a limit on the number of buffers to
     # pass to sendmsg.
     if hasattr(socket.socket, "sendmsg"):
-        try:
-            SENDMSG_MAX_COUNT = os.sysconf("SC_IOV_MAX")  # type: ignore
-        except Exception:
-            SENDMSG_MAX_COUNT = 16  # Should be supported on all systems
+        # Note: can't use WINDOWS constant as it upsets mypy
+        if sys.platform == "win32":
+            SENDMSG_MAX_COUNT = 16  # No os.sysconf available
+        else:
+            try:
+                SENDMSG_MAX_COUNT = os.sysconf("SC_IOV_MAX")
+            except Exception:
+                SENDMSG_MAX_COUNT = 16  # Should be supported on all systems
     else:
         SENDMSG_MAX_COUNT = 1  # sendmsg not supported, use send instead
 
