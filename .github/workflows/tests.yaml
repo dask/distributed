@@ -25,7 +25,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.8", "3.9", "3.10"]
         # Cherry-pick test modules to split the overall runtime roughly in half
-        # partition: [ci1, not ci1]
+        partition: [ci1, not ci1]
         exclude:
           - os: macos-latest
             python-version: 3.9
@@ -119,13 +119,8 @@ jobs:
           set -o pipefail
           mkdir reports
 
-          pytest \
-            distributed/tests/test_client.py::test_retire_workers \
-            distributed/tests/test_scheduler.py::test_retire_workers_close \
-            distributed/tests/test_client.py::test_reconnect_timeout \
-            distributed/tests/test_tls_functional.py::test_retire_workers \
-            distributed/tests/test_stress.py::test_stress_scatter_death \
-            --runslow \
+          pytest distributed \
+            -m "not avoid_ci and ${{ matrix.partition }}" --runslow \
             --leaks=fds,processes,threads \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \
             --cov=distributed --cov-report=xml \
