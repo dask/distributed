@@ -1025,9 +1025,12 @@ def ensure_memoryview(obj):
     elif not mv.contiguous:
         # Copy to contiguous form of expected shape & type
         return memoryview(bytearray(mv))
-    else:
+    elif mv.ndim != 1 or mv.format != "B":
         # Perform zero-copy reshape & cast
         return mv.cast("B")
+    else:
+        # Return `memoryview` as it already meets requirements
+        return mv
 
 
 def open_port(host=""):

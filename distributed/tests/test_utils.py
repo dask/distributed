@@ -260,6 +260,8 @@ def test_ensure_memoryview():
         result = ensure_memoryview(d)
         assert isinstance(result, memoryview)
         assert result == memoryview(b"1")
+        if isinstance(d, memoryview):
+            assert id(d) == id(result)
 
 
 def test_ensure_memoryview_ndarray():
