@@ -1,5 +1,9 @@
 distributed:
   version: 2
+
+  logging:
+    distributed.active_memory_manager: debug
+    distributed.active_memory_manager.tasks: debug
   # logging:
   #   distributed: info
   #   distributed.client: warning
