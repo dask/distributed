@@ -1400,7 +1400,9 @@ class SchedulerState:
     # State Transitions #
     #####################
 
-    def _transition(self, key, finish: str, stimulus_id: str, *args, **kwargs):
+    def _transition(
+        self, key: str, finish: str, stimulus_id: str, *args, **kwargs
+    ) -> tuple[dict, dict, dict]:
         """Transition a key from its current state to the finish state
 
         Examples
@@ -1432,9 +1434,9 @@ class SchedulerState:
             if self.transition_counter_max:
                 assert self.transition_counter < self.transition_counter_max
 
-            recommendations = {}
-            worker_msgs = {}
-            client_msgs = {}
+            recommendations: dict = {}
+            worker_msgs: dict = {}
+            client_msgs: dict = {}
 
             if self.plugins:
                 dependents = set(ts.dependents)
@@ -1444,23 +1446,17 @@ class SchedulerState:
             if func is not None:
                 recommendations, client_msgs, worker_msgs = func(
                     self, key, stimulus_id, *args, **kwargs
-                )  # type: ignore
+                )
 
             elif "released" not in (start, finish):
                 assert not args and not kwargs, (args, kwargs, start, finish)
-                a_recs: dict
-                a_cmsgs: dict
-                a_wmsgs: dict
-                a: tuple = self._transition(key, "released", stimulus_id)
-                a_recs, a_cmsgs, a_wmsgs = a
+                a_recs, a_cmsgs, a_wmsgs = self._transition(
+                    key, "released", stimulus_id
+                )
 
                 v = a_recs.get(key, finish)
                 func = self._TRANSITIONS_TABLE["released", v]
-                b_recs: dict
-                b_cmsgs: dict
-                b_wmsgs: dict
-                b: tuple = func(self, key, stimulus_id)  # type: ignore
-                b_recs, b_cmsgs, b_wmsgs = b
+                b_recs, b_cmsgs, b_wmsgs = func(self, key, stimulus_id)
 
                 recommendations.update(a_recs)
                 for c, new_msgs in a_cmsgs.items():
