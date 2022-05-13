@@ -1987,9 +1987,9 @@ class Worker(ServerNode):
         if self.validate:
             # All previously unknown tasks that were created above by
             # ensure_tasks_exists() have been transitioned to fetch or flight
-            assert ts.state != "released", self.story(ts)
-            for dep_ts in ts.dependencies:
-                assert dep_ts.state != "released", self.story(dep_ts)
+            assert all(
+                ts2.state != "released" for ts2 in (ts, *ts.dependencies)
+            ), self.story(ts, *ts.dependencies)
 
     ########################
     # Worker State Machine #
