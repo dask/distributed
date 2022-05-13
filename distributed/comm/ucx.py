@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     except ImportError:
         pass
 else:
-    ucp = None  # type: ignore
+    ucp = None
 
 device_array = None
 pre_existing_cuda_context = False
