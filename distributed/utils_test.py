@@ -56,6 +56,7 @@ from distributed.metrics import time
 from distributed.nanny import Nanny
 from distributed.node import ServerNode
 from distributed.proctitle import enable_proctitle_on_children
+from distributed.profile import wait_profiler
 from distributed.protocol import deserialize
 from distributed.security import Security
 from distributed.utils import (
@@ -69,7 +70,7 @@ from distributed.utils import (
     reset_logger_locks,
     sync,
 )
-from distributed.worker import WORKER_ANY_RUNNING, InvalidTransition, Worker
+from distributed.worker import InvalidTransition, Worker
 
 try:
     import ssl
@@ -1782,14 +1783,9 @@ def check_instances():
         sleep(0.1)
         assert time() < start + 10
 
-    _global_clients.clear()
-
-    for w in Worker._instances:
-        with suppress(RuntimeError):  # closed IOLoop
-            w.loop.add_callback(w.close, report=False, executor_wait=False)
-            if w.status in WORKER_ANY_RUNNING:
-                w.loop.add_callback(w.close)
-    Worker._instances.clear()
+    wait_profiler()
+    gc.collect()
+    assert not Worker._instances
 
     start = time()
     while any(c.status != "closed" for c in Worker._initialized_clients):
