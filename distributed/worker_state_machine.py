@@ -346,14 +346,23 @@ class ReleaseWorkerDataMsg(SendMessageToScheduler):
     stimulus_id: str
 
 
+@dataclass
+class MissingDataMsg(SendMessageToScheduler):
+    op = "missing-data"
+
+    __slots__ = ("key", "errant_worker", "stimulus_id")
+    key: str
+    errant_worker: str
+    stimulus_id: str
+
+
 # Not to be confused with RescheduleEvent below or the distributed.Reschedule Exception
 @dataclass
 class RescheduleMsg(SendMessageToScheduler):
     op = "reschedule"
 
-    __slots__ = ("key", "worker", "stimulus_id")
+    __slots__ = ("key", "stimulus_id")
     key: str
-    worker: str
     stimulus_id: str
 
 

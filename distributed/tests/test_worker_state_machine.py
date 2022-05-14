@@ -133,8 +133,8 @@ def test_sendmsg_to_dict():
 def test_merge_recs_instructions():
     x = TaskState("x")
     y = TaskState("y")
-    instr1 = RescheduleMsg(key="foo", worker="a", stimulus_id="test")
-    instr2 = RescheduleMsg(key="bar", worker="b", stimulus_id="test")
+    instr1 = RescheduleMsg(key="foo", stimulus_id="test")
+    instr2 = RescheduleMsg(key="bar", stimulus_id="test")
     assert merge_recs_instructions(
         ({x: "memory"}, [instr1]),
         ({y: "released"}, [instr2]),
@@ -268,7 +268,7 @@ async def test_fetch_to_compute(c, s, a, b):
         # FIXME: This log should be replaced with an
         # StateMachineEvent/Instruction log
         [
-            (f2.key, "compute-task"),
+            (f2.key, "compute-task", "released"),
             # This is a "please fetch" request. We don't have anything like
             # this, yet. We don't see the request-dep signal in here because we
             # do not wait for the key to be actually scheduled
@@ -276,9 +276,9 @@ async def test_fetch_to_compute(c, s, a, b):
             # After the worker failed, we're instructed to forget f2 before
             # something new comes in
             ("free-keys", (f2.key,)),
-            (f1.key, "compute-task"),
+            (f1.key, "compute-task", "released"),
             (f1.key, "put-in-memory"),
-            (f2.key, "compute-task"),
+            (f2.key, "compute-task", "released"),
         ],
     )
 

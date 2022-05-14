@@ -46,7 +46,7 @@ from distributed.comm.utils import (
 )
 from distributed.protocol.utils import pack_frames_prelude, unpack_frames
 from distributed.system import MEMORY_LIMIT
-from distributed.utils import ensure_ip, get_ip, get_ipv6, nbytes
+from distributed.utils import ensure_ip, ensure_memoryview, get_ip, get_ipv6, nbytes
 
 logger = logging.getLogger(__name__)
 
@@ -305,7 +305,7 @@ class TCP(Comm):
                     if isinstance(each_frame, memoryview):
                         # Make sure that `len(data) == data.nbytes`
                         # See <https://github.com/tornadoweb/tornado/pull/2996>
-                        each_frame = memoryview(each_frame).cast("B")
+                        each_frame = ensure_memoryview(each_frame)
 
                     stream._write_buffer.append(each_frame)
                     stream._total_write_index += each_frame_nbytes

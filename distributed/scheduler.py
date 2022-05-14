@@ -744,14 +744,14 @@ class TaskPrefix:
 
     @property
     def nbytes_total(self) -> int:
-        return sum([tg.nbytes_total for tg in self.groups])
+        return sum(tg.nbytes_total for tg in self.groups)
 
     def __len__(self) -> int:
         return sum(map(len, self.groups))
 
     @property
     def duration(self) -> float:
-        return sum([tg.duration for tg in self.groups])
+        return sum(tg.duration for tg in self.groups)
 
     @property
     def types(self) -> set[str]:
@@ -1400,7 +1400,9 @@ class SchedulerState:
     # State Transitions #
     #####################
 
-    def _transition(self, key, finish: str, stimulus_id: str, *args, **kwargs):
+    def _transition(
+        self, key: str, finish: str, stimulus_id: str, *args, **kwargs
+    ) -> tuple[dict, dict, dict]:
         """Transition a key from its current state to the finish state
 
         Examples
@@ -1432,9 +1434,9 @@ class SchedulerState:
             if self.transition_counter_max:
                 assert self.transition_counter < self.transition_counter_max
 
-            recommendations = {}  # type: ignore
-            worker_msgs = {}  # type: ignore
-            client_msgs = {}  # type: ignore
+            recommendations: dict = {}
+            worker_msgs: dict = {}
+            client_msgs: dict = {}
 
             if self.plugins:
                 dependents = set(ts.dependents)
@@ -1444,33 +1446,27 @@ class SchedulerState:
             if func is not None:
                 recommendations, client_msgs, worker_msgs = func(
                     self, key, stimulus_id, *args, **kwargs
-                )  # type: ignore
+                )
 
             elif "released" not in (start, finish):
                 assert not args and not kwargs, (args, kwargs, start, finish)
-                a_recs: dict
-                a_cmsgs: dict
-                a_wmsgs: dict
-                a: tuple = self._transition(key, "released", stimulus_id)
-                a_recs, a_cmsgs, a_wmsgs = a
+                a_recs, a_cmsgs, a_wmsgs = self._transition(
+                    key, "released", stimulus_id
+                )
 
                 v = a_recs.get(key, finish)
                 func = self._TRANSITIONS_TABLE["released", v]
-                b_recs: dict
-                b_cmsgs: dict
-                b_wmsgs: dict
-                b: tuple = func(self, key, stimulus_id)  # type: ignore
-                b_recs, b_cmsgs, b_wmsgs = b
+                b_recs, b_cmsgs, b_wmsgs = func(self, key, stimulus_id)
 
                 recommendations.update(a_recs)
                 for c, new_msgs in a_cmsgs.items():
-                    msgs = client_msgs.get(c)  # type: ignore
+                    msgs = client_msgs.get(c)
                     if msgs is not None:
                         msgs.extend(new_msgs)
                     else:
                         client_msgs[c] = new_msgs
                 for w, new_msgs in a_wmsgs.items():
-                    msgs = worker_msgs.get(w)  # type: ignore
+                    msgs = worker_msgs.get(w)
                     if msgs is not None:
                         msgs.extend(new_msgs)
                     else:
@@ -1478,13 +1474,13 @@ class SchedulerState:
 
                 recommendations.update(b_recs)
                 for c, new_msgs in b_cmsgs.items():
-                    msgs = client_msgs.get(c)  # type: ignore
+                    msgs = client_msgs.get(c)
                     if msgs is not None:
                         msgs.extend(new_msgs)
                     else:
                         client_msgs[c] = new_msgs
                 for w, new_msgs in b_wmsgs.items():
-                    msgs = worker_msgs.get(w)  # type: ignore
+                    msgs = worker_msgs.get(w)
                     if msgs is not None:
                         msgs.extend(new_msgs)
                     else:
@@ -1845,7 +1841,7 @@ class SchedulerState:
                 assert not ts.processing_on
                 assert not ts.has_lost_dependencies
                 assert ts not in self.unrunnable
-                assert all([dts.who_has for dts in ts.dependencies])
+                assert all(dts.who_has for dts in ts.dependencies)
 
             ws = self.decide_worker(ts)
             if ws is None:
@@ -1953,7 +1949,7 @@ class SchedulerState:
                 assert not ts.exception_blame
                 assert ts.state == "processing"
 
-            ws = self.workers.get(worker)  # type: ignore
+            ws = self.workers.get(worker)
             if ws is None:
                 recommendations[key] = "released"
                 return recommendations, client_msgs, worker_msgs
@@ -2280,7 +2276,7 @@ class SchedulerState:
         traceback=None,
         exception_text: str = None,
         traceback_text: str = None,
-        worker: str = None,  # type: ignore
+        worker: str = None,
         **kwargs,
     ):
         ws: WorkerState
@@ -3455,7 +3451,7 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> dict[str, Any]:
         address = self.coerce_address(address, resolve_address)
         address = normalize_address(address)
-        ws: WorkerState = self.workers.get(address)  # type: ignore
+        ws = self.workers.get(address)
         if ws is None:
             return {"status": "missing"}
 
@@ -4687,53 +4683,48 @@ class Scheduler(SchedulerState, ServerNode):
         self.send_all(client_msgs, worker_msgs)
 
     def handle_missing_data(
-        self, key: str, errant_worker: str, stimulus_id: str, **kwargs
+        self, key: str, worker: str, errant_worker: str, stimulus_id: str
     ) -> None:
-        """Signal that `errant_worker` does not hold `key`
+        """Signal that `errant_worker` does not hold `key`.
 
-        This may either indicate that `errant_worker` is dead or that we may be
-        working with stale data and need to remove `key` from the workers
-        `has_what`.
-
-        If no replica of a task is available anymore, the task is transitioned
-        back to released and rescheduled, if possible.
+        This may either indicate that `errant_worker` is dead or that we may be working
+        with stale data and need to remove `key` from the workers `has_what`. If no
+        replica of a task is available anymore, the task is transitioned back to
+        released and rescheduled, if possible.
 
         Parameters
         ----------
-        key : str, optional
-            Task key that could not be found, by default None
-        errant_worker : str, optional
-            Address of the worker supposed to hold a replica, by default None
+        key : str
+            Task key that could not be found
+        worker : str
+            Address of the worker informing the scheduler
+        errant_worker : str
+            Address of the worker supposed to hold a replica
         """
-        logger.debug("handle missing data key=%s worker=%s", key, errant_worker)
+        logger.debug(f"handle missing data {key=} {worker=} {errant_worker=}")
         self.log_event(errant_worker, {"action": "missing-data", "key": key})
 
-        if key not in self.tasks:
+        ts = self.tasks.get(key)
+        ws = self.workers.get(errant_worker)
+        if not ts or not ws or ws not in ts.who_has:
             return
 
-        ts: TaskState = self.tasks[key]
-        ws: WorkerState = self.workers.get(errant_worker)
-
-        if ws is not None and ws in ts.who_has:
-            self.remove_replica(ts, ws)
+        self.remove_replica(ts, ws)
         if ts.state == "memory" and not ts.who_has:
             if ts.run_spec:
                 self.transitions({key: "released"}, stimulus_id)
             else:
                 self.transitions({key: "forgotten"}, stimulus_id)
 
-    def release_worker_data(self, key, worker, stimulus_id):
-        ws: WorkerState = self.workers.get(worker)
-        ts: TaskState = self.tasks.get(key)
-        if not ws or not ts:
+    def release_worker_data(self, key: str, worker: str, stimulus_id: str) -> None:
+        ts = self.tasks.get(key)
+        ws = self.workers.get(worker)
+        if not ts or not ws or ws not in ts.who_has:
             return
-        recommendations: dict = {}
-        if ws in ts.who_has:
-            self.remove_replica(ts, ws)
-            if not ts.who_has:
-                recommendations[ts.key] = "released"
-        if recommendations:
-            self.transitions(recommendations, stimulus_id)
+
+        self.remove_replica(ts, ws)
+        if not ts.who_has:
+            self.transitions({key: "released"}, stimulus_id)
 
     def handle_long_running(self, key=None, worker=None, compute_duration=None):
         """A task has seceded from the thread pool
@@ -4778,7 +4769,7 @@ class Scheduler(SchedulerState, ServerNode):
     def handle_worker_status_change(
         self, status: str, worker: str, stimulus_id: str
     ) -> None:
-        ws: WorkerState = self.workers.get(worker)  # type: ignore
+        ws = self.workers.get(worker)
         if not ws:
             return
         prev_status = ws.status
@@ -4911,7 +4902,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.add_plugin(plugin, name=name, idempotent=idempotent)
 
-    def worker_send(self, worker, msg):
+    def worker_send(self, worker: str, msg: dict[str, Any]) -> None:
         """Send message to worker
 
         This also handles connection failures by adding a callback to remove
@@ -5290,9 +5281,9 @@ class Scheduler(SchedulerState, ServerNode):
             )
             return set(who_has)
 
-        ws: WorkerState = self.workers.get(worker_address)  # type: ignore
+        ws = self.workers.get(worker_address)
 
-        if ws is None:
+        if not ws:
             logger.warning(f"Worker {worker_address} lost during replication")
             return set(who_has)
         elif result["status"] == "OK":
@@ -5344,8 +5335,8 @@ class Scheduler(SchedulerState, ServerNode):
             )
             return
 
-        ws: WorkerState = self.workers.get(worker_address)  # type: ignore
-        if ws is None:
+        ws = self.workers.get(worker_address)
+        if not ws:
             return
 
         for key in keys:
@@ -5917,9 +5908,9 @@ class Scheduler(SchedulerState, ServerNode):
             groups = groupby(key, self.workers.values())
 
             limit_bytes = {
-                k: sum([ws.memory_limit for ws in v]) for k, v in groups.items()
+                k: sum(ws.memory_limit for ws in v) for k, v in groups.items()
             }
-            group_bytes = {k: sum([ws.nbytes for ws in v]) for k, v in groups.items()}
+            group_bytes = {k: sum(ws.nbytes for ws in v) for k, v in groups.items()}
 
             limit = sum(limit_bytes.values())
             total = sum(group_bytes.values())
@@ -6871,8 +6862,8 @@ class Scheduler(SchedulerState, ServerNode):
             tasks_timings=tasks_timings,
             address=self.address,
             nworkers=len(self.workers),
-            threads=sum([ws.nthreads for ws in self.workers.values()]),
-            memory=format_bytes(sum([ws.memory_limit for ws in self.workers.values()])),
+            threads=sum(ws.nthreads for ws in self.workers.values()),
+            memory=format_bytes(sum(ws.memory_limit for ws in self.workers.values())),
             code=code,
             dask_version=dask.__version__,
             distributed_version=distributed.__version__,
@@ -7106,8 +7097,8 @@ class Scheduler(SchedulerState, ServerNode):
             cpu = max(1, cpu)
 
         # add more workers if more than 60% of memory is used
-        limit = sum([ws.memory_limit for ws in self.workers.values()])
-        used = sum([ws.nbytes for ws in self.workers.values()])
+        limit = sum(ws.memory_limit for ws in self.workers.values())
+        used = sum(ws.nbytes for ws in self.workers.values())
         memory = 0
         if used > 0.6 * limit and limit > 0:
             memory = 2 * len(self.workers)
@@ -7128,6 +7119,9 @@ class Scheduler(SchedulerState, ServerNode):
         for key in keys:
             ts = self.tasks[key]
             who_has[key] = {ws.address for ws in ts.who_has}
+
+        if self.validate:
+            assert all(who_has.values())
 
         self.stream_comms[addr].send(
             {
@@ -7333,20 +7327,18 @@ def _task_to_msg(
         "priority": ts.priority,
         "duration": duration,
         "stimulus_id": f"compute-task-{time()}",
-        "who_has": {},
+        "who_has": {
+            dts.key: [ws.address for ws in dts.who_has] for dts in ts.dependencies
+        },
+        "nbytes": {dts.key: dts.nbytes for dts in ts.dependencies},
     }
+    if state.validate:
+        assert all(msg["who_has"].values())
+
     if ts.resource_restrictions:
         msg["resource_restrictions"] = ts.resource_restrictions
     if ts.actor:
         msg["actor"] = True
-
-    deps = ts.dependencies
-    if deps:
-        msg["who_has"] = {dts.key: [ws.address for ws in dts.who_has] for dts in deps}
-        msg["nbytes"] = {dts.key: dts.nbytes for dts in deps}
-
-        if state.validate:
-            assert all(msg["who_has"].values())
 
     if isinstance(ts.run_spec, dict):
         msg.update(ts.run_spec)
@@ -7484,7 +7476,7 @@ def validate_task_state(ts: TaskState) -> None:
     assert bool(ts.who_has) == (ts.state == "memory"), (ts, ts.who_has, ts.state)
 
     if ts.state == "processing":
-        assert all([dts.who_has for dts in ts.dependencies]), (
+        assert all(dts.who_has for dts in ts.dependencies), (
             "task processing without all deps",
             str(ts),
             str(ts.dependencies),
@@ -7519,7 +7511,7 @@ def validate_task_state(ts: TaskState) -> None:
 
     if ts.actor:
         if ts.state == "memory":
-            assert sum([ts in ws.actors for ws in ts.who_has]) == 1
+            assert sum(ts in ws.actors for ws in ts.who_has) == 1
         if ts.state == "processing":
             assert ts.processing_on
             assert ts in ts.processing_on.actors
