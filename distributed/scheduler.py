@@ -3319,6 +3319,7 @@ class Scheduler(SchedulerState, ServerNode):
         for k, v in self.services.items():
             logger.info("%11s at: %25s", k, "%s:%d" % (listen_ip, v.port))
 
+        # TODO: Should this be a periodic callback?
         self.loop.add_callback(self.reevaluate_occupancy)
 
         if self.scheduler_file:
@@ -7014,7 +7015,11 @@ class Scheduler(SchedulerState, ServerNode):
         think about.
         """
         try:
-            if self.status == Status.closed:
+            if (
+                self.status == Status.closing
+                or Status.closing_gracefully
+                or Status.closing
+            ):
                 return
             last = time()
             next_time = timedelta(seconds=0.1)
