@@ -62,14 +62,6 @@ Scheduler methods exposed by the API with an example of the request body they ta
         "workers":["tcp://127.0.0.1:53741", "tcp://127.0.0.1:53669"]
     }
 
-- ``/api/v1/workers_to_close`` : get a list of n workers that the scheduler can safely close
-
-.. code-block:: json
-
-    {
-        "n":2
-    }
-
 - ``/api/v1/get_workers`` : get all workers on the scheduler
 - ``/api/v1/adaptive_target`` : get the target number of workers based on the scheduler's load 
 
