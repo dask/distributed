@@ -33,8 +33,7 @@ class WorkersToCloseHandler(RequestHandler):
             workers_to_close = {"workers": scheduler.workers_to_close(**params)}
             self.write(json.dumps(workers_to_close))
         except Exception as e:
-            self.set_status(400, str(e))
-            print(str(e))
+            self.set_status(500, str(e))
             self.write(json.dumps({"Error": "Bad request"}))
 
 
