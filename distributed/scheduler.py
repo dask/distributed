@@ -3141,6 +3141,7 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle("dask-scheduler [not started]")
         Scheduler._instances.add(self)
         self.rpc.allow_offload = False
+        self.active_callbacks = {}
 
     ##################
     # Administration #
@@ -3387,6 +3388,10 @@ class Scheduler(SchedulerState, ServerNode):
         for pc in self.periodic_callbacks.values():
             pc.stop()
         self.periodic_callbacks.clear()
+
+        for cb in self.active_callbacks.values():
+            self.loop.remove_timeout(cb)
+        self.active_callbacks.clear()
 
         self.stop_services()
 
@@ -4284,15 +4289,21 @@ class Scheduler(SchedulerState, ServerNode):
             self.bandwidth_workers.pop((address, w), None)
             self.bandwidth_workers.pop((w, address), None)
 
+        cb_id = f"remove-worker-{time()}"
+
         def remove_worker_from_events():
             # If the worker isn't registered anymore after the delay, remove from events
             if address not in self.workers and address in self.events:
                 del self.events[address]
+            del self.active_callbacks[cb_id]
 
         cleanup_delay = parse_timedelta(
             dask.config.get("distributed.scheduler.events-cleanup-delay")
         )
-        self.loop.call_later(cleanup_delay, remove_worker_from_events)
+        # TODO: What is the best unique key to use here?
+        self.active_callbacks[cb_id] = self.loop.call_later(
+            cleanup_delay, remove_worker_from_events
+        )
         logger.debug("Removed worker %s", ws)
 
         return "OK"
@@ -4635,15 +4646,20 @@ class Scheduler(SchedulerState, ServerNode):
                 except Exception as e:
                     logger.exception(e)
 
+        cb_id = f"remove-client-{time()}"
+
         def remove_client_from_events():
             # If the client isn't registered anymore after the delay, remove from events
             if client not in self.clients and client in self.events:
                 del self.events[client]
+            del self.active_callbacks[cb_id]
 
         cleanup_delay = parse_timedelta(
             dask.config.get("distributed.scheduler.events-cleanup-delay")
         )
-        self.loop.call_later(cleanup_delay, remove_client_from_events)
+        self.active_callbacks[cb_id] = self.loop.call_later(
+            cleanup_delay, remove_client_from_events
+        )
 
     def send_task_to_worker(self, worker, ts: TaskState, duration: float = -1):
         """Send a single computational task to a worker"""
