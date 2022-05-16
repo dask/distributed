@@ -1283,6 +1283,7 @@ class SchedulerState:
         unrunnable: set,
         validate: bool,
         plugins: Iterable[SchedulerPlugin] = (),
+        transition_counter_max: int | Literal[False] = False,
         **kwargs,  # Passed verbatim to Server.__init__()
     ):
         logger.info("State start")
@@ -1338,9 +1339,7 @@ class SchedulerState:
             / 2.0
         )
         self.transition_counter = 0
-        self.transition_counter_max = dask.config.get(
-            "distributed.admin.transition-counter-max"
-        )
+        self.transition_counter_max = transition_counter_max
 
     @property
     def memory(self) -> MemoryState:
@@ -2878,6 +2877,7 @@ class Scheduler(SchedulerState, ServerNode):
         preload_argv=(),
         plugins=(),
         contact_address=None,
+        transition_counter_max=False,
         **kwargs,
     ):
         self._setup_logging(logger)
@@ -3109,6 +3109,7 @@ class Scheduler(SchedulerState, ServerNode):
             unrunnable=unrunnable,
             validate=validate,
             plugins=plugins,
+            transition_counter_max=transition_counter_max,
         )
         ServerNode.__init__(
             self,
