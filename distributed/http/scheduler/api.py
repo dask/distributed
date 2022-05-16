@@ -17,8 +17,13 @@ class RetireWorkersHandler(RequestHandler):
         scheduler = self.server
         try:
             params = json.loads(self.request.body)
-            workers = params["workers"]
-            workers_info = await scheduler.retire_workers(workers)
+            n_workers = params.get("n", 0)
+            if n_workers:
+                workers = scheduler.workers_to_close(n=n_workers)
+                workers_info = await scheduler.retire_workers(workers=workers)
+            else:
+                workers = params.get("workers", {})
+                workers_info = await scheduler.retire_workers(workers=workers)
             self.write(json.dumps(workers_info))
         except Exception as e:
             self.set_status(500, str(e))
