@@ -4726,7 +4726,9 @@ class Scheduler(SchedulerState, ServerNode):
         if not ts.who_has:
             self.transitions({key: "released"}, stimulus_id)
 
-    def handle_long_running(self, key=None, worker=None, compute_duration=None):
+    def handle_long_running(
+        self, key: str, worker: str, compute_duration: float, stimulus_id: str
+    ) -> None:
         """A task has seceded from the thread pool
 
         We stop the task from being stolen in the future, and change task
@@ -4735,27 +4737,23 @@ class Scheduler(SchedulerState, ServerNode):
         if key not in self.tasks:
             logger.debug("Skipping long_running since key %s was already released", key)
             return
-        ts: TaskState = self.tasks[key]
+        ts = self.tasks[key]
         steal = self.extensions.get("stealing")
         if steal is not None:
             steal.remove_key_from_stealable(ts)
 
-        ws: WorkerState = ts.processing_on
+        ws = ts.processing_on
         if ws is None:
             logger.debug("Received long-running signal from duplicate task. Ignoring.")
             return
 
-        if compute_duration:
-            old_duration: float = ts.prefix.duration_average
-            new_duration: float = compute_duration
-            if old_duration < 0:
-                avg_duration = new_duration
-            else:
-                avg_duration = 0.5 * old_duration + 0.5 * new_duration
+        old_duration = ts.prefix.duration_average
+        if old_duration < 0:
+            ts.prefix.duration_average = compute_duration
+        else:
+            ts.prefix.duration_average = (old_duration + compute_duration) / 2
 
-            ts.prefix.duration_average = avg_duration
-
-        occ: float = ws.processing[ts]
+        occ = ws.processing[ts]
         ws.occupancy -= occ
         self.total_occupancy -= occ
         # Cannot remove from processing since we're using this for things like
