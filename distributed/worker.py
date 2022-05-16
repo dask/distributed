@@ -548,6 +548,7 @@ class Worker(ServerNode):
         lifetime: Any | None = None,
         lifetime_stagger: Any | None = None,
         lifetime_restart: bool | None = None,
+        transition_counter_max: int | Literal[False] = False,
         ###################################
         # Parameters to WorkerMemoryManager
         memory_limit: str | float = "auto",
@@ -610,9 +611,7 @@ class Worker(ServerNode):
         self.validate = validate
 
         self.transition_counter = 0
-        self.transition_counter_max = dask.config.get(
-            "distributed.admin.transition-counter-max"
-        )
+        self.transition_counter_max = transition_counter_max
         self.incoming_transfer_log = deque(maxlen=100000)
         self.incoming_count = 0
         self.outgoing_transfer_log = deque(maxlen=100000)

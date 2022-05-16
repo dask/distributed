@@ -3264,7 +3264,8 @@ async def test_transition_counter_max_worker(c, s, a):
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
-    config={"distributed.admin.transition-counter-max": False},
+    scheduler_kwargs={"transition_counter_max": False},
+    worker_kwargs={"transition_counter_max": False},
 )
 async def test_disable_transition_counter_max(c, s, a, b):
     """Test that the cluster can run indefinitely if transition_counter_max is disabled.

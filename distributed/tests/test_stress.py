@@ -219,7 +219,8 @@ async def test_stress_steal(c, s, *workers):
     nthreads=[("", 1)] * 10,
     client=True,
     timeout=180,
-    config={"distributed.admin.transition-counter-max": 500_000},
+    scheduler_kwargs={"transition_counter_max": 500_000},
+    worker_kwargs={"transition_counter_max": 500_000},
 )
 async def test_close_connections(c, s, *workers):
     da = pytest.importorskip("dask.array")
@@ -287,7 +288,8 @@ async def test_no_delay_during_large_transfer(c, s, w):
     client=True,
     Worker=Nanny,
     nthreads=[("", 2)] * 6,
-    config={"distributed.admin.transition-counter-max": 500_000},
+    scheduler_kwargs={"transition_counter_max": 500_000},
+    worker_kwargs={"transition_counter_max": 500_000},
 )
 async def test_chaos_rechunk(c, s, *workers):
     s.allowed_failures = 10000

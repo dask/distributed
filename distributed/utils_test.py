@@ -989,12 +989,21 @@ def gen_cluster(
         timeout = 3600
 
     scheduler_kwargs = merge(
-        {"dashboard": False, "dashboard_address": ":0"}, scheduler_kwargs
+        dict(
+            dashboard=False,
+            dashboard_address=":0",
+            transition_counter_max=50_000,
+        ),
+        scheduler_kwargs,
     )
     worker_kwargs = merge(
-        {"memory_limit": system.MEMORY_LIMIT, "death_timeout": 15}, worker_kwargs
+        dict(
+            memory_limit=system.MEMORY_LIMIT,
+            death_timeout=15,
+            transition_counter_max=50_000,
+        ),
+        worker_kwargs,
     )
-    config = merge({"distributed.admin.transition-counter-max": 50_000}, config)
 
     def _(func):
         if not iscoroutinefunction(func):
