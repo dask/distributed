@@ -2555,11 +2555,11 @@ class Worker(ServerNode):
         self._executing.discard(ts)
         self.long_running.add(ts.key)
 
+        smsg = LongRunningMsg(
+            key=ts.key, compute_duration=compute_duration, stimulus_id=stimulus_id
+        )
         return merge_recs_instructions(
-            (
-                {},
-                [LongRunningMsg(key=ts.key, compute_duration=compute_duration)],
-            ),
+            ({}, [smsg]),
             self._ensure_computing(),
         )
 

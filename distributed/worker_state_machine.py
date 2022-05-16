@@ -257,44 +257,45 @@ class UniqueTaskHeap(Collection[TaskState]):
         return f"<{type(self).__name__}: {len(self)} items>"
 
 
+@dataclass
 class Instruction:
     """Command from the worker state machine to the Worker, in response to an event"""
 
-    __slots__ = ()
+    __slots__ = ("stimulus_id",)
+    stimulus_id: str
 
 
 @dataclass
 class GatherDep(Instruction):
+    __slots__ = ("worker", "to_gather", "total_nbytes")
     worker: str
     to_gather: set[str]
     total_nbytes: int
-    stimulus_id: str
-    __slots__ = tuple(__annotations__)  # type: ignore
 
 
 @dataclass
 class Execute(Instruction):
-    __slots__ = ("key", "stimulus_id")
+    __slots__ = ("key",)
     key: str
-    stimulus_id: str
 
 
-class SendMessageToScheduler(Instruction):
+@dataclass
+class EnsureCommunicatingAfterTransitions(Instruction):
     __slots__ = ()
+
+
+@dataclass
+class SendMessageToScheduler(Instruction):
     #: Matches a key in Scheduler.stream_handlers
     op: ClassVar[str]
+    __slots__ = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Convert object to dict so that it can be serialized with msgpack"""
         d = {k: getattr(self, k) for k in self.__annotations__}
         d["op"] = self.op
+        d["stimulus_id"] = self.stimulus_id
         return d
-
-
-@dataclass
-class EnsureCommunicatingAfterTransitions(Instruction):
-    __slots__ = ("stimulus_id",)
-    stimulus_id: str
 
 
 @dataclass
@@ -308,7 +309,6 @@ class TaskFinishedMsg(SendMessageToScheduler):
     metadata: dict
     thread: int | None
     startstops: list[StartStop]
-    stimulus_id: str
     __slots__ = tuple(__annotations__)  # type: ignore
 
     def to_dict(self) -> dict[str, Any]:
@@ -328,7 +328,6 @@ class TaskErredMsg(SendMessageToScheduler):
     traceback_text: str
     thread: int | None
     startstops: list[StartStop]
-    stimulus_id: str
     __slots__ = tuple(__annotations__)  # type: ignore
 
     def to_dict(self) -> dict[str, Any]:
@@ -341,19 +340,17 @@ class TaskErredMsg(SendMessageToScheduler):
 class ReleaseWorkerDataMsg(SendMessageToScheduler):
     op = "release-worker-data"
 
-    __slots__ = ("key", "stimulus_id")
+    __slots__ = ("key",)
     key: str
-    stimulus_id: str
 
 
 @dataclass
 class MissingDataMsg(SendMessageToScheduler):
     op = "missing-data"
 
-    __slots__ = ("key", "errant_worker", "stimulus_id")
+    __slots__ = ("key", "errant_worker")
     key: str
     errant_worker: str
-    stimulus_id: str
 
 
 # Not to be confused with RescheduleEvent below or the distributed.Reschedule Exception
@@ -361,9 +358,8 @@ class MissingDataMsg(SendMessageToScheduler):
 class RescheduleMsg(SendMessageToScheduler):
     op = "reschedule"
 
-    __slots__ = ("key", "stimulus_id")
+    __slots__ = ("key",)
     key: str
-    stimulus_id: str
 
 
 @dataclass
@@ -379,9 +375,8 @@ class LongRunningMsg(SendMessageToScheduler):
 class AddKeysMsg(SendMessageToScheduler):
     op = "add-keys"
 
-    __slots__ = ("keys", "stimulus_id")
+    __slots__ = ("keys",)
     keys: list[str]
-    stimulus_id: str
 
 
 @dataclass
