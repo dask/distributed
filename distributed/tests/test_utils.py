@@ -248,23 +248,59 @@ def test_seek_delimiter_endline():
     assert f.tell() == 7
 
 
-def test_ensure_memoryview_empty():
-    result = ensure_memoryview(b"")
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"",
+        bytearray(),
+        b"1",
+        bytearray(b"1"),
+        memoryview(b"1"),
+        memoryview(bytearray(b"1")),
+        array("B", b"1"),
+        array("I", range(5)),
+        memoryview(b"123456")[::2],
+        memoryview(b"123456").cast("B", (2, 3)),
+        memoryview(b"0123456789").cast("B", (5, 2))[::2],
+    ],
+)
+def test_ensure_memoryview(data):
+    data_mv = memoryview(data)
+    result = ensure_memoryview(data)
     assert isinstance(result, memoryview)
-    assert result == memoryview(b"")
+    assert result.contiguous
+    assert result.ndim == 1
+    assert result.format == "B"
+    assert result == bytes(data_mv)
+    if data_mv.nbytes and data_mv.contiguous:
+        assert id(result.obj) == id(data_mv.obj)
+        assert result.readonly == data_mv.readonly
+        if isinstance(data, memoryview):
+            if data.ndim == 1 and data.format == "B":
+                assert id(result) == id(data)
+            else:
+                assert id(data) != id(result)
+    else:
+        assert id(result.obj) != id(data_mv.obj)
+        assert not result.readonly
 
 
-def test_ensure_memoryview():
-    data = [b"1", memoryview(b"1"), bytearray(b"1"), array("B", b"1")]
-    for d in data:
-        result = ensure_memoryview(d)
-        assert isinstance(result, memoryview)
-        assert result == memoryview(b"1")
-
-
-def test_ensure_memoryview_ndarray():
+@pytest.mark.parametrize(
+    "dt, nitems, shape, strides",
+    [
+        ("i8", 12, (12,), (8,)),
+        ("i8", 12, (3, 4), (32, 8)),
+        ("i8", 12, (4, 3), (8, 32)),
+        ("i8", 12, (3, 2), (32, 16)),
+        ("i8", 12, (2, 3), (16, 32)),
+    ],
+)
+def test_ensure_memoryview_ndarray(dt, nitems, shape, strides):
     np = pytest.importorskip("numpy")
-    result = ensure_memoryview(np.arange(12).reshape(3, 4)[:, ::2].T)
+    data = np.ndarray(
+        shape, dtype=dt, buffer=np.arange(nitems, dtype=dt), strides=strides
+    )
+    result = ensure_memoryview(data)
     assert isinstance(result, memoryview)
     assert result.ndim == 1
     assert result.format == "B"

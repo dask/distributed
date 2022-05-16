@@ -902,7 +902,7 @@ def test_worker_dir(worker):
         test_worker_dir()
 
 
-@gen_cluster(nthreads=[])
+@gen_cluster(nthreads=[], config={"temporary-directory": None})
 async def test_false_worker_dir(s):
     async with Worker(s.address, local_directory="") as w:
         local_directory = w.local_directory
@@ -2696,7 +2696,7 @@ async def test_gather_dep_exception_one_task_2(c, s, a, b):
     See also test_gather_dep_exception_one_task
     """
     # This test does not trigger the condition reliably but is a very easy case
-    # which should function correctly regardles
+    # which should function correctly regardless
 
     fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
     fut2 = c.submit(inc, fut1, workers=[b.address], key="f2")
@@ -2704,7 +2704,9 @@ async def test_gather_dep_exception_one_task_2(c, s, a, b):
     while fut1.key not in b.tasks or b.tasks[fut1.key].state == "flight":
         await asyncio.sleep(0)
 
-    s.handle_missing_data(key="f1", errant_worker=a.address, stimulus_id="test")
+    s.handle_missing_data(
+        key="f1", worker=b.address, errant_worker=a.address, stimulus_id="test"
+    )
 
     await fut2
 
@@ -3157,7 +3159,7 @@ async def test_task_flight_compute_oserror(c, s, a, b):
 
     sum_story = b.story("f1")
     expected_sum_story = [
-        ("f1", "compute-task"),
+        ("f1", "compute-task", "released"),
         (
             "f1",
             "released",
@@ -3174,7 +3176,7 @@ async def test_task_flight_compute_oserror(c, s, a, b):
         ("f1", "waiting", "released", "released", lambda msg: msg["f1"] == "forgotten"),
         ("f1", "released", "forgotten", "forgotten", {}),
         # Now, we actually compute the task *once*. This must not cycle back
-        ("f1", "compute-task"),
+        ("f1", "compute-task", "released"),
         ("f1", "released", "waiting", "waiting", {"f1": "ready"}),
         ("f1", "waiting", "ready", "ready", {"f1": "executing"}),
         ("f1", "ready", "executing", "executing", {}),

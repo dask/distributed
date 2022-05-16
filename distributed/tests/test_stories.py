@@ -142,7 +142,7 @@ async def test_worker_story_with_deps(c, s, a, b):
 
     # This is a simple transition log
     expected = [
-        ("res", "compute-task"),
+        ("res", "compute-task", "released"),
         ("res", "released", "waiting", "waiting", {"dep": "fetch"}),
         ("res", "waiting", "ready", "ready", {"res": "executing"}),
         ("res", "ready", "executing", "executing", {}),

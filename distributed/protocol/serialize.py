@@ -87,17 +87,12 @@ def pickle_loads(header, frames):
     if not writeable:
         writeable = len(buffers) * (None,)
 
-    new = []
-    memoryviews = map(memoryview, buffers)
-    for w, mv in zip(writeable, memoryviews):
-        if w == mv.readonly:
-            if w:
-                mv = memoryview(bytearray(mv))
-            else:
-                mv = memoryview(bytes(mv))
-        new.append(mv)
+    buffers = [
+        memoryview(bytearray(mv) if w else bytes(mv)) if w == mv.readonly else mv
+        for w, mv in zip(writeable, map(ensure_memoryview, buffers))
+    ]
 
-    return pickle.loads(x, buffers=new)
+    return pickle.loads(x, buffers=buffers)
 
 
 def import_allowed_module(name):
@@ -785,7 +780,7 @@ def _serialize_memoryview(obj):
 @dask_deserialize.register(memoryview)
 def _deserialize_memoryview(header, frames):
     if len(frames) == 1:
-        out = memoryview(frames[0]).cast("B")
+        out = ensure_memoryview(frames[0])
     else:
         out = memoryview(b"".join(frames))
     out = out.cast(header["format"], header["shape"])
