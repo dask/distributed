@@ -5,7 +5,7 @@ import pytest
 
 from distributed.protocol.serialize import Serialize
 from distributed.utils import recursive_to_dict
-from distributed.utils_test import assert_story, gen_cluster, inc
+from distributed.utils_test import _LockedCommPool, assert_story, gen_cluster, inc
 from distributed.worker_state_machine import (
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -302,3 +302,37 @@ async def test_fetch_via_amm_to_compute(c, s, a, b):
     b.comm_threshold_bytes = old_comm_threshold
 
     await f1
+
+
+@gen_cluster(client=True)
+async def test_cancelled_while_in_flight(c, s, a, b):
+    event = asyncio.Event()
+    a.rpc = _LockedCommPool(a.rpc, write_event=event)
+
+    x = c.submit(inc, 1, key="x", workers=[b.address])
+    y = c.submit(inc, x, key="y", workers=[a.address])
+    await wait_for_state("x", "flight", a)
+    y.release()
+    await wait_for_state("x", "cancelled", a)
+
+    # Let the comm from b to a return the result
+    event.set()
+    # upon reception, x transitions cancelled->forgotten
+    while a.tasks:
+        await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True)
+async def test_in_memory_while_in_flight(c, s, a, b):
+    event = asyncio.Event()
+    a.rpc = _LockedCommPool(a.rpc, write_event=event)
+
+    x = c.submit(inc, 1, key="x", workers=[b.address])
+    y = c.submit(inc, x, key="y", workers=[a.address])
+    await wait_for_state("x", "flight", a)
+    a.update_data({"x": 3})
+    await wait_for_state("x", "memory", a)
+
+    # Let the comm from b to a return the result
+    event.set()
+    assert await y == 4  # Data in flight from b has been discarded
