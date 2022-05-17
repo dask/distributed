@@ -11,9 +11,10 @@ import dask.config
 from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
 from dask.widgets import get_template
 
-from ..core import Status
-from ..objects import SchedulerInfo
-from ..utils import (
+from distributed.core import Status
+from distributed.deploy.adaptive import Adaptive
+from distributed.objects import SchedulerInfo
+from distributed.utils import (
     Log,
     Logs,
     LoopRunner,
@@ -22,7 +23,6 @@ from ..utils import (
     format_dashboard_link,
     log_errors,
 )
-from .adaptive import Adaptive
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +98,7 @@ class Cluster(SyncMethodMixin):
 
     async def _start(self):
         comm = await self.scheduler_comm.live_comm()
+        comm.name = "Cluster worker status"
         await comm.write({"op": "subscribe_worker_status"})
         self.scheduler_info = SchedulerInfo(await comm.read())
         self._watch_worker_status_comm = comm
@@ -193,7 +194,7 @@ class Cluster(SyncMethodMixin):
             return self.sync(self._close, callback_timeout=timeout)
 
     def __del__(self):
-        if self.status != Status.closed:
+        if getattr(self, "status", Status.closed) != Status.closed:
             with suppress(AttributeError, RuntimeError):  # during closing
                 self.loop.add_callback(self.close)
 
@@ -398,13 +399,13 @@ class Cluster(SyncMethodMixin):
 
             adapt.on_click(adapt_cb)
 
+            @log_errors
             def scale_cb(b):
-                with log_errors():
-                    n = request.value
-                    with suppress(AttributeError):
-                        self._adaptive.stop()
-                    self.scale(n)
-                    update()
+                n = request.value
+                with suppress(AttributeError):
+                    self._adaptive.stop()
+                self.scale(n)
+                update()
 
             scale.on_click(scale_cb)
         else:  # pragma: no cover
@@ -461,14 +462,14 @@ class Cluster(SyncMethodMixin):
     def __enter__(self):
         return self.sync(self.__aenter__)
 
-    def __exit__(self, typ, value, traceback):
-        return self.sync(self.__aexit__, typ, value, traceback)
+    def __exit__(self, exc_type, exc_value, traceback):
+        return self.sync(self.__aexit__, exc_type, exc_value, traceback)
 
     async def __aenter__(self):
         await self
         return self
 
-    async def __aexit__(self, typ, value, traceback):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         f = self.close()
         if isawaitable(f):
             await f

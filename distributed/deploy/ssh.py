@@ -10,7 +10,7 @@ from json import dumps
 import dask
 import dask.config
 
-from .spec import ProcessInterface, SpecCluster
+from distributed.deploy.spec import ProcessInterface, SpecCluster
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +37,10 @@ class Process(ProcessInterface):
         await super().start()
 
     async def close(self):
-        self.proc.kill()  # https://github.com/ronf/asyncssh/issues/112
-        self.connection.close()
+        if self.proc:
+            self.proc.kill()  # https://github.com/ronf/asyncssh/issues/112
+        if self.connection:
+            self.connection.close()
         await super().close()
 
 
@@ -396,7 +398,7 @@ def SSHCluster(
         )
 
     if set(kwargs) & old_cluster_kwargs:
-        from .old_ssh import SSHCluster as OldSSHCluster
+        from distributed.deploy.old_ssh import SSHCluster as OldSSHCluster
 
         warnings.warn(
             "Note that the SSHCluster API has been replaced.  "

@@ -2,13 +2,13 @@ import asyncio
 import logging
 import random
 from datetime import timedelta
-from time import monotonic, sleep
+from time import sleep
 
 import pytest
 
 from distributed import Client, Nanny, TimeoutError, Variable, wait, worker_client
 from distributed.compatibility import WINDOWS
-from distributed.metrics import time
+from distributed.metrics import monotonic, time
 from distributed.utils_test import captured_logger, div, gen_cluster, inc, popen
 
 
@@ -216,9 +216,8 @@ async def test_race(c, s, *workers):
 
     futures = c.map(f, range(15))
     results = await c.gather(futures)
-    assert all(r > NITERS * 0.8 for r in results)
 
-    while len(s.wants_what["variable-x"]) != 1:
+    while "variable-x" in s.tasks:
         await asyncio.sleep(0.01)
 
 

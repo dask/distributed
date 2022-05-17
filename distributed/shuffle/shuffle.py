@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from dask.base import tokenize
-from dask.delayed import Delayed, delayed
-from dask.highlevelgraph import HighLevelGraph
+from dask.delayed import Delayed
+from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 
-from .shuffle_extension import NewShuffleMetadata, ShuffleId, ShuffleWorkerExtension
+from distributed.shuffle.shuffle_extension import ShuffleId, ShuffleWorkerExtension
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -33,12 +33,10 @@ def get_ext() -> ShuffleWorkerExtension:
     return extension
 
 
-def shuffle_setup(metadata: NewShuffleMetadata) -> None:
-    get_ext().create_shuffle(metadata)
-
-
-def shuffle_transfer(input: pd.DataFrame, id: ShuffleId, setup=None) -> None:
-    get_ext().add_partition(input, id)
+def shuffle_transfer(
+    input: pd.DataFrame, id: ShuffleId, npartitions: int = None, column=None
+) -> None:
+    get_ext().add_partition(input, id, npartitions=npartitions, column=column)
 
 
 def shuffle_unpack(id: ShuffleId, output_partition: int, barrier=None) -> pd.DataFrame:
@@ -59,19 +57,19 @@ def rearrange_by_column_p2p(
     npartitions = npartitions or df.npartitions
     token = tokenize(df, column, npartitions)
 
-    setup = delayed(shuffle_setup, pure=True)(
-        NewShuffleMetadata(
-            ShuffleId(token),
-            df._meta,
-            column,
-            npartitions,
-        )
-    )
+    empty = df._meta.copy()
+    for c, dt in empty.dtypes.items():
+        if dt == object:
+            empty[c] = empty[c].astype(
+                "string"
+            )  # TODO: we fail at non-string object dtypes
+    empty[column] = empty[column].astype("int64")  # TODO: this shouldn't be necesssary
 
     transferred = df.map_partitions(
         shuffle_transfer,
-        token,
-        setup,
+        id=token,
+        npartitions=npartitions,
+        column=column,
         meta=df,
         enforce_metadata=False,
         transform_divisions=False,
@@ -90,6 +88,7 @@ def rearrange_by_column_p2p(
     dsk = {
         (name, i): (shuffle_unpack, token, i, barrier_key) for i in range(npartitions)
     }
+    layer = MaterializedLayer(dsk, annotations={"shuffle": lambda key: key[1]})
     # TODO: update to use blockwise.
     # Changes task names, so breaks setting worker restrictions at the moment.
     # Also maybe would be nice if the `DataFrameIOLayer` interface supported this?
@@ -107,7 +106,7 @@ def rearrange_by_column_p2p(
     # )
 
     return DataFrame(
-        HighLevelGraph.from_collections(name, dsk, [barrier]),
+        HighLevelGraph.from_collections(name, layer, [barrier]),
         name,
         df._meta,
         [None] * (npartitions + 1),

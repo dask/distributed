@@ -10,7 +10,7 @@ import dask
 from distributed import Client
 from distributed.comm.ucx import _scrub_ucx_config
 from distributed.utils import get_ip
-from distributed.utils_test import popen
+from distributed.utils_test import gen_test, popen
 
 try:
     HOST = get_ip()
@@ -21,70 +21,51 @@ ucp = pytest.importorskip("ucp")
 rmm = pytest.importorskip("rmm")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_ucx_config(cleanup):
-    ucx_110 = ucp.get_ucx_version() >= (1, 10, 0)
-
     ucx = {
         "nvlink": True,
         "infiniband": True,
         "rdmacm": False,
-        "net-devices": "",
         "tcp": True,
         "cuda-copy": True,
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
         ucx_config = _scrub_ucx_config()
-        if ucx_110:
-            assert ucx_config.get("TLS") == "rc,tcp,cuda_copy,cuda_ipc"
-            assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "tcp"
-        else:
-            assert ucx_config.get("TLS") == "rc,tcp,sockcm,cuda_copy,cuda_ipc"
-            assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "sockcm"
-        assert ucx_config.get("NET_DEVICES") is None
+        assert ucx_config.get("TLS") == "rc,tcp,cuda_copy,cuda_ipc"
+        assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "tcp"
 
     ucx = {
         "nvlink": False,
         "infiniband": True,
         "rdmacm": False,
-        "net-devices": "mlx5_0:1",
         "tcp": True,
         "cuda-copy": False,
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
         ucx_config = _scrub_ucx_config()
-        if ucx_110:
-            assert ucx_config.get("TLS") == "rc,tcp"
-            assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "tcp"
-        else:
-            assert ucx_config.get("TLS") == "rc,tcp,sockcm"
-            assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "sockcm"
-        assert ucx_config.get("NET_DEVICES") == "mlx5_0:1"
+        assert ucx_config.get("TLS") == "rc,tcp"
+        assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "tcp"
 
     ucx = {
         "nvlink": False,
         "infiniband": True,
         "rdmacm": True,
-        "net-devices": "all",
         "tcp": True,
         "cuda-copy": True,
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
         ucx_config = _scrub_ucx_config()
-        if ucx_110:
-            assert ucx_config.get("TLS") == "rc,tcp,cuda_copy"
-        else:
-            assert ucx_config.get("TLS") == "rc,tcp,rdmacm,cuda_copy"
+        assert ucx_config.get("TLS") == "rc,tcp,cuda_copy"
         assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "rdmacm"
 
     ucx = {
         "nvlink": None,
         "infiniband": None,
         "rdmacm": None,
-        "net-devices": None,
         "tcp": None,
         "cuda-copy": None,
     }

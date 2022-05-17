@@ -13,28 +13,27 @@ source:
 
 build:
   number: {{ GIT_DESCRIBE_NUMBER }}
-  string: py{{ python | replace(".", "") }}_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
-  script: {{ PYTHON }} -m pip install . -vv
+  string: py_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
+  noarch: python
+  script: python -m pip install . -vv --no-deps
   entry_points:
-    - dask-scheduler = distributed.cli.dask_scheduler:go
-    - dask-ssh = distributed.cli.dask_ssh:go
-    - dask-worker = distributed.cli.dask_worker:go
+    - dask-scheduler = distributed.cli.dask_scheduler:main
+    - dask-ssh = distributed.cli.dask_ssh:main
+    - dask-worker = distributed.cli.dask_worker:main
 
 requirements:
-  build:
-    - python                                 # [build_platform != target_platform]
-    - cross-python_{{ target_platform }}     # [build_platform != target_platform]
   host:
-    - python
+    - python >=3.8
     - pip
-
+    - setuptools
   run:
-    - python
+    - python >=3.8
     - click >=6.6
     - cloudpickle >=1.5.0
     - cytoolz >=0.8.2
     - dask-core >={{ dask_version }}
     - jinja2
+    - locket >=1.0
     - msgpack-python >=0.6.0
     - packaging >=20.0
     - psutil >=5.0
@@ -42,11 +41,9 @@ requirements:
     - sortedcontainers !=2.0.0,!=2.0.1
     - tblib >=1.6.0
     - toolz >=0.8.2
-    - tornado >=5  # [py<38]
-    - tornado >=6.0.3  # [py>=38]
+    - tornado >=6.0.3
+    - urllib3
     - zict >=0.1.3
-    - setuptools <60.0.0
-
   run_constrained:
     - openssl !=1.1.1e
 

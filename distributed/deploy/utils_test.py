@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from ..client import Client
+from distributed.client import Client
 
 
 class ClusterTest:

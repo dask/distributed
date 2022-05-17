@@ -16,12 +16,12 @@ import dask
 from dask.utils import parse_bytes, parse_timedelta
 from dask.widgets import get_template
 
-from ..core import CommClosedError, Status, rpc
-from ..scheduler import Scheduler
-from ..security import Security
-from ..utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
-from .adaptive import Adaptive
-from .cluster import Cluster
+from distributed.core import Status, rpc
+from distributed.deploy.adaptive import Adaptive
+from distributed.deploy.cluster import Cluster
+from distributed.scheduler import Scheduler
+from distributed.security import Security
+from distributed.utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ class ProcessInterface:
         await self
         return self
 
-    async def __aexit__(self, *args, **kwargs):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         await self.close()
 
 
@@ -258,7 +258,11 @@ class SpecCluster(Cluster):
         if not self.asynchronous:
             self._loop_runner.start()
             self.sync(self._start)
-            self.sync(self._correct_state)
+            try:
+                self.sync(self._correct_state)
+            except Exception:
+                self.sync(self.close)
+                raise
 
     async def _start(self):
         while self.status == Status.starting:
@@ -280,18 +284,19 @@ class SpecCluster(Cluster):
                 options = {"dashboard": True}
             self.scheduler_spec = {"cls": Scheduler, "options": options}
 
-        # Check if scheduler has already been created by a subclass
-        if self.scheduler is None:
-            cls = self.scheduler_spec["cls"]
-            if isinstance(cls, str):
-                cls = import_term(cls)
-            self.scheduler = cls(**self.scheduler_spec.get("options", {}))
-            self.scheduler = await self.scheduler
-        self.scheduler_comm = rpc(
-            getattr(self.scheduler, "external_address", None) or self.scheduler.address,
-            connection_args=self.security.get_connection_args("client"),
-        )
         try:
+            # Check if scheduler has already been created by a subclass
+            if self.scheduler is None:
+                cls = self.scheduler_spec["cls"]
+                if isinstance(cls, str):
+                    cls = import_term(cls)
+                self.scheduler = cls(**self.scheduler_spec.get("options", {}))
+                self.scheduler = await self.scheduler
+            self.scheduler_comm = rpc(
+                getattr(self.scheduler, "external_address", None)
+                or self.scheduler.address,
+                connection_args=self.security.get_connection_args("client"),
+            )
             await super()._start()
         except Exception as e:  # pragma: no cover
             self.status = Status.failed
@@ -320,10 +325,7 @@ class SpecCluster(Cluster):
                     for w in to_close
                     if w in self.workers
                 ]
-                await asyncio.wait(tasks)
-                for task in tasks:  # for tornado gen.coroutine support
-                    with suppress(RuntimeError):
-                        await task
+                await asyncio.gather(*tasks)
             for name in to_close:
                 if name in self.workers:
                     del self.workers[name]
@@ -338,7 +340,11 @@ class SpecCluster(Cluster):
                     opts["name"] = name
                 if isinstance(cls, str):
                     cls = import_term(cls)
-                worker = cls(self.scheduler.address, **opts)
+                worker = cls(
+                    getattr(self.scheduler, "contact_address", None)
+                    or self.scheduler.address,
+                    **opts,
+                )
                 self._created.add(worker)
                 workers.append(worker)
             if workers:
@@ -368,7 +374,7 @@ class SpecCluster(Cluster):
                 dask.config.get("distributed.deploy.lost-worker-timeout")
             )
 
-            asyncio.get_event_loop().call_later(delay, f)
+            asyncio.get_running_loop().call_later(delay, f)
         super()._update_worker_status(op, msg)
 
     def __await__(self):
@@ -400,18 +406,19 @@ class SpecCluster(Cluster):
             if isawaitable(f):
                 await f
             await self._correct_state()
-            for future in self._futures:
-                await future
-            async with self._lock:
-                with suppress(CommClosedError, OSError):
-                    if self.scheduler_comm:
-                        await self.scheduler_comm.close(close_workers=True)
-                    else:
-                        logger.warning("Cluster closed without starting up")
+            await asyncio.gather(*self._futures)
+
+            if self.scheduler_comm:
+                async with self._lock:
+                    with suppress(OSError):
+                        await self.scheduler_comm.terminate(close_workers=True)
+                    await self.scheduler_comm.close_rpc()
+            else:
+                logger.warning("Cluster closed without starting up")
 
             await self.scheduler.close()
             for w in self._created:
-                assert w.status == Status.closed, w.status
+                assert w.status in {Status.closed, Status.failed}, w.status
 
         if hasattr(self, "_old_logging_level"):
             silence_logging(self._old_logging_level)
@@ -426,8 +433,8 @@ class SpecCluster(Cluster):
         assert self.status == Status.running
         return self
 
-    def __exit__(self, typ, value, traceback):
-        super().__exit__(typ, value, traceback)
+    def __exit__(self, exc_type, exc_value, traceback):
+        super().__exit__(exc_type, exc_value, traceback)
         self._loop_runner.stop()
 
     def _threads_per_worker(self) -> int:

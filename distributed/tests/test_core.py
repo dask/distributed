@@ -1,10 +1,12 @@
 import asyncio
+import contextlib
 import os
 import socket
 import threading
 import weakref
 
 import pytest
+from tornado.ioloop import IOLoop
 
 import dask
 
@@ -13,6 +15,7 @@ from distributed.core import (
     ConnectionPool,
     Server,
     Status,
+    _expects_comm,
     clean_exception,
     coerce_to_address,
     connect,
@@ -70,7 +73,8 @@ def echo_no_serialize(comm, x):
     return {"result": x}
 
 
-def test_server_status_is_always_enum():
+@gen_test()
+async def test_server_status_is_always_enum():
     """Assignments with strings is forbidden"""
     server = Server({})
     assert isinstance(server.status, Status)
@@ -81,25 +85,27 @@ def test_server_status_is_always_enum():
         server.status = "running"
 
 
-def test_server_assign_assign_enum_is_quiet():
+@gen_test()
+async def test_server_assign_assign_enum_is_quiet():
     """That would be the default in user code"""
     server = Server({})
     server.status = Status.running
 
 
-def test_server_status_compare_enum_is_quiet():
+@gen_test()
+async def test_server_status_compare_enum_is_quiet():
     """That would be the default in user code"""
     server = Server({})
     server.status == Status.running
 
 
-def test_server(loop):
+@gen_test()
+async def test_server():
     """
     Simple Server test.
     """
 
-    async def f():
-        server = Server({"ping": pingpong})
+    async with Server({"ping": pingpong}) as server:
         with pytest.raises(ValueError):
             server.port
         await server.listen(8881)
@@ -123,14 +129,10 @@ def test_server(loop):
 
             await comm.close()
 
-        server.stop()
 
-    loop.run_sync(f)
-
-
-def test_server_raises_on_blocked_handlers(loop):
-    async def f():
-        server = Server({"ping": pingpong}, blocked_handlers=["ping"])
+@gen_test()
+async def test_server_raises_on_blocked_handlers():
+    async with Server({"ping": pingpong}, blocked_handlers=["ping"]) as server:
         await server.listen(8881)
 
         comm = await connect(server.address)
@@ -142,16 +144,14 @@ def test_server_raises_on_blocked_handlers(loop):
         assert "'ping' handler has been explicitly disallowed" in repr(exception)
 
         await comm.close()
-        server.stop()
-
-    res = loop.run_sync(f)
 
 
 class MyServer(Server):
     default_port = 8756
 
 
-@pytest.mark.asyncio
+@pytest.mark.slow
+@gen_test()
 async def test_server_listen():
     """
     Test various Server.listen() arguments and their effect.
@@ -275,41 +275,39 @@ async def test_server_listen():
 
 
 async def check_rpc(listen_addr, rpc_addr=None, listen_args={}, connection_args={}):
-    server = Server({"ping": pingpong})
-    await server.listen(listen_addr, **listen_args)
-    if rpc_addr is None:
-        rpc_addr = server.address
+    async with Server({"ping": pingpong}) as server:
+        await server.listen(listen_addr, **listen_args)
+        if rpc_addr is None:
+            rpc_addr = server.address
 
-    async with rpc(rpc_addr, connection_args=connection_args) as remote:
-        response = await remote.ping()
-        assert response == b"pong"
-        assert remote.comms
+        async with rpc(rpc_addr, connection_args=connection_args) as remote:
+            response = await remote.ping()
+            assert response == b"pong"
+            assert remote.comms
 
-        response = await remote.ping(close=True)
-        assert response == b"pong"
-        response = await remote.ping()
-        assert response == b"pong"
+            response = await remote.ping(close=True)
+            assert response == b"pong"
+            response = await remote.ping()
+            assert response == b"pong"
 
-    assert not remote.comms
-    assert remote.status == Status.closed
-
-    server.stop()
-    await asyncio.sleep(0)
+        assert not remote.comms
+        assert remote.status == Status.closed
+        await asyncio.sleep(0)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_rpc_default():
     await check_rpc(8883, "127.0.0.1:8883")
     await check_rpc(8883)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_rpc_tcp():
     await check_rpc("tcp://:8883", "tcp://127.0.0.1:8883")
     await check_rpc("tcp://")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_rpc_tls():
     sec = tls_security()
     await check_rpc(
@@ -320,12 +318,12 @@ async def test_rpc_tls():
     )
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_rpc_inproc():
     await check_rpc("inproc://", None)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_rpc_inputs():
     L = [rpc("127.0.0.1:8884"), rpc(("127.0.0.1", 8884)), rpc("tcp://127.0.0.1:8884")]
 
@@ -338,48 +336,46 @@ async def test_rpc_inputs():
 async def check_rpc_message_lifetime(*listen_args):
     # Issue #956: rpc arguments and result shouldn't be kept alive longer
     # than necessary
-    server = Server({"echo": echo_serialize})
-    await server.listen(*listen_args)
+    async with Server({"echo": echo_serialize}) as server:
+        await server.listen(*listen_args)
 
-    # Sanity check
-    obj = CountedObject()
-    assert CountedObject.n_instances == 1
-    del obj
-    start = time()
-    while CountedObject.n_instances != 0:
-        await asyncio.sleep(0.01)
-        assert time() < start + 1
-
-    async with rpc(server.address) as remote:
+        # Sanity check
         obj = CountedObject()
-        res = await remote.echo(x=to_serialize(obj))
-        assert isinstance(res["result"], CountedObject)
-        # Make sure resource cleanup code in coroutines runs
-        await asyncio.sleep(0.05)
+        assert CountedObject.n_instances == 1
+        del obj
+        start = time()
+        while CountedObject.n_instances != 0:
+            await asyncio.sleep(0.01)
+            assert time() < start + 1
 
-        w1 = weakref.ref(obj)
-        w2 = weakref.ref(res["result"])
-        del obj, res
+        async with rpc(server.address) as remote:
+            obj = CountedObject()
+            res = await remote.echo(x=to_serialize(obj))
+            assert isinstance(res["result"], CountedObject)
+            # Make sure resource cleanup code in coroutines runs
+            await asyncio.sleep(0.05)
 
-        assert w1() is None
-        assert w2() is None
-        # If additional instances were created, they were deleted as well
-        assert CountedObject.n_instances == 0
+            w1 = weakref.ref(obj)
+            w2 = weakref.ref(res["result"])
+            del obj, res
 
-    server.stop()
+            assert w1() is None
+            assert w2() is None
+            # If additional instances were created, they were deleted as well
+            assert CountedObject.n_instances == 0
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_rpc_message_lifetime_default():
     await check_rpc_message_lifetime()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_rpc_message_lifetime_tcp():
     await check_rpc_message_lifetime("tcp://")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_rpc_message_lifetime_inproc():
     await check_rpc_message_lifetime("inproc://")
 
@@ -389,7 +385,7 @@ async def check_rpc_with_many_connections(listen_arg):
         for i in range(10):
             await remote.ping()
 
-    server = Server({"ping": pingpong})
+    server = await Server({"ping": pingpong})
     await server.listen(listen_arg)
 
     async with rpc(server.address) as remote:
@@ -402,134 +398,124 @@ async def check_rpc_with_many_connections(listen_arg):
         assert all(comm.closed() for comm in remote.comms)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_rpc_with_many_connections_tcp():
     await check_rpc_with_many_connections("tcp://")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_rpc_with_many_connections_inproc():
     await check_rpc_with_many_connections("inproc://")
 
 
 async def check_large_packets(listen_arg):
     """tornado has a 100MB cap by default"""
-    server = Server({})
-    await server.listen(listen_arg)
+    async with Server({}) as server:
+        await server.listen(listen_arg)
 
-    data = b"0" * int(200e6)  # slightly more than 100MB
-    async with rpc(server.address) as conn:
-        result = await conn.echo(data=data)
-        assert result == data
+        data = b"0" * int(200e6)  # slightly more than 100MB
+        async with rpc(server.address) as conn:
+            result = await conn.echo(data=data)
+            assert result == data
 
-        d = {"x": data}
-        result = await conn.echo(data=d)
-        assert result == d
-
-    server.stop()
+            d = {"x": data}
+            result = await conn.echo(data=d)
+            assert result == d
 
 
 @pytest.mark.slow
-@pytest.mark.asyncio
+@gen_test()
 async def test_large_packets_tcp():
     await check_large_packets("tcp://")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_large_packets_inproc():
     await check_large_packets("inproc://")
 
 
 async def check_identity(listen_arg):
-    server = Server({})
-    await server.listen(listen_arg)
+    async with Server({}) as server:
+        await server.listen(listen_arg)
 
-    async with rpc(server.address) as remote:
-        a = await remote.identity()
-        b = await remote.identity()
-        assert a["type"] == "Server"
-        assert a["id"] == b["id"]
-
-    server.stop()
+        async with rpc(server.address) as remote:
+            a = await remote.identity()
+            b = await remote.identity()
+            assert a["type"] == "Server"
+            assert a["id"] == b["id"]
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_identity_tcp():
     await check_identity("tcp://")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_identity_inproc():
     await check_identity("inproc://")
 
 
-@pytest.mark.asyncio
-async def test_ports(loop):
-    for port in range(9877, 9887):
-        server = Server({}, io_loop=loop)
-        try:
-            await server.listen(port)
-        except OSError:  # port already taken?
-            pass
+@gen_test()
+async def test_ports():
+    loop = IOLoop.current()
+    async with Server({}) as server:
+        for port in range(9877, 9887):
+            try:
+                await server.listen(port)
+            except OSError:  # port already taken?
+                pass
+            else:
+                break
         else:
-            break
-    else:
-        raise Exception()
-    try:
+            raise Exception()
+
         assert server.port == port
 
         with pytest.raises((OSError, socket.error)):
-            server2 = Server({}, io_loop=loop)
-            await server2.listen(port)
-    finally:
-        server.stop()
+            async with Server({}) as server2:
+                await server2.listen(port)
 
-    try:
-        server3 = Server({}, io_loop=loop)
+    async with Server({}) as server3:
         await server3.listen(0)
         assert isinstance(server3.port, int)
         assert server3.port > 1024
-    finally:
-        server3.stop()
 
 
 def stream_div(comm=None, x=None, y=None):
     return x / y
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_errors():
-    server = Server({"div": stream_div})
-    await server.listen(0)
+    async with Server({"div": stream_div}) as server:
+        await server.listen(0)
 
-    with rpc(("127.0.0.1", server.port)) as r:
-        with pytest.raises(ZeroDivisionError):
-            await r.div(x=1, y=0)
+        async with rpc(("127.0.0.1", server.port)) as r:
+            with pytest.raises(ZeroDivisionError):
+                await r.div(x=1, y=0)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_connect_raises():
     with pytest.raises(IOError):
         await connect("127.0.0.1:58259", timeout=0.01)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_send_recv_args():
-    server = Server({})
-    await server.listen(0)
+    async with Server({}) as server:
+        await server.listen(0)
 
-    comm = await connect(server.address)
-    result = await send_recv(comm, op="echo", data=b"1")
-    assert result == b"1"
-    assert not comm.closed()
-    result = await send_recv(comm, op="echo", data=b"2", reply=False)
-    assert result is None
-    assert not comm.closed()
-    result = await send_recv(comm, op="echo", data=b"3", close=True)
-    assert result == b"3"
-    assert comm.closed()
-
-    server.stop()
+        comm = await connect(server.address)
+        result = await send_recv(comm, op="echo", data=b"1")
+        assert result == b"1"
+        assert not comm.closed()
+        result = await send_recv(comm, op="echo", data=b"2", reply=False)
+        assert result is None
+        assert not comm.closed()
+        result = await send_recv(comm, op="echo", data=b"3", close=True)
+        assert result == b"3"
+        assert comm.closed()
 
 
 @gen_test(timeout=5)
@@ -539,19 +525,19 @@ async def test_send_recv_cancelled():
     async def get_stuck(comm):
         await asyncio.Future()
 
-    server = Server({"get_stuck": get_stuck})
-    await server.listen(0)
+    async with Server({"get_stuck": get_stuck}) as server:
+        await server.listen(0)
 
-    client_comm = await connect(server.address, deserialize=False)
-    while not server._comms:
-        await asyncio.sleep(0.01)
-    server_comm = next(iter(server._comms))
+        client_comm = await connect(server.address, deserialize=False)
+        while not server._comms:
+            await asyncio.sleep(0.01)
+        server_comm = next(iter(server._comms))
 
-    with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(send_recv(client_comm, op="get_stuck"), timeout=0.1)
-    assert client_comm.closed()
-    while not server_comm.closed():
-        await asyncio.sleep(0.01)
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(send_recv(client_comm, op="get_stuck"), timeout=0.1)
+        assert client_comm.closed()
+        while not server_comm.closed():
+            await asyncio.sleep(0.01)
 
 
 def test_coerce_to_address():
@@ -559,7 +545,7 @@ def test_coerce_to_address():
         assert coerce_to_address(arg) == "tcp://127.0.0.1:8786"
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_connection_pool():
     async def ping(comm, delay=0.1):
         await asyncio.sleep(delay)
@@ -567,6 +553,7 @@ async def test_connection_pool():
 
     servers = [Server({"ping": ping}) for i in range(10)]
     for server in servers:
+        await server
         await server.listen(0)
 
     rpc = await ConnectionPool(limit=5)
@@ -606,9 +593,10 @@ async def test_connection_pool():
         assert time() < start + 2
 
     await rpc.close()
+    await asyncio.gather(*[server.close() for server in servers])
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_connection_pool_close_while_connecting(monkeypatch):
     """
     Ensure a closed connection pool guarantees to have no connections left open
@@ -619,7 +607,7 @@ async def test_connection_pool_close_while_connecting(monkeypatch):
 
     class SlowConnector(TCPConnector):
         async def connect(self, address, deserialize, **connection_args):
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(10000)
             return await super().connect(
                 address, deserialize=deserialize, **connection_args
             )
@@ -629,35 +617,68 @@ async def test_connection_pool_close_while_connecting(monkeypatch):
 
     monkeypatch.setitem(backends, "tcp", SlowBackend())
 
-    server = Server({})
-    await server.listen("tcp://")
+    async with Server({}) as server:
+        await server.listen("tcp://")
 
-    pool = await ConnectionPool(limit=2)
+        pool = await ConnectionPool(limit=2)
 
-    async def connect_to_server():
-        comm = await pool.connect(server.address)
-        pool.reuse(server.address, comm)
+        async def connect_to_server():
+            comm = await pool.connect(server.address)
+            pool.reuse(server.address, comm)
 
-    tasks = [asyncio.create_task(connect_to_server()) for _ in range(30)]
+        # #tasks > limit
+        tasks = [asyncio.create_task(connect_to_server()) for _ in range(5)]
 
-    await asyncio.sleep(0)
-    assert pool._connecting
-    close_fut = asyncio.create_task(pool.close())
+        while not pool._connecting:
+            await asyncio.sleep(0.01)
 
-    with pytest.raises(
-        CommClosedError, match="ConnectionPool not running. Status: Status.closed"
-    ):
-        await asyncio.gather(*tasks)
-
-    await close_fut
-    assert not pool.open
-    assert not pool._n_connecting
-
-    for t in tasks:
-        t.cancel()
+        await pool.close()
+        for t in tasks:
+            with pytest.raises(CommClosedError):
+                await t
+        assert not pool.open
+        assert not pool._n_connecting
 
 
-@pytest.mark.asyncio
+@gen_test()
+async def test_connection_pool_outside_cancellation(monkeypatch):
+    # Ensure cancellation errors are properly reraised
+    from distributed.comm.registry import backends
+    from distributed.comm.tcp import TCPBackend, TCPConnector
+
+    class SlowConnector(TCPConnector):
+        async def connect(self, address, deserialize, **connection_args):
+            await asyncio.sleep(10000)
+            return await super().connect(
+                address, deserialize=deserialize, **connection_args
+            )
+
+    class SlowBackend(TCPBackend):
+        _connector_class = SlowConnector
+
+    monkeypatch.setitem(backends, "tcp", SlowBackend())
+
+    async with Server({}) as server:
+        await server.listen("tcp://")
+        pool = await ConnectionPool(limit=2)
+
+        async def connect_to_server():
+            comm = await pool.connect(server.address)
+            pool.reuse(server.address, comm)
+
+        # #tasks > limit
+        tasks = [asyncio.create_task(connect_to_server()) for _ in range(5)]
+        while not pool._connecting:
+            await asyncio.sleep(0.01)
+
+        for t in tasks:
+            t.cancel()
+
+        done, _ = await asyncio.wait(tasks)
+        assert all(t.cancelled() for t in tasks)
+
+
+@gen_test()
 async def test_connection_pool_respects_limit():
 
     limit = 5
@@ -671,16 +692,19 @@ async def test_connection_pool_respects_limit():
         await pool(ip="127.0.0.1", port=port).ping()
         assert pool.open <= limit
 
-    servers = [Server({"ping": ping}) for i in range(10)]
-    for server in servers:
-        await server.listen(0)
+    async with contextlib.AsyncExitStack() as stack:
+        servers = [
+            await stack.enter_async_context(Server({"ping": ping})) for i in range(10)
+        ]
+        for server in servers:
+            await server.listen(0)
 
-    pool = await ConnectionPool(limit=limit)
+        pool = await ConnectionPool(limit=limit)
+        await asyncio.gather(*(do_ping(pool, s.port) for s in servers))
+        await pool.close()
 
-    await asyncio.gather(*(do_ping(pool, s.port) for s in servers))
 
-
-@pytest.mark.asyncio
+@gen_test()
 async def test_connection_pool_tls():
     """
     Make sure connection args are supported.
@@ -695,6 +719,7 @@ async def test_connection_pool_tls():
 
     servers = [Server({"ping": ping}) for i in range(10)]
     for server in servers:
+        await server
         await server.listen("tls://", **listen_args)
 
     rpc = await ConnectionPool(limit=5, connection_args=connection_args)
@@ -705,9 +730,10 @@ async def test_connection_pool_tls():
     assert rpc.active == 0
 
     await rpc.close()
+    await asyncio.gather(*[server.close() for server in servers])
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_connection_pool_remove():
     async def ping(comm, delay=0.01):
         await asyncio.sleep(delay)
@@ -715,6 +741,7 @@ async def test_connection_pool_remove():
 
     servers = [Server({"ping": ping}) for i in range(5)]
     for server in servers:
+        await server
         await server.listen(0)
 
     rpc = await ConnectionPool(limit=10)
@@ -744,24 +771,25 @@ async def test_connection_pool_remove():
     rpc.reuse(serv.address, comm)
 
     await rpc.close()
+    await asyncio.gather(*[server.close() for server in servers])
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_counters():
-    server = Server({"div": stream_div})
-    await server.listen("tcp://")
+    async with Server({"div": stream_div}) as server:
+        await server.listen("tcp://")
 
-    async with rpc(server.address) as r:
-        for i in range(2):
-            await r.identity()
-        with pytest.raises(ZeroDivisionError):
-            await r.div(x=1, y=0)
+        async with rpc(server.address) as r:
+            for i in range(2):
+                await r.identity()
+            with pytest.raises(ZeroDivisionError):
+                await r.div(x=1, y=0)
 
-        c = server.counters
-        assert c["op"].components[0] == {"identity": 2, "div": 1}
+            c = server.counters
+            assert c["op"].components[0] == {"identity": 2, "div": 1}
 
 
-@gen_cluster()
+@gen_cluster(config={"distributed.admin.tick.interval": "20 ms"})
 async def test_ticks(s, a, b):
     pytest.importorskip("crick")
     await asyncio.sleep(0.1)
@@ -770,7 +798,7 @@ async def test_ticks(s, a, b):
     assert 0.01 < c.components[0].quantile(0.5) < 0.5
 
 
-@gen_cluster()
+@gen_cluster(config={"distributed.admin.tick.interval": "20 ms"})
 async def test_tick_logging(s, a, b):
     pytest.importorskip("crick")
     from distributed import core
@@ -790,37 +818,30 @@ async def test_tick_logging(s, a, b):
 
 @pytest.mark.parametrize("compression", list(compressions))
 @pytest.mark.parametrize("serialize", [echo_serialize, echo_no_serialize])
-def test_compression(compression, serialize, loop):
+@gen_test()
+async def test_compression(compression, serialize):
     with dask.config.set(compression=compression):
-
-        async def f():
-            server = Server({"echo": serialize})
+        async with Server({"echo": serialize}) as server:
             await server.listen("tcp://")
 
-            with rpc(server.address) as r:
+            async with rpc(server.address) as r:
                 data = b"1" * 1000000
                 result = await r.echo(x=to_serialize(data))
                 assert result == {"result": data}
 
-            server.stop()
 
-        loop.run_sync(f)
-
-
-@pytest.mark.asyncio
+@gen_test()
 async def test_rpc_serialization():
-    server = Server({"echo": echo_serialize})
-    await server.listen("tcp://")
+    async with Server({"echo": echo_serialize}) as server:
+        await server.listen("tcp://")
 
-    async with rpc(server.address, serializers=["msgpack"]) as r:
-        with pytest.raises(TypeError):
-            await r.echo(x=to_serialize(inc))
+        async with rpc(server.address, serializers=["msgpack"]) as r:
+            with pytest.raises(TypeError):
+                await r.echo(x=to_serialize(inc))
 
-    async with rpc(server.address, serializers=["msgpack", "pickle"]) as r:
-        result = await r.echo(x=to_serialize(inc))
-        assert result == {"result": inc}
-
-    server.stop()
+        async with rpc(server.address, serializers=["msgpack", "pickle"]) as r:
+            result = await r.echo(x=to_serialize(inc))
+            assert result == {"result": inc}
 
 
 @gen_cluster()
@@ -828,53 +849,55 @@ async def test_thread_id(s, a, b):
     assert s.thread_id == a.thread_id == b.thread_id == threading.get_ident()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_deserialize_error():
-    server = Server({"throws": throws})
-    await server.listen(0)
+    async with Server({"throws": throws}) as server:
+        await server.listen(0)
 
-    comm = await connect(server.address, deserialize=False)
-    with pytest.raises(Exception) as info:
-        await send_recv(comm, op="throws")
+        comm = await connect(server.address, deserialize=False)
+        with pytest.raises(Exception, match=r"RuntimeError\('hello!'\)") as info:
+            await send_recv(comm, op="throws", x="foo")
 
-    assert type(info.value) == Exception
-    for c in str(info.value):
-        assert c.isalpha() or c in "(',!)"  # no crazy bytestrings
+        assert type(info.value) == Exception
+        for c in str(info.value):
+            assert c.isalpha() or c in "(',!)"  # no crazy bytestrings
+
+        await comm.close()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_connection_pool_detects_remote_close():
-    server = Server({"ping": pingpong})
-    await server.listen("tcp://")
+    async with Server({"ping": pingpong}) as server:
+        await server.listen("tcp://")
 
-    # open a connection, use it and give it back to the pool
-    p = await ConnectionPool(limit=10)
-    conn = await p.connect(server.address)
-    await send_recv(conn, op="ping")
-    p.reuse(server.address, conn)
+        # open a connection, use it and give it back to the pool
+        p = await ConnectionPool(limit=10)
+        conn = await p.connect(server.address)
+        await send_recv(conn, op="ping")
+        p.reuse(server.address, conn)
 
-    # now close this connection on the *server*
-    assert len(server._comms) == 1
-    server_conn = list(server._comms.keys())[0]
-    await server_conn.close()
+        # now close this connection on the *server*
+        assert len(server._comms) == 1
+        server_conn = list(server._comms.keys())[0]
+        await server_conn.close()
 
-    # give the ConnectionPool some time to realize that the connection is closed
-    await asyncio.sleep(0.1)
+        # give the ConnectionPool some time to realize that the connection is closed
+        await asyncio.sleep(0.1)
 
-    # the connection pool should not hand out `conn` again
-    conn2 = await p.connect(server.address)
-    assert conn2 is not conn
-    p.reuse(server.address, conn2)
-    # check that `conn` has ben removed from the internal data structures
-    assert p.open == 1 and p.active == 0
+        # the connection pool should not hand out `conn` again
+        conn2 = await p.connect(server.address)
+        assert conn2 is not conn
+        p.reuse(server.address, conn2)
+        # check that `conn` has ben removed from the internal data structures
+        assert p.open == 1 and p.active == 0
 
-    # check connection pool invariants hold even after it detects a closed connection
-    # while creating conn2:
-    p._validate()
-    await p.close()
+        # check connection pool invariants hold even after it detects a closed connection
+        # while creating conn2:
+        p._validate()
+        await p.close()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_close_properly():
     """
     If the server is closed we should cancel all still ongoing coros and close
@@ -922,13 +945,13 @@ async def test_close_properly():
         assert not len(server._ongoing_coroutines)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_server_redundant_kwarg():
     with pytest.raises(TypeError, match="unexpected keyword argument"):
         await Server({}, typo_kwarg="foo")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_server_comms_mark_active_handlers():
     """Whether handlers are active can be read off of the self._comms values.
     ensure this is properly reflected and released. The sentinel for
@@ -939,23 +962,23 @@ async def test_server_comms_mark_active_handlers():
         await asyncio.sleep(0.2)
         return "done"
 
-    server = await Server({"wait": long_handler})
-    await server.listen(0)
-    assert server._comms == {}
+    async with Server({"wait": long_handler}) as server:
+        await server.listen(0)
+        assert server._comms == {}
 
-    comm = await connect(server.address)
-    await comm.write({"op": "wait"})
-    while not server._comms:
-        await asyncio.sleep(0.05)
-    assert set(server._comms.values()) == {"wait"}
-    assert await comm.read() == "done"
-    assert set(server._comms.values()) == {None}
-    await comm.close()
-    while server._comms:
-        await asyncio.sleep(0.01)
+        comm = await connect(server.address)
+        await comm.write({"op": "wait"})
+        while not server._comms:
+            await asyncio.sleep(0.05)
+        assert set(server._comms.values()) == {"wait"}
+        assert await comm.read() == "done"
+        assert set(server._comms.values()) == {None}
+        await comm.close()
+        while server._comms:
+            await asyncio.sleep(0.01)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_close_fast_without_active_handlers():
     async def very_fast(comm):
         return "done"
@@ -973,7 +996,7 @@ async def test_close_fast_without_active_handlers():
     await asyncio.wait_for(fut, 0.1)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_close_grace_period_for_handlers():
     async def long_handler(comm, delay=10):
         await asyncio.sleep(delay)
@@ -994,3 +1017,58 @@ async def test_close_grace_period_for_handlers():
         await asyncio.wait_for(fut, 0.5)
     await comm.close()
     await server.close()
+
+
+def test_expects_comm():
+    class A:
+        def empty(self):
+            ...
+
+        def one_arg(self, arg):
+            ...
+
+        def comm_arg(self, comm):
+            ...
+
+        def stream_arg(self, stream):
+            ...
+
+        def two_arg(self, arg, other):
+            ...
+
+        def comm_arg_other(self, comm, other):
+            ...
+
+        def stream_arg_other(self, stream, other):
+            ...
+
+        def arg_kwarg(self, arg, other=None):
+            ...
+
+        def comm_posarg_only(self, comm, /, other):
+            ...
+
+        def comm_not_leading_position(self, other, comm):
+            ...
+
+        def stream_not_leading_position(self, other, stream):
+            ...
+
+    expected_warning = "first arugment of a RPC handler `stream` is deprecated"
+
+    instance = A()
+
+    assert not _expects_comm(instance.empty)
+    assert not _expects_comm(instance.one_arg)
+    assert _expects_comm(instance.comm_arg)
+    with pytest.warns(FutureWarning, match=expected_warning):
+        assert _expects_comm(instance.stream_arg)
+    assert not _expects_comm(instance.two_arg)
+    assert _expects_comm(instance.comm_arg_other)
+    with pytest.warns(FutureWarning, match=expected_warning):
+        assert _expects_comm(instance.stream_arg_other)
+    assert not _expects_comm(instance.arg_kwarg)
+    assert _expects_comm(instance.comm_posarg_only)
+    assert not _expects_comm(instance.comm_not_leading_position)
+
+    assert not _expects_comm(instance.stream_not_leading_position)

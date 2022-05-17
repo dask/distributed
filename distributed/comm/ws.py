@@ -16,12 +16,26 @@ from tornado.websocket import WebSocketClosedError, WebSocketHandler, websocket_
 
 import dask
 
-from ..utils import ensure_bytes, nbytes
-from .addressing import parse_host_port, unparse_host_port
-from .core import Comm, CommClosedError, Connector, FatalCommClosedError, Listener
-from .registry import backends
-from .tcp import BaseTCPBackend, _expect_tls_context, convert_stream_closed_error
-from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to_frames
+from distributed.comm.addressing import parse_host_port, unparse_host_port
+from distributed.comm.core import (
+    Comm,
+    CommClosedError,
+    Connector,
+    FatalCommClosedError,
+    Listener,
+)
+from distributed.comm.registry import backends
+from distributed.comm.tcp import (
+    BaseTCPBackend,
+    _expect_tls_context,
+    convert_stream_closed_error,
+)
+from distributed.comm.utils import (
+    ensure_concrete_host,
+    from_frames,
+    get_tcp_server_address,
+    to_frames,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -122,14 +136,18 @@ class WSHandlerComm(Comm):
             frame_split_size=BIG_BYTES_SHARD_SIZE,
         )
         n = struct.pack("Q", len(frames))
+        nbytes_frames = 0
         try:
             await self.handler.write_message(n, binary=True)
             for frame in frames:
-                await self.handler.write_message(ensure_bytes(frame), binary=True)
+                if type(frame) is not bytes:
+                    frame = bytes(frame)
+                await self.handler.write_message(frame, binary=True)
+                nbytes_frames += len(frame)
         except WebSocketClosedError as e:
             raise CommClosedError(str(e))
 
-        return sum(map(nbytes, frames))
+        return nbytes_frames
 
     def abort(self):
         self.handler.close()
@@ -211,14 +229,18 @@ class WS(Comm):
             frame_split_size=BIG_BYTES_SHARD_SIZE,
         )
         n = struct.pack("Q", len(frames))
+        nbytes_frames = 0
         try:
             await self.sock.write_message(n, binary=True)
             for frame in frames:
-                await self.sock.write_message(ensure_bytes(frame), binary=True)
+                if type(frame) is not bytes:
+                    frame = bytes(frame)
+                await self.sock.write_message(frame, binary=True)
+                nbytes_frames += len(frame)
         except WebSocketClosedError as e:
             raise CommClosedError(e)
 
-        return sum(map(nbytes, frames))
+        return nbytes_frames
 
     async def close(self):
         if not self.sock.close_code:

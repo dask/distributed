@@ -11,13 +11,14 @@ from time import sleep
 import psutil
 import pytest
 from tornado import gen
+from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
 from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.process import AsyncProcess
 from distributed.utils import mp_context
-from distributed.utils_test import gen_test, nodebug, pristine_loop
+from distributed.utils_test import gen_test, nodebug
 
 
 def feed(in_q, out_q):
@@ -79,7 +80,7 @@ async def test_simple():
     t1 = time()
     await proc.join(timeout=0.02)
     dt = time() - t1
-    assert 0.2 >= dt >= 0.01
+    assert 0.2 >= dt >= 0.001
     assert proc.is_alive()
     assert proc.pid is not None
     assert proc.exitcode is None
@@ -107,13 +108,14 @@ async def test_simple():
     assert dt <= 0.6
 
     del proc
-    gc.collect()
+
     start = time()
     while wr1() is not None and time() < start + 1:
         # Perhaps the GIL switched before _watch_process() exit,
         # help it a little
         sleep(0.001)
         gc.collect()
+
     if wr1() is not None:
         # Help diagnosing
         from types import FrameType
@@ -339,6 +341,7 @@ def _parent_process(child_pipe):
     be used to determine if it exited correctly."""
 
     async def parent_process_coroutine():
+        IOLoop.current()
         worker_ready = mp_context.Event()
 
         worker = AsyncProcess(target=_worker_process, args=(worker_ready, child_pipe))
@@ -353,13 +356,12 @@ def _parent_process(child_pipe):
         # worker_process to also exit.
         os._exit(255)
 
-    with pristine_loop() as loop:
-        try:
-            loop.run_sync(parent_process_coroutine, timeout=10)
-        finally:
-            loop.stop()
+    async def run_with_timeout():
+        t = asyncio.create_task(parent_process_coroutine())
+        return await asyncio.wait_for(t, timeout=10)
 
-            raise RuntimeError("this should be unreachable due to os._exit")
+    asyncio.run(run_with_timeout())
+    raise RuntimeError("this should be unreachable due to os._exit")
 
 
 def test_asyncprocess_child_teardown_on_parent_exit():

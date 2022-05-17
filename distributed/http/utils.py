@@ -6,7 +6,7 @@ import os
 import toolz
 from tornado import web
 
-from ..utils import has_keyword
+from distributed.utils import has_keyword
 
 dirname = os.path.dirname(__file__)
 
@@ -38,7 +38,7 @@ def get_handlers(server, modules: list[str], prefix="/"):
     _routes = []
     for module_name in modules:
         module = importlib.import_module(module_name)
-        _routes.extend(module.routes)  # type: ignore
+        _routes.extend(module.routes)
 
     routes = []
 

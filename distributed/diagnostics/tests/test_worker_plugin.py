@@ -1,4 +1,5 @@
 import asyncio
+import warnings
 
 import pytest
 
@@ -81,41 +82,6 @@ async def test_remove_with_client_raises(c, s):
     worker = await Worker(s.address, loop=s.loop)
     with pytest.raises(ValueError, match="bar"):
         await c.unregister_worker_plugin("bar")
-
-
-@gen_cluster(client=True, nthreads=[])
-async def test_create_with_client_and_plugin_from_class(c, s):
-    with pytest.warns(FutureWarning, match=r"Adding plugins by class is deprecated"):
-        await c.register_worker_plugin(MyPlugin, data=456)
-
-    worker = await Worker(s.address, loop=s.loop)
-    assert worker._my_plugin_status == "setup"
-    assert worker._my_plugin_data == 456
-
-    # Give the plugin a new name so that it registers
-    with pytest.warns(FutureWarning, match=r"Adding plugins by class is deprecated"):
-        await c.register_worker_plugin(MyPlugin, data=789, name="new")
-    assert worker._my_plugin_data == 789
-
-
-@gen_cluster(nthreads=[], client=True)
-async def test_plugin_class_warns(c, s):
-    class EmptyPlugin:
-        pass
-
-    with pytest.warns(FutureWarning, match=r"Adding plugins by class is deprecated"):
-        await c.register_worker_plugin(EmptyPlugin)
-
-
-@gen_cluster(nthreads=[], client=True)
-async def test_unused_kwargs_throws(c, s):
-    class EmptyPlugin:
-        pass
-
-    with pytest.raises(
-        ValueError, match=r"kwargs provided but plugin is already an instance"
-    ):
-        await c.register_worker_plugin(EmptyPlugin(), data=789)
 
 
 @gen_cluster(client=True, worker_kwargs={"plugins": [MyPlugin(5)]})
@@ -264,11 +230,13 @@ async def test_assert_no_warning_no_overload(c, s, a):
     class Dummy(WorkerPlugin):
         pass
 
-    with pytest.warns(None):
+    with warnings.catch_warnings(record=True) as record:
         await c.register_worker_plugin(Dummy())
         assert await c.submit(inc, 1, key="x") == 2
         while "x" in a.tasks:
             await asyncio.sleep(0.01)
+
+    assert not record
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)

@@ -13,11 +13,11 @@ from typing import ClassVar
 import dask
 from dask.utils import parse_timedelta
 
-from ..metrics import time
-from ..protocol import pickle
-from ..protocol.compression import get_default_compression
-from . import registry
-from .addressing import parse_address
+from distributed.comm import registry
+from distributed.comm.addressing import parse_address
+from distributed.metrics import time
+from distributed.protocol import pickle
+from distributed.protocol.compression import get_default_compression
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +202,7 @@ class Listener(ABC):
         await self.start()
         return self
 
-    async def __aexit__(self, *exc):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         future = self.stop()
         if inspect.isawaitable(future):
             await future

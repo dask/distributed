@@ -5,8 +5,8 @@ from collections import defaultdict
 
 from dask.utils import parse_timedelta, stringify
 
-from .client import Client, Future
-from .worker import get_client, get_worker
+from distributed.client import Client, Future
+from distributed.worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +42,7 @@ class QueueExtension:
             {"queue-future-release": self.future_release, "queue_release": self.release}
         )
 
-        self.scheduler.extensions["queues"] = self
-
-    def create(self, comm=None, name=None, client=None, maxsize=0):
+    def create(self, name=None, client=None, maxsize=0):
         logger.debug(f"Queue name: {name}")
         if name not in self.queues:
             self.queues[name] = asyncio.Queue(maxsize=maxsize)
@@ -52,7 +50,7 @@ class QueueExtension:
         else:
             self.client_refcount[name] += 1
 
-    def release(self, comm=None, name=None, client=None):
+    def release(self, name=None, client=None):
         if name not in self.queues:
             return
 
@@ -65,9 +63,7 @@ class QueueExtension:
             if keys:
                 self.scheduler.client_releases_keys(keys=keys, client="queue-%s" % name)
 
-    async def put(
-        self, comm=None, name=None, key=None, data=None, client=None, timeout=None
-    ):
+    async def put(self, name=None, key=None, data=None, client=None, timeout=None):
         if key is not None:
             record = {"type": "Future", "value": key}
             self.future_refcount[name, key] += 1
@@ -82,7 +78,7 @@ class QueueExtension:
             self.scheduler.client_releases_keys(keys=[key], client="queue-%s" % name)
             del self.future_refcount[name, key]
 
-    async def get(self, comm=None, name=None, client=None, timeout=None, batch=False):
+    async def get(self, name=None, client=None, timeout=None, batch=False):
         def process(record):
             """Add task status if known"""
             if record["type"] == "Future":
@@ -122,7 +118,7 @@ class QueueExtension:
             record = process(record)
             return record
 
-    def qsize(self, comm=None, name=None, client=None):
+    def qsize(self, name=None, client=None):
         return self.queues[name].qsize()
 
 

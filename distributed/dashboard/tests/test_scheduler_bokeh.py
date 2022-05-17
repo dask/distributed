@@ -23,11 +23,14 @@ from distributed.dashboard.components.scheduler import (
     ClusterMemory,
     ComputePerKey,
     CurrentLoad,
+    EventLoop,
     Events,
+    Hardware,
     MemoryByKey,
     Occupancy,
     ProcessingHistogram,
     ProfileServer,
+    Shuffling,
     StealingEvents,
     StealingTimeSeries,
     SystemMonitor,
@@ -75,7 +78,13 @@ async def test_simple(c, s, a, b):
 
 @gen_cluster(client=True, worker_kwargs={"dashboard": True})
 async def test_basic(c, s, a, b):
-    for component in [TaskStream, SystemMonitor, Occupancy, StealingTimeSeries]:
+    for component in [
+        TaskStream,
+        SystemMonitor,
+        Occupancy,
+        StealingTimeSeries,
+        EventLoop,
+    ]:
         ss = component(s)
 
         ss.update()
@@ -951,6 +960,12 @@ async def test_aggregate_action(c, s, a, b):
     assert ("transfer") in mbk.action_source.data["names"]
     assert ("compute") in mbk.action_source.data["names"]
 
+    [title_line] = [
+        line for line in response.body.decode().split("\n") if "<title>" in line
+    ]
+    assert "AggregateAction" in title_line
+    assert "Bokeh" not in title_line
+
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 async def test_compute_per_key(c, s, a, b):
@@ -991,3 +1006,26 @@ async def test_prefix_bokeh(s, a, b):
     bokeh_app = s.http_application.applications[0]
     assert isinstance(bokeh_app, BokehTornado)
     assert bokeh_app.prefix == f"/{prefix}"
+
+
+@gen_cluster(client=True, worker_kwargs={"dashboard": True})
+async def test_shuffling(c, s, a, b):
+    dd = pytest.importorskip("dask.dataframe")
+    ss = Shuffling(s)
+
+    df = dask.datasets.timeseries()
+    df2 = dd.shuffle.shuffle(df, "x", shuffle="p2p").persist()
+
+    start = time()
+    while not ss.source.data["disk_read"]:
+        ss.update()
+        await asyncio.sleep(0.1)
+        assert time() < start + 5
+
+
+@gen_cluster(client=True, nthreads=[], scheduler_kwargs={"dashboard": True})
+async def test_hardware(c, s):
+    plot = Hardware(s)
+    while not plot.disk_data:
+        await asyncio.sleep(0.1)
+        plot.update()

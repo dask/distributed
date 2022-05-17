@@ -3,6 +3,7 @@ import os
 import pathlib
 import signal
 import socket
+import sys
 import threading
 from contextlib import contextmanager
 from time import sleep
@@ -21,7 +22,7 @@ from distributed.utils import mp_context
 from distributed.utils_test import (
     _LockedCommPool,
     _UnhashableCallable,
-    assert_worker_story,
+    assert_story,
     check_process_leak,
     cluster,
     dump_cluster_state,
@@ -29,8 +30,10 @@ from distributed.utils_test import (
     gen_test,
     inc,
     new_config,
+    raises_with_cause,
     tls_only_security,
 )
+from distributed.worker import InvalidTransition
 
 
 def test_bare_cluster(loop):
@@ -38,12 +41,15 @@ def test_bare_cluster(loop):
         pass
 
 
-def test_cluster(loop):
+def test_cluster(cleanup):
+    async def identity():
+        async with rpc(s["address"]) as scheduler_rpc:
+            return await scheduler_rpc.identity()
+
     with cluster() as (s, [a, b]):
-        with rpc(s["address"]) as s:
-            ident = loop.run_sync(s.identity)
-            assert ident["type"] == "Scheduler"
-            assert len(ident["workers"]) == 2
+        ident = asyncio.run(identity())
+        assert ident["type"] == "Scheduler"
+        assert len(ident["workers"]) == 2
 
 
 @gen_cluster(client=True)
@@ -52,7 +58,7 @@ async def test_gen_cluster(c, s, a, b):
     assert isinstance(s, Scheduler)
     for w in [a, b]:
         assert isinstance(w, Worker)
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+    assert set(s.workers) == {w.address for w in [a, b]}
     assert await c.submit(lambda: 123) == 123
 
 
@@ -132,7 +138,7 @@ async def test_gen_cluster_without_client(s, a, b):
     assert isinstance(s, Scheduler)
     for w in [a, b]:
         assert isinstance(w, Worker)
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+    assert set(s.workers) == {w.address for w in [a, b]}
 
     async with Client(s.address, asynchronous=True) as c:
         future = c.submit(lambda x: x + 1, 1)
@@ -153,7 +159,7 @@ async def test_gen_cluster_tls(e, s, a, b):
     for w in [a, b]:
         assert isinstance(w, Worker)
         assert w.address.startswith("tls://")
-    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+    assert set(s.workers) == {w.address for w in [a, b]}
 
 
 @pytest.mark.xfail(
@@ -202,9 +208,8 @@ async def test_gen_test_double_parametrized(foo, bar):
 
 
 @gen_test()
-async def test_gen_test_pytest_fixture(tmp_path, c):
+async def test_gen_test_pytest_fixture(tmp_path):
     assert isinstance(tmp_path, pathlib.Path)
-    assert isinstance(c, Client)
 
 
 @contextmanager
@@ -264,8 +269,8 @@ def test_tls_cluster(tls_client):
     assert tls_client.security
 
 
-@pytest.mark.asyncio
-async def test_tls_scheduler(security, cleanup):
+@gen_test()
+async def test_tls_scheduler(security):
     async with Scheduler(
         security=security, host="localhost", dashboard_address=":0"
     ) as s:
@@ -290,88 +295,87 @@ class MyServer(Server):
         return "pong"
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_locked_comm_drop_in_replacement(loop):
 
-    a = await MyServer({})
-    await a.listen(0)
+    async with MyServer({}) as a, await MyServer({}) as b:
+        await a.listen(0)
 
-    read_event = asyncio.Event()
-    read_event.set()
-    read_queue = asyncio.Queue()
-    original_pool = a.rpc
-    a.rpc = _LockedCommPool(original_pool, read_event=read_event, read_queue=read_queue)
+        read_event = asyncio.Event()
+        read_event.set()
+        read_queue = asyncio.Queue()
+        original_pool = a.rpc
+        a.rpc = _LockedCommPool(
+            original_pool, read_event=read_event, read_queue=read_queue
+        )
 
-    b = await MyServer({})
-    await b.listen(0)
-    # Event is set, the pool works like an ordinary pool
-    res = await a.rpc(b.address).ping()
-    assert await read_queue.get() == (b.address, "pong")
-    assert res == "pong"
-    assert b.counter == 1
+        await b.listen(0)
+        # Event is set, the pool works like an ordinary pool
+        res = await a.rpc(b.address).ping()
+        assert await read_queue.get() == (b.address, "pong")
+        assert res == "pong"
+        assert b.counter == 1
 
-    read_event.clear()
-    # Can also be used without a lock to intercept network traffic
-    a.rpc = _LockedCommPool(original_pool, read_queue=read_queue)
-    a.rpc.remove(b.address)
-    res = await a.rpc(b.address).ping()
-    assert await read_queue.get() == (b.address, "pong")
+        read_event.clear()
+        # Can also be used without a lock to intercept network traffic
+        a.rpc = _LockedCommPool(original_pool, read_queue=read_queue)
+        a.rpc.remove(b.address)
+        res = await a.rpc(b.address).ping()
+        assert await read_queue.get() == (b.address, "pong")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_locked_comm_intercept_read(loop):
 
-    a = await MyServer({})
-    await a.listen(0)
-    b = await MyServer({})
-    await b.listen(0)
+    async with MyServer({}) as a, MyServer({}) as b:
+        await a.listen(0)
+        await b.listen(0)
 
-    read_event = asyncio.Event()
-    read_queue = asyncio.Queue()
-    a.rpc = _LockedCommPool(a.rpc, read_event=read_event, read_queue=read_queue)
+        read_event = asyncio.Event()
+        read_queue = asyncio.Queue()
+        a.rpc = _LockedCommPool(a.rpc, read_event=read_event, read_queue=read_queue)
 
-    async def ping_pong():
-        return await a.rpc(b.address).ping()
+        async def ping_pong():
+            return await a.rpc(b.address).ping()
 
-    fut = asyncio.create_task(ping_pong())
+        fut = asyncio.create_task(ping_pong())
 
-    # We didn't block the write but merely the read. The remove should have
-    # received the message and responded already
-    while not b.counter:
-        await asyncio.sleep(0.001)
+        # We didn't block the write but merely the read. The remove should have
+        # received the message and responded already
+        while not b.counter:
+            await asyncio.sleep(0.001)
 
-    with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(asyncio.shield(fut), 0.01)
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.shield(fut), 0.01)
 
-    assert await read_queue.get() == (b.address, "pong")
-    read_event.set()
-    assert await fut == "pong"
+        assert await read_queue.get() == (b.address, "pong")
+        read_event.set()
+        assert await fut == "pong"
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_locked_comm_intercept_write(loop):
 
-    a = await MyServer({})
-    await a.listen(0)
-    b = await MyServer({})
-    await b.listen(0)
+    async with MyServer({}) as a, MyServer({}) as b:
+        await a.listen(0)
+        await b.listen(0)
 
-    write_event = asyncio.Event()
-    write_queue = asyncio.Queue()
-    a.rpc = _LockedCommPool(a.rpc, write_event=write_event, write_queue=write_queue)
+        write_event = asyncio.Event()
+        write_queue = asyncio.Queue()
+        a.rpc = _LockedCommPool(a.rpc, write_event=write_event, write_queue=write_queue)
 
-    async def ping_pong():
-        return await a.rpc(b.address).ping()
+        async def ping_pong():
+            return await a.rpc(b.address).ping()
 
-    fut = asyncio.create_task(ping_pong())
+        fut = asyncio.create_task(ping_pong())
 
-    with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(asyncio.shield(fut), 0.01)
-    # Write was blocked. The remote hasn't received the message, yet
-    assert b.counter == 0
-    assert await write_queue.get() == (b.address, {"op": "ping", "reply": True})
-    write_event.set()
-    assert await fut == "pong"
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.shield(fut), 0.01)
+        # Write was blocked. The remote hasn't received the message, yet
+        assert b.counter == 0
+        assert await write_queue.get() == (b.address, {"op": "ping", "reply": True})
+        write_event.set()
+        assert await fut == "pong"
 
 
 @pytest.mark.slow()
@@ -408,7 +412,7 @@ def test_dump_cluster_state_timeout(tmp_path):
     assert "workers" in state
 
 
-def test_assert_worker_story():
+def test_assert_story():
     now = time()
     story = [
         ("foo", "id1", now - 600),
@@ -416,58 +420,81 @@ def test_assert_worker_story():
         ("baz", {1: 2}, "id2", now),
     ]
     # strict=False
-    assert_worker_story(story, [("foo",), ("bar",), ("baz", {1: 2})])
-    assert_worker_story(story, [])
-    assert_worker_story(story, [("foo",)])
-    assert_worker_story(story, [("foo",), ("bar",)])
-    assert_worker_story(story, [("baz", lambda d: d[1] == 2)])
+    assert_story(story, [("foo",), ("bar",), ("baz", {1: 2})])
+    assert_story(story, [])
+    assert_story(story, [("foo",)])
+    assert_story(story, [("foo",), ("bar",)])
+    assert_story(story, [("baz", lambda d: d[1] == 2)])
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("foo", "nomatch")])
+        assert_story(story, [("foo", "nomatch")])
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("baz",)])
+        assert_story(story, [("baz",)])
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("baz", {1: 3})])
+        assert_story(story, [("baz", {1: 3})])
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("foo",), ("bar",), ("baz", "extra"), ("+1",)])
+        assert_story(story, [("foo",), ("bar",), ("baz", "extra"), ("+1",)])
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("baz", lambda d: d[1] == 3)])
+        assert_story(story, [("baz", lambda d: d[1] == 3)])
     with pytest.raises(KeyError):  # Faulty lambda
-        assert_worker_story(story, [("baz", lambda d: d[2] == 1)])
-    assert_worker_story([], [])
-    assert_worker_story([("foo", "id1", now)], [("foo",)])
+        assert_story(story, [("baz", lambda d: d[2] == 1)])
+    assert_story([], [])
+    assert_story([("foo", "id1", now)], [("foo",)])
     with pytest.raises(AssertionError):
-        assert_worker_story([], [("foo",)])
+        assert_story([], [("foo",)])
 
     # strict=True
-    assert_worker_story([], [], strict=True)
-    assert_worker_story([("foo", "id1", now)], [("foo",)])
-    assert_worker_story(story, [("foo",), ("bar",), ("baz", {1: 2})], strict=True)
+    assert_story([], [], strict=True)
+    assert_story([("foo", "id1", now)], [("foo",)])
+    assert_story(story, [("foo",), ("bar",), ("baz", {1: 2})], strict=True)
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("foo",), ("bar",)], strict=True)
+        assert_story(story, [("foo",), ("bar",)], strict=True)
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [("foo",), ("baz", {1: 2})], strict=True)
+        assert_story(story, [("foo",), ("baz", {1: 2})], strict=True)
     with pytest.raises(AssertionError):
-        assert_worker_story(story, [], strict=True)
+        assert_story(story, [], strict=True)
 
 
 @pytest.mark.parametrize(
-    "story",
+    "story_factory",
     [
-        [()],  # Missing payload, stimulus_id, ts
-        [("foo",)],  # Missing (stimulus_id, ts)
-        [("foo", "bar")],  # Missing ts
-        [("foo", "bar", "baz")],  # ts is not a float
-        [("foo", "bar", time() + 3600)],  # ts is in the future
-        [("foo", "bar", time() - 7200)],  # ts is too old
-        [("foo", 123, time())],  # stimulus_id is not a string
-        [("foo", "", time())],  # stimulus_id is an empty string
-        [("", time())],  # no payload
-        [("foo", "id", time()), ("foo", "id", time() - 10)],  # timestamps out of order
+        pytest.param(lambda: [()], id="Missing payload, stimulus_id, ts"),
+        pytest.param(lambda: [("foo",)], id="Missing (stimulus_id, ts)"),
+        pytest.param(lambda: [("foo", "bar")], id="Missing ts"),
+        pytest.param(lambda: [("foo", "bar", "baz")], id="ts is not a float"),
+        pytest.param(lambda: [("foo", "bar", time() + 3600)], id="ts is in the future"),
+        pytest.param(lambda: [("foo", "bar", time() - 7200)], id="ts is too old"),
+        pytest.param(lambda: [("foo", 123, time())], id="stimulus_id is not a str"),
+        pytest.param(lambda: [("foo", "", time())], id="stimulus_id is an empty str"),
+        pytest.param(lambda: [("", time())], id="no payload"),
+        pytest.param(
+            lambda: [("foo", "id", time()), ("foo", "id", time() - 10)],
+            id="timestamps out of order",
+        ),
     ],
 )
-def test_assert_worker_story_malformed_story(story):
+def test_assert_story_malformed_story(story_factory):
+    # defer the calls to time() to when the test runs rather than collection
+    story = story_factory()
     with pytest.raises(AssertionError, match="Malformed story event"):
-        assert_worker_story(story, [])
+        assert_story(story, [])
+
+
+@pytest.mark.parametrize("strict", [True, False])
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_assert_story_identity(c, s, a, strict):
+    f1 = c.submit(inc, 1, key="f1")
+    f2 = c.submit(inc, f1, key="f2")
+    assert await f2 == 3
+    scheduler_story = s.story(f2.key)
+    assert scheduler_story
+    worker_story = a.story(f2.key)
+    assert worker_story
+    assert_story(worker_story, worker_story, strict=strict)
+    assert_story(scheduler_story, scheduler_story, strict=strict)
+    with pytest.raises(AssertionError):
+        assert_story(scheduler_story, worker_story, strict=strict)
+    with pytest.raises(AssertionError):
+        assert_story(worker_story, scheduler_story, strict=strict)
 
 
 @gen_cluster()
@@ -537,9 +564,16 @@ async def test_dump_cluster_unresponsive_remote_worker(c, s, a, b, tmpdir):
     clog_fut.cancel()
 
 
+# Note: can't use WINDOWS constant as it upsets mypy
+if sys.platform == "win32":
+    TERM_SIGNALS = (signal.SIGTERM, signal.SIGINT)
+else:
+    TERM_SIGNALS = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
+
+
 def garbage_process(barrier, ignore_sigterm: bool = False, t: float = 3600) -> None:
     if ignore_sigterm:
-        for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        for signum in TERM_SIGNALS:
             signal.signal(signum, signal.SIG_IGN)
     barrier.wait()
     sleep(t)
@@ -590,3 +624,122 @@ def test_check_process_leak_post_cleanup(ignore_sigterm):
         p.start()
         barrier.wait()
     assert not p.is_alive()
+
+
+@pytest.mark.parametrize("nanny", [True, False])
+def test_start_failure_worker(nanny):
+    if nanny:
+        ctx = raises_with_cause(RuntimeError, None, TypeError, None)
+    else:
+        ctx = pytest.raises(TypeError)
+    with ctx:
+        with cluster(nanny=nanny, worker_kwargs={"foo": "bar"}):
+            return
+
+
+def test_start_failure_scheduler():
+    with pytest.raises(TypeError):
+        with cluster(scheduler_kwargs={"foo": "bar"}):
+            return
+
+
+def test_invalid_transitions(capsys):
+    @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+    async def test_log_invalid_transitions(c, s, a):
+        x = c.submit(inc, 1, key="task-name")
+        y = c.submit(inc, x)
+        xkey = x.key
+        del x
+        await y
+        while a.tasks[xkey].state != "released":
+            await asyncio.sleep(0.01)
+        ts = a.tasks[xkey]
+        with pytest.raises(InvalidTransition):
+            a.transition(ts, "foo", stimulus_id="bar")
+
+        while not s.events["invalid-worker-transition"]:
+            await asyncio.sleep(0.01)
+
+    with pytest.raises(Exception) as info:
+        test_log_invalid_transitions()
+
+    assert "invalid" in str(info).lower()
+    assert "worker" in str(info).lower()
+    assert "transition" in str(info).lower()
+
+    out, err = capsys.readouterr()
+
+    assert "foo" in out + err
+    assert "task-name" in out + err
+
+
+def test_invalid_worker_states(capsys):
+    @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+    async def test_log_invalid_worker_task_states(c, s, a):
+        x = c.submit(inc, 1, key="task-name")
+        await x
+        a.tasks[x.key].state = "released"
+        with pytest.raises(Exception):
+            a.validate_task(a.tasks[x.key])
+
+        while not s.events["invalid-worker-task-states"]:
+            await asyncio.sleep(0.01)
+
+    with pytest.raises(Exception) as info:
+        test_log_invalid_worker_task_states()
+
+    out, err = capsys.readouterr()
+
+    assert "released" in out + err
+    assert "task-name" in out + err
+
+
+def test_raises_with_cause():
+    with raises_with_cause(RuntimeError, "exception", ValueError, "cause"):
+        raise RuntimeError("exception") from ValueError("cause")
+
+    with raises_with_cause(RuntimeError, "exception", ValueError, "tial mat"):
+        raise RuntimeError("exception") from ValueError("partial match")
+
+    with raises_with_cause(RuntimeError, None, ValueError, "cause"):
+        raise RuntimeError("exception") from ValueError("cause")
+
+    with raises_with_cause(RuntimeError, "exception", ValueError, None):
+        raise RuntimeError("exception") from ValueError("bar")
+
+    with raises_with_cause(RuntimeError, None, ValueError, None):
+        raise RuntimeError("foo") from ValueError("bar")
+
+    # we're trying to stick to pytest semantics
+    # If the exception types don't match, raise the original exception
+    # If the text doesn't match, raise an assert
+
+    with pytest.raises(RuntimeError):
+        with raises_with_cause(RuntimeError, "exception", ValueError, "cause"):
+            raise RuntimeError("exception") from OSError("cause")
+
+    with pytest.raises(ValueError):
+        with raises_with_cause(RuntimeError, "exception", ValueError, "cause"):
+            raise ValueError("exception") from ValueError("cause")
+
+    with pytest.raises(AssertionError):
+        with raises_with_cause(RuntimeError, "exception", ValueError, "foo"):
+            raise RuntimeError("exception") from ValueError("cause")
+
+    with pytest.raises(AssertionError):
+        with raises_with_cause(RuntimeError, "foo", ValueError, "cause"):
+            raise RuntimeError("exception") from ValueError("cause")
+
+
+def test_worker_fail_hard(capsys):
+    @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+    async def test_fail_hard(c, s, a):
+        with pytest.raises(Exception):
+            await a.gather_dep(
+                worker="abcd", to_gather=["x"], total_nbytes=0, stimulus_id="foo"
+            )
+
+    with pytest.raises(Exception) as info:
+        test_fail_hard()
+
+    assert "abcd" in str(info.value)

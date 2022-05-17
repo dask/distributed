@@ -20,15 +20,19 @@ import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
 from collections import OrderedDict, UserDict, deque
-from collections.abc import Container, KeysView, ValuesView
+from collections.abc import Callable, Collection, Container, KeysView, ValuesView
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
+from functools import wraps
 from hashlib import md5
 from importlib.util import cache_from_source
+from pickle import PickleBuffer
 from time import sleep
+from types import ModuleType
+from typing import TYPE_CHECKING
 from typing import Any as AnyType
-from typing import ClassVar
+from typing import ClassVar, TypeVar, overload
 
 import click
 import tblib.pickling_support
@@ -44,11 +48,12 @@ from tornado.ioloop import IOLoop
 
 import dask
 from dask import istask
+from dask.utils import ensure_bytes as _ensure_bytes
 from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
-from .compatibility import WINDOWS
-from .metrics import time
+from distributed.compatibility import WINDOWS
+from distributed.metrics import time
 
 try:
     from dask.context import thread_state
@@ -64,6 +69,13 @@ else:
 logger = _logger = logging.getLogger(__name__)
 
 
+if TYPE_CHECKING:
+    # TODO: import from typing (requires Python >=3.10)
+    from typing_extensions import ParamSpec
+
+    P = ParamSpec("P")
+    T = TypeVar("T")
+
 no_default = "__no_default__"
 
 
@@ -73,10 +85,8 @@ def _initialize_mp_context():
     if method == "forkserver":
         # Makes the test suite much faster
         preload = ["distributed"]
-        if "pkg_resources" in sys.modules:
-            preload.append("pkg_resources")
 
-        from .versions import optional_packages, required_packages
+        from distributed.versions import optional_packages, required_packages
 
         for pkg, _ in required_packages + optional_packages:
             try:
@@ -686,24 +696,102 @@ def key_split_group(x) -> str:
         return "Other"
 
 
-@contextmanager
-def log_errors(pdb=False):
-    from .comm import CommClosedError
+@overload
+def log_errors(func: Callable[P, T], /) -> Callable[P, T]:
+    ...
 
-    try:
-        yield
-    except (CommClosedError, gen.Return):
-        raise
-    except Exception as e:
+
+@overload
+def log_errors(*, pdb: bool = False, unroll_stack: int = 1) -> _LogErrors:
+    ...
+
+
+def log_errors(func=None, /, *, pdb=False, unroll_stack=1):
+    """Log any errors and then reraise them.
+
+    This can be used:
+
+    - As a context manager::
+
+        with log_errors(...):
+            ...
+
+    - As a bare function decorator::
+
+        @log_errors
+        def func(...):
+            ...
+
+    - As a function decorator with parameters::
+
+        @log_errors(...)
+        def func(...):
+            ...
+
+    Parameters
+    ----------
+    pdb: bool, optional
+        Set to True to break into the debugger in case of exception
+    unroll_stack: int, optional
+        Number of levels of stack to unroll when determining the module's name for the
+        purpose of logging. Normally you should omit this. Set to 2 if you are writing a
+        helper function, context manager, or decorator.
+    """
+    le = _LogErrors(pdb=pdb, unroll_stack=unroll_stack)
+    return le(func) if func else le
+
+
+class _LogErrors:
+    __slots__ = ("pdb", "unroll_stack")
+
+    pdb: bool
+    unroll_stack: int
+
+    def __init__(self, pdb: bool, unroll_stack: int):
+        self.pdb = pdb
+        self.unroll_stack = unroll_stack
+
+    def __call__(self, func: Callable[P, T], /) -> Callable[P, T]:
+        self.unroll_stack += 1
+
+        if inspect.iscoroutinefunction(func):
+
+            async def wrapper(*args, **kwargs):
+                with self:
+                    return await func(*args, **kwargs)
+
+        else:
+
+            def wrapper(*args, **kwargs):
+                with self:
+                    return func(*args, **kwargs)
+
+        return wraps(func)(wrapper)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        from distributed.comm import CommClosedError
+
+        if not exc_type or issubclass(exc_type, (CommClosedError, gen.Return)):
+            return
+
+        stack = inspect.stack()
+        frame = stack[self.unroll_stack]
+        mod = inspect.getmodule(frame[0])
+        modname = mod.__name__
+
         try:
-            logger.exception(e)
-        except TypeError:  # logger becomes None during process cleanup
-            pass
-        if pdb:
-            import pdb
+            logger = logging.getLogger(modname)
+            logger.exception(exc_value)
+        except Exception:  # Interpreter teardown
+            pass  # pragma: nocover
 
-            pdb.set_trace()
-        raise
+        if self.pdb:
+            import pdb  # pragma: nocover
+
+            pdb.set_trace()  # pragma: nocover
 
 
 def silence_logging(level, root="distributed"):
@@ -914,17 +1002,39 @@ def ensure_bytes(s):
     >>> ensure_bytes(b'123')
     b'123'
     """
-    if isinstance(s, bytes):
-        return s
-    elif hasattr(s, "encode"):
-        return s.encode()
+    warnings.warn(
+        "`distributed.utils.ensure_bytes` is deprecated. "
+        "Please switch to `dask.utils.ensure_bytes`. "
+        "This will be removed in `2022.6.0`.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _ensure_bytes(s)
+
+
+def ensure_memoryview(obj):
+    """Ensure `obj` is a 1-D contiguous `uint8` `memoryview`"""
+    mv: memoryview
+    if type(obj) is memoryview:
+        mv = obj
     else:
-        try:
-            return bytes(s)
-        except Exception as e:
-            raise TypeError(
-                "Object %s is neither a bytes object nor has an encode method" % s
-            ) from e
+        mv = memoryview(obj)
+
+    if not mv.nbytes:
+        # Drop `obj` reference to permit freeing underlying data
+        return memoryview(bytearray())
+    elif not mv.contiguous:
+        # Copy to contiguous form of expected shape & type
+        return memoryview(bytearray(mv))
+    elif mv.ndim != 1 or mv.format != "B":
+        # Perform zero-copy reshape & cast
+        # Use `PickleBuffer.raw()` as `memoryview.cast()` fails with F-order
+        # Pass `mv.obj` so the created `memoryview` has that as its `obj`
+        # xref: https://github.com/python/cpython/issues/91484
+        return PickleBuffer(mv.obj).raw()
+    else:
+        # Return `memoryview` as it already meets requirements
+        return mv
 
 
 def open_port(host=""):
@@ -942,12 +1052,12 @@ def open_port(host=""):
     return port
 
 
-def import_file(path):
+def import_file(path: str):
     """Loads modules for a file (.py, .zip, .egg)"""
     directory, filename = os.path.split(path)
     name, ext = os.path.splitext(filename)
-    names_to_import = []
-    tmp_python_path = None
+    names_to_import: list[str] = []
+    tmp_python_path: str | None = None
 
     if ext in (".py",):  # , '.pyc'):
         if directory not in sys.path:
@@ -963,7 +1073,7 @@ def import_file(path):
         names = (mod_info.name for mod_info in pkgutil.iter_modules([path]))
         names_to_import.extend(names)
 
-    loaded = []
+    loaded: list[ModuleType] = []
     if not names_to_import:
         logger.warning("Found nothing to import from %s", filename)
     else:
@@ -1125,21 +1235,8 @@ def color_of(x, palette=palette):
     return palette[n % len(palette)]
 
 
-def _iscoroutinefunction(f):
-    return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
-
-
-@functools.lru_cache(None)
-def _iscoroutinefunction_cached(f):
-    return _iscoroutinefunction(f)
-
-
 def iscoroutinefunction(f):
-    # Attempt to use lru_cache version and fall back to non-cached version if needed
-    try:
-        return _iscoroutinefunction_cached(f)
-    except TypeError:  # unhashable type
-        return _iscoroutinefunction(f)
+    return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
 
 
 @contextmanager
@@ -1162,15 +1259,15 @@ def format_dashboard_link(host, port):
     )
 
 
-def parse_ports(port):
+def parse_ports(port: int | str | Collection[int] | None) -> list[int] | list[None]:
     """Parse input port information into list of ports
 
     Parameters
     ----------
-    port : int, str, None
+    port : int, str, list[int], None
         Input port or ports. Can be an integer like 8787, a string for a
-        single port like "8787", a string for a sequential range of ports like
-        "8000:8200", or None.
+        single port like "8787", string for a sequential range of ports like
+        "8000:8200", a collection of ints, or None.
 
     Returns
     -------
@@ -1202,12 +1299,7 @@ def parse_ports(port):
     [None]
 
     """
-    if isinstance(port, str) and ":" not in port:
-        port = int(port)
-
-    if isinstance(port, (int, type(None))):
-        ports = [port]
-    else:
+    if isinstance(port, str) and ":" in port:
         port_start, port_stop = map(int, port.split(":"))
         if port_stop <= port_start:
             raise ValueError(
@@ -1215,9 +1307,20 @@ def parse_ports(port):
                 "port_stop must be greater than port_start, but got "
                 f"{port_start=} and {port_stop=}"
             )
-        ports = list(range(port_start, port_stop + 1))
+        return list(range(port_start, port_stop + 1))
 
-    return ports
+    if isinstance(port, str):
+        return [int(port)]
+
+    if isinstance(port, int) or port is None:
+        return [port]  # type: ignore
+
+    if isinstance(port, Collection):
+        if not all(isinstance(p, int) for p in port):
+            raise TypeError(port)
+        return list(port)  # type: ignore
+
+    raise TypeError(port)
 
 
 is_coroutine_function = iscoroutinefunction
@@ -1320,7 +1423,7 @@ def import_term(name: str):
 
 
 async def offload(fn, *args, **kwargs):
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     # Retain context vars while deserializing; see https://bugs.python.org/issue34014
     context = contextvars.copy_context()
     return await loop.run_in_executor(
@@ -1332,13 +1435,13 @@ class EmptyContext:
     def __enter__(self):
         pass
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_value, traceback):
         pass
 
     async def __aenter__(self):
         pass
 
-    async def __aexit__(self, *args):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         pass
 
 
@@ -1616,3 +1719,16 @@ def recursive_to_dict(
         return repr(obj)
     finally:
         tok.var.reset(tok)
+
+
+def is_python_shutting_down() -> bool:
+    """Is the interpreter shutting down now?
+
+    This is a variant of ``sys.is_finalizing`` which can return True inside the ``__del__``
+    method of classes defined inside the distributed package.
+    """
+    # This import must remain local for the global variable to be
+    # properly evaluated
+    from distributed import _python_shutting_down
+
+    return _python_shutting_down

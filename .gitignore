@@ -32,5 +32,9 @@ tags
 .venv/
 .mypy_cache/
 
+reports/
+test_report.*
+test_short_report.html
+
 # Test failures will dump the cluster state in here
 test_cluster_dump/

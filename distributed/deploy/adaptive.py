@@ -6,9 +6,9 @@ from tornado.ioloop import IOLoop
 import dask.config
 from dask.utils import parse_timedelta
 
-from ..protocol import pickle
-from ..utils import log_errors
-from .adaptive_core import AdaptiveCore
+from distributed.deploy.adaptive_core import AdaptiveCore
+from distributed.protocol import pickle
+from distributed.utils import log_errors
 
 logger = logging.getLogger(__name__)
 
@@ -183,22 +183,23 @@ class Adaptive(AdaptiveCore):
             **self._workers_to_close_kwargs,
         )
 
+    @log_errors
     async def scale_down(self, workers):
         if not workers:
             return
-        with log_errors():
-            logger.info("Retiring workers %s", workers)
-            # Ask scheduler to cleanly retire workers
-            await self.scheduler.retire_workers(
-                names=workers,
-                remove=True,
-                close_workers=True,
-            )
 
-            # close workers more forcefully
-            f = self.cluster.scale_down(workers)
-            if isawaitable(f):
-                await f
+        logger.info("Retiring workers %s", workers)
+        # Ask scheduler to cleanly retire workers
+        await self.scheduler.retire_workers(
+            names=workers,
+            remove=True,
+            close_workers=True,
+        )
+
+        # close workers more forcefully
+        f = self.cluster.scale_down(workers)
+        if isawaitable(f):
+            await f
 
     async def scale_up(self, n):
         f = self.cluster.scale(n)
