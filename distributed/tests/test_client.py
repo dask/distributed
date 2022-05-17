@@ -3644,28 +3644,37 @@ async def test_reconnect():
     await c._close(fast=True)
 
 
-class UnhandledException(Exception):
+class UnhandledExceptions(Exception):
     pass
 
 
 @contextmanager
 def catch_unhandled_exceptions() -> Generator[None, None, None]:
     loop = asyncio.get_running_loop()
-    ctx: dict[str, Any] | None = None
+    ctxs: list[dict[str, Any]] = []
 
     old_handler = loop.get_exception_handler()
 
     @loop.set_exception_handler
     def _(loop: object, context: dict[str, Any]) -> None:
-        nonlocal ctx
-        ctx = context
+        ctxs.append(context)
 
     try:
         yield
     finally:
         loop.set_exception_handler(old_handler)
-    if ctx:
-        raise UnhandledException(ctx["message"]) from ctx.get("exception")
+    if ctxs:
+        msgs = []
+        for i, ctx in enumerate(ctxs, 1):
+            msgs.append(ctx["message"])
+            print(
+                f"------ Unhandled exception {i}/{len(ctxs)}: {ctx['message']!r} ------"
+            )
+            print(ctx)
+            if exc := ctx.get("exception"):
+                traceback.print_exception(type(exc), exc, exc.__traceback__)
+
+        raise UnhandledExceptions(", ".join(msgs))
 
 
 @gen_cluster(client=True, nthreads=[], client_kwargs={"timeout": 0.5})
