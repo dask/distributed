@@ -19,7 +19,7 @@ async def wait_for_signals(signals: list[signal.Signals]) -> None:
         # Restore old signal handler to allow for quicker exit
         # if the user sends the signal again.
         signal.signal(signum, old_handlers[signum])
-        logger.info("Received signal %d", signum)
+        logger.info("Received signal %s (%d)", signal.Signals(signum).name, signum)
         loop.call_soon_threadsafe(event.set)
 
     for sig in signals:

@@ -477,6 +477,6 @@ def test_signal_handling(loop, sig):
         logs = stdout.decode().lower()
         assert stderr is None
         assert scheduler.returncode == 0
-        assert f"signal {sig}" in logs
+        assert sig.name.lower() in logs
         assert "scheduler closing" in logs
         assert "end scheduler" in logs
