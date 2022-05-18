@@ -827,6 +827,7 @@ class Worker(ServerNode):
 
         # FIXME annotations: https://github.com/tornadoweb/tornado/issues/3117
         pc = PeriodicCallback(self.find_missing, 1000)  # type: ignore
+        self._find_missing_running = False
         self.periodic_callbacks["find-missing"] = pc
 
         self._address = contact_address
@@ -3432,9 +3433,10 @@ class Worker(ServerNode):
 
     @log_errors
     async def find_missing(self) -> None:
-        if not self._missing_dep_flight:
+        if self._find_missing_running or not self._missing_dep_flight:
             return
         try:
+            self._find_missing_running = True
             if self.validate:
                 for ts in self._missing_dep_flight:
                     assert not ts.who_has
@@ -3452,6 +3454,7 @@ class Worker(ServerNode):
             self.transitions(recommendations, stimulus_id=stimulus_id)
 
         finally:
+            self._find_missing_running = False
             # This is quite arbitrary but the heartbeat has scaling implemented
             self.periodic_callbacks[
                 "find-missing"
