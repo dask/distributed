@@ -666,8 +666,7 @@ class Server:
             await comm.close()
             assert comm.closed()
 
-    @gen.coroutine
-    def close(self):
+    async def close(self):
         for pc in self.periodic_callbacks.values():
             pc.stop()
 
@@ -676,23 +675,25 @@ class Server:
             for listener in self.listeners:
                 future = listener.stop()
                 if inspect.isawaitable(future):
-                    yield future
+                    await future
         for i in range(20):
             # If there are still handlers running at this point, give them a
             # second to finish gracefully themselves, otherwise...
             if any(self._comms.values()):
-                yield asyncio.sleep(0.05)
+                await asyncio.sleep(0.05)
             else:
                 break
-        yield self.rpc.close()
-        yield [comm.close() for comm in list(self._comms)]  # then forcefully close
+        await self.rpc.close()
+        await asyncio.gather(
+            [comm.close() for comm in self._comms.values()]
+        )  # then forcefully close
         for cb in self._ongoing_coroutines:
             cb.cancel()
         for i in range(10):
             if all(c.cancelled() for c in self._ongoing_coroutines):
                 break
             else:
-                yield asyncio.sleep(0.01)
+                await asyncio.sleep(0.01)
 
         self._event_finished.set()
 
