@@ -192,7 +192,7 @@ async def test_upload_file(c, s, a, b):
     assert result == 123
 
     await c.close()
-    await s.close(close_workers=True)
+    await s.close()
     assert not os.path.exists(os.path.join(a.local_directory, "foobar.py"))
 
 
@@ -2962,7 +2962,7 @@ async def test_missing_released_zombie_tasks(c, s, a, b):
     while key not in b.tasks or b.tasks[key].state != "fetch":
         await asyncio.sleep(0.01)
 
-    await a.close(report=False)
+    await a.close()
 
     del f1, f2
 

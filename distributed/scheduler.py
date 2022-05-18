@@ -3347,7 +3347,7 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle(f"dask-scheduler [{self.address}]")
         return self
 
-    async def close(self, fast=False, close_workers=False):
+    async def close(self):
         """Send cleanup signal to all coroutines then wait until finished
 
         See Also
@@ -3370,19 +3370,6 @@ class Scheduler(SchedulerState, ServerNode):
         for preload in self.preloads:
             await preload.teardown()
 
-        if close_workers:
-            await self.broadcast(msg={"op": "close_gracefully"}, nanny=True)
-            for worker in self.workers:
-                # Report would require the worker to unregister with the
-                # currently closing scheduler. This is not necessary and might
-                # delay shutdown of the worker unnecessarily
-                self.worker_send(worker, {"op": "close", "report": False})
-            for i in range(20):  # wait a second for send signals to clear
-                if self.workers:
-                    await asyncio.sleep(0.05)
-                else:
-                    break
-
         await asyncio.gather(
             *[plugin.close() for plugin in list(self.plugins.values())]
         )
@@ -3399,15 +3386,16 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Scheduler closing all comms")
 
         futures = []
-        for w, comm in list(self.stream_comms.items()):
+        for _, comm in list(self.stream_comms.items()):
             if not comm.closed():
-                comm.send({"op": "close", "report": False})
+                # This closes the Worker and ensures that if a Nanny is around,
+                # it is closed as well
+                comm.send({"op": "terminate"})
                 comm.send({"op": "close-stream"})
             with suppress(AttributeError):
                 futures.append(comm.close())
 
-        for future in futures:  # TODO: do all at once
-            await future
+        await asyncio.gather(*futures)
 
         for comm in self.client_comms.values():
             comm.abort()
@@ -3431,8 +3419,8 @@ class Scheduler(SchedulerState, ServerNode):
         """
         logger.info("Closing worker %s", worker)
         self.log_event(worker, {"action": "close-worker"})
-        # FIXME: This does not handle nannies
-        self.worker_send(worker, {"op": "close", "report": False})
+        ws = self.workers[worker]
+        self.worker_send(worker, {"op": "close", "nanny": bool(ws.nanny)})
         await self.remove_worker(address=worker, safe=safe, stimulus_id=stimulus_id)
 
     ###########
@@ -4183,7 +4171,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Remove worker %s", ws)
         if close:
             with suppress(AttributeError, CommClosedError):
-                self.stream_comms[address].send({"op": "close", "report": False})
+                self.stream_comms[address].send({"op": "close"})
 
         self.remove_resources(address)
 
@@ -4744,7 +4732,7 @@ class Scheduler(SchedulerState, ServerNode):
         ws.long_running.add(ts)
         self.check_idle_saturated(ws)
 
-    def handle_worker_status_change(
+    async def handle_worker_status_change(
         self, status: str, worker: str, stimulus_id: str
     ) -> None:
         ws = self.workers.get(worker)
@@ -4772,9 +4760,12 @@ class Scheduler(SchedulerState, ServerNode):
                 worker_msgs: dict = {}
                 self._transitions(recs, client_msgs, worker_msgs, stimulus_id)
                 self.send_all(client_msgs, worker_msgs)
-
-        else:
-            self.running.discard(ws)
+        elif ws.status == Status.paused:
+            self.running.remove(ws)
+        elif ws.status == Status.closing:
+            await self.remove_worker(
+                address=ws.address, stimulus_id=stimulus_id, close=False
+            )
 
     async def handle_worker(self, comm=None, worker=None, stimulus_id=None):
         """
@@ -5101,12 +5092,7 @@ class Scheduler(SchedulerState, ServerNode):
             ]
 
             resps = All(
-                [
-                    nanny.restart(
-                        close=True, timeout=timeout * 0.8, executor_wait=False
-                    )
-                    for nanny in nannies
-                ]
+                [nanny.restart(close=True, timeout=timeout * 0.8) for nanny in nannies]
             )
             try:
                 resps = await asyncio.wait_for(resps, timeout)
@@ -5999,6 +5985,7 @@ class Scheduler(SchedulerState, ServerNode):
                     prev_status = ws.status
                     ws.status = Status.closing_gracefully
                     self.running.discard(ws)
+                    # FIXME: We should send a message to the nanny first.
                     self.stream_comms[ws.address].send(
                         {
                             "op": "worker-status-change",

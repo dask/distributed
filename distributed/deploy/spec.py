@@ -411,7 +411,7 @@ class SpecCluster(Cluster):
             if self.scheduler_comm:
                 async with self._lock:
                     with suppress(OSError):
-                        await self.scheduler_comm.terminate(close_workers=True)
+                        await self.scheduler_comm.terminate()
                     await self.scheduler_comm.close_rpc()
             else:
                 logger.warning("Cluster closed without starting up")

@@ -3655,7 +3655,7 @@ async def test_reconnect():
         except CancelledError:
             break
 
-    await w.close(report=False)
+    await w.close()
     await c._close(fast=True)
 
 
