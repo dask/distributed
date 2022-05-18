@@ -571,7 +571,7 @@ async def test_Executor(c, s):
             assert e._threads  # had to do some work
 
 
-@gen_cluster(nthreads=[("127.0.0.1", 1)], worker_kwargs={"reconnect": False})
+@gen_cluster(nthreads=[("127.0.0.1", 1)])
 async def test_close_on_disconnect(s, w):
     await s.close()
 
