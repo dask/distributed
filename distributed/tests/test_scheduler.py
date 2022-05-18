@@ -1085,20 +1085,12 @@ async def test_worker_arrives_with_processing_data(c, s, a, b):
     w = Worker(s.address, nthreads=1)
     w.update_data(data={y.key: 3})
 
-    await w
+    with pytest.raises(RuntimeError):
+        await w
+    assert w.status == Status.failed
+    assert len(s.workers) == 2
 
-    start = time()
-
-    while len(s.workers) < 3:
-        await asyncio.sleep(0.01)
-
-    assert s.get_task_status(keys={x.key, y.key, z.key}) == {
-        x.key: "released",
-        y.key: "memory",
-        z.key: "processing",
-    }
-
-    await w.close()
+    await wait([yy, zz])
 
 
 @pytest.mark.slow
