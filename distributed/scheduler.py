@@ -4298,36 +4298,45 @@ class Scheduler(SchedulerState, ServerNode):
 
         return "OK"
 
-    def stimulus_cancel(self, comm, keys=None, client=None, force=False):
+    async def stimulus_cancel(self, keys, client, force=False):
         """Stop execution on a list of keys"""
         logger.info("Client %s requests to cancel %d keys", client, len(keys))
         if client:
             self.log_event(
                 client, {"action": "cancel", "count": len(keys), "force": force}
             )
-        for key in keys:
-            self.cancel_key(key, client, force=force)
 
-    def cancel_key(self, key, client, retries=5, force=False):
+        await asyncio.gather(
+            *[self._cancel_key(key, client, force=force) for key in keys]
+        )
+
+    async def _cancel_key(self, key, client, force=False):
         """Cancel a particular key and all dependents"""
         # TODO: this should be converted to use the transition mechanism
-        ts: TaskState = self.tasks.get(key)
+        ts: TaskState | None = self.tasks.get(key)
         dts: TaskState
         try:
             cs: ClientState = self.clients[client]
         except KeyError:
             return
-        if ts is None or not ts.who_wants:  # no key yet, lets try again in a moment
-            if retries:
-                self.loop.call_later(
-                    0.2, lambda: self.cancel_key(key, client, retries - 1)
-                )
-            return
+
+        # no key yet, lets try again in a moment
+        start = time()
+        while ts is None or not ts.who_wants:
+            await asyncio.sleep(0.1)
+            ts = self.tasks.get(key)
+            if time() - start >= 1:
+                return
+
         if force or ts.who_wants == {cs}:  # no one else wants this key
-            for dts in list(ts.dependents):
-                self.cancel_key(dts.key, client, force=force)
-        logger.info("Scheduler cancels key %s.  Force=%s", key, force)
-        self.report({"op": "cancelled-key", "key": key})
+            await asyncio.gather(
+                *[
+                    self._cancel_key(dts.key, client, force=force)
+                    for dts in ts.dependents
+                ]
+            )
+            logger.info("Scheduler cancels key %s.  Force=%s", key, force)
+            self.report({"op": "cancelled-key", "key": key})
         clients = list(ts.who_wants) if force else [cs]
         for cs in clients:
             self.client_releases_keys(

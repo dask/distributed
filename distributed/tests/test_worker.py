@@ -687,9 +687,9 @@ async def test_restrictions(c, s, a, b):
     await x
     ts = a.tasks[x.key]
     assert ts.resource_restrictions == {"A": 1}
-    await c._cancel(x)
+    await c.cancel([x])
 
-    while ts.state != "memory":
+    while ts.state == "executing":
         # Resource should be unavailable while task isn't finished
         assert a.available_resources == {"A": 0}
         await asyncio.sleep(0.01)
