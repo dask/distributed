@@ -14,7 +14,7 @@ from unittest import mock
 import cloudpickle
 import psutil
 import pytest
-from tlz import concat, first, frequencies, merge, valmap
+from tlz import concat, first, merge, valmap
 
 import dask
 from dask import delayed
@@ -1091,28 +1091,6 @@ async def test_worker_arrives_with_processing_data(c, s, a, b):
     assert len(s.workers) == 2
 
     await wait([yy, zz])
-
-
-@pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
-async def test_worker_breaks_and_returns(c, s, a):
-    future = c.submit(slowinc, 1, delay=0.1)
-    for i in range(20):
-        future = c.submit(slowinc, future, delay=0.1)
-
-    await wait(future)
-
-    await a.batched_stream.comm.close()
-
-    await asyncio.sleep(0.1)
-    start = time()
-    await wait(future, timeout=10)
-    end = time()
-
-    assert end - start < 2
-
-    states = frequencies(ts.state for ts in s.tasks.values())
-    assert states == {"memory": 1, "released": 20}
 
 
 @gen_cluster(client=True, nthreads=[])
