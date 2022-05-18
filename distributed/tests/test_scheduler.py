@@ -3158,50 +3158,6 @@ async def test_worker_heartbeat_after_cancel(c, s, *workers):
         await asyncio.gather(*(w.heartbeat() for w in workers))
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_worker_reconnect_task_memory(c, s, a):
-    a.periodic_callbacks["heartbeat"].stop()
-
-    futs = c.map(inc, range(10))
-    res = c.submit(sum, futs)
-
-    while not a.executing_count and not a.data:
-        await asyncio.sleep(0.001)
-
-    await s.remove_worker(address=a.address, close=False, stimulus_id="test")
-    while not res.done():
-        await a.heartbeat()
-
-    await res
-    assert ("no-worker", "memory") in {
-        (start, finish) for (_, start, finish, _, _, _) in s.transition_log
-    }
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_worker_reconnect_task_memory_with_resources(c, s, a):
-    async with Worker(s.address, resources={"A": 1}) as b:
-        while s.workers[b.address].status != Status.running:
-            await asyncio.sleep(0.001)
-
-        b.periodic_callbacks["heartbeat"].stop()
-
-        futs = c.map(inc, range(10), resources={"A": 1})
-        res = c.submit(sum, futs)
-
-        while not b.executing_count and not b.data:
-            await asyncio.sleep(0.001)
-
-        await s.remove_worker(address=b.address, close=False, stimulus_id="test")
-        while not res.done():
-            await b.heartbeat()
-
-        await res
-        assert ("no-worker", "memory") in {
-            (start, finish) for (_, start, finish, _, _, _) in s.transition_log
-        }
-
-
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_set_restrictions(c, s, a, b):
 
