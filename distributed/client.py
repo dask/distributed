@@ -1212,6 +1212,8 @@ class Client(SyncMethodMixin):
         assert self.scheduler_comm.comm.closed()
 
         self.status = "connecting"
+        if self.scheduler_comm:
+            await self.scheduler_comm.close()
         self.scheduler_comm = None
 
         for st in self.futures.values():
@@ -1287,6 +1289,7 @@ class Client(SyncMethodMixin):
         if msg[0].get("warning"):
             warnings.warn(version_module.VersionMismatchWarning(msg[0]["warning"]))
 
+        assert not self.scheduler_comm, self.scheduler_comm
         bcomm = BatchedSend(interval="10ms", name="Client")
         bcomm.start(comm)
         self.scheduler_comm = bcomm
@@ -1514,13 +1517,11 @@ class Client(SyncMethodMixin):
             if self.get == dask.config.get("get", None):
                 del dask.config.config["get"]
 
-            if (
-                self.scheduler_comm
-                and self.scheduler_comm.comm
-                and not self.scheduler_comm.comm.closed()
-            ):
+            if self.scheduler_comm:
                 self._send_to_scheduler({"op": "close-client"})
                 self._send_to_scheduler({"op": "close-stream"})
+                await self.scheduler_comm.close()
+                self.scheduler_comm = None
 
             current_task = asyncio.current_task()
             handle_report_task = self._handle_report_task
@@ -1532,9 +1533,6 @@ class Client(SyncMethodMixin):
             ):
                 with suppress(asyncio.CancelledError, TimeoutError):
                     await asyncio.wait_for(asyncio.shield(handle_report_task), 0.1)
-
-            if self.scheduler_comm:
-                await self.scheduler_comm.close()
 
             for key in list(self.futures):
                 self._release_key(key=key)
