@@ -685,7 +685,7 @@ class Server:
                 break
         await self.rpc.close()
         await asyncio.gather(
-            [comm.close() for comm in self._comms.values()]
+            *(comm.close() for comm in self._comms.values())
         )  # then forcefully close
         for cb in self._ongoing_coroutines:
             cb.cancel()
