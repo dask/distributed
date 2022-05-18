@@ -1093,65 +1093,6 @@ async def test_worker_arrives_with_processing_data(c, s, a, b):
     await wait([yy, zz])
 
 
-@gen_cluster(client=True, nthreads=[])
-async def test_no_workers_to_memory(c, s):
-    x = delayed(slowinc)(1, delay=10.0)
-    y = delayed(slowinc)(x, delay=0.4)
-    z = delayed(slowinc)(y, delay=0.4)
-
-    yy, zz = c.persist([y, z])
-
-    while len(s.tasks) < 3:
-        await asyncio.sleep(0.01)
-
-    w = Worker(s.address, nthreads=1)
-    w.update_data(data={y.key: 3})
-
-    start = time()
-    await w
-    while not s.workers or s.workers[w.address].status != Status.running:
-        await asyncio.sleep(0.01)
-    assert time() < start + 9  # Did not wait for x
-
-    assert s.get_task_status(keys={x.key, y.key, z.key}) == {
-        x.key: "released",
-        y.key: "memory",
-        z.key: "processing",
-    }
-
-    await w.close()
-
-
-@gen_cluster(client=True)
-async def test_no_worker_to_memory_restrictions(c, s, a, b):
-    with dask.annotate(workers="alice"):
-        x = delayed(slowinc)(1, delay=0.4)
-        y = delayed(slowinc)(x, delay=0.4)
-        z = delayed(slowinc)(y, delay=0.4)
-
-    yy, zz = c.persist([y, z], optimize_graph=False)
-
-    while not s.tasks:
-        await asyncio.sleep(0.01)
-
-    w = Worker(s.address, nthreads=1, name="alice")
-    w.update_data(data={y.key: 3})
-
-    await w
-
-    while len(s.workers) < 3:
-        await asyncio.sleep(0.01)
-    await asyncio.sleep(0.3)
-
-    assert s.get_task_status(keys={x.key, y.key, z.key}) == {
-        x.key: "released",
-        y.key: "memory",
-        z.key: "processing",
-    }
-
-    await w.close()
-
-
 def test_run_on_scheduler_sync(loop):
     def f(dask_scheduler=None):
         return dask_scheduler.address
