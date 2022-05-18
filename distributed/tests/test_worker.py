@@ -1657,23 +1657,21 @@ async def test_workerstate_executing(c, s, a):
     await f
 
 
-@pytest.mark.parametrize("reconnect", [True, False])
 @gen_cluster(nthreads=[])
-async def test_heartbeat_comm_closed(s, monkeypatch, reconnect):
+async def test_heartbeat_comm_closed(s, monkeypatch):
     with captured_logger("distributed.worker", level=logging.WARNING) as logger:
 
         def bad_heartbeat_worker(*args, **kwargs):
             raise CommClosedError()
 
-        async with await Worker(s.address, reconnect=reconnect) as w:
+        async with await Worker(s.address) as w:
             # Trigger CommClosedError during worker heartbeat
             monkeypatch.setattr(w.scheduler, "heartbeat_worker", bad_heartbeat_worker)
 
             await w.heartbeat()
-            if reconnect:
-                assert w.status == Status.running
-            else:
-                assert w.status == Status.closed
+            assert w.status == Status.closed
+            while s.workers:
+                await asyncio.sleep(0.01)
     assert "Heartbeat to scheduler failed" in logger.getvalue()
 
 
