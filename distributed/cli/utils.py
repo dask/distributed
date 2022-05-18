@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+import warnings
 from typing import Any
 
 from tornado.ioloop import IOLoop
@@ -36,6 +37,9 @@ def install_signal_handlers(loop=None, cleanup=None):
     a SIGINT or SIGTERM.  *cleanup* is an optional callback called,
     before the loop stops, with a single signal number argument.
     """
+    warnings.warn(
+        "install_signal_handlers is deprecated", DeprecationWarning, stacklevel=2
+    )
     import signal
 
     loop = loop or IOLoop.current()
