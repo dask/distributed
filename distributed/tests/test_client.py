@@ -3589,7 +3589,6 @@ async def test_scatter_raises_if_no_workers(c, s):
         await c.scatter(1, timeout=0.5)
 
 
-@pytest.mark.flaky(reruns=2)
 @gen_test()
 async def test_reconnect():
     port = random.randint(10000, 50000)
@@ -3608,11 +3607,8 @@ async def test_reconnect():
         s.stop()
         await Server.close(s)
 
-    futures = []
-    w = Worker(f"127.0.0.1:{port}")
-    futures.append(asyncio.ensure_future(w.start()))
-
     s = await Scheduler(port=port)
+    w = await Worker(f"127.0.0.1:{port}")
     c = await Client(f"127.0.0.1:{port}", asynchronous=True)
     await c.wait_for_workers(1, timeout=10)
     x = c.submit(inc, 1)
@@ -3633,6 +3629,10 @@ async def test_reconnect():
     while c.status != "running":
         await asyncio.sleep(0.1)
         assert time() < start + 10
+
+    await w.finished()
+    w = await Worker(f"127.0.0.1:{port}")
+
     start = time()
     while len(await c.nthreads()) != 1:
         await asyncio.sleep(0.05)
