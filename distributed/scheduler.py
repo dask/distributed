@@ -5026,43 +5026,21 @@ class Scheduler(SchedulerState, ServerNode):
             )
             result = {"status": "error", "keys": missing_keys}
             with log_errors():
-                # Remove suspicious workers from the scheduler but allow them to
-                # reconnect.
+                # Remove suspicious workers from the scheduler and shut them down.
                 await asyncio.gather(
                     *(
                         self.remove_worker(
-                            address=worker, close=False, stimulus_id=stimulus_id
+                            address=worker, close=True, stimulus_id=stimulus_id
                         )
                         for worker in missing_workers
                     )
                 )
-                recommendations: dict
-                client_msgs: dict = {}
-                worker_msgs: dict = {}
                 for key, workers in missing_keys.items():
-                    # Task may already be gone if it was held by a
-                    # `missing_worker`
-                    ts: TaskState = self.tasks.get(key)
                     logger.exception(
-                        "Workers don't have promised key: %s, %s",
+                        "Shut down workers that don't have promised key: %s, %s",
                         str(workers),
                         str(key),
                     )
-                    if not workers or ts is None:
-                        continue
-                    recommendations: dict = {key: "released"}
-                    for worker in workers:
-                        ws = self.workers.get(worker)
-                        if ws is not None and ws in ts.who_has:
-                            # FIXME: This code path is not tested
-                            self.remove_replica(ts, ws)
-                            self._transitions(
-                                recommendations,
-                                client_msgs,
-                                worker_msgs,
-                                stimulus_id=stimulus_id,
-                            )
-                self.send_all(client_msgs, worker_msgs)
 
         self.log_event("all", {"action": "gather", "count": len(keys)})
         return result

@@ -2178,65 +2178,21 @@ async def test_gather_no_workers(c, s, a, b):
     assert list(res["keys"]) == ["x"]
 
 
-@pytest.mark.slow
-@pytest.mark.parametrize("reschedule_different_worker", [True, False])
-@pytest.mark.parametrize("swap_data_insert_order", [True, False])
 @gen_cluster(client=True, client_kwargs={"direct_to_workers": False})
-async def test_gather_allow_worker_reconnect(
-    c, s, a, b, reschedule_different_worker, swap_data_insert_order
-):
+async def test_gather_bad_worker_removed(c, s, a, b):
     """
-    Test that client resubmissions allow failed workers to reconnect and re-use
-    their results. Failure scenario would be a connection issue during result
-    gathering.
-    Upon connection failure, the worker is flagged as suspicious and removed
-    from the scheduler. If the worker is healthy and reconnencts we want to use
-    its results instead of recomputing them.
-
-    See also distributed.tests.test_worker.py::test_worker_reconnects_mid_compute
+    Upon connection failure or missing expected keys during gather, a worker is
+    shut down. The tasks should be rescheduled onto different workers, transparently
+    to `client.gather`.
     """
-    # GH3246
-    if reschedule_different_worker:
+    x = c.submit(slowinc, 1, workers=[a.address], allow_other_workers=True)
 
-        class SwitchRestrictions(SchedulerPlugin):
-            def __init__(self, scheduler):
-                self.scheduler = scheduler
-
-            def transition(self, key, start, finish, **kwargs):
-                if key in ("reducer", "final") and finish == "memory":
-                    self.scheduler.tasks[key]._worker_restrictions = {b.address}
-
-        plugin = SwitchRestrictions(s)
-        s.add_plugin(plugin)
-
-    b_address = b.address
-
-    def inc_slow(x, lock):
-        w = get_worker()
-        if w.address == b_address:
-            with lock:
-                return x + 1
-        return x + 1
-
-    lock = Lock()
-
-    await lock.acquire()
-
-    x = c.submit(inc_slow, 1, lock, workers=[a.address], allow_other_workers=True)
-
-    def reducer(*args):
+    def finalizer(*args):
         return get_worker().address
 
-    def finalizer(addr):
-        if swap_data_insert_order:
-            w = get_worker()
-            new_data = dict(reversed(list(w.data.items())))
-            w.data.clear()
-            w.data.update(new_data)
-        return addr
-
-    z = c.submit(reducer, x, key="reducer", workers=[a.address])
-    fin = c.submit(finalizer, z, key="final", workers=[a.address])
+    fin = c.submit(
+        finalizer, x, key="final", workers=[a.address], allow_other_workers=True
+    )
 
     s.rpc = await FlakyConnectionPool(failing_connections=1)
 
@@ -2249,46 +2205,29 @@ async def test_gather_allow_worker_reconnect(
             logging.getLogger("distributed.client")
         ) as client_logger:
             # Gather using the client (as an ordinary user would)
-            # Upon a missing key, the client will reschedule the computations
-            res = None
-            while not res:
-                try:
-                    # This reduces test runtime by about a second since we're
-                    # depending on a worker heartbeat for a reconnect.
-                    res = await asyncio.wait_for(fin, 0.1)
-                except asyncio.TimeoutError:
-                    await a.heartbeat()
+            # Upon a missing key, the client will remove the bad worker and
+            # reschedule the computations
 
-    # Ensure that we're actually reusing the result
-    assert res == a.address
-    await lock.release()
+            # Both tasks are rescheduled onto `b`, since `a` was removed.
+            assert await fin == b.address
 
-    while not all(all(ts.state == "memory" for ts in w.tasks.values()) for w in [a, b]):
-        await asyncio.sleep(0.01)
+            await a.finished()
+            assert list(s.workers) == [b.address]
 
-    assert z.key in a.tasks
-    assert z.key not in b.tasks
-    assert b.executed_count == 1
-    for w in [a, b]:
-        assert x.key in w.tasks
-        assert w.tasks[x.key].state == "memory"
-    while not len(s.tasks[x.key].who_has) == 2:
-        await asyncio.sleep(0.01)
-    assert len(s.tasks[z.key].who_has) == 1
+            sched_logger = sched_logger.getvalue()
+            client_logger = client_logger.getvalue()
+            assert "Shut down workers that don't have promised key" in sched_logger
 
-    sched_logger = sched_logger.getvalue()
-    client_logger = client_logger.getvalue()
+            assert "Couldn't gather 1 keys, rescheduling" in client_logger
+
+            assert s.tasks[fin.key].who_has == {s.workers[b.address]}
+            assert a.executed_count == 2
+            assert b.executed_count >= 1
+            # ^ leave room for a future switch from `remove_worker` to `retire_workers`
 
     # Ensure that the communication was done via the scheduler, i.e. we actually hit a
     # bad connection
     assert s.rpc.cnn_count > 0
-
-    # The reducer task was actually not found upon first collection. The client will
-    # reschedule the graph
-    assert "Couldn't gather 1 keys, rescheduling" in client_logger
-    # There will also be a `Unexpected worker completed task` message but this
-    # is rather an artifact and not the intention
-    assert "Workers don't have promised key" in sched_logger
 
 
 @gen_cluster(client=True)
