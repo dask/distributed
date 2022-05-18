@@ -1984,13 +1984,6 @@ class Worker(ServerNode):
         self.transitions(recommendations, stimulus_id=stimulus_id)
         self._handle_instructions(instructions)
 
-        if self.validate:
-            # All previously unknown tasks that were created above by
-            # ensure_tasks_exists() have been transitioned to fetch or flight
-            assert all(
-                ts2.state != "released" for ts2 in (ts, *ts.dependencies)
-            ), self.story(ts, *ts.dependencies)
-
     ########################
     # Worker State Machine #
     ########################
