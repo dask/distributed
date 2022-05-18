@@ -18,7 +18,7 @@ import weakref
 import zipfile
 from collections import deque
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from functools import partial
 from operator import add
 from threading import Semaphore
@@ -5094,8 +5094,9 @@ async def test_secede_balances(c, s, a, b):
     assert results == [sum(map(inc, range(10)))] * 10
 
 
+@pytest.mark.parametrize("raise_exception", [True, False])
 @gen_cluster(client=True, nthreads=[("", 1)])
-async def test_long_running_not_in_occupancy(c, s, a):
+async def test_long_running_not_in_occupancy(c, s, a, raise_exception):
     # https://github.com/dask/distributed/issues/5332
     # See also test_long_running_removal_clean
 
@@ -5107,6 +5108,8 @@ async def test_long_running_not_in_occupancy(c, s, a):
         entered.set()
         secede()
         lock.acquire()
+        if raise_exception:
+            raise RuntimeError("Exception in task")
 
     f = c.submit(long_running, l, entered)
     await entered.wait()
@@ -5129,10 +5132,16 @@ async def test_long_running_not_in_occupancy(c, s, a):
     assert s.workers[a.address].occupancy == 0
     await l.release()
 
-    await f
+    with (
+        pytest.raises(RuntimeError, match="Exception in task")
+        if raise_exception
+        else nullcontext()
+    ):
+        await f
 
     assert s.total_occupancy == 0
     assert ws.occupancy == 0
+    assert not ws.long_running
 
 
 @pytest.mark.parametrize("ordinary_task", [True, False])
@@ -5181,6 +5190,7 @@ async def test_long_running_removal_clean(c, s, a, ordinary_task):
     # In the end, everything should be reset
     assert s.total_occupancy == 0
     assert ws.occupancy == 0
+    assert not ws.long_running
 
 
 @gen_cluster(client=True)

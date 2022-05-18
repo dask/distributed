@@ -7180,6 +7180,7 @@ def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str | None:
         return None
 
     duration = ws.processing.pop(ts)
+    ws.long_running.discard(ts)
     if not ws.processing:
         state.total_occupancy -= ws.occupancy
         ws.occupancy = 0
