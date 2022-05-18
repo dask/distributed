@@ -1,6 +1,3 @@
-from __future__ import annotations
-
-import logging
 import warnings
 
 from tornado.ioloop import IOLoop
@@ -8,8 +5,6 @@ from tornado.ioloop import IOLoop
 warnings.warn(
     "the distributed.cli.utils module is deprecated", DeprecationWarning, stacklevel=2
 )
-
-logger = logging.getLogger(__name__)
 
 
 def install_signal_handlers(loop=None, cleanup=None):
