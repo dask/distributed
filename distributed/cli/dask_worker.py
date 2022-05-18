@@ -169,11 +169,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     """,
 )
 @click.option(
-    "--reconnect/--no-reconnect",
-    default=True,
-    help="Reconnect to scheduler if disconnected [default: --reconnect]",
-)
-@click.option(
     "--nanny/--no-nanny",
     default=True,
     help="Start workers in nanny process for management [default: --nanny]",
