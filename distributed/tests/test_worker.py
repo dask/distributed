@@ -1737,7 +1737,7 @@ async def test_heartbeat_missing_real_cluster(s, a):
         # The heartbeat PeriodicCallback is still running, so one _could_ fire
         # while `Worker.close` has yielded control. We simulate that explicitly.
 
-        # Because `hearbeat`` will `await self.close`, which is blocking on our
+        # Because `hearbeat` will `await self.close`, which is blocking on our
         # extension, we have to run it concurrently.
         hbt = asyncio.create_task(a.heartbeat())
 
