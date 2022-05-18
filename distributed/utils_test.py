@@ -56,7 +56,9 @@ from distributed.metrics import time
 from distributed.nanny import Nanny
 from distributed.node import ServerNode
 from distributed.proctitle import enable_proctitle_on_children
+from distributed.profile import wait_profiler
 from distributed.protocol import deserialize
+from distributed.scheduler import TaskState
 from distributed.security import Security
 from distributed.utils import (
     DequeHandler,
@@ -1792,6 +1794,11 @@ def check_instances():
         assert time() < start + 10
 
     _global_clients.clear()
+
+    wait_profiler()
+    gc.collect()
+
+    assert not TaskState._instances
 
     for w in Worker._instances:
         with suppress(RuntimeError):  # closed IOLoop

@@ -1062,7 +1062,9 @@ class TaskState:
     #: Cached hash of :attr:`~TaskState.client_key`
     _hash: int
 
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__) + ("__weakref__",)  # type: ignore
+
+    _instances: weakref.WeakSet[TaskState] = weakref.WeakSet()
 
     def __init__(self, key: str, run_spec: object):
         self.key = key
@@ -1098,6 +1100,7 @@ class TaskState:
         self.metadata = {}
         self.annotations = {}
         self.erred_on = set()
+        TaskState._instances.add(self)
 
     def __hash__(self) -> int:
         return self._hash
