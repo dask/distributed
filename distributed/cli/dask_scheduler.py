@@ -12,7 +12,7 @@ import click
 from tornado.ioloop import IOLoop
 
 from distributed import Scheduler
-from distributed.cli.utils import wait_for_signals
+from distributed._signals import wait_for_signals
 from distributed.preloading import validate_preload_argv
 from distributed.proctitle import (
     enable_proctitle_on_children,
