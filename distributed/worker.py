@@ -3157,7 +3157,7 @@ class Worker(ServerNode):
         return self.comm_threshold_bytes
 
     def _get_cause(self, keys: Iterable[str]) -> TaskState:
-        """For diagnostics, we want to attach a transfer to a single task. this task is
+        """For diagnostics, we want to attach a transfer to a single task. This task is
         typically the next to be executed but since we're fetching tasks for potentially
         many dependents, an exact match is not possible.
 
