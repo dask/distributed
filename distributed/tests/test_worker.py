@@ -1677,6 +1677,86 @@ async def test_heartbeat_comm_closed(s, monkeypatch, reconnect):
     assert "Heartbeat to scheduler failed" in logger.getvalue()
 
 
+@gen_cluster(nthreads=[("", 1)], worker_kwargs={"heartbeat_interval": "100s"})
+async def test_heartbeat_missing(s, a, monkeypatch):
+    async def missing_heartbeat_worker(*args, **kwargs):
+        return {"status": "missing"}
+
+    with captured_logger("distributed.worker", level=logging.WARNING) as wlogger:
+        monkeypatch.setattr(a.scheduler, "heartbeat_worker", missing_heartbeat_worker)
+        await a.heartbeat()
+        assert a.status == Status.closed
+        assert "Scheduler was unaware of this worker" in wlogger.getvalue()
+
+        while s.workers:
+            await asyncio.sleep(0.01)
+
+
+@gen_cluster(nthreads=[("", 1)], worker_kwargs={"heartbeat_interval": "100s"})
+async def test_heartbeat_missing_real_cluster(s, a):
+    # The idea here is to create a situation where `s.workers[a.address]`,
+    # doesn't exist, but the worker is not yet closed and can still heartbeat.
+    # Ideally, this state would be impossible, and this test would be removed,
+    # and the `status: missing` handling would be replaced with an assertion error.
+    # However, `Scheduler.remove_worker` and `Worker.close` both currently leave things
+    # in degenerate, half-closed states while they're running (and yielding control
+    # via `await`).
+
+    # Currently this is easy because of https://github.com/dask/distributed/issues/6354.
+    # But even with that fixed, it may still be possible, since `Worker.close`
+    # could take an arbitrarily long time, and things can keep running
+    # while it's closing.
+    assumption_msg = "Test assumptions have changed. Race condition may have been fixed; this test may be removable."
+
+    class BlockCloseExtension:
+        def __init__(self) -> None:
+            self.close_reached = asyncio.Event()
+            self.unblock_close = asyncio.Event()
+
+        async def close(self):
+            self.close_reached.set()
+            await self.unblock_close.wait()
+
+    # `Worker.close` awaits extensions' `close` methods midway though.
+    # During this `await`, the Worker is in state `closing`, but the heartbeat
+    # `PeriodicCallback` is still running. We will intentionally pause
+    # the worker here to simulate the timing of a heartbeat happing in this
+    # degenerate state.
+    a.extensions["block-close"] = block_close = BlockCloseExtension()
+
+    with captured_logger(
+        "distributed.worker", level=logging.WARNING
+    ) as wlogger, captured_logger(
+        "distributed.scheduler", level=logging.WARNING
+    ) as slogger:
+        await s.remove_worker(a.address, "foo")
+        assert not s.workers
+
+        # Wait until the close signal reaches the worker and it starts shutting down.
+        await block_close.close_reached.wait()
+        assert a.status == Status.closing, assumption_msg
+        assert a.periodic_callbacks["heartbeat"].is_running(), assumption_msg
+        # The heartbeat PeriodicCallback is still running, so one _could_ fire
+        # while `Worker.close` has yielded control. We simulate that explicitly.
+
+        # Because `hearbeat`` will `await self.close`, which is blocking on our
+        # extension, we have to run it concurrently.
+        hbt = asyncio.create_task(a.heartbeat())
+
+        # Worker was already closing, so the second `.close()` will be idempotent.
+        # Best we can test for is this log message.
+        while "Scheduler was unaware of this worker" not in wlogger.getvalue():
+            await asyncio.sleep(0.01)
+
+        assert "Received heartbeat from unregistered worker" in slogger.getvalue()
+        assert not s.workers
+
+        block_close.unblock_close.set()
+        await hbt
+        await a.finished()
+        assert not s.workers
+
+
 @gen_cluster(nthreads=[])
 async def test_bad_local_directory(s):
     try:
