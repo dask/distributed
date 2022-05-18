@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
+import subprocess
 import sys
 from multiprocessing import cpu_count
 from time import sleep
@@ -13,7 +15,7 @@ from dask.utils import tmpfile
 
 from distributed import Client
 from distributed.cli.dask_worker import _apportion_ports, main
-from distributed.compatibility import LINUX, to_thread
+from distributed.compatibility import LINUX, WINDOWS, to_thread
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, popen, requires_ipv6
@@ -593,7 +595,7 @@ def test_worker_timeout(no_nanny):
     if no_nanny:
         args.append("--no-nanny")
     result = runner.invoke(main, args)
-    assert result.exit_code != 0
+    assert result.exit_code == 1
 
 
 def test_bokeh_deprecation():
@@ -682,3 +684,54 @@ def dask_setup(worker):
         await c.wait_for_workers(1)
         [foo] = (await c.run(lambda dask_worker: dask_worker.foo)).values()
         assert foo == "setup"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+def test_timeout(nanny):
+    worker = subprocess.run(
+        [
+            "python",
+            "-m",
+            "distributed.cli.dask_worker",
+            "192.168.1.100:7777",
+            nanny,
+            "--death-timeout=1",
+        ],
+        text=True,
+        encoding="utf8",
+        capture_output=True,
+    )
+
+    assert "timed out starting worker" in worker.stderr.lower()
+    assert "end worker" in worker.stderr.lower()
+    assert worker.returncode == 1
+
+
+@pytest.mark.skipif(WINDOWS, reason="POSIX only")
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+@pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
+@gen_cluster(client=True, nthreads=[])
+async def test_signal_handling(c, s, nanny, sig):
+    with subprocess.Popen(
+        ["python", "-m", "distributed.cli.dask_worker", s.address, nanny],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    ) as worker:
+        await c.wait_for_workers(1)
+
+        worker.send_signal(sig)
+        stdout, stderr = worker.communicate()
+        logs = stdout.decode().lower()
+        assert stderr is None
+        assert worker.returncode == 0
+        assert sig.name.lower() in logs
+        if nanny == "--nanny":
+            assert "closing nanny" in logs
+            assert "stopping worker" in logs
+        else:
+            assert "nanny" not in logs
+        assert "end worker" in logs
+        assert "timed out" not in logs
+        assert "error" not in logs
+        assert "exception" not in logs
