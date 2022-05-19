@@ -1847,7 +1847,7 @@ class SchedulerState:
                 return recommendations, client_msgs, worker_msgs
             worker = ws.address
 
-            self.set_duration_estimate(ts, ws)
+            self._set_duration_estimate(ts, ws)
             ts.processing_on = ws
             ts.state = "processing"
             self.consume_resources(ts, ws)
@@ -1986,7 +1986,7 @@ class SchedulerState:
             steal = self.extensions.get("stealing")
             for tts in s:
                 if tts.processing_on:
-                    self.set_duration_estimate(tts, tts.processing_on)
+                    self._set_duration_estimate(tts, tts.processing_on)
                     if steal:
                         steal.recalculate_cost(tts)
 
@@ -2509,7 +2509,7 @@ class SchedulerState:
     # Assigning Tasks to Workers #
     ##############################
 
-    def set_duration_estimate(self, ts: TaskState, ws: WorkerState) -> float:
+    def _set_duration_estimate(self, ts: TaskState, ws: WorkerState) -> None:
         """Estimate task duration using worker state and task state.
 
         If a task takes longer than twice the current average duration we
@@ -2518,6 +2518,11 @@ class SchedulerState:
 
         See also ``_remove_from_processing``
         """
+        # Long running tasks do not contribute to occupancy calculations and we
+        # do not set any task duration estimates
+        if ts in ws.long_running:
+            return
+
         exec_time: float = ws.executing.get(ts, 0)
         duration: float = self.get_task_duration(ts)
         total_duration: float
@@ -2526,14 +2531,11 @@ class SchedulerState:
         else:
             comm: float = self.get_comm_cost(ts, ws)
             total_duration = duration + comm
+
         old = ws.processing.get(ts, 0)
         ws.processing[ts] = total_duration
-
-        if ts not in ws.long_running:
-            self.total_occupancy += total_duration - old
-            ws.occupancy += total_duration - old
-
-        return total_duration
+        self.total_occupancy += total_duration - old
+        ws.occupancy += total_duration - old
 
     def check_idle_saturated(self, ws: WorkerState, occ: float = -1.0):
         """Update the status of the idle and saturated state
@@ -2745,7 +2747,7 @@ class SchedulerState:
         ts: TaskState
         old = ws.occupancy
         for ts in ws.processing:
-            self.set_duration_estimate(ts, ws)
+            self._set_duration_estimate(ts, ws)
 
         self.check_idle_saturated(ws)
         steal = self.extensions.get("stealing")
@@ -7178,7 +7180,7 @@ def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str | None:
 
     See also
     --------
-    Scheduler.set_duration_estimate
+    Scheduler._set_duration_estimate
     """
     ws = ts.processing_on
     assert ws
@@ -7188,6 +7190,7 @@ def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str | None:
         return None
 
     duration = ws.processing.pop(ts)
+    ws.long_running.discard(ts)
     if not ws.processing:
         state.total_occupancy -= ws.occupancy
         ws.occupancy = 0
