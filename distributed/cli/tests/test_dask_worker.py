@@ -719,18 +719,34 @@ async def test_signal_handling(c, s, nanny, sig):
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 def test_error_during_startup(monkeypatch, nanny):
     # see https://github.com/dask/distributed/issues/6320
-    scheduler_port = open_port()
+    scheduler_port = str(open_port())
     scheduler_addr = f"tcp://127.0.0.1:{scheduler_port}"
 
     monkeypatch.setenv("DASK_SCHEDULER_ADDRESS", scheduler_addr)
-    with popen(["dask-scheduler"]):
+    with popen(
+        [
+            "dask-scheduler",
+            "--port",
+            scheduler_port,
+        ],
+        flush_output=False,
+    ) as scheduler:
+        start = time()
+        # Wait for the scheduler to be up
+        while line := scheduler.stdout.readline():
+            if b"Scheduler at" in line:
+                break
+            # Ensure this is not killed by pytest-timeout
+            if time() - start > 5:
+                raise TimeoutError("Scheduler failed to start in time.")
+
         with popen(
             [
                 "dask-worker",
                 scheduler_addr,
                 nanny,
                 "--worker-port",
-                str(scheduler_port),
+                scheduler_port,
             ],
         ) as worker:
             assert worker.wait(5) == 1
