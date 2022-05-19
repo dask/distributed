@@ -1071,8 +1071,30 @@ async def test_include_communication_in_occupancy(c, s, a, b):
     del z
 
 
+@gen_cluster(nthreads=[])
+async def test_new_worker_with_data_rejected(s):
+    w = Worker(s.address, nthreads=1)
+    w.update_data(data={"x": 0})
+
+    with captured_logger(
+        "distributed.worker", level=logging.WARNING
+    ) as wlog, captured_logger("distributed.scheduler", level=logging.WARNING) as slog:
+        with pytest.raises(RuntimeError, match="Worker failed to start"):
+            await w
+        assert "connected with 1 key(s) in memory" in slog.getvalue()
+        assert "Register worker" not in slog.getvalue()
+        assert "connected with 1 key(s) in memory" in wlog.getvalue()
+
+    assert w.status == Status.failed
+    assert not s.workers
+    assert not s.stream_comms
+    assert not s.host_info
+
+
 @gen_cluster(client=True)
 async def test_worker_arrives_with_processing_data(c, s, a, b):
+    # A worker arriving with data we need should still be rejected,
+    # and not affect other computations
     x = delayed(slowinc)(1, delay=0.4)
     y = delayed(slowinc)(x, delay=0.4)
     z = delayed(slowinc)(y, delay=0.4)
@@ -1085,7 +1107,7 @@ async def test_worker_arrives_with_processing_data(c, s, a, b):
     w = Worker(s.address, nthreads=1)
     w.update_data(data={y.key: 3})
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="Worker failed to start"):
         await w
     assert w.status == Status.failed
     assert len(s.workers) == 2

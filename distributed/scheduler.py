@@ -3582,8 +3582,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         if nbytes:
             err = (
-                f"Worker {address!r} reconnected with {len(nbytes)} keys in memory! Worker reconnection is not supported. "
-                f"{list(nbytes)}"
+                f"Worker {address!r} connected with {len(nbytes)} key(s) in memory! Worker reconnection is not supported. "
+                f"Keys: {list(nbytes)}"
             )
             logger.error(err)
             if comm:
