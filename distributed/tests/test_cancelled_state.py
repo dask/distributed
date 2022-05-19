@@ -322,10 +322,7 @@ async def test_in_flight_lost_after_resumed(c, s, b):
             ("free-keys", (fut1.key,)),
             (fut1.key, "resumed", "released", "cancelled", {}),
             # After gather_dep receives the data, the task is forgotten
-            ("receive-dep", a.address, {fut1.key}),
-            (fut1.key, "release-key"),
-            (fut1.key, "cancelled", "released", "released", {fut1.key: "forgotten"}),
-            (fut1.key, "released", "forgotten", "forgotten", {}),
+            (fut1.key, "cancelled", "memory", "released", {fut1.key: "forgotten"}),
         ],
     )
 

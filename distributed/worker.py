@@ -3159,7 +3159,8 @@ class Worker(ServerNode):
     def _get_cause(self, keys: Iterable[str]) -> TaskState:
         """For diagnostics, we want to attach a transfer to a single task. This task is
         typically the next to be executed but since we're fetching tasks for potentially
-        many dependents, an exact match is not possible.
+        many dependents, an exact match is not possible. Additionally, if a key was
+        fetched through acquire-replicas, dependents may not be known at all.
 
         Returns
         -------
@@ -3333,9 +3334,7 @@ class Worker(ServerNode):
             for d in self.in_flight_workers.pop(worker):
                 ts = self.tasks[d]
                 ts.done = True
-                if ts.state == "cancelled":
-                    recommendations[ts] = "released"
-                elif d in data:
+                if d in data:
                     recommendations[ts] = ("memory", data[d])
                 elif busy:
                     recommendations[ts] = "fetch"
