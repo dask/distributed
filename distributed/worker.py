@@ -517,6 +517,7 @@ class Worker(ServerNode):
         local_directory: str | None = None,
         services: dict | None = None,
         name: Any | None = None,
+        reconnect: bool | None = None,
         executor: Executor | dict[str, Executor] | Literal["offload"] | None = None,
         resources: dict[str, float] | None = None,
         silence_logs: int | None = None,
@@ -561,6 +562,21 @@ class Worker(ServerNode):
         # Parameters to Server
         **kwargs,
     ):
+        if reconnect is not None:
+            if reconnect:
+                raise ValueError(
+                    "The `reconnect=True` option for `Worker` has been removed. "
+                    "To improve cluster stability, workers now always shut down in the face of network disconnects. "
+                    "For details, or if this is an issue for you, see https://github.com/dask/distributed/issues/6350."
+                )
+            else:
+                warnings.warn(
+                    "The `reconnect` argument to `Worker` is deprecated, and will be removed in a future release. "
+                    "Worker reconnection is now always disabled, so passing `reconnect=False` is unnecessary. "
+                    "See https://github.com/dask/distributed/issues/6350 for details.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
         self.tasks = {}
         self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)

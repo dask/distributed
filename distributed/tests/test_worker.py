@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 import traceback
+import warnings
 import weakref
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -3533,3 +3534,15 @@ async def test_do_not_block_event_loop_during_shutdown(s):
         await w.close(executor_wait=True)
 
     await asyncio.gather(block(), close(), set_future())
+
+
+def test_reconnect_argument_deprecated():
+    with pytest.deprecated_call(match="`reconnect` argument"):
+        Worker("tcp://localhost:8786", reconnect=False)
+    with pytest.raises(ValueError, match="reconnect=True"):
+        Worker("tcp://localhost:8786", reconnect=True)
+
+    with warnings.catch_warnings():
+        # No argument should not warn or raise
+        warnings.simplefilter("error")
+        Worker("tcp://localhost:8786")
