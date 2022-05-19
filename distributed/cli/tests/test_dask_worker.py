@@ -275,6 +275,36 @@ async def test_no_nanny(c, s):
         await c.wait_for_workers(1)
 
 
+@gen_cluster(client=True, nthreads=[])
+async def test_reconnect_deprecated(c, s):
+    with popen(
+        ["dask-worker", s.address, "--reconnect"],
+        flush_output=False,
+    ) as worker:
+        for _ in range(10):
+            line = worker.stdout.readline()
+            print(line)
+            if b"`--reconnect` option has been removed" in line:
+                break
+        else:
+            raise AssertionError("Message not printed, see stdout")
+        assert worker.wait() == 1
+
+    with popen(
+        ["dask-worker", s.address, "--no-reconnect"],
+        flush_output=False,
+    ) as worker:
+        for _ in range(10):
+            line = worker.stdout.readline()
+            print(line)
+            if b"flag is deprecated, and will be removed" in line:
+                break
+        else:
+            raise AssertionError("Message not printed, see stdout")
+        await c.wait_for_workers(1)
+        await c.shutdown()
+
+
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[])
 async def test_resources(c, s):

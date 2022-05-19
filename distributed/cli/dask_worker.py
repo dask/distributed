@@ -169,6 +169,11 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     """,
 )
 @click.option(
+    "--reconnect/--no-reconnect",
+    default=None,
+    help="Deprecated, has no effect. Passing --reconnect is an error. [default: --no-reconnect]",
+)
+@click.option(
     "--nanny/--no-nanny",
     default=True,
     help="Start workers in nanny process for management [default: --nanny]",
@@ -275,6 +280,7 @@ def main(
     dashboard_address,
     worker_class,
     preload_nanny,
+    reconnect,
     **kwargs,
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
@@ -294,6 +300,20 @@ def main(
             "The --bokeh/--no-bokeh flag has been renamed to --dashboard/--no-dashboard. "
         )
         dashboard = bokeh
+    if reconnect is not None:
+        if reconnect:
+            logger.error(
+                "The `--reconnect` option has been removed. "
+                "To improve cluster stability, workers now always shut down in the face of network disconnects. "
+                "For details, or if this is an issue for you, see https://github.com/dask/distributed/issues/6350."
+            )
+            sys.exit(1)
+        else:
+            logger.warning(
+                "The `--no-reconnect/--reconnect` flag is deprecated, and will be removed in a future release. "
+                "Worker reconnection is now always disabled, so `--no-reconnect` is unnecessary. "
+                "See https://github.com/dask/distributed/issues/6350 for details.",
+            )
 
     sec = {
         k: v
