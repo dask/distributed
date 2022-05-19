@@ -6087,6 +6087,10 @@ async def test_wait_for_workers(c, s, a, b):
     assert "3/10" in str(info.value).replace(" ", "")
     assert "1 ms" in str(info.value)
 
+    future = asyncio.ensure_future(c.wait_for_workers(n_workers=2))
+    await asyncio.sleep(0.22)  # 2 chances
+    assert future.done()
+
     future = asyncio.ensure_future(c.wait_for_workers(n_workers=2, absolute=True))
     await asyncio.sleep(0.22)  # 2 chances
     assert not future.done()
