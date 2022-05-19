@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import functools
 import logging
 import os
 import shutil
@@ -654,9 +655,9 @@ class WorkerProcess:
         uid = uuid.uuid4().hex
 
         self.process = AsyncProcess(
-            target=self._run,
-            name="Dask Worker process (from Nanny)",
-            kwargs=dict(
+            target=functools.partial(
+                self._run,
+                init_msg_interval=self._init_msg_interval,
                 worker_kwargs=self.worker_kwargs,
                 silence_logs=self.silence_logs,
                 init_result_q=self.init_result_q,
@@ -666,6 +667,7 @@ class WorkerProcess:
                 env=self.env,
                 config=self.config,
             ),
+            name="Dask Worker process (from Nanny)",
         )
         self.process.daemon = dask.config.get("distributed.worker.daemon", default=True)
         self.process.set_exit_callback(self._on_exit)
@@ -805,9 +807,9 @@ class WorkerProcess:
             else:
                 return msg
 
-    @classmethod
+    @staticmethod
     def _run(
-        cls,
+        init_msg_interval,
         worker_kwargs,
         silence_logs,
         init_result_q,
@@ -886,7 +888,7 @@ class WorkerProcess:
                     # properly handled. See also
                     # WorkerProcess._wait_until_connected (the 2 is for good
                     # measure)
-                    sync_sleep(cls._init_msg_interval * 2)
+                    sync_sleep(init_msg_interval * 2)
                 else:
                     try:
                         assert worker.address
@@ -913,7 +915,7 @@ class WorkerProcess:
             # arrive in a race condition where the process cleanup wipes the
             # queue before the exception can be properly handled. See also
             # WorkerProcess._wait_until_connected (the 2 is for good measure)
-            sync_sleep(cls._init_msg_interval * 2)
+            sync_sleep(init_msg_interval * 2)
         else:
             try:
                 loop.run_sync(run)
