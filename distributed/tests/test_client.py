@@ -3589,6 +3589,7 @@ async def test_scatter_raises_if_no_workers(c, s):
         await c.scatter(1, timeout=0.5)
 
 
+@pytest.mark.flaky(reruns=2)  # due to random port
 @gen_test()
 async def test_reconnect():
     port = random.randint(10000, 50000)
