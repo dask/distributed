@@ -4,6 +4,7 @@ import logging
 import multiprocessing as mp
 import os
 import random
+import signal
 import sys
 from contextlib import suppress
 from unittest import mock
@@ -452,10 +453,7 @@ class KeyboardInterruptWorker(worker.Worker):
     """A Worker that raises KeyboardInterrupt almost immediately"""
 
     async def heartbeat(self):
-        def raise_err():
-            raise KeyboardInterrupt()
-
-        self.loop.add_callback(raise_err)
+        os.kill(os.getpid(), signal.SIGINT)
 
 
 @pytest.mark.parametrize("protocol", ["tcp", "ucx"])

@@ -6,6 +6,7 @@ import functools
 import logging
 import os
 import shutil
+import signal
 import threading
 import uuid
 import warnings
@@ -18,7 +19,6 @@ from time import sleep as sync_sleep
 from typing import TYPE_CHECKING, ClassVar
 
 import psutil
-from tornado import gen
 from tornado.ioloop import IOLoop
 
 import dask
@@ -26,6 +26,7 @@ from dask.system import CPU_COUNT
 from dask.utils import parse_timedelta
 
 from distributed import preloading
+from distributed.cli.utils import wait_for_signals
 from distributed.comm import get_address_host
 from distributed.comm.addressing import address_from_user_args
 from distributed.core import (
@@ -819,6 +820,9 @@ class WorkerProcess:
         config,
         Worker,
     ):  # pragma: no cover
+        thread = None
+        worker = None
+        worker_started = False
         try:
             os.environ.update(env)
             dask.config.set(config)
@@ -832,24 +836,16 @@ class WorkerProcess:
             if silence_logs:
                 logger.setLevel(silence_logs)
 
-            IOLoop.clear_instance()
-            loop = IOLoop()
-            loop.make_current()
-            worker = Worker(**worker_kwargs)
+            async def do_stop(*, worker, timeout=5, executor_wait=True):
+                await worker.close(
+                    report=True,
+                    nanny=False,
+                    safe=True,  # TODO: Graceful or not?
+                    executor_wait=executor_wait,
+                    timeout=timeout,
+                )
 
-            async def do_stop(timeout=5, executor_wait=True):
-                try:
-                    await worker.close(
-                        report=True,
-                        nanny=False,
-                        safe=True,  # TODO: Graceful or not?
-                        executor_wait=executor_wait,
-                        timeout=timeout,
-                    )
-                finally:
-                    loop.stop()
-
-            def watch_stop_q():
+            def watch_stop_q(loop, event):
                 """
                 Wait for an incoming stop message and then stop the
                 worker cleanly.
@@ -863,73 +859,100 @@ class WorkerProcess:
                     child_stop_q.close()
                     assert msg["op"] == "stop", msg
                     del msg["op"]
-                    loop.add_callback(do_stop, **msg)
+                    loop.call_soon_threadafe(loop, event.set)
 
-            thread = threading.Thread(
-                target=watch_stop_q, name="Nanny stop queue watch"
-            )
-            thread.daemon = True
-            thread.start()
+            async def wait_for_stop_q_and_close():
+                nonlocal thread
+                loop = asyncio.get_running_loop()
+                future = loop.create_future()
 
-            async def run():
+                def callback(msg):
+                    try:
+                        loop.call_soon_threadsafe(future.set_result, msg)
+                    except RuntimeError:
+                        pass
+
+                thread = threading.Thread(
+                    functools.partial(
+                        watch_stop_q,
+                        callback=callback,
+                    ),
+                    daemon=True,
+                )
+                try:
+                    msg = await future
+                finally:
+                    child_stop_q.close()
+                await do_stop(**msg)
+
+            async def wait_for_signals_and_close(worker):
+                await wait_for_signals([signal.SIGINT, signal.SIGTERM])
+                await do_stop()
+
+            async def run_worker(worker):
                 """
                 Try to start worker and inform parent of outcome.
                 """
-                try:
-                    await worker
-                except Exception as e:
-                    logger.exception("Failed to start worker")
-                    init_result_q.put({"uid": uid, "exception": e})
-                    init_result_q.close()
-                    # If we hit an exception here we need to wait for a least
-                    # one interval for the outside to pick up this message.
-                    # Otherwise we arrive in a race condition where the process
-                    # cleanup wipes the queue before the exception can be
-                    # properly handled. See also
-                    # WorkerProcess._wait_until_connected (the 2 is for good
-                    # measure)
-                    sync_sleep(init_msg_interval * 2)
-                else:
-                    try:
-                        assert worker.address
-                    except ValueError:
-                        pass
-                    else:
-                        init_result_q.put(
-                            {
-                                "address": worker.address,
-                                "dir": worker.local_directory,
-                                "uid": uid,
-                            }
-                        )
-                        init_result_q.close()
-                        await worker.finished()
-                        logger.info("Worker closed")
+                nonlocal worker
+                nonlocal worker_started
 
+                worker = Worker(**worker_kwargs)
+                await worker
+                try:
+                    assert worker.address
+                except ValueError:
+                    pass
+                else:
+                    worker_started = True
+                    init_result_q.put(
+                        {
+                            "address": worker.address,
+                            "dir": worker.local_directory,
+                            "uid": uid,
+                        }
+                    )
+                    init_result_q.close()
+                    await worker.finished()
+                    logger.info("Worker closed")
+
+            async def run():
+                wait_for_stop_q_and_close_task = asyncio.create_task(
+                    wait_for_stop_q_and_close()
+                )
+                wait_for_signals_and_close_task = asyncio.create_task(
+                    wait_for_signals_and_close()
+                )
+                run_worker_task = asyncio.create_task(run_worker())
+                done, _ = await asyncio.wait(
+                    [
+                        wait_for_signals_and_close_task,
+                        wait_for_stop_q_and_close_task,
+                        run_worker_task,
+                    ],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                [task.result() for task in done]
+
+            asyncio.run(run)
         except Exception as e:
-            logger.exception("Failed to initialize Worker")
-            init_result_q.put({"uid": uid, "exception": e})
-            init_result_q.close()
-            # If we hit an exception here we need to wait for a least one
-            # interval for the outside to pick up this message. Otherwise we
-            # arrive in a race condition where the process cleanup wipes the
-            # queue before the exception can be properly handled. See also
-            # WorkerProcess._wait_until_connected (the 2 is for good measure)
-            sync_sleep(init_msg_interval * 2)
-        else:
-            try:
-                loop.run_sync(run)
-            except (TimeoutError, gen.TimeoutError):
-                # Loop was stopped before wait_until_closed() returned, ignore
-                pass
-            except KeyboardInterrupt:
-                # At this point the loop is not running thus we have to run
-                # do_stop() explicitly.
-                loop.run_sync(do_stop)
-            finally:
-                with suppress(ValueError):
-                    child_stop_q.put({"op": "stop"})  # usually redundant
-                with suppress(ValueError):
-                    child_stop_q.close()  # usually redundant
-                child_stop_q.join_thread()
+            if not worker_started:
+                phase = "initialize" if worker is None else "start"
+                logger.exception(f"Failed to {phase} worker")
+                init_result_q.put({"uid": uid, "exception": e})
+                init_result_q.close()
+                # If we hit an exception here we need to wait for a least
+                # one interval for the outside to pick up this message.
+                # Otherwise we arrive in a race condition where the process
+                # cleanup wipes the queue before the exception can be
+                # properly handled. See also
+                # WorkerProcess._wait_until_connected (the 2 is for good
+                # measure)
+                sync_sleep(init_msg_interval * 2)
+        finally:
+            with suppress(ValueError):
+                child_stop_q.put({"op": "stop"})  # usually redundant
+            with suppress(ValueError):
+                child_stop_q.close()  # usually redundant
+            child_stop_q.join_thread()
+            if thread is not None:
                 thread.join(timeout=2)
