@@ -2557,6 +2557,33 @@ async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, 
         await asyncio.sleep(0.001)
 
 
+@pytest.mark.parametrize("close_on_scheduler", [True, False])
+@gen_cluster(
+    client=True,
+    nthreads=[
+        ("", 1),
+    ],
+)
+async def test_worker_batched_send_broken(
+    c: Client, s: Scheduler, a: Worker, close_on_scheduler: bool
+):
+    fs = c.map(slowinc, range(20))
+    while not a.data:
+        await asyncio.sleep(0.01)
+
+    if close_on_scheduler:
+        # "Temporary network blip" from the worker's perspective
+        s.stream_comms[a.address].comm.abort()
+    else:
+        a.batched_stream.comm.abort()
+
+    await c.gather(fs)
+
+    # Should work the second time
+    fs = c.map(slowinc, fs)
+    await c.gather(fs)
+
+
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_forget_dependents_after_release(c, s, a):
 
