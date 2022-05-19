@@ -1308,7 +1308,7 @@ class Client(SyncMethodMixin):
         except OSError:
             logger.debug("Not able to query scheduler for identity")
 
-    async def _wait_for_workers(self, n_workers=0, timeout=None):
+    async def _wait_for_workers(self, n_workers=0, timeout=None, absolute=False):
         info = await self.scheduler.identity()
         self._scheduler_identity = SchedulerInfo(info)
         if timeout:
@@ -1325,7 +1325,9 @@ class Client(SyncMethodMixin):
                 ]
             )
 
-        while n_workers and running_workers(info) < n_workers:
+        while (running_workers(info) != n_workers and absolute) or (
+            n_workers and running_workers(info) < n_workers and not absolute
+        ):
             if deadline and time() > deadline:
                 raise TimeoutError(
                     "Only %d/%d workers arrived after %s"
@@ -1335,7 +1337,7 @@ class Client(SyncMethodMixin):
             info = await self.scheduler.identity()
             self._scheduler_identity = SchedulerInfo(info)
 
-    def wait_for_workers(self, n_workers=0, timeout=None):
+    def wait_for_workers(self, n_workers=0, timeout=None, absolute=False):
         """Blocking call to wait for n workers before continuing
 
         Parameters
@@ -1345,8 +1347,13 @@ class Client(SyncMethodMixin):
         timeout : number, optional
             Time in seconds after which to raise a
             ``dask.distributed.TimeoutError``
+        absolute : bool, optional
+            Wait for exactly ``n_workers``
+            Default ``False``, waits for at least ``n_workers``
         """
-        return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
+        return self.sync(
+            self._wait_for_workers, n_workers, timeout=timeout, absolute=absolute
+        )
 
     def _heartbeat(self):
         if self.scheduler_comm:

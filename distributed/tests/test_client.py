@@ -6080,13 +6080,21 @@ async def test_wait_for_workers(c, s, a, b):
     start = time()
     await future
     assert time() < start + 1
-    await w.close()
 
     with pytest.raises(TimeoutError) as info:
         await c.wait_for_workers(n_workers=10, timeout="1 ms")
 
-    assert "2/10" in str(info.value).replace(" ", "")
+    assert "3/10" in str(info.value).replace(" ", "")
     assert "1 ms" in str(info.value)
+
+    future = asyncio.ensure_future(c.wait_for_workers(n_workers=2, absolute=True))
+    await asyncio.sleep(0.22)  # 2 chances
+    assert not future.done()
+
+    await w.close()
+    start = time()
+    await future
+    assert time() < start + 1
 
 
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
