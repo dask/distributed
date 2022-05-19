@@ -6072,6 +6072,14 @@ async def test_instances(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_wait_for_workers(c, s, a, b):
+    with pytest.raises(TimeoutError) as info:
+        await c.wait_for_workers(n_workers=1, timeout="1 ms", absolute=True)
+    assert "2/1" in str(info.value).replace(" ", "")
+
+    future = asyncio.ensure_future(c.wait_for_workers(n_workers=1))
+    await asyncio.sleep(0.22)  # 2 chances
+    assert future.done()
+
     future = asyncio.ensure_future(c.wait_for_workers(n_workers=3))
     await asyncio.sleep(0.22)  # 2 chances
     assert not future.done()

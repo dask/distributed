@@ -1330,7 +1330,7 @@ class Client(SyncMethodMixin):
         ):
             if deadline and time() > deadline:
                 raise TimeoutError(
-                    "Only %d/%d workers arrived after %s"
+                    "Only had %d/%d workers after %s"
                     % (running_workers(info), n_workers, timeout)
                 )
             await asyncio.sleep(0.1)
