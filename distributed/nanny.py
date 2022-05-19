@@ -113,7 +113,6 @@ class Nanny(ServerNode):
         services=None,
         name=None,
         memory_limit="auto",
-        reconnect=True,
         validate=False,
         quiet=False,
         resources=None,
@@ -192,7 +191,6 @@ class Nanny(ServerNode):
 
         self._given_worker_port = worker_port
         self.nthreads = nthreads or CPU_COUNT
-        self.reconnect = reconnect
         self.validate = validate
         self.resources = resources
         self.death_timeout = parse_timedelta(death_timeout)
@@ -521,9 +519,9 @@ class Nanny(ServerNode):
                 await self._unregister()
             except OSError:
                 logger.exception("Failed to unregister")
-                if not self.reconnect:
-                    await self.close()
-                    return
+                # Always try to reconnect to scheduler
+                await self.close()
+                return
 
         try:
             if self.status not in (
