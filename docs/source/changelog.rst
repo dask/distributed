@@ -1,6 +1,159 @@
 Changelog
 =========
 
+.. _v2022.05.0:
+
+2022.05.0
+---------
+
+Released on May 2, 2022
+
+Highlights
+^^^^^^^^^^
+This is a bugfix release for `this issue <https://github.com/dask/distributed/issues/6255>`_.
+
+Enhancements
+^^^^^^^^^^^^
+- Handle ``writeable`` in ``buffer_callback`` (:pr:`6238`) `jakirkham`_
+- Use ``.data`` with NumPy array allocation (:pr:`6242`) `jakirkham`_
+
+Bug Fixes
+^^^^^^^^^
+- Close executor in event loop if interpreter is closing (:pr:`6256`) `Matthew Rocklin`_
+
+
+.. _v2022.04.2:
+
+2022.04.2
+---------
+
+Released on April 29, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Unblock event loop while waiting for ``ThreadpoolExecutor`` to shut down (:pr:`6091`) `Florian Jetter`_
+- ``RetireWorker`` policy is done if removed (:pr:`6234`) `Gabe Joseph`_
+- Pause to disable dependency gathering (:pr:`6195`) `crusaderky`_
+- Add ``EOFError`` to nanny ``multiprocessing.queue`` except list (:pr:`6213`) `Matthew Rocklin`_
+- Re-interpret error in lost worker scenario (:pr:`6193`) `Matthew Rocklin`_
+- Add Stimulus IDs to Scheduler (:pr:`6161`) `Florian Jetter`_
+- Set a five minute TTL for Dask workers (:pr:`6200`) `Matthew Rocklin`_
+- Add ``distributed.metrics.monotonic`` (:pr:`6181`) `crusaderky`_
+- Send worker validation errors to scheduler and err on test completion (:pr:`6192`) `Matthew Rocklin`_
+- Redesign worker exponential backoff on busy-gather (:pr:`6173`) `crusaderky`_
+- Log all invalid worker transitions to scheduler (:pr:`6134`) `Matthew Rocklin`_
+- Make Graph dashboard plot have invisible axes (:pr:`6149`) `Matthew Rocklin`_
+- Remove ``Nanny`` ``auto_restart`` state (:pr:`6138`) `Matthew Rocklin`_
+
+Bug Fixes
+^^^^^^^^^
+- Ensure scheduler events do not hold on to ``TaskState`` objects (:pr:`6226`) `Florian Jetter`_
+- Allow pausing and choke event loop while spilling (:pr:`6189`) `crusaderky`_
+- Do not use UUID in stealing (:pr:`6179`) `Florian Jetter`_
+- Handle int worker names in info page (:pr:`6158`) `Brett Naul`_
+- Fix ``psutil`` dio counters none (:pr:`6093`) `ungarj`_
+- Join ``Nanny`` watch thread (:pr:`6146`) `Matthew Rocklin`_
+- Improve logging when closing workers (:pr:`6129`) `Matthew Rocklin`_
+- Avoid stack overflow in profiling (:pr:`6141`) `Matthew Rocklin`_
+- Clean up ``SSHCluster`` if failure to start (:pr:`6130`) `Matthew Rocklin`_
+
+Deprecations
+^^^^^^^^^^^^
+- Deprecate ``rpc`` synchronous context manager (:pr:`6171`) `Thomas Grainger`_
+
+Documentation
+^^^^^^^^^^^^^
+- Update ``actors.rst`` (:pr:`6167`) `Scott Sievert`_
+
+Maintenance
+^^^^^^^^^^^
+- Add ``fail_hard`` decorator for worker methods (:pr:`6210`) `Matthew Rocklin`_
+- Do not require ``pytest_timeout`` (:pr:`6224`) `Florian Jetter`_
+- Remove remaining ``run_sync`` calls from tests (:pr:`6196`) `Thomas Grainger`_
+- Increase test timeout if debugger is running (:pr:`6218`) `Florian Jetter`_
+- Do not list closes keyword in list of bullet points (:pr:`6219`) `Florian Jetter`_
+- Harmonize (:pr:`6161`) and (:pr:`6173`) (:pr:`6207`) `crusaderky`_
+- Xfail ``test_worker_death_timeout`` (:pr:`6186`) `Matthew Rocklin`_
+- Use random port in ``test_dask_spec.py::test_text`` (:pr:`6187`) `Matthew Rocklin`_
+- Mark all websocket tests as flaky (:pr:`6188`) `Matthew Rocklin`_
+- Fix flaky ``test_dont_steal_long_running_tasks`` (:pr:`6197`) `crusaderky`_
+- Cleanup names in stealing (:pr:`6185`) `Matthew Rocklin`_
+- ``log_errors`` decorator (:pr:`6184`) `crusaderky`_
+- Pass ``mypy`` validation on Windows (:pr:`6180`) `crusaderky`_
+- Add ``locket`` as a dependency instead of vendoring (:pr:`6166`) `Michael Adkins`_
+- Remove unittestmock for ``gather_dep`` and ``get_data_from_worker`` (:pr:`6172`) `Florian Jetter`_
+- ``mypy`` tweaks (:pr:`6175`) `crusaderky`_
+- Avoid easy deprecated calls to ``asyncio.get_event_loop()`` (:pr:`6170`) `Thomas Grainger`_
+- Fix flaky ``test_cancel_fire_and_forget`` (:pr:`6099`) `crusaderky`_
+- Remove deprecated code (:pr:`6144`) `Matthew Rocklin`_
+- Update link of test badge (:pr:`6154`) `Florian Jetter`_
+- Remove legacy state mappings (:pr:`6145`) `Matthew Rocklin`_
+- Fix ``test_worker_waits_for_scheduler`` (:pr:`6155`) `Matthew Rocklin`_
+- Disallow leaked threads on windows (:pr:`6152`) `Thomas Grainger`_
+- Review annotations and docstrings in ``scheduler.py``, part 1 (:pr:`6132`) `crusaderky`_
+- Relax ``test_asyncprocess.py::test_simple`` (:pr:`6150`) `Matthew Rocklin`_
+- Drop ``cast`` ing which is effectively a no-op (:pr:`6101`) `jakirkham`_
+- Mark tests that use a specific port as flaky (:pr:`6139`) `Matthew Rocklin`_
+- AMM Suggestion namedtuples (:pr:`6108`) `crusaderky`_
+
+.. _v2022.04.1:
+
+2022.04.1
+---------
+
+Released on April 15, 2022
+
+New Features
+^^^^^^^^^^^^
+- Add ``KillWorker`` Plugin (:pr:`6126`) `Matthew Rocklin`_
+
+Enhancements
+^^^^^^^^^^^^
+- Sort worker list in info pages (:pr:`6135`) `Matthew Rocklin`_
+- Add back ``Worker.transition_fetch_missing`` (:pr:`6112`) `Matthew Rocklin`_
+- Log state machine events (:pr:`6092`) `crusaderky`_
+- Migrate ``ensure_executing`` transitions to new ``WorkerState`` event mechanism - part 1 (:pr:`6003`) `crusaderky`_
+- Migrate ``ensure_executing`` transitions to new ``WorkerState`` event mechanism - part 2 (:pr:`6062`) `crusaderky`_
+- Annotate worker transitions to error (:pr:`6012`) `crusaderky`_
+
+Bug Fixes
+^^^^^^^^^
+- Avoid transitioning from memory/released to missing in worker (:pr:`6123`) `Matthew Rocklin`_
+- Don't try to reconnect client on interpreter shutdown (:pr:`6120`) `Matthew Rocklin`_
+- Wrap UCX init warnings in importable functions (:pr:`6121`) `Charles Blackmon-Luca`_
+- Cancel asyncio tasks on worker close (:pr:`6098`) `crusaderky`_
+- Avoid port collisions when defining port ranges (:pr:`6054`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Avoid intermittent failure in ``test_cancel_fire_and_forget`` (:pr:`6131`) `Matthew Rocklin`_
+- Ignore ``bokeh`` warning in pytest (:pr:`6127`) `Matthew Rocklin`_
+- Start uncythonization (:pr:`6104`) `Martin Durant`_
+- Avoid redundant cleanup fixture in ``gen_test`` tests (:pr:`6118`) `Thomas Grainger`_
+- Move ``comm.close`` to finally in ``test_comms`` (:pr:`6109`) `Florian Jetter`_
+- Use ``async`` with ``Server`` in ``test_core.py`` (:pr:`6100`) `Matthew Rocklin`_
+- Elevate warnings to errors in the test suite (:pr:`6094`) `Thomas Grainger`_
+- Add ``urllib3`` to nightly conda builds (:pr:`6102`) `James Bourbeau`_
+- Drop Blosc (:pr:`6027`) `Matthew Rocklin`_
+- Robust ``test_get_returns_early`` (:pr:`6090`) `Florian Jetter`_
+- Overhaul ``test_priorities.py`` (:pr:`6077`) `crusaderky`_
+- Remove ``pytest-asyncio`` (:pr:`6063`) `Thomas Grainger`_
+- Clean up usage around plain ``rpc`` (:pr:`6082`) `Florian Jetter`_
+- Drop OSX builds for Python 3.9 (:pr:`6073`) `Florian Jetter`_
+- Bump periods in ``utils_test.wait_for`` (:pr:`6081`) `Florian Jetter`_
+- Check for ucx-py nightlies when updating gpuCI (:pr:`6006`) `Charles Blackmon-Luca`_
+- Type annotations for ``profile.py`` (:pr:`6067`) `crusaderky`_
+- Fix flaky ``test_worker_time_to_live`` (:pr:`6061`) `crusaderky`_
+- Fix flaky ``test_as_completed_async_for_cancel`` (:pr:`6072`) `crusaderky`_
+- Fix regression in ``test_weakref_cache`` (:pr:`6033`) `crusaderky`_
+- Trivial fix to ``test_nanny_worker_port_range`` (:pr:`6070`) `crusaderky`_
+- Drop deprecated ``tornado.netutil.ExecutorResolver`` (:pr:`6031`) `Thomas Grainger`_
+- Delete ``asyncio.py`` (:pr:`6066`) `Thomas Grainger`_
+- Tweak conda environment files (:pr:`6037`) `crusaderky`_
+- Harden ``test_abort_execution_to_fetch`` and more (:pr:`6026`) `crusaderky`_
+- Fix ``test_as_completed_with_results_no_raise`` and name ``comm`` (:pr:`6042`) `Matthew Rocklin`_
+- Use more robust limits in ``test_worker_memory`` (:pr:`6055`) `Florian Jetter`_
+
 .. _v2022.04.0:
 
 2022.04.0
@@ -3453,3 +3606,4 @@ significantly without many new features.
 .. _`Andrii Oriekhov`: https://github.com/andriyor
 .. _`Duncan McGregor`: https://github.com/dmcg
 .. _`Eric Engestrom`: https://github.com/lace
+.. _`ungarj`: https://github.com/ungarj

@@ -49,6 +49,22 @@ Pages and JSON endpoints served by the scheduler
 - ``/statics/()``: static file content (CSS, etc)
 - ``/stealing``: worker occupancy metrics, to evaluate task stealing
 
+Scheduler API
+-------------
+
+Scheduler methods exposed by the API with an example of the request body they take
+
+- ``/api/v1/retire_workers`` : retire certain workers on the scheduler
+
+.. code-block:: json
+
+    {
+        "workers":["tcp://127.0.0.1:53741", "tcp://127.0.0.1:53669"]
+    }
+
+- ``/api/v1/get_workers`` : get all workers on the scheduler
+- ``/api/v1/adaptive_target`` : get the target number of workers based on the scheduler's load 
+
 Individual bokeh plots
 ----------------------
 

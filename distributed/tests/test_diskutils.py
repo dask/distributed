@@ -15,6 +15,7 @@ import dask
 from distributed.compatibility import WINDOWS
 from distributed.diskutils import WorkSpace
 from distributed.metrics import time
+from distributed.profile import wait_profiler
 from distributed.utils import mp_context
 from distributed.utils_test import captured_logger
 
@@ -52,6 +53,7 @@ def test_workdir_simple(tmpdir):
     a.release()
     assert_contents(["bb", "bb.dirlock"])
     del b
+    wait_profiler()
     gc.collect()
     assert_contents([])
 
@@ -87,9 +89,11 @@ def test_two_workspaces_in_same_directory(tmpdir):
 
     del ws
     del b
+    wait_profiler()
     gc.collect()
     assert_contents(["aa", "aa.dirlock"], trials=5)
     del a
+    wait_profiler()
     gc.collect()
     assert_contents([], trials=5)
 
@@ -169,7 +173,7 @@ def test_locking_disabled(tmpdir):
     base_dir = str(tmpdir)
 
     with dask.config.set({"distributed.worker.use-file-locking": False}):
-        with mock.patch("distributed.diskutils.locket.lock_file") as lock_file:
+        with mock.patch("locket.lock_file") as lock_file:
             assert_contents = functools.partial(assert_directory_contents, base_dir)
 
             ws = WorkSpace(base_dir)
@@ -184,6 +188,7 @@ def test_locking_disabled(tmpdir):
             a.release()
             assert_contents(["bb"])
             del b
+            wait_profiler()
             gc.collect()
             assert_contents([])
 

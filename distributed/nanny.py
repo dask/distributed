@@ -94,7 +94,6 @@ class Nanny(ServerNode):
 
     _instances: ClassVar[weakref.WeakSet[Nanny]] = weakref.WeakSet()
     process = None
-    status = Status.undefined
     memory_manager: NannyMemoryManager
 
     # Inputs to parse_ports()
@@ -228,7 +227,6 @@ class Nanny(ServerNode):
         self.services = services
         self.name = name
         self.quiet = quiet
-        self.auto_restart = True
 
         if silence_logs:
             silence_logging(level=silence_logs)
@@ -270,7 +268,6 @@ class Nanny(ServerNode):
 
         self._listen_address = listen_address
         Nanny._instances.add(self)
-        self.status = Status.init
 
     # Deprecated attributes; use Nanny.memory_manager.<name> instead
     memory_limit = DeprecatedMemoryManagerAttribute()
@@ -290,7 +287,10 @@ class Nanny(ServerNode):
         allowed_errors = (TimeoutError, CommClosedError, EnvironmentError, RPCClosed)
         with suppress(allowed_errors):
             await asyncio.wait_for(
-                self.scheduler.unregister(address=self.worker_address), timeout
+                self.scheduler.unregister(
+                    address=self.worker_address, stimulus_id=f"nanny-close-{time()}"
+                ),
+                timeout,
             )
 
     @property
@@ -307,10 +307,10 @@ class Nanny(ServerNode):
         warnings.warn("The local_dir attribute has moved to local_directory")
         return self.local_directory
 
-    async def start(self):
+    async def start_unsafe(self):
         """Start nanny, start local process, start watching"""
 
-        await super().start()
+        await super().start_unsafe()
 
         ports = parse_ports(self._start_port)
         for port in ports:
@@ -335,7 +335,7 @@ class Nanny(ServerNode):
                 break
         else:
             raise ValueError(
-                f"Could not start Nanny on host {self._start_host}"
+                f"Could not start Nanny on host {self._start_host} "
                 f"with port {self._start_port}"
             )
 
@@ -350,11 +350,12 @@ class Nanny(ServerNode):
 
         logger.info("        Start Nanny at: %r", self.address)
         response = await self.instantiate()
-        if response == Status.running:
-            assert self.worker_address
-            self.status = Status.running
-        else:
+
+        if response != Status.running:
             await self.close()
+            return
+
+        assert self.worker_address
 
         self.start_periodic_callbacks()
 
@@ -366,7 +367,6 @@ class Nanny(ServerNode):
         Blocks until both the process is down and the scheduler is properly
         informed
         """
-        self.auto_restart = False
         if self.process is None:
             return "OK"
 
@@ -413,62 +413,63 @@ class Nanny(ServerNode):
                     self.process.start(), self.death_timeout
                 )
             except TimeoutError:
-                await self.close(timeout=self.death_timeout)
                 logger.error(
                     "Timed out connecting Nanny '%s' to scheduler '%s'",
                     self,
                     self.scheduler_addr,
                 )
+                await self.close(timeout=self.death_timeout)
                 raise
 
         else:
             try:
                 result = await self.process.start()
             except Exception:
+                logger.error("Failed to start process", exc_info=True)
                 await self.close()
                 raise
         return result
 
+    @log_errors
     async def plugin_add(self, plugin=None, name=None):
-        with log_errors(pdb=False):
-            if isinstance(plugin, bytes):
-                plugin = pickle.loads(plugin)
+        if isinstance(plugin, bytes):
+            plugin = pickle.loads(plugin)
 
-            if name is None:
-                name = _get_plugin_name(plugin)
+        if name is None:
+            name = _get_plugin_name(plugin)
 
-            assert name
+        assert name
 
-            self.plugins[name] = plugin
+        self.plugins[name] = plugin
 
-            logger.info("Starting Nanny plugin %s" % name)
-            if hasattr(plugin, "setup"):
-                try:
-                    result = plugin.setup(nanny=self)
-                    if isawaitable(result):
-                        result = await result
-                except Exception as e:
-                    msg = error_message(e)
-                    return msg
-            if getattr(plugin, "restart", False):
-                await self.restart()
-
-            return {"status": "OK"}
-
-    async def plugin_remove(self, name=None):
-        with log_errors(pdb=False):
-            logger.info(f"Removing Nanny plugin {name}")
+        logger.info("Starting Nanny plugin %s" % name)
+        if hasattr(plugin, "setup"):
             try:
-                plugin = self.plugins.pop(name)
-                if hasattr(plugin, "teardown"):
-                    result = plugin.teardown(nanny=self)
-                    if isawaitable(result):
-                        result = await result
+                result = plugin.setup(nanny=self)
+                if isawaitable(result):
+                    result = await result
             except Exception as e:
                 msg = error_message(e)
                 return msg
+        if getattr(plugin, "restart", False):
+            await self.restart()
 
-            return {"status": "OK"}
+        return {"status": "OK"}
+
+    @log_errors
+    async def plugin_remove(self, name=None):
+        logger.info(f"Removing Nanny plugin {name}")
+        try:
+            plugin = self.plugins.pop(name)
+            if hasattr(plugin, "teardown"):
+                result = plugin.teardown(nanny=self)
+                if isawaitable(result):
+                    result = await result
+        except Exception as e:
+            msg = error_message(e)
+            return msg
+
+        return {"status": "OK"}
 
     async def restart(self, timeout=30, executor_wait=True):
         async def _():
@@ -508,6 +509,7 @@ class Nanny(ServerNode):
     def _on_exit_sync(self, exitcode):
         self.loop.add_callback(self._on_exit, exitcode)
 
+    @log_errors
     async def _on_exit(self, exitcode):
         if self.status not in (
             Status.init,
@@ -518,6 +520,7 @@ class Nanny(ServerNode):
             try:
                 await self._unregister()
             except OSError:
+                logger.exception("Failed to unregister")
                 if not self.reconnect:
                     await self.close()
                     return
@@ -528,9 +531,8 @@ class Nanny(ServerNode):
                 Status.closed,
                 Status.closing_gracefully,
             ):
-                if self.auto_restart:
-                    logger.warning("Restarting worker")
-                    await self.instantiate()
+                logger.warning("Restarting worker")
+                await self.instantiate()
             elif self.status == Status.closing_gracefully:
                 await self.close()
 
@@ -567,7 +569,11 @@ class Nanny(ServerNode):
             return "OK"
 
         self.status = Status.closing
-        logger.info("Closing Nanny at %r", self.address)
+        logger.info(
+            "Closing Nanny at %r. Report closure to scheduler: %s",
+            self.address_safe,
+            report,
+        )
 
         for preload in self.preloads:
             await preload.teardown()
@@ -677,6 +683,7 @@ class WorkerProcess:
         try:
             msg = await self._wait_until_connected(uid)
         except Exception:
+            logger.exception("Failed to connect to process")
             self.status = Status.failed
             self.process.terminate()
             raise
@@ -750,6 +757,7 @@ class WorkerProcess:
             return
         assert self.status in (Status.starting, Status.running)
         self.status = Status.stopping
+        logger.info("Nanny asking worker to close")
 
         process = self.process
         self.child_stop_q.put(
@@ -844,14 +852,22 @@ class WorkerProcess:
                 Wait for an incoming stop message and then stop the
                 worker cleanly.
                 """
-                msg = child_stop_q.get()
-                child_stop_q.close()
-                assert msg.pop("op") == "stop"
-                loop.add_callback(do_stop, **msg)
+                try:
+                    msg = child_stop_q.get()
+                except (TypeError, OSError, EOFError):
+                    logger.error("Worker process died unexpectedly")
+                    msg = {"op": "stop"}
+                finally:
+                    child_stop_q.close()
+                    assert msg["op"] == "stop", msg
+                    del msg["op"]
+                    loop.add_callback(do_stop, **msg)
 
-            t = threading.Thread(target=watch_stop_q, name="Nanny stop queue watch")
-            t.daemon = True
-            t.start()
+            thread = threading.Thread(
+                target=watch_stop_q, name="Nanny stop queue watch"
+            )
+            thread.daemon = True
+            thread.start()
 
             async def run():
                 """
@@ -908,3 +924,10 @@ class WorkerProcess:
                 # At this point the loop is not running thus we have to run
                 # do_stop() explicitly.
                 loop.run_sync(do_stop)
+            finally:
+                with suppress(ValueError):
+                    child_stop_q.put({"op": "stop"})  # usually redundant
+                with suppress(ValueError):
+                    child_stop_q.close()  # usually redundant
+                child_stop_q.join_thread()
+                thread.join(timeout=2)

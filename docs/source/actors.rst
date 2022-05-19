@@ -227,5 +227,3 @@ Actors offer advanced capabilities, but with some cost:
     computations no diagnostics are available about these computations.
 3.  **No Load balancing:** Actors are allocated onto workers evenly, without
     serious consideration given to avoiding communication.
-4.  **Experimental:** Actors are a new feature and subject to change without
-    warning

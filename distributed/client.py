@@ -34,7 +34,6 @@ from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph
 from dask.optimization import SubgraphCallable
 from dask.utils import (
-    _deprecated,
     apply,
     ensure_dict,
     format_bytes,
@@ -53,7 +52,7 @@ from tornado import gen
 from tornado.ioloop import PeriodicCallback
 
 from distributed import cluster_dump, preloading
-from distributed import versions as version_module  # type: ignore
+from distributed import versions as version_module
 from distributed.batched import BatchedSend
 from distributed.cfexecutor import ClientExecutor
 from distributed.core import (
@@ -91,6 +90,7 @@ from distributed.utils import (
     format_dashboard_link,
     has_keyword,
     import_term,
+    is_python_shutting_down,
     log_errors,
     no_default,
     sync,
@@ -1207,37 +1207,38 @@ class Client(SyncMethodMixin):
 
         return self
 
+    @log_errors
     async def _reconnect(self):
-        with log_errors():
-            assert self.scheduler_comm.comm.closed()
+        assert self.scheduler_comm.comm.closed()
 
-            self.status = "connecting"
-            self.scheduler_comm = None
+        self.status = "connecting"
+        self.scheduler_comm = None
 
-            for st in self.futures.values():
-                st.cancel()
-            self.futures.clear()
+        for st in self.futures.values():
+            st.cancel()
+        self.futures.clear()
 
-            timeout = self._timeout
-            deadline = time() + timeout
-            while timeout > 0 and self.status == "connecting":
-                try:
-                    await self._ensure_connected(timeout=timeout)
-                    break
-                except OSError:
-                    # Wait a bit before retrying
-                    await asyncio.sleep(0.1)
-                    timeout = deadline - time()
-                except ImportError:
-                    await self._close()
-                    break
-            else:
-                logger.error(
-                    "Failed to reconnect to scheduler after %.2f "
-                    "seconds, closing client",
-                    self._timeout,
-                )
+        timeout = self._timeout
+        deadline = time() + timeout
+        while timeout > 0 and self.status == "connecting":
+            try:
+                await self._ensure_connected(timeout=timeout)
+                break
+            except OSError:
+                # Wait a bit before retrying
+                await asyncio.sleep(0.1)
+                timeout = deadline - time()
+            except ImportError:
                 await self._close()
+                break
+
+        else:
+            logger.error(
+                "Failed to reconnect to scheduler after %.2f "
+                "seconds, closing client",
+                self._timeout,
+            )
+            await self._close()
 
     async def _ensure_connected(self, timeout=None):
         if (
@@ -1314,11 +1315,21 @@ class Client(SyncMethodMixin):
             deadline = time() + parse_timedelta(timeout)
         else:
             deadline = None
-        while n_workers and len(info["workers"]) < n_workers:
+
+        def running_workers(info):
+            return len(
+                [
+                    ws
+                    for ws in info["workers"].values()
+                    if ws["status"] == Status.running.name
+                ]
+            )
+
+        while n_workers and running_workers(info) < n_workers:
             if deadline and time() > deadline:
                 raise TimeoutError(
                     "Only %d/%d workers arrived after %s"
-                    % (len(info["workers"]), n_workers, timeout)
+                    % (running_workers(info), n_workers, timeout)
                 )
             await asyncio.sleep(0.1)
             info = await self.scheduler.identity()
@@ -1350,10 +1361,10 @@ class Client(SyncMethodMixin):
         await self
         return self
 
-    async def __aexit__(self, typ, value, traceback):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         await self._close()
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback):
         self.close()
 
     def __del__(self):
@@ -1384,52 +1395,54 @@ class Client(SyncMethodMixin):
                 {"op": "client-releases-keys", "keys": [key], "client": self.id}
             )
 
+    @log_errors
     async def _handle_report(self):
         """Listen to scheduler"""
-        with log_errors():
-            try:
-                while True:
-                    if self.scheduler_comm is None:
+        try:
+            while True:
+                if self.scheduler_comm is None:
+                    break
+                try:
+                    msgs = await self.scheduler_comm.comm.read()
+                except CommClosedError:
+                    if is_python_shutting_down():
+                        return
+                    if self.status == "running":
+                        logger.info("Client report stream closed to scheduler")
+                        logger.info("Reconnecting...")
+                        self.status = "connecting"
+                        await self._reconnect()
+                        continue
+                    else:
                         break
+                if not isinstance(msgs, (list, tuple)):
+                    msgs = (msgs,)
+
+                breakout = False
+                for msg in msgs:
+                    logger.debug("Client receives message %s", msg)
+
+                    if "status" in msg and "error" in msg["status"]:
+                        typ, exc, tb = clean_exception(**msg)
+                        raise exc.with_traceback(tb)
+
+                    op = msg.pop("op")
+
+                    if op == "close" or op == "stream-closed":
+                        breakout = True
+                        break
+
                     try:
-                        msgs = await self.scheduler_comm.comm.read()
-                    except CommClosedError:
-                        if self.status == "running":
-                            logger.info("Client report stream closed to scheduler")
-                            logger.info("Reconnecting...")
-                            self.status = "connecting"
-                            await self._reconnect()
-                            continue
-                        else:
-                            break
-                    if not isinstance(msgs, (list, tuple)):
-                        msgs = (msgs,)
-
-                    breakout = False
-                    for msg in msgs:
-                        logger.debug("Client receives message %s", msg)
-
-                        if "status" in msg and "error" in msg["status"]:
-                            typ, exc, tb = clean_exception(**msg)
-                            raise exc.with_traceback(tb)
-
-                        op = msg.pop("op")
-
-                        if op == "close" or op == "stream-closed":
-                            breakout = True
-                            break
-
-                        try:
-                            handler = self._stream_handlers[op]
-                            result = handler(**msg)
-                            if inspect.isawaitable(result):
-                                await result
-                        except Exception as e:
-                            logger.exception(e)
-                    if breakout:
-                        break
-            except CancelledError:
-                pass
+                        handler = self._stream_handlers[op]
+                        result = handler(**msg)
+                        if inspect.isawaitable(result):
+                            await result
+                    except Exception as e:
+                        logger.exception(e)
+                if breakout:
+                    break
+        except CancelledError:
+            pass
 
     def _handle_key_in_memory(self, key=None, type=None, workers=None):
         state = self.futures.get(key)
@@ -2441,37 +2454,37 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self._retry, futures, asynchronous=asynchronous)
 
+    @log_errors
     async def _publish_dataset(self, *args, name=None, override=False, **kwargs):
-        with log_errors():
-            coroutines = []
+        coroutines = []
 
-            def add_coro(name, data):
-                keys = [stringify(f.key) for f in futures_of(data)]
-                coroutines.append(
-                    self.scheduler.publish_put(
-                        keys=keys,
-                        name=name,
-                        data=to_serialize(data),
-                        override=override,
-                        client=self.id,
-                    )
+        def add_coro(name, data):
+            keys = [stringify(f.key) for f in futures_of(data)]
+            coroutines.append(
+                self.scheduler.publish_put(
+                    keys=keys,
+                    name=name,
+                    data=to_serialize(data),
+                    override=override,
+                    client=self.id,
                 )
+            )
 
-            if name:
-                if len(args) == 0:
-                    raise ValueError(
-                        "If name is provided, expecting call signature like"
-                        " publish_dataset(df, name='ds')"
-                    )
-                # in case this is a singleton, collapse it
-                elif len(args) == 1:
-                    args = args[0]
-                add_coro(name, args)
+        if name:
+            if len(args) == 0:
+                raise ValueError(
+                    "If name is provided, expecting call signature like"
+                    " publish_dataset(df, name='ds')"
+                )
+            # in case this is a singleton, collapse it
+            elif len(args) == 1:
+                args = args[0]
+            add_coro(name, args)
 
-            for name, data in kwargs.items():
-                add_coro(name, data)
+        for name, data in kwargs.items():
+            add_coro(name, data)
 
-            await asyncio.gather(*coroutines)
+        await asyncio.gather(*coroutines)
 
     def publish_dataset(self, *args, **kwargs):
         """
@@ -2787,27 +2800,6 @@ class Client(SyncMethodMixin):
             on_error=on_error,
             **kwargs,
         )
-
-    @_deprecated(use_instead="Client.run which detects async functions automatically")
-    def run_coroutine(self, function, *args, **kwargs):
-        """
-        Spawn a coroutine on all workers.
-
-        This spawns a coroutine on all currently known workers and then waits
-        for the coroutine on each worker.  The coroutines' results are returned
-        as a dictionary keyed by worker address.
-
-        Parameters
-        ----------
-        function : a coroutine function
-            (typically a function wrapped in gen.coroutine or
-             a Python 3.5+ async function)
-        *args : tuple
-            Optional arguments for the remote function
-        **kwargs : dict
-            Optional keyword arguments for the remote function
-        """
-        return self.run(function, *args, **kwargs)
 
     @staticmethod
     def _get_computation_code(stacklevel=None) -> str:
@@ -4294,6 +4286,31 @@ class Client(SyncMethodMixin):
         """Convert many collections into a single dask graph, after optimization"""
         return collections_to_dsk(collections, *args, **kwargs)
 
+    async def _story(self, keys=(), on_error="raise"):
+        assert on_error in ("raise", "ignore")
+
+        try:
+            flat_stories = await self.scheduler.get_story(keys=keys)
+            flat_stories = [("scheduler", *msg) for msg in flat_stories]
+        except Exception:
+            if on_error == "raise":
+                raise
+            elif on_error == "ignore":
+                flat_stories = []
+            else:
+                raise ValueError(f"on_error not in {'raise', 'ignore'}")
+
+        responses = await self.scheduler.broadcast(
+            msg={"op": "get_story", "keys": keys}, on_error=on_error
+        )
+        for worker, stories in responses.items():
+            flat_stories.extend((worker, *msg) for msg in stories)
+        return flat_stories
+
+    def story(self, *keys_or_stimulus_ids, on_error="raise"):
+        """Returns a cluster-wide story for the given keys or simtulus_id's"""
+        return self.sync(self._story, keys=keys_or_stimulus_ids, on_error=on_error)
+
     def get_task_stream(
         self,
         start=None,
@@ -4401,16 +4418,14 @@ class Client(SyncMethodMixin):
         else:
             return msgs
 
-    async def _register_scheduler_plugin(self, plugin, name, **kwargs):
-        if isinstance(plugin, type):
-            plugin = plugin(**kwargs)
-
+    async def _register_scheduler_plugin(self, plugin, name, idempotent=False):
         return await self.scheduler.register_scheduler_plugin(
             plugin=dumps(plugin, protocol=4),
             name=name,
+            idempotent=idempotent,
         )
 
-    def register_scheduler_plugin(self, plugin, name=None, **kwargs):
+    def register_scheduler_plugin(self, plugin, name=None, idempotent=False):
         """Register a scheduler plugin.
 
         See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
@@ -4422,21 +4437,9 @@ class Client(SyncMethodMixin):
         name : str
             Name for the plugin; if None, a name is taken from the
             plugin instance or automatically generated if not present.
-        **kwargs : Any
-            deprecated; Arguments passed to the Plugin class (if Plugin is an
-            instance kwargs are unused).
-
+        idempotent : bool
+            Do not re-register if a plugin of the given name already exists.
         """
-        if isinstance(plugin, type):
-            warnings.warn(
-                "Adding plugins by class is deprecated and will be disabled in a "
-                "future release. Please add plugins by instance instead.",
-                category=FutureWarning,
-            )
-            # note: plugin is constructed in async def _register_scheduler_plugin
-        elif kwargs:
-            raise ValueError("kwargs provided but plugin is already an instance")
-
         if name is None:
             name = _get_plugin_name(plugin)
 
@@ -4444,7 +4447,7 @@ class Client(SyncMethodMixin):
             self._register_scheduler_plugin,
             plugin=plugin,
             name=name,
-            **kwargs,
+            idempotent=idempotent,
         )
 
     def register_worker_callbacks(self, setup=None):
@@ -4482,7 +4485,7 @@ class Client(SyncMethodMixin):
                 raise exc.with_traceback(tb)
         return responses
 
-    def register_worker_plugin(self, plugin=None, name=None, nanny=None, **kwargs):
+    def register_worker_plugin(self, plugin=None, name=None, nanny=None):
         """
         Registers a lifecycle worker plugin for all current and future workers.
 
@@ -4514,10 +4517,6 @@ class Client(SyncMethodMixin):
             If plugin has no name attribute a random name is used.
         nanny : bool, optional
             Whether to register the plugin with workers or nannies.
-        **kwargs : optional
-            Deprecated; If you pass a class as the plugin, instead of a class
-            instance, then the class will be instantiated with any extra
-            keyword arguments.
 
         Examples
         --------
@@ -4552,16 +4551,6 @@ class Client(SyncMethodMixin):
         distributed.WorkerPlugin
         unregister_worker_plugin
         """
-        if isinstance(plugin, type):
-            warnings.warn(
-                "Adding plugins by class is deprecated and will be disabled in a "
-                "future release. Please add plugins by instance instead.",
-                category=FutureWarning,
-            )
-            plugin = plugin(**kwargs)
-        elif kwargs:
-            raise ValueError("kwargs provided but plugin is already an instance")
-
         if name is None:
             name = _get_plugin_name(plugin)
 
@@ -4639,14 +4628,6 @@ class _WorkerSetupPlugin(WorkerPlugin):
             return self._setup(dask_worker=worker)
         else:
             return self._setup()
-
-
-class Executor(Client):
-    """Deprecated: see Client"""
-
-    def __init__(self, *args, **kwargs):
-        warnings.warn("Executor has been renamed to Client")
-        super().__init__(*args, **kwargs)
 
 
 def CompatibleExecutor(*args, **kwargs):
@@ -4900,6 +4881,8 @@ class as_completed:
             if self.raise_errors and future.status == "error":
                 typ, exc, tb = result
                 raise exc.with_traceback(tb)
+            elif future.status == "cancelled":
+                res = (res[0], CancelledError(future.key))
         return res
 
     def __next__(self):
@@ -5203,7 +5186,7 @@ class get_task_stream:
         self.start = time()
         return self
 
-    def __exit__(self, typ, value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback):
         L = self.client.get_task_stream(
             start=self.start, plot=self._plot, filename=self._filename
         )
@@ -5214,7 +5197,7 @@ class get_task_stream:
     async def __aenter__(self):
         return self
 
-    async def __aexit__(self, typ, value, traceback):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         L = await self.client.get_task_stream(
             start=self.start, plot=self._plot, filename=self._filename
         )
@@ -5267,7 +5250,7 @@ class performance_report:
         )
         await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
 
-    async def __aexit__(self, typ, value, traceback, code=None):
+    async def __aexit__(self, exc_type, exc_value, traceback, code=None):
         client = get_client()
         if code is None:
             code = client._get_computation_code(self._stacklevel + 1)
@@ -5280,10 +5263,10 @@ class performance_report:
     def __enter__(self):
         get_client().sync(self.__aenter__)
 
-    def __exit__(self, typ, value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback):
         client = get_client()
         code = client._get_computation_code(self._stacklevel + 1)
-        client.sync(self.__aexit__, type, value, traceback, code=code)
+        client.sync(self.__aexit__, exc_type, exc_value, traceback, code=code)
 
 
 class get_task_metadata:
@@ -5313,7 +5296,7 @@ class get_task_metadata:
         await get_client().scheduler.start_task_metadata(name=self.name)
         return self
 
-    async def __aexit__(self, typ, value, traceback):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         response = await get_client().scheduler.stop_task_metadata(name=self.name)
         self.metadata = response["metadata"]
         self.state = response["state"]
@@ -5321,8 +5304,8 @@ class get_task_metadata:
     def __enter__(self):
         return get_client().sync(self.__aenter__)
 
-    def __exit__(self, typ, value, traceback):
-        return get_client().sync(self.__aexit__, type, value, traceback)
+    def __exit__(self, exc_type, exc_value, traceback):
+        return get_client().sync(self.__aexit__, exc_type, exc_value, traceback)
 
 
 @contextmanager
@@ -5367,16 +5350,3 @@ def _close_global_client():
 
 
 atexit.register(_close_global_client)
-
-
-def __getattr__(name):
-    if name == "ensure_default_get":
-        warnings.warn(
-            "`ensure_default_get` is deprecated and will be removed in a future release. "
-            "Please use `distributed.client.ensure_default_client` instead.",
-            category=FutureWarning,
-            stacklevel=2,
-        )
-        return ensure_default_client
-    else:
-        raise AttributeError(f"module {__name__} has no attribute {name}")

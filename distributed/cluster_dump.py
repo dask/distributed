@@ -10,9 +10,9 @@ from typing import IO, Any, Awaitable, Callable, Collection, Literal
 import fsspec
 import msgpack
 
+from distributed._stories import scheduler_story as _scheduler_story
+from distributed._stories import worker_story as _worker_story
 from distributed.compatibility import to_thread
-from distributed.stories import scheduler_story as _scheduler_story
-from distributed.stories import worker_story as _worker_story
 
 DEFAULT_CLUSTER_DUMP_FORMAT: Literal["msgpack" | "yaml"] = "msgpack"
 DEFAULT_CLUSTER_DUMP_EXCLUDE: Collection[str] = ("run_spec",)

@@ -5,6 +5,8 @@ pytest.importorskip("requests")
 
 import os
 import shutil
+import signal
+import subprocess
 import sys
 import tempfile
 from time import sleep
@@ -17,7 +19,7 @@ from dask.utils import tmpfile
 import distributed
 import distributed.cli.dask_scheduler
 from distributed import Client, Scheduler
-from distributed.compatibility import LINUX
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.metrics import time
 from distributed.utils import get_ip, get_ip_interface
 from distributed.utils_test import (
@@ -414,9 +416,12 @@ def test_version_option():
 def test_idle_timeout(loop):
     start = time()
     runner = CliRunner()
-    runner.invoke(distributed.cli.dask_scheduler.main, ["--idle-timeout", "1s"])
+    result = runner.invoke(
+        distributed.cli.dask_scheduler.main, ["--idle-timeout", "1s"]
+    )
     stop = time()
     assert 1 < stop - start < 10
+    assert result.exit_code == 0
 
 
 def test_multiple_workers_2(loop):
@@ -453,3 +458,25 @@ def test_multiple_workers(loop):
                     while len(c.nthreads()) < 2:
                         sleep(0.1)
                         assert time() < start + 10
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(WINDOWS, reason="POSIX only")
+@pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
+def test_signal_handling(loop, sig):
+    with subprocess.Popen(
+        ["python", "-m", "distributed.cli.dask_scheduler"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    ) as scheduler:
+        # Wait for scheduler to start
+        with Client(f"127.0.0.1:{Scheduler.default_port}", loop=loop) as c:
+            pass
+        scheduler.send_signal(sig)
+        stdout, stderr = scheduler.communicate()
+        logs = stdout.decode().lower()
+        assert stderr is None
+        assert scheduler.returncode == 0
+        assert sig.name.lower() in logs
+        assert "scheduler closing" in logs
+        assert "end scheduler" in logs

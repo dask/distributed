@@ -31,9 +31,7 @@ Known issues
   flag would solve this issue. See pytest_rerunfailures code for inspiration.
 
 - The @gen_cluster fixture leaks 2 fds on the first test decorated with it within a test
-  suite; this is likely caused by an incomplete warmup routine of
-  distributed.comm.tcp.BaseTCPConnector.
-  This issue would also be fixed by rerunning failing tests.
+  suite; This issue would also be fixed by rerunning failing tests.
 
 - The @pytest.mark.flaky decorator (pytest_rerunfailures) completely disables this
   plugin for the decorated tests.
@@ -57,8 +55,6 @@ from typing import Any, ClassVar
 import psutil
 import pytest
 
-from distributed.comm.tcp import BaseTCPConnector
-from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 
 
@@ -157,11 +153,9 @@ class DemoChecker(ResourceChecker, name="demo"):
 
 
 class FDChecker(ResourceChecker, name="fds"):
-    def __init__(self):
-        BaseTCPConnector.warmup()
-
     def measure(self) -> int:
-        if WINDOWS:
+        # Note: can't use WINDOWS constant as it upsets mypy
+        if sys.platform == "win32":
             # Don't use num_handles(); you'll get tens of thousands of reported leaks
             return 0
         return psutil.Process().num_fds()
@@ -187,9 +181,6 @@ class RSSMemoryChecker(ResourceChecker, name="memory"):
 
 
 class ActiveThreadsChecker(ResourceChecker, name="threads"):
-    def __init__(self):
-        BaseTCPConnector.warmup()
-
     def measure(self) -> set[threading.Thread]:
         return set(threading.enumerate())
 

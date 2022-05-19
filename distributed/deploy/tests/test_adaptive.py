@@ -1,5 +1,4 @@
 import asyncio
-import gc
 import math
 from time import sleep
 
@@ -30,22 +29,22 @@ def test_adaptive_local_cluster(loop):
     ) as cluster:
         alc = cluster.adapt(interval="100 ms")
         with Client(cluster, loop=loop) as c:
-            assert not c.nthreads()
+            assert not cluster.scheduler.workers
             future = c.submit(lambda x: x + 1, 1)
             assert future.result() == 2
-            assert c.nthreads()
+            assert cluster.scheduler.workers
 
             sleep(0.1)
-            assert c.nthreads()  # still there after some time
+            assert cluster.scheduler.workers
 
             del future
 
             start = time()
-            while cluster.scheduler.nthreads:
+            while cluster.scheduler.workers:
                 sleep(0.01)
                 assert time() < start + 30
 
-            assert not c.nthreads()
+            assert not cluster.scheduler.workers
 
 
 @gen_test()
@@ -151,7 +150,6 @@ async def test_min_max():
         assert len(adapt.log) == 2 and all(d["status"] == "up" for _, d in adapt.log)
 
         del futures
-        gc.collect()
 
         start = time()
         while len(cluster.scheduler.workers) != 1:
@@ -382,15 +380,19 @@ async def test_adapt_cores_memory():
         assert adapt.maximum == 5
 
 
-def test_adaptive_config():
+@gen_test()
+async def test_adaptive_config():
     with dask.config.set(
         {"distributed.adaptive.minimum": 10, "distributed.adaptive.wait-count": 8}
     ):
-        adapt = Adaptive(interval="5s")
-        assert adapt.minimum == 10
-        assert adapt.maximum == math.inf
-        assert adapt.interval == 5
-        assert adapt.wait_count == 8
+        try:
+            adapt = Adaptive(interval="5s")
+            assert adapt.minimum == 10
+            assert adapt.maximum == math.inf
+            assert adapt.interval == 5
+            assert adapt.wait_count == 8
+        finally:
+            adapt.stop()
 
 
 @gen_test()

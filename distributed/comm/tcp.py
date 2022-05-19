@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import asyncio
 import ctypes
 import errno
 import functools
@@ -7,7 +10,7 @@ import struct
 import sys
 import weakref
 from ssl import SSLCertVerificationError, SSLError
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from tornado import gen
 
@@ -43,8 +46,7 @@ from distributed.comm.utils import (
 )
 from distributed.protocol.utils import pack_frames_prelude, unpack_frames
 from distributed.system import MEMORY_LIMIT
-from distributed.threadpoolexecutor import ThreadPoolExecutor
-from distributed.utils import ensure_ip, get_ip, get_ipv6, nbytes
+from distributed.utils import ensure_ip, ensure_memoryview, get_ip, get_ipv6, nbytes
 
 logger = logging.getLogger(__name__)
 
@@ -303,7 +305,7 @@ class TCP(Comm):
                     if isinstance(each_frame, memoryview):
                         # Make sure that `len(data) == data.nbytes`
                         # See <https://github.com/tornadoweb/tornado/pull/2996>
-                        each_frame = memoryview(each_frame).cast("B")
+                        each_frame = ensure_memoryview(each_frame)
 
                     stream._write_buffer.append(each_frame)
                     stream._total_write_index += each_frame_nbytes
@@ -402,38 +404,31 @@ class RequireEncryptionMixin:
             )
 
 
-class BaseTCPConnector(Connector, RequireEncryptionMixin):
-    _executor: ClassVar[ThreadPoolExecutor] = ThreadPoolExecutor(
-        2, thread_name_prefix="TCP-Executor"
-    )
-    _client: ClassVar[TCPClient]
+class _DefaultLoopResolver(netutil.Resolver):
+    """
+    Resolver implementation using `asyncio.loop.getaddrinfo`.
+    backport from Tornado 6.2+
+    https://github.com/tornadoweb/tornado/blob/3de78b7a15ba7134917a18b0755ea24d7f8fde94/tornado/netutil.py#L416-L432
+    """
 
-    @classmethod
-    def warmup(cls) -> None:
-        """Pre-start threads and sockets to avoid catching them in checks for thread and
-        fd leaks
-        """
-        ex = cls._executor
-        while len(ex._threads) < ex._max_workers:
-            ex._adjust_thread_count()
-        cls._get_client()
-
-    @classmethod
-    def _get_client(cls):
-        if not hasattr(cls, "_client"):
-            resolver = netutil.ExecutorResolver(
-                close_executor=False, executor=cls._executor
+    async def resolve(
+        self, host: str, port: int, family: socket.AddressFamily = socket.AF_UNSPEC
+    ) -> list[tuple[int, Any]]:
+        # On Solaris, getaddrinfo fails if the given port is not found
+        # in /etc/services and no socket type is given, so we must pass
+        # one here.  The socket type used here doesn't seem to actually
+        # matter (we discard the one we get back in the results),
+        # so the addresses we return should still be usable with SOCK_DGRAM.
+        return [
+            (fam, address)
+            for fam, _, _, _, address in await asyncio.get_running_loop().getaddrinfo(
+                host, port, family=family, type=socket.SOCK_STREAM
             )
-            cls._client = TCPClient(resolver=resolver)
-        return cls._client
+        ]
 
-    @property
-    def client(self):
-        # The `TCPClient` is cached on the class itself to avoid creating
-        # excess `ThreadPoolExecutor`s. We delay creation until inside an async
-        # function to avoid accessing an IOLoop from a context where a backing
-        # event loop doesn't exist.
-        return self._get_client()
+
+class BaseTCPConnector(Connector, RequireEncryptionMixin):
+    client: ClassVar[TCPClient] = TCPClient(resolver=_DefaultLoopResolver())
 
     async def connect(self, address, deserialize=True, **connection_args):
         self._check_encryption(address, connection_args)

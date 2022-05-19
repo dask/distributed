@@ -39,6 +39,7 @@ from dask.utils import format_bytes, parse_bytes, parse_timedelta
 
 from distributed import system
 from distributed.core import Status
+from distributed.metrics import monotonic
 from distributed.spill import ManualEvictProto, SpillBuffer
 from distributed.utils import log_errors
 from distributed.utils_perf import ThrottledGC
@@ -131,7 +132,7 @@ class WorkerMemoryManager:
 
         self.memory_monitor_interval = parse_timedelta(
             dask.config.get("distributed.worker.memory.monitor-interval"),
-            default=None,
+            default=False,
         )
         assert isinstance(self.memory_monitor_interval, (int, float))
 
@@ -151,6 +152,7 @@ class WorkerMemoryManager:
 
         self._throttled_gc = ThrottledGC(logger=logger)
 
+    @log_errors
     async def memory_monitor(self, worker: Worker) -> None:
         """Track this process's memory usage and act accordingly.
         If process memory rises above the spill threshold (70%), start dumping data to
@@ -158,19 +160,18 @@ class WorkerMemoryManager:
         If process memory rises above the pause threshold (80%), stop execution of new
         tasks.
         """
-        with log_errors():
-            if self._memory_monitoring:
-                return
-            self._memory_monitoring = True
-            try:
-                # Don't use psutil directly; instead read from the same API that is used
-                # to send info to the Scheduler (e.g. for the benefit of Active Memory
-                # Manager) and which can be easily mocked in unit tests.
-                memory = worker.monitor.get_process_memory()
-                self._maybe_pause_or_unpause(worker, memory)
-                await self._maybe_spill(worker, memory)
-            finally:
-                self._memory_monitoring = False
+        if self._memory_monitoring:
+            return
+        self._memory_monitoring = True
+        try:
+            # Don't use psutil directly; instead read from the same API that is used
+            # to send info to the Scheduler (e.g. for the benefit of Active Memory
+            # Manager) and which can be easily mocked in unit tests.
+            memory = worker.monitor.get_process_memory()
+            self._maybe_pause_or_unpause(worker, memory)
+            await self._maybe_spill(worker, memory)
+        finally:
+            self._memory_monitoring = False
 
     def _maybe_pause_or_unpause(self, worker: Worker, memory: int) -> None:
         if self.memory_pause_fraction is False:
@@ -234,12 +235,14 @@ class WorkerMemoryManager:
         )
         count = 0
         need = memory - target
+        last_checked_for_pause = last_yielded = monotonic()
+
         while memory > target:
             if not data.fast:
                 logger.warning(
                     "Unmanaged memory use is high. This may indicate a memory leak "
                     "or the memory may not be released to the OS; see "
-                    "https://distributed.dask.org/en/latest/worker.html#memtrim "
+                    "https://distributed.dask.org/en/latest/worker-memory.html#memory-not-released-back-to-the-os "
                     "for more information. "
                     "-- Unmanaged memory: %s -- Worker memory limit: %s",
                     format_bytes(memory),
@@ -255,7 +258,6 @@ class WorkerMemoryManager:
 
             total_spilled += weight
             count += 1
-            await asyncio.sleep(0)
 
             memory = worker.monitor.get_process_memory()
             if total_spilled > need and memory > target:
@@ -265,7 +267,23 @@ class WorkerMemoryManager:
                 self._throttled_gc.collect()
                 memory = worker.monitor.get_process_memory()
 
-        self._maybe_pause_or_unpause(worker, memory)
+            now = monotonic()
+
+            # Spilling may potentially take multiple seconds; we may pass the pause
+            # threshold in the meantime.
+            if now - last_checked_for_pause > self.memory_monitor_interval:
+                self._maybe_pause_or_unpause(worker, memory)
+                last_checked_for_pause = now
+
+            # Increase spilling aggressiveness when the fast buffer is filled with a lot
+            # of small values. This artificially chokes the rest of the event loop -
+            # namely, the reception of new data from other workers. While this is
+            # somewhat of an ugly hack,  DO NOT tweak this without a thorough cycle of
+            # stress testing. See: https://github.com/dask/distributed/issues/6110.
+            if now - last_yielded > 0.5:
+                await asyncio.sleep(0)
+                last_yielded = monotonic()
+
         if count:
             logger.debug(
                 "Moved %d tasks worth %s to disk",
@@ -287,6 +305,7 @@ class NannyMemoryManager:
     memory_limit: int | None
     memory_terminate_fraction: float | Literal[False]
     memory_monitor_interval: float | None
+    _last_terminated_pid: int
 
     def __init__(
         self,
@@ -300,9 +319,11 @@ class NannyMemoryManager:
         )
         self.memory_monitor_interval = parse_timedelta(
             dask.config.get("distributed.worker.memory.monitor-interval"),
-            default=None,
+            default=False,
         )
         assert isinstance(self.memory_monitor_interval, (int, float))
+        self._last_terminated_pid = -1
+
         if self.memory_limit and self.memory_terminate_fraction is not False:
             pc = PeriodicCallback(
                 partial(self.memory_monitor, nanny),
@@ -323,11 +344,20 @@ class NannyMemoryManager:
         except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
             return  # pragma: nocover
 
+        if process.pid in (self._last_terminated_pid, None):
+            # We already sent SIGTERM to the worker, but its handler is still running
+            # since the previous iteration of the memory_monitor - for example, it
+            # may be taking a long time deleting all the spilled data from disk.
+            return
+        self._last_terminated_pid = -1
+
         if memory / self.memory_limit > self.memory_terminate_fraction:
             logger.warning(
-                "Worker exceeded %d%% memory budget. Restarting",
-                100 * self.memory_terminate_fraction,
+                f"Worker {nanny.worker_address} (pid={process.pid}) exceeded "
+                f"{self.memory_terminate_fraction * 100:.0f}% memory budget. "
+                "Restarting...",
             )
+            self._last_terminated_pid = process.pid
             process.terminate()
 
 
