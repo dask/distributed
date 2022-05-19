@@ -713,3 +713,23 @@ async def test_signal_handling(c, s, nanny, sig):
         assert "timed out" not in logs
         assert "error" not in logs
         assert "exception" not in logs
+
+
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+def test_error_during_startup(monkeypatch, nanny):
+    # see https://github.com/dask/distributed/issues/6320
+    scheduler_port = 8786
+    scheduler_addr = f"tcp://127.0.0.1:{scheduler_port}"
+
+    monkeypatch.setenv("DASK_SCHEDULER_ADDRESS", scheduler_addr)
+    with popen(["dask-scheduler"]):
+        with popen(
+            [
+                "dask-worker",
+                scheduler_addr,
+                nanny,
+                "--worker-port",
+                str(scheduler_port),
+            ],
+        ) as worker:
+            assert worker.wait(5) == 1
