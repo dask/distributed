@@ -426,7 +426,7 @@ async def test_cancelled_resumed_after_flight_with_dependencies(c, s, w2, w3):
 
         f1 = c.submit(inc, 1, key="f1", workers=[w1.address])
         f2 = c.submit(inc, 2, key="f2", workers=[w1.address])
-        f3 = c.submit(sum, [f1, f2], workers=[w1.address])
+        f3 = c.submit(sum, [f1, f2], key="f3", workers=[w1.address])
 
         await wait(f3)
         f4 = c.submit(inc, f3, key="f4", workers=[w2.address])
@@ -441,8 +441,7 @@ async def test_cancelled_resumed_after_flight_with_dependencies(c, s, w2, w3):
         )
         await s.remove_worker(w1.address, "stim-id")
 
-        while w2.tasks[f3.key].state != "resumed":
-            await asyncio.sleep(0.1)
+        await wait_for_state(f3.key, "resumed", w2)
         assert_story(
             w2.log,
             [
