@@ -18,6 +18,7 @@ from distributed.cli.dask_worker import _apportion_ports, main
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
+from distributed.utils import open_port
 from distributed.utils_test import gen_cluster, popen, requires_ipv6
 
 
@@ -718,7 +719,7 @@ async def test_signal_handling(c, s, nanny, sig):
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 def test_error_during_startup(monkeypatch, nanny):
     # see https://github.com/dask/distributed/issues/6320
-    scheduler_port = 8786
+    scheduler_port = open_port()
     scheduler_addr = f"tcp://127.0.0.1:{scheduler_port}"
 
     monkeypatch.setenv("DASK_SCHEDULER_ADDRESS", scheduler_addr)
