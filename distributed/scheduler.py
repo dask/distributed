@@ -477,7 +477,7 @@ class WorkerState:
         self.versions = versions or {}
         self.nanny = nanny
         self.status = status
-        self._hash = hash(address) + hash(pid) + hash(name)
+        self._hash = hash((address, pid, name))
         self.nbytes = 0
         self.occupancy = 0
         self._memory_unmanaged_old = 0
