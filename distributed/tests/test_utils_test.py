@@ -16,13 +16,14 @@ import dask.config
 
 from distributed import Client, Nanny, Scheduler, Worker, config, default_client
 from distributed.compatibility import WINDOWS
-from distributed.core import Server, rpc
+from distributed.core import Server, Status, rpc
 from distributed.metrics import time
 from distributed.utils import mp_context
 from distributed.utils_test import (
     _LockedCommPool,
     _UnhashableCallable,
     assert_story,
+    captured_logger,
     check_process_leak,
     cluster,
     dump_cluster_state,
@@ -33,7 +34,7 @@ from distributed.utils_test import (
     raises_with_cause,
     tls_only_security,
 )
-from distributed.worker import InvalidTransition
+from distributed.worker import InvalidTransition, fail_hard
 
 
 def test_bare_cluster(loop):
@@ -731,15 +732,43 @@ def test_raises_with_cause():
             raise RuntimeError("exception") from ValueError("cause")
 
 
-def test_worker_fail_hard(capsys):
-    @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
-    async def test_fail_hard(c, s, a):
-        with pytest.raises(Exception):
-            await a.gather_dep(
-                worker="abcd", to_gather=["x"], total_nbytes=0, stimulus_id="foo"
-            )
+@pytest.mark.parametrize("sync", [True, False])
+def test_fail_hard(sync):
+    """@fail_hard is a last resort when error handling for everything that we foresaw
+    could possibly go wrong failed.
+    Instead of trying to force a crash here, we'll write custom methods which do crash.
+    """
 
-    with pytest.raises(Exception) as info:
-        test_fail_hard()
+    class CustomError(Exception):
+        pass
 
-    assert "abcd" in str(info.value)
+    class FailWorker(Worker):
+        @fail_hard
+        def fail_sync(self):
+            raise CustomError()
+
+        @fail_hard
+        async def fail_async(self):
+            raise CustomError()
+
+    test_done = False
+
+    @gen_cluster(nthreads=[])
+    async def test(s):
+        nonlocal test_done
+        with captured_logger("distributed.worker") as logger:
+            async with FailWorker(s.address) as a:
+                with pytest.raises(CustomError):
+                    if sync:
+                        a.fail_sync()
+                    else:
+                        await a.fail_async()
+
+                while a.status != Status.closed:
+                    await asyncio.sleep(0.01)
+
+        test_done = True
+
+    with pytest.raises(CustomError):
+        test()
+    assert test_done
