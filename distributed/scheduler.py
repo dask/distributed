@@ -4240,10 +4240,10 @@ class Scheduler(SchedulerState, ServerNode):
         recommendations: dict = {}
 
         ts: TaskState
-        for ts in list(ws.processing):
+        for ts in ws.processing:
             k = ts.key
             recommendations[k] = "released"
-            if not safe:
+            if not safe and ts in ws.executing:
                 ts.suspicious += 1
                 ts.prefix.suspicious += 1
                 if ts.suspicious > self.allowed_failures:
