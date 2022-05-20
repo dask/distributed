@@ -189,6 +189,7 @@ def fail_hard(method):
                     )
                     logger.exception(e)
                 await _force_close(self)
+                raise
 
     else:
 
@@ -207,6 +208,7 @@ def fail_hard(method):
                     )
                     logger.exception(e)
                 self.loop.add_callback(_force_close, self)
+                raise
 
     return wrapper
 
