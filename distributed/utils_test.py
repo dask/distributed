@@ -132,7 +132,7 @@ def invalid_python_script(tmpdir_factory):
 
 async def cleanup_global_workers():
     for worker in Worker._instances:
-        await worker.close(report=False, executor_wait=False)
+        await worker.close(executor_wait=False)
 
 
 @pytest.fixture
@@ -792,7 +792,10 @@ async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
     await asyncio.gather(*(disconnect(addr, timeout, rpc_kwargs) for addr in addresses))
 
 
-def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
+def gen_test(
+    timeout: float = _TEST_TIMEOUT,
+    clean_kwargs: dict[str, Any] = {},
+) -> Callable[[Callable], Callable]:
     """Coroutine test
 
     @pytest.mark.parametrize("param", [1, 2, 3])
@@ -814,7 +817,7 @@ def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
 
     def _(func):
         def test_func(*args, **kwargs):
-            with clean() as loop:
+            with clean(**clean_kwargs) as loop:
                 injected_func = functools.partial(func, *args, **kwargs)
                 if iscoroutinefunction(func):
                     cor = injected_func
@@ -877,7 +880,7 @@ async def start_cluster(
         await asyncio.sleep(0.01)
         if time() > start + 30:
             await asyncio.gather(*(w.close(timeout=1) for w in workers))
-            await s.close(fast=True)
+            await s.close()
             check_invalid_worker_transitions(s)
             check_invalid_task_states(s)
             check_worker_fail_hard(s)
@@ -931,7 +934,7 @@ async def end_cluster(s, workers):
 
     async def end_worker(w):
         with suppress(asyncio.TimeoutError, CommClosedError, EnvironmentError):
-            await w.close(report=False)
+            await w.close()
 
     await asyncio.gather(*(end_worker(w) for w in workers))
     await s.close()  # wait until scheduler stops completely
@@ -1704,6 +1707,7 @@ def check_thread_leak():
 
             bad_thread = bad_threads[0]
             call_stacks = profile.call_stack(sys._current_frames()[bad_thread.ident])
+            breakpoint()
             assert False, (bad_thread, call_stacks)
 
 
@@ -1795,7 +1799,7 @@ def check_instances():
 
     for w in Worker._instances:
         with suppress(RuntimeError):  # closed IOLoop
-            w.loop.add_callback(w.close, report=False, executor_wait=False)
+            w.loop.add_callback(w.close, executor_wait=False)
             if w.status in WORKER_ANY_RUNNING:
                 w.loop.add_callback(w.close)
     Worker._instances.clear()

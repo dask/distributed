@@ -221,7 +221,7 @@ async def _force_close(self):
     2.  If it doesn't, log and kill the process
     """
     try:
-        await asyncio.wait_for(self.close(nanny=False, executor_wait=False), 30)
+        await asyncio.wait_for(self.close(executor_wait=False), 30)
     except (Exception, BaseException):  # <-- include BaseException here or not??
         # Worker is in a very broken state if closing fails. We need to shut down immediately,
         # to ensure things don't get even worse and this worker potentially deadlocks the cluster.
@@ -785,7 +785,7 @@ class Worker(ServerNode):
             "get_data": self.get_data,
             "update_data": self.update_data,
             "free_keys": self.handle_free_keys,
-            "terminate": self.close,
+            "terminate": self.terminate,
             "ping": pingpong,
             "upload_file": self.upload_file,
             "call_stack": self.get_call_stack,
@@ -807,6 +807,7 @@ class Worker(ServerNode):
 
         stream_handlers = {
             "close": self.close,
+            "terminate": self.terminate,
             "cancel-compute": self.handle_cancel_compute,
             "acquire-replicas": self.handle_acquire_replicas,
             "compute-task": self.handle_compute_task,
@@ -1221,7 +1222,7 @@ class Worker(ServerNode):
                 logger.error(
                     f"Scheduler was unaware of this worker {self.address!r}. Shutting down."
                 )
-                await self.close(report=False)
+                await self.close()
                 return
 
             self.scheduler_delay = response["time"] - middle
@@ -1232,12 +1233,12 @@ class Worker(ServerNode):
             self.bandwidth_types.clear()
         except CommClosedError:
             logger.warning("Heartbeat to scheduler failed", exc_info=True)
-            await self.close(report=False)
+            await self.close()
         except OSError as e:
             # Scheduler is gone. Respect distributed.comm.timeouts.connect
             if "Timed out trying to connect" in str(e):
                 logger.info("Timed out while trying to connect during heartbeat")
-                await self.close(report=False)
+                await self.close()
             else:
                 logger.exception(e)
                 raise e
@@ -1251,7 +1252,7 @@ class Worker(ServerNode):
             "Connection to scheduler broken. Closing without reporting.  Status: %s",
             self.status,
         )
-        await self.close(report=False)
+        await self.close()
 
     async def upload_file(self, comm, filename=None, data=None, load=True):
         out_filename = os.path.join(self.local_directory, filename)
@@ -1439,10 +1440,20 @@ class Worker(ServerNode):
         self.start_periodic_callbacks()
         return self
 
+    async def terminate(self, **kwargs):
+        return await self.close(nanny=True, **kwargs)
+
     @log_errors
     async def close(
-        self, report=True, timeout=30, nanny=True, executor_wait=True, safe=False
+        self,
+        timeout=30,
+        executor_wait=True,
+        nanny=False,
     ):
+        # FIXME: The worker should not be allowed to close the nanny. Ownership
+        # is the other way round. If an external caller wants to close
+        # nanny+worker, the nanny must be notified first. ==> Remove kwarg
+        # nanny, see also Scheduler.retire_workers
         if self.status in (Status.closed, Status.closing):
             await self.finished()
             return
@@ -1455,8 +1466,6 @@ class Worker(ServerNode):
             logger.info("Stopping worker")
         if self.status not in WORKER_ANY_RUNNING:
             logger.info("Closed worker has not yet started: %s", self.status)
-        if not report:
-            logger.info("Not reporting worker closure to scheduler")
         if not executor_wait:
             logger.info("Not waiting on executor to close")
         self.status = Status.closing
@@ -1520,16 +1529,6 @@ class Worker(ServerNode):
                         # otherwise
                         c.close()
 
-        with suppress(EnvironmentError, TimeoutError):
-            if report and self.contact_address is not None:
-                await asyncio.wait_for(
-                    self.scheduler.unregister(
-                        address=self.contact_address,
-                        safe=safe,
-                        stimulus_id=f"worker-close-{time()}",
-                    ),
-                    timeout,
-                )
         await self.scheduler.close_rpc()
         self._workdir.release()
 
@@ -1607,7 +1606,7 @@ class Worker(ServerNode):
             remove=False,
             stimulus_id=f"worker-close-gracefully-{time()}",
         )
-        await self.close(safe=True, nanny=not restart)
+        await self.close(nanny=not restart)
 
     async def wait_until_closed(self):
         warnings.warn("wait_until_closed has moved to finished()")

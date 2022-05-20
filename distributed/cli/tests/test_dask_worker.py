@@ -18,6 +18,7 @@ from distributed.cli.dask_worker import _apportion_ports, main
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
+from distributed.utils import open_port
 from distributed.utils_test import gen_cluster, popen, requires_ipv6
 
 
@@ -713,3 +714,39 @@ async def test_signal_handling(c, s, nanny, sig):
         assert "timed out" not in logs
         assert "error" not in logs
         assert "exception" not in logs
+
+
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+def test_error_during_startup(monkeypatch, nanny):
+    # see https://github.com/dask/distributed/issues/6320
+    scheduler_port = str(open_port())
+    scheduler_addr = f"tcp://127.0.0.1:{scheduler_port}"
+
+    monkeypatch.setenv("DASK_SCHEDULER_ADDRESS", scheduler_addr)
+    with popen(
+        [
+            "dask-scheduler",
+            "--port",
+            scheduler_port,
+        ],
+        flush_output=False,
+    ) as scheduler:
+        start = time()
+        # Wait for the scheduler to be up
+        while line := scheduler.stdout.readline():
+            if b"Scheduler at" in line:
+                break
+            # Ensure this is not killed by pytest-timeout
+            if time() - start > 5:
+                raise TimeoutError("Scheduler failed to start in time.")
+
+        with popen(
+            [
+                "dask-worker",
+                scheduler_addr,
+                nanny,
+                "--worker-port",
+                scheduler_port,
+            ],
+        ) as worker:
+            assert worker.wait(5) == 1

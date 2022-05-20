@@ -1630,7 +1630,7 @@ class Client(SyncMethodMixin):
         else:
             with suppress(CommClosedError):
                 self.status = "closing"
-                await self.scheduler.terminate(close_workers=True)
+                await self.scheduler.terminate()
 
     def shutdown(self):
         """Shut down the connected scheduler and workers
