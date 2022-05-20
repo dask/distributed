@@ -792,7 +792,10 @@ async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
     await asyncio.gather(*(disconnect(addr, timeout, rpc_kwargs) for addr in addresses))
 
 
-def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
+def gen_test(
+    timeout: float = _TEST_TIMEOUT,
+    clean_kwargs: dict[str, Any] = {},
+) -> Callable[[Callable], Callable]:
     """Coroutine test
 
     @pytest.mark.parametrize("param", [1, 2, 3])
@@ -814,7 +817,7 @@ def gen_test(timeout: float = _TEST_TIMEOUT) -> Callable[[Callable], Callable]:
 
     def _(func):
         def test_func(*args, **kwargs):
-            with clean() as loop:
+            with clean(**clean_kwargs) as loop:
                 injected_func = functools.partial(func, *args, **kwargs)
                 if iscoroutinefunction(func):
                     cor = injected_func
@@ -1704,6 +1707,7 @@ def check_thread_leak():
 
             bad_thread = bad_threads[0]
             call_stacks = profile.call_stack(sys._current_frames()[bad_thread.ident])
+            breakpoint()
             assert False, (bad_thread, call_stacks)
 
 
