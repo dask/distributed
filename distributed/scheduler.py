@@ -6954,6 +6954,12 @@ class Scheduler(SchedulerState, ServerNode):
             self.event_counts[name] += 1
             self._report_event(name, event)
 
+            for plugin in list(self.plugins.values()):
+                try:
+                    plugin.log_event(name, msg)
+                except Exception:
+                    logger.info("Plugin failed with exception", exc_info=True)
+
     def _report_event(self, name, event):
         for client in self.event_subscriber[name]:
             self.report(
