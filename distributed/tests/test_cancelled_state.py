@@ -321,7 +321,7 @@ async def test_in_flight_lost_after_resumed(c, s, b):
             # The initial free-keys is rejected
             ("free-keys", (fut1.key,)),
             (fut1.key, "resumed", "released", "cancelled", {}),
-            # After gather_dep receives the data, it tries to transition to memory but the task will release instead
+            # After gather_dep receives the data, the task is forgotten
             (fut1.key, "cancelled", "memory", "released", {fut1.key: "forgotten"}),
         ],
     )
@@ -366,7 +366,7 @@ async def test_cancelled_error(c, s, a, b):
 
 
 @gen_cluster(client=True, nthreads=[("", 1, {"resources": {"A": 1}})])
-async def test_cancelled_error_with_ressources(c, s, a):
+async def test_cancelled_error_with_resources(c, s, a):
     executing = Event()
     lock_executing = Lock()
     await lock_executing.acquire()

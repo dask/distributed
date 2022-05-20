@@ -3156,61 +3156,32 @@ class Worker(ServerNode):
         )
         return self.comm_threshold_bytes
 
-    def _filter_deps_for_fetch(
-        self, to_gather_keys: Iterable[str]
-    ) -> tuple[set[str], set[str], TaskState | None]:
-        """Filter a list of keys before scheduling coroutines to fetch data from workers.
+    def _get_cause(self, keys: Iterable[str]) -> TaskState:
+        """For diagnostics, we want to attach a transfer to a single task. This task is
+        typically the next to be executed but since we're fetching tasks for potentially
+        many dependents, an exact match is not possible. Additionally, if a key was
+        fetched through acquire-replicas, dependents may not be known at all.
 
         Returns
         -------
-        in_flight_keys:
-            The subset of keys in to_gather_keys in state `flight` or `resumed`
-        cancelled_keys:
-            The subset of tasks in to_gather_keys in state `cancelled` or `memory`
-        cause:
-            The task to attach startstops of this transfer to
+        The task to attach startstops of this transfer to
         """
-        in_flight_tasks: set[TaskState] = set()
-        cancelled_keys: set[str] = set()
-        for key in to_gather_keys:
-            ts = self.tasks.get(key)
-            if ts is None:
-                continue
-
-            # At this point, a task has been transitioned fetch->flight
-            # flight is only allowed to be transitioned into
-            # {memory, resumed, cancelled}
-            # resumed and cancelled will block any further transition until this
-            # coro has been finished
-
-            if ts.state in ("flight", "resumed"):
-                in_flight_tasks.add(ts)
-            # If the key is already in memory, the fetch should not happen which
-            # is signalled by the cancelled_keys
-            elif ts.state in {"cancelled", "memory"}:
-                cancelled_keys.add(key)
-            else:
-                raise RuntimeError(
-                    f"Task {ts.key} found in illegal state {ts.state}. "
-                    "Only states `flight`, `resumed` and `cancelled` possible."
-                )
-
-        # For diagnostics we want to attach the transfer to a single task. this
-        # task is typically the next to be executed but since we're fetching
-        # tasks for potentially many dependents, an exact match is not possible.
-        # If there are no dependents, this is a pure replica fetch
         cause = None
-        for ts in in_flight_tasks:
+        for key in keys:
+            ts = self.tasks[key]
             if ts.dependents:
-                cause = next(iter(ts.dependents))
-                break
-            else:
-                cause = ts
-        in_flight_keys = {ts.key for ts in in_flight_tasks}
-        return in_flight_keys, cancelled_keys, cause
+                return next(iter(ts.dependents))
+            cause = ts
+        assert cause  # Always at least one key
+        return cause
 
     def _update_metrics_received_data(
-        self, start: float, stop: float, data: dict, cause: TaskState, worker: str
+        self,
+        start: float,
+        stop: float,
+        data: dict[str, Any],
+        cause: TaskState,
+        worker: str,
     ) -> None:
 
         total_bytes = sum(self.tasks[key].get_nbytes() for key in data)
@@ -3259,7 +3230,7 @@ class Worker(ServerNode):
     async def gather_dep(
         self,
         worker: str,
-        to_gather: Iterable[str],
+        to_gather: Collection[str],
         total_nbytes: int,
         *,
         stimulus_id: str,
@@ -3283,46 +3254,23 @@ class Worker(ServerNode):
         recommendations: Recs = {}
         instructions: Instructions = []
         response = {}
-        to_gather_keys: set[str] = set()
-        cancelled_keys: set[str] = set()
 
         def done_event():
             return GatherDepDoneEvent(stimulus_id=f"gather-dep-done-{time()}")
 
         try:
-            to_gather_keys, cancelled_keys, cause = self._filter_deps_for_fetch(
-                to_gather
-            )
-
-            if not to_gather_keys:
-                self.log.append(
-                    ("nothing-to-gather", worker, to_gather, stimulus_id, time())
-                )
-                return done_event()
-
-            assert cause
-            # Keep namespace clean since this func is long and has many
-            # dep*, *ts* variables
-            del to_gather
-
-            self.log.append(
-                ("request-dep", worker, to_gather_keys, stimulus_id, time())
-            )
-            logger.debug(
-                "Request %d keys for task %s from %s",
-                len(to_gather_keys),
-                cause,
-                worker,
-            )
+            self.log.append(("request-dep", worker, to_gather, stimulus_id, time()))
+            logger.debug("Request %d keys from %s", len(to_gather), worker)
 
             start = time()
             response = await get_data_from_worker(
-                self.rpc, to_gather_keys, worker, who=self.address
+                self.rpc, to_gather, worker, who=self.address
             )
             stop = time()
             if response["status"] == "busy":
                 return done_event()
 
+            cause = self._get_cause(to_gather)
             self._update_metrics_received_data(
                 start=start,
                 stop=stop,
@@ -3375,9 +3323,7 @@ class Worker(ServerNode):
             data = response.get("data", {})
 
             if busy:
-                self.log.append(
-                    ("busy-gather", worker, to_gather_keys, stimulus_id, time())
-                )
+                self.log.append(("busy-gather", worker, to_gather, stimulus_id, time()))
                 # Avoid hammering the worker. If there are multiple replicas
                 # available, immediately try fetching from a different worker.
                 self.busy_workers.add(worker)
@@ -3388,12 +3334,7 @@ class Worker(ServerNode):
             for d in self.in_flight_workers.pop(worker):
                 ts = self.tasks[d]
                 ts.done = True
-                if d in cancelled_keys:
-                    if ts.state == "cancelled":
-                        recommendations[ts] = "released"
-                    else:
-                        recommendations[ts] = "fetch"
-                elif d in data:
+                if d in data:
                     recommendations[ts] = ("memory", data[d])
                 elif busy:
                     recommendations[ts] = "fetch"
