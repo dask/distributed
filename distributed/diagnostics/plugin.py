@@ -112,6 +112,9 @@ class SchedulerPlugin:
     def remove_client(self, scheduler: Scheduler, client: str) -> None:
         """Run when a client disconnects"""
 
+    def log_event(self, name, msg) -> None:
+        """Run when an event is logged"""
+
 
 class WorkerPlugin:
     """Interface to extend the Worker
