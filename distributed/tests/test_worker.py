@@ -3363,9 +3363,7 @@ async def test_gather_dep_no_longer_in_flight_tasks(c, s, a):
 
 
 @pytest.mark.parametrize("intermediate_state", ["resumed", "cancelled"])
-@pytest.mark.parametrize(
-    "close_worker", [False, pytest.param(True, marks=pytest.mark.slow)]
-)
+@pytest.mark.parametrize("close_worker", [False, True])
 @gen_cluster(client=True)
 async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
     c, s, a, x, intermediate_state, close_worker
