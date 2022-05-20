@@ -18,7 +18,7 @@ import weakref
 import zipfile
 from collections import deque
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from functools import partial
 from operator import add
 from threading import Semaphore
@@ -40,6 +40,7 @@ from distributed import (
     CancelledError,
     Event,
     LocalCluster,
+    Lock,
     Nanny,
     TimeoutError,
     Worker,
@@ -5115,40 +5116,103 @@ async def test_secede_balances(c, s, a, b):
     assert results == [sum(map(inc, range(10)))] * 10
 
 
+@pytest.mark.parametrize("raise_exception", [True, False])
 @gen_cluster(client=True, nthreads=[("", 1)])
-async def test_long_running_not_in_occupancy(c, s, a):
+async def test_long_running_not_in_occupancy(c, s, a, raise_exception):
     # https://github.com/dask/distributed/issues/5332
-    from distributed import Lock
+    # See also test_long_running_removal_clean
 
     l = Lock()
+    entered = Event()
     await l.acquire()
 
-    def long_running(lock):
-        sleep(0.1)
+    def long_running(lock, entered):
+        entered.set()
         secede()
         lock.acquire()
+        if raise_exception:
+            raise RuntimeError("Exception in task")
 
-    f = c.submit(long_running, l)
-    while f.key not in s.tasks:
-        await asyncio.sleep(0.01)
-    assert s.workers[a.address].occupancy == parse_timedelta(
+    f = c.submit(long_running, l, entered)
+    await entered.wait()
+    ts = s.tasks[f.key]
+    ws = s.workers[a.address]
+    assert ws.occupancy == parse_timedelta(
         dask.config.get("distributed.scheduler.unknown-task-duration")
     )
 
-    while s.workers[a.address].occupancy:
+    while ws.occupancy:
         await asyncio.sleep(0.01)
     await a.heartbeat()
 
-    ts = s.tasks[f.key]
-    ws = s.workers[a.address]
-    s.set_duration_estimate(ts, ws)
+    s._set_duration_estimate(ts, ws)
     assert s.workers[a.address].occupancy == 0
+    assert s.total_occupancy == 0
+    assert ws.occupancy == 0
 
     s.reevaluate_occupancy(0)
     assert s.workers[a.address].occupancy == 0
     await l.release()
 
+    with (
+        pytest.raises(RuntimeError, match="Exception in task")
+        if raise_exception
+        else nullcontext()
+    ):
+        await f
+
+    assert s.total_occupancy == 0
+    assert ws.occupancy == 0
+    assert not ws.long_running
+
+
+@pytest.mark.parametrize("ordinary_task", [True, False])
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_long_running_removal_clean(c, s, a, ordinary_task):
+    # https://github.com/dask/distributed/issues/5975 which could reduce
+    # occupancy to negative values upon finishing long running tasks
+
+    # See also test_long_running_not_in_occupancy
+
+    l = Lock()
+    entered = Event()
+    l2 = Lock()
+    entered2 = Event()
+    await l.acquire()
+    await l2.acquire()
+
+    def long_running_secede(lock, entered):
+        entered.set()
+        secede()
+        lock.acquire()
+
+    def long_running(lock, entered):
+        entered.set()
+        lock.acquire()
+
+    f = c.submit(long_running_secede, l, entered)
+    await entered.wait()
+
+    if ordinary_task:
+        f2 = c.submit(long_running, l2, entered2)
+        await entered2.wait()
+    await l.release()
     await f
+
+    ws = s.workers[a.address]
+
+    if ordinary_task:
+        # Should be exactly 0.5 but if for whatever reason this test runs slow,
+        # some approximation may kick in increasing this number
+        assert s.total_occupancy >= 0.5
+        assert ws.occupancy >= 0.5
+        await l2.release()
+        await f2
+
+    # In the end, everything should be reset
+    assert s.total_occupancy == 0
+    assert ws.occupancy == 0
+    assert not ws.long_running
 
 
 @gen_cluster(client=True)
