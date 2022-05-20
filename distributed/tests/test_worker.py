@@ -3536,13 +3536,17 @@ async def test_do_not_block_event_loop_during_shutdown(s):
     await asyncio.gather(block(), close(), set_future())
 
 
-def test_reconnect_argument_deprecated():
+@gen_cluster(nthreads=[])
+async def test_reconnect_argument_deprecated(s):
     with pytest.deprecated_call(match="`reconnect` argument"):
-        Worker("tcp://localhost:8786", reconnect=False)
+        async with Worker(s.address, reconnect=False):
+            pass
     with pytest.raises(ValueError, match="reconnect=True"):
-        Worker("tcp://localhost:8786", reconnect=True)
+        async with Worker(s.address, reconnect=True):
+            pass
 
     with warnings.catch_warnings():
         # No argument should not warn or raise
         warnings.simplefilter("error")
-        Worker("tcp://localhost:8786")
+        async with Worker(s.address):
+            pass
