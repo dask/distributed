@@ -1927,7 +1927,7 @@ class _LockedCommPool(ConnectionPool):
         )
     # It might be necessary to remove all existing comms
     # if the wrapped pool has been used before
-    >>> w.remove(remote_address)
+    >>> w.rpc.remove(remote_address)
 
     >>> async def ping_pong():
             return await w.rpc(remote_address).ping()
