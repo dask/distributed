@@ -413,7 +413,7 @@ def test_version_option():
 
 
 @pytest.mark.slow
-def test_idle_timeout(loop):
+def test_idle_timeout():
     start = time()
     runner = CliRunner()
     result = runner.invoke(
@@ -422,6 +422,23 @@ def test_idle_timeout(loop):
     stop = time()
     assert 1 < stop - start < 10
     assert result.exit_code == 0
+
+
+@pytest.mark.slow
+def test_restores_signal_handler():
+    # another test could have altered the signal handler, so use a new function
+    # that both has sensible sigint behaviour *and* can be used as a sentinel
+    def raise_ki():
+        raise KeyboardInterrupt
+
+    original_handler = signal.signal(signal.SIGINT, raise_ki)
+    try:
+        CliRunner().invoke(
+            distributed.cli.dask_scheduler.main, ["--idle-timeout", "1s"]
+        )
+        assert signal.getsignal(signal.SIGINT) is raise_ki
+    finally:
+        signal.signal(signal.SIGINT, original_handler)
 
 
 def test_multiple_workers_2(loop):

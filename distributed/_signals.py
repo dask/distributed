@@ -25,4 +25,8 @@ async def wait_for_signals(signals: list[signal.Signals]) -> None:
     for sig in signals:
         old_handlers[sig] = signal.signal(sig, handle_signal)
 
-    await event.wait()
+    try:
+        await event.wait()
+    finally:
+        for sig in signals:
+            signal.signal(sig, old_handlers[sig])
