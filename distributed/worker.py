@@ -1220,7 +1220,7 @@ class Worker(ServerNode):
                 logger.error(
                     f"Scheduler was unaware of this worker {self.address!r}. Shutting down."
                 )
-                await self.close(report=False)
+                await self.close()
                 return
 
             self.scheduler_delay = response["time"] - middle
@@ -1231,7 +1231,7 @@ class Worker(ServerNode):
             self.bandwidth_types.clear()
         except CommClosedError:
             logger.warning("Heartbeat to scheduler failed", exc_info=True)
-            await self.close(report=False)
+            await self.close()
         except OSError as e:
             # Scheduler is gone. Respect distributed.comm.timeouts.connect
             if "Timed out trying to connect" in str(e):
