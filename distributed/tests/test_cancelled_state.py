@@ -396,3 +396,59 @@ async def test_cancelled_error_with_ressources(c, s, a):
     await lock_executing.release()
 
     assert await fut2 == 2
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
+async def test_cancelled_resumed_after_flight_with_dependencies(c, s, w2, w3):
+    # See https://github.com/dask/distributed/pull/6327#discussion_r872231090
+    block_get_data_1 = asyncio.Lock()
+    enter_get_data_1 = asyncio.Event()
+    await block_get_data_1.acquire()
+
+    class BlockGetDataWorker(Worker):
+        def __init__(self, *args, get_data_event, get_data_lock, **kwargs):
+            self._get_data_event = get_data_event
+            self._get_data_lock = get_data_lock
+            super().__init__(*args, **kwargs)
+
+        async def get_data(self, comm, *args, **kwargs):
+            self._get_data_event.set()
+            async with self._get_data_lock:
+                return await super().get_data(comm, *args, **kwargs)
+
+    async with await BlockGetDataWorker(
+        s.address,
+        get_data_event=enter_get_data_1,
+        get_data_lock=block_get_data_1,
+        name="w1",
+    ) as w1:
+
+        f1 = c.submit(inc, 1, key="f1", workers=[w1.address])
+        f2 = c.submit(inc, 2, key="f2", workers=[w1.address])
+        f3 = c.submit(sum, [f1, f2], key="f3", workers=[w1.address])
+
+        await wait(f3)
+        f4 = c.submit(inc, f3, key="f4", workers=[w2.address])
+
+        await enter_get_data_1.wait()
+        s.set_restrictions(
+            {
+                f1.key: {w3.address},
+                f2.key: {w3.address},
+                f3.key: {w2.address},
+            }
+        )
+        await s.remove_worker(w1.address, "stim-id")
+
+        await wait_for_state(f3.key, "resumed", w2)
+        assert_story(
+            w2.log,
+            [
+                (f3.key, "flight", "released", "cancelled", {}),
+                # ...
+                (f3.key, "cancelled", "waiting", "resumed", {}),
+            ],
+        )
+    # w1 closed
+
+    assert await f4 == 6
