@@ -198,3 +198,14 @@ async def test_log_event_plugin(c, s, a, b):
     await c.submit(f)
 
     assert ("foo", 123) in s._recorded_events
+
+
+@gen_cluster(client=True)
+async def test_register_plugin_on_scheduler(c, s, a, b):
+    class MyPlugin(SchedulerPlugin):
+        async def start(self, scheduler: Scheduler) -> None:
+            scheduler._foo = "bar"  # type: ignore
+
+    await s.register_scheduler_plugin(MyPlugin())
+
+    assert s._foo == "bar"
