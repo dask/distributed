@@ -1329,17 +1329,19 @@ class Client(SyncMethodMixin):
         else:
             deadline = None
 
-        def running_workers(info):
+        def running_workers(info, status_list=[Status.running]):
             return len(
                 [
                     ws
                     for ws in info["workers"].values()
-                    if ws["status"] == Status.running.name
+                    if ws["status"] in [s.name for s in status_list]
                 ]
             )
 
         need_exact = lambda: (
-            running_workers(info) != n_workers and mode == WorkerWaitMode.exactly
+            running_workers(info, status_list=[Status.running, Status.paused])
+            != n_workers
+            and mode == WorkerWaitMode.exactly
         )
         need_min = lambda: (
             n_workers
@@ -1348,7 +1350,8 @@ class Client(SyncMethodMixin):
         )
         need_max = lambda: (
             n_workers
-            and running_workers(info) > n_workers
+            and running_workers(info, status_list=[Status.running, Status.paused])
+            > n_workers
             and mode == WorkerWaitMode.max
         )
 
