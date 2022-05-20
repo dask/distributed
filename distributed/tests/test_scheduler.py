@@ -31,6 +31,7 @@ from distributed import (
     fire_and_forget,
     wait,
 )
+from distributed.comm.addressing import parse_host_port
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
@@ -3630,3 +3631,19 @@ async def test_ensure_events_dont_include_taskstate_objects(c, s, a, b):
     await c.gather(futs)
 
     assert "TaskState" not in str(s.events)
+
+
+@gen_cluster(nthreads=[("", 1)])
+async def test_worker_state_unique_regardless_of_address(s, w):
+    ws1 = s.workers[w.address]
+    host, port = parse_host_port(ws1.address)
+    await w.close()
+    while s.workers:
+        await asyncio.sleep(0.1)
+
+    async with Worker(s.address, port=port, host=host) as w2:
+        ws2 = s.workers[w2.address]
+
+    assert ws1 is not ws2
+    assert ws1 != ws2
+    assert hash(ws1) != ws2
