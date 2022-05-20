@@ -1268,7 +1268,9 @@ class Worker(ServerNode):
     async def handle_scheduler(self, comm):
         await self.handle_stream(comm)
         logger.info(
-            "Connection to scheduler broken. Closing without reporting.  Status: %s",
+            "Connection to scheduler broken. Closing without reporting. ID: %s Address %s Status: %s",
+            self.id,
+            self.address,
             self.status,
         )
         await self.close()
@@ -1969,19 +1971,25 @@ class Worker(ServerNode):
         recommendations: Recs = {}
         instructions: Instructions = []
 
-        if ts.state in READY | {"executing", "long-running", "waiting", "resumed"}:
+        if ts.state in READY | {
+            "executing",
+            "long-running",
+            "waiting",
+        }:
             pass
         elif ts.state == "memory":
             instructions.append(
                 self._get_task_finished_msg(ts, stimulus_id=stimulus_id)
             )
+        elif ts.state == "error":
+            instructions.append(TaskErredMsg.from_task(ts, stimulus_id=stimulus_id))
         elif ts.state in {
             "released",
             "fetch",
             "flight",
             "missing",
             "cancelled",
-            "error",
+            "resumed",
         }:
             recommendations[ts] = "waiting"
 
@@ -2097,7 +2105,7 @@ class Worker(ServerNode):
     def transition_generic_released(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
-        self.release_key(ts.key, stimulus_id=stimulus_id)
+        self._purge_state(ts.key, stimulus_id=stimulus_id)
         recs: Recs = {}
         for dependency in ts.dependencies:
             if (
@@ -2106,6 +2114,7 @@ class Worker(ServerNode):
             ):
                 recs[dependency] = "released"
 
+        ts.state = "released"
         if not ts.dependents:
             recs[ts] = "forgotten"
 
@@ -2127,7 +2136,10 @@ class Worker(ServerNode):
             if dep_ts.state != "memory":
                 ts.waiting_for_data.add(dep_ts)
                 dep_ts.waiters.add(ts)
-                recommendations[dep_ts] = "fetch"
+                # TODO: main branch claims this shouldn't be conditional since a
+                # recent change
+                if dep_ts.state not in {"fetch", "flight", "missing"}:
+                    recommendations[dep_ts] = "fetch"
 
         if ts.waiting_for_data:
             self.waiting_for_data_count += 1
@@ -2275,15 +2287,10 @@ class Worker(ServerNode):
         ts.exception_text = exception_text
         ts.traceback_text = traceback_text
         ts.state = "error"
-        smsg = TaskErredMsg(
-            key=ts.key,
-            exception=exception,
-            traceback=traceback,
-            exception_text=exception_text,
-            traceback_text=traceback_text,
-            thread=self.threads.get(ts.key),
-            startstops=ts.startstops,
+        smsg = TaskErredMsg.from_task(
+            ts,
             stimulus_id=stimulus_id,
+            thread=self.threads.get(ts.key),
         )
 
         return {}, [smsg]
@@ -2649,7 +2656,7 @@ class Worker(ServerNode):
             dep.dependents.discard(ts)
             if dep.state == "released" and not dep.dependents:
                 recommendations[dep] = "forgotten"
-
+        self._purge_state(ts.key, stimulus_id=stimulus_id)
         # Mark state as forgotten in case it is still referenced
         ts.state = "forgotten"
         self.tasks.pop(ts.key, None)
@@ -3521,80 +3528,48 @@ class Worker(ServerNode):
             # Update status and send confirmation to the Scheduler (see status.setter)
             self.status = new_status
 
-    def release_key(
+    def _purge_state(
         self,
         key: str,
-        cause: TaskState | None = None,
-        report: bool = True,
         *,
         stimulus_id: str,
     ) -> None:
-        try:
-            if self.validate:
-                assert not isinstance(key, TaskState)
-            ts = self.tasks[key]
-            # needed for legacy notification support
-            state_before = ts.state
-            ts.state = "released"
+        """Ensure that TaskState attributes are reset to a neutral default and
+        Worker-level state associated to the provided key is cleared (e.g.
+        who_has)
+        This is idempotent
+        """
+        ts = self.tasks[key]
+        logger.debug(
+            "Purge task key: %s state: %s; stimulus_id=%s",
+            ts.key,
+            ts.state,
+            stimulus_id,
+        )
+        self.log.append((key, "purge-state", stimulus_id, time()))
+        self.data.pop(key, None)
+        self.actors.pop(key, None)
 
-            logger.debug(
-                "Release key %s",
-                {"key": key, "cause": cause, "stimulus_id": stimulus_id},
-            )
-            if cause:
-                self.log.append(
-                    (key, "release-key", {"cause": cause}, stimulus_id, time())
-                )
-            else:
-                self.log.append((key, "release-key", stimulus_id, time()))
-            if key in self.data:
-                try:
-                    del self.data[key]
-                except FileNotFoundError:
-                    logger.error("Tried to delete %s but no file found", exc_info=True)
-            if key in self.actors:
-                del self.actors[key]
+        for worker in ts.who_has:
+            self.has_what[worker].discard(ts.key)
+            self.data_needed_per_worker[worker].discard(ts)
+        ts.who_has.clear()
+        self.data_needed.discard(ts)
 
-            self.data_needed.discard(ts)
-            for w in ts.who_has:
-                self.has_what[w].discard(ts.key)
-                self.data_needed_per_worker[w].discard(ts)
-            ts.who_has.clear()
+        self.threads.pop(key, None)
 
-            if key in self.threads:
-                del self.threads[key]
+        for d in ts.dependencies:
+            ts.waiting_for_data.discard(d)
+            d.waiters.discard(ts)
 
-            if ts.resource_restrictions is not None:
-                if ts.state == "executing":
-                    for resource, quantity in ts.resource_restrictions.items():
-                        self.available_resources[resource] += quantity
+        ts.waiting_for_data.clear()
+        ts.nbytes = None
+        ts._previous = None
+        ts._next = None
+        ts.done = False
 
-            for d in ts.dependencies:
-                ts.waiting_for_data.discard(d)
-                d.waiters.discard(ts)
-
-            ts.waiting_for_data.clear()
-            ts.nbytes = None
-            ts._previous = None
-            ts._next = None
-            ts.done = False
-
-            self._executing.discard(ts)
-            self._in_flight_tasks.discard(ts)
-
-            self._notify_plugins(
-                "release_key", key, state_before, cause, stimulus_id, report
-            )
-        except CommClosedError:
-            # Batched stream send might raise if it was already closed
-            pass
-        except Exception as e:  # pragma: no cover
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
+        self._executing.discard(ts)
+        self._in_flight_tasks.discard(ts)
 
     ################
     # Execute Task #
@@ -4184,15 +4159,6 @@ class Worker(ServerNode):
     def _notify_plugins(self, method_name, *args, **kwargs):
         for name, plugin in self.plugins.items():
             if hasattr(plugin, method_name):
-                if method_name == "release_key":
-                    warnings.warn(
-                        "The `WorkerPlugin.release_key` hook is deprecated and will be "
-                        "removed in a future version. A similar event can now be "
-                        "caught by filtering for a `finish=='released'` event in the "
-                        "`WorkerPlugin.transition` hook.",
-                        FutureWarning,
-                    )
-
                 try:
                     getattr(plugin, method_name)(*args, **kwargs)
                 except Exception:
@@ -4227,9 +4193,6 @@ class Worker(ServerNode):
         assert ts.run_spec is not None
         assert ts.key not in self.data
         assert not ts.waiting_for_data
-        for dep in ts.dependencies:
-            assert dep.state == "memory", self.story(dep)
-            assert dep.key in self.data or dep.key in self.actors
 
     def validate_task_ready(self, ts):
         assert ts.key in pluck(1, self.ready)
@@ -4294,8 +4257,12 @@ class Worker(ServerNode):
         assert ts not in self._executing
         assert ts not in self._in_flight_tasks
         assert ts not in self._missing_dep_flight
-        assert ts not in self._missing_dep_flight
-        assert not any(ts.key in has_what for has_what in self.has_what.values())
+
+        # FIXME the below assert statement is true most of the time. If a task
+        # performs the transition flight->cancel->waiting, its dependencies are
+        # normally in released state. However, the compute-task call for their
+        # previous dependent provided them with who_has, such that this assert
+        # is no longer true.
         assert not ts.waiting_for_data
         assert not ts.done
         assert not ts.exception
@@ -4343,7 +4310,7 @@ class Worker(ServerNode):
             )
 
             raise AssertionError(
-                f"Invalid TaskState encountered for {ts!r}.\nStory:\n{self.story(ts)}\n"
+                f"Invalid TaskState encountered on {self.id} for {ts!r}.\nStory:\n{self.story(ts)}\n"
             ) from e
 
     def validate_state(self):
@@ -4381,10 +4348,11 @@ class Worker(ServerNode):
             for worker, keys in self.has_what.items():
                 assert worker != self.address
                 for k in keys:
+                    assert k in self.tasks, self.story(k)
                     assert worker in self.tasks[k].who_has
 
             for ts in self.data_needed:
-                assert ts.state == "fetch"
+                assert ts.state == "fetch", self.story(ts)
                 assert self.tasks[ts.key] is ts
             for worker, tss in self.data_needed_per_worker.items():
                 for ts in tss:
@@ -5205,3 +5173,82 @@ async def benchmark_network(
 
             out[size_str] = total / (time() - start)
     return out
+
+
+[
+    (
+        "f1",
+        "ensure-task-exists",
+        "released",
+        "compute-task-1654160270.4501",
+        1654160270.450457,
+    ),
+    (
+        "f1",
+        "released",
+        "fetch",
+        "fetch",
+        {},
+        "compute-task-1654160270.4501",
+        1654160270.450478,
+    ),
+    (
+        "gather-dependencies",
+        "tcp://127.0.0.1:54108",
+        {"f1"},
+        "compute-task-1654160270.4501",
+        1654160270.45051,
+    ),
+    (
+        "f1",
+        "fetch",
+        "flight",
+        "flight",
+        {},
+        "compute-task-1654160270.4501",
+        1654160270.4505181,
+    ),
+    (
+        "request-dep",
+        "tcp://127.0.0.1:54108",
+        {"f1"},
+        "compute-task-1654160270.4501",
+        1654160270.450558,
+    ),
+    (
+        "busy-gather",
+        "tcp://127.0.0.1:54108",
+        {"f1"},
+        "compute-task-1654160270.4501",
+        1654160270.4519591,
+    ),
+    (
+        "f1",
+        "flight",
+        "fetch",
+        "fetch",
+        {},
+        "compute-task-1654160270.4501",
+        1654160270.4519749,
+    ),
+    ("f1", "purge-state", "worker-connect-1654160270.3552", 1654160270.4605172),
+    (
+        "f1",
+        "fetch",
+        "released",
+        "released",
+        {"f1": "forgotten"},
+        "worker-connect-1654160270.3552",
+        1654160270.460523,
+    ),
+    ("f1", "purge-state", "worker-connect-1654160270.3552", 1654160270.460525),
+    (
+        "f1",
+        "released",
+        "forgotten",
+        "forgotten",
+        {},
+        "worker-connect-1654160270.3552",
+        1654160270.4605281,
+    ),
+]

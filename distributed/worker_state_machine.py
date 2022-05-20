@@ -300,6 +300,22 @@ class TaskErredMsg(SendMessageToScheduler):
         d["status"] = "error"
         return d
 
+    @staticmethod
+    def from_task(
+        ts: TaskState, stimulus_id: str, thread: int | None = None
+    ) -> TaskErredMsg:
+        assert ts.exception
+        return TaskErredMsg(
+            key=ts.key,
+            exception=ts.exception,
+            traceback=ts.traceback,
+            exception_text=ts.exception_text,
+            traceback_text=ts.traceback_text,
+            thread=thread,
+            startstops=ts.startstops,
+            stimulus_id=stimulus_id,
+        )
+
 
 @dataclass
 class ReleaseWorkerDataMsg(SendMessageToScheduler):

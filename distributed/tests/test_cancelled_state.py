@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 import distributed
 from distributed import Event, Lock, Worker
 from distributed.client import wait
@@ -452,3 +454,102 @@ async def test_cancelled_resumed_after_flight_with_dependencies(c, s, w2, w3):
     # w1 closed
 
     assert await f4 == 6
+
+
+@pytest.mark.parametrize("wait_for_processing", [True, False])
+@pytest.mark.parametrize("raise_error", [True, False])
+@gen_cluster(client=True)
+async def test_resumed_cancelled_handle_compute(
+    c, s, a, b, raise_error, wait_for_processing
+):
+    """
+    Given the history of a task
+    Executing -> Cancelled -> Fetch -> Resumed
+
+    A handle_compute should properly restore executing
+    """
+    # This test is heavily using set_restrictions to simulate certain scheduler
+    # decisions of placing keys
+
+    lock_compute = Lock()
+    await lock_compute.acquire()
+    enter_compute = Event()
+
+    def block(x, lock, enter_event):
+        enter_event.set()
+        with lock:
+            if raise_error:
+                raise RuntimeError("test error")
+            else:
+                return x + 1
+
+    f1 = c.submit(inc, 1, key="f1", workers=[a.address])
+    f2 = c.submit(inc, f1, key="f2", workers=[a.address])
+    f3 = c.submit(
+        block,
+        f2,
+        lock=lock_compute,
+        enter_event=enter_compute,
+        key="f3",
+        workers=[b.address],
+    )
+
+    f4 = c.submit(sum, [f1, f3], workers=[b.address])
+
+    await enter_compute.wait()
+
+    async def release_all_futures():
+        futs = [f1, f2, f3, f4]
+        for fut in futs:
+            fut.release()
+
+        while any(fut.key in s.tasks for fut in futs):
+            await asyncio.sleep(0.05)
+
+    await release_all_futures()
+    await wait_for_state(f3.key, "cancelled", b)
+
+    f1 = c.submit(inc, 1, key="f1", workers=[a.address])
+    f2 = c.submit(inc, f1, key="f2", workers=[a.address])
+    f3 = c.submit(inc, f2, key="f3", workers=[a.address])
+    f4 = c.submit(sum, [f1, f3], workers=[b.address])
+
+    await wait_for_state(f3.key, "resumed", b)
+    await release_all_futures()
+
+    f1 = c.submit(inc, 1, key="f1", workers=[a.address])
+    f2 = c.submit(inc, f1, key="f2", workers=[a.address])
+    f3 = c.submit(inc, f2, key="f3", workers=[b.address])
+    f4 = c.submit(sum, [f1, f3], workers=[b.address])
+
+    if wait_for_processing:
+        await wait_for_state(f3.key, "processing", s)
+
+    await lock_compute.release()
+
+    if not raise_error:
+        assert await f4 == 4 + 2
+
+        assert_story(
+            b.story(f3.key),
+            expect=[
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "released", "cancelled", {}),
+                (f3.key, "cancelled", "fetch", "resumed", {}),
+                (f3.key, "resumed", "memory", "memory", {}),
+            ],
+        )
+
+    else:
+        with pytest.raises(RuntimeError, match="test error"):
+            await f3
+
+        assert_story(
+            b.story(f3.key),
+            expect=[
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "released", "cancelled", {}),
+                (f3.key, "cancelled", "fetch", "resumed", {}),
+                (f3.key, "resumed", "error", "error", {}),
+            ],
+        )
