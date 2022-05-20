@@ -1,6 +1,6 @@
 import pytest
 
-from distributed import Scheduler, SchedulerPlugin, Worker
+from distributed import Scheduler, SchedulerPlugin, Worker, get_worker
 from distributed.utils_test import gen_cluster, gen_test, inc
 
 
@@ -178,3 +178,23 @@ async def test_register_scheduler_plugin_pickle_disabled(c, s, a, b):
     assert "distributed.scheduler.pickle" in msg
 
     assert n_plugins == len(s.plugins)
+
+
+@gen_cluster(client=True)
+async def test_log_event_plugin(c, s, a, b):
+    class EventPlugin(SchedulerPlugin):
+        async def start(self, scheduler: Scheduler) -> None:
+            self.scheduler = scheduler
+            self.scheduler._recorded_events = list()  # type: ignore
+
+        def log_event(self, name, msg):
+            self.scheduler._recorded_events.append((name, msg))
+
+    await c.register_scheduler_plugin(EventPlugin())
+
+    def f():
+        get_worker().log_event("foo", 123)
+
+    await c.submit(f)
+
+    assert ("foo", 123) in s._recorded_events
