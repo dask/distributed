@@ -4865,7 +4865,8 @@ class Scheduler(SchedulerState, ServerNode):
                 "arbitrary bytestrings using pickle via the "
                 "'distributed.scheduler.pickle' configuration setting."
             )
-        plugin = loads(plugin)
+        if not isinstance(plugin, SchedulerPlugin):
+            plugin = loads(plugin)
 
         if name is None:
             name = _get_plugin_name(plugin)
