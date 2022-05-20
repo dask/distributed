@@ -324,6 +324,18 @@ async def test_cancelled_while_in_flight(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_in_memory_while_in_flight(c, s, a, b):
+    """
+    1. A client scatters x to a
+    2. The scheduler does not know about scattered keys until the three-way round-trip
+       between client, worker, and scheduler has been completed (see Scheduler.scatter)
+    3. In the middle of that handshake, a client (not necessarily the same client) calls
+       ``{op: compute-task, key: x}`` on b and then
+       ``{op: compute-task, key: y, who_has: {x: [b]}`` on a, which triggers a
+       gather_dep call to copy x key from b to a.
+    4. while x is in flight from b to a, the scatter finishes, which triggers
+       update_data, which in turn transitions x from flight to memory.
+    5. later on, gather_dep finishes, but the key is already in memory.
+    """
     event = asyncio.Event()
     a.rpc = _LockedCommPool(a.rpc, write_event=event)
 
