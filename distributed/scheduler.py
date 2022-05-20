@@ -3456,6 +3456,7 @@ class Scheduler(SchedulerState, ServerNode):
         address = normalize_address(address)
         ws = self.workers.get(address)
         if ws is None:
+            logger.warning(f"Received heartbeat from unregistered worker {address!r}.")
             return {"status": "missing"}
 
         host = get_address_host(address)
@@ -3581,6 +3582,16 @@ class Scheduler(SchedulerState, ServerNode):
         if address in self.workers:
             raise ValueError("Worker already exists %s" % address)
 
+        if nbytes:
+            err = (
+                f"Worker {address!r} connected with {len(nbytes)} key(s) in memory! Worker reconnection is not supported. "
+                f"Keys: {list(nbytes)}"
+            )
+            logger.error(err)
+            if comm:
+                await comm.write({"status": "error", "message": err, "time": time()})
+            return
+
         if name in self.aliases:
             logger.warning("Worker tried to connect with a duplicate name: %s", name)
             msg = {
@@ -3655,51 +3666,8 @@ class Scheduler(SchedulerState, ServerNode):
             except Exception as e:
                 logger.exception(e)
 
-        recommendations: dict = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
-        if nbytes:
-            assert isinstance(nbytes, dict)
-            already_released_keys = []
-            for key in nbytes:
-                ts: TaskState = self.tasks.get(key)  # type: ignore
-                if ts is not None and ts.state != "released":
-                    if ts.state == "memory":
-                        self.add_keys(worker=address, keys=[key])
-                    else:
-                        t: tuple = self._transition(
-                            key,
-                            "memory",
-                            stimulus_id,
-                            worker=address,
-                            nbytes=nbytes[key],
-                            typename=types[key],
-                        )
-                        recommendations, client_msgs, worker_msgs = t
-                        self._transitions(
-                            recommendations, client_msgs, worker_msgs, stimulus_id
-                        )
-                        recommendations = {}
-                else:
-                    already_released_keys.append(key)
-            if already_released_keys:
-                if address not in worker_msgs:
-                    worker_msgs[address] = []
-                worker_msgs[address].append(
-                    {
-                        "op": "remove-replicas",
-                        "keys": already_released_keys,
-                        "stimulus_id": stimulus_id,
-                    }
-                )
-
         if ws.status == Status.running:
-            recommendations.update(self.bulk_schedule_after_adding_worker(ws))
-
-        if recommendations:
-            self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
-
-        self.send_all(client_msgs, worker_msgs)
+            self.transitions(self.bulk_schedule_after_adding_worker(ws), stimulus_id)
 
         logger.info("Register worker %s", ws)
 
@@ -5060,43 +5028,21 @@ class Scheduler(SchedulerState, ServerNode):
             )
             result = {"status": "error", "keys": missing_keys}
             with log_errors():
-                # Remove suspicious workers from the scheduler but allow them to
-                # reconnect.
+                # Remove suspicious workers from the scheduler and shut them down.
                 await asyncio.gather(
                     *(
                         self.remove_worker(
-                            address=worker, close=False, stimulus_id=stimulus_id
+                            address=worker, close=True, stimulus_id=stimulus_id
                         )
                         for worker in missing_workers
                     )
                 )
-                recommendations: dict
-                client_msgs: dict = {}
-                worker_msgs: dict = {}
                 for key, workers in missing_keys.items():
-                    # Task may already be gone if it was held by a
-                    # `missing_worker`
-                    ts: TaskState = self.tasks.get(key)
                     logger.exception(
-                        "Workers don't have promised key: %s, %s",
+                        "Shut down workers that don't have promised key: %s, %s",
                         str(workers),
                         str(key),
                     )
-                    if not workers or ts is None:
-                        continue
-                    recommendations: dict = {key: "released"}
-                    for worker in workers:
-                        ws = self.workers.get(worker)
-                        if ws is not None and ws in ts.who_has:
-                            # FIXME: This code path is not tested
-                            self.remove_replica(ts, ws)
-                            self._transitions(
-                                recommendations,
-                                client_msgs,
-                                worker_msgs,
-                                stimulus_id=stimulus_id,
-                            )
-                self.send_all(client_msgs, worker_msgs)
 
         self.log_event("all", {"action": "gather", "count": len(keys)})
         return result

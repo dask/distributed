@@ -387,7 +387,6 @@ class Nanny(ServerNode):
                 nanny=self.address,
                 name=self.name,
                 memory_limit=self.memory_manager.memory_limit,
-                reconnect=self.reconnect,
                 resources=self.resources,
                 validate=self.validate,
                 silence_logs=self.silence_logs,

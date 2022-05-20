@@ -487,7 +487,6 @@ class Worker(ServerNode):
     connection_args: dict[str, Any]
     actors: dict[str, Actor | None]
     loop: IOLoop
-    reconnect: bool
     executors: dict[str, Executor]
     batched_stream: BatchedSend
     name: Any
@@ -518,7 +517,7 @@ class Worker(ServerNode):
         local_directory: str | None = None,
         services: dict | None = None,
         name: Any | None = None,
-        reconnect: bool = True,
+        reconnect: bool | None = None,
         executor: Executor | dict[str, Executor] | Literal["offload"] | None = None,
         resources: dict[str, float] | None = None,
         silence_logs: int | None = None,
@@ -563,6 +562,21 @@ class Worker(ServerNode):
         # Parameters to Server
         **kwargs,
     ):
+        if reconnect is not None:
+            if reconnect:
+                raise ValueError(
+                    "The `reconnect=True` option for `Worker` has been removed. "
+                    "To improve cluster stability, workers now always shut down in the face of network disconnects. "
+                    "For details, or if this is an issue for you, see https://github.com/dask/distributed/issues/6350."
+                )
+            else:
+                warnings.warn(
+                    "The `reconnect` argument to `Worker` is deprecated, and will be removed in a future release. "
+                    "Worker reconnection is now always disabled, so passing `reconnect=False` is unnecessary. "
+                    "See https://github.com/dask/distributed/issues/6350 for details.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
         self.tasks = {}
         self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)
@@ -714,7 +728,6 @@ class Worker(ServerNode):
 
         self.actors = {}
         self.loop = loop or IOLoop.current()
-        self.reconnect = reconnect
 
         # Common executors always available
         self.executors = {
@@ -1148,6 +1161,8 @@ class Worker(ServerNode):
             except TimeoutError:  # pragma: no cover
                 logger.info("Timed out when connecting to scheduler")
         if response["status"] != "OK":
+            msg = response["message"] if "message" in response else repr(response)
+            logger.error(f"Unable to connect to scheduler: {msg}")
             raise ValueError(f"Unexpected response from register: {response!r}")
         else:
             await asyncio.gather(
@@ -1200,13 +1215,11 @@ class Worker(ServerNode):
             self._update_latency(end - start)
 
             if response["status"] == "missing":
-                # If running, wait up to 0.5s and then re-register self.
-                # Otherwise just exit.
-                start = time()
-                while self.status in WORKER_ANY_RUNNING and time() < start + 0.5:
-                    await asyncio.sleep(0.01)
-                if self.status in WORKER_ANY_RUNNING:
-                    await self._register_with_scheduler()
+                # Scheduler thought we left. Reconnection is not supported, so just shut down.
+                logger.error(
+                    f"Scheduler was unaware of this worker {self.address!r}. Shutting down."
+                )
+                await self.close(report=False)
                 return
 
             self.scheduler_delay = response["time"] - middle
@@ -1217,8 +1230,7 @@ class Worker(ServerNode):
             self.bandwidth_types.clear()
         except CommClosedError:
             logger.warning("Heartbeat to scheduler failed", exc_info=True)
-            if not self.reconnect:
-                await self.close(report=False)
+            await self.close(report=False)
         except OSError as e:
             # Scheduler is gone. Respect distributed.comm.timeouts.connect
             if "Timed out trying to connect" in str(e):
@@ -1233,16 +1245,11 @@ class Worker(ServerNode):
     @fail_hard
     async def handle_scheduler(self, comm):
         await self.handle_stream(comm)
-
-        if self.reconnect and self.status in WORKER_ANY_RUNNING:
-            logger.info("Connection to scheduler broken.  Reconnecting...")
-            self.loop.add_callback(self.heartbeat)
-        else:
-            logger.info(
-                "Connection to scheduler broken. Closing without reporting.  Status: %s",
-                self.status,
-            )
-            await self.close(report=False)
+        logger.info(
+            "Connection to scheduler broken. Closing without reporting.  Status: %s",
+            self.status,
+        )
+        await self.close(report=False)
 
     async def upload_file(self, comm, filename=None, data=None, load=True):
         out_filename = os.path.join(self.local_directory, filename)
@@ -1438,7 +1445,6 @@ class Worker(ServerNode):
             await self.finished()
             return
 
-        self.reconnect = False
         disable_gc_diagnosis()
 
         try:

@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 import traceback
+import warnings
 import weakref
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -571,7 +572,7 @@ async def test_Executor(c, s):
             assert e._threads  # had to do some work
 
 
-@gen_cluster(nthreads=[("127.0.0.1", 1)], worker_kwargs={"reconnect": False})
+@gen_cluster(nthreads=[("127.0.0.1", 1)])
 async def test_close_on_disconnect(s, w):
     await s.close()
 
@@ -1657,24 +1658,115 @@ async def test_workerstate_executing(c, s, a):
     await f
 
 
-@pytest.mark.parametrize("reconnect", [True, False])
+@gen_cluster(nthreads=[("", 1)])
+async def test_shutdown_on_scheduler_comm_closed(s, a):
+    with captured_logger("distributed.worker", level=logging.INFO) as logger:
+        # Temporary network disconnect
+        s.stream_comms[a.address].abort()
+
+        await a.finished()
+        assert a.status == Status.closed
+        assert not s.workers
+        assert not s.stream_comms
+        assert "Connection to scheduler broken" in logger.getvalue()
+
+
 @gen_cluster(nthreads=[])
-async def test_heartbeat_comm_closed(s, monkeypatch, reconnect):
+async def test_heartbeat_comm_closed(s, monkeypatch):
     with captured_logger("distributed.worker", level=logging.WARNING) as logger:
 
         def bad_heartbeat_worker(*args, **kwargs):
             raise CommClosedError()
 
-        async with await Worker(s.address, reconnect=reconnect) as w:
+        async with await Worker(s.address) as w:
             # Trigger CommClosedError during worker heartbeat
             monkeypatch.setattr(w.scheduler, "heartbeat_worker", bad_heartbeat_worker)
 
             await w.heartbeat()
-            if reconnect:
-                assert w.status == Status.running
-            else:
-                assert w.status == Status.closed
+            assert w.status == Status.closed
+            while s.workers:
+                await asyncio.sleep(0.01)
     assert "Heartbeat to scheduler failed" in logger.getvalue()
+
+
+@gen_cluster(nthreads=[("", 1)], worker_kwargs={"heartbeat_interval": "100s"})
+async def test_heartbeat_missing(s, a, monkeypatch):
+    async def missing_heartbeat_worker(*args, **kwargs):
+        return {"status": "missing"}
+
+    with captured_logger("distributed.worker", level=logging.WARNING) as wlogger:
+        monkeypatch.setattr(a.scheduler, "heartbeat_worker", missing_heartbeat_worker)
+        await a.heartbeat()
+        assert a.status == Status.closed
+        assert "Scheduler was unaware of this worker" in wlogger.getvalue()
+
+        while s.workers:
+            await asyncio.sleep(0.01)
+
+
+@gen_cluster(nthreads=[("", 1)], worker_kwargs={"heartbeat_interval": "100s"})
+async def test_heartbeat_missing_real_cluster(s, a):
+    # The idea here is to create a situation where `s.workers[a.address]`,
+    # doesn't exist, but the worker is not yet closed and can still heartbeat.
+    # Ideally, this state would be impossible, and this test would be removed,
+    # and the `status: missing` handling would be replaced with an assertion error.
+    # However, `Scheduler.remove_worker` and `Worker.close` both currently leave things
+    # in degenerate, half-closed states while they're running (and yielding control
+    # via `await`).
+
+    # Currently this is easy because of https://github.com/dask/distributed/issues/6354.
+    # But even with that fixed, it may still be possible, since `Worker.close`
+    # could take an arbitrarily long time, and things can keep running
+    # while it's closing.
+    assumption_msg = "Test assumptions have changed. Race condition may have been fixed; this test may be removable."
+
+    class BlockCloseExtension:
+        def __init__(self) -> None:
+            self.close_reached = asyncio.Event()
+            self.unblock_close = asyncio.Event()
+
+        async def close(self):
+            self.close_reached.set()
+            await self.unblock_close.wait()
+
+    # `Worker.close` awaits extensions' `close` methods midway though.
+    # During this `await`, the Worker is in state `closing`, but the heartbeat
+    # `PeriodicCallback` is still running. We will intentionally pause
+    # the worker here to simulate the timing of a heartbeat happing in this
+    # degenerate state.
+    a.extensions["block-close"] = block_close = BlockCloseExtension()
+
+    with captured_logger(
+        "distributed.worker", level=logging.WARNING
+    ) as wlogger, captured_logger(
+        "distributed.scheduler", level=logging.WARNING
+    ) as slogger:
+        await s.remove_worker(a.address, "foo")
+        assert not s.workers
+
+        # Wait until the close signal reaches the worker and it starts shutting down.
+        await block_close.close_reached.wait()
+        assert a.status == Status.closing, assumption_msg
+        assert a.periodic_callbacks["heartbeat"].is_running(), assumption_msg
+        # The heartbeat PeriodicCallback is still running, so one _could_ fire
+        # while `Worker.close` has yielded control. We simulate that explicitly.
+
+        # Because `hearbeat` will `await self.close`, which is blocking on our
+        # extension, we have to run it concurrently.
+        hbt = asyncio.create_task(a.heartbeat())
+
+        # Worker was already closing, so the second `.close()` will be idempotent.
+        # Best we can test for is this log message.
+        while "Scheduler was unaware of this worker" not in wlogger.getvalue():
+            await asyncio.sleep(0.01)
+
+        assert "Received heartbeat from unregistered worker" in slogger.getvalue()
+        assert not s.workers
+
+        block_close.unblock_close.set()
+        await hbt
+        await a.finished()
+        assert not s.workers
 
 
 @gen_cluster(nthreads=[])
@@ -2396,165 +2488,6 @@ async def test_hold_on_to_replicas(c, s, *workers):
 
     while len(workers[2].data) > 1:
         await asyncio.sleep(0.01)
-
-
-@pytest.mark.xfail(
-    WINDOWS and sys.version_info[:2] == (3, 8),
-    reason="https://github.com/dask/distributed/issues/5621",
-)
-@gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
-async def test_worker_reconnects_mid_compute(c, s, a, b):
-    """Ensure that, if a worker disconnects while computing a result, the scheduler will
-    still accept the result.
-
-    There is also an edge case tested which ensures that the reconnect is
-    successful if a task is currently executing; see
-    https://github.com/dask/distributed/issues/5078
-
-    See also distributed.tests.test_scheduler.py::test_gather_allow_worker_reconnect
-    """
-    with captured_logger("distributed.scheduler") as s_logs:
-        # Let's put one task in memory to ensure the reconnect has tasks in
-        # different states
-        f1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
-        await f1
-        a_address = a.address
-        a.periodic_callbacks["heartbeat"].stop()
-        await a.heartbeat()
-        a.heartbeat_active = True
-
-        from distributed import Lock
-
-        def fast_on_a(lock):
-            w = get_worker()
-            import time
-
-            if w.address != a_address:
-                lock.acquire()
-            else:
-                time.sleep(1)
-
-        lock = Lock()
-        # We want to be sure that A is the only one computing this result
-        async with lock:
-
-            f2 = c.submit(
-                fast_on_a, lock, workers=[a.address], allow_other_workers=True
-            )
-
-            while f2.key not in a.tasks:
-                await asyncio.sleep(0.01)
-
-            await s.stream_comms[a.address].close()
-
-            assert len(s.workers) == 1
-            a.heartbeat_active = False
-            await a.heartbeat()
-            assert len(s.workers) == 2
-            # Since B is locked, this is ensured to originate from A
-            await f2
-
-    assert "Unexpected worker completed task" in s_logs.getvalue()
-
-    # Ensure that all in-memory tasks on A have been restored on the
-    # scheduler after reconnect
-    for ts in a.tasks.values():
-        if ts.state == "memory":
-            assert a.address in {ws.address for ws in s.tasks[ts.key].who_has}
-
-    # Ensure that all keys have been properly registered and will also be
-    # cleaned up nicely.
-    del f1, f2
-
-    while any(w.tasks for w in [a, b]):
-        await asyncio.sleep(0.001)
-
-
-@pytest.mark.xfail(
-    WINDOWS and sys.version_info[:2] == (3, 8),
-    reason="https://github.com/dask/distributed/issues/5621",
-)
-@gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
-async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, a, b):
-    """
-    Ensure that a reconnecting worker does not break the scheduler regardless of
-    what state the keys of the worker are in when it connects back
-
-    See also test_worker_reconnects_mid_compute which uses a smaller chain of
-    tasks and does not release f1 in between
-    """
-
-    with captured_logger("distributed.scheduler") as s_logs:
-        # Let's put one task in memory to ensure the reconnect has tasks in
-        # different states
-        f1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
-        f2 = c.submit(inc, f1, workers=[a.address], allow_other_workers=True)
-        await f1
-        a_address = a.address
-
-        a.periodic_callbacks["heartbeat"].stop()
-        await a.heartbeat()
-        a.heartbeat_active = True
-
-        from distributed import Lock
-
-        def fast_on_a(lock):
-            w = get_worker()
-            import time
-
-            if w.address != a_address:
-                lock.acquire()
-            else:
-                time.sleep(1)
-
-        lock = Lock()
-        # We want to be sure that A is the only one computing this result
-        async with lock:
-
-            f3 = c.submit(
-                fast_on_a, lock, workers=[a.address], allow_other_workers=True
-            )
-
-            while f3.key not in a.tasks:
-                await asyncio.sleep(0.01)
-
-            story_before = s.story(f1.key)
-            await s.stream_comms[a.address].close()
-            # Release f1 which triggers a release cycle of all tasks such that
-            # they are rescheduled on B. However, at this time, B will never be
-            # able to compute f3 / fast_on_a since it is locked on that worker.
-            # The only way to get f3 to complete is for Worker A to reconnect.
-
-            f1.release()
-            assert len(s.workers) == 1
-            story = s.story(f1.key)
-            while len(story) == len(story_before):
-                story = s.story(f1.key)
-                await asyncio.sleep(0.1)
-
-            next = story[len(story_before)]
-            assert next[:3] == (f1.key, "memory", "released")
-
-            a.heartbeat_active = False
-            await a.heartbeat()
-
-            while len(s.workers) != 2:
-                await asyncio.sleep(0.01)
-
-            # Since B is locked, this is ensured to originate from A
-            await f3
-
-    assert "Unexpected worker completed task" in s_logs.getvalue()
-
-    # Ensure that all in-memory tasks on A have been restored on the
-    # scheduler after reconnect
-    for ts in a.tasks.values():
-        if ts.state == "memory":
-            assert a.address in {ws.address for ws in s.tasks[ts.key].who_has}
-
-    del f1, f2, f3
-    while any(w.tasks for w in [a, b]):
-        await asyncio.sleep(0.001)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
@@ -3601,3 +3534,19 @@ async def test_do_not_block_event_loop_during_shutdown(s):
         await w.close(executor_wait=True)
 
     await asyncio.gather(block(), close(), set_future())
+
+
+@gen_cluster(nthreads=[])
+async def test_reconnect_argument_deprecated(s):
+    with pytest.deprecated_call(match="`reconnect` argument"):
+        async with Worker(s.address, reconnect=False):
+            pass
+    with pytest.raises(ValueError, match="reconnect=True"):
+        async with Worker(s.address, reconnect=True):
+            pass
+
+    with warnings.catch_warnings():
+        # No argument should not warn or raise
+        warnings.simplefilter("error")
+        async with Worker(s.address):
+            pass
