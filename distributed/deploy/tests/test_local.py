@@ -1162,6 +1162,7 @@ class MyPlugin:
         import my_nonexistent_library  # noqa
 
 
+@pytest.mark.slow
 @gen_test(
     clean_kwargs={
         # FIXME: This doesn't close the LoopRunner properly, leaving a thread around
@@ -1169,7 +1170,7 @@ class MyPlugin:
     }
 )
 async def test_localcluster_start_exception():
-    with raises_with_cause(RuntimeError, None, ImportError, None):
+    with raises_with_cause(RuntimeError, None, ImportError, "my_nonexistent_library"):
         async with LocalCluster(
             plugins={MyPlugin()},
         ):
