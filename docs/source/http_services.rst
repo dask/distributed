@@ -52,7 +52,11 @@ Pages and JSON endpoints served by the scheduler
 Scheduler API
 -------------
 
-Scheduler methods exposed by the API with an example of the request body they take
+Scheduler methods exposed by the API with an example of the request body they take.
+
+.. note::
+   To prevent unauthorized access, the scheduler API is disabled by default if `tls`_ is enabled.
+   See the ``distributed.http.insecure-routes`` :doc:`config <configuration>` setting.
 
 - ``/api/v1/retire_workers`` : retire certain workers on the scheduler
 
@@ -63,7 +67,7 @@ Scheduler methods exposed by the API with an example of the request body they ta
     }
 
 - ``/api/v1/get_workers`` : get all workers on the scheduler
-- ``/api/v1/adaptive_target`` : get the target number of workers based on the scheduler's load 
+- ``/api/v1/adaptive_target`` : get the target number of workers based on the scheduler's load
 
 Individual bokeh plots
 ----------------------

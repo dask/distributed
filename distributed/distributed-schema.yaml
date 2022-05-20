@@ -246,7 +246,15 @@ properties:
 
                   These modules will have a ``routes`` keyword that gets added to the main HTTP Server.
                   This is also a list that can be extended with user defined modules.
+                  These routes should be read-only; they should not be able to affect cluster state.
+              insecure-routes:
+                type: array
+                description: |
+                  A list of modules that will only be added as HTTP routes if unauthenticated client connections are allowed
 
+                  These routes offer the ability to affect cluster state. Unlike client connections, HTTP routes do not support
+                  authentication. Since the client is the primary way to affect cluster state, it's assumed that if client
+                  connections require authentication, these routes should not be exposed.
           allowed-imports:
             type: array
             description: |

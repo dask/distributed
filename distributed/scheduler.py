@@ -2951,6 +2951,10 @@ class Scheduler(SchedulerState, ServerNode):
             except ImportError:
                 show_dashboard = False
                 http_server_modules.append("distributed.http.scheduler.missing_bokeh")
+        if not self.security.require_encryption:
+            http_server_modules.extend(
+                dask.config.get("distributed.scheduler.http.insecure-routes")
+            )
         routes = get_handlers(
             server=self, modules=http_server_modules, prefix=http_prefix
         )

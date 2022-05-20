@@ -13,7 +13,7 @@ from tornado.httpclient import AsyncHTTPClient, HTTPClientError
 from dask.sizeof import sizeof
 
 from distributed.utils import is_valid_xml
-from distributed.utils_test import gen_cluster, inc, slowinc
+from distributed.utils_test import gen_cluster, inc, slowinc, tls_only_security
 
 
 @gen_cluster(client=True)
@@ -257,6 +257,15 @@ async def test_api(c, s, a, b):
             assert resp.status == 200
             assert resp.headers["Content-Type"] == "text/plain"
             assert (await resp.text()) == "API V1"
+
+
+@gen_cluster(client=True, clean_kwargs={"threads": False}, security=tls_only_security())
+async def test_api_disabled_if_secure(c, s, a, b):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            "http://localhost:%d/api/v1" % s.http_server.port
+        ) as resp:
+            assert resp.status == 404
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
