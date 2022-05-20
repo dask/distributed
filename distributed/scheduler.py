@@ -477,7 +477,7 @@ class WorkerState:
         self.versions = versions or {}
         self.nanny = nanny
         self.status = status
-        self._hash = hash(address)
+        self._hash = hash((address, pid, name))
         self.nbytes = 0
         self.occupancy = 0
         self._memory_unmanaged_old = 0
@@ -501,7 +501,7 @@ class WorkerState:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, WorkerState):
             return False
-        return self.address == other.address
+        return hash(self) == hash(other)
 
     @property
     def has_what(self) -> Set[TaskState]:
