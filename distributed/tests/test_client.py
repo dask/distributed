@@ -6072,10 +6072,6 @@ async def test_instances(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_wait_for_workers(c, s, a, b):
-    with pytest.raises(TimeoutError) as info:
-        await c.wait_for_workers(n_workers=1, timeout="1 ms", absolute=True)
-    assert "2/1" in str(info.value).replace(" ", "")
-
     future = asyncio.ensure_future(c.wait_for_workers(n_workers=1))
     await asyncio.sleep(0.22)  # 2 chances
     assert future.done()
@@ -6098,8 +6094,42 @@ async def test_wait_for_workers(c, s, a, b):
     future = asyncio.ensure_future(c.wait_for_workers(n_workers=2))
     await asyncio.sleep(0.22)  # 2 chances
     assert future.done()
+    await w.close()
 
-    future = asyncio.ensure_future(c.wait_for_workers(n_workers=2, absolute=True))
+
+@gen_cluster(client=True)
+async def test_wait_for_workers_max(c, s, a, b):
+    future = asyncio.ensure_future(c.wait_for_workers(n_workers=3, mode="at most"))
+    await asyncio.sleep(0.22)  # 2 chances
+    assert future.done()
+
+    w = await Worker(s.address)
+    start = time()
+    await future
+    assert time() < start + 1
+
+    with pytest.raises(TimeoutError) as info:
+        await c.wait_for_workers(n_workers=1, timeout="1 ms", mode="at most")
+
+    assert "3/1" in str(info.value).replace(" ", "")
+    assert "1 ms" in str(info.value)
+
+
+@gen_cluster(client=True)
+async def test_wait_for_workers_exactly(c, s, a, b):
+    with pytest.raises(TimeoutError) as info:
+        await c.wait_for_workers(n_workers=1, timeout="1 ms", mode="exactly")
+    assert "2/1" in str(info.value).replace(" ", "")
+
+    w = await Worker(s.address)
+
+    with pytest.raises(TimeoutError) as info:
+        await c.wait_for_workers(n_workers=10, timeout="1 ms", mode="exactly")
+
+    assert "3/10" in str(info.value).replace(" ", "")
+    assert "1 ms" in str(info.value)
+
+    future = asyncio.ensure_future(c.wait_for_workers(n_workers=2, mode="exactly"))
     await asyncio.sleep(0.22)  # 2 chances
     assert not future.done()
 

@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
+from enum import Enum
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
@@ -147,6 +148,14 @@ def _del_global_client(c: Client) -> None:
                 del _global_clients[k]
         except KeyError:  # pragma: no cover
             pass
+
+
+class WorkerWaitMode(Enum):
+    """Mode to use when waiting for workers."""
+
+    min = "at least"
+    max = "at most"
+    exactly = "exactly"
 
 
 class Future(WrappedKey):
@@ -1308,7 +1317,11 @@ class Client(SyncMethodMixin):
         except OSError:
             logger.debug("Not able to query scheduler for identity")
 
-    async def _wait_for_workers(self, n_workers=0, timeout=None, absolute=False):
+    async def _wait_for_workers(
+        self, n_workers=0, timeout=None, mode=WorkerWaitMode.min
+    ):
+        if isinstance(mode, str):
+            mode = WorkerWaitMode(mode)
         info = await self.scheduler.identity()
         self._scheduler_identity = SchedulerInfo(info)
         if timeout:
@@ -1325,19 +1338,31 @@ class Client(SyncMethodMixin):
                 ]
             )
 
-        while (running_workers(info) != n_workers and absolute) or (
-            n_workers and running_workers(info) < n_workers and not absolute
-        ):
+        need_exact = lambda: (
+            running_workers(info) != n_workers and mode == WorkerWaitMode.exactly
+        )
+        need_min = lambda: (
+            n_workers
+            and running_workers(info) < n_workers
+            and mode == WorkerWaitMode.min
+        )
+        need_max = lambda: (
+            n_workers
+            and running_workers(info) > n_workers
+            and mode == WorkerWaitMode.max
+        )
+
+        while need_exact() or need_min() or need_max():
             if deadline and time() > deadline:
                 raise TimeoutError(
-                    "Only had %d/%d workers after %s"
-                    % (running_workers(info), n_workers, timeout)
+                    "Had %d/%d workers after %s and needed %s %d"
+                    % (running_workers(info), n_workers, timeout, mode, n_workers)
                 )
             await asyncio.sleep(0.1)
             info = await self.scheduler.identity()
             self._scheduler_identity = SchedulerInfo(info)
 
-    def wait_for_workers(self, n_workers=0, timeout=None, absolute=False):
+    def wait_for_workers(self, n_workers=0, timeout=None, mode=WorkerWaitMode.min):
         """Blocking call to wait for n workers before continuing
 
         Parameters
@@ -1347,13 +1372,12 @@ class Client(SyncMethodMixin):
         timeout : number, optional
             Time in seconds after which to raise a
             ``dask.distributed.TimeoutError``
-        absolute : bool, optional
-            Wait for exactly ``n_workers``
-            Default ``False``, waits for at least ``n_workers``
+        mode : WorkerWaitMode | str, optional
+            Mode to use when waiting for workers.
+            Default ``WorkerWaitMode.min`` or ``"at least"``, waits for at least ``n_workers``.
+            Other options include ``"at most"`` and ``"exactly"``.
         """
-        return self.sync(
-            self._wait_for_workers, n_workers, timeout=timeout, absolute=absolute
-        )
+        return self.sync(self._wait_for_workers, n_workers, timeout=timeout, mode=mode)
 
     def _heartbeat(self):
         if self.scheduler_comm:
