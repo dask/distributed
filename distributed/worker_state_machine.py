@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict
 import dask
 from dask.utils import parse_bytes
 
+from distributed.core import ErrorMessage, error_message
 from distributed.protocol.serialize import Serialize
 from distributed.utils import recursive_to_dict
 
@@ -458,7 +459,6 @@ class ExecuteSuccessEvent(StateMachineEvent):
     stop: float
     nbytes: int
     type: type | None
-    stimulus_id: str
     __slots__ = tuple(__annotations__)  # type: ignore
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
@@ -481,12 +481,37 @@ class ExecuteFailureEvent(StateMachineEvent):
     traceback: Serialize | None
     exception_text: str
     traceback_text: str
-    stimulus_id: str
     __slots__ = tuple(__annotations__)  # type: ignore
 
     def _after_from_dict(self) -> None:
         self.exception = Serialize(Exception())
         self.traceback = None
+
+    @classmethod
+    def from_exception(
+        cls,
+        err_or_msg: BaseException | ErrorMessage,
+        *,
+        key: str,
+        start: float | None = None,
+        stop: float | None = None,
+        stimulus_id: str,
+    ) -> ExecuteFailureEvent:
+        if isinstance(err_or_msg, dict):
+            msg = err_or_msg
+        else:
+            msg = error_message(err_or_msg)
+
+        return cls(
+            key=key,
+            start=start,
+            stop=stop,
+            exception=msg["exception"],
+            traceback=msg["traceback"],
+            exception_text=msg["exception_text"],
+            traceback_text=msg["traceback_text"],
+            stimulus_id=stimulus_id,
+        )
 
 
 @dataclass

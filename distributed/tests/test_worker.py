@@ -2570,6 +2570,24 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
 
 
 @gen_cluster(client=True)
+async def test_run_spec_deserialize_fail(c, s, a, b):
+    class F:
+        def __call__(self):
+            pass
+
+        def __reduce__(self):
+            return lambda: 1 / 0, ()
+
+    with captured_logger("distributed.worker") as logger:
+        fut = c.submit(F())
+        assert isinstance(await fut.exception(), ZeroDivisionError)
+
+    logvalue = logger.getvalue()
+    assert "Could not deserialize task" in logvalue
+    assert "return lambda: 1 / 0, ()" in logvalue
+
+
+@gen_cluster(client=True)
 async def test_gather_dep_exception_one_task(c, s, a, b):
     """Ensure an exception in a single task does not tear down an entire batch of gather_dep
 
