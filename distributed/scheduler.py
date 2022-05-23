@@ -4733,7 +4733,7 @@ class Scheduler(SchedulerState, ServerNode):
         ws.long_running.add(ts)
         self.check_idle_saturated(ws)
 
-    def handle_worker_status_change(
+    async def handle_worker_status_change(
         self, status: str, worker: str, stimulus_id: str
     ) -> None:
         ws = self.workers.get(worker)
@@ -4761,8 +4761,12 @@ class Scheduler(SchedulerState, ServerNode):
                 worker_msgs: dict = {}
                 self._transitions(recs, client_msgs, worker_msgs, stimulus_id)
                 self.send_all(client_msgs, worker_msgs)
-        else:
-            self.running.discard(ws)
+        elif ws.status == Status.paused:
+            self.running.remove(ws)
+        elif ws.status == Status.closing:
+            await self.remove_worker(
+                address=ws.address, stimulus_id=stimulus_id, close=False
+            )
 
     async def handle_worker(self, comm=None, worker=None, stimulus_id=None):
         """
