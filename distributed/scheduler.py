@@ -3387,6 +3387,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         futures = []
         for _, comm in list(self.stream_comms.items()):
+            # FIXME use `self.remove_worker()` instead after https://github.com/dask/distributed/issues/6390
             if not comm.closed():
                 # This closes the Worker and ensures that if a Nanny is around,
                 # it is closed as well
