@@ -16,6 +16,8 @@ from dask.sizeof import sizeof
 from distributed.utils import is_valid_xml
 from distributed.utils_test import gen_cluster, inc, slowinc
 
+DEFAULT_ROUTES = dask.config.get("distributed.scheduler.http.routes")
+
 
 @gen_cluster(client=True)
 async def test_connect(c, s, a, b):
@@ -258,7 +260,10 @@ def test_api_disabled_by_default():
 @gen_cluster(
     client=True,
     clean_kwargs={"threads": False},
-    config={"distributed.scheduler.http.routes": ["distributed.http.scheduler.api"]},
+    config={
+        "distributed.scheduler.http.routes": DEFAULT_ROUTES
+        + ["distributed.http.scheduler.api"]
+    },
 )
 async def test_api(c, s, a, b):
     async with aiohttp.ClientSession() as session:
@@ -273,7 +278,10 @@ async def test_api(c, s, a, b):
 @gen_cluster(
     client=True,
     clean_kwargs={"threads": False},
-    config={"distributed.scheduler.http.routes": ["distributed.http.scheduler.api"]},
+    config={
+        "distributed.scheduler.http.routes": DEFAULT_ROUTES
+        + ["distributed.http.scheduler.api"]
+    },
 )
 async def test_retire_workers(c, s, a, b):
     async with aiohttp.ClientSession() as session:
@@ -291,7 +299,10 @@ async def test_retire_workers(c, s, a, b):
 @gen_cluster(
     client=True,
     clean_kwargs={"threads": False},
-    config={"distributed.scheduler.http.routes": ["distributed.http.scheduler.api"]},
+    config={
+        "distributed.scheduler.http.routes": DEFAULT_ROUTES
+        + ["distributed.http.scheduler.api"]
+    },
 )
 async def test_get_workers(c, s, a, b):
     async with aiohttp.ClientSession() as session:
@@ -308,7 +319,10 @@ async def test_get_workers(c, s, a, b):
 @gen_cluster(
     client=True,
     clean_kwargs={"threads": False},
-    config={"distributed.scheduler.http.routes": ["distributed.http.scheduler.api"]},
+    config={
+        "distributed.scheduler.http.routes": DEFAULT_ROUTES
+        + ["distributed.http.scheduler.api"]
+    },
 )
 async def test_adaptive_target(c, s, a, b):
     async with aiohttp.ClientSession() as session:
