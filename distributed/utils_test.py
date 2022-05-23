@@ -1707,7 +1707,6 @@ def check_thread_leak():
 
             bad_thread = bad_threads[0]
             call_stacks = profile.call_stack(sys._current_frames()[bad_thread.ident])
-            breakpoint()
             assert False, (bad_thread, call_stacks)
 
 
