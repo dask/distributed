@@ -44,6 +44,9 @@ from dask.utils import format_time, parse_timedelta
 from distributed.metrics import time
 from distributed.utils import color_of
 
+#: This lock can be acquired to ensure that no instance of watch() is concurrently holding references to frames
+lock = threading.Lock()
+
 
 def identifier(frame: FrameType | None) -> str:
     """A string identifier from a frame
@@ -314,16 +317,13 @@ def plot_data(state, profile_interval=0.010):
     }
 
 
-_watch_running: set[int] = set()
-
-
 def wait_profiler() -> None:
     """Wait until a moment when no instances of watch() are sampling the frames.
     You must call this function whenever you would otherwise expect an object to be
     immediately released after it's descoped.
     """
-    while _watch_running:
-        sleep(0.0001)
+    with lock:
+        pass
 
 
 def _watch(
@@ -337,11 +337,9 @@ def _watch(
 
     recent = create()
     last = time()
-    watch_id = threading.get_ident()
 
     while not stop():
-        _watch_running.add(watch_id)
-        try:
+        with lock:
             if time() > last + cycle:
                 log.append((time(), recent))
                 recent = create()
@@ -353,8 +351,6 @@ def _watch(
 
             process(frame, None, recent, omit=omit)
             del frame
-        finally:
-            _watch_running.remove(watch_id)
         sleep(interval)
 
 
