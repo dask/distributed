@@ -11,7 +11,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from distributed.utils import TimeoutError, mp_context
+from distributed.utils import mp_context
 
 logger = logging.getLogger(__name__)
 
@@ -261,15 +261,9 @@ class AsyncProcess:
         assert self._state.pid is not None, "can only join a started process"
         if self._state.exitcode is not None:
             return
-        if timeout is None:
-            await self._exit_future
-        else:
-            try:
-                # Shield otherwise the timeout cancels the future and our
-                # on_exit callback will try to set a result on a canceled future
-                await asyncio.wait_for(asyncio.shield(self._exit_future), timeout)
-            except TimeoutError:
-                pass
+        # Shield otherwise the timeout cancels the future and our
+        # on_exit callback will try to set a result on a canceled future
+        await asyncio.wait_for(asyncio.shield(self._exit_future), timeout)
 
     def close(self):
         """
