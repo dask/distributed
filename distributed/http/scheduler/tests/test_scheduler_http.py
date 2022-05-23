@@ -10,6 +10,7 @@ pytest.importorskip("bokeh")
 from tornado.escape import url_escape
 from tornado.httpclient import AsyncHTTPClient, HTTPClientError
 
+import dask.config
 from dask.sizeof import sizeof
 
 from distributed.utils import is_valid_xml
@@ -248,8 +249,18 @@ async def test_eventstream(c, s, a, b):
     ws_client.close()
 
 
+def test_api_disabled_by_default():
+    assert "distributed.http.scheduler.api" not in dask.config.get(
+        "distributed.scheduler.http.routes"
+    )
+
+
 @gen_cluster(client=True, clean_kwargs={"threads": False})
 async def test_api(c, s, a, b):
+    if "distributed.http.scheduler.api" not in dask.config.get(
+        "distributed.scheduler.http.routes"
+    ):
+        pytest.skip()
     async with aiohttp.ClientSession() as session:
         async with session.get(
             "http://localhost:%d/api/v1" % s.http_server.port
@@ -261,6 +272,10 @@ async def test_api(c, s, a, b):
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
 async def test_retire_workers(c, s, a, b):
+    if "distributed.http.scheduler.api" not in dask.config.get(
+        "distributed.scheduler.http.routes"
+    ):
+        pytest.skip()
     async with aiohttp.ClientSession() as session:
         params = {"workers": [a.address, b.address]}
         async with session.post(
@@ -275,6 +290,10 @@ async def test_retire_workers(c, s, a, b):
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
 async def test_get_workers(c, s, a, b):
+    if "distributed.http.scheduler.api" not in dask.config.get(
+        "distributed.scheduler.http.routes"
+    ):
+        pytest.skip()
     async with aiohttp.ClientSession() as session:
         async with session.get(
             "http://localhost:%d/api/v1/get_workers" % s.http_server.port
@@ -288,6 +307,10 @@ async def test_get_workers(c, s, a, b):
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
 async def test_adaptive_target(c, s, a, b):
+    if "distributed.http.scheduler.api" not in dask.config.get(
+        "distributed.scheduler.http.routes"
+    ):
+        pytest.skip()
     async with aiohttp.ClientSession() as session:
         async with session.get(
             "http://localhost:%d/api/v1/adaptive_target" % s.http_server.port

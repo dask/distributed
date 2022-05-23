@@ -53,7 +53,6 @@ distributed:
         - distributed.http.scheduler.prometheus
         - distributed.http.scheduler.info
         - distributed.http.scheduler.json
-        - distributed.http.scheduler.api
         - distributed.http.health
         - distributed.http.proxy
         - distributed.http.statics
