@@ -486,10 +486,16 @@ class BrokenWorker(worker.Worker):
 
 @gen_cluster(nthreads=[])
 async def test_worker_start_exception(s):
-    # make sure this raises the right Exception:
-    with raises_with_cause(RuntimeError, None, StartException, None):
-        async with Nanny(s.address, worker_class=BrokenWorker) as n:
-            pass
+    nanny = Nanny(s.address, worker_class=BrokenWorker)
+    with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
+        # make sure this raises the right Exception:
+        with raises_with_cause(RuntimeError, None, StartException, None):
+            async with nanny:
+                pass
+    assert nanny.status == Status.failed
+    # ^ NOTE: `Nanny.close` sets it to `closed`, then `Server.start._close_on_failure` sets it to `failed`
+    assert nanny.process is None
+    assert "Restarting worker" not in logs.getvalue()
 
 
 @gen_cluster(nthreads=[])
