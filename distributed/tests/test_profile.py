@@ -224,6 +224,7 @@ def test_watch_requires_lock_to_run():
 
     start_threads = threading.active_count()
 
+    # Hog the lock over the entire duration of watch
     thread = threading.Thread(
         target=hold_lock, name="Hold Lock", kwargs={"stop": stop_lock}
     )
