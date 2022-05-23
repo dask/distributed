@@ -759,17 +759,20 @@ class WorkerProcess:
         logger.info("Nanny asking worker to close")
 
         process = self.process
+        assert self.process
+        wait_timeout = max(0, deadline - time()) * 0.8
+        wait_deadline = time() + wait_timeout
         self.child_stop_q.put(
             {
                 "op": "stop",
-                "timeout": max(0, deadline - time()) * 0.8,
+                "timeout": wait_timeout,
                 "executor_wait": executor_wait,
             }
         )
         await asyncio.sleep(0)  # otherwise we get broken pipe errors
         self.child_stop_q.close()
 
-        while process.is_alive() and time() < deadline:
+        while process.is_alive() and time() < wait_deadline:
             await asyncio.sleep(0.05)
 
         if process.is_alive():
@@ -780,6 +783,11 @@ class WorkerProcess:
                 await process.terminate()
             except Exception as e:
                 logger.error("Failed to kill worker process: %s", e)
+            else:
+                try:
+                    await process.join(max(0, deadline - time()))
+                except asyncio.TimeoutError:
+                    logger.error("Timed out waiting for worker process to exit")
 
     async def _wait_until_connected(self, uid):
         while True:

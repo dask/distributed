@@ -11,6 +11,8 @@ from unittest import mock
 import psutil
 import pytest
 
+from distributed.diagnostics.plugin import WorkerPlugin
+
 pytestmark = pytest.mark.gpu
 
 from tlz import first, valmap
@@ -568,3 +570,50 @@ async def test_restart_memory(c, s, n):
 
     while not s.workers:
         await asyncio.sleep(0.1)
+
+
+class BlockSigterm(WorkerPlugin):
+    def __init__(self, term_happened, term_proceed) -> None:
+        self.term_happened = term_happened
+        self.term_proceed = term_proceed
+
+    def setup(self, worker):
+        import signal
+
+        signal.signal(signal.SIGTERM, self.sigterm)
+
+    def sigterm(self, *args):
+        self.term_happened.set()
+        self.term_proceed.wait()
+
+    async def teardown(self, worker):
+        # Never let the worker cleanly shut down, so it has to be killed
+        while True:
+            await asyncio.sleep(10)
+
+
+@gen_cluster(nthreads=[])
+async def test_close_joins(s):
+    term_happened = mp.Event()
+    term_proceed = mp.Event()
+
+    nanny = Nanny(s.address, plugins=[BlockSigterm(term_happened, term_proceed)])
+    async with nanny:
+        p = nanny.process
+        assert p
+        close_t = asyncio.create_task(nanny.close())
+        await asyncio.to_thread(term_happened.wait)
+
+        assert not close_t.done()
+        assert nanny.status == Status.closing
+        assert nanny.process and nanny.process.status == Status.stopping
+
+        term_proceed.set()
+
+        await close_t
+
+        assert nanny.status == Status.closed
+        assert not nanny.process
+
+        assert p.status == Status.closed
+        assert not p.process
