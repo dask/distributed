@@ -221,7 +221,7 @@ async def _force_close(self):
     2.  If it doesn't, log and kill the process
     """
     try:
-        await asyncio.wait_for(self.close(executor_wait=False), 30)
+        await asyncio.wait_for(self.close(nanny=False, executor_wait=False), 30)
     except (Exception, BaseException):  # <-- include BaseException here or not??
         # Worker is in a very broken state if closing fails. We need to shut down immediately,
         # to ensure things don't get even worse and this worker potentially deadlocks the cluster.
@@ -1448,7 +1448,7 @@ class Worker(ServerNode):
         self,
         timeout=30,
         executor_wait=True,
-        nanny=False,
+        nanny=True,
     ):
         # FIXME: The worker should not be allowed to close the nanny. Ownership
         # is the other way round. If an external caller wants to close
