@@ -515,6 +515,7 @@ class Nanny(ServerNode):
             Status.closing,
             Status.closed,
             Status.closing_gracefully,
+            Status.failed,
         ):
             try:
                 await self._unregister()
@@ -529,6 +530,7 @@ class Nanny(ServerNode):
                 Status.closing,
                 Status.closed,
                 Status.closing_gracefully,
+                Status.failed,
             ):
                 logger.warning("Restarting worker")
                 await self.instantiate()
