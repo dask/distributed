@@ -680,10 +680,11 @@ class Server:
         for i in range(20):
             # If there are still handlers running at this point, give them a
             # second to finish gracefully themselves, otherwise...
-            if any(self._comms.values()):
+            if any(comm for comm in self._comms.values() if comm != "terminate"):
                 yield asyncio.sleep(0.05)
             else:
                 break
+
         yield self.rpc.close()
         yield [comm.close() for comm in list(self._comms)]  # then forcefully close
         for cb in self._ongoing_coroutines:
