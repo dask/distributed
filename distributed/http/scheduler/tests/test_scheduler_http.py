@@ -255,12 +255,12 @@ def test_api_disabled_by_default():
     )
 
 
-@gen_cluster(client=True, clean_kwargs={"threads": False})
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={"distributed.scheduler.http.routes": ["distributed.http.scheduler.api"]},
+)
 async def test_api(c, s, a, b):
-    if "distributed.http.scheduler.api" not in dask.config.get(
-        "distributed.scheduler.http.routes"
-    ):
-        pytest.skip()
     async with aiohttp.ClientSession() as session:
         async with session.get(
             "http://localhost:%d/api/v1" % s.http_server.port
@@ -270,12 +270,12 @@ async def test_api(c, s, a, b):
             assert (await resp.text()) == "API V1"
 
 
-@gen_cluster(client=True, clean_kwargs={"threads": False})
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={"distributed.scheduler.http.routes": ["distributed.http.scheduler.api"]},
+)
 async def test_retire_workers(c, s, a, b):
-    if "distributed.http.scheduler.api" not in dask.config.get(
-        "distributed.scheduler.http.routes"
-    ):
-        pytest.skip()
     async with aiohttp.ClientSession() as session:
         params = {"workers": [a.address, b.address]}
         async with session.post(
@@ -288,12 +288,12 @@ async def test_retire_workers(c, s, a, b):
             assert len(retired_workers_info) == 2
 
 
-@gen_cluster(client=True, clean_kwargs={"threads": False})
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={"distributed.scheduler.http.routes": ["distributed.http.scheduler.api"]},
+)
 async def test_get_workers(c, s, a, b):
-    if "distributed.http.scheduler.api" not in dask.config.get(
-        "distributed.scheduler.http.routes"
-    ):
-        pytest.skip()
     async with aiohttp.ClientSession() as session:
         async with session.get(
             "http://localhost:%d/api/v1/get_workers" % s.http_server.port
@@ -305,12 +305,12 @@ async def test_get_workers(c, s, a, b):
             assert set(workers_address) == {a.address, b.address}
 
 
-@gen_cluster(client=True, clean_kwargs={"threads": False})
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={"distributed.scheduler.http.routes": ["distributed.http.scheduler.api"]},
+)
 async def test_adaptive_target(c, s, a, b):
-    if "distributed.http.scheduler.api" not in dask.config.get(
-        "distributed.scheduler.http.routes"
-    ):
-        pytest.skip()
     async with aiohttp.ClientSession() as session:
         async with session.get(
             "http://localhost:%d/api/v1/adaptive_target" % s.http_server.port
