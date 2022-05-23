@@ -872,7 +872,6 @@ class Client(SyncMethodMixin):
 
         self._asynchronous = asynchronous
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
-        self.io_loop = self.loop = self._loop_runner.loop
         self._connecting_to_scheduler = False
 
         self._gather_keys = None
@@ -943,6 +942,17 @@ class Client(SyncMethodMixin):
         from distributed.recreate_tasks import ReplayTaskClient
 
         ReplayTaskClient(self)
+
+    @property
+    def io_loop(self):
+        warnings.warn(
+            "The io_loop property is deprecated", DeprecationWarning, stacklevel=2
+        )
+        return self._loop_runner.loop
+
+    @property
+    def loop(self):
+        return self._loop_runner.loop
 
     @contextmanager
     def as_current(self):

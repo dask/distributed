@@ -11,6 +11,7 @@ from inspect import isawaitable
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from tornado import gen
+from tornado.ioloop import IOLoop
 
 import dask
 from dask.utils import parse_bytes, parse_timedelta
@@ -230,6 +231,9 @@ class SpecCluster(Cluster):
         shutdown_on_close=True,
         scheduler_sync_interval=1,
     ):
+        if loop is None and asynchronous:
+            loop = IOLoop.current()
+
         self._created = weakref.WeakSet()
 
         self.scheduler_spec = copy.copy(scheduler)
@@ -259,7 +263,14 @@ class SpecCluster(Cluster):
             scheduler_sync_interval=scheduler_sync_interval,
         )
 
-        if not self.asynchronous:
+        try:
+            called_from_running_loop = (
+                getattr(loop, "asyncio_loop", None) is asyncio.get_running_loop()
+            )
+        except RuntimeError:
+            called_from_running_loop = asynchronous
+
+        if not called_from_running_loop:
             self._loop_runner.start()
             self.sync(self._start)
             try:
