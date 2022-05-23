@@ -3391,7 +3391,7 @@ class Scheduler(SchedulerState, ServerNode):
             if not comm.closed():
                 # This closes the Worker and ensures that if a Nanny is around,
                 # it is closed as well
-                comm.send({"op": "terminate"})
+                comm.send({"op": "close"})
                 comm.send({"op": "close-stream"})
                 # ^ TODO remove? `Worker.close` will close the stream anyway.
             with suppress(AttributeError):
@@ -3421,8 +3421,7 @@ class Scheduler(SchedulerState, ServerNode):
         """
         logger.info("Closing worker %s", worker)
         self.log_event(worker, {"action": "close-worker"})
-        ws = self.workers[worker]
-        self.worker_send(worker, {"op": "close", "nanny": bool(ws.nanny)})
+        self.worker_send(worker, {"op": "close"})  # TODO redundant with `remove_worker`
         await self.remove_worker(address=worker, safe=safe, stimulus_id=stimulus_id)
 
     ###########

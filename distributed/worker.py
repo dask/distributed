@@ -785,7 +785,7 @@ class Worker(ServerNode):
             "get_data": self.get_data,
             "update_data": self.update_data,
             "free_keys": self.handle_free_keys,
-            "terminate": self.terminate,
+            "terminate": self.close,
             "ping": pingpong,
             "upload_file": self.upload_file,
             "call_stack": self.get_call_stack,
@@ -807,7 +807,6 @@ class Worker(ServerNode):
 
         stream_handlers = {
             "close": self.close,
-            "terminate": self.terminate,
             "cancel-compute": self.handle_cancel_compute,
             "acquire-replicas": self.handle_acquire_replicas,
             "compute-task": self.handle_compute_task,
@@ -1439,9 +1438,6 @@ class Worker(ServerNode):
 
         self.start_periodic_callbacks()
         return self
-
-    async def terminate(self, **kwargs):
-        return await self.close(nanny=True, **kwargs)
 
     @log_errors
     async def close(
