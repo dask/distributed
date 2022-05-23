@@ -570,7 +570,7 @@ async def test_restart_memory(c, s, n):
         await asyncio.sleep(0.1)
 
 
-@gen_cluster(Worker=Nanny, nthreads=[("", 1)], timeout=10)
+@gen_cluster(Worker=Nanny, nthreads=[("", 1)])
 async def test_scheduler_crash_doesnt_restart(s, a):
     # Simulate a scheduler crash by disconnecting it first
     # (`s.close()` would tell workers to cleanly shut down)
