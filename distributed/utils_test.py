@@ -816,6 +816,7 @@ def gen_test(
         timeout = 3600
 
     def _(func):
+        @functools.wraps(func)
         def test_func(*args, **kwargs):
             with clean(**clean_kwargs) as loop:
                 injected_func = functools.partial(func, *args, **kwargs)
