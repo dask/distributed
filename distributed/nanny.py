@@ -591,7 +591,7 @@ class Nanny(ServerNode):
             if self.process is not None:
                 await self.kill(timeout=timeout)
         except Exception:
-            pass
+            logger.exception("Error in Nanny killing Worker subprocess")
         self.process = None
         await self.rpc.close()
         self.status = Status.closed
