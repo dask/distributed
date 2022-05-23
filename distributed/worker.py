@@ -1454,6 +1454,11 @@ class Worker(ServerNode):
             await self.finished()
             return
 
+        if self.status not in WORKER_ANY_RUNNING:
+            # We may not be able to reliably communicate with the Nanny, so don't try.
+            # Otherwise, the Nanny RPC call may hang, especially during worker/nanny startup.
+            nanny = False
+
         disable_gc_diagnosis()
 
         try:

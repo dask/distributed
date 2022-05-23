@@ -1172,6 +1172,9 @@ class MyPlugin:
 async def test_localcluster_start_exception():
     with raises_with_cause(RuntimeError, None, ImportError, "my_nonexistent_library"):
         async with LocalCluster(
+            n_workers=1,
+            threads_per_worker=1,
+            processes=True,
             plugins={MyPlugin()},
         ):
             return
