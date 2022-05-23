@@ -339,18 +339,18 @@ def _watch(
     last = time()
 
     while not stop():
-        with lock:
-            if time() > last + cycle:
+        if time() > last + cycle:
+            recent = create()
+            with lock:
                 log.append((time(), recent))
-                recent = create()
                 last = time()
-            try:
-                frame = sys._current_frames()[thread_id]
-            except KeyError:
-                return
+                try:
+                    frame = sys._current_frames()[thread_id]
+                except KeyError:
+                    return
 
-            process(frame, None, recent, omit=omit)
-            del frame
+                process(frame, None, recent, omit=omit)
+                del frame
         sleep(interval)
 
 
