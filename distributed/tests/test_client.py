@@ -6134,7 +6134,7 @@ async def test_shutdown():
                 await c.shutdown()
 
                 assert s.status == Status.closed
-                assert w.status == Status.closed
+                assert w.status in {Status.closed, Status.closing}
 
 
 @gen_test()
