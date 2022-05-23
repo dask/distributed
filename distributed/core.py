@@ -698,8 +698,7 @@ class Server:
                 asyncio.gather(*_ongoing_tasks(), return_exceptions=True), 1
             )
         except asyncio.TimeoutError:
-            for cb in _ongoing_tasks():
-                cb.cancel()
+            # the timeout on gather should've cancelled all the tasks
             await asyncio.gather(*_ongoing_tasks(), return_exceptions=True)
 
         await self.rpc.close()
