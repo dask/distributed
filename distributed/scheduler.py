@@ -3393,6 +3393,7 @@ class Scheduler(SchedulerState, ServerNode):
                 # it is closed as well
                 comm.send({"op": "terminate"})
                 comm.send({"op": "close-stream"})
+                # ^ TODO remove? `Worker.close` will close the stream anyway.
             with suppress(AttributeError):
                 futures.append(comm.close())
 
