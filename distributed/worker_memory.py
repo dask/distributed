@@ -334,14 +334,17 @@ class NannyMemoryManager:
 
     def memory_monitor(self, nanny: Nanny) -> None:
         """Track worker's memory. Restart if it goes above terminate fraction."""
-        if nanny.status != Status.running:
+        if (
+            nanny.status != Status.running
+            or nanny.process is None
+            or nanny.process.process is None
+            or nanny.process.process.pid is None
+        ):
             return  # pragma: nocover
-        if nanny.process is None or nanny.process.process is None:
-            return  # pragma: nocover
+
         process = nanny.process.process
         try:
-            proc = nanny._psutil_process
-            memory = proc.memory_info().rss
+            memory = psutil.Process(process.pid).memory_info().rss
         except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
             return  # pragma: nocover
 
