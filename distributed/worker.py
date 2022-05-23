@@ -3645,36 +3645,22 @@ class Worker(ServerNode):
             return {"status": "error", "exception": to_serialize(ex)}
 
     async def _maybe_deserialize_task(
-        self, ts: TaskState, *, stimulus_id: str
-    ) -> tuple[Callable, tuple, dict[str, Any]] | None:
-        if ts.run_spec is None:
-            return None
-        try:
-            start = time()
-            # Offload deserializing large tasks
-            if sizeof(ts.run_spec) > OFFLOAD_THRESHOLD:
-                function, args, kwargs = await offload(_deserialize, *ts.run_spec)
-            else:
-                function, args, kwargs = _deserialize(*ts.run_spec)
-            stop = time()
+        self, ts: TaskState
+    ) -> tuple[Callable, tuple, dict[str, Any]]:
+        assert ts.run_spec is not None
+        start = time()
+        # Offload deserializing large tasks
+        if sizeof(ts.run_spec) > OFFLOAD_THRESHOLD:
+            function, args, kwargs = await offload(_deserialize, *ts.run_spec)
+        else:
+            function, args, kwargs = _deserialize(*ts.run_spec)
+        stop = time()
 
-            if stop - start > 0.010:
-                ts.startstops.append(
-                    {"action": "deserialize", "start": start, "stop": stop}
-                )
-            return function, args, kwargs
-        except Exception as e:
-            logger.error("Could not deserialize task", exc_info=True)
-            self.log.append((ts.key, "deserialize-error", stimulus_id, time()))
-            emsg = error_message(e)
-            del emsg["status"]  # type: ignore
-            self.transition(
-                ts,
-                "error",
-                **emsg,
-                stimulus_id=stimulus_id,
+        if stop - start > 0.010:
+            ts.startstops.append(
+                {"action": "deserialize", "start": start, "stop": stop}
             )
-            raise
+        return function, args, kwargs
 
     def _ensure_computing(self) -> RecsInstrs:
         if self.status != Status.running:
@@ -3748,14 +3734,20 @@ class Worker(ServerNode):
             return AlreadyCancelledEvent(key=ts.key, stimulus_id=stimulus_id)
 
         try:
+            function, args, kwargs = await self._maybe_deserialize_task(ts)
+        except Exception as exc:
+            logger.error("Could not deserialize task %s", key, exc_info=True)
+            return ExecuteFailureEvent.from_exception(
+                exc,
+                key=key,
+                stimulus_id=f"run-spec-deserialize-failed-{time()}",
+            )
+
+        try:
             if self.validate:
                 assert not ts.waiting_for_data
                 assert ts.state == "executing"
                 assert ts.run_spec is not None
-
-            function, args, kwargs = await self._maybe_deserialize_task(  # type: ignore
-                ts, stimulus_id=stimulus_id
-            )
 
             args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
 
@@ -3837,29 +3829,20 @@ class Worker(ServerNode):
                 convert_kwargs_to_str(kwargs2, max_len=1000),
                 result["exception_text"],
             )
-            return ExecuteFailureEvent(
+            return ExecuteFailureEvent.from_exception(
+                result,
                 key=key,
                 start=result["start"],
                 stop=result["stop"],
-                exception=result["exception"],
-                traceback=result["traceback"],
-                exception_text=result["exception_text"],
-                traceback_text=result["traceback_text"],
                 stimulus_id=f"task-erred-{time()}",
             )
 
         except Exception as exc:
             logger.error("Exception during execution of task %s.", key, exc_info=True)
-            msg = error_message(exc)
-            return ExecuteFailureEvent(
+            return ExecuteFailureEvent.from_exception(
+                exc,
                 key=key,
-                start=None,
-                stop=None,
-                exception=msg["exception"],
-                traceback=msg["traceback"],
-                exception_text=msg["exception_text"],
-                traceback_text=msg["traceback_text"],
-                stimulus_id=f"task-erred-{time()}",
+                stimulus_id=f"execute-unknown-error-{time()}",
             )
 
     @functools.singledispatchmethod
