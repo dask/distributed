@@ -2,6 +2,7 @@ import asyncio
 
 import distributed
 from distributed import Event, Lock, Worker
+from distributed.client import wait
 from distributed.utils_test import (
     _LockedCommPool,
     assert_story,
@@ -83,7 +84,7 @@ async def test_abort_execution_to_fetch(c, s, a, b):
     assert_story(
         a.story("f1"),
         [
-            ("f1", "compute-task"),
+            ("f1", "compute-task", "released"),
             ("f1", "released", "waiting", "waiting", {"f1": "ready"}),
             ("f1", "waiting", "ready", "ready", {"f1": "executing"}),
             ("f1", "ready", "executing", "executing", {}),
@@ -264,11 +265,12 @@ async def test_in_flight_lost_after_resumed(c, s, b):
     block_get_data = asyncio.Lock()
     in_get_data = asyncio.Event()
 
+    await block_get_data.acquire()
     lock_executing = Lock()
 
     def block_execution(lock):
         with lock:
-            return
+            return 1
 
     class BlockedGetData(Worker):
         async def get_data(self, comm, *args, **kwargs):
@@ -281,15 +283,12 @@ async def test_in_flight_lost_after_resumed(c, s, b):
             block_execution,
             lock_executing,
             workers=[a.address],
-            allow_other_workers=True,
             key="fut1",
         )
         # Ensure fut1 is in memory but block any further execution afterwards to
         # ensure we control when the recomputation happens
-        await fut1
+        await wait(fut1)
         await lock_executing.acquire()
-        in_get_data.clear()
-        await block_get_data.acquire()
         fut2 = c.submit(inc, fut1, workers=[b.address], key="fut2")
 
         # This ensures that B already fetches the task, i.e. after this the task
@@ -298,6 +297,7 @@ async def test_in_flight_lost_after_resumed(c, s, b):
         assert fut1.key in b.tasks
         assert b.tasks[fut1.key].state == "flight"
 
+        s.set_restrictions({fut1.key: [a.address, b.address]})
         # It is removed, i.e. get_data is guaranteed to fail and f1 is scheduled
         # to be recomputed on B
         await s.remove_worker(a.address, "foo", close=False, safe=True)
@@ -321,7 +321,7 @@ async def test_in_flight_lost_after_resumed(c, s, b):
             # The initial free-keys is rejected
             ("free-keys", (fut1.key,)),
             (fut1.key, "resumed", "released", "cancelled", {}),
-            # After gather_dep receives the data, it tries to transition to memory but the task will release instead
+            # After gather_dep receives the data, the task is forgotten
             (fut1.key, "cancelled", "memory", "released", {fut1.key: "forgotten"}),
         ],
     )
@@ -366,7 +366,7 @@ async def test_cancelled_error(c, s, a, b):
 
 
 @gen_cluster(client=True, nthreads=[("", 1, {"resources": {"A": 1}})])
-async def test_cancelled_error_with_ressources(c, s, a):
+async def test_cancelled_error_with_resources(c, s, a):
     executing = Event()
     lock_executing = Lock()
     await lock_executing.acquire()
@@ -396,3 +396,59 @@ async def test_cancelled_error_with_ressources(c, s, a):
     await lock_executing.release()
 
     assert await fut2 == 2
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
+async def test_cancelled_resumed_after_flight_with_dependencies(c, s, w2, w3):
+    # See https://github.com/dask/distributed/pull/6327#discussion_r872231090
+    block_get_data_1 = asyncio.Lock()
+    enter_get_data_1 = asyncio.Event()
+    await block_get_data_1.acquire()
+
+    class BlockGetDataWorker(Worker):
+        def __init__(self, *args, get_data_event, get_data_lock, **kwargs):
+            self._get_data_event = get_data_event
+            self._get_data_lock = get_data_lock
+            super().__init__(*args, **kwargs)
+
+        async def get_data(self, comm, *args, **kwargs):
+            self._get_data_event.set()
+            async with self._get_data_lock:
+                return await super().get_data(comm, *args, **kwargs)
+
+    async with await BlockGetDataWorker(
+        s.address,
+        get_data_event=enter_get_data_1,
+        get_data_lock=block_get_data_1,
+        name="w1",
+    ) as w1:
+
+        f1 = c.submit(inc, 1, key="f1", workers=[w1.address])
+        f2 = c.submit(inc, 2, key="f2", workers=[w1.address])
+        f3 = c.submit(sum, [f1, f2], key="f3", workers=[w1.address])
+
+        await wait(f3)
+        f4 = c.submit(inc, f3, key="f4", workers=[w2.address])
+
+        await enter_get_data_1.wait()
+        s.set_restrictions(
+            {
+                f1.key: {w3.address},
+                f2.key: {w3.address},
+                f3.key: {w2.address},
+            }
+        )
+        await s.remove_worker(w1.address, "stim-id")
+
+        await wait_for_state(f3.key, "resumed", w2)
+        assert_story(
+            w2.log,
+            [
+                (f3.key, "flight", "released", "cancelled", {}),
+                # ...
+                (f3.key, "cancelled", "waiting", "resumed", {}),
+            ],
+        )
+    # w1 closed
+
+    assert await f4 == 6

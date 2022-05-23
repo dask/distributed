@@ -5,7 +5,7 @@ import pytest
 
 from distributed.protocol.serialize import Serialize
 from distributed.utils import recursive_to_dict
-from distributed.utils_test import assert_story, gen_cluster, inc
+from distributed.utils_test import _LockedCommPool, assert_story, gen_cluster, inc
 from distributed.worker_state_machine import (
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -133,8 +133,8 @@ def test_sendmsg_to_dict():
 def test_merge_recs_instructions():
     x = TaskState("x")
     y = TaskState("y")
-    instr1 = RescheduleMsg(key="foo", worker="a", stimulus_id="test")
-    instr2 = RescheduleMsg(key="bar", worker="b", stimulus_id="test")
+    instr1 = RescheduleMsg(key="foo", stimulus_id="test")
+    instr2 = RescheduleMsg(key="bar", stimulus_id="test")
     assert merge_recs_instructions(
         ({x: "memory"}, [instr1]),
         ({y: "released"}, [instr2]),
@@ -268,7 +268,7 @@ async def test_fetch_to_compute(c, s, a, b):
         # FIXME: This log should be replaced with an
         # StateMachineEvent/Instruction log
         [
-            (f2.key, "compute-task"),
+            (f2.key, "compute-task", "released"),
             # This is a "please fetch" request. We don't have anything like
             # this, yet. We don't see the request-dep signal in here because we
             # do not wait for the key to be actually scheduled
@@ -276,9 +276,9 @@ async def test_fetch_to_compute(c, s, a, b):
             # After the worker failed, we're instructed to forget f2 before
             # something new comes in
             ("free-keys", (f2.key,)),
-            (f1.key, "compute-task"),
+            (f1.key, "compute-task", "released"),
             (f1.key, "put-in-memory"),
-            (f2.key, "compute-task"),
+            (f2.key, "compute-task", "released"),
         ],
     )
 
@@ -302,3 +302,49 @@ async def test_fetch_via_amm_to_compute(c, s, a, b):
     b.comm_threshold_bytes = old_comm_threshold
 
     await f1
+
+
+@gen_cluster(client=True)
+async def test_cancelled_while_in_flight(c, s, a, b):
+    event = asyncio.Event()
+    a.rpc = _LockedCommPool(a.rpc, write_event=event)
+
+    x = c.submit(inc, 1, key="x", workers=[b.address])
+    y = c.submit(inc, x, key="y", workers=[a.address])
+    await wait_for_state("x", "flight", a)
+    y.release()
+    await wait_for_state("x", "cancelled", a)
+
+    # Let the comm from b to a return the result
+    event.set()
+    # upon reception, x transitions cancelled->forgotten
+    while a.tasks:
+        await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True)
+async def test_in_memory_while_in_flight(c, s, a, b):
+    """
+    1. A client scatters x to a
+    2. The scheduler does not know about scattered keys until the three-way round-trip
+       between client, worker, and scheduler has been completed (see Scheduler.scatter)
+    3. In the middle of that handshake, a client (not necessarily the same client) calls
+       ``{op: compute-task, key: x}`` on b and then
+       ``{op: compute-task, key: y, who_has: {x: [b]}`` on a, which triggers a
+       gather_dep call to copy x key from b to a.
+    4. while x is in flight from b to a, the scatter finishes, which triggers
+       update_data, which in turn transitions x from flight to memory.
+    5. later on, gather_dep finishes, but the key is already in memory.
+    """
+    event = asyncio.Event()
+    a.rpc = _LockedCommPool(a.rpc, write_event=event)
+
+    x = c.submit(inc, 1, key="x", workers=[b.address])
+    y = c.submit(inc, x, key="y", workers=[a.address])
+    await wait_for_state("x", "flight", a)
+    a.update_data({"x": 3})
+    await wait_for_state("x", "memory", a)
+
+    # Let the comm from b to a return the result
+    event.set()
+    assert await y == 4  # Data in flight from b has been discarded

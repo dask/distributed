@@ -387,7 +387,6 @@ class Nanny(ServerNode):
                 nanny=self.address,
                 name=self.name,
                 memory_limit=self.memory_manager.memory_limit,
-                reconnect=self.reconnect,
                 resources=self.resources,
                 validate=self.validate,
                 silence_logs=self.silence_logs,
@@ -471,7 +470,7 @@ class Nanny(ServerNode):
 
         return {"status": "OK"}
 
-    async def restart(self, timeout=30, executor_wait=True):
+    async def restart(self, timeout=30):
         async def _():
             if self.process is not None:
                 await self.kill()
@@ -557,7 +556,7 @@ class Nanny(ServerNode):
         """
         self.status = Status.closing_gracefully
 
-    async def close(self, comm=None, timeout=5, report=None):
+    async def close(self, timeout=5):
         """
         Close the worker process, stop all comms.
         """
@@ -570,9 +569,8 @@ class Nanny(ServerNode):
 
         self.status = Status.closing
         logger.info(
-            "Closing Nanny at %r. Report closure to scheduler: %s",
+            "Closing Nanny at %r.",
             self.address_safe,
-            report,
         )
 
         for preload in self.preloads:
@@ -595,9 +593,8 @@ class Nanny(ServerNode):
         self.process = None
         await self.rpc.close()
         self.status = Status.closed
-        if comm:
-            await comm.write("OK")
         await super().close()
+        return "OK"
 
     async def _log_event(self, topic, msg):
         await self.scheduler.log_event(
@@ -838,9 +835,7 @@ class WorkerProcess:
             async def do_stop(timeout=5, executor_wait=True):
                 try:
                     await worker.close(
-                        report=True,
                         nanny=False,
-                        safe=True,  # TODO: Graceful or not?
                         executor_wait=executor_wait,
                         timeout=timeout,
                     )
@@ -926,8 +921,8 @@ class WorkerProcess:
                 loop.run_sync(do_stop)
             finally:
                 with suppress(ValueError):
-                    child_stop_q.put({"op": "close"})  # probably redundant
+                    child_stop_q.put({"op": "stop"})  # usually redundant
                 with suppress(ValueError):
-                    child_stop_q.close()  # probably redundant
+                    child_stop_q.close()  # usually redundant
                 child_stop_q.join_thread()
                 thread.join(timeout=2)

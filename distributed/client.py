@@ -52,7 +52,7 @@ from tornado import gen
 from tornado.ioloop import PeriodicCallback
 
 from distributed import cluster_dump, preloading
-from distributed import versions as version_module  # type: ignore
+from distributed import versions as version_module
 from distributed.batched import BatchedSend
 from distributed.cfexecutor import ClientExecutor
 from distributed.core import (
@@ -1630,7 +1630,7 @@ class Client(SyncMethodMixin):
         else:
             with suppress(CommClosedError):
                 self.status = "closing"
-                await self.scheduler.terminate(close_workers=True)
+                await self.scheduler.terminate()
 
     def shutdown(self):
         """Shut down the connected scheduler and workers
@@ -4418,16 +4418,14 @@ class Client(SyncMethodMixin):
         else:
             return msgs
 
-    async def _register_scheduler_plugin(self, plugin, name, **kwargs):
-        if isinstance(plugin, type):
-            plugin = plugin(**kwargs)
-
+    async def _register_scheduler_plugin(self, plugin, name, idempotent=False):
         return await self.scheduler.register_scheduler_plugin(
             plugin=dumps(plugin, protocol=4),
             name=name,
+            idempotent=idempotent,
         )
 
-    def register_scheduler_plugin(self, plugin, name=None):
+    def register_scheduler_plugin(self, plugin, name=None, idempotent=False):
         """Register a scheduler plugin.
 
         See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
@@ -4439,6 +4437,8 @@ class Client(SyncMethodMixin):
         name : str
             Name for the plugin; if None, a name is taken from the
             plugin instance or automatically generated if not present.
+        idempotent : bool
+            Do not re-register if a plugin of the given name already exists.
         """
         if name is None:
             name = _get_plugin_name(plugin)
@@ -4447,6 +4447,7 @@ class Client(SyncMethodMixin):
             self._register_scheduler_plugin,
             plugin=plugin,
             name=name,
+            idempotent=idempotent,
         )
 
     def register_worker_callbacks(self, setup=None):
@@ -4880,6 +4881,8 @@ class as_completed:
             if self.raise_errors and future.status == "error":
                 typ, exc, tb = result
                 raise exc.with_traceback(tb)
+            elif future.status == "cancelled":
+                res = (res[0], CancelledError(future.key))
         return res
 
     def __next__(self):

@@ -18,7 +18,7 @@ import weakref
 import zipfile
 from collections import deque
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from functools import partial
 from operator import add
 from threading import Semaphore
@@ -40,6 +40,7 @@ from distributed import (
     CancelledError,
     Event,
     LocalCluster,
+    Lock,
     Nanny,
     TimeoutError,
     Worker,
@@ -2305,30 +2306,43 @@ async def test_cancel_tuple_key(c, s, a, b):
 
 @gen_cluster()
 async def test_cancel_multi_client(s, a, b):
-    c = await Client(s.address, asynchronous=True)
-    f = await Client(s.address, asynchronous=True)
+    async with Client(s.address, asynchronous=True, name="c") as c:
+        async with Client(s.address, asynchronous=True, name="f") as f:
 
-    x = c.submit(slowinc, 1)
-    y = f.submit(slowinc, 1)
+            x = c.submit(slowinc, 1)
+            y = f.submit(slowinc, 1)
 
-    assert x.key == y.key
+            assert x.key == y.key
 
-    await c.cancel([x])
+            # Ensure both clients are known to the scheduler.
+            await y
+            await x
 
-    assert x.cancelled()
-    assert not y.cancelled()
+            await c.cancel([x])
 
-    while y.key not in s.tasks:
-        await asyncio.sleep(0.01)
+            # Give the scheduler time to pass messages
+            await asyncio.sleep(0.1)
 
-    out = await y
-    assert out == 2
+            assert x.cancelled()
+            assert not y.cancelled()
 
-    with pytest.raises(CancelledError):
-        await x
+            out = await y
+            assert out == 2
 
-    await c.close()
-    await f.close()
+            with pytest.raises(CancelledError):
+                await x
+
+
+@gen_cluster(nthreads=[("", 1)], client=True)
+async def test_cancel_before_known_to_scheduler(c, s, a):
+    with captured_logger("distributed.scheduler") as slogs:
+        f = c.submit(inc, 1)
+        await c.cancel([f])
+
+        with pytest.raises(CancelledError):
+            await f
+
+        assert "Scheduler cancels key" in slogs.getvalue()
 
 
 @gen_cluster(client=True)
@@ -3576,7 +3590,7 @@ async def test_scatter_raises_if_no_workers(c, s):
         await c.scatter(1, timeout=0.5)
 
 
-@pytest.mark.flaky(reruns=2)
+@pytest.mark.flaky(reruns=2)  # due to random port
 @gen_test()
 async def test_reconnect():
     port = random.randint(10000, 50000)
@@ -3595,11 +3609,8 @@ async def test_reconnect():
         s.stop()
         await Server.close(s)
 
-    futures = []
-    w = Worker(f"127.0.0.1:{port}")
-    futures.append(asyncio.ensure_future(w.start()))
-
     s = await Scheduler(port=port)
+    w = await Worker(f"127.0.0.1:{port}")
     c = await Client(f"127.0.0.1:{port}", asynchronous=True)
     await c.wait_for_workers(1, timeout=10)
     x = c.submit(inc, 1)
@@ -3620,6 +3631,10 @@ async def test_reconnect():
     while c.status != "running":
         await asyncio.sleep(0.1)
         assert time() < start + 10
+
+    await w.finished()
+    w = await Worker(f"127.0.0.1:{port}")
+
     start = time()
     while len(await c.nthreads()) != 1:
         await asyncio.sleep(0.05)
@@ -3640,32 +3655,41 @@ async def test_reconnect():
         except CancelledError:
             break
 
-    await w.close(report=False)
+    await w.close()
     await c._close(fast=True)
 
 
-class UnhandledException(Exception):
+class UnhandledExceptions(Exception):
     pass
 
 
 @contextmanager
 def catch_unhandled_exceptions() -> Generator[None, None, None]:
     loop = asyncio.get_running_loop()
-    ctx: dict[str, Any] | None = None
+    ctxs: list[dict[str, Any]] = []
 
     old_handler = loop.get_exception_handler()
 
     @loop.set_exception_handler
     def _(loop: object, context: dict[str, Any]) -> None:
-        nonlocal ctx
-        ctx = context
+        ctxs.append(context)
 
     try:
         yield
     finally:
         loop.set_exception_handler(old_handler)
-    if ctx:
-        raise UnhandledException(ctx["message"]) from ctx.get("exception")
+    if ctxs:
+        msgs = []
+        for i, ctx in enumerate(ctxs, 1):
+            msgs.append(ctx["message"])
+            print(
+                f"------ Unhandled exception {i}/{len(ctxs)}: {ctx['message']!r} ------"
+            )
+            print(ctx)
+            if exc := ctx.get("exception"):
+                traceback.print_exception(type(exc), exc, exc.__traceback__)
+
+        raise UnhandledExceptions(", ".join(msgs))
 
 
 @gen_cluster(client=True, nthreads=[], client_kwargs={"timeout": 0.5})
@@ -5093,40 +5117,103 @@ async def test_secede_balances(c, s, a, b):
     assert results == [sum(map(inc, range(10)))] * 10
 
 
+@pytest.mark.parametrize("raise_exception", [True, False])
 @gen_cluster(client=True, nthreads=[("", 1)])
-async def test_long_running_not_in_occupancy(c, s, a):
+async def test_long_running_not_in_occupancy(c, s, a, raise_exception):
     # https://github.com/dask/distributed/issues/5332
-    from distributed import Lock
+    # See also test_long_running_removal_clean
 
     l = Lock()
+    entered = Event()
     await l.acquire()
 
-    def long_running(lock):
-        sleep(0.1)
+    def long_running(lock, entered):
+        entered.set()
         secede()
         lock.acquire()
+        if raise_exception:
+            raise RuntimeError("Exception in task")
 
-    f = c.submit(long_running, l)
-    while f.key not in s.tasks:
-        await asyncio.sleep(0.01)
-    assert s.workers[a.address].occupancy == parse_timedelta(
+    f = c.submit(long_running, l, entered)
+    await entered.wait()
+    ts = s.tasks[f.key]
+    ws = s.workers[a.address]
+    assert ws.occupancy == parse_timedelta(
         dask.config.get("distributed.scheduler.unknown-task-duration")
     )
 
-    while s.workers[a.address].occupancy:
+    while ws.occupancy:
         await asyncio.sleep(0.01)
     await a.heartbeat()
 
-    ts = s.tasks[f.key]
-    ws = s.workers[a.address]
-    s.set_duration_estimate(ts, ws)
+    s._set_duration_estimate(ts, ws)
     assert s.workers[a.address].occupancy == 0
+    assert s.total_occupancy == 0
+    assert ws.occupancy == 0
 
     s.reevaluate_occupancy(0)
     assert s.workers[a.address].occupancy == 0
     await l.release()
 
+    with (
+        pytest.raises(RuntimeError, match="Exception in task")
+        if raise_exception
+        else nullcontext()
+    ):
+        await f
+
+    assert s.total_occupancy == 0
+    assert ws.occupancy == 0
+    assert not ws.long_running
+
+
+@pytest.mark.parametrize("ordinary_task", [True, False])
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_long_running_removal_clean(c, s, a, ordinary_task):
+    # https://github.com/dask/distributed/issues/5975 which could reduce
+    # occupancy to negative values upon finishing long running tasks
+
+    # See also test_long_running_not_in_occupancy
+
+    l = Lock()
+    entered = Event()
+    l2 = Lock()
+    entered2 = Event()
+    await l.acquire()
+    await l2.acquire()
+
+    def long_running_secede(lock, entered):
+        entered.set()
+        secede()
+        lock.acquire()
+
+    def long_running(lock, entered):
+        entered.set()
+        lock.acquire()
+
+    f = c.submit(long_running_secede, l, entered)
+    await entered.wait()
+
+    if ordinary_task:
+        f2 = c.submit(long_running, l2, entered2)
+        await entered2.wait()
+    await l.release()
     await f
+
+    ws = s.workers[a.address]
+
+    if ordinary_task:
+        # Should be exactly 0.5 but if for whatever reason this test runs slow,
+        # some approximation may kick in increasing this number
+        assert s.total_occupancy >= 0.5
+        assert ws.occupancy >= 0.5
+        await l2.release()
+        await f2
+
+    # In the end, everything should be reset
+    assert s.total_occupancy == 0
+    assert ws.occupancy == 0
+    assert not ws.long_running
 
 
 @gen_cluster(client=True)

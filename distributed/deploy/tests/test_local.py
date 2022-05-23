@@ -12,10 +12,9 @@ from tornado.ioloop import IOLoop
 
 from dask.system import CPU_COUNT
 
-from distributed import Client, Nanny, Worker, get_client
+from distributed import Client, LocalCluster, Nanny, Worker, get_client
 from distributed.compatibility import LINUX
 from distributed.core import Status
-from distributed.deploy.local import LocalCluster
 from distributed.deploy.utils_test import ClusterTest
 from distributed.metrics import time
 from distributed.system import MEMORY_LIMIT
@@ -29,6 +28,7 @@ from distributed.utils_test import (
     clean,
     gen_test,
     inc,
+    raises_with_cause,
     slowinc,
     tls_only_security,
     xfail_ssl_issue5601,
@@ -1155,3 +1155,23 @@ async def test_connect_to_closed_cluster():
         # Raises during init without actually connecting since we're not
         # awaiting anything
         Client(cluster, asynchronous=True)
+
+
+class MyPlugin:
+    def setup(self, worker=None):
+        import my_nonexistent_library  # noqa
+
+
+@pytest.mark.slow
+@gen_test(
+    clean_kwargs={
+        # FIXME: This doesn't close the LoopRunner properly, leaving a thread around
+        "threads": False
+    }
+)
+async def test_localcluster_start_exception():
+    with raises_with_cause(RuntimeError, None, ImportError, "my_nonexistent_library"):
+        async with LocalCluster(
+            plugins={MyPlugin()},
+        ):
+            return

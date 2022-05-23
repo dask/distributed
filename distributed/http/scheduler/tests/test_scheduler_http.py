@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 
+import aiohttp
 import pytest
 
 pytest.importorskip("bokeh")
@@ -245,3 +246,53 @@ async def test_eventstream(c, s, a, b):
     )
     assert "websocket" in str(s.plugins).lower()
     ws_client.close()
+
+
+@gen_cluster(client=True, clean_kwargs={"threads": False})
+async def test_api(c, s, a, b):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            "http://localhost:%d/api/v1" % s.http_server.port
+        ) as resp:
+            assert resp.status == 200
+            assert resp.headers["Content-Type"] == "text/plain"
+            assert (await resp.text()) == "API V1"
+
+
+@gen_cluster(client=True, clean_kwargs={"threads": False})
+async def test_retire_workers(c, s, a, b):
+    async with aiohttp.ClientSession() as session:
+        params = {"workers": [a.address, b.address]}
+        async with session.post(
+            "http://localhost:%d/api/v1/retire_workers" % s.http_server.port,
+            json=params,
+        ) as resp:
+            assert resp.status == 200
+            assert resp.headers["Content-Type"] == "application/json"
+            retired_workers_info = json.loads(await resp.text())
+            assert len(retired_workers_info) == 2
+
+
+@gen_cluster(client=True, clean_kwargs={"threads": False})
+async def test_get_workers(c, s, a, b):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            "http://localhost:%d/api/v1/get_workers" % s.http_server.port
+        ) as resp:
+            assert resp.status == 200
+            assert resp.headers["Content-Type"] == "application/json"
+            workers_info = json.loads(await resp.text())["workers"]
+            workers_address = [worker.get("address") for worker in workers_info]
+            assert set(workers_address) == {a.address, b.address}
+
+
+@gen_cluster(client=True, clean_kwargs={"threads": False})
+async def test_adaptive_target(c, s, a, b):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            "http://localhost:%d/api/v1/adaptive_target" % s.http_server.port
+        ) as resp:
+            assert resp.status == 200
+            assert resp.headers["Content-Type"] == "application/json"
+            num_workers = json.loads(await resp.text())["workers"]
+            assert num_workers == 0
