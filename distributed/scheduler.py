@@ -5982,7 +5982,8 @@ class Scheduler(SchedulerState, ServerNode):
                     prev_status = ws.status
                     ws.status = Status.closing_gracefully
                     self.running.discard(ws)
-                    # FIXME: We should send a message to the nanny first.
+                    # FIXME: We should send a message to the nanny first;
+                    # eventually workers won't be able to close their own nannies.
                     self.stream_comms[ws.address].send(
                         {
                             "op": "worker-status-change",
