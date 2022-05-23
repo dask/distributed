@@ -674,7 +674,7 @@ class WorkerProcess:
             await self.process.start()
         except OSError:
             logger.exception("Nanny failed to start process", exc_info=True)
-            self.process.terminate()
+            await self.process.terminate()
             self.status = Status.failed
             return self.status
         try:
@@ -682,7 +682,7 @@ class WorkerProcess:
         except Exception:
             logger.exception("Failed to connect to process")
             self.status = Status.failed
-            self.process.terminate()
+            await self.process.terminate()
             raise
         if not msg:
             return self.status
