@@ -38,6 +38,7 @@ from dask.system import CPU_COUNT
 from dask.utils import format_bytes, parse_bytes, parse_timedelta
 
 from distributed import system
+from distributed.compatibility import WINDOWS
 from distributed.core import Status
 from distributed.metrics import monotonic
 from distributed.spill import ManualEvictProto, SpillBuffer
@@ -344,14 +345,10 @@ class NannyMemoryManager:
         except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
             return  # pragma: nocover
 
-        if process.pid in (self._last_terminated_pid, None):
-            # We already sent SIGTERM to the worker, but its handler is still running
-            # since the previous iteration of the memory_monitor - for example, it
-            # may be taking a long time deleting all the spilled data from disk.
+        if memory / self.memory_limit <= self.memory_terminate_fraction:
             return
-        self._last_terminated_pid = -1
 
-        if memory / self.memory_limit > self.memory_terminate_fraction:
+        if self._last_terminated_pid != process.pid:
             logger.warning(
                 f"Worker {nanny.worker_address} (pid={process.pid}) exceeded "
                 f"{self.memory_terminate_fraction * 100:.0f}% memory budget. "
@@ -359,6 +356,29 @@ class NannyMemoryManager:
             )
             self._last_terminated_pid = process.pid
             process.terminate()
+        else:
+            # We already sent SIGTERM to the worker, but the process is still alive
+            # since the previous iteration of the memory_monitor - for example, some
+            # user code may have tampered with signal handlers.
+            # Send SIGKILL for immediate termination.
+            #
+            # Note that this should not be a disk-related issue. Unlike in a regular
+            # worker shutdown, where the worker cleans up its own spill directory, in
+            # case of SIGTERM no atexit or weakref.finalize callback is triggered
+            # whatsoever; instead, the nanny cleans up the spill directory *after* the
+            # worker has been shut down and before starting a new one.
+            # This is important, as spill directory cleanup may potentially take tens of
+            # seconds and, if the worker did it, any task that was running and leaking
+            # would continue to do so for the whole duration of the cleanup, increasing
+            # the risk of going beyond 100%.
+            logger.warning(
+                f"Worker {nanny.worker_address} (pid={process.pid}) is slow to %s",
+                # On Windows, kill() is an alias to terminate()
+                "terminate; trying again"
+                if WINDOWS
+                else "accept SIGTERM; sending SIGKILL",
+            )
+            process.kill()
 
 
 def parse_memory_limit(
