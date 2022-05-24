@@ -397,11 +397,7 @@ class UCXConnector(Connector):
         init_once()
         try:
             ep = await ucp.create_endpoint(ip, port)
-        except (ucp.exceptions.UCXCloseError, ucp.exceptions.UCXCanceled,) + (
-            getattr(ucp.exceptions, "UCXConnectionReset", ()),
-            getattr(ucp.exceptions, "UCXNotConnected", ()),
-            getattr(ucp.exceptions, "UCXUnreachable", ()),
-        ):  # type: ignore
+        except ucp.exceptions.UCXBaseException:
             raise CommClosedError("Connection closed before handshake completed")
         return self.comm_class(
             ep,
