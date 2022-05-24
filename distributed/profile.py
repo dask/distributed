@@ -317,15 +317,6 @@ def plot_data(state, profile_interval=0.010):
     }
 
 
-def wait_profiler() -> None:
-    """Wait until a moment when no instances of watch() are sampling the frames.
-    You must call this function whenever you would otherwise expect an object to be
-    immediately released after it's descoped.
-    """
-    with lock:
-        pass
-
-
 def _watch(
     thread_id: int,
     log: deque[tuple[float, dict[str, Any]]],  # [(timestamp, output of create()), ...]

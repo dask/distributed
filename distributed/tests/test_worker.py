@@ -34,6 +34,7 @@ from distributed import (
     default_client,
     get_client,
     get_worker,
+    profile,
     wait,
 )
 from distributed.comm.registry import backends
@@ -42,7 +43,6 @@ from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
-from distributed.profile import wait_profiler
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
 from distributed.utils_test import (
@@ -1851,8 +1851,8 @@ async def test_stimulus_story(c, s, a):
     del f
     while "f" in a.data:
         await asyncio.sleep(0.01)
-    wait_profiler()
-    assert ref() is None
+    with profile.lock:
+        assert ref() is None
 
     story = a.stimulus_story("f", "f2")
     assert {ev.key for ev in story} == {"f", "f2"}
