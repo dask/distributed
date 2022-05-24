@@ -14,29 +14,27 @@ def require_auth(method_func):
     def wrapper(self):
         auth = self.request.headers.get("Authorization", None)
         key = dask.config.get("distributed.scheduler.http.api-key")
-        if (
-            key is None
-            or key == ""
-            or (
-                key
-                and (
-                    not auth
-                    or not auth.startswith("Bearer ")
-                    or key != auth.split(" ")[-1]
-                )
-            )
+        if key is False or (
+            key and auth and auth.startswith("Bearer ") and key == auth.split(" ")[-1]
         ):
-            self.set_status(403, "Unauthorized")
-            return
+            if not asyncio.iscoroutinefunction(method_func):
+                return method_func(self)
+            else:
 
-        if not asyncio.iscoroutinefunction(method_func):
-            return method_func(self)
+                async def tmp():
+                    return await method_func(self)
+
+                return tmp()
         else:
+            self.set_status(403, "Unauthorized")
+            if not asyncio.iscoroutinefunction(method_func):
+                return
+            else:
+                # When wrapping a coroutine we need to return a coroutine even if it just returns None
+                async def tmp():
+                    return
 
-            async def tmp():
-                return await method_func(self)
-
-            return tmp()
+                return tmp()
 
     return wrapper
 
