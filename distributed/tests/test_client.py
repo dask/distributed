@@ -5543,7 +5543,11 @@ def test_client_async_before_loop_starts(cleanup):
             pass
 
     with pristine_loop() as loop:
-        client = Client(asynchronous=True, loop=loop)
+        with pytest.warns(
+            DeprecationWarning,
+            match=r"Constructing LoopRunner\(loop=loop\) without a running loop is deprecated",
+        ):
+            client = Client(asynchronous=True, loop=loop)
         assert client.asynchronous
         assert isinstance(client.close(), NoOpAwaitable)
         loop.run_sync(close)  # TODO: client.close() does not unset global client
