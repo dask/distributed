@@ -568,3 +568,19 @@ async def test_restart_memory(c, s, n):
 
     while not s.workers:
         await asyncio.sleep(0.1)
+
+
+@gen_cluster(Worker=Nanny, nthreads=[("", 1)])
+async def test_scheduler_crash_doesnt_restart(s, a):
+    # Simulate a scheduler crash by disconnecting it first
+    # (`s.close()` would tell workers to cleanly shut down)
+    bcomm = next(iter(s.stream_comms.values()))
+    bcomm.abort()
+    await s.close()
+
+    while a.status != Status.closing_gracefully:
+        await asyncio.sleep(0.01)
+
+    await a.finished()
+    assert a.status == Status.closed
+    assert a.process is None

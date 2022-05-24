@@ -3387,11 +3387,13 @@ class Scheduler(SchedulerState, ServerNode):
 
         futures = []
         for _, comm in list(self.stream_comms.items()):
+            # FIXME use `self.remove_worker()` instead after https://github.com/dask/distributed/issues/6390
             if not comm.closed():
                 # This closes the Worker and ensures that if a Nanny is around,
                 # it is closed as well
-                comm.send({"op": "terminate"})
+                comm.send({"op": "close"})
                 comm.send({"op": "close-stream"})
+                # ^ TODO remove? `Worker.close` will close the stream anyway.
             with suppress(AttributeError):
                 futures.append(comm.close())
 
@@ -3419,8 +3421,7 @@ class Scheduler(SchedulerState, ServerNode):
         """
         logger.info("Closing worker %s", worker)
         self.log_event(worker, {"action": "close-worker"})
-        ws = self.workers[worker]
-        self.worker_send(worker, {"op": "close", "nanny": bool(ws.nanny)})
+        self.worker_send(worker, {"op": "close"})  # TODO redundant with `remove_worker`
         await self.remove_worker(address=worker, safe=safe, stimulus_id=stimulus_id)
 
     ###########
@@ -4732,7 +4733,7 @@ class Scheduler(SchedulerState, ServerNode):
         ws.long_running.add(ts)
         self.check_idle_saturated(ws)
 
-    async def handle_worker_status_change(
+    def handle_worker_status_change(
         self, status: str, worker: str, stimulus_id: str
     ) -> None:
         ws = self.workers.get(worker)
@@ -4760,12 +4761,8 @@ class Scheduler(SchedulerState, ServerNode):
                 worker_msgs: dict = {}
                 self._transitions(recs, client_msgs, worker_msgs, stimulus_id)
                 self.send_all(client_msgs, worker_msgs)
-        elif ws.status == Status.paused:
-            self.running.remove(ws)
-        elif ws.status == Status.closing:
-            await self.remove_worker(
-                address=ws.address, stimulus_id=stimulus_id, close=False
-            )
+        else:
+            self.running.discard(ws)
 
     async def handle_worker(self, comm=None, worker=None, stimulus_id=None):
         """
@@ -5986,7 +5983,8 @@ class Scheduler(SchedulerState, ServerNode):
                     prev_status = ws.status
                     ws.status = Status.closing_gracefully
                     self.running.discard(ws)
-                    # FIXME: We should send a message to the nanny first.
+                    # FIXME: We should send a message to the nanny first;
+                    # eventually workers won't be able to close their own nannies.
                     self.stream_comms[ws.address].send(
                         {
                             "op": "worker-status-change",

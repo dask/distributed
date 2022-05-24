@@ -221,7 +221,7 @@ async def _force_close(self):
     2.  If it doesn't, log and kill the process
     """
     try:
-        await asyncio.wait_for(self.close(executor_wait=False), 30)
+        await asyncio.wait_for(self.close(nanny=False, executor_wait=False), 30)
     except (Exception, BaseException):  # <-- include BaseException here or not??
         # Worker is in a very broken state if closing fails. We need to shut down immediately,
         # to ensure things don't get even worse and this worker potentially deadlocks the cluster.
@@ -785,7 +785,7 @@ class Worker(ServerNode):
             "get_data": self.get_data,
             "update_data": self.update_data,
             "free_keys": self.handle_free_keys,
-            "terminate": self.terminate,
+            "terminate": self.close,
             "ping": pingpong,
             "upload_file": self.upload_file,
             "call_stack": self.get_call_stack,
@@ -807,7 +807,6 @@ class Worker(ServerNode):
 
         stream_handlers = {
             "close": self.close,
-            "terminate": self.terminate,
             "cancel-compute": self.handle_cancel_compute,
             "acquire-replicas": self.handle_acquire_replicas,
             "compute-task": self.handle_compute_task,
@@ -1440,23 +1439,31 @@ class Worker(ServerNode):
         self.start_periodic_callbacks()
         return self
 
-    async def terminate(self, **kwargs):
-        return await self.close(nanny=True, **kwargs)
-
     @log_errors
     async def close(
         self,
         timeout=30,
         executor_wait=True,
-        nanny=False,
+        nanny=True,
     ):
         # FIXME: The worker should not be allowed to close the nanny. Ownership
         # is the other way round. If an external caller wants to close
         # nanny+worker, the nanny must be notified first. ==> Remove kwarg
         # nanny, see also Scheduler.retire_workers
-        if self.status in (Status.closed, Status.closing):
+        if self.status in (Status.closed, Status.closing, Status.failed):
             await self.finished()
             return
+
+        if self.status == Status.init:
+            # If the worker is still in startup/init and is started by a nanny,
+            # this means the nanny itself is not up, yet. If the Nanny isn't up,
+            # yet, it's server will not accept any incoming RPC requests and
+            # will block until the startup is finished.
+            # Therefore, this worker trying to communicate with the Nanny during
+            # startup is not possible and we cannot close it.
+            # In this case, the Nanny will automatically close after inspecting
+            # the worker status
+            nanny = False
 
         disable_gc_diagnosis()
 
