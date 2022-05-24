@@ -338,6 +338,8 @@ def test_weakref_cache(tmpdir, cls, expect_cached, size):
     # the same id as a deleted one
     id_x = x.id
     del x
+
+    # Ensure that the profiler has stopped and released all references to x so that it can be garbage-collected
     with profile.lock:
         pass
 

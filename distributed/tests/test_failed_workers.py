@@ -261,6 +261,8 @@ async def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
     await c.restart()
     y = c.submit(inc, 1)
     del x
+
+    # Ensure that the profiler has stopped and released all references to x so that it can be garbage-collected
     with profile.lock:
         pass
     await asyncio.sleep(0.1)
