@@ -14,11 +14,11 @@ def require_auth(method_func):
     def wrapper(self):
         auth = self.request.headers.get("Authorization", None)
         key = dask.config.get("distributed.scheduler.http.api-key")
-        if key and (
-            not auth
-            or not auth.startswith("Bearer ")
-            or not key
-            or key != auth.split(" ")[-1]
+        if key is None or (
+            key
+            and (
+                not auth or not auth.startswith("Bearer ") or key != auth.split(" ")[-1]
+            )
         ):
             self.set_status(403, "Unauthorized")
             return

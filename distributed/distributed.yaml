@@ -57,6 +57,7 @@ distributed:
         - distributed.http.health
         - distributed.http.proxy
         - distributed.http.statics
+        - distributed.http.scheduler.api
 
     allowed-imports:
       - dask
