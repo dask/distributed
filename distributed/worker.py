@@ -1450,13 +1450,19 @@ class Worker(ServerNode):
         # is the other way round. If an external caller wants to close
         # nanny+worker, the nanny must be notified first. ==> Remove kwarg
         # nanny, see also Scheduler.retire_workers
-        if self.status in (Status.closed, Status.closing):
+        if self.status in (Status.closed, Status.closing, Status.failed):
             await self.finished()
             return
 
-        if self.status not in WORKER_ANY_RUNNING:
-            # We may not be able to reliably communicate with the Nanny, so don't try.
-            # Otherwise, the Nanny RPC call may hang, especially during worker/nanny startup.
+        if self.status == Status.init:
+            # If the worker is still in startup/init and is started by a nanny,
+            # this means the nanny itself is not up, yet. If the Nanny isn't up,
+            # yet, it's server will not accept any incoming RPC requests and
+            # will block until the startup is finished.
+            # Therefore, this worker trying to communicate with the Nanny during
+            # startup is not possible and we cannot close it.
+            # In this case, the Nanny will automatically close after inspecting
+            # the worker status
             nanny = False
 
         disable_gc_diagnosis()
