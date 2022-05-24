@@ -678,13 +678,11 @@ class WorkerProcess:
             logger.exception("Nanny failed to start process", exc_info=True)
             await self.process.terminate()
             self.status = Status.failed
-            return self.status
         try:
             msg = await self._wait_until_connected(uid)
         except Exception:
-            logger.exception("Failed to connect to process")
-            self.status = Status.failed
             await self.process.terminate()
+            self.status = Status.failed
             raise
         if not msg:
             return self.status
@@ -809,9 +807,6 @@ class WorkerProcess:
                 continue
 
             if "exception" in msg:
-                logger.error(
-                    "Failed while trying to start worker process: %s", msg["exception"]
-                )
                 raise msg["exception"]
             else:
                 return msg

@@ -496,6 +496,8 @@ async def test_worker_start_exception(s):
     # ^ NOTE: `Nanny.close` sets it to `closed`, then `Server.start._close_on_failure` sets it to `failed`
     assert nanny.process is None
     assert "Restarting worker" not in logs.getvalue()
+    # Avoid excessive spewing. (It's also printed once extra within the subprocess, which is okay.)
+    assert logs.getvalue().count("test_nanny.StartException: broken") == 1
 
 
 @gen_cluster(nthreads=[])
