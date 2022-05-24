@@ -2982,8 +2982,11 @@ class Worker(ServerNode):
             if ts.state != "fetch" or ts.key in all_keys_to_gather:
                 continue
 
+            if not ts.who_has:
+                recommendations[ts] = "missing"
+                continue
+
             if self.validate:
-                assert ts.who_has
                 assert self.address not in ts.who_has
 
             workers = [
@@ -3402,33 +3405,44 @@ class Worker(ServerNode):
             ].callback_time = self.periodic_callbacks["heartbeat"].callback_time
 
     def update_who_has(self, who_has: dict[str, Collection[str]]) -> None:
-        try:
-            for dep, workers in who_has.items():
-                if not workers:
-                    continue
+        for key, workers in who_has.items():
+            ts = self.tasks.get(key)
+            if not ts:
+                # The worker sent a refresh-who-has request to the scheduler but, by the
+                # time the answer comes back, some of the keys have been forgotten.
+                continue
+            workers = set(workers)
 
-                if dep in self.tasks:
-                    dep_ts = self.tasks[dep]
-                    if self.address in workers and self.tasks[dep].state != "memory":
-                        logger.debug(
-                            "Scheduler claims worker %s holds data for task %s which is not true.",
-                            self.name,
-                            dep,
-                        )
-                        # Do not mutate the input dict. That's rude
-                        workers = set(workers) - {self.address}
-                    dep_ts.who_has.update(workers)
+            if self.address in workers:
+                workers.remove(self.address)
 
-                    for worker in workers:
-                        self.has_what[worker].add(dep)
-                        self.data_needed_per_worker[worker].push(dep_ts)
-        except Exception as e:  # pragma: no cover
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
+            if ts.state != "memory":
+                # This can happen if the worker recently released a key, but the
+                # scheduler hasn't processed the release-worker-data message yet.
+                # It is not necessary to send a missing-data message back to the
+                # scheduler here, because it is guaranteed to reach the scheduler
+                # after the release-worker-data from the same BatchedSend channel.
+                logger.debug(
+                    "Scheduler claims worker %s holds data for task %s, "
+                    "which is not true.",
+                    self.address,
+                    ts,
+                )
 
-                pdb.set_trace()
-            raise
+            if ts.who_has == workers:
+                continue
+            new_workers = workers - ts.who_has
+            del_workers = ts.who_has - workers
+
+            for worker in del_workers:
+                self.has_what[worker].discard(key)
+                # Can't remove from self.data_needed_per_worker; there is logic
+                # in _select_keys_for_gather to deal with this
+
+            for worker in new_workers:
+                self.has_what[worker].add(key)
+
+            ts.who_has = workers
 
     def handle_steal_request(self, key: str, stimulus_id: str) -> None:
         # There may be a race condition between stealing and releasing a task.
