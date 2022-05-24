@@ -754,7 +754,11 @@ class WorkerProcess:
         if self.status == Status.stopping:
             await self.stopped.wait()
             return
-        assert self.status in (Status.starting, Status.running)
+        assert self.status in (
+            Status.starting,
+            Status.running,
+            Status.failed,  # process failed to start, but hasn't been joined yet
+        ), self.status
         self.status = Status.stopping
         logger.info("Nanny asking worker to close")
 
