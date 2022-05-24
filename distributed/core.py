@@ -187,7 +187,8 @@ class Server:
         self.monitor = SystemMonitor()
         self.counters = None
         self.digests = None
-        self._ongoing_coroutines = set()
+        self._ongoing_background_tasks = set()
+        self._ongoing_comm_handlers = set()
         self._event_finished = asyncio.Event()
 
         self.listeners = []
@@ -218,7 +219,7 @@ class Server:
 
         self.counters = defaultdict(partial(Counter, loop=self.io_loop))
 
-        self.periodic_callbacks = dict()
+        self.periodic_callbacks = {}
 
         pc = PeriodicCallback(
             self.monitor.update,
@@ -583,8 +584,8 @@ class Server:
                             result = asyncio.create_task(
                                 result, name=f"handle-comm-{address}-{op}"
                             )
-                            self._ongoing_coroutines.add(result)
-                            result.add_done_callback(self._ongoing_coroutines.remove)
+                            self._ongoing_comm_handlers.add(result)
+                            result.add_done_callback(self._ongoing_comm_handlers.remove)
                             result = await result
                         elif inspect.isawaitable(result):
                             raise RuntimeError(
@@ -673,6 +674,11 @@ class Server:
             await comm.close()
             assert comm.closed()
 
+    def add_background_task(self, coro) -> None:
+        task = asyncio.create_task(coro())
+        self._ongoing_background_tasks.add(task)
+        task.add_done_callback(self._ongoing_background_tasks.remove)
+
     async def close(self, timeout=None):
         for pc in self.periodic_callbacks.values():
             pc.stop()
@@ -686,20 +692,22 @@ class Server:
                     _stops.add(future)
             await asyncio.gather(*_stops)
 
-        def _ongoing_tasks():
+        def _ongoing_comm_handlers():
             return (
-                t for t in self._ongoing_coroutines if t is not asyncio.current_task()
+                t
+                for t in self._ongoing_comm_handlers
+                if t is not asyncio.current_task()
             )
 
         # TODO: Deal with exceptions
         try:
             # Give the handlers a bit of time to finish gracefully
             await asyncio.wait_for(
-                asyncio.gather(*_ongoing_tasks(), return_exceptions=True), 1
+                asyncio.gather(*_ongoing_comm_handlers(), return_exceptions=True), 1
             )
         except asyncio.TimeoutError:
             # the timeout on gather should've cancelled all the tasks
-            await asyncio.gather(*_ongoing_tasks(), return_exceptions=True)
+            await asyncio.gather(*_ongoing_comm_handlers(), return_exceptions=True)
 
         await self.rpc.close()
         await asyncio.gather(*[comm.close() for comm in list(self._comms)])

@@ -928,7 +928,7 @@ async def test_close_properly():
         comm = await remote.live_comm()
         await comm.write({"op": "sleep"})
 
-        await async_wait_for(lambda: not server._ongoing_coroutines, 10)
+        await async_wait_for(lambda: not server._ongoing_comm_handlers, 10)
 
         listeners = server.listeners
         assert len(listeners) == len(ports)
@@ -942,7 +942,7 @@ async def test_close_properly():
             await assert_cannot_connect(f"tcp://{ip}:{port}")
 
         # weakref set/dict should be cleaned up
-        assert not len(server._ongoing_coroutines)
+        assert not len(server._ongoing_comm_handlers)
 
 
 @gen_test()
