@@ -187,7 +187,7 @@ class Server:
         self.monitor = SystemMonitor()
         self.counters = None
         self.digests = None
-        self._ongoing_coroutines = weakref.WeakSet()
+        self._ongoing_coroutines = set()
         self._event_finished = asyncio.Event()
 
         self.listeners = []
@@ -508,7 +508,7 @@ class Server:
 
         await self
         try:
-            while True:
+            while not self.__stopped:
                 try:
                     msg = await comm.read()
                     logger.debug("Message from %r: %s", address, msg)
@@ -579,10 +579,17 @@ class Server:
                             result = handler(comm, **msg)
                         else:
                             result = handler(**msg)
-                        if inspect.isawaitable(result):
-                            result = asyncio.ensure_future(result)
+                        if inspect.iscoroutine(result):
+                            result = asyncio.create_task(
+                                result, name=f"handle-comm-{address}-{op}"
+                            )
                             self._ongoing_coroutines.add(result)
+                            result.add_done_callback(self._ongoing_coroutines.remove)
                             result = await result
+                        elif inspect.isawaitable(result):
+                            raise RuntimeError(
+                                f"Comm handler returned unknown awaitable. Expected coroutine, instead got {type(result)}"
+                            )
                     except CommClosedError:
                         if self.status == Status.running:
                             logger.info("Lost connection to %r", address, exc_info=True)
@@ -666,34 +673,36 @@ class Server:
             await comm.close()
             assert comm.closed()
 
-    @gen.coroutine
-    def close(self):
+    async def close(self, timeout=None):
         for pc in self.periodic_callbacks.values():
             pc.stop()
 
         if not self.__stopped:
             self.__stopped = True
+            _stops = set()
             for listener in self.listeners:
                 future = listener.stop()
                 if inspect.isawaitable(future):
-                    yield future
-        for i in range(20):
-            # If there are still handlers running at this point, give them a
-            # second to finish gracefully themselves, otherwise...
-            if any(self._comms.values()):
-                yield asyncio.sleep(0.05)
-            else:
-                break
-        yield self.rpc.close()
-        yield [comm.close() for comm in list(self._comms)]  # then forcefully close
-        for cb in self._ongoing_coroutines:
-            cb.cancel()
-        for i in range(10):
-            if all(c.cancelled() for c in self._ongoing_coroutines):
-                break
-            else:
-                yield asyncio.sleep(0.01)
+                    _stops.add(future)
+            await asyncio.gather(*_stops)
 
+        def _ongoing_tasks():
+            return (
+                t for t in self._ongoing_coroutines if t is not asyncio.current_task()
+            )
+
+        # TODO: Deal with exceptions
+        try:
+            # Give the handlers a bit of time to finish gracefully
+            await asyncio.wait_for(
+                asyncio.gather(*_ongoing_tasks(), return_exceptions=True), 1
+            )
+        except asyncio.TimeoutError:
+            # the timeout on gather should've cancelled all the tasks
+            await asyncio.gather(*_ongoing_tasks(), return_exceptions=True)
+
+        await self.rpc.close()
+        await asyncio.gather(*[comm.close() for comm in list(self._comms)])
         self._event_finished.set()
 
 
