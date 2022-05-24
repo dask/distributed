@@ -48,7 +48,7 @@ try:
 except ImportError:
     single_key = first
 from tornado import gen
-from tornado.ioloop import PeriodicCallback
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import distributed.utils
 from distributed import cluster_dump, preloading
@@ -760,6 +760,7 @@ class Client(SyncMethodMixin):
     _default_event_handlers = {"print": _handle_print, "warn": _handle_warn}
 
     preloads: list[preloading.Preload]
+    __loop: IOLoop | None = None
 
     def __init__(
         self,
@@ -944,15 +945,36 @@ class Client(SyncMethodMixin):
         ReplayTaskClient(self)
 
     @property
-    def io_loop(self):
+    def io_loop(self) -> IOLoop | None:
         warnings.warn(
             "The io_loop property is deprecated", DeprecationWarning, stacklevel=2
         )
-        return self._loop_runner.loop
+        return self.loop
+
+    @io_loop.setter
+    def io_loop(self, value: IOLoop) -> None:
+        warnings.warn(
+            "The io_loop property is deprecated", DeprecationWarning, stacklevel=2
+        )
+        self.loop = value
 
     @property
-    def loop(self):
-        return self._loop_runner.loop
+    def loop(self) -> IOLoop | None:
+        loop = self.__loop
+        if loop is None:
+            # If the loop is not running when this is called, the LoopRunner.loop
+            # property will raise a DeprecationWarning
+            # However subsequent calls might occur - eg atexit, where a stopped
+            # loop is still acceptable - so we cache access to the loop.
+            self.__loop = loop = self._loop_runner.loop
+        return loop
+
+    @loop.setter
+    def loop(self, value: IOLoop) -> None:
+        warnings.warn(
+            "setting the loop property is deprecated", DeprecationWarning, stacklevel=2
+        )
+        self.__loop = value
 
     @contextmanager
     def as_current(self):
@@ -1366,10 +1388,8 @@ class Client(SyncMethodMixin):
     def __del__(self):
         # If the loop never got assigned, we failed early in the constructor,
         # nothing to do
-        if getattr(self, "status", "newly-created") in ["closed", "newly-created"]:
-            return
-
-        self.close()
+        if self.__loop is not None:
+            self.close()
 
     def _inc_ref(self, key):
         with self._refcount_lock:

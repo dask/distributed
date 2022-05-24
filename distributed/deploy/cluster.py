@@ -9,7 +9,7 @@ from contextlib import suppress
 from inspect import isawaitable
 from typing import Any
 
-from tornado.ioloop import PeriodicCallback
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask.config
 from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
@@ -56,6 +56,7 @@ class Cluster(SyncMethodMixin):
 
     _supports_scaling = True
     _cluster_info: dict = {}
+    __loop: IOLoop | None = None
 
     def __init__(
         self,
@@ -92,8 +93,24 @@ class Cluster(SyncMethodMixin):
         self.status = Status.created
 
     @property
-    def loop(self):
-        return self._loop_runner.loop
+    def loop(self) -> IOLoop | None:
+        loop = self.__loop
+        if loop is None:
+            # If the loop is not running when this is called, the LoopRunner.loop
+            # property will raise a DeprecationWarning
+            # However subsequent calls might occur - eg atexit, where a stopped
+            # loop is still acceptable - so we cache access to the loop.
+            self.__loop = loop = self._loop_runner.loop
+        return loop
+
+    @loop.setter
+    def loop(self, value: IOLoop) -> None:
+        warnings.warn(
+            "setting the loop property is deprecated", DeprecationWarning, stacklevel=2
+        )
+        if value is None:
+            raise ValueError("expected an IOLoop, got None")
+        self.__loop = value
 
     @property
     def name(self):
