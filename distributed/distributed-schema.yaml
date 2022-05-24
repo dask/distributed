@@ -2,14 +2,12 @@ properties:
   distributed:
     type: object
     properties:
-
       version:
         type: integer
 
       scheduler:
         type: object
         properties:
-
           allowed-failures:
             type: integer
             minimum: 0
@@ -22,8 +20,8 @@ properties:
 
           bandwidth:
             type:
-            - integer
-            - string
+              - integer
+              - string
             description: |
               The expected bandwidth between any pair of workers
 
@@ -45,8 +43,8 @@ properties:
 
           contact-address:
             type:
-            - string
-            - "null"
+              - string
+              - "null"
             description: |
               The address that the scheduler advertises to workers for communication with it.
 
@@ -56,8 +54,8 @@ properties:
 
           default-data-size:
             type:
-            - string
-            - integer
+              - string
+              - integer
             description: |
               The default size of a piece of data if we don't know anything about it.
 
@@ -71,8 +69,8 @@ properties:
 
           idle-timeout:
             type:
-            - string
-            - "null"
+              - string
+              - "null"
             description: |
               Shut down the scheduler after this duration if no activity has occured
 
@@ -119,8 +117,8 @@ properties:
 
           worker-ttl:
             type:
-            - string
-            - "null"
+              - string
+              - "null"
             description: |
               Time to live for workers.
 
@@ -205,16 +203,16 @@ properties:
                 properties:
                   ca-file:
                     type:
-                    - string
-                    - "null"
+                      - string
+                      - "null"
                   key:
                     type:
-                    - string
-                    - "null"
+                      - string
+                      - "null"
                   cert:
                     type:
-                    - string
-                    - "null"
+                      - string
+                      - "null"
               bokeh-application:
                 type: object
                 description: |
@@ -239,6 +237,10 @@ properties:
             type: object
             description: Settings for Dask's embedded HTTP Server
             properties:
+              api-key:
+                type: string
+                description: |
+                  API key required to access private HTTP API methods.
               routes:
                 type: array
                 description: |
@@ -263,8 +265,7 @@ properties:
                 description: set to true to auto-start the AMM on Scheduler init
               interval:
                 type: string
-                description:
-                  Time expression, e.g. "2s". Run the AMM cycle every <interval>.
+                description: Time expression, e.g. "2s". Run the AMM cycle every <interval>.
               policies:
                 type: array
                 items:
@@ -273,7 +274,8 @@ properties:
                   properties:
                     class:
                       type: string
-                      description: fully qualified name of an ActiveMemoryManagerPolicy
+                      description:
+                        fully qualified name of an ActiveMemoryManagerPolicy
                         subclass
                   additionalProperties:
                     description: keyword arguments to the policy constructor, if any
@@ -376,8 +378,8 @@ properties:
             properties:
               duration:
                 type:
-                - string
-                - "null"
+                  - string
+                  - "null"
                 description: |
                   The time after creation to close the worker, like "1 hour"
               stagger:
@@ -396,7 +398,6 @@ properties:
                 type: boolean
                 description: |
                   Do we try to resurrect the worker after the lifetime deadline?
-
 
           profile:
             type: object
@@ -484,8 +485,8 @@ properties:
 
               target:
                 oneOf:
-                  - {type: number, minimum: 0, maximum: 1}
-                  - {enum: [false]}
+                  - { type: number, minimum: 0, maximum: 1 }
+                  - { enum: [false] }
                 description: >-
                   When the process memory (as observed by the operating system) gets
                   above this amount we start spilling the dask keys holding the largest
@@ -493,24 +494,24 @@ properties:
 
               spill:
                 oneOf:
-                  - {type: number, minimum: 0, maximum: 1}
-                  - {enum: [false]}
+                  - { type: number, minimum: 0, maximum: 1 }
+                  - { enum: [false] }
                 description: >-
                   When the process memory (as observed by the operating system) gets
                   above this amount we spill all data to disk.
 
               pause:
                 oneOf:
-                  - {type: number, minimum: 0, maximum: 1}
-                  - {enum: [false]}
+                  - { type: number, minimum: 0, maximum: 1 }
+                  - { enum: [false] }
                 description: >-
                   When the process memory (as observed by the operating system) gets
                   above this amount we no longer start new tasks on this worker.
 
               terminate:
                 oneOf:
-                  - {type: number, minimum: 0, maximum: 1}
-                  - {enum: [false]}
+                  - { type: number, minimum: 0, maximum: 1 }
+                  - { enum: [false] }
                 description: >-
                   When the process memory reaches this level the nanny process will kill
                   the worker (if a nanny is present)
@@ -518,7 +519,7 @@ properties:
               max-spill:
                 oneOf:
                   - type: string
-                  - {type: number, minimum: 0}
+                  - { type: number, minimum: 0 }
                   - enum: [false]
                 description: >-
                   Limit of number of bytes to be spilled on disk.
@@ -545,7 +546,6 @@ properties:
         description: |
           Configuration settings for Dask Nannies
         properties:
-
           preload:
             type: array
             description: |
@@ -574,8 +574,7 @@ properties:
         properties:
           heartbeat:
             type: string
-            description:
-              This value is the time between heartbeats
+            description: This value is the time between heartbeats
 
               The client sends a periodic heartbeat message to the scheduler.
               If it misses enough of these then the scheduler assumes that it has gone.
@@ -585,7 +584,7 @@ properties:
             description: Interval between scheduler-info updates
 
           security-loader:
-            type: [string, 'null']
+            type: [string, "null"]
             description: |
               A fully qualified name (e.g. ``module.submodule.function``) of
               a callback to use for loading security credentials for the
@@ -608,7 +607,6 @@ properties:
               Arguments to pass into the preload scripts described above
 
               See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
-
 
       deploy:
         type: object
@@ -670,13 +668,11 @@ properties:
         type: object
         description: Configuration settings for Dask communications
         properties:
-
           retry:
             type: object
             description: |
               Some operations (such as gathering data) are subject to re-tries with the below parameters
             properties:
-
               count:
                 type: integer
                 minimum: 0
@@ -702,8 +698,8 @@ properties:
 
           offload:
             type:
-            - boolean
-            - string
+              - boolean
+              - string
             description: |
               The size of message after which we choose to offload serialization to another thread
 
@@ -755,8 +751,8 @@ properties:
 
           require-encryption:
             type:
-            - boolean
-            - "null"
+              - boolean
+              - "null"
             description: |
               Whether to require encryption on non-local comms
 
@@ -774,8 +770,8 @@ properties:
             properties:
               ciphers:
                 type:
-                - string
-                - "null"
+                  - string
+                  - "null"
                 description: Allowed ciphers, specified as an OpenSSL cipher string.
 
               min-version:
@@ -790,8 +786,8 @@ properties:
 
               ca-file:
                 type:
-                - string
-                - "null"
+                  - string
+                  - "null"
                 description: Path to a CA file, in pem format
 
               scheduler:
@@ -800,13 +796,13 @@ properties:
                 properties:
                   cert:
                     type:
-                    - string
-                    - "null"
+                      - string
+                      - "null"
                     description: Path to certificate file
                   key:
                     type:
-                    - string
-                    - "null"
+                      - string
+                      - "null"
                     description: |
                       Path to key file.
 
@@ -819,13 +815,13 @@ properties:
                 properties:
                   cert:
                     type:
-                    - string
-                    - "null"
+                      - string
+                      - "null"
                     description: Path to certificate file
                   key:
                     type:
-                    - string
-                    - "null"
+                      - string
+                      - "null"
                     description: |
                       Path to key file.
 
@@ -838,13 +834,13 @@ properties:
                 properties:
                   cert:
                     type:
-                    - string
-                    - "null"
+                      - string
+                      - "null"
                     description: Path to certificate file
                   key:
                     type:
-                    - string
-                    - "null"
+                      - string
+                      - "null"
                     description: |
                       Path to key file.
 
@@ -857,30 +853,30 @@ properties:
               UCX provides access to other transport methods including NVLink and InfiniBand.
             properties:
               cuda-copy:
-                type: [boolean, 'null']
+                type: [boolean, "null"]
                 description: |
                   Set environment variables to enable CUDA support over UCX. This may be used even if
                   InfiniBand and NVLink are not supported or disabled, then transferring data over TCP.
               tcp:
-                type: [boolean, 'null']
+                type: [boolean, "null"]
                 description: |
                   Set environment variables to enable TCP over UCX, even if InfiniBand and NVLink
                   are not supported or disabled.
               nvlink:
-                type: [boolean, 'null']
+                type: [boolean, "null"]
                 description: |
                   Set environment variables to enable UCX over NVLink, implies ``distributed.comm.ucx.tcp=True``.
               infiniband:
-                type: [boolean, 'null']
+                type: [boolean, "null"]
                 description: |
                   Set environment variables to enable UCX over InfiniBand, implies ``distributed.comm.ucx.tcp=True``.
               rdmacm:
-                type: [boolean, 'null']
+                type: [boolean, "null"]
                 description: |
                   Set environment variables to enable UCX RDMA connection manager support,
                   requires ``distributed.comm.ucx.infiniband=True``.
               create-cuda-context:
-                type: [boolean, 'null']
+                type: [boolean, "null"]
                 description: |
                   Creates a CUDA context before UCX is initialized. This is necessary to enable UCX to
                   properly identify connectivity of GPUs with specialized networking hardware, such as
@@ -902,7 +898,7 @@ properties:
             properties:
               shard:
                 type:
-                - string
+                  - string
                 description: |
                   The maximum size of a websocket frame to send through a comm.
 
@@ -984,10 +980,10 @@ properties:
               interval:
                 type: string
                 description: The time between ticks, default 20ms
-              limit :
+              limit:
                 type: string
                 description: The time allowed before triggering a warning
-              cycle :
+              cycle:
                 type: string
                 description: The time in between verifying event loop speed
 
@@ -1042,6 +1038,6 @@ properties:
           Configuration options for the RAPIDS Memory Manager.
         properties:
           pool-size:
-            type: [integer, 'null']
+            type: [integer, "null"]
             description: |
               The size of the memory pool in bytes.

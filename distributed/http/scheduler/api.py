@@ -1,8 +1,38 @@
 from __future__ import annotations
 
+import asyncio
+import functools
 import json
 
+import dask.config
+
 from distributed.http.utils import RequestHandler
+
+
+def require_auth(method_func):
+    @functools.wraps(method_func)
+    def wrapper(self):
+        auth = self.request.headers.get("Authorization", None)
+        key = dask.config.get("distributed.scheduler.http.api-key")
+        if key and (
+            not auth
+            or not auth.startswith("Bearer ")
+            or not key
+            or key != auth.split(" ")[-1]
+        ):
+            self.set_status(403, "Unauthorized")
+            return
+
+        if not asyncio.iscoroutinefunction(method_func):
+            return method_func(self)
+        else:
+
+            async def tmp():
+                return await method_func(self)
+
+            return tmp()
+
+    return wrapper
 
 
 class APIHandler(RequestHandler):
@@ -12,6 +42,7 @@ class APIHandler(RequestHandler):
 
 
 class RetireWorkersHandler(RequestHandler):
+    @require_auth
     async def post(self):
         self.set_header("Content-Type", "application/json")
         scheduler = self.server

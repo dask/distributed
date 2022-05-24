@@ -49,6 +49,7 @@ distributed:
       lease-timeout: 30s  # Maximum interval to wait for a Client refresh before a lease is invalidated and released.
 
     http:
+      api-key: null
       routes:
         - distributed.http.scheduler.prometheus
         - distributed.http.scheduler.info
