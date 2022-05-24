@@ -69,7 +69,7 @@ Scheduler methods exposed by the API with an example of the request body they ta
     API methods that modify the state of the scheduler require an API key to be set in the ``Authorization`` header.
     This API key can be set via ``distributed.scheduler.http.api-key`` in the Dask config.
 
-    .. code-block:: json
+    .. code-block:: console
 
         $ curl -H "Authorization: Bearer {api-key}" http://localhost:8787/api/v1/retire_workers
 
