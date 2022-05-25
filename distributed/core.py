@@ -362,7 +362,10 @@ class Server:
                 # The demonstrator for this is Worker.terminate(), which
                 # closes the server socket in response to an incoming message.
                 # See https://github.com/tornadoweb/tornado/issues/2069
-                self.add_background_task(asyncio.coroutine(listener.stop)())
+                async def _stop_listener():
+                    listener.stop()
+
+                self.add_background_task(_stop_listener())
 
     @property
     def listener(self):

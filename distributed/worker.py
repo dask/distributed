@@ -952,9 +952,11 @@ class Worker(ServerNode):
         if self.thread_id == threading.get_ident():
             self.batched_stream.send(full_msg)
         else:
-            self.add_background_task(
-                asyncio.coroutine(self.batched_stream.send)(full_msg)
-            )
+
+            async def _send_batched_stream(batched_stream):
+                batched_stream.send(full_msg)
+
+            self.add_background_task(_send_batched_stream(self.batched_stream))
 
     @property
     def executing_count(self) -> int:
