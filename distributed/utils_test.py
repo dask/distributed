@@ -181,6 +181,8 @@ def loop_in_thread(cleanup):
             loop_started.set_result((io_loop, stop_event))
             await stop_event.wait()
 
+        # run asyncio.run in a thread and collect exceptions from *either*
+        # the loop failing to start, or failing to close
         ran = tpe.submit(_run_and_close_tornado, run)
         for f in concurrent.futures.as_completed((loop_started, ran)):
             if f is loop_started:
@@ -191,6 +193,9 @@ def loop_in_thread(cleanup):
                     io_loop.add_callback(stop_event.set)
 
             elif f is ran:
+                # if this is the first iteration the loop failed to start
+                # if it's the second iteration the loop has finished or
+                # the loop failed to close and we need to raise the exception
                 ran.result()
                 return
 
