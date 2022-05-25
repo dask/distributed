@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import asyncio
 import logging
+import multiprocessing
 import os
 import re
 import threading
@@ -49,6 +52,8 @@ class AsyncProcess:
     A coroutine-compatible multiprocessing.Process-alike.
     All normally blocking methods are wrapped in Tornado coroutines.
     """
+
+    _process: multiprocessing.Process
 
     def __init__(self, loop=None, target=None, name=None, args=(), kwargs={}):
         if not callable(target):
@@ -175,7 +180,9 @@ class AsyncProcess:
         target(*args, **kwargs)
 
     @classmethod
-    def _watch_message_queue(cls, selfref, process, loop, state, q, exit_future):
+    def _watch_message_queue(
+        cls, selfref, process: multiprocessing.Process, loop, state, q, exit_future
+    ):
         # As multiprocessing.Process is not thread-safe, we run all
         # blocking operations from this single loop and ship results
         # back to the caller when needed.
@@ -204,7 +211,12 @@ class AsyncProcess:
             if op == "start":
                 _call_and_set_future(loop, msg["future"], _start)
             elif op == "terminate":
+                # Send SIGTERM
                 _call_and_set_future(loop, msg["future"], process.terminate)
+            elif op == "kill":
+                # Send SIGKILL
+                _call_and_set_future(loop, msg["future"], process.kill)
+
             elif op == "stop":
                 break
             else:
@@ -240,15 +252,33 @@ class AsyncProcess:
         self._watch_q.put_nowait({"op": "start", "future": fut})
         return fut
 
-    def terminate(self):
-        """
-        Terminate the child process.
+    def terminate(self) -> asyncio.Future[None]:
+        """Terminate the child process.
 
         This method returns a future.
+
+        See also
+        --------
+        multiprocessing.Process.terminate
         """
         self._check_closed()
-        fut = Future()
+        fut: Future[None] = Future()
         self._watch_q.put_nowait({"op": "terminate", "future": fut})
+        return fut
+
+    def kill(self) -> asyncio.Future[None]:
+        """Send SIGKILL to the child process.
+        On Windows, this is the same as terminate().
+
+        This method returns a future.
+
+        See also
+        --------
+        multiprocessing.Process.kill
+        """
+        self._check_closed()
+        fut: Future[None] = Future()
+        self._watch_q.put_nowait({"op": "kill", "future": fut})
         return fut
 
     async def join(self, timeout=None):
