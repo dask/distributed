@@ -357,6 +357,7 @@ async def test_ucx_protocol(ucx_loop, cleanup, port):
     not hasattr(ucp.exceptions, "UCXUnreachable"),
     reason="Requires UCX-Py support for UCXUnreachable exception",
 )
+@gen_test()
 async def test_ucx_unreachable(
     ucx_loop,
 ):
