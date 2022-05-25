@@ -318,7 +318,7 @@ async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
         2. x transitions released -> fetch
         3. the network stack is busy, so x does not transition to flight yet.
         4. scheduler calls handle_compute("y2", who_has={"x": [w3]}) on w1
-        5. when x finally reaches the top of the data_needed heap, the w1 will not try
+        5. when x finally reaches the top of the data_needed heap, w1 will not try
            contacting w2
 
     as_deps=False
@@ -326,12 +326,16 @@ async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
         2. x transitions released -> fetch
         3. the network stack is busy, so x does not transition to flight yet.
         4. scheduler calls handle_acquire_replicas(who_has={"x": [w3]}) on w1
-        5. when x finally reaches the top of the data_needed heap, the w1 will not try
+        5. when x finally reaches the top of the data_needed heap, w1 will not try
            contacting w2
     """
     x = (await c.scatter({"x": 1}, workers=[w2.address, w3.address], broadcast=True))[
         "x"
     ]
+
+    # Make sure find_missing is not involved
+    w1.periodic_callbacks["find-missing"].stop()
+
     with freeze_data_fetching(w1, jump_start=True):
         if as_deps:
             y1 = c.submit(inc, x, key="y1", workers=[w1.address])
@@ -355,7 +359,6 @@ async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
             await asyncio.sleep(0.01)
 
     await wait_for_state("x", "memory", w1)
-
     assert_story(
         w1.story("request-dep"),
         [("request-dep", w3.address, {"x"})],
@@ -399,14 +402,12 @@ async def test_fetch_to_missing(c, s, a, b):
         a.story("x"),
         [
             ("x", "ensure-task-exists", "released"),
-            ("x", "update-who-has", [b.address], []),
             ("x", "released", "fetch", "fetch", {}),
             ("gather-dependencies", b.address, {"x"}),
             ("x", "fetch", "flight", "flight", {}),
             ("request-dep", b.address, {"x"}),
             ("busy-gather", b.address, {"x"}),
             ("x", "flight", "fetch", "fetch", {}),
-            ("x", "update-who-has", [], [b.address]),  # Called Scheduler.who_has
             ("x", "fetch", "missing", "missing", {}),
         ],
         # There may be a round of find_missing() after this.
@@ -415,6 +416,7 @@ async def test_fetch_to_missing(c, s, a, b):
     )
 
 
+@pytest.mark.skip(reason="TODO link issue")
 @gen_cluster(client=True)
 async def test_new_replica_while_all_workers_in_flight(c, s, w1, w2):
     """A task is stuck in 'fetch' state because all workers that hold a replica are in
@@ -430,6 +432,9 @@ async def test_new_replica_while_all_workers_in_flight(c, s, w1, w2):
     Test that, when this happens, the task is immediately acquired from the new worker,
     without waiting for the original replica holders to get out of flight.
     """
+    # Make sure find_missing is not involved
+    w1.periodic_callbacks["find-missing"].stop()
+
     async with BlockedGetData(s.address) as w3:
         x = c.submit(inc, 1, key="x", workers=[w3.address])
         y = c.submit(inc, 2, key="y", workers=[w3.address])

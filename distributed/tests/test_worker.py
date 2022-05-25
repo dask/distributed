@@ -2767,7 +2767,6 @@ async def test_acquire_replicas_already_in_flight(c, s, *nannies):
         story[b],
         [
             ("x", "ensure-task-exists", "released"),
-            ("x", "update-who-has", [a], []),
             ("x", "released", "fetch", "fetch", {}),
             ("gather-dependencies", a, {"x"}),
             ("x", "fetch", "flight", "flight", {}),
