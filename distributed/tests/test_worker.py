@@ -46,6 +46,8 @@ from distributed.profile import wait_profiler
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
 from distributed.utils_test import (
+    BlockedGatherDep,
+    BlockedGetData,
     TaskStateMetadataPlugin,
     _LockedCommPool,
     assert_story,
@@ -3136,30 +3138,6 @@ async def test_task_flight_compute_oserror(c, s, a, b):
         ("f1", "executing", "memory", "memory", {}),
     ]
     assert_story(sum_story, expected_sum_story, strict=True)
-
-
-class BlockedGatherDep(Worker):
-    def __init__(self, *args, **kwargs):
-        self.in_gather_dep = asyncio.Event()
-        self.block_gather_dep = asyncio.Event()
-        super().__init__(*args, **kwargs)
-
-    async def gather_dep(self, *args, **kwargs):
-        self.in_gather_dep.set()
-        await self.block_gather_dep.wait()
-        return await super().gather_dep(*args, **kwargs)
-
-
-class BlockedGetData(Worker):
-    def __init__(self, *args, **kwargs):
-        self.in_get_data = asyncio.Event()
-        self.block_get_data = asyncio.Event()
-        super().__init__(*args, **kwargs)
-
-    async def get_data(self, comm, *args, **kwargs):
-        self.in_get_data.set()
-        await self.block_get_data.wait()
-        return await super().get_data(comm, *args, **kwargs)
 
 
 @gen_cluster(client=True, nthreads=[])

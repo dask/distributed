@@ -1,18 +1,17 @@
 import asyncio
 import logging
-from contextlib import contextmanager
 from itertools import chain
 
 import pytest
 
 from distributed import Worker
-from distributed.core import Status
 from distributed.protocol.serialize import Serialize
 from distributed.utils import recursive_to_dict
 from distributed.utils_test import (
     _LockedCommPool,
     assert_story,
     captured_logger,
+    freeze_data_fetching,
     gen_cluster,
     inc,
 )
@@ -256,23 +255,6 @@ def test_executefailure_to_dict():
     assert ev3.traceback_text == "tb text"
 
 
-@contextmanager
-def freeze_data_fetching(w: Worker):
-    """Prevent any task from transitioning from fetch to flight on the worker while
-    inside the context.
-
-    This is not the same as setting the worker to Status=paused, which would also
-    inform the Scheduler and prevent further tasks to be enqueued on the worker.
-    """
-    old_out_connections = w.total_out_connections
-    old_comm_threshold = w.comm_threshold_bytes
-    w.total_out_connections = 0
-    w.comm_threshold_bytes = 0
-    yield
-    w.total_out_connections = old_out_connections
-    w.comm_threshold_bytes = old_comm_threshold
-
-
 @gen_cluster(client=True)
 async def test_fetch_to_compute(c, s, a, b):
     with freeze_data_fetching(b):
@@ -349,7 +331,7 @@ async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
     x = (await c.scatter({"x": 1}, workers=[w2.address, w3.address], broadcast=True))[
         "x"
     ]
-    with freeze_data_fetching(w1):
+    with freeze_data_fetching(w1, jump_start=True):
         if as_deps:
             y1 = c.submit(inc, x, key="y1", workers=[w1.address])
         else:
@@ -370,11 +352,6 @@ async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
 
         while w1.tasks["x"].who_has != {w3.address}:
             await asyncio.sleep(0.01)
-
-    # Jump-start ensure_communicating after freeze_data_fetching.
-    # This simulates an unrelated third worker moving out of in_flight_workers.
-    w1.status = Status.paused
-    w1.status = Status.running
 
     await wait_for_state("x", "memory", w1)
 

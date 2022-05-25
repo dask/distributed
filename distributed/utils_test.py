@@ -2153,3 +2153,89 @@ def raises_with_cause(
         assert re.search(
             match_cause, str(exc.__cause__)
         ), f"Pattern ``{match_cause}`` not found in ``{exc.__cause__}``"
+
+
+class BlockedGatherDep(Worker):
+    """A Worker that sets event `in_gather_dep` the first time it enters the gather_dep
+    method and then does not initiate any comms, thus leaving the task(s) in flight
+    indefinitely, until the test sets `block_gather_dep`
+
+    Example
+    -------
+    .. code-block:: python
+
+        @gen_test()
+        async def test1(s, a, b):
+            async with BlockedGatherDep(s.address) as x:
+                # [do something to cause x to fetch data from a or b]
+                await x.in_gather_dep.wait()
+                # [do something that must happen while the tasks are in flight]
+                x.block_gather_dep.set()
+                # [from this moment on, x is a regular worker]
+
+    See also
+    --------
+    BlockedGetData
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.in_gather_dep = asyncio.Event()
+        self.block_gather_dep = asyncio.Event()
+        super().__init__(*args, **kwargs)
+
+    async def gather_dep(self, *args, **kwargs):
+        self.in_gather_dep.set()
+        await self.block_gather_dep.wait()
+        return await super().gather_dep(*args, **kwargs)
+
+
+class BlockedGetData(Worker):
+    """A Worker that sets event `in_get_data` the first time it enters the get_data
+    method and then does not answer the comms, thus leaving the task(s) in flight
+    indefinitely, until the test sets `block_get_data`
+
+    See also
+    --------
+    BlockedGatherDep
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.in_get_data = asyncio.Event()
+        self.block_get_data = asyncio.Event()
+        super().__init__(*args, **kwargs)
+
+    async def get_data(self, comm, *args, **kwargs):
+        self.in_get_data.set()
+        await self.block_get_data.wait()
+        return await super().get_data(comm, *args, **kwargs)
+
+
+@contextmanager
+def freeze_data_fetching(w: Worker, *, jump_start: bool = False):
+    """Prevent any task from transitioning from fetch to flight on the worker while
+    inside the context, simulating a situation where the worker's network comms are
+    saturated.
+
+    This is not the same as setting the worker to Status=paused, which would also
+    inform the Scheduler and prevent further tasks to be enqueued on the worker.
+
+    Parameters
+    ----------
+    w: Worker
+        The Worker on which tasks will not transition from fetch to flight
+    jump_start: bool
+        If False, tasks will remain in fetch state after exiting the context, until
+        something else triggers ensure_communicating.
+        If True, trigger ensure_communicating on exit; this simulates e.g. an unrelated
+        worker moving out of in_flight_workers.
+    """
+    old_out_connections = w.total_out_connections
+    old_comm_threshold = w.comm_threshold_bytes
+    w.total_out_connections = 0
+    w.comm_threshold_bytes = 0
+    yield
+    w.total_out_connections = old_out_connections
+    w.comm_threshold_bytes = old_comm_threshold
+    if jump_start:
+        w.status = Status.paused
+        w.status = Status.running
