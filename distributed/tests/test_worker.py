@@ -1743,7 +1743,7 @@ async def test_heartbeat_missing_real_cluster(s, a):
     ) as wlogger, captured_logger(
         "distributed.scheduler", level=logging.WARNING
     ) as slogger:
-        await s.remove_worker(a.address, "foo")
+        await s.remove_worker(a.address, stimulus_id="foo")
         assert not s.workers
 
         # Wait until the close signal reaches the worker and it starts shutting down.
