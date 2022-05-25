@@ -6556,13 +6556,16 @@ class Scheduler(SchedulerState, ServerNode):
         self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
         self.send_all(client_msgs, worker_msgs)
 
-    def story(self, *keys):
-        """Get all transitions that touch one of the input keys"""
-        keys = {key.key if isinstance(key, TaskState) else key for key in keys}
-        return scheduler_story(keys, self.transition_log)
+    def story(self, *keys_or_tasks_or_stimuli: str | TaskState) -> list[tuple]:
+        """Get all transitions that touch one of the input keys or stimulus_id's"""
+        keys_or_stimuli = {
+            key.key if isinstance(key, TaskState) else key
+            for key in keys_or_tasks_or_stimuli
+        }
+        return scheduler_story(keys_or_stimuli, self.transition_log)
 
-    async def get_story(self, keys=()):
-        return self.story(*keys)
+    async def get_story(self, keys_or_stimuli: Iterable[str]) -> list[tuple]:
+        return self.story(*keys_or_stimuli)
 
     transition_story = story
 
