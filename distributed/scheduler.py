@@ -28,7 +28,6 @@ from collections.abc import (
     Set,
 )
 from contextlib import suppress
-from datetime import timedelta
 from functools import partial
 from numbers import Number
 from typing import Any, ClassVar, Literal, cast
@@ -3321,7 +3320,7 @@ class Scheduler(SchedulerState, ServerNode):
         for k, v in self.services.items():
             logger.info("%11s at: %25s", k, "%s:%d" % (listen_ip, v.port))
 
-        self.loop.add_callback(self.reevaluate_occupancy)
+        self.add_background_task(self.reevaluate_occupancy())
 
         if self.scheduler_file:
             with open(self.scheduler_file, "w") as f:
@@ -4244,7 +4243,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.bandwidth_workers.pop((address, w), None)
             self.bandwidth_workers.pop((w, address), None)
 
-        def remove_worker_from_events():
+        async def remove_worker_from_events():
             # If the worker isn't registered anymore after the delay, remove from events
             if address not in self.workers and address in self.events:
                 del self.events[address]
@@ -4252,7 +4251,8 @@ class Scheduler(SchedulerState, ServerNode):
         cleanup_delay = parse_timedelta(
             dask.config.get("distributed.scheduler.events-cleanup-delay")
         )
-        self.loop.call_later(cleanup_delay, remove_worker_from_events)
+
+        self.add_background_task(remove_worker_from_events(), cleanup_delay)
         logger.debug("Removed worker %s", ws)
 
         return "OK"
@@ -4604,7 +4604,7 @@ class Scheduler(SchedulerState, ServerNode):
                 except Exception as e:
                     logger.exception(e)
 
-        def remove_client_from_events():
+        async def remove_client_from_events():
             # If the client isn't registered anymore after the delay, remove from events
             if client not in self.clients and client in self.events:
                 del self.events[client]
@@ -4612,7 +4612,8 @@ class Scheduler(SchedulerState, ServerNode):
         cleanup_delay = parse_timedelta(
             dask.config.get("distributed.scheduler.events-cleanup-delay")
         )
-        self.loop.call_later(cleanup_delay, remove_client_from_events)
+
+        self.add_background_task(remove_client_from_events(), cleanup_delay)
 
     def send_task_to_worker(self, worker, ts: TaskState, duration: float = -1):
         """Send a single computational task to a worker"""
@@ -4879,10 +4880,10 @@ class Scheduler(SchedulerState, ServerNode):
         try:
             stream_comms[worker].send(msg)
         except (CommClosedError, AttributeError):
-            self.loop.add_callback(
-                self.remove_worker,
-                address=worker,
-                stimulus_id=f"worker-send-comm-fail-{time()}",
+            self.add_background_task(
+                self.remove_worker(
+                    address=worker, stimulus_id=f"worker-send-comm-fail-{time()}"
+                )
             )
 
     def client_send(self, client, msg):
@@ -4928,10 +4929,11 @@ class Scheduler(SchedulerState, ServerNode):
                 # worker already gone
                 pass
             except (CommClosedError, AttributeError):
-                self.loop.add_callback(
-                    self.remove_worker,
-                    address=worker,
-                    stimulus_id=f"send-all-comm-fail-{time()}",
+                self.add_background_task(
+                    self.remove_worker(
+                        address=worker,
+                        stimulus_id=f"send-all-comm-fail-{time()}",
+                    )
                 )
 
     ############################
@@ -6930,7 +6932,7 @@ class Scheduler(SchedulerState, ServerNode):
     # Cleanup #
     ###########
 
-    def reevaluate_occupancy(self, worker_index: int = 0):
+    async def reevaluate_occupancy(self, worker_index: int = 0):
         """Periodically reassess task duration time
 
         The expected duration of a task can change over time.  Unfortunately we
@@ -6946,33 +6948,29 @@ class Scheduler(SchedulerState, ServerNode):
         think about.
         """
         try:
-            if self.status == Status.closed:
-                return
-            last = time()
-            next_time = timedelta(seconds=0.1)
+            while self.status != Status.closed:
+                last = time()
+                delay = 0.1
 
-            if self.proc.cpu_percent() < 50:
-                workers: list = list(self.workers.values())
-                nworkers: int = len(workers)
-                i: int
-                for i in range(nworkers):
-                    ws: WorkerState = workers[worker_index % nworkers]
-                    worker_index += 1
-                    try:
-                        if ws is None or not ws.processing:
-                            continue
-                        self._reevaluate_occupancy_worker(ws)
-                    finally:
-                        del ws  # lose ref
+                if self.proc.cpu_percent() < 50:
+                    workers: list = list(self.workers.values())
+                    nworkers: int = len(workers)
+                    i: int
+                    for i in range(nworkers):
+                        ws: WorkerState = workers[worker_index % nworkers]
+                        worker_index += 1
+                        try:
+                            if ws is None or not ws.processing:
+                                continue
+                            self._reevaluate_occupancy_worker(ws)
+                        finally:
+                            del ws  # lose ref
 
-                    duration = time() - last
-                    if duration > 0.005:  # 5ms since last release
-                        next_time = timedelta(seconds=duration * 5)  # 25ms gap
-                        break
-
-            self.loop.add_timeout(
-                next_time, self.reevaluate_occupancy, worker_index=worker_index
-            )
+                        duration = time() - last
+                        if duration > 0.005:  # 5ms since last release
+                            delay = duration * 5  # 25ms gap
+                            break
+                await asyncio.sleep(delay)
 
         except Exception:
             logger.error("Error in reevaluate occupancy", exc_info=True)
@@ -7004,7 +7002,7 @@ class Scheduler(SchedulerState, ServerNode):
                 "Scheduler closing after being idle for %s",
                 format_time(self.idle_timeout),
             )
-            self.loop.add_callback(self.close)
+            self.add_background_task(self.close())
 
     def adaptive_target(self, target_duration=None):
         """Desired number of workers based on the current workload

@@ -15,11 +15,10 @@ from collections.abc import Container
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import Callable, ClassVar, TypedDict, TypeVar
+from typing import Callable, ClassVar, Coroutine, TypedDict, TypeVar
 
 import tblib
 from tlz import merge
-from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
@@ -248,10 +247,10 @@ class Server:
 
         self.thread_id = 0
 
-        def set_thread_ident():
+        async def set_thread_ident():
             self.thread_id = threading.get_ident()
 
-        self.io_loop.add_callback(set_thread_ident)
+        self.add_background_task(set_thread_ident())
         self._startup_lock = asyncio.Lock()
         self.__startup_exc: Exception | None = None
         self.__started = asyncio.Event()
@@ -344,16 +343,17 @@ class Server:
         """
         self._last_tick = time()
 
-        def start_pcs():
+        async def start_pcs():
             for pc in self.periodic_callbacks.values():
                 if not pc.is_running():
                     pc.start()
 
-        self.io_loop.add_callback(start_pcs)
+        self.add_background_task(start_pcs())
 
     def stop(self):
         if not self.__stopped:
             self.__stopped = True
+
             for listener in self.listeners:
                 # Delay closing the server socket until the next IO loop tick.
                 # Otherwise race conditions can appear if an event handler
@@ -362,7 +362,7 @@ class Server:
                 # The demonstrator for this is Worker.terminate(), which
                 # closes the server socket in response to an incoming message.
                 # See https://github.com/tornadoweb/tornado/issues/2069
-                self.io_loop.add_callback(listener.stop)
+                self.add_background_task(asyncio.coroutine(listener.stop)())
 
     @property
     def listener(self):
@@ -653,8 +653,8 @@ class Server:
                                 break
                             handler = self.stream_handlers[op]
                             if is_coroutine_function(handler):
-                                self.loop.add_callback(handler, **merge(extra, msg))
-                                await gen.sleep(0)
+                                self.add_background_task(handler(**merge(extra, msg)))
+                                await asyncio.sleep(0)
                             else:
                                 handler(**merge(extra, msg))
                         else:
@@ -674,8 +674,16 @@ class Server:
             await comm.close()
             assert comm.closed()
 
-    def add_background_task(self, coro) -> None:
-        task = asyncio.create_task(coro())
+    def add_background_task(self, coro: Coroutine, delay: float | None = None) -> None:
+        if delay is not None:
+
+            async def _delay(coro, delay):
+                await asyncio.sleep(delay)
+                await coro
+
+            coro = _delay(coro, delay)
+
+        task = asyncio.create_task(coro)
         self._ongoing_background_tasks.add(task)
         task.add_done_callback(self._ongoing_background_tasks.remove)
 
@@ -877,12 +885,10 @@ class rpc:
         tasks = []
         for comm in list(self.comms):
             if comm and not comm.closed():
-                # IOLoop.current().add_callback(_close_comm, comm)
                 task = asyncio.ensure_future(_close_comm(comm))
                 tasks.append(task)
         for comm in list(self._created):
             if comm and not comm.closed():
-                # IOLoop.current().add_callback(_close_comm, comm)
                 task = asyncio.ensure_future(_close_comm(comm))
                 tasks.append(task)
 
