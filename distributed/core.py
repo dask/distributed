@@ -247,10 +247,10 @@ class Server:
 
         self.thread_id = 0
 
-        async def set_thread_ident():
+        def set_thread_ident():
             self.thread_id = threading.get_ident()
 
-        self.add_background_task(set_thread_ident())
+        self.io_loop.add_callback(set_thread_ident)
         self._startup_lock = asyncio.Lock()
         self.__startup_exc: Exception | None = None
         self.__started = asyncio.Event()
@@ -699,6 +699,23 @@ class Server:
                 if inspect.isawaitable(future):
                     _stops.add(future)
             await asyncio.gather(*_stops)
+
+        def _ongoing_background_tasks():
+            return (
+                t
+                for t in self._ongoing_background_tasks
+                if t is not asyncio.current_task()
+            )
+
+        # TODO: Deal with exceptions
+        try:
+            # Give the handlers a bit of time to finish gracefully
+            await asyncio.wait_for(
+                asyncio.gather(*_ongoing_background_tasks(), return_exceptions=True), 1
+            )
+        except asyncio.TimeoutError:
+            # the timeout on gather should've cancelled all the tasks
+            await asyncio.gather(*_ongoing_background_tasks(), return_exceptions=True)
 
         def _ongoing_comm_handlers():
             return (
