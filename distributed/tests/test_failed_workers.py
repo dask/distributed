@@ -10,11 +10,10 @@ from tlz import first, partition_all
 
 from dask import delayed
 
-from distributed import Client, Nanny, wait
+from distributed import Client, Nanny, profile, wait
 from distributed.comm import CommClosedError
 from distributed.compatibility import MACOS
 from distributed.metrics import time
-from distributed.profile import wait_profiler
 from distributed.utils import CancelledError, sync
 from distributed.utils_test import (
     captured_logger,
@@ -262,7 +261,10 @@ async def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
     await c.restart()
     y = c.submit(inc, 1)
     del x
-    wait_profiler()
+
+    # Ensure that the profiler has stopped and released all references to x so that it can be garbage-collected
+    with profile.lock:
+        pass
     await asyncio.sleep(0.1)
     await y
 
