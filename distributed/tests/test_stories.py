@@ -156,6 +156,7 @@ async def test_worker_story_with_deps(c, s, a, b):
     assert stimulus_ids == {"compute-task"}
     expected = [
         ("dep", "ensure-task-exists", "released"),
+        ("dep", "update-who-has", [a.address], []),
         ("dep", "released", "fetch", "fetch", {}),
         ("gather-dependencies", a.address, {"dep"}),
         ("dep", "fetch", "flight", "flight", {}),

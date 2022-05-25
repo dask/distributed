@@ -1,11 +1,21 @@
 import asyncio
+import logging
+from contextlib import contextmanager
 from itertools import chain
 
 import pytest
 
+from distributed import Worker
+from distributed.core import Status
 from distributed.protocol.serialize import Serialize
 from distributed.utils import recursive_to_dict
-from distributed.utils_test import _LockedCommPool, assert_story, gen_cluster, inc
+from distributed.utils_test import (
+    _LockedCommPool,
+    assert_story,
+    captured_logger,
+    gen_cluster,
+    inc,
+)
 from distributed.worker_state_machine import (
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -16,12 +26,13 @@ from distributed.worker_state_machine import (
     SendMessageToScheduler,
     StateMachineEvent,
     TaskState,
+    TaskStateState,
     UniqueTaskHeap,
     merge_recs_instructions,
 )
 
 
-async def wait_for_state(key, state, dask_worker):
+async def wait_for_state(key: str, state: TaskStateState, dask_worker: Worker) -> None:
     while key not in dask_worker.tasks or dask_worker.tasks[key].state != state:
         await asyncio.sleep(0.005)
 
@@ -245,28 +256,36 @@ def test_executefailure_to_dict():
     assert ev3.traceback_text == "tb text"
 
 
+@contextmanager
+def freeze_data_fetching(w: Worker):
+    """Prevent any task from transitioning from fetch to flight on the worker while
+    inside the context.
+
+    This is not the same as setting the worker to Status=paused, which would also
+    inform the Scheduler and prevent further tasks to be enqueued on the worker.
+    """
+    old_out_connections = w.total_out_connections
+    old_comm_threshold = w.comm_threshold_bytes
+    w.total_out_connections = 0
+    w.comm_threshold_bytes = 0
+    yield
+    w.total_out_connections = old_out_connections
+    w.comm_threshold_bytes = old_comm_threshold
+
+
 @gen_cluster(client=True)
 async def test_fetch_to_compute(c, s, a, b):
-    # Block ensure_communicating to ensure we indeed know that the task is in
-    # fetch and doesn't leave it accidentally
-    old_out_connections, b.total_out_connections = b.total_out_connections, 0
-    old_comm_threshold, b.comm_threshold_bytes = b.comm_threshold_bytes, 0
-
-    f1 = c.submit(inc, 1, workers=[a.address], key="f1", allow_other_workers=True)
-    f2 = c.submit(inc, f1, workers=[b.address], key="f2")
-
-    await wait_for_state(f1.key, "fetch", b)
-    await a.close()
-
-    b.total_out_connections = old_out_connections
-    b.comm_threshold_bytes = old_comm_threshold
+    with freeze_data_fetching(b):
+        f1 = c.submit(inc, 1, workers=[a.address], key="f1", allow_other_workers=True)
+        f2 = c.submit(inc, f1, workers=[b.address], key="f2")
+        await wait_for_state(f1.key, "fetch", b)
+        await a.close()
 
     await f2
 
     assert_story(
         b.log,
-        # FIXME: This log should be replaced with an
-        # StateMachineEvent/Instruction log
+        # FIXME: This log should be replaced with a StateMachineEvent log
         [
             (f2.key, "compute-task", "released"),
             # This is a "please fetch" request. We don't have anything like
@@ -285,23 +304,188 @@ async def test_fetch_to_compute(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_fetch_via_amm_to_compute(c, s, a, b):
-    # Block ensure_communicating to ensure we indeed know that the task is in
-    # fetch and doesn't leave it accidentally
-    old_out_connections, b.total_out_connections = b.total_out_connections, 0
-    old_comm_threshold, b.comm_threshold_bytes = b.comm_threshold_bytes, 0
-
-    f1 = c.submit(inc, 1, workers=[a.address], key="f1", allow_other_workers=True)
-
-    await f1
-    s.request_acquire_replicas(b.address, [f1.key], stimulus_id="test")
-
-    await wait_for_state(f1.key, "fetch", b)
-    await a.close()
-
-    b.total_out_connections = old_out_connections
-    b.comm_threshold_bytes = old_comm_threshold
+    with freeze_data_fetching(b):
+        f1 = c.submit(inc, 1, workers=[a.address], key="f1", allow_other_workers=True)
+        await f1
+        s.request_acquire_replicas(b.address, [f1.key], stimulus_id="test")
+        await wait_for_state(f1.key, "fetch", b)
+        await a.close()
 
     await f1
+
+    assert_story(
+        b.log,
+        # FIXME: This log should be replaced with a StateMachineEvent log
+        [
+            (f1.key, "ensure-task-exists", "released"),
+            (f1.key, "released", "fetch", "fetch", {}),
+            (f1.key, "compute-task", "fetch"),
+            (f1.key, "put-in-memory"),
+        ],
+    )
+
+
+@pytest.mark.parametrize("as_deps", [False, True])
+@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
+    """
+    as_deps=True
+        0. task x is a dependency of y1 and y2
+        1. scheduler calls handle_compute("y1", who_has={"x": [w2, w3]}) on w1
+        2. x transitions released -> fetch
+        3. the network stack is busy, so x does not transition to flight yet.
+        4. scheduler calls handle_compute("y2", who_has={"x": [w3]}) on w1
+        5. when x finally reaches the top of the data_needed heap, the w1 will not try
+           contacting w2
+
+    as_deps=False
+        1. scheduler calls handle_acquire_replicas(who_has={"x": [w2, w3]}) on w1
+        2. x transitions released -> fetch
+        3. the network stack is busy, so x does not transition to flight yet.
+        4. scheduler calls handle_acquire_replicas(who_has={"x": [w3]}) on w1
+        5. when x finally reaches the top of the data_needed heap, the w1 will not try
+           contacting w2
+    """
+    x = (await c.scatter({"x": 1}, workers=[w2.address, w3.address], broadcast=True))[
+        "x"
+    ]
+    with freeze_data_fetching(w1):
+        if as_deps:
+            y1 = c.submit(inc, x, key="y1", workers=[w1.address])
+        else:
+            s.request_acquire_replicas(w1.address, ["x"], stimulus_id="test")
+
+        await wait_for_state("x", "fetch", w1)
+        assert w1.tasks["x"].who_has == {w2.address, w3.address}
+
+        assert len(s.tasks["x"].who_has) == 2
+        await w2.close()
+        while len(s.tasks["x"].who_has) > 1:
+            await asyncio.sleep(0.01)
+
+        if as_deps:
+            y2 = c.submit(inc, x, key="y2", workers=[w1.address])
+        else:
+            s.request_acquire_replicas(w1.address, ["x"], stimulus_id="test")
+
+        while w1.tasks["x"].who_has != {w3.address}:
+            await asyncio.sleep(0.01)
+
+    # Jump-start ensure_communicating after freeze_data_fetching.
+    # This simulates an unrelated third worker moving out of in_flight_workers.
+    w1.status = Status.paused
+    w1.status = Status.running
+
+    await wait_for_state("x", "memory", w1)
+
+    assert_story(
+        w1.story("request-dep"),
+        [("request-dep", w3.address, {"x"})],
+        # This tests that there has been no attempt to contact w2.
+        # If the assumption being tested breaks, this will fail 50% of the times.
+        strict=True,
+    )
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
+async def test_fetch_to_missing(c, s, a, b):
+    """
+    1. task x is a dependency of y
+    2. scheduler calls handle_compute("y", who_has={"x": [b]}) on a
+    3. x transitions released -> fetch -> flight; a connects to b
+    4. b responds it's busy. x transitions flight -> fetch
+    5. The busy state triggers an RPC call to Scheduler.who_has
+    6. the scheduler responds {"x": []}, because w1 in the meantime has lost the key.
+    7. x is transitioned fetch -> missing
+    """
+    x = await c.scatter({"x": 1}, workers=[b.address])
+    b.total_in_connections = 0
+    # Crucially, unlike with `c.submit(inc, x, workers=[a.address])`, the scheduler
+    # doesn't keep track of acquire-replicas requests, so it won't proactively inform a
+    # when we call remove_worker later on
+    s.request_acquire_replicas(a.address, ["x"], stimulus_id="test")
+
+    # state will flip-flop between fetch and flight every 150ms, which is the retry
+    # period for busy workers.
+    await wait_for_state("x", "fetch", a)
+    assert b.address in a.busy_workers
+
+    # Sever connection between b and s, but not between b and a.
+    # If a tries fetching from b after this, b will keep responding {status: busy}.
+    b.periodic_callbacks["heartbeat"].stop()
+    await s.remove_worker(b.address, close=False, stimulus_id="test")
+
+    await wait_for_state("x", "missing", a)
+
+    assert_story(
+        a.story("x"),
+        [
+            ("x", "ensure-task-exists", "released"),
+            ("x", "update-who-has", [b.address], []),
+            ("x", "released", "fetch", "fetch", {}),
+            ("gather-dependencies", b.address, {"x"}),
+            ("x", "fetch", "flight", "flight", {}),
+            ("request-dep", b.address, {"x"}),
+            ("busy-gather", b.address, {"x"}),
+            ("x", "flight", "fetch", "fetch", {}),
+            ("x", "update-who-has", [], [b.address]),  # Called Scheduler.who_has
+            ("x", "fetch", "missing", "missing", {}),
+        ],
+        # There may be a round of find_missing() after this.
+        # Due to timings, there also may be multiple attempts to connect from a to b.
+        strict=False,
+    )
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_self_denounce_missing_data(c, s, a):
+    x = c.submit(inc, 1, key="x")
+    await x
+
+    y = c.submit(inc, x, key="y")
+    # Wait until the scheduler is forwarding the compute-task to the worker, but before
+    # the worker has received it
+    while "y" not in s.tasks or s.tasks["y"].state != "processing":
+        await asyncio.sleep(0)
+
+    # Wipe x from the worker. This simulates the scheduler calling
+    # delete_worker_data(a.address, ["x"]), but the RPC call has not returned yet.
+    a.handle_free_keys(keys=["x"], stimulus_id="test")
+
+    # At the same time,
+    # a->s: {"op": "release-worker-data", keys=["x"]}
+    # s->a: {"op": "compute-task", key="y", who_has={"x": [a.address]}}
+
+    with captured_logger("distributed.worker", level=logging.DEBUG) as logger:
+        # The compute-task request for y gets stuck in waiting state, because x is not
+        # in memory. However, moments later the scheduler is informed that a is missing
+        # x; so it releases y and then recomputes both x and y.
+        assert await y == 3
+
+    assert (
+        f"Scheduler claims worker {a.address} holds data for task "
+        "<TaskState 'x' released>, which is not true."
+    ) in logger.getvalue()
+
+    assert_story(
+        a.story("x", "y"),
+        # Note: omitted uninteresting events
+        [
+            # {"op": "compute-task", key="y", who_has={"x": [a.address]}}
+            # reaches the worker
+            ("y", "compute-task", "released"),
+            ("x", "ensure-task-exists", "released"),
+            ("x", "released", "missing", "missing", {}),
+            # {"op": "release-worker-data", keys=["x"]} reaches the scheduler, which
+            # reacts by releasing both keys and then recomputing them
+            ("y", "release-key"),
+            ("x", "release-key"),
+            ("x", "compute-task", "released"),
+            ("x", "executing", "memory", "memory", {}),
+            ("y", "compute-task", "released"),
+            ("y", "executing", "memory", "memory", {}),
+        ],
+    )
 
 
 @gen_cluster(client=True)

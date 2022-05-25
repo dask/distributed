@@ -1887,8 +1887,12 @@ class Worker(ServerNode):
             if ts.state != "memory":
                 recommendations[ts] = "fetch"
 
-        self.update_who_has(who_has)
+        recommendations, instructions = merge_recs_instructions(
+            (recommendations, []),
+            self._update_who_has(who_has, stimulus_id=stimulus_id),
+        )
         self.transitions(recommendations, stimulus_id=stimulus_id)
+        self._handle_instructions(instructions)
 
         if self.validate:
             for key in keys:
@@ -1991,7 +1995,10 @@ class Worker(ServerNode):
             for dep_key, value in nbytes.items():
                 self.tasks[dep_key].nbytes = value
 
-            self.update_who_has(who_has)
+            recommendations, instructions = merge_recs_instructions(
+                (recommendations, instructions),
+                self._update_who_has(who_has, stimulus_id=stimulus_id),
+            )
         else:  # pragma: nocover
             raise RuntimeError(f"Unexpected task state encountered {ts} {stimulus_id}")
 
@@ -2947,10 +2954,14 @@ class Worker(ServerNode):
             "data": key in self.data,
         }
 
-    def story(self, *keys_or_tasks: str | TaskState) -> list[tuple]:
-        """Return all transitions involving one or more tasks"""
-        keys = {e.key if isinstance(e, TaskState) else e for e in keys_or_tasks}
-        return worker_story(keys, self.log)
+    def story(self, *keys_or_tasks_or_tags: str | TaskState) -> list[tuple]:
+        """Return all records from the transitions log involving one or more tasks;
+        it can also be used for arbitrary non-transition tags.
+        """
+        keys_or_tags = {
+            e.key if isinstance(e, TaskState) else e for e in keys_or_tasks_or_tags
+        }
+        return worker_story(keys_or_tags, self.log)
 
     async def get_story(self, keys=None):
         return self.story(*keys)
@@ -3143,8 +3154,14 @@ class Worker(ServerNode):
 
         while tasks:
             ts = tasks.peek()
-            if ts.state != "fetch" or ts.key in all_keys_to_gather:
+            if (
+                ts.state != "fetch"
                 # Do not acquire the same key twice if multiple workers holds replicas
+                or ts.key in all_keys_to_gather
+                # A replica is still available (otherwise status would not be 'fetch'
+                # anymore), but not on this worker. See _update_who_has().
+                or worker not in ts.who_has
+            ):
                 tasks.pop()
                 continue
             if total_bytes + ts.get_nbytes() > self.target_message_size:
@@ -3370,7 +3387,12 @@ class Worker(ServerNode):
                 who_has = await retry_operation(
                     self.scheduler.who_has, keys=refresh_who_has
                 )
-                self.update_who_has(who_has)
+                refresh_stimulus_id = f"gather-dep-busy-{time()}"
+                recommendations, instructions = self._update_who_has(
+                    who_has, stimulus_id=refresh_stimulus_id
+                )
+                self.transitions(recommendations, stimulus_id=refresh_stimulus_id)
+                self._handle_instructions(instructions)
 
     @log_errors
     def _readd_busy_worker(self, worker: str) -> None:
@@ -3394,12 +3416,15 @@ class Worker(ServerNode):
                 self.scheduler.who_has,
                 keys=[ts.key for ts in self._missing_dep_flight],
             )
-            self.update_who_has(who_has)
-            recommendations: Recs = {}
+            recommendations, instructions = self._update_who_has(
+                who_has, stimulus_id=stimulus_id
+            )
             for ts in self._missing_dep_flight:
                 if ts.who_has:
+                    assert ts not in recommendations
                     recommendations[ts] = "fetch"
             self.transitions(recommendations, stimulus_id=stimulus_id)
+            self._handle_instructions(instructions)
 
         finally:
             self._find_missing_running = False
@@ -3408,34 +3433,90 @@ class Worker(ServerNode):
                 "find-missing"
             ].callback_time = self.periodic_callbacks["heartbeat"].callback_time
 
-    def update_who_has(self, who_has: dict[str, Collection[str]]) -> None:
-        try:
-            for dep, workers in who_has.items():
-                if not workers:
-                    continue
+    def _update_who_has(
+        self, who_has: Mapping[str, Collection[str]], *, stimulus_id: str
+    ) -> RecsInstrs:
+        recs: Recs = {}
+        instructions: Instructions = []
 
-                if dep in self.tasks:
-                    dep_ts = self.tasks[dep]
-                    if self.address in workers and self.tasks[dep].state != "memory":
-                        logger.debug(
-                            "Scheduler claims worker %s holds data for task %s which is not true.",
-                            self.name,
-                            dep,
-                        )
-                        # Do not mutate the input dict. That's rude
-                        workers = set(workers) - {self.address}
-                    dep_ts.who_has.update(workers)
+        for key, workers in who_has.items():
+            ts = self.tasks.get(key)
+            if not ts:
+                # The worker sent a refresh-who-has request to the scheduler but, by the
+                # time the answer comes back, some of the keys have been forgotten.
+                continue
+            workers = set(workers)
 
-                    for worker in workers:
-                        self.has_what[worker].add(dep)
-                        self.data_needed_per_worker[worker].push(dep_ts)
-        except Exception as e:  # pragma: no cover
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
+            if self.address in workers:
+                workers.remove(self.address)
+                if ts.state != "memory":
+                    # This can happen if the worker recently released a key, but the
+                    # scheduler hasn't processed the release-worker-data message yet.
+                    # It is not necessary to send a missing-data message back to the
+                    # scheduler here, because it is guaranteed to reach the scheduler
+                    # after the release-worker-data from the same BatchedSend channel.
+                    logger.debug(
+                        "Scheduler claims worker %s holds data for task %s, "
+                        "which is not true.",
+                        self.address,
+                        ts,
+                    )
 
-                pdb.set_trace()
-            raise
+            if ts.who_has == workers:
+                continue
+
+            new_workers = workers - ts.who_has
+            del_workers = ts.who_has - workers
+
+            def max2(workers: set[str]) -> list[str]:
+                if len(workers) < 3:
+                    return list(workers)
+                it = iter(workers)
+                return [next(it), next(it), f"({len(workers) - 2} more)"]
+
+            self.log.append(
+                (
+                    key,
+                    "update-who-has",
+                    max2(new_workers),
+                    max2(del_workers),
+                    stimulus_id,
+                    time(),
+                )
+            )
+
+            for worker in del_workers:
+                self.has_what[worker].discard(key)
+                # Can't remove from self.data_needed_per_worker; there is logic
+                # in _select_keys_for_gather to deal with this
+
+            for worker in new_workers:
+                self.has_what[worker].add(key)
+                if ts.state == "fetch":
+                    self.data_needed_per_worker[worker].push(ts)
+                    # All workers which previously held a replica of the key may either
+                    # be in flight or busy. Kick off ensure_communicating to try
+                    # fetching the data from the new worker.
+                    # There are other reasons why a task may be sitting in 'fetch' state
+                    # - e.g. if we're over the total_out_connections or the
+                    # comm_threshold_bytes limit, or if we're paused. We're deliberately
+                    # NOT testing the full gamut of use cases for the sake of simplicity
+                    # and robustness and just stating that ensure_communicating *may*
+                    # return new GatherDep events now.
+                    instructions.append(
+                        EnsureCommunicatingAfterTransitions(stimulus_id=stimulus_id)
+                    )
+
+            ts.who_has = workers
+            # currently fetching -> can no longer be fetched -> transition to missing
+            # any other state -> eventually, possibly, the task may transition to fetch
+            # or missing, at which point the relevant transitions will test who_has that
+            # we just updated. e.g. see the various transitions to fetch, which
+            # instead recommend transitioning to missing if who_has is empty.
+            if not workers and ts.state == "fetch":
+                recs[ts] = "missing"
+
+        return recs, instructions
 
     def handle_steal_request(self, key: str, stimulus_id: str) -> None:
         # There may be a race condition between stealing and releasing a task.
@@ -4259,6 +4340,7 @@ class Worker(ServerNode):
                 assert ts.state is not None
                 # check that worker has task
                 for worker in ts.who_has:
+                    assert worker != self.address
                     assert ts.key in self.has_what[worker]
                 # check that deps have a set state and that dependency<->dependent links
                 # are there
@@ -4283,6 +4365,7 @@ class Worker(ServerNode):
             # FIXME https://github.com/dask/distributed/issues/6319
             # assert self.waiting_for_data_count == waiting_for_data_count
             for worker, keys in self.has_what.items():
+                assert worker != self.address
                 for k in keys:
                     assert worker in self.tasks[k].who_has
 
