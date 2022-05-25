@@ -7002,7 +7002,7 @@ class Scheduler(SchedulerState, ServerNode):
                 "Scheduler closing after being idle for %s",
                 format_time(self.idle_timeout),
             )
-            self.add_background_task(self.close())
+            asyncio.create_task(self.close())
 
     def adaptive_target(self, target_duration=None):
         """Desired number of workers based on the current workload
