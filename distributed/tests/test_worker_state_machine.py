@@ -416,7 +416,7 @@ async def test_fetch_to_missing(c, s, a, b):
     )
 
 
-@pytest.mark.skip(reason="TODO link issue")
+@pytest.mark.skip(reason="https://github.com/dask/distributed/issues/6446")
 @gen_cluster(client=True)
 async def test_new_replica_while_all_workers_in_flight(c, s, w1, w2):
     """A task is stuck in 'fetch' state because all workers that hold a replica are in
