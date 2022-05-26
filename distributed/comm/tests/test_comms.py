@@ -563,7 +563,7 @@ async def check_client_server(
 
 @pytest.mark.gpu
 @gen_test()
-async def test_ucx_client_server():
+async def test_ucx_client_server(ucx_loop):
     pytest.importorskip("distributed.comm.ucx")
     ucp = pytest.importorskip("ucp")
 
