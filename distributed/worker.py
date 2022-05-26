@@ -2342,7 +2342,16 @@ class Worker(ServerNode):
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         """See Worker._transition_from_resumed"""
-        return self._transition_from_resumed(ts, "fetch", stimulus_id=stimulus_id)
+        recs, instructions = self._transition_from_resumed(
+            ts, "fetch", stimulus_id=stimulus_id
+        )
+        if self.validate:
+            # This would only be possible in a fetch->cancelled->resumed->fetch loop,
+            # but there are no transitions from fetch which set the state to cancelled.
+            # If this assertion failed, we' need to call _ensure_communicating like in
+            # the other transitions that set ts.status = "fetch".
+            assert ts.state != "fetch"
+        return recs, instructions
 
     def transition_resumed_missing(
         self, ts: TaskState, *, stimulus_id: str
