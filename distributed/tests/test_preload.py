@@ -302,3 +302,14 @@ async def test_client_preload_config_click(s):
     ):
         async with Client(address=s.address, asynchronous=True) as c:
             assert c.foo == value
+
+
+@gen_test()
+async def test_teardown_failure_doesnt_crash_scheduler():
+    text = """
+def dask_teardown(worker):
+    raise Exception(123)
+"""
+    async with Scheduler(dashboard_address=":0", preload=text) as s:
+        async with Worker(s.address, preload=[text]) as w:
+            pass
