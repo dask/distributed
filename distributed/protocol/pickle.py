@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 import pickle
 
@@ -40,13 +41,14 @@ def dumps(x, *, buffer_callback=None, protocol=HIGHEST_PROTOCOL):
     try:
         buffers.clear()
         result = pickle.dumps(x, **dump_kwargs)
-        if len(result) < 1000:
-            if b"__main__" in result:
+        if (
+            b"__main__" in result
+            or getattr(inspect.getmodule(x), "__name__", None)
+            in cloudpickle.list_registry_pickle_by_value()
+        ):
+            if len(result) < 1000 or not _always_use_pickle_for(x):
                 buffers.clear()
                 result = cloudpickle.dumps(x, **dump_kwargs)
-        elif not _always_use_pickle_for(x) and b"__main__" in result:
-            buffers.clear()
-            result = cloudpickle.dumps(x, **dump_kwargs)
     except Exception:
         try:
             buffers.clear()
