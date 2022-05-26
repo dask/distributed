@@ -209,3 +209,29 @@ async def test_register_plugin_on_scheduler(c, s, a, b):
     await s.register_scheduler_plugin(MyPlugin())
 
     assert s._foo == "bar"
+
+
+@gen_cluster(client=True)
+async def test_closing_errors_ok(c, s, a, b, capsys):
+    class OK(SchedulerPlugin):
+        async def before_close(self):
+            print(123)
+
+        async def close(self):
+            print(456)
+
+    class Bad(SchedulerPlugin):
+        async def before_close(self):
+            raise Exception()
+
+        async def close(self):
+            raise Exception()
+
+    await s.register_scheduler_plugin(OK())
+    await s.register_scheduler_plugin(Bad())
+
+    await s.close()
+
+    out, err = capsys.readouterr()
+    assert "123" in out
+    assert "456" in out

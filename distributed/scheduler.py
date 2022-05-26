@@ -3358,9 +3358,12 @@ class Scheduler(SchedulerState, ServerNode):
             await self.finished()
             return
 
-        await asyncio.gather(
-            *[plugin.before_close() for plugin in list(self.plugins.values())]
-        )
+        try:
+            await asyncio.gather(
+                *[plugin.before_close() for plugin in list(self.plugins.values())]
+            )
+        except Exception:
+            logger.exception("Plugin before_close call failed during scheduler close")
 
         self.status = Status.closing
 
@@ -3370,9 +3373,12 @@ class Scheduler(SchedulerState, ServerNode):
         for preload in self.preloads:
             await preload.teardown()
 
-        await asyncio.gather(
-            *[plugin.close() for plugin in list(self.plugins.values())]
-        )
+        try:
+            await asyncio.gather(
+                *[plugin.close() for plugin in list(self.plugins.values())]
+            )
+        except Exception:
+            logger.exception("Plugin close call failed during scheduler close")
 
         for pc in self.periodic_callbacks.values():
             pc.stop()
