@@ -18,6 +18,7 @@ from distributed.profile import (
     info_frame,
     ll_get_stack,
     llprocess,
+    lock,
     merge,
     plot_data,
     process,
@@ -200,6 +201,45 @@ def test_watch():
 
     sleep(0.5)
     assert 1 < len(log) < 10
+
+    start = time()
+    while threading.active_count() > start_threads:
+        assert time() < start + 2
+        sleep(0.01)
+
+
+def test_watch_requires_lock_to_run():
+    start = time()
+
+    def stop_lock():
+        return time() > start + 0.600
+
+    def stop_profile():
+        return time() > start + 0.500
+
+    def hold_lock(stop):
+        with lock:
+            while not stop():
+                sleep(0.1)
+
+    start_threads = threading.active_count()
+
+    # Hog the lock over the entire duration of watch
+    thread = threading.Thread(
+        target=hold_lock, name="Hold Lock", kwargs={"stop": stop_lock}
+    )
+    thread.daemon = True
+    thread.start()
+
+    log = watch(interval="10ms", cycle="50ms", stop=stop_profile)
+
+    start = time()  # wait until thread starts up
+    while threading.active_count() < start_threads + 2:
+        assert time() < start + 2
+        sleep(0.01)
+
+    sleep(0.5)
+    assert len(log) == 0
 
     start = time()
     while threading.active_count() > start_threads:
