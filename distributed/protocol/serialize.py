@@ -909,3 +909,8 @@ def register_generic(
     object_with_dict_serializer = ObjectDictSerializer(serializer_name)
     serialize_func.register(cls)(object_with_dict_serializer.serialize)
     deserialize_func.register(cls)(object_with_dict_serializer.deserialize)
+
+
+import distributed.protocol.shared as plasma_shared
+
+register_serialization_family("plasma", plasma_shared.ser, plasma_shared.deser)

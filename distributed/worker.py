@@ -506,6 +506,7 @@ class Worker(ServerNode):
     plugins: dict[str, WorkerPlugin]
     _pending_plugins: tuple[WorkerPlugin, ...]
     _async_instructions: set[asyncio.Task]
+    shared_data: MutableMapping[str, list[bytes | memoryview]]
 
     def __init__(
         self,
@@ -589,6 +590,7 @@ class Worker(ServerNode):
 
         self.in_flight_workers = {}
         self.busy_workers = set()
+        self.shared_data = {}
         self.total_out_connections = dask.config.get(
             "distributed.worker.connections.outgoing"
         )
