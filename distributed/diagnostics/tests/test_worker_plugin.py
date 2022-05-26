@@ -3,7 +3,7 @@ import warnings
 
 import pytest
 
-from distributed import Worker, WorkerPlugin
+from distributed import Worker, WorkerPlugin, get_worker
 from distributed.utils_test import async_wait_for, gen_cluster, inc
 
 
@@ -284,3 +284,19 @@ async def test_WorkerPlugin_overwrite(c, s, w):
 
     await c.submit(inc, 0)
     assert w.bar == 456
+
+
+@gen_cluster(nthreads=[], client=True)
+async def test_race(c, s):
+    class MyPlugin(WorkerPlugin):
+        async def setup(self, worker):
+            await asyncio.sleep(0.2)  # create some space for tasks to start
+            worker.flag = True
+
+    def check():
+        return get_worker().flag
+
+    future = c.submit(check)
+    await c.register_worker_plugin(MyPlugin())
+    async with Worker(s.address):
+        assert await future

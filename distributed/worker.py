@@ -3733,6 +3733,7 @@ class Worker(ServerNode):
     async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent | None:
         if self.status in {Status.closing, Status.closed, Status.closing_gracefully}:
             return None
+        await self._started.wait()
         ts = self.tasks.get(key)
         if not ts:
             return None

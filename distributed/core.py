@@ -253,7 +253,7 @@ class Server:
         self.io_loop.add_callback(set_thread_ident)
         self._startup_lock = asyncio.Lock()
         self.__startup_exc: Exception | None = None
-        self.__started = asyncio.Event()
+        self._started = asyncio.Event()
 
         self.rpc = ConnectionPool(
             limit=connection_limit,
@@ -325,7 +325,7 @@ class Server:
                 await _close_on_failure(exc)
                 raise RuntimeError(f"{type(self).__name__} failed to start.") from exc
             self.status = Status.running
-            self.__started.set()
+            self._started.set()
         return self
 
     async def __aenter__(self):
