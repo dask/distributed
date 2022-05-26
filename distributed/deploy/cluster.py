@@ -427,10 +427,13 @@ class Cluster(SyncMethodMixin):
         cluster_repr_interval = parse_timedelta(
             dask.config.get("distributed.deploy.cluster-repr-interval", default="ms")
         )
-        pc = PeriodicCallback(update, cluster_repr_interval * 1000)
-        self.periodic_callbacks["cluster-repr"] = pc
-        pc.start()
 
+        def install():
+            pc = PeriodicCallback(update, cluster_repr_interval * 1000)
+            self.periodic_callbacks["cluster-repr"] = pc
+            pc.start()
+
+        self.loop.add_callback(install)
         return tab
 
     def _repr_html_(self, cluster_status=None):
