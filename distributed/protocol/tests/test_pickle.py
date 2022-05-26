@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import pickle
+import sys
 import weakref
 from functools import partial
 from operator import add
 
+import cloudpickle
 import pytest
+
+from dask.utils import tmpdir
 
 from distributed import profile
 from distributed.protocol import deserialize, serialize
@@ -187,3 +191,22 @@ def test_pickle_functions(protocol):
             assert wr() is None
             assert wr2() is None
             assert wr3() is None
+
+
+def test_pickle_by_value_when_registered():
+    with tmpdir() as d:
+        try:
+            sys.path.insert(0, d)
+            module = f"{d}/mymodule.py"
+            with open(module, "w") as f:
+                f.write("def myfunc(x):\n    return x + 1")
+            import mymodule  # noqa
+
+            assert dumps(mymodule.myfunc, protocol=HIGHEST_PROTOCOL) == pickle.dumps(
+                mymodule.myfunc, protocol=HIGHEST_PROTOCOL
+            )
+            cloudpickle.register_pickle_by_value(mymodule)
+            assert len(dumps(mymodule.myfunc)) > len(pickle.dumps(mymodule.myfunc))
+
+        finally:
+            sys.path.pop(0)
