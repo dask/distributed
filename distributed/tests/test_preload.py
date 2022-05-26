@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import shutil
@@ -279,6 +280,23 @@ async def test_client_preload_click(s):
         address=s.address, asynchronous=True, preload=text, preload_argv=[[value]]
     ) as c:
         assert c.foo == value
+
+
+@gen_test()
+async def test_teardown_failure_doesnt_crash_scheduler():
+    text = """
+def dask_teardown(worker):
+    raise Exception(123)
+"""
+
+    with captured_logger(logging.getLogger("distributed.scheduler")) as s_logger:
+        with captured_logger(logging.getLogger("distributed.worker")) as w_logger:
+            async with Scheduler(dashboard_address=":0", preload=text) as s:
+                async with Worker(s.address, preload=[text]) as w:
+                    pass
+
+    assert "123" in s_logger.getvalue()
+    assert "123" in w_logger.getvalue()
 
 
 @gen_cluster(nthreads=[])

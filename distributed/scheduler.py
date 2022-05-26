@@ -3358,8 +3358,14 @@ class Scheduler(SchedulerState, ServerNode):
             await self.finished()
             return
 
+        async def log_errors(func):
+            try:
+                await func()
+            except Exception:
+                logger.exception("Plugin call failed during scheduler.close")
+
         await asyncio.gather(
-            *[plugin.before_close() for plugin in list(self.plugins.values())]
+            *[log_errors(plugin.before_close) for plugin in list(self.plugins.values())]
         )
 
         self.status = Status.closing
@@ -3368,10 +3374,13 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle("dask-scheduler [closing]")
 
         for preload in self.preloads:
-            await preload.teardown()
+            try:
+                await preload.teardown()
+            except Exception as e:
+                logger.exception(e)
 
         await asyncio.gather(
-            *[plugin.close() for plugin in list(self.plugins.values())]
+            *[log_errors(plugin.close) for plugin in list(self.plugins.values())]
         )
 
         for pc in self.periodic_callbacks.values():

@@ -1384,7 +1384,7 @@ async def test_interface_async(Worker):
 @pytest.mark.gpu
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
 @gen_test()
-async def test_protocol_from_scheduler_address(Worker):
+async def test_protocol_from_scheduler_address(ucx_loop, Worker):
     pytest.importorskip("ucp")
 
     async with Scheduler(protocol="ucx", dashboard_address=":0") as s:
