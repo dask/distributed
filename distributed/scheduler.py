@@ -3374,7 +3374,10 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle("dask-scheduler [closing]")
 
         for preload in self.preloads:
-            await preload.teardown()
+            try:
+                await preload.teardown()
+            except Exception as e:
+                logger.exception(e)
 
         await asyncio.gather(
             *[log_errors(plugin.close) for plugin in list(self.plugins.values())]
