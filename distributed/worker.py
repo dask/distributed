@@ -3427,13 +3427,15 @@ class Worker(ServerNode):
 
             if self.address in workers:
                 workers.remove(self.address)
+                # This can only happen if rebalance() recently asked to release a key,
+                # but the RPC call hasn't returned yet. rebalance() is flagged as not
+                # being safe to run while the cluster is not at rest and has already
+                # been penned in to be redesigned on top of the AMM.
+                # It is not necessary to send a message back to the
+                # scheduler here, because it is guaranteed that there's already a
+                # release-worker-data message in transit to it.
                 if ts.state != "memory":
-                    # This can happen if the worker recently released a key, but the
-                    # scheduler hasn't processed the release-worker-data message yet.
-                    # It is not necessary to send a missing-data message back to the
-                    # scheduler here, because it is guaranteed to reach the scheduler
-                    # after the release-worker-data from the same BatchedSend channel.
-                    logger.debug(
+                    logger.debug(  # pragma: nocover
                         "Scheduler claims worker %s holds data for task %s, "
                         "which is not true.",
                         self.address,

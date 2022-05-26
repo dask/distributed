@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from itertools import chain
 
 import pytest
@@ -11,7 +10,6 @@ from distributed.utils_test import (
     BlockedGetData,
     _LockedCommPool,
     assert_story,
-    captured_logger,
     freeze_data_fetching,
     gen_cluster,
     inc,
@@ -461,57 +459,6 @@ async def test_new_replica_while_all_workers_in_flight(c, s, w1, w2):
         # Finally let the other worker to get out of flight
         w3.block_get_data.set()
         await wait_for_state("x", "memory", w1)
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_self_denounce_missing_data(c, s, a):
-    x = c.submit(inc, 1, key="x")
-    await x
-
-    y = c.submit(inc, x, key="y")
-    # Wait until the scheduler is forwarding the compute-task to the worker, but before
-    # the worker has received it
-    while "y" not in s.tasks or s.tasks["y"].state != "processing":
-        await asyncio.sleep(0)
-
-    # Wipe x from the worker. This simulates the scheduler calling
-    # delete_worker_data(a.address, ["x"]), but the RPC call has not returned yet.
-    a.handle_free_keys(keys=["x"], stimulus_id="test")
-
-    # At the same time,
-    # a->s: {"op": "release-worker-data", keys=["x"]}
-    # s->a: {"op": "compute-task", key="y", who_has={"x": [a.address]}}
-
-    with captured_logger("distributed.worker", level=logging.DEBUG) as logger:
-        # The compute-task request for y gets stuck in waiting state, because x is not
-        # in memory. However, moments later the scheduler is informed that a is missing
-        # x; so it releases y and then recomputes both x and y.
-        assert await y == 3
-
-    assert (
-        f"Scheduler claims worker {a.address} holds data for task "
-        "<TaskState 'x' released>, which is not true."
-    ) in logger.getvalue()
-
-    assert_story(
-        a.story("x", "y"),
-        # Note: omitted uninteresting events
-        [
-            # {"op": "compute-task", key="y", who_has={"x": [a.address]}}
-            # reaches the worker
-            ("y", "compute-task", "released"),
-            ("x", "ensure-task-exists", "released"),
-            ("x", "released", "missing", "missing", {}),
-            # {"op": "release-worker-data", keys=["x"]} reaches the scheduler, which
-            # reacts by releasing both keys and then recomputing them
-            ("y", "release-key"),
-            ("x", "release-key"),
-            ("x", "compute-task", "released"),
-            ("x", "executing", "memory", "memory", {}),
-            ("y", "compute-task", "released"),
-            ("y", "executing", "memory", "memory", {}),
-        ],
-    )
 
 
 @gen_cluster(client=True)
