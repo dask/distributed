@@ -2620,7 +2620,7 @@ async def test_gather_dep_exception_one_task(c, s, a, b):
         if peer_addr == a.address and msg["op"] == "get_data":
             break
 
-    # Provoke an "impossible transision exception"
+    # Provoke an "impossible transition exception"
     # By choosing a state which doesn't exist we're not running into validation
     # errors and the state machine should raise if we want to transition from
     # fetch to memory
