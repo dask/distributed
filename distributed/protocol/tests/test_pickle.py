@@ -19,6 +19,7 @@ from distributed.protocol.pickle import (
     dumps,
     loads,
 )
+from distributed.utils_test import save_sys_modules
 
 
 class MemoryviewHolder:
@@ -202,19 +203,20 @@ def test_pickle_functions(protocol):
     not CLOUDPICKLE_GTE_20, reason="Pickle by value registration not supported"
 )
 def test_pickle_by_value_when_registered():
-    with tmpdir() as d:
-        try:
-            sys.path.insert(0, d)
-            module = f"{d}/mymodule.py"
-            with open(module, "w") as f:
-                f.write("def myfunc(x):\n    return x + 1")
-            import mymodule  # noqa
+    with save_sys_modules():
+        with tmpdir() as d:
+            try:
+                sys.path.insert(0, d)
+                module = f"{d}/mymodule.py"
+                with open(module, "w") as f:
+                    f.write("def myfunc(x):\n    return x + 1")
+                import mymodule  # noqa
 
-            assert dumps(mymodule.myfunc, protocol=HIGHEST_PROTOCOL) == pickle.dumps(
-                mymodule.myfunc, protocol=HIGHEST_PROTOCOL
-            )
-            cloudpickle.register_pickle_by_value(mymodule)
-            assert len(dumps(mymodule.myfunc)) > len(pickle.dumps(mymodule.myfunc))
+                assert dumps(
+                    mymodule.myfunc, protocol=HIGHEST_PROTOCOL
+                ) == pickle.dumps(mymodule.myfunc, protocol=HIGHEST_PROTOCOL)
+                cloudpickle.register_pickle_by_value(mymodule)
+                assert len(dumps(mymodule.myfunc)) > len(pickle.dumps(mymodule.myfunc))
 
-        finally:
-            sys.path.pop(0)
+            finally:
+                sys.path.pop(0)
