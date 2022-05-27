@@ -225,7 +225,7 @@ class Server:
         self.monitor = SystemMonitor()
         self.counters = None
         self.digests = None
-        self._background_tasks = TaskGroup()
+        self._ongoing_background_tasks = TaskGroup()
         self._ongoing_comm_handlers = set()
         self._event_finished = asyncio.Event()
 
@@ -717,10 +717,10 @@ class Server:
             assert comm.closed()
 
     def _call_later(self, delay, afunc, *args, **kwargs):
-        self._background_tasks.call_later(delay, afunc, *args, **kwargs)
+        self._ongoing_background_tasks.call_later(delay, afunc, *args, **kwargs)
 
     def _call_soon(self, afunc, *args, **kwargs):
-        self._background_tasks.call_soon(afunc, *args, **kwargs)
+        self._ongoing_background_tasks.call_soon(afunc, *args, **kwargs)
 
     async def close(self, timeout=None):
         for pc in self.periodic_callbacks.values():
@@ -736,7 +736,7 @@ class Server:
             await asyncio.gather(*_stops)
 
         # TODO: Deal with exceptions
-        await self._background_tasks.stop(timeout=1)
+        await self._ongoing_background_tasks.stop(timeout=1)
 
         def _ongoing_comm_handlers():
             return (
