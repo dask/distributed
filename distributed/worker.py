@@ -82,6 +82,7 @@ from distributed.utils import (
     LRU,
     TimeoutError,
     _maybe_complex,
+    delay,
     get_ip,
     has_arg,
     import_file,
@@ -890,7 +891,7 @@ class Worker(ServerNode):
 
         if self.lifetime:
             self.lifetime += (random.random() * 2 - 1) * lifetime_stagger
-            self.add_background_task(self.close_gracefully(), self.lifetime)
+            self.add_background_task(delay(self.close_gracefully, self.lifetime)())
 
         self._async_instructions = set()
 
@@ -983,7 +984,7 @@ class Worker(ServerNode):
         prev_status = self.status
         ServerNode.status.__set__(self, value)
         stimulus_id = f"worker-status-change-{time()}"
-        self._send_worker_status_change(stimulus_id)
+        self.add_background_task(self._send_worker_status_change(stimulus_id))
         if prev_status == Status.paused and value == Status.running:
             self.handle_stimulus(UnpauseEvent(stimulus_id=stimulus_id))
 
@@ -3341,7 +3342,7 @@ class Worker(ServerNode):
                 # Avoid hammering the worker. If there are multiple replicas
                 # available, immediately try fetching from a different worker.
                 self.busy_workers.add(worker)
-                self.add_background_task(self._readd_busy_worker(worker), delay=0.15)
+                self.add_background_task(delay(self._readd_busy_worker, 0.15)(worker))
 
             refresh_who_has = set()
 

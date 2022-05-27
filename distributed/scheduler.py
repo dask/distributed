@@ -88,6 +88,7 @@ from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
     TimeoutError,
+    delay,
     empty_context,
     get_fileno_limit,
     key_split,
@@ -4252,7 +4253,7 @@ class Scheduler(SchedulerState, ServerNode):
             dask.config.get("distributed.scheduler.events-cleanup-delay")
         )
 
-        self.add_background_task(remove_worker_from_events(), cleanup_delay)
+        self.add_background_task(delay(remove_worker_from_events, cleanup_delay)())
         logger.debug("Removed worker %s", ws)
 
         return "OK"
@@ -4613,7 +4614,7 @@ class Scheduler(SchedulerState, ServerNode):
             dask.config.get("distributed.scheduler.events-cleanup-delay")
         )
 
-        self.add_background_task(remove_client_from_events(), cleanup_delay)
+        self.add_background_task(delay(remove_client_from_events, cleanup_delay)())
 
     def send_task_to_worker(self, worker, ts: TaskState, duration: float = -1):
         """Send a single computational task to a worker"""

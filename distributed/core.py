@@ -677,15 +677,7 @@ class Server:
             await comm.close()
             assert comm.closed()
 
-    def add_background_task(self, coro: Coroutine, delay: float | None = None) -> None:
-        if delay is not None:
-
-            async def _delay(coro, delay):
-                await asyncio.sleep(delay)
-                await coro
-
-            coro = _delay(coro, delay)
-
+    def add_background_task(self, coro: Coroutine) -> None:
         task = asyncio.create_task(coro)
         self._ongoing_background_tasks.add(task)
         task.add_done_callback(self._ongoing_background_tasks.remove)

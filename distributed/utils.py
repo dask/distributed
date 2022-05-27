@@ -1732,3 +1732,11 @@ def is_python_shutting_down() -> bool:
     from distributed import _python_shutting_down
 
     return _python_shutting_down
+
+
+def delay(func, delay):
+    async def wrapper(*args, **kwargs):
+        await asyncio.sleep(delay)
+        return await func(*args, **kwargs)
+
+    return wrapper
