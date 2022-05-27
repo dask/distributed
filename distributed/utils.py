@@ -1734,7 +1734,7 @@ def is_python_shutting_down() -> bool:
     return _python_shutting_down
 
 
-def delay(corofunc: Callable[..., Coroutine], delay: float):
+def delayed(corofunc: Callable[..., Coroutine], delay: float):
     """Decorator to delay the evaluation of a coroutine function by the given delay in seconds."""
 
     async def wrapper(*args, **kwargs):

@@ -15,7 +15,7 @@ from collections.abc import Container
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import Callable, ClassVar, Coroutine, TypedDict, TypeVar
+from typing import Callable, ClassVar, TypedDict, TypeVar
 
 import tblib
 from tlz import merge
@@ -37,6 +37,7 @@ from distributed.comm import (
 from distributed.metrics import time
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
+    delayed,
     get_traceback,
     has_keyword,
     is_coroutine_function,
@@ -106,6 +107,44 @@ def _expects_comm(func: Callable) -> bool:
         )
         return True
     return False
+
+
+class TaskGroup:
+    def __init__(self):
+        self.closed = False
+        self._ongoing_tasks = set()
+
+    def call_soon(self, afunc, *args, **kwargs):
+        if not self.closed:
+            task = asyncio.create_task(afunc(*args, **kwargs))
+            self._ongoing_tasks.add(task)
+            task.add_done_callback(self._ongoing_tasks.remove)
+
+    def call_later(self, delay, afunc, *args, **kwargs):
+        self.call_soon(delayed(afunc, delay), *args, **kwargs)
+
+    @property
+    def _cancellable_tasks(self):
+        return (t for t in self._ongoing_tasks if t is not asyncio.current_task())
+
+    async def cancel(self):
+        self.close()
+        return await asyncio.gather(*self._cancellable_tasks, return_exceptions=True)
+
+    def close(self):
+        self.closed = True
+
+    async def stop(self, timeout=1):
+        self.close()
+        try:
+            # Give the tasks a bit of time to finish gracefully
+            return await asyncio.wait_for(
+                asyncio.gather(*self._cancellable_tasks, return_exceptions=True),
+                timeout,
+            )
+        except asyncio.TimeoutError:
+            # the timeout on gather should've cancelled all the tasks
+            return await self.cancel()
 
 
 class Server:
@@ -186,7 +225,7 @@ class Server:
         self.monitor = SystemMonitor()
         self.counters = None
         self.digests = None
-        self._ongoing_background_tasks = set()
+        self._background_tasks = TaskGroup()
         self._ongoing_comm_handlers = set()
         self._event_finished = asyncio.Event()
 
@@ -348,7 +387,7 @@ class Server:
                 if not pc.is_running():
                     pc.start()
 
-        self.create_background_task(start_pcs())
+        self._call_soon(start_pcs)
 
     def stop(self):
         if not self.__stopped:
@@ -365,7 +404,7 @@ class Server:
                 async def _stop_listener():
                     listener.stop()
 
-                self.create_background_task(_stop_listener())
+                self._call_soon(_stop_listener)
 
     @property
     def listener(self):
@@ -656,9 +695,7 @@ class Server:
                                 break
                             handler = self.stream_handlers[op]
                             if is_coroutine_function(handler):
-                                self.create_background_task(
-                                    handler(**merge(extra, msg))
-                                )
+                                self._call_soon(handler, **merge(extra, msg))
                                 await asyncio.sleep(0)
                             else:
                                 handler(**merge(extra, msg))
@@ -679,10 +716,11 @@ class Server:
             await comm.close()
             assert comm.closed()
 
-    def create_background_task(self, coro: Coroutine) -> None:
-        task = asyncio.create_task(coro)
-        self._ongoing_background_tasks.add(task)
-        task.add_done_callback(self._ongoing_background_tasks.remove)
+    def _call_later(self, delay, afunc, *args, **kwargs):
+        self._background_tasks.call_later(delay, afunc, *args, **kwargs)
+
+    def _call_soon(self, afunc, *args, **kwargs):
+        self._background_tasks.call_soon(afunc, *args, **kwargs)
 
     async def close(self, timeout=None):
         for pc in self.periodic_callbacks.values():
@@ -697,22 +735,8 @@ class Server:
                     _stops.add(future)
             await asyncio.gather(*_stops)
 
-        def _ongoing_background_tasks():
-            return (
-                t
-                for t in self._ongoing_background_tasks
-                if t is not asyncio.current_task()
-            )
-
         # TODO: Deal with exceptions
-        try:
-            # Give the handlers a bit of time to finish gracefully
-            await asyncio.wait_for(
-                asyncio.gather(*_ongoing_background_tasks(), return_exceptions=True), 1
-            )
-        except asyncio.TimeoutError:
-            # the timeout on gather should've cancelled all the tasks
-            await asyncio.gather(*_ongoing_background_tasks(), return_exceptions=True)
+        await self._background_tasks.stop(timeout=1)
 
         def _ongoing_comm_handlers():
             return (

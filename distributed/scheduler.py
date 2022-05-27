@@ -88,7 +88,6 @@ from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
     TimeoutError,
-    delay,
     empty_context,
     get_fileno_limit,
     key_split,
@@ -3321,7 +3320,7 @@ class Scheduler(SchedulerState, ServerNode):
         for k, v in self.services.items():
             logger.info("%11s at: %25s", k, "%s:%d" % (listen_ip, v.port))
 
-        self.create_background_task(self.reevaluate_occupancy())
+        self._call_soon(self.reevaluate_occupancy)
 
         if self.scheduler_file:
             with open(self.scheduler_file, "w") as f:
@@ -4253,7 +4252,7 @@ class Scheduler(SchedulerState, ServerNode):
             dask.config.get("distributed.scheduler.events-cleanup-delay")
         )
 
-        self.create_background_task(delay(remove_worker_from_events, cleanup_delay)())
+        self._call_later(cleanup_delay, remove_worker_from_events)
         logger.debug("Removed worker %s", ws)
 
         return "OK"
@@ -4614,7 +4613,7 @@ class Scheduler(SchedulerState, ServerNode):
             dask.config.get("distributed.scheduler.events-cleanup-delay")
         )
 
-        self.create_background_task(delay(remove_client_from_events, cleanup_delay)())
+        self._call_later(cleanup_delay, remove_client_from_events)
 
     def send_task_to_worker(self, worker, ts: TaskState, duration: float = -1):
         """Send a single computational task to a worker"""
@@ -4881,10 +4880,10 @@ class Scheduler(SchedulerState, ServerNode):
         try:
             stream_comms[worker].send(msg)
         except (CommClosedError, AttributeError):
-            self.create_background_task(
-                self.remove_worker(
-                    address=worker, stimulus_id=f"worker-send-comm-fail-{time()}"
-                )
+            self._call_soon(
+                self.remove_worker,
+                address=worker,
+                stimulus_id=f"worker-send-comm-fail-{time()}",
             )
 
     def client_send(self, client, msg):
@@ -4930,11 +4929,10 @@ class Scheduler(SchedulerState, ServerNode):
                 # worker already gone
                 pass
             except (CommClosedError, AttributeError):
-                self.create_background_task(
-                    self.remove_worker(
-                        address=worker,
-                        stimulus_id=f"send-all-comm-fail-{time()}",
-                    )
+                self._call_soon(
+                    self.remove_worker,
+                    address=worker,
+                    stimulus_id=f"send-all-comm-fail-{time()}",
                 )
 
     ############################

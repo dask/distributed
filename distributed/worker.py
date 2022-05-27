@@ -82,7 +82,6 @@ from distributed.utils import (
     LRU,
     TimeoutError,
     _maybe_complex,
-    delay,
     get_ip,
     has_arg,
     import_file,
@@ -891,7 +890,7 @@ class Worker(ServerNode):
 
         if self.lifetime:
             self.lifetime += (random.random() * 2 - 1) * lifetime_stagger
-            self.create_background_task(delay(self.close_gracefully, self.lifetime)())  # type: ignore
+            self._call_later(self.lifetime, self.close_gracefully)
 
         self._async_instructions = set()
 
@@ -957,7 +956,7 @@ class Worker(ServerNode):
             async def _send_batched_stream(batched_stream):
                 batched_stream.send(full_msg)
 
-            self.create_background_task(_send_batched_stream(self.batched_stream))
+            self._call_soon(_send_batched_stream, self.batched_stream)
 
     @property
     def executing_count(self) -> int:
@@ -984,7 +983,7 @@ class Worker(ServerNode):
         prev_status = self.status
         ServerNode.status.__set__(self, value)
         stimulus_id = f"worker-status-change-{time()}"
-        self.create_background_task(self._send_worker_status_change(stimulus_id))
+        self._call_soon(self._send_worker_status_change, stimulus_id)
         if prev_status == Status.paused and value == Status.running:
             self.handle_stimulus(UnpauseEvent(stimulus_id=stimulus_id))
 
@@ -1187,7 +1186,7 @@ class Worker(ServerNode):
         self.batched_stream.start(comm)
         self.periodic_callbacks["keep-alive"].start()
         self.periodic_callbacks["heartbeat"].start()
-        self.create_background_task(self.handle_scheduler(comm))
+        self._call_soon(self.handle_scheduler, comm)
 
     def _update_latency(self, latency):
         self.latency = latency * 0.05 + self.latency * 0.95
@@ -1645,7 +1644,7 @@ class Worker(ServerNode):
 
                 bcomm.start(comm)
 
-            self.create_background_task(batched_send_connect())
+            self._call_soon(batched_send_connect)
 
         self.stream_comms[address].send(msg)
 
@@ -3342,9 +3341,7 @@ class Worker(ServerNode):
                 # Avoid hammering the worker. If there are multiple replicas
                 # available, immediately try fetching from a different worker.
                 self.busy_workers.add(worker)
-                self.create_background_task(
-                    delay(self._readd_busy_worker, 0.15)(worker)
-                )
+                self._call_later(0.15, self._readd_busy_worker, worker)
 
             refresh_who_has = set()
 
@@ -3479,7 +3476,7 @@ class Worker(ServerNode):
                 "Invalid Worker.status transition: %s -> %s", self._status, new_status
             )
             # Reiterate the current status to the scheduler to restore sync
-            self.create_background_task(self._send_worker_status_change(stimulus_id))
+            self._call_soon(self._send_worker_status_change, stimulus_id)
 
         else:
             # Update status and send confirmation to the Scheduler (see status.setter)
