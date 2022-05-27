@@ -15,6 +15,7 @@ import cloudpickle
 import psutil
 import pytest
 from tlz import concat, first, merge, valmap
+from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
@@ -779,8 +780,14 @@ async def test_update_graph_culls(s, a, b):
 
 
 def test_io_loop(loop):
-    s = Scheduler(loop=loop, dashboard_address=":0", validate=True)
-    assert s.io_loop is loop
+    async def main():
+        with pytest.warns(
+            DeprecationWarning, match=r"the loop kwarg to Scheduler is deprecated"
+        ):
+            s = Scheduler(loop=loop, dashboard_address=":0", validate=True)
+        assert s.io_loop is IOLoop.current()
+
+    asyncio.run(main())
 
 
 @gen_cluster(client=True)

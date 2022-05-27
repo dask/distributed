@@ -9,7 +9,6 @@ import sys
 import warnings
 
 import click
-from tornado.ioloop import IOLoop
 
 from distributed import Scheduler
 from distributed._signals import wait_for_signals
@@ -186,11 +185,9 @@ def main(
         resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard))
 
     async def run():
-        loop = IOLoop.current()
         logger.info("-" * 47)
 
         scheduler = Scheduler(
-            loop=loop,
             security=sec,
             host=host,
             port=port,
