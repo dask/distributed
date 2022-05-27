@@ -1996,7 +1996,7 @@ class SchedulerState:
             if nbytes is not None:
                 ts.set_nbytes(nbytes)
 
-            _remove_from_processing(self, ts)
+            _remove_from_processing(self, ts, recommendations)
 
             _add_to_memory(
                 self, ts, ws, recommendations, client_msgs, type=type, typename=typename
@@ -2229,7 +2229,7 @@ class SchedulerState:
                 assert not ts.waiting_on
                 assert self.tasks[key].state == "processing"
 
-            w: str = _remove_from_processing(self, ts)
+            w = _remove_from_processing(self, ts, recommendations)
             if w:
                 worker_msgs[w] = [
                     {
@@ -2298,7 +2298,7 @@ class SchedulerState:
                 ws = ts.processing_on
                 ws.actors.remove(ts)
 
-            w = _remove_from_processing(self, ts)
+            w = _remove_from_processing(self, ts, recommendations)
 
             ts.erred_on.add(w or worker)  # type: ignore
             if exception is not None:
@@ -2649,7 +2649,9 @@ class SchedulerState:
                 sw: set = set()
                 for addr, supplied in dr.items():
                     if supplied >= required:
-                        sw.add(addr)
+                        ws = self.workers[addr]
+                        if supplied - ws.used_resources[resource] >= required:
+                            sw.add(addr)
 
                 dw[resource] = sw
 
@@ -7115,7 +7117,9 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
 
-def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str | None:
+def _remove_from_processing(
+    state: SchedulerState, ts: TaskState, recommendations: dict[str, str]
+) -> str | None:
     """Remove *ts* from the set of processing tasks.
 
     See also
@@ -7140,6 +7144,15 @@ def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str | None:
 
     state.check_idle_saturated(ws)
     state.release_resources(ts, ws)
+    if ts.resource_restrictions and state.unrunnable:
+        # FIXME extremely inefficient!!
+        now_runnable_tasks = []
+        for uts in state.unrunnable:
+            if (valid := state.valid_workers(uts)) or valid is None:
+                now_runnable_tasks.append(uts)
+        now_runnable_tasks.sort(key=operator.attrgetter("priority"), reverse=True)
+        for uts in now_runnable_tasks:
+            recommendations[uts.key] = "waiting"
 
     return ws.address
 
