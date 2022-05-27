@@ -211,27 +211,29 @@ def test_watch():
 def test_watch_requires_lock_to_run():
     start = time()
 
-    def stop_lock():
-        return time() > start + 0.600
+    release_lock = False
 
-    def stop_profile():
+    def stop_blocking():
+        return release_lock
+
+    def stop_profiling():
         return time() > start + 0.500
 
-    def hold_lock(stop):
+    def block_lock(stop):
         with lock:
             while not stop():
                 sleep(0.1)
 
     start_threads = threading.active_count()
 
-    # Hog the lock over the entire duration of watch
+    # Block the lock over the entire duration of watch
     thread = threading.Thread(
-        target=hold_lock, name="Hold Lock", kwargs={"stop": stop_lock}
+        target=block_lock, name="Block Lock", kwargs={"stop": stop_blocking}
     )
     thread.daemon = True
     thread.start()
 
-    log = watch(interval="10ms", cycle="50ms", stop=stop_profile)
+    log = watch(interval="10ms", cycle="50ms", stop=stop_profiling)
 
     start = time()  # wait until thread starts up
     while threading.active_count() < start_threads + 2:
@@ -240,6 +242,7 @@ def test_watch_requires_lock_to_run():
 
     sleep(0.5)
     assert len(log) == 0
+    release_lock = True
 
     start = time()
     while threading.active_count() > start_threads:
