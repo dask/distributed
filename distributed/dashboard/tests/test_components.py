@@ -25,9 +25,9 @@ def test_basic(Component):
 async def test_profile_plot(c, s, a, b):
     p = ProfilePlot()
     assert not p.source.data["left"]
-    await c.gather(c.map(slowinc, range(10), delay=0.05))
-    p.update(a.profile_recent)
-    assert len(p.source.data["left"]) >= 1
+    while not len(p.source.data["left"]):
+        await c.submit(slowinc, 1, pure=False, delay=0.1)
+        p.update(a.profile_recent)
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
@@ -40,8 +40,8 @@ async def test_profile_time_plot(c, s, a, b):
     ap = ProfileTimePlot(a, doc=curdoc())
     ap.trigger_update()
 
-    assert len(sp.source.data["left"]) <= 1
-    assert len(ap.source.data["left"]) <= 1
+    assert not len(sp.source.data["left"])
+    assert not len(ap.source.data["left"])
 
     await c.gather(c.map(slowinc, range(10), delay=0.05))
     ap.trigger_update()
