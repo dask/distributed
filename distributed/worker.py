@@ -952,11 +952,7 @@ class Worker(ServerNode):
         if self.thread_id == threading.get_ident():
             self.batched_stream.send(full_msg)
         else:
-
-            async def _send_batched_stream(batched_stream):
-                batched_stream.send(full_msg)
-
-            self._call_soon(_send_batched_stream, self.batched_stream)
+            self.loop.add_callback(self.batched_stream.send, full_msg)
 
     @property
     def executing_count(self) -> int:
