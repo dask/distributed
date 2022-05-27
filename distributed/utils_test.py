@@ -25,7 +25,7 @@ from collections.abc import Callable
 from contextlib import contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
-from typing import Any, Generator, Literal
+from typing import IO, Any, Generator, Iterator, Literal
 
 import pytest
 import yaml
@@ -1257,7 +1257,9 @@ def _terminate_process(proc):
 
 
 @contextmanager
-def popen(args: list[str], flush_output: bool = True, **kwargs):
+def popen(
+    args: list[str], flush_output: bool = True, **kwargs
+) -> Iterator[subprocess.Popen[bytes]]:
     """Start a shell command in a subprocess.
     Yields a subprocess.Popen object.
 
@@ -2189,3 +2191,25 @@ def ucx_loop():
     yield loop
     ucp.reset()
     loop.close()
+
+
+def wait_for_log_line(
+    match: bytes, stream: IO[bytes] | None, max_lines: int | None = 10
+) -> bytes:
+    """
+    Read lines from an IO stream until the match is found, and return the matching line.
+
+    Prints each line to test stdout for easier debugging of failures.
+    """
+    assert stream
+    i = 0
+    while True:
+        if max_lines is not None and i == max_lines:
+            raise AssertionError(
+                f"{match!r} not found in {max_lines} log lines. See test stdout for details."
+            )
+        line = stream.readline()
+        print(line)
+        if match in line:
+            return line
+        i += 1
