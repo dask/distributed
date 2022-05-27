@@ -221,11 +221,11 @@ def test_watch_requires_lock_to_run():
             stop_profiling_called.set()
         return time() > start + 0.500
 
-    release_lock_ev = threading.Event()
+    release_lock = threading.Event()
 
     def block_lock():
         with lock:
-            release_lock_ev.wait()
+            release_lock.wait()
 
     start_threads = threading.active_count()
 
@@ -243,7 +243,7 @@ def test_watch_requires_lock_to_run():
 
     sleep(0.5)
     assert len(log) == 0
-    release_lock_ev.set()
+    release_lock.set()
 
     profiling_thread.join(2)
     blocking_thread.join(2)
