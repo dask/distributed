@@ -1,5 +1,7 @@
 import pickle
 
+from toolz import first
+
 import dask.config
 
 try:
@@ -33,7 +35,17 @@ def _put_buffer(buf):
 
 
 def ser(x, context=None):
+    from distributed.worker import get_worker
+
     frames = [None]
+    try:
+        worker = get_worker()
+    except ValueError:
+        # on client; must be scattering
+        worker = None
+
+    if worker and id(x) in worker.shared_data:
+        return worker.shared_data[id(x)]
 
     def add_buf(buf):
         frames.append(memoryview(buf))
@@ -41,23 +53,18 @@ def ser(x, context=None):
     frames[0] = pickle.dumps(x, protocol=-1, buffer_callback=add_buf)
     head = {"serializer": "plasma"}
     if any(buf.nbytes > PLASMA_SIZE_LIMIT for buf in frames[1:]):
-        from distributed.worker import get_worker
 
-        try:
-            worker = get_worker()
-        except ValueError:
-            # on client; must be scattering
-            worker = None
         frames[1:] = [
-            _put_buffer(buf, worker, id(x)) if buf.nbytes > PLASMA_SIZE_LIMIT else buf
+            _put_buffer(buf) if buf.nbytes > PLASMA_SIZE_LIMIT else buf
             for buf in frames[1:]
         ]
         if worker is not None:
-            k = any(k for k, d in worker.data if d is x)  # find object's dask key
+            # find object's dask key; it ought to exist
+            k = first((k for k, d in worker.data.items() if d is x))
             new_obj = deser(
                 None, frames
             )  # version of object pointing at shared buffers
-            worker.shared_data[id(new_obj)] = frames  # save shared buffers
+            worker.shared_data[id(new_obj)] = head, frames  # save shared buffers
             worker.data[k] = new_obj  # replace original object
     return head, frames
 
