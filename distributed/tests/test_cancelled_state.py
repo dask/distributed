@@ -300,7 +300,7 @@ async def test_in_flight_lost_after_resumed(c, s, b):
         s.set_restrictions({fut1.key: [a.address, b.address]})
         # It is removed, i.e. get_data is guaranteed to fail and f1 is scheduled
         # to be recomputed on B
-        await s.remove_worker(a.address, "foo", close=False, safe=True)
+        await s.remove_worker(a.address, stimulus_id="foo", close=False, safe=True)
 
         while not b.tasks[fut1.key].state == "resumed":
             await asyncio.sleep(0.01)
@@ -438,7 +438,7 @@ async def test_cancelled_resumed_after_flight_with_dependencies(c, s, w2, w3):
                 f3.key: {w2.address},
             }
         )
-        await s.remove_worker(w1.address, "stim-id")
+        await s.remove_worker(w1.address, stimulus_id="stim-id")
 
         await wait_for_state(f3.key, "resumed", w2)
         assert_story(

@@ -259,8 +259,12 @@ def test_seek_delimiter_endline():
         memoryview(bytearray(b"1")),
         array("B", b"1"),
         array("I", range(5)),
+        memoryview(b"123456")[1:-1],
         memoryview(b"123456")[::2],
+        memoryview(array("I", range(5)))[1:-1],
+        memoryview(array("I", range(5)))[::2],
         memoryview(b"123456").cast("B", (2, 3)),
+        memoryview(b"0123456789").cast("B", (5, 2))[1:-1],
         memoryview(b"0123456789").cast("B", (5, 2))[::2],
     ],
 )
@@ -273,7 +277,6 @@ def test_ensure_memoryview(data):
     assert result.format == "B"
     assert result == bytes(data_mv)
     if data_mv.nbytes and data_mv.contiguous:
-        assert id(result.obj) == id(data_mv.obj)
         assert result.readonly == data_mv.readonly
         if isinstance(data, memoryview):
             if data.ndim == 1 and data.format == "B":

@@ -69,7 +69,6 @@ from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import Server, Status
 from distributed.metrics import time
-from distributed.profile import wait_profiler
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
 from distributed.sizeof import sizeof
 from distributed.utils import is_valid_xml, mp_context, sync, tmp_text
@@ -678,8 +677,8 @@ def test_no_future_references(c):
     futures = c.map(inc, range(10))
     ws.update(futures)
     del futures
-    wait_profiler()
-    assert not list(ws)
+    with profile.lock:
+        assert not list(ws)
 
 
 def test_get_sync_optimize_graph_passes_through(c):
@@ -811,9 +810,9 @@ async def test_recompute_released_key(c, s, a, b):
     result1 = await x
     xkey = x.key
     del x
-    wait_profiler()
-    await asyncio.sleep(0)
-    assert c.refcount[xkey] == 0
+    with profile.lock:
+        await asyncio.sleep(0)
+        assert c.refcount[xkey] == 0
 
     # 1 second batching needs a second action to trigger
     while xkey in s.tasks and s.tasks[xkey].who_has or xkey in a.data or xkey in b.data:
@@ -3483,10 +3482,9 @@ async def test_Client_clears_references_after_restart(c, s, a, b):
 
     key = x.key
     del x
-    wait_profiler()
-    await asyncio.sleep(0)
-
-    assert key not in c.refcount
+    with profile.lock:
+        await asyncio.sleep(0)
+        assert key not in c.refcount
 
 
 @gen_cluster(Worker=Nanny, client=True)

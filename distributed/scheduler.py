@@ -3365,8 +3365,14 @@ class Scheduler(SchedulerState, ServerNode):
             await self.finished()
             return
 
+        async def log_errors(func):
+            try:
+                await func()
+            except Exception:
+                logger.exception("Plugin call failed during scheduler.close")
+
         await asyncio.gather(
-            *[plugin.before_close() for plugin in list(self.plugins.values())]
+            *[log_errors(plugin.before_close) for plugin in list(self.plugins.values())]
         )
 
         self.status = Status.closing
@@ -3375,10 +3381,13 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle("dask-scheduler [closing]")
 
         for preload in self.preloads:
-            await preload.teardown()
+            try:
+                await preload.teardown()
+            except Exception as e:
+                logger.exception(e)
 
         await asyncio.gather(
-            *[plugin.close() for plugin in list(self.plugins.values())]
+            *[log_errors(plugin.close) for plugin in list(self.plugins.values())]
         )
 
         for pc in self.periodic_callbacks.values():
@@ -4148,7 +4157,9 @@ class Scheduler(SchedulerState, ServerNode):
         return tuple(seen)
 
     @log_errors
-    async def remove_worker(self, address, stimulus_id, safe=False, close=True):
+    async def remove_worker(
+        self, address: str, *, stimulus_id: str, safe: bool = False, close: bool = True
+    ) -> Literal["OK", "already-removed"]:
         """
         Remove worker from cluster
 
@@ -4157,7 +4168,7 @@ class Scheduler(SchedulerState, ServerNode):
         state.
         """
         if self.status == Status.closed:
-            return
+            return "already-removed"
 
         address = self.coerce_address(address)
 
