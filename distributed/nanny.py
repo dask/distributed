@@ -506,7 +506,7 @@ class Nanny(ServerNode):
         return run(self, comm, *args, **kwargs)
 
     def _on_exit_sync(self, exitcode):
-        self.add_background_task(self._on_exit(exitcode))
+        self.create_background_task(self._on_exit(exitcode))
 
     @log_errors
     async def _on_exit(self, exitcode):
@@ -603,7 +603,7 @@ class Nanny(ServerNode):
         )
 
     def log_event(self, topic, msg):
-        self.add_background_task(self._log_event(topic, msg))
+        self.create_background_task(self._log_event(topic, msg))
 
 
 class WorkerProcess:

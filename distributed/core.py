@@ -348,7 +348,7 @@ class Server:
                 if not pc.is_running():
                     pc.start()
 
-        self.add_background_task(start_pcs())
+        self.create_background_task(start_pcs())
 
     def stop(self):
         if not self.__stopped:
@@ -365,7 +365,7 @@ class Server:
                 async def _stop_listener():
                     listener.stop()
 
-                self.add_background_task(_stop_listener())
+                self.create_background_task(_stop_listener())
 
     @property
     def listener(self):
@@ -656,7 +656,9 @@ class Server:
                                 break
                             handler = self.stream_handlers[op]
                             if is_coroutine_function(handler):
-                                self.add_background_task(handler(**merge(extra, msg)))
+                                self.create_background_task(
+                                    handler(**merge(extra, msg))
+                                )
                                 await asyncio.sleep(0)
                             else:
                                 handler(**merge(extra, msg))
@@ -677,7 +679,7 @@ class Server:
             await comm.close()
             assert comm.closed()
 
-    def add_background_task(self, coro: Coroutine) -> None:
+    def create_background_task(self, coro: Coroutine) -> None:
         task = asyncio.create_task(coro)
         self._ongoing_background_tasks.add(task)
         task.add_done_callback(self._ongoing_background_tasks.remove)

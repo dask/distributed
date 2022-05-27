@@ -3321,7 +3321,7 @@ class Scheduler(SchedulerState, ServerNode):
         for k, v in self.services.items():
             logger.info("%11s at: %25s", k, "%s:%d" % (listen_ip, v.port))
 
-        self.add_background_task(self.reevaluate_occupancy())
+        self.create_background_task(self.reevaluate_occupancy())
 
         if self.scheduler_file:
             with open(self.scheduler_file, "w") as f:
@@ -4253,7 +4253,7 @@ class Scheduler(SchedulerState, ServerNode):
             dask.config.get("distributed.scheduler.events-cleanup-delay")
         )
 
-        self.add_background_task(delay(remove_worker_from_events, cleanup_delay)())
+        self.create_background_task(delay(remove_worker_from_events, cleanup_delay)())
         logger.debug("Removed worker %s", ws)
 
         return "OK"
@@ -4614,7 +4614,7 @@ class Scheduler(SchedulerState, ServerNode):
             dask.config.get("distributed.scheduler.events-cleanup-delay")
         )
 
-        self.add_background_task(delay(remove_client_from_events, cleanup_delay)())
+        self.create_background_task(delay(remove_client_from_events, cleanup_delay)())
 
     def send_task_to_worker(self, worker, ts: TaskState, duration: float = -1):
         """Send a single computational task to a worker"""
@@ -4881,7 +4881,7 @@ class Scheduler(SchedulerState, ServerNode):
         try:
             stream_comms[worker].send(msg)
         except (CommClosedError, AttributeError):
-            self.add_background_task(
+            self.create_background_task(
                 self.remove_worker(
                     address=worker, stimulus_id=f"worker-send-comm-fail-{time()}"
                 )
@@ -4930,7 +4930,7 @@ class Scheduler(SchedulerState, ServerNode):
                 # worker already gone
                 pass
             except (CommClosedError, AttributeError):
-                self.add_background_task(
+                self.create_background_task(
                     self.remove_worker(
                         address=worker,
                         stimulus_id=f"send-all-comm-fail-{time()}",
