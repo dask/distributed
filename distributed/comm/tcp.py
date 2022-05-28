@@ -12,8 +12,6 @@ import weakref
 from ssl import SSLCertVerificationError, SSLError
 from typing import Any, ClassVar
 
-from tornado import gen
-
 try:
     import ssl
 except ImportError:
@@ -327,8 +325,7 @@ class TCP(Comm):
 
         return frames_nbytes_total
 
-    @gen.coroutine
-    def close(self):
+    async def close(self):
         # We use gen.coroutine here rather than async def to avoid errors like
         # Task was destroyed but it is pending!
         # Triggered by distributed.deploy.tests.test_local::test_silent_startup
@@ -338,7 +335,7 @@ class TCP(Comm):
             try:
                 # Flush the stream's write buffer by waiting for a last write.
                 if stream.writing():
-                    yield stream.write(b"")
+                    await stream.write(b"")
                 stream.socket.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
