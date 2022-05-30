@@ -127,34 +127,23 @@ class TaskGroup:
     def _cancellable_tasks(self):
         return (t for t in self._ongoing_tasks if t is not asyncio.current_task())
 
-    async def cancel(self):
-        self.close()
-        futures = await asyncio.gather(*self._cancellable_tasks, return_exceptions=True)
-        for future in futures:
-            try:
-                future.exception()
-            except asyncio.CancelledError:
-                pass
-
     def close(self):
         self.closed = True
 
-    async def stop(self, timeout=0):
+    async def stop(self, timeout=1):
         self.close()
         try:
             # Give the tasks a bit of time to finish gracefully
-            futures = await asyncio.wait_for(
-                asyncio.gather(*self._cancellable_tasks, return_exceptions=True),
+            gather = asyncio.gather(
+                *self._cancellable_tasks,
+                return_exceptions=True,
+            )
+            await asyncio.wait_for(
+                gather,
                 timeout,
             )
-            for future in futures:
-                try:
-                    future.exception()
-                except asyncio.CancelledError:
-                    pass
         except asyncio.TimeoutError:
-            # the timeout on gather should've cancelled all the tasks
-            return await self.cancel()
+            return await gather
 
 
 class Server:
@@ -758,25 +747,11 @@ class Server:
         # TODO: Deal with exceptions
         try:
             # Give the handlers a bit of time to finish gracefully
-            futures = await asyncio.wait_for(
-                asyncio.gather(*_ongoing_comm_handlers(), return_exceptions=True), 1
-            )
-            for future in futures:
-                try:
-                    future.exception()
-                except asyncio.CancelledError:
-                    pass
+            gather = asyncio.gather(*_ongoing_comm_handlers(), return_exceptions=True)
+            await asyncio.wait_for(gather, 1)
         except asyncio.TimeoutError:
             # the timeout on gather should've cancelled all the tasks
-            futures = await asyncio.gather(
-                *_ongoing_comm_handlers(), return_exceptions=True
-            )
-
-            for future in futures:
-                try:
-                    future.exception()
-                except asyncio.CancelledError:
-                    pass
+            await gather
 
         await self.rpc.close()
         await asyncio.gather(*[comm.close() for comm in list(self._comms)])
