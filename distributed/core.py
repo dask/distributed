@@ -143,7 +143,10 @@ class TaskGroup:
                 timeout,
             )
         except asyncio.TimeoutError:
-            return await gather
+            try:
+                await gather
+            except asyncio.CancelledError:
+                pass
 
 
 class Server:
@@ -751,7 +754,10 @@ class Server:
             await asyncio.wait_for(gather, 1)
         except asyncio.TimeoutError:
             # the timeout on gather should've cancelled all the tasks
-            await gather
+            try:
+                await gather
+            except asyncio.CancelledError:
+                pass
 
         await self.rpc.close()
         await asyncio.gather(*[comm.close() for comm in list(self._comms)])
