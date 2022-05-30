@@ -1453,7 +1453,10 @@ class Worker(ServerNode):
         # nanny+worker, the nanny must be notified first. ==> Remove kwarg
         # nanny, see also Scheduler.retire_workers
         if self.status in (Status.closed, Status.closing, Status.failed):
-            await self.finished()
+            try:
+                await self.finished()
+            except asyncio.CancelledError:
+                pass
             return
 
         if self.status == Status.init:
