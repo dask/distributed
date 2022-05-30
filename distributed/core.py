@@ -129,7 +129,12 @@ class TaskGroup:
 
     async def cancel(self):
         self.close()
-        return await asyncio.gather(*self._cancellable_tasks, return_exceptions=True)
+        futures = await asyncio.gather(*self._cancellable_tasks, return_exceptions=True)
+        for future in futures:
+            try:
+                future.exception()
+            except asyncio.CancelledError:
+                pass
 
     def close(self):
         self.closed = True
@@ -763,7 +768,15 @@ class Server:
                     pass
         except asyncio.TimeoutError:
             # the timeout on gather should've cancelled all the tasks
-            await asyncio.gather(*_ongoing_comm_handlers(), return_exceptions=True)
+            futures = await asyncio.gather(
+                *_ongoing_comm_handlers(), return_exceptions=True
+            )
+
+            for future in futures:
+                try:
+                    future.exception()
+                except asyncio.CancelledError:
+                    pass
 
         await self.rpc.close()
         await asyncio.gather(*[comm.close() for comm in list(self._comms)])
