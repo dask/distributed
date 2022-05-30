@@ -996,6 +996,7 @@ async def test_no_dangling_asyncio_tasks():
     async with LocalCluster(asynchronous=True, processes=False, dashboard_address=":0"):
         await asyncio.sleep(0.01)
 
+    await asyncio.sleep(0.01)
     tasks = asyncio.all_tasks()
     assert tasks == start
 
