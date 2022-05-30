@@ -351,7 +351,6 @@ class Worker(ServerNode):
     data: MutableMapping, type, None
         The object to use for storage, builds a disk-backed LRU dict by default
     nthreads: int, optional
-    loop: tornado.ioloop.IOLoop
     local_directory: str, optional
         Directory where we place local resources
     name: str, optional
@@ -514,7 +513,7 @@ class Worker(ServerNode):
         *,
         scheduler_file: str | None = None,
         nthreads: int | None = None,
-        loop: IOLoop | None = None,
+        loop: IOLoop | None = None,  # Deprecated
         local_dir: None = None,  # Deprecated, use local_directory instead
         local_directory: str | None = None,
         services: dict | None = None,
@@ -579,6 +578,13 @@ class Worker(ServerNode):
                     DeprecationWarning,
                     stacklevel=2,
                 )
+        if loop is not None:
+            warnings.warn(
+                "The `loop` argument to `Worker` is deprecated, and will be removed in a future release. "
+                "The Worker always binds to the current loop",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self.tasks = {}
         self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)
@@ -729,7 +735,7 @@ class Worker(ServerNode):
         self.connection_args = self.security.get_connection_args("worker")
 
         self.actors = {}
-        self.loop = loop or IOLoop.current()
+        self.loop = self.io_loop = IOLoop.current()
 
         # Common executors always available
         self.executors = {
@@ -819,7 +825,6 @@ class Worker(ServerNode):
         super().__init__(
             handlers=handlers,
             stream_handlers=stream_handlers,
-            io_loop=self.loop,
             connection_args=self.connection_args,
             **kwargs,
         )
@@ -878,7 +883,7 @@ class Worker(ServerNode):
 
         if lifetime is None:
             lifetime = dask.config.get("distributed.worker.lifetime.duration")
-        self.lifetime = parse_timedelta(lifetime)
+        lifetime = parse_timedelta(lifetime)
 
         if lifetime_stagger is None:
             lifetime_stagger = dask.config.get("distributed.worker.lifetime.stagger")
@@ -888,9 +893,10 @@ class Worker(ServerNode):
             lifetime_restart = dask.config.get("distributed.worker.lifetime.restart")
         self.lifetime_restart = lifetime_restart
 
-        if self.lifetime:
-            self.lifetime += (random.random() * 2 - 1) * lifetime_stagger
-            self.io_loop.call_later(self.lifetime, self.close_gracefully)
+        if lifetime:
+            lifetime += (random.random() * 2 - 1) * lifetime_stagger
+            self.io_loop.call_later(lifetime, self.close_gracefully)
+        self.lifetime = lifetime
 
         self._async_instructions = set()
 

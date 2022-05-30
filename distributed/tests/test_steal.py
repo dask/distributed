@@ -324,7 +324,7 @@ async def test_new_worker_steals(c, s, a):
     while len(a.tasks) < 10:
         await asyncio.sleep(0.01)
 
-    b = await Worker(s.address, loop=s.loop, nthreads=1, memory_limit=MEMORY_LIMIT)
+    b = await Worker(s.address, nthreads=1, memory_limit=MEMORY_LIMIT)
 
     result = await total
     assert result == sum(map(inc, range(100)))
@@ -478,7 +478,7 @@ async def test_steal_resource_restrictions(c, s, a):
         await asyncio.sleep(0.01)
     assert len(a.tasks) == 101
 
-    b = await Worker(s.address, loop=s.loop, nthreads=1, resources={"A": 4})
+    b = await Worker(s.address, nthreads=1, resources={"A": 4})
 
     while not b.tasks or len(a.tasks) == 101:
         await asyncio.sleep(0.01)
@@ -500,15 +500,7 @@ async def test_steal_resource_restrictions_asym_diff(c, s, a):
         await asyncio.sleep(0.01)
     assert len(a.tasks) == 101
 
-    b = await Worker(
-        s.address,
-        loop=s.loop,
-        nthreads=1,
-        resources={
-            "A": 4,
-            "B": 5,
-        },
-    )
+    b = await Worker(s.address, nthreads=1, resources={"A": 4, "B": 5})
 
     while not b.tasks or len(a.tasks) == 101:
         await asyncio.sleep(0.01)

@@ -42,7 +42,7 @@ class MyPlugin(WorkerPlugin):
 async def test_create_with_client(c, s):
     await c.register_worker_plugin(MyPlugin(123))
 
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     assert worker._my_plugin_status == "setup"
     assert worker._my_plugin_data == 123
 
@@ -55,7 +55,7 @@ async def test_remove_with_client(c, s):
     await c.register_worker_plugin(MyPlugin(123), name="foo")
     await c.register_worker_plugin(MyPlugin(546), name="bar")
 
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     # remove the 'foo' plugin
     await c.unregister_worker_plugin("foo")
     assert worker._my_plugin_status == "teardown"
@@ -79,7 +79,7 @@ async def test_remove_with_client(c, s):
 async def test_remove_with_client_raises(c, s):
     await c.register_worker_plugin(MyPlugin(123), name="foo")
 
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     with pytest.raises(ValueError, match="bar"):
         await c.unregister_worker_plugin("bar")
 

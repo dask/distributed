@@ -891,8 +891,9 @@ async def start_cluster(
     scheduler_kwargs: dict[str, Any] = {},
     worker_kwargs: dict[str, Any] = {},
 ) -> tuple[Scheduler, list[ServerNode]]:
+    if loop is not None:
+        warnings.warn("the loop kwarg to start_cluster is deprecated")
     s = await Scheduler(
-        loop=loop,
         validate=True,
         security=security,
         port=0,
@@ -906,7 +907,6 @@ async def start_cluster(
             nthreads=ncore[1],
             name=i,
             security=security,
-            loop=loop,
             validate=True,
             host=ncore[0],
             **(

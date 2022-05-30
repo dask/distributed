@@ -162,6 +162,13 @@ class Server:
         timeout=None,
         io_loop=None,
     ):
+        if io_loop is not None:
+            warnings.warn(
+                "The io_loop kwarg to Server is deprecated",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         self._status = Status.init
         self.handlers = {
             "identity": self.identity,
@@ -191,8 +198,7 @@ class Server:
         self._event_finished = asyncio.Event()
 
         self.listeners = []
-        self.io_loop = io_loop or IOLoop.current()
-        self.loop = self.io_loop
+        self.io_loop = self.loop = IOLoop.current()
 
         if not hasattr(self.io_loop, "profile"):
             ref = weakref.ref(self.io_loop)
