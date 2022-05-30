@@ -890,7 +890,7 @@ class Worker(ServerNode):
 
         if self.lifetime:
             self.lifetime += (random.random() * 2 - 1) * lifetime_stagger
-            self._call_later(self.lifetime, self.close_gracefully)
+            self.io_loop.call_later(self.lifetime, self.close_gracefully)
 
         self._async_instructions = set()
 
