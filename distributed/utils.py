@@ -1029,9 +1029,8 @@ def ensure_memoryview(obj):
     elif mv.ndim != 1 or mv.format != "B":
         # Perform zero-copy reshape & cast
         # Use `PickleBuffer.raw()` as `memoryview.cast()` fails with F-order
-        # Pass `mv.obj` so the created `memoryview` has that as its `obj`
         # xref: https://github.com/python/cpython/issues/91484
-        return PickleBuffer(mv.obj).raw()
+        return PickleBuffer(mv).raw()
     else:
         # Return `memoryview` as it already meets requirements
         return mv

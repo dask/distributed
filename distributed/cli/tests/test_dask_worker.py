@@ -19,7 +19,7 @@ from distributed.compatibility import LINUX, WINDOWS
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils import open_port
-from distributed.utils_test import gen_cluster, popen, requires_ipv6
+from distributed.utils_test import gen_cluster, popen, requires_ipv6, wait_for_log_line
 
 
 @pytest.mark.parametrize(
@@ -246,9 +246,7 @@ async def test_nanny_worker_port_range_too_many_workers_raises(s):
         ],
         flush_output=False,
     ) as worker:
-        assert any(
-            b"Not enough ports in range" in worker.stdout.readline() for _ in range(100)
-        )
+        wait_for_log_line(b"Not enough ports in range", worker.stdout, max_lines=100)
 
 
 @pytest.mark.slow
@@ -282,26 +280,14 @@ async def test_reconnect_deprecated(c, s):
         ["dask-worker", s.address, "--reconnect"],
         flush_output=False,
     ) as worker:
-        for _ in range(10):
-            line = worker.stdout.readline()
-            print(line)
-            if b"`--reconnect` option has been removed" in line:
-                break
-        else:
-            raise AssertionError("Message not printed, see stdout")
+        wait_for_log_line(b"`--reconnect` option has been removed", worker.stdout)
         assert worker.wait() == 1
 
     with popen(
         ["dask-worker", s.address, "--no-reconnect"],
         flush_output=False,
     ) as worker:
-        for _ in range(10):
-            line = worker.stdout.readline()
-            print(line)
-            if b"flag is deprecated, and will be removed" in line:
-                break
-        else:
-            raise AssertionError("Message not printed, see stdout")
+        wait_for_log_line(b"flag is deprecated, and will be removed", worker.stdout)
         await c.wait_for_workers(1)
         await c.shutdown()
 
@@ -377,9 +363,7 @@ async def test_nworkers_requires_nanny(s):
         ["dask-worker", s.address, "--nworkers=2", "--no-nanny"],
         flush_output=False,
     ) as worker:
-        assert any(
-            b"Failed to launch worker" in worker.stdout.readline() for _ in range(15)
-        )
+        wait_for_log_line(b"Failed to launch worker", worker.stdout, max_lines=15)
 
 
 @pytest.mark.slow
@@ -419,9 +403,7 @@ async def test_worker_cli_nprocs_renamed_to_nworkers(c, s):
         flush_output=False,
     ) as worker:
         await c.wait_for_workers(2)
-        assert any(
-            b"renamed to --nworkers" in worker.stdout.readline() for _ in range(15)
-        )
+        wait_for_log_line(b"renamed to --nworkers", worker.stdout, max_lines=15)
 
 
 @gen_cluster(nthreads=[])
@@ -430,10 +412,7 @@ async def test_worker_cli_nworkers_with_nprocs_is_an_error(s):
         ["dask-worker", s.address, "--nprocs=2", "--nworkers=2"],
         flush_output=False,
     ) as worker:
-        assert any(
-            b"Both --nprocs and --nworkers" in worker.stdout.readline()
-            for _ in range(15)
-        )
+        wait_for_log_line(b"Both --nprocs and --nworkers", worker.stdout, max_lines=15)
 
 
 @pytest.mark.slow
@@ -733,12 +712,10 @@ def test_error_during_startup(monkeypatch, nanny):
     ) as scheduler:
         start = time()
         # Wait for the scheduler to be up
-        while line := scheduler.stdout.readline():
-            if b"Scheduler at" in line:
-                break
-            # Ensure this is not killed by pytest-timeout
-            if time() - start > 5:
-                raise TimeoutError("Scheduler failed to start in time.")
+        wait_for_log_line(b"Scheduler at", scheduler.stdout)
+        # Ensure this is not killed by pytest-timeout
+        if time() - start > 5:
+            raise TimeoutError("Scheduler failed to start in time.")
 
         with popen(
             [

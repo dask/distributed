@@ -1489,7 +1489,10 @@ class Worker(ServerNode):
                 )
 
         for preload in self.preloads:
-            await preload.teardown()
+            try:
+                await preload.teardown()
+            except Exception as e:
+                logger.exception(e)
 
         for extension in self.extensions.values():
             if hasattr(extension, "close"):
