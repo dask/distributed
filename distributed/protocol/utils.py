@@ -6,7 +6,7 @@ from collections.abc import Sequence
 
 import dask
 
-from distributed.utils import nbytes
+from distributed.utils import host_concat, nbytes
 
 BIG_BYTES_SHARD_SIZE = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
 
@@ -56,7 +56,7 @@ def pack_frames(frames):
     --------
     unpack_frames
     """
-    return b"".join([pack_frames_prelude(frames), *frames])
+    return host_concat([pack_frames_prelude(frames), *frames])
 
 
 def unpack_frames(b):

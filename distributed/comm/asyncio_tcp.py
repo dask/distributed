@@ -21,13 +21,15 @@ import dask
 from distributed.comm.addressing import parse_host_port, unparse_host_port
 from distributed.comm.core import Comm, CommClosedError, Connector, Listener
 from distributed.comm.registry import Backend
-from distributed.comm.utils import (
-    ensure_concrete_host,
-    from_frames,
+from distributed.comm.utils import ensure_concrete_host, from_frames, to_frames
+from distributed.utils import (
+    ensure_ip,
+    ensure_memoryview,
+    get_ip,
+    get_ipv6,
     host_array,
-    to_frames,
+    host_concat,
 )
-from distributed.utils import ensure_ip, ensure_memoryview, get_ip, get_ipv6
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +68,7 @@ def coalesce_buffers(
             if len(concat) == 1:
                 out_buffers.append(concat[0])
             else:
-                out_buffers.append(b"".join(concat))
+                out_buffers.append(host_concat(concat))
             concat.clear()
             csize = 0
 
@@ -395,9 +397,9 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
 
         if msg_nbytes < 4 * 1024:
             # Always concatenate small messages
-            buffers = [b"".join([header, *frames])]
+            buffers = [host_concat([header, *frames])]
         else:
-            buffers = coalesce_buffers([header, *frames])
+            buffers = coalesce_buffers([header, *frames])  # type: ignore
 
         if len(buffers) > 1:
             self._transport.writelines(buffers)

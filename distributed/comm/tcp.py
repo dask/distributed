@@ -41,12 +41,19 @@ from distributed.comm.utils import (
     ensure_concrete_host,
     from_frames,
     get_tcp_server_address,
-    host_array,
     to_frames,
 )
 from distributed.protocol.utils import pack_frames_prelude, unpack_frames
 from distributed.system import MEMORY_LIMIT
-from distributed.utils import ensure_ip, ensure_memoryview, get_ip, get_ipv6, nbytes
+from distributed.utils import (
+    ensure_ip,
+    ensure_memoryview,
+    get_ip,
+    get_ipv6,
+    host_array,
+    host_concat,
+    nbytes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -292,7 +299,7 @@ class TCP(Comm):
 
         if frames_nbytes_total < 2**17:  # 128kiB
             # small enough, send in one go
-            frames = [b"".join(frames)]
+            frames = [host_concat(frames)]
             frames_nbytes = [frames_nbytes_total]
 
         try:
@@ -311,7 +318,7 @@ class TCP(Comm):
                     stream._total_write_index += each_frame_nbytes
 
             # start writing frames
-            stream.write(b"")
+            stream.write(host_array())
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
@@ -338,7 +345,7 @@ class TCP(Comm):
             try:
                 # Flush the stream's write buffer by waiting for a last write.
                 if stream.writing():
-                    yield stream.write(b"")
+                    yield stream.write(host_array())
                 stream.socket.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass

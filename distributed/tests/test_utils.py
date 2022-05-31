@@ -31,6 +31,9 @@ from distributed.utils import (
     format_dashboard_link,
     get_ip_interface,
     get_traceback,
+    host_array,
+    host_concat,
+    host_copy,
     is_kernel,
     is_valid_xml,
     iscoroutinefunction,
@@ -248,6 +251,28 @@ def test_seek_delimiter_endline():
     assert f.tell() == 7
 
 
+def test_host_array_empty():
+    a = host_array()
+    assert isinstance(a, memoryview)
+    assert a.nbytes == 0
+    assert a.format == "B"
+    assert a.ndim == 1
+    assert a.shape == (0,)
+    assert a.contiguous
+
+
+def test_host_array():
+    for N in [0, 3, 5]:
+        a = host_array(N)
+        assert isinstance(a, memoryview)
+        assert a.nbytes == N
+        assert a.format == "B"
+        assert a.ndim == 1
+        assert a.shape == (N,)
+        assert a.contiguous
+        assert not a.readonly
+
+
 @pytest.mark.parametrize(
     "data",
     [
@@ -265,6 +290,44 @@ def test_seek_delimiter_endline():
         memoryview(array("I", range(5)))[::2],
         memoryview(b"123456").cast("B", (2, 3)),
         memoryview(b"0123456789").cast("B", (5, 2))[1:-1],
+        memoryview(b"0123456789").cast("B", (5, 2))[::2],
+    ],
+)
+def test_host_copy(data):
+    data = memoryview(data)
+    result = host_copy(data)
+    assert isinstance(result, memoryview)
+    assert result.contiguous
+    assert not result.readonly
+    assert result.ndim == 1
+    assert result.format == "B"
+    assert id(result.obj) != id(data.obj)
+    assert bytes(result) == bytes(data)
+
+
+def test_host_concat():
+    assert host_concat([]) == host_array()
+    a = memoryview(b"123")
+    a_r = host_concat([a])
+    assert id(a_r) == id(a)
+    L = [b"ab", b"cde", b"", b"f", b"gh"]
+    a_r = host_concat(L)
+    assert a_r == b"".join(L)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"",
+        bytearray(),
+        b"1",
+        bytearray(b"1"),
+        memoryview(b"1"),
+        memoryview(bytearray(b"1")),
+        array("B", b"1"),
+        array("I", range(5)),
+        memoryview(b"123456")[::2],
+        memoryview(b"123456").cast("B", (2, 3)),
         memoryview(b"0123456789").cast("B", (5, 2))[::2],
     ],
 )

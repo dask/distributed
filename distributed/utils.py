@@ -20,7 +20,14 @@ import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
 from collections import OrderedDict, UserDict, deque
-from collections.abc import Callable, Collection, Container, KeysView, ValuesView
+from collections.abc import (
+    Callable,
+    Collection,
+    Container,
+    KeysView,
+    Sequence,
+    ValuesView,
+)
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
@@ -101,6 +108,60 @@ def _initialize_mp_context():
 
 
 mp_context = _initialize_mp_context()
+
+
+# Find the function, `host_array()`, to use when allocating new host arrays
+try:
+    # Use NumPy, when available, to avoid memory initialization cost.
+    # A `bytearray` is zero-initialized using `calloc`, which we don't need.
+    # `np.empty` both skips the zero-initialization, and
+    # uses hugepages when available ( https://github.com/numpy/numpy/pull/14216 ).
+    import numpy
+
+    def numpy_host_array(n: int = 0) -> memoryview:
+        return numpy.empty((n,), dtype="u1").data
+
+    host_array = numpy_host_array
+
+    def numpy_host_copy(mv: memoryview) -> memoryview:
+        out = host_array(mv.nbytes)
+        numpy.copyto(numpy.ndarray(mv.shape, mv.format, out), mv, casting="no")
+        return out
+
+    host_copy = numpy_host_copy
+
+    def _numpy_host_concat(L: list[memoryview]) -> memoryview:
+        out = host_array(sum(mv.nbytes for mv in L))
+        numpy.concatenate(L, axis=None, out=numpy.asarray(out))
+        return out
+
+    _host_concat = _numpy_host_concat
+except ImportError:
+
+    def builtin_host_array(n: int = 0) -> memoryview:
+        return memoryview(bytearray(n))
+
+    host_array = builtin_host_array
+
+    def builtin_host_copy(mv: memoryview) -> memoryview:
+        return memoryview(bytearray(mv))
+
+    host_copy = builtin_host_copy
+
+    def _builtin_host_concat(L: list[memoryview]) -> memoryview:
+        return memoryview(bytearray().join(L))
+
+    _host_concat = _builtin_host_concat
+
+
+def host_concat(seq: Sequence) -> memoryview:
+    L: list[memoryview] = list(filter(bool, map(ensure_memoryview, seq)))
+    if len(L) == 0:
+        return host_array()
+    elif len(L) == 1:
+        return L[0]
+    else:
+        return _host_concat(L)
 
 
 def has_arg(func, argname):
@@ -1022,10 +1083,10 @@ def ensure_memoryview(obj):
 
     if not mv.nbytes:
         # Drop `obj` reference to permit freeing underlying data
-        return memoryview(bytearray())
+        return host_array()
     elif not mv.contiguous:
         # Copy to contiguous form of expected shape & type
-        return memoryview(bytearray(mv))
+        return host_copy(mv)
     elif mv.ndim != 1 or mv.format != "B":
         # Perform zero-copy reshape & cast
         # Use `PickleBuffer.raw()` as `memoryview.cast()` fails with F-order

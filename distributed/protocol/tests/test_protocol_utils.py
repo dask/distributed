@@ -8,7 +8,7 @@ from distributed.protocol.utils import merge_memoryviews, pack_frames, unpack_fr
 def test_pack_frames():
     frames = [b"123", b"asdf"]
     b = pack_frames(frames)
-    assert isinstance(b, bytes)
+    assert isinstance(b, memoryview)
     frames2 = unpack_frames(b)
 
     assert frames == frames2
