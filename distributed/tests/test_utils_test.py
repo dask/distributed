@@ -31,6 +31,7 @@ from distributed.utils_test import (
     gen_test,
     inc,
     new_config,
+    popen,
     raises_with_cause,
     tls_only_security,
 )
@@ -772,3 +773,60 @@ def test_fail_hard(sync):
     with pytest.raises(CustomError):
         test()
     assert test_done
+
+
+def test_popen_write_during_terminate_deadlock():
+    # Fabricate a command which, when terminated, tries to write more than the pipe buffer can hold (65536 bytes).
+    # This would deadlock if `proc.wait()` was called, since the process will be trying to write to stdout, but
+    # stdout isn't being cleared because our process is blocked in `proc.wait()`.
+    # `proc.communicate()` is necessary: https://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
+    with popen(
+        [
+            sys.executable,
+            "-c",
+            "; ".join(
+                [
+                    "import signal",
+                    "import time",
+                    "import threading",
+                    "e = threading.Event()",
+                    "signal.signal(signal.SIGINT, lambda *args: [print('x' * 131072), e.set()])",
+                    # ^ 131072 is 2x the size of the default Linux pipe buffer
+                    "print('ready', flush=True)",
+                    "e.wait()",
+                ]
+            ),
+        ],
+        flush_output=False,
+    ) as proc:
+        assert proc.stdout.readline().strip() == b"ready"
+
+    # Exiting the context manager (terminating the subprocess) will raise `subprocess.TimeoutExpired`
+    # if this test breaks.
+
+    # import subprocess
+    # import signal
+    # import time
+
+    # proc = subprocess.Popen(
+    #     # This shell magic:
+    #     # - Starts `tail -f /dev/null` (which will hang forever) in the background.
+    #     #   It's in the background, because `trap`s don't run until subcommands finish,
+    #     #   so otherwise it would block the signal handler.
+    #     # - When SIGINT occurs:
+    #         # - Tries to print 131072 random bytes (more than pipe buffer size)
+    #         # - Then kills the `tail -f`. Otherwise, the overall `proc` would still be running.
+    #     'trap "head -c 131072 /dev/urandom; kill %1" SIGINT; tail -f /dev/null & wait',
+    #     shell=True,
+    #     stdout=subprocess.PIPE,
+    #     stderr=subprocess.STDOUT,
+    # )
+    # time.sleep(0.5)
+    # proc.send_signal(signal.SIGINT)
+    # # time.sleep(0.5)
+    # proc.wait(1)
+    # # proc.kill()
+    # out, _ = proc.communicate(timeout=2)
+    # print(out)
+    # assert out
+    # # assert False
