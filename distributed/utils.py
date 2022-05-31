@@ -103,6 +103,26 @@ def _initialize_mp_context():
 mp_context = _initialize_mp_context()
 
 
+# Find the function, `host_array()`, to use when allocating new host arrays
+try:
+    # Use NumPy, when available, to avoid memory initialization cost.
+    # A `bytearray` is zero-initialized using `calloc`, which we don't need.
+    # `np.empty` both skips the zero-initialization, and
+    # uses hugepages when available ( https://github.com/numpy/numpy/pull/14216 ).
+    import numpy
+
+    def numpy_host_array(n: int) -> memoryview:
+        return numpy.empty((n,), dtype="u1").data
+
+    host_array = numpy_host_array
+except ImportError:
+
+    def builtin_host_array(n: int) -> memoryview:
+        return memoryview(bytearray(n))
+
+    host_array = builtin_host_array
+
+
 def has_arg(func, argname):
     """
     Whether the function takes an argument with the given name.

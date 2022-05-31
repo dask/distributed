@@ -19,14 +19,16 @@ from dask.utils import parse_bytes
 from distributed.comm.addressing import parse_host_port, unparse_host_port
 from distributed.comm.core import Comm, CommClosedError, Connector, Listener
 from distributed.comm.registry import Backend, backends
-from distributed.comm.utils import (
-    ensure_concrete_host,
-    from_frames,
-    host_array,
-    to_frames,
-)
+from distributed.comm.utils import ensure_concrete_host, from_frames, to_frames
 from distributed.diagnostics.nvml import has_cuda_context
-from distributed.utils import ensure_ip, get_ip, get_ipv6, log_errors, nbytes
+from distributed.utils import (
+    ensure_ip,
+    get_ip,
+    get_ipv6,
+    host_array,
+    log_errors,
+    nbytes,
+)
 
 logger = logging.getLogger(__name__)
 

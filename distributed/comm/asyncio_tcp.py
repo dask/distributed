@@ -21,13 +21,8 @@ import dask
 from distributed.comm.addressing import parse_host_port, unparse_host_port
 from distributed.comm.core import Comm, CommClosedError, Connector, Listener
 from distributed.comm.registry import Backend
-from distributed.comm.utils import (
-    ensure_concrete_host,
-    from_frames,
-    host_array,
-    to_frames,
-)
-from distributed.utils import ensure_ip, ensure_memoryview, get_ip, get_ipv6
+from distributed.comm.utils import ensure_concrete_host, from_frames, to_frames
+from distributed.utils import ensure_ip, ensure_memoryview, get_ip, get_ipv6, host_array
 
 logger = logging.getLogger(__name__)
 
