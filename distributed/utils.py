@@ -75,8 +75,8 @@ if TYPE_CHECKING:
 
     P = ParamSpec("P")
     T = TypeVar("T")
-    CoroutineFunctionType = TypeVar(
-        "CoroutineFunctionType", bound=Callable[..., Coroutine]
+    _CoroutineFunctionType = TypeVar(
+        "_CoroutineFunctionType", bound=Callable[..., Coroutine]
     )
 
 
@@ -1738,11 +1738,11 @@ def is_python_shutting_down() -> bool:
     return _python_shutting_down
 
 
-def delayed(corofunc: CoroutineFunctionType, delay: float) -> CoroutineFunctionType:
+def delayed(corofunc: _CoroutineFunctionType, delay: float) -> _CoroutineFunctionType:
     """Decorator to delay the evaluation of a coroutine function by the given delay in seconds."""
 
     async def wrapper(*args, **kwargs):
         await asyncio.sleep(delay)
         return await corofunc(*args, **kwargs)
 
-    return cast(CoroutineFunctionType, wrapper)
+    return cast(_CoroutineFunctionType, wrapper)
