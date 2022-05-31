@@ -1083,10 +1083,10 @@ def ensure_memoryview(obj):
 
     if not mv.nbytes:
         # Drop `obj` reference to permit freeing underlying data
-        return memoryview(bytearray())
+        return host_array()
     elif not mv.contiguous:
         # Copy to contiguous form of expected shape & type
-        return memoryview(bytearray(mv))
+        return host_copy(mv)
     elif mv.ndim != 1 or mv.format != "B":
         # Perform zero-copy reshape & cast
         # Use `PickleBuffer.raw()` as `memoryview.cast()` fails with F-order
