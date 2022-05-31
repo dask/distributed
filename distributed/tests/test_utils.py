@@ -32,6 +32,7 @@ from distributed.utils import (
     get_ip_interface,
     get_traceback,
     host_array,
+    host_copy,
     is_kernel,
     is_valid_xml,
     iscoroutinefunction,
@@ -288,6 +289,34 @@ def test_host_array():
         memoryview(array("I", range(5)))[::2],
         memoryview(b"123456").cast("B", (2, 3)),
         memoryview(b"0123456789").cast("B", (5, 2))[1:-1],
+        memoryview(b"0123456789").cast("B", (5, 2))[::2],
+    ],
+)
+def test_host_copy(data):
+    data = memoryview(data)
+    result = host_copy(data)
+    assert isinstance(result, memoryview)
+    assert result.contiguous
+    assert not result.readonly
+    assert result.ndim == 1
+    assert result.format == "B"
+    assert id(result.obj) != id(data.obj)
+    assert bytes(result) == bytes(data)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"",
+        bytearray(),
+        b"1",
+        bytearray(b"1"),
+        memoryview(b"1"),
+        memoryview(bytearray(b"1")),
+        array("B", b"1"),
+        array("I", range(5)),
+        memoryview(b"123456")[::2],
+        memoryview(b"123456").cast("B", (2, 3)),
         memoryview(b"0123456789").cast("B", (5, 2))[::2],
     ],
 )
