@@ -194,20 +194,22 @@ class TaskGroup:
         After the timeout, all remaining tasks are cancelled.
         """
         self.close()
-        try:
-            gather = asyncio.gather(
+
+        # Wrap to avoid Python3.8 issue,
+        # see https://github.com/dask/distributed/pull/6478#discussion_r885696827
+        async def _gather():
+            return await asyncio.gather(
                 *self._cancellable_tasks,
                 return_exceptions=True,
             )
+
+        try:
             await asyncio.wait_for(
-                gather,
+                _gather(),
                 timeout,
             )
         except asyncio.TimeoutError:
-            try:
-                await gather
-            except asyncio.CancelledError:
-                pass
+            pass
 
 
 class Server:
