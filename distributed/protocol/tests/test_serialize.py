@@ -272,7 +272,7 @@ def test_serialize_bytes(kwargs):
         (int(2**25) * b"ab", int(2**25) * b"ab"),
     ]:
         b = serialize_bytes(x, **kwargs)
-        assert isinstance(b, bytes)
+        assert isinstance(b, memoryview)
         y = deserialize_bytes(b)
         assert str(x) == str(y)
 

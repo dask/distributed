@@ -23,7 +23,7 @@ from distributed.protocol.utils import (
     pack_frames_prelude,
     unpack_frames,
 )
-from distributed.utils import ensure_memoryview, has_keyword
+from distributed.utils import ensure_memoryview, has_keyword, host_concat, host_copy
 
 dask_serialize = dask.utils.Dispatch("dask_serialize")
 dask_deserialize = dask.utils.Dispatch("dask_deserialize")
@@ -88,7 +88,7 @@ def pickle_loads(header, frames):
         writeable = len(buffers) * (None,)
 
     buffers = [
-        memoryview(bytearray(mv) if w else bytes(mv)) if w == mv.readonly else mv
+        (host_copy(mv) if w else mv.toreadonly()) if w == mv.readonly else mv
         for w, mv in zip(writeable, map(ensure_memoryview, buffers))
     ]
 
@@ -171,7 +171,7 @@ def msgpack_dumps(x):
 
 
 def msgpack_loads(header, frames):
-    return msgpack.loads(b"".join(frames), use_list=False, **msgpack_opts)
+    return msgpack.loads(host_concat(frames), use_list=False, **msgpack_opts)
 
 
 def serialization_error_loads(header, frames):
@@ -480,7 +480,7 @@ def merge_and_deserialize(header, frames, deserializers=None):
             try:
                 merged = merge_memoryviews(subframes)
             except (ValueError, TypeError):
-                merged = bytearray().join(subframes)
+                merged = host_concat(subframes)
 
             merged_frames.append(merged)
 
@@ -646,7 +646,7 @@ def serialize_bytelist(x, **kwargs):
 
 def serialize_bytes(x, **kwargs):
     L = serialize_bytelist(x, **kwargs)
-    return b"".join(L)
+    return host_concat(L)
 
 
 def deserialize_bytes(b):
@@ -764,7 +764,7 @@ def _deserialize_array(header, frames):
     if nframes == 1:
         a.frombytes(ensure_memoryview(frames[0]))
     elif nframes > 1:
-        a.frombytes(b"".join(map(ensure_memoryview, frames)))
+        a.frombytes(host_concat(frames))
     return a
 
 
@@ -779,11 +779,7 @@ def _serialize_memoryview(obj):
 
 @dask_deserialize.register(memoryview)
 def _deserialize_memoryview(header, frames):
-    if len(frames) == 1:
-        out = ensure_memoryview(frames[0])
-    else:
-        out = memoryview(b"".join(frames))
-    out = out.cast(header["format"], header["shape"])
+    out = host_concat(frames).cast(header["format"], header["shape"])
     return out
 
 
