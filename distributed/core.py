@@ -15,7 +15,7 @@ from collections.abc import Container
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import Callable, ClassVar, TypedDict, TypeVar
+from typing import Callable, ClassVar, Coroutine, TypedDict, TypeVar
 
 import tblib
 from tlz import merge
@@ -110,7 +110,7 @@ def _expects_comm(func: Callable) -> bool:
 
 
 class TaskGroup:
-    """Collection tracking all currently running tasks within a group"""
+    """Collection tracking all currently running asynchronous tasks within a group"""
 
     #: If True, the group is closed and does not allow adding new tasks.
     closed: bool
@@ -119,10 +119,27 @@ class TaskGroup:
         self.closed = False
         self._ongoing_tasks = set()
 
-    def call_soon(self, afunc, *args, **kwargs) -> asyncio.Task | None:
-        """Schedule the coroutine function `afunc` to be executed with `args`
-        arguments and `kwargs` keyword arguments as an asyncio.Task.
-        Returns the Task object.
+    def call_soon(
+        self, afunc: Callable[..., Coroutine], *args, **kwargs
+    ) -> asyncio.Task | None:
+        """Schedule a coroutine function to be executed as an `asyncio.Task`.
+
+        The coroutine function `afunc` is scheduled with `args` arguments and `kwargs` keyword arguments
+        as an `asyncio.Task`.
+
+        Parameters
+        ----------
+        afunc
+            Coroutine function to schedule.
+        *args
+            Arguments to be passed to `afunc`.
+        **kwargs
+            Keyword arguments to be passed to `afunc`
+
+        Returns
+        -------
+        asyncio.Task | None
+            The scheduled Task object, or None if the group is closed.
         """
         if self.closed:
             return None
@@ -132,10 +149,29 @@ class TaskGroup:
         task.add_done_callback(self._ongoing_tasks.remove)
         return task
 
-    def call_later(self, delay, afunc, *args, **kwargs) -> asyncio.Task | None:
-        """Schedule the coroutine function `afunc` to be executed after `delay` seconds with `args`
-        arguments and `kwargs` keyword arguments as an asyncio.Task.
-        Returns the Task object.
+    def call_later(
+        self, delay: int, afunc: Callable[..., Coroutine], *args, **kwargs
+    ) -> asyncio.Task | None:
+        """Schedule a coroutine function to be executed after `delay` seconds as an `asyncio.Task`.
+
+        The coroutine function `afunc` is scheduled with `args` arguments and `kwargs` keyword arguments
+        as an `asyncio.Task` that is executed after `delay` seconds.
+
+        Parameters
+        ----------
+        delay
+            Delay in seconds.
+        afunc
+            Coroutine function to schedule.
+        *args
+            Arguments to be passed to `afunc`.
+        **kwargs
+            Keyword arguments to be passed to `afunc`
+
+        Returns
+        -------
+        asyncio.Task | None
+            The scheduled Task object, or None if the group is closed.
         """
         return self.call_soon(delayed(afunc, delay), *args, **kwargs)
 
@@ -145,12 +181,15 @@ class TaskGroup:
 
     def close(self):
         """Closes the task group so that no new tasks can be scheduled.
+
         Existing tasks continue to run.
         """
         self.closed = True
 
     async def stop(self, timeout=1):
-        """Closes the task group and waits `timeout` seconds for all tasks to gracefully finish.
+        """Close the group and stop all currently running tasks.
+
+        Closes the task group and waits `timeout` seconds for all tasks to gracefully finish.
         After the timeout, all remaining tasks are cancelled.
         """
         self.close()
