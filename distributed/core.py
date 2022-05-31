@@ -114,14 +114,17 @@ class TaskGroup:
         self.closed = False
         self._ongoing_tasks = set()
 
-    def call_soon(self, afunc, *args, **kwargs):
-        if not self.closed:
-            task = asyncio.create_task(afunc(*args, **kwargs))
-            self._ongoing_tasks.add(task)
-            task.add_done_callback(self._ongoing_tasks.remove)
+    def call_soon(self, afunc, *args, **kwargs) -> asyncio.Task | None:
+        if self.closed:
+            return None
 
-    def call_later(self, delay, afunc, *args, **kwargs):
-        self.call_soon(delayed(afunc, delay), *args, **kwargs)
+        task = asyncio.create_task(afunc(*args, **kwargs))
+        self._ongoing_tasks.add(task)
+        task.add_done_callback(self._ongoing_tasks.remove)
+        return task
+
+    def call_later(self, delay, afunc, *args, **kwargs) -> asyncio.Task | None:
+        return self.call_soon(delayed(afunc, delay), *args, **kwargs)
 
     @property
     def _cancellable_tasks(self):
@@ -228,7 +231,7 @@ class Server:
         self.counters = None
         self.digests = None
         self._ongoing_background_tasks = TaskGroup()
-        self._ongoing_comm_handlers = set()
+        self._ongoing_comm_handlers = TaskGroup()
         self._event_finished = asyncio.Event()
 
         self.listeners = []
@@ -620,21 +623,21 @@ class Server:
 
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
-                        if _expects_comm(handler):
-                            result = handler(comm, **msg)
-                        else:
-                            result = handler(**msg)
-                        if inspect.iscoroutine(result):
-                            result = asyncio.create_task(
-                                result, name=f"handle-comm-{address}-{op}"
-                            )
-                            self._ongoing_comm_handlers.add(result)
-                            result.add_done_callback(self._ongoing_comm_handlers.remove)
+                        if inspect.iscoroutinefunction(handler):
+                            if _expects_comm(handler):
+                                result = self._ongoing_comm_handlers.call_soon(
+                                    handler, comm, **msg
+                                )
+                            else:
+                                result = self._ongoing_comm_handlers.call_soon(
+                                    handler, **msg
+                                )
                             result = await result
-                        elif inspect.isawaitable(result):
-                            raise RuntimeError(
-                                f"Comm handler returned unknown awaitable. Expected coroutine, instead got {type(result)}"
-                            )
+                        else:
+                            if _expects_comm(handler):
+                                result = handler(comm, **msg)
+                            else:
+                                result = handler(**msg)
                     except CommClosedError:
                         if self.status == Status.running:
                             logger.info("Lost connection to %r", address, exc_info=True)
@@ -740,24 +743,8 @@ class Server:
         # TODO: Deal with exceptions
         await self._ongoing_background_tasks.stop(timeout=1)
 
-        def _ongoing_comm_handlers():
-            return (
-                t
-                for t in self._ongoing_comm_handlers
-                if t is not asyncio.current_task()
-            )
-
         # TODO: Deal with exceptions
-        try:
-            # Give the handlers a bit of time to finish gracefully
-            gather = asyncio.gather(*_ongoing_comm_handlers(), return_exceptions=True)
-            await asyncio.wait_for(gather, 1)
-        except asyncio.TimeoutError:
-            # the timeout on gather should've cancelled all the tasks
-            try:
-                await gather
-            except asyncio.CancelledError:
-                pass
+        await self._ongoing_comm_handlers.stop(timeout=1)
 
         await self.rpc.close()
         await asyncio.gather(*[comm.close() for comm in list(self._comms)])
