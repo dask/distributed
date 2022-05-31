@@ -16,7 +16,7 @@ from tlz import identity
 
 import dask
 
-from distributed.utils import ensure_memoryview, nbytes
+from distributed.utils import ensure_memoryview, host_array, host_concat, nbytes
 
 compressions: dict[
     str | None | Literal[False],
@@ -47,7 +47,7 @@ with suppress(ImportError):
     # Note: `snappy.__version__` doesn't exist in a release yet.
     #       So do a little test that will fail if snappy is not 0.5.3 or later.
     try:
-        snappy.compress(memoryview(b""))
+        snappy.compress(host_array())
     except TypeError:
         raise ImportError("Need snappy >= 0.5.3")
 
@@ -127,7 +127,7 @@ def byte_sample(b, size, n):
     """
     assert size >= 0 and n >= 0
     if size == 0 or n == 0:
-        return memoryview(b"")
+        return host_array()
 
     b = ensure_memoryview(b)
 
@@ -144,7 +144,7 @@ def byte_sample(b, size, n):
     if n == 1:
         return parts[0]
     else:
-        return memoryview(b"".join(parts))
+        return host_concat(parts)
 
 
 def maybe_compress(
