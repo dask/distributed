@@ -130,6 +130,13 @@ def init_once():
         import rmm
 
         device_array = lambda n: rmm.DeviceBuffer(size=n)
+
+        pool_size_str = dask.config.get("distributed.rmm.pool-size")
+        if pool_size_str is not None:
+            pool_size = parse_bytes(pool_size_str)
+            rmm.reinitialize(
+                pool_allocator=True, managed_memory=False, initial_pool_size=pool_size
+            )
     except ImportError:
         try:
             import numba.cuda
@@ -146,20 +153,6 @@ def init_once():
                 raise RuntimeError(
                     "In order to send/recv CUDA arrays, Numba or RMM is required"
                 )
-
-    pool_size_str = dask.config.get("distributed.rmm.pool-size")
-    if pool_size_str is not None:
-        pool_size = parse_bytes(pool_size_str)
-        try:
-            import rmm
-
-            rmm.reinitialize(
-                pool_allocator=True, managed_memory=False, initial_pool_size=pool_size
-            )
-        except ImportError:
-            raise RuntimeError(
-                "In order to set distributed.rmm.pool-size, RMM is required"
-            )
 
 
 def _close_comm(ref):
