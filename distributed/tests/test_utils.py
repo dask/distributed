@@ -32,6 +32,7 @@ from distributed.utils import (
     get_ip_interface,
     get_traceback,
     host_array,
+    host_concat,
     host_copy,
     is_kernel,
     is_valid_xml,
@@ -302,6 +303,16 @@ def test_host_copy(data):
     assert result.format == "B"
     assert id(result.obj) != id(data.obj)
     assert bytes(result) == bytes(data)
+
+
+def test_host_concat():
+    assert host_concat([]) == host_array()
+    a = memoryview(b"123")
+    a_r = host_concat([a])
+    assert id(a_r) == id(a)
+    L = [b"ab", b"cde", b"", b"f", b"gh"]
+    a_r = host_concat(L)
+    assert a_r == b"".join(L)
 
 
 @pytest.mark.parametrize(
