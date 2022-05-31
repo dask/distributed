@@ -15,7 +15,7 @@ from collections.abc import Container
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import Callable, ClassVar, Coroutine, TypedDict, TypeVar
+from typing import Callable, ClassVar, TypedDict, TypeVar
 
 import tblib
 from tlz import merge
@@ -37,6 +37,7 @@ from distributed.comm import (
 from distributed.metrics import time
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
+    CoroutineFunctionType,
     delayed,
     get_traceback,
     has_keyword,
@@ -115,12 +116,12 @@ class TaskGroup:
     #: If True, the group is closed and does not allow adding new tasks.
     closed: bool
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.closed = False
-        self._ongoing_tasks = set()
+        self._ongoing_tasks: set[asyncio.Task] = set()
 
     def call_soon(
-        self, afunc: Callable[..., Coroutine], *args, **kwargs
+        self, afunc: CoroutineFunctionType, *args, **kwargs
     ) -> asyncio.Task | None:
         """Schedule a coroutine function to be executed as an `asyncio.Task`.
 
@@ -150,7 +151,7 @@ class TaskGroup:
         return task
 
     def call_later(
-        self, delay: int, afunc: Callable[..., Coroutine], *args, **kwargs
+        self, delay: int, afunc: CoroutineFunctionType, *args, **kwargs
     ) -> asyncio.Task | None:
         """Schedule a coroutine function to be executed after `delay` seconds as an `asyncio.Task`.
 
@@ -179,14 +180,14 @@ class TaskGroup:
     def _cancellable_tasks(self):
         return (t for t in self._ongoing_tasks if t is not asyncio.current_task())
 
-    def close(self):
+    def close(self) -> None:
         """Closes the task group so that no new tasks can be scheduled.
 
         Existing tasks continue to run.
         """
         self.closed = True
 
-    async def stop(self, timeout=1):
+    async def stop(self, timeout=1) -> None:
         """Close the group and stop all currently running tasks.
 
         Closes the task group and waits `timeout` seconds for all tasks to gracefully finish.
