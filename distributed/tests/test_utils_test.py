@@ -803,30 +803,3 @@ def test_popen_write_during_terminate_deadlock():
 
     # Exiting the context manager (terminating the subprocess) will raise `subprocess.TimeoutExpired`
     # if this test breaks.
-
-    # import subprocess
-    # import signal
-    # import time
-
-    # proc = subprocess.Popen(
-    #     # This shell magic:
-    #     # - Starts `tail -f /dev/null` (which will hang forever) in the background.
-    #     #   It's in the background, because `trap`s don't run until subcommands finish,
-    #     #   so otherwise it would block the signal handler.
-    #     # - When SIGINT occurs:
-    #         # - Tries to print 131072 random bytes (more than pipe buffer size)
-    #         # - Then kills the `tail -f`. Otherwise, the overall `proc` would still be running.
-    #     'trap "head -c 131072 /dev/urandom; kill %1" SIGINT; tail -f /dev/null & wait',
-    #     shell=True,
-    #     stdout=subprocess.PIPE,
-    #     stderr=subprocess.STDOUT,
-    # )
-    # time.sleep(0.5)
-    # proc.send_signal(signal.SIGINT)
-    # # time.sleep(0.5)
-    # proc.wait(1)
-    # # proc.kill()
-    # out, _ = proc.communicate(timeout=2)
-    # print(out)
-    # assert out
-    # # assert False
