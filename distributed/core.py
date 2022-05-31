@@ -110,11 +110,20 @@ def _expects_comm(func: Callable) -> bool:
 
 
 class TaskGroup:
+    """Collection tracking all currently running tasks within a group"""
+
+    #: If True, the group is closed and does not allow adding new tasks.
+    closed: bool
+
     def __init__(self):
         self.closed = False
         self._ongoing_tasks = set()
 
     def call_soon(self, afunc, *args, **kwargs) -> asyncio.Task | None:
+        """Schedule the coroutine function `afunc` to be executed with `args`
+        arguments and `kwargs` keyword arguments as an asyncio.Task.
+        Returns the Task object.
+        """
         if self.closed:
             return None
 
@@ -124,6 +133,10 @@ class TaskGroup:
         return task
 
     def call_later(self, delay, afunc, *args, **kwargs) -> asyncio.Task | None:
+        """Schedule the coroutine function `afunc` to be executed after `delay` seconds with `args`
+        arguments and `kwargs` keyword arguments as an asyncio.Task.
+        Returns the Task object.
+        """
         return self.call_soon(delayed(afunc, delay), *args, **kwargs)
 
     @property
@@ -131,12 +144,17 @@ class TaskGroup:
         return (t for t in self._ongoing_tasks if t is not asyncio.current_task())
 
     def close(self):
+        """Closes the task group so that no new tasks can be scheduled.
+        Existing tasks continue to run.
+        """
         self.closed = True
 
     async def stop(self, timeout=1):
+        """Closes the task group and waits `timeout` seconds for all tasks to gracefully finish.
+        After the timeout, all remaining tasks are cancelled.
+        """
         self.close()
         try:
-            # Give the tasks a bit of time to finish gracefully
             gather = asyncio.gather(
                 *self._cancellable_tasks,
                 return_exceptions=True,
