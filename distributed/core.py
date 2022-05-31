@@ -150,7 +150,7 @@ class TaskGroup:
         return task
 
     def call_later(
-        self, delay: int, afunc: Callable[..., Coroutine], *args, **kwargs
+        self, delay: float, afunc: Callable[..., Coroutine], *args, **kwargs
     ) -> asyncio.Task | None:
         """Schedule a coroutine function to be executed after `delay` seconds as an `asyncio.Task`.
 
@@ -448,7 +448,7 @@ class Server:
                 if not pc.is_running():
                     pc.start()
 
-        self._call_soon(start_pcs)
+        self.call_soon(start_pcs)
 
     def stop(self):
         if not self.__stopped:
@@ -465,7 +465,7 @@ class Server:
                 async def _stop_listener():
                     listener.stop()
 
-                self._call_soon(_stop_listener)
+                self.call_soon(_stop_listener)
 
     @property
     def listener(self):
@@ -756,7 +756,7 @@ class Server:
                                 break
                             handler = self.stream_handlers[op]
                             if is_coroutine_function(handler):
-                                self._call_soon(handler, **merge(extra, msg))
+                                self.call_soon(handler, **merge(extra, msg))
                                 await asyncio.sleep(0)
                             else:
                                 handler(**merge(extra, msg))
@@ -777,10 +777,50 @@ class Server:
             await comm.close()
             assert comm.closed()
 
-    def _call_later(self, delay, afunc, *args, **kwargs):
+    def call_later(
+        self, delay: float, afunc: Callable[..., Coroutine], *args, **kwargs
+    ) -> None:
+        """Schedule a coroutine function to be asynchronously executed after `delay` seconds.
+
+        The coroutine function `afunc` is scheduled with `args` arguments and `kwargs` keyword arguments
+        to be asynchronously executed after `delay` seconds.
+
+        Parameters
+        ----------
+        delay
+            Delay in seconds.
+        afunc
+            Coroutine function to schedule.
+        *args
+            Arguments to be passed to `afunc`.
+        **kwargs
+            Keyword arguments to be passed to `afunc`
+
+        Returns
+        -------
+        None
+        """
+
         self._ongoing_background_tasks.call_later(delay, afunc, *args, **kwargs)
 
-    def _call_soon(self, afunc, *args, **kwargs):
+    def call_soon(self, afunc: Callable[..., Coroutine], *args, **kwargs) -> None:
+        """Schedule a coroutine function to be executed asynchronously.
+
+        The coroutine function `afunc` is scheduled asynchronously with `args` arguments and `kwargs` keyword arguments.
+
+        Parameters
+        ----------
+        afunc
+            Coroutine function to schedule.
+        *args
+            Arguments to be passed to `afunc`.
+        **kwargs
+            Keyword arguments to be passed to `afunc`
+
+        Returns
+        -------
+        None
+        """
         self._ongoing_background_tasks.call_soon(afunc, *args, **kwargs)
 
     async def close(self, timeout=None):
