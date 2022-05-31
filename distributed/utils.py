@@ -32,7 +32,7 @@ from time import sleep
 from types import ModuleType
 from typing import TYPE_CHECKING
 from typing import Any as AnyType
-from typing import ClassVar, Coroutine, TypeVar, overload
+from typing import ClassVar, Coroutine, TypeVar, cast, overload
 
 import click
 import tblib.pickling_support
@@ -1734,16 +1734,14 @@ def is_python_shutting_down() -> bool:
     return _python_shutting_down
 
 
-CoroutineFunctionType = TypeVar(
-    "CoroutineFunctionType", bound=Callable[..., Coroutine[AnyType, AnyType, AnyType]]
-)
+CoroutineFunctionType = TypeVar("CoroutineFunctionType", bound=Callable[..., Coroutine])
 
 
-def delayed(corofunc: CoroutineFunctionType, delay: float):
+def delayed(corofunc: CoroutineFunctionType, delay: float) -> CoroutineFunctionType:
     """Decorator to delay the evaluation of a coroutine function by the given delay in seconds."""
 
     async def wrapper(*args, **kwargs):
         await asyncio.sleep(delay)
         return await corofunc(*args, **kwargs)
 
-    return wrapper
+    return cast(CoroutineFunctionType, wrapper)
