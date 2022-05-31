@@ -20,7 +20,14 @@ import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
 from collections import OrderedDict, UserDict, deque
-from collections.abc import Callable, Collection, Container, KeysView, ValuesView
+from collections.abc import (
+    Callable,
+    Collection,
+    Container,
+    KeysView,
+    Sequence,
+    ValuesView,
+)
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
@@ -122,6 +129,13 @@ try:
         return out
 
     host_copy = numpy_host_copy
+
+    def _numpy_host_concat(L: list[memoryview]) -> memoryview:
+        out = host_array(sum(mv.nbytes for mv in L))
+        numpy.concatenate(L, axis=None, out=numpy.asarray(out))
+        return out
+
+    _host_concat = _numpy_host_concat
 except ImportError:
 
     def builtin_host_array(n: int = 0) -> memoryview:
@@ -133,6 +147,21 @@ except ImportError:
         return memoryview(bytearray(mv))
 
     host_copy = builtin_host_copy
+
+    def _builtin_host_concat(L: list[memoryview]) -> memoryview:
+        return memoryview(bytearray().join(L))
+
+    _host_concat = _builtin_host_concat
+
+
+def host_concat(seq: Sequence) -> memoryview:
+    L: list[memoryview] = list(filter(bool, map(ensure_memoryview, seq)))
+    if len(L) == 0:
+        return host_array()
+    elif len(L) == 1:
+        return L[0]
+    else:
+        return _host_concat(L)
 
 
 def has_arg(func, argname):
