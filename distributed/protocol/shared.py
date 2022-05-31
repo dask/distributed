@@ -60,12 +60,15 @@ def ser(x, context=None):
         ]
         if worker is not None:
             # find object's dask key; it ought to exist
-            k = first((k for k, d in worker.data.items() if d is x))
-            new_obj = deser(
-                None, frames
-            )  # version of object pointing at shared buffers
-            worker.shared_data[id(new_obj)] = head, frames  # save shared buffers
-            worker.data[k] = new_obj  # replace original object
+            seq = [k for k, d in worker.data.items() if d is x]
+            # if key is not in data, this is probably a test in-process worker
+            if seq:
+                k = first(seq)
+                new_obj = deser(
+                    None, frames
+                )  # version of object pointing at shared buffers
+                worker.shared_data[id(new_obj)] = head, frames  # save shared buffers
+                worker.data[k] = new_obj  # replace original object
     return head, frames
 
 

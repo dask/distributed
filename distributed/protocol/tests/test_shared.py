@@ -6,7 +6,7 @@ import pytest
 plasma = pytest.importorskip("pyarrow.plasma")
 np = pytest.importorskip("numpy")
 
-from distributed.utils_test import gen_cluster
+from distributed.utils_test import gen_cluster, inc
 
 path = "/tmp/plasma"
 
@@ -28,14 +28,20 @@ def plasma_session(plasma_process):
     client.evict(1000000)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, client_kwargs={"serializers": ["plasma", "error"]})
 async def test_roundtrip(c, s, a, b, plasma_session):
+    await b.close()  # ensure we reuse the worker data
     # uses temporary and unlikely hard-coded buffer min size of 1 byte
     x = np.arange(100)  # 800 bytes
     f = await c.scatter(x)  # produces one shared buffer
-    f2 = c.submit(lambda y: y + 1, f)  # produces another shared buffer
-    f3 = c.submit(lambda y: y + 1, f)  # does not make another buffer, key exists
-    out = await f2
+    assert len(plasma_session.list()) == 1
+    f2 = c.submit(inc, f)  # does not yet make new shared buffer
+    assert len(plasma_session.list()) == 1
+    f3 = c.submit(inc, f)  # does not make another buffer, key exists
+    assert len(plasma_session.list()) == 1
+    out = await f2  # getting result creates buffer for y + 1
+    assert len(plasma_session.list()) == 2
     _ = await c.gather([f2, f3])  # does not make another buffer, ser already exists
     assert (x + 1 == out).all()
     assert all([_["data_size"] == x.nbytes for _ in plasma_session.list().values()])
+    assert len(plasma_session.list()) == 2
