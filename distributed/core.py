@@ -143,8 +143,8 @@ class AsyncTaskGroup:
         """
         if self.closed:
             return None
-
-        task = asyncio.create_task(afunc(*args, **kwargs))
+        coro = afunc(*args, **kwargs)
+        task = asyncio.create_task(coro)
         self._ongoing_tasks.add(task)
         task.add_done_callback(self._ongoing_tasks.remove)
         return task
@@ -175,10 +175,6 @@ class AsyncTaskGroup:
         """
         return self.call_soon(delayed(afunc, delay), *args, **kwargs)
 
-    @property
-    def _cancellable_tasks(self):
-        return (t for t in self._ongoing_tasks if t is not asyncio.current_task())
-
     def close(self) -> None:
         """Closes the task group so that no new tasks can be scheduled.
 
@@ -194,18 +190,22 @@ class AsyncTaskGroup:
         """
         self.close()
 
-        # Wrap gather in task to avoid Python3.8 issue,
-        # see https://github.com/dask/distributed/pull/6478#discussion_r885757056
-        gather_task = asyncio.create_task(
-            asyncio.gather(*self._cancellable_tasks, return_exceptions=True)
-        )
-        try:
-            await asyncio.wait_for(
-                gather_task,
-                timeout,
+        tasks_to_stop = [
+            t for t in self._ongoing_tasks if t is not asyncio.current_task()
+        ]
+        if tasks_to_stop:
+            # Wrap gather in task to avoid Python3.8 issue,
+            # see https://github.com/dask/distributed/pull/6478#discussion_r885757056
+            gather_task = asyncio.create_task(
+                asyncio.gather(*tasks_to_stop, return_exceptions=True)
             )
-        except asyncio.TimeoutError:
-            pass
+            try:
+                await asyncio.wait_for(
+                    gather_task,
+                    timeout,
+                )
+            except asyncio.TimeoutError:
+                pass
 
 
 class Server:
