@@ -115,12 +115,24 @@ try:
         return numpy.empty((n,), dtype="u1").data
 
     host_array = numpy_host_array
+
+    def numpy_host_copy(mv: memoryview) -> memoryview:
+        out = host_array(mv.nbytes)
+        numpy.copyto(numpy.ndarray(mv.shape, mv.format, out), mv, casting="no")
+        return out
+
+    host_copy = numpy_host_copy
 except ImportError:
 
     def builtin_host_array(n: int = 0) -> memoryview:
         return memoryview(bytearray(n))
 
     host_array = builtin_host_array
+
+    def builtin_host_copy(mv: memoryview) -> memoryview:
+        return memoryview(bytearray(mv))
+
+    host_copy = builtin_host_copy
 
 
 def has_arg(func, argname):
