@@ -150,9 +150,16 @@ def init_once():
     pool_size_str = dask.config.get("distributed.rmm.pool-size")
     if pool_size_str is not None:
         pool_size = parse_bytes(pool_size_str)
-        rmm.reinitialize(
-            pool_allocator=True, managed_memory=False, initial_pool_size=pool_size
-        )
+        try:
+            import rmm
+
+            rmm.reinitialize(
+                pool_allocator=True, managed_memory=False, initial_pool_size=pool_size
+            )
+        except ImportError:
+            raise RuntimeError(
+                "In order to set distributed.rmm.pool-size, RMM is required"
+            )
 
 
 def _close_comm(ref):
