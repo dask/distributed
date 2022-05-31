@@ -109,7 +109,7 @@ def _expects_comm(func: Callable) -> bool:
     return False
 
 
-class TaskGroup:
+class AsyncTaskGroup:
     """Collection tracking all currently running asynchronous tasks within a group"""
 
     #: If True, the group is closed and does not allow adding new tasks.
@@ -286,8 +286,8 @@ class Server:
         self.monitor = SystemMonitor()
         self.counters = None
         self.digests = None
-        self._ongoing_background_tasks = TaskGroup()
-        self._ongoing_comm_handlers = TaskGroup()
+        self._ongoing_background_tasks = AsyncTaskGroup()
+        self._ongoing_comm_handlers = AsyncTaskGroup()
         self._event_finished = asyncio.Event()
 
         self.listeners = []
