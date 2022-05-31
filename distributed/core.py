@@ -194,20 +194,21 @@ class Server:
         self.io_loop = io_loop or IOLoop.current()
         self.loop = self.io_loop
 
-        if dask.config.get("distributed.worker.profile.enabled"):
-            if not hasattr(self.io_loop, "profile"):
-                ref = weakref.ref(self.io_loop)
+        if dask.config.get("distributed.worker.profile.enabled") and not hasattr(
+            self.io_loop, "profile"
+        ):
+            ref = weakref.ref(self.io_loop)
 
-                def stop() -> bool:
-                    loop = ref()
-                    return loop is None or loop.asyncio_loop.is_closed()
+            def stop() -> bool:
+                loop = ref()
+                return loop is None or loop.asyncio_loop.is_closed()
 
-                self.io_loop.profile = profile.watch(
-                    omit=("profile.py", "selectors.py"),
-                    interval=dask.config.get("distributed.worker.profile.interval"),
-                    cycle=dask.config.get("distributed.worker.profile.cycle"),
-                    stop=stop,
-                )
+            self.io_loop.profile = profile.watch(
+                omit=("profile.py", "selectors.py"),
+                interval=dask.config.get("distributed.worker.profile.interval"),
+                cycle=dask.config.get("distributed.worker.profile.cycle"),
+                stop=stop,
+            )
 
         # Statistics counters for various events
         with suppress(ImportError):
