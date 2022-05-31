@@ -111,13 +111,13 @@ try:
     # uses hugepages when available ( https://github.com/numpy/numpy/pull/14216 ).
     import numpy
 
-    def numpy_host_array(n: int) -> memoryview:
+    def numpy_host_array(n: int = 0) -> memoryview:
         return numpy.empty((n,), dtype="u1").data
 
     host_array = numpy_host_array
 except ImportError:
 
-    def builtin_host_array(n: int) -> memoryview:
+    def builtin_host_array(n: int = 0) -> memoryview:
         return memoryview(bytearray(n))
 
     host_array = builtin_host_array
