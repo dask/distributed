@@ -31,6 +31,7 @@ from distributed.utils import (
     format_dashboard_link,
     get_ip_interface,
     get_traceback,
+    host_array,
     is_kernel,
     is_valid_xml,
     iscoroutinefunction,
@@ -246,6 +247,28 @@ def test_seek_delimiter_endline():
     f.seek(5)
     seek_delimiter(f, b"\n", 5)
     assert f.tell() == 7
+
+
+def test_host_array_empty():
+    a = host_array()
+    assert isinstance(a, memoryview)
+    assert a.nbytes == 0
+    assert a.format == "B"
+    assert a.ndim == 1
+    assert a.shape == (0,)
+    assert a.contiguous
+
+
+def test_host_array():
+    for N in [0, 3, 5]:
+        a = host_array(N)
+        assert isinstance(a, memoryview)
+        assert a.nbytes == N
+        assert a.format == "B"
+        assert a.ndim == 1
+        assert a.shape == (N,)
+        assert a.contiguous
+        assert not a.readonly
 
 
 @pytest.mark.parametrize(
