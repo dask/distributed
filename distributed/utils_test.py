@@ -1285,14 +1285,17 @@ def raises(func, exc=Exception):
         return True
 
 
-def _terminate_process(proc):
+def _terminate_process(proc: subprocess.Popen, already_communicating: bool):
     if proc.poll() is None:
         if sys.platform.startswith("win"):
             proc.send_signal(signal.CTRL_BREAK_EVENT)
         else:
             proc.send_signal(signal.SIGINT)
         try:
-            proc.wait(30)
+            if already_communicating:
+                proc.wait(timeout=30)
+            else:
+                proc.communicate(timeout=30)
         finally:
             # Make sure we don't leave the process lingering around
             with suppress(OSError):
@@ -1351,7 +1354,7 @@ def popen(
 
     finally:
         try:
-            _terminate_process(proc)
+            _terminate_process(proc, already_communicating=flush_output)
         finally:
             # XXX Also dump stdout if return code != 0 ?
             if flush_output:
