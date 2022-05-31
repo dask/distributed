@@ -15,7 +15,7 @@ from collections.abc import Container
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import Callable, ClassVar, TypedDict, TypeVar
+from typing import Callable, ClassVar, Coroutine, TypedDict, TypeVar
 
 import tblib
 from tlz import merge
@@ -37,7 +37,6 @@ from distributed.comm import (
 from distributed.metrics import time
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
-    CoroutineFunctionType,
     delayed,
     get_traceback,
     has_keyword,
@@ -121,7 +120,7 @@ class TaskGroup:
         self._ongoing_tasks: set[asyncio.Task] = set()
 
     def call_soon(
-        self, afunc: CoroutineFunctionType, *args, **kwargs
+        self, afunc: Callable[..., Coroutine], *args, **kwargs
     ) -> asyncio.Task | None:
         """Schedule a coroutine function to be executed as an `asyncio.Task`.
 
@@ -151,7 +150,7 @@ class TaskGroup:
         return task
 
     def call_later(
-        self, delay: int, afunc: CoroutineFunctionType, *args, **kwargs
+        self, delay: int, afunc: Callable[..., Coroutine], *args, **kwargs
     ) -> asyncio.Task | None:
         """Schedule a coroutine function to be executed after `delay` seconds as an `asyncio.Task`.
 
@@ -195,17 +194,14 @@ class TaskGroup:
         """
         self.close()
 
-        # Wrap to avoid Python3.8 issue,
-        # see https://github.com/dask/distributed/pull/6478#discussion_r885696827
-        async def _gather():
-            return await asyncio.gather(
-                *self._cancellable_tasks,
-                return_exceptions=True,
-            )
-
+        # Wrap gather in task to avoid Python3.8 issue,
+        # see https://github.com/dask/distributed/pull/6478#discussion_r885757056
+        gather_task = asyncio.create_task(
+            asyncio.gather(*self._cancellable_tasks, return_exceptions=True)
+        )
         try:
             await asyncio.wait_for(
-                _gather(),
+                gather_task,
                 timeout,
             )
         except asyncio.TimeoutError:

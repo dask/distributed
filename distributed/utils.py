@@ -75,6 +75,10 @@ if TYPE_CHECKING:
 
     P = ParamSpec("P")
     T = TypeVar("T")
+    CoroutineFunctionType = TypeVar(
+        "CoroutineFunctionType", bound=Callable[..., Coroutine]
+    )
+
 
 no_default = "__no_default__"
 
@@ -1732,9 +1736,6 @@ def is_python_shutting_down() -> bool:
     from distributed import _python_shutting_down
 
     return _python_shutting_down
-
-
-CoroutineFunctionType = TypeVar("CoroutineFunctionType", bound=Callable[..., Coroutine])
 
 
 def delayed(corofunc: CoroutineFunctionType, delay: float) -> CoroutineFunctionType:
