@@ -1349,6 +1349,7 @@ async def test_profile_metadata_keys(c, s, a, b):
 @gen_cluster(
     client=True,
     config={
+        "distributed.worker.profile.enabled": True,
         "distributed.worker.profile.interval": "1ms",
         "distributed.worker.profile.cycle": "100ms",
     },
@@ -1365,6 +1366,7 @@ async def test_statistical_profiling(c, s, a, b):
 @gen_cluster(
     client=True,
     config={
+        "distributed.worker.profile.enabled": True,
         "distributed.worker.profile.interval": "1ms",
         "distributed.worker.profile.cycle": "100ms",
     },

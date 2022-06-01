@@ -21,7 +21,11 @@ def test_basic(Component):
     assert isinstance(c.root, Model)
 
 
-@gen_cluster(client=True, clean_kwargs={"threads": False})
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={"distributed.worker.profile.enabled": True},
+)
 async def test_profile_plot(c, s, a, b):
     p = ProfilePlot()
     assert not p.source.data["left"]
