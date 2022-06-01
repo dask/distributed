@@ -885,14 +885,11 @@ def gen_test(
 async def start_cluster(
     nthreads: list[tuple[str, int] | tuple[str, int, dict]],
     scheduler_addr: str,
-    loop: IOLoop | None = None,
     security: Security | dict[str, Any] | None = None,
     Worker: type[ServerNode] = Worker,
     scheduler_kwargs: dict[str, Any] = {},
     worker_kwargs: dict[str, Any] = {},
 ) -> tuple[Scheduler, list[ServerNode]]:
-    if loop is not None:
-        warnings.warn("the loop kwarg to start_cluster is deprecated")
     s = await Scheduler(
         validate=True,
         security=security,
