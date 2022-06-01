@@ -91,7 +91,7 @@ distributed:
       restart: False        # Do we ressurrect the worker after the lifetime deadline?
 
     profile:
-      enabled: true         # Whether or not to enable profiling
+      enabled: True         # Whether or not to enable profiling
       interval: 10ms        # Time between statistical profiling queries
       cycle: 1000ms         # Time between starting new profile
       low-level: False      # Whether or not to include low-level functions
