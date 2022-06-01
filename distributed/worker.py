@@ -841,9 +841,7 @@ class Worker(ServerNode):
         pc = PeriodicCallback(self.heartbeat, self.heartbeat_interval * 1000)
         self.periodic_callbacks["heartbeat"] = pc
 
-        pc = PeriodicCallback(
-            lambda: self.batched_stream.send({"op": "keep-alive"}), 60000
-        )
+        pc = PeriodicCallback(lambda: self.batched_send({"op": "keep-alive"}), 60000)
         self.periodic_callbacks["keep-alive"] = pc
 
         pc = PeriodicCallback(self.find_missing, 1000)
@@ -954,9 +952,9 @@ class Worker(ServerNode):
             "msg": msg,
         }
         if self.thread_id == threading.get_ident():
-            self.batched_stream.send(full_msg)
+            self.batched_send(full_msg)
         else:
-            self.loop.add_callback(self.batched_stream.send, full_msg)
+            self.loop.add_callback(self.batched_send, full_msg)
 
     @property
     def executing_count(self) -> int:
@@ -988,20 +986,13 @@ class Worker(ServerNode):
             self.handle_stimulus(UnpauseEvent(stimulus_id=stimulus_id))
 
     def _send_worker_status_change(self, stimulus_id: str) -> None:
-        if (
-            self.batched_stream
-            and self.batched_stream.comm
-            and not self.batched_stream.comm.closed()
-        ):
-            self.batched_stream.send(
-                {
-                    "op": "worker-status-change",
-                    "status": self._status.name,
-                    "stimulus_id": stimulus_id,
-                },
-            )
-        elif self._status != Status.closed:
-            self.loop.call_later(0.05, self._send_worker_status_change, stimulus_id)
+        self.batched_send(
+            {
+                "op": "worker-status-change",
+                "status": self._status.name,
+                "stimulus_id": stimulus_id,
+            },
+        )
 
     async def get_metrics(self) -> dict:
         try:
@@ -1103,6 +1094,24 @@ class Worker(ServerNode):
     #####################
     # External Services #
     #####################
+
+    def batched_send(self, msg: dict[str, Any]) -> None:
+        """Send a fire-and-forget message to the scheduler through bulk comms.
+        
+        If we're not currently connected to the scheduler, the message will be silently dropped!
+
+        Parameters
+        ----------
+        msg: dict
+            msgpack-serializable message to send to the scheduler.
+            Must have a 'op' key which is registered in Scheduler.stream_handlers.
+        """
+        if (
+            self.batched_stream
+            and self.batched_stream.comm
+            and not self.batched_stream.comm.closed()
+        ):
+            self.batched_stream.send(msg)
 
     async def _register_with_scheduler(self):
         self.periodic_callbacks["keep-alive"].stop()
@@ -1555,12 +1564,7 @@ class Worker(ServerNode):
         if self._protocol == "ucx":  # pragma: no cover
             await asyncio.sleep(0.2)
 
-        if (
-            self.batched_stream
-            and self.batched_stream.comm
-            and not self.batched_stream.comm.closed()
-        ):
-            self.batched_stream.send({"op": "close-stream"})
+        self.batched_send({"op": "close-stream"})
 
         if self.batched_stream:
             with suppress(TimeoutError):
@@ -2850,13 +2854,7 @@ class Worker(ServerNode):
             for ts in tasks:
                 self.validate_task(ts)
 
-        if self.batched_stream.closed():
-            logger.debug(
-                "BatchedSend closed while transitioning tasks. %d tasks not sent.",
-                len(instructions),
-            )
-        else:
-            self._handle_instructions(instructions)
+        self._handle_instructions(instructions)
 
     @fail_hard
     @log_errors
@@ -2889,7 +2887,7 @@ class Worker(ServerNode):
                 task: asyncio.Task | None = None
 
                 if isinstance(inst, SendMessageToScheduler):
-                    self.batched_stream.send(inst.to_dict())
+                    self.batched_send(inst.to_dict())
 
                 elif isinstance(inst, EnsureCommunicatingAfterTransitions):
                     # A single compute-task or acquire-replicas command may cause
@@ -3472,7 +3470,7 @@ class Worker(ServerNode):
             "state": state,
             "stimulus_id": stimulus_id,
         }
-        self.batched_stream.send(response)
+        self.batched_send(response)
 
         if state in READY | {"waiting"}:
             assert ts
