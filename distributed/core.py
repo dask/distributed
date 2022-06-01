@@ -119,6 +119,27 @@ class AsyncTaskGroup:
         self.closed = False
         self._ongoing_tasks: set[asyncio.Task] = set()
 
+    def schedule(self, coro: Coroutine) -> asyncio.Task | None:
+        """Schedules a coroutine object to be executed as an `asyncio.Task`.
+
+        Parameters
+        ----------
+        coro : Coroutine
+            Coroutine object to schedule.
+
+        Returns
+        -------
+        asyncio.Task | None
+            The scheduled Task object, or None if the group is closed.
+        """
+        if self.closed:
+            coro.close()
+            return None
+        task = asyncio.create_task(coro)
+        self._ongoing_tasks.add(task)
+        task.add_done_callback(self._ongoing_tasks.remove)
+        return task
+
     def call_soon(
         self, afunc: Callable[..., Coroutine], *args, **kwargs
     ) -> asyncio.Task | None:
@@ -143,10 +164,7 @@ class AsyncTaskGroup:
         """
         if self.closed:
             return None
-        task = asyncio.create_task(afunc(*args, **kwargs))
-        self._ongoing_tasks.add(task)
-        task.add_done_callback(self._ongoing_tasks.remove)
-        return task
+        return self.schedule(afunc(*args, **kwargs))
 
     def call_later(
         self, delay: float, afunc: Callable[..., Coroutine], *args, **kwargs
@@ -681,21 +699,17 @@ class Server:
 
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
-                        if inspect.iscoroutinefunction(handler):
-                            if _expects_comm(handler):
-                                result = self._ongoing_comm_handlers.call_soon(
-                                    handler, comm, **msg
-                                )
-                            else:
-                                result = self._ongoing_comm_handlers.call_soon(
-                                    handler, **msg
-                                )
-                            result = await result
+                        if _expects_comm(handler):
+                            result = handler(comm, **msg)
                         else:
-                            if _expects_comm(handler):
-                                result = handler(comm, **msg)
-                            else:
-                                result = handler(**msg)
+                            result = handler(**msg)
+                        if inspect.iscoroutine(result):
+                            result = self._ongoing_comm_handlers.schedule(result)
+                            result = await result
+                        elif inspect.isawaitable(result):
+                            raise RuntimeError(
+                                f"Comm handler returned unknown awaitable. Expected coroutine, instead got {type(result)}"
+                            )
                     except CommClosedError:
                         if self.status == Status.running:
                             logger.info("Lost connection to %r", address, exc_info=True)
