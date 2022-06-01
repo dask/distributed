@@ -7,6 +7,7 @@ import errno
 import functools
 import heapq
 import logging
+import operator
 import os
 import pathlib
 import random
@@ -586,9 +587,9 @@ class Worker(ServerNode):
         self.tasks = {}
         self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)
-        self.data_needed = HeapSet(key=lambda ts: ts.priority)
+        self.data_needed = HeapSet(key=operator.attrgetter("priority"))
         self.data_needed_per_worker = defaultdict(
-            lambda: HeapSet(key=lambda ts: ts.priority)  # type: ignore
+            lambda: HeapSet(key=operator.attrgetter("priority"))
         )
         self.nanny = nanny
         self._lock = threading.Lock()
@@ -1078,9 +1079,9 @@ class Worker(ServerNode):
             "status": self.status,
             "ready": self.ready,
             "constrained": self.constrained,
-            "data_needed": self.data_needed.sorted(),
+            "data_needed": list(self.data_needed.sorted()),
             "data_needed_per_worker": {
-                w: v.sorted() for w, v in self.data_needed_per_worker.items()
+                w: list(v.sorted()) for w, v in self.data_needed_per_worker.items()
             },
             "long_running": self.long_running,
             "executing_count": self.executing_count,
@@ -3032,16 +3033,16 @@ class Worker(ServerNode):
             local = [w for w in workers if get_address_host(w) == host]
             worker = random.choice(local or workers)
 
-            to_gather, total_nbytes = self._select_keys_for_gather(worker, ts)
+            to_gather_tasks, total_nbytes = self._select_keys_for_gather(worker, ts)
+            to_gather_keys = {ts.key for ts in to_gather_tasks}
 
             self.log.append(
-                ("gather-dependencies", worker, to_gather, stimulus_id, time())
+                ("gather-dependencies", worker, to_gather_keys, stimulus_id, time())
             )
 
             self.comm_nbytes += total_nbytes
-            self.in_flight_workers[worker] = to_gather
-            for d_key in to_gather:
-                d_ts = self.tasks[d_key]
+            self.in_flight_workers[worker] = to_gather_keys
+            for d_ts in to_gather_tasks:
                 if self.validate:
                     assert d_ts.state == "fetch"
                     assert d_ts not in recommendations
@@ -3055,7 +3056,7 @@ class Worker(ServerNode):
             instructions.append(
                 GatherDep(
                     worker=worker,
-                    to_gather=to_gather,
+                    to_gather=to_gather_keys,
                     total_nbytes=total_nbytes,
                     stimulus_id=stimulus_id,
                 )
@@ -3152,14 +3153,14 @@ class Worker(ServerNode):
 
     def _select_keys_for_gather(
         self, worker: str, ts: TaskState
-    ) -> tuple[set[str], int]:
+    ) -> tuple[set[TaskState], int]:
         """``_ensure_communicating`` decided to fetch a single task from a worker,
         following priority. In order to minimise overhead, request fetching other tasks
         from the same worker within the message, following priority for the single
         worker but ignoring higher priority tasks from other workers, up to
         ``target_message_size``.
         """
-        keys = {ts.key}
+        tss = {ts}
         total_bytes = ts.get_nbytes()
         tasks = self.data_needed_per_worker[worker]
 
@@ -3176,10 +3177,10 @@ class Worker(ServerNode):
                 if other_worker != worker:
                     self.data_needed_per_worker[other_worker].remove(ts)
 
-            keys.add(ts.key)
+            tss.add(ts)
             total_bytes += ts.get_nbytes()
 
-        return keys, total_bytes
+        return tss, total_bytes
 
     @property
     def total_comm_bytes(self):
@@ -4363,10 +4364,12 @@ class Worker(ServerNode):
 
             for ts in self.data_needed:
                 assert ts.state == "fetch"
+                assert self.tasks[ts.key] is ts
             for worker, tss in self.data_needed_per_worker.items():
                 for ts in tss:
-                    assert ts in self.data_needed
                     assert ts.state == "fetch"
+                    assert self.tasks[ts.key] is ts
+                    assert ts in self.data_needed
                     assert worker in ts.who_has
 
             for ts in self.tasks.values():

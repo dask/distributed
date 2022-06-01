@@ -174,7 +174,13 @@ class TaskState:
         return f"<TaskState {self.key!r} {self.state}>"
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, TaskState) and other.key == self.key
+        if not isinstance(other, TaskState) or other.key != self.key:
+            return False
+        # When a task transitions to forgotten and exits Worker.tasks, it should be
+        # immediately dereferenced. If the same task is recreated later on on the
+        # worker, we should not have to deal with its previous incarnation lingering.
+        assert other is self
+        return True
 
     def __hash__(self) -> int:
         return hash(self.key)

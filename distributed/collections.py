@@ -3,11 +3,11 @@ from __future__ import annotations
 import heapq
 import weakref
 from collections import OrderedDict, UserDict
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Hashable, Iterator
 from typing import MutableSet  # TODO move to collections.abc (requires Python >=3.9)
 from typing import Any, TypeVar, cast
 
-T = TypeVar("T")
+T = TypeVar("T", bound=Hashable)
 
 
 # TODO change to UserDict[K, V] (requires Python >=3.9)
@@ -44,6 +44,7 @@ class HeapSet(MutableSet[T]):
     _heap: list[tuple[Any, int, weakref.ref[T]]]
 
     def __init__(self, *, key: Callable[[T], Any]):
+        # FIXME https://github.com/python/mypy/issues/708
         self.key = key  # type: ignore
         self._data = set()
         self._inc = 0
@@ -54,9 +55,6 @@ class HeapSet(MutableSet[T]):
 
     def __contains__(self, value: object) -> bool:
         return value in self._data
-
-    def __iter__(self) -> Iterator[T]:
-        return iter(self._data)
 
     def __len__(self) -> int:
         return len(self._data)
@@ -72,6 +70,8 @@ class HeapSet(MutableSet[T]):
 
     def discard(self, value: T) -> None:
         self._data.discard(value)
+        if not self._data:
+            self._heap.clear()
 
     def peek(self) -> T:
         """Get the smallest element without removing it"""
@@ -93,13 +93,22 @@ class HeapSet(MutableSet[T]):
                 self._data.remove(value)
                 return value
 
-    def sorted(self) -> list[T]:
-        """Return a list containing all elements, from smallest to largest according to
-        the key and insertion order.
+    def __iter__(self) -> Iterator[T]:
+        """Iterate over all elements. This is a O(n) operation which returns the
+        elements in pseudo-random order.
         """
-        out = []
+        return iter(self._data)
+
+    def sorted(self) -> Iterator[T]:
+        """Iterate ofer all elements. This is a O(n*logn) operation which returns the
+        elements in order, from smallest to largest according to the key and insertion
+        order.
+        """
         for _, _, vref in sorted(self._heap):
             value = vref()
             if value in self._data:
-                out.append(value)
-        return out
+                yield value
+
+    def clear(self) -> None:
+        self._data.clear()
+        self._heap.clear()

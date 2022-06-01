@@ -51,14 +51,15 @@ def test_heapset():
     assert cz in heap
     assert cw in heap
 
-    heap_list = heap.sorted()
+    heap_sorted = heap.sorted()
     # iteration does not empty heap
     assert len(heap) == 4
-    assert len(heap_list) == 4
-    assert heap_list[0] is cy
-    assert heap_list[1] is cx
-    assert heap_list[2] is cz
-    assert heap_list[3] is cw
+    assert next(heap_sorted) is cy
+    assert next(heap_sorted) is cx
+    assert next(heap_sorted) is cz
+    assert next(heap_sorted) is cw
+    with pytest.raises(StopIteration):
+        next(heap_sorted)
 
     assert set(heap) == {cx, cy, cz, cw}
 
@@ -96,7 +97,7 @@ def test_heapset():
     heap.discard(cw)
 
     assert len(heap) == 2
-    assert heap.sorted() == [cx, cz]
+    assert list(heap.sorted()) == [cx, cz]
     # cy is at the top of heap._heap, but is skipped
     assert heap.peek() is cx
     assert heap.pop() is cx
@@ -108,4 +109,16 @@ def test_heapset():
         heap.peek()
     with pytest.raises(KeyError):
         heap.pop()
-    assert heap.sorted() == []
+    assert list(heap.sorted()) == []
+
+    # Test clear()
+    heap.add(cx)
+    heap.clear()
+    assert not heap
+    heap.add(cx)
+    assert cx in heap
+    # Test discard last element
+    heap.discard(cx)
+    assert not heap
+    heap.add(cx)
+    assert cx in heap
