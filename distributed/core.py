@@ -40,7 +40,7 @@ from distributed.utils import (
     delayed,
     get_traceback,
     has_keyword,
-    is_coroutine_function,
+    iscoroutinefunction,
     recursive_to_dict,
     truncate_exception,
 )
@@ -143,8 +143,7 @@ class AsyncTaskGroup:
         """
         if self.closed:
             return None
-        coro = afunc(*args, **kwargs)
-        task = asyncio.create_task(coro)
+        task = asyncio.create_task(afunc(*args, **kwargs))
         self._ongoing_tasks.add(task)
         task.add_done_callback(self._ongoing_tasks.remove)
         return task
@@ -195,13 +194,13 @@ class AsyncTaskGroup:
         ]
         if tasks_to_stop:
             # Wrap gather in task to avoid Python3.8 issue,
-            # see https://github.com/dask/distributed/pull/6478#discussion_r885757056
-            gather_task = asyncio.create_task(
-                asyncio.gather(*tasks_to_stop, return_exceptions=True)
-            )
+            # see https://github.com/dask/distributed/pull/6478#discussion_r885696827
+            async def gather():
+                return await asyncio.gather(*tasks_to_stop, return_exceptions=True)
+
             try:
                 await asyncio.wait_for(
-                    gather_task,
+                    gather(),
                     timeout,
                 )
             except asyncio.TimeoutError:
@@ -755,7 +754,7 @@ class Server:
                                 closed = True
                                 break
                             handler = self.stream_handlers[op]
-                            if is_coroutine_function(handler):
+                            if iscoroutinefunction(handler):
                                 self.call_soon(handler, **merge(extra, msg))
                                 await asyncio.sleep(0)
                             else:
