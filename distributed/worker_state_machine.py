@@ -281,6 +281,12 @@ class Execute(Instruction):
 
 
 @dataclass
+class RetryBusyWorkerLater(Instruction):
+    __slots__ = ("worker",)
+    worker: str
+
+
+@dataclass
 class EnsureCommunicatingAfterTransitions(Instruction):
     __slots__ = ()
 
@@ -442,6 +448,12 @@ class StateMachineEvent:
 @dataclass
 class UnpauseEvent(StateMachineEvent):
     __slots__ = ()
+
+
+@dataclass
+class RetryBusyWorkerEvent(StateMachineEvent):
+    __slots__ = ("worker",)
+    worker: str
 
 
 @dataclass
