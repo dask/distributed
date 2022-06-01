@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import heapq
 import sys
-from collections.abc import Callable, Container, Iterator
+from collections.abc import Container, Iterator
 from copy import copy
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -53,11 +53,20 @@ PROCESSING: set[TaskStateState] = {
 READY: set[TaskStateState] = {"ready", "constrained"}
 
 
+NO_VALUE = "--no-value-sentinel--"
+
+
 class SerializedTask(NamedTuple):
-    function: Callable
-    args: tuple
-    kwargs: dict[str, Any]
-    task: object  # distributed.scheduler.TaskState.run_spec
+    """Info from distributed.scheduler.TaskState.run_spec
+    Input to distributed.worker._deserialize
+
+    (function, args kwargs) and task are mutually exclusive
+    """
+
+    function: bytes | None = None
+    args: bytes | tuple | list | None = None
+    kwargs: bytes | dict[str, Any] | None = None
+    task: object = NO_VALUE
 
 
 class StartStop(TypedDict, total=False):
@@ -381,6 +390,22 @@ class AddKeysMsg(SendMessageToScheduler):
 
 
 @dataclass
+class StealResponseMsg(SendMessageToScheduler):
+    """Worker->Scheduler response to ``{op: steal-request}``
+
+    See also
+    --------
+    StealRequestEvent
+    """
+
+    op = "steal-response"
+
+    __slots__ = ("key", "state")
+    key: str
+    state: TaskStateState | None
+
+
+@dataclass
 class StateMachineEvent:
     __slots__ = ("stimulus_id", "handled")
     stimulus_id: str
@@ -449,6 +474,39 @@ class GatherDepDoneEvent(StateMachineEvent):
     """Temporary hack - to be removed"""
 
     __slots__ = ()
+
+
+@dataclass
+class ComputeTaskEvent(StateMachineEvent):
+    key: str
+    who_has: dict[str, Collection[str]]
+    nbytes: dict[str, int]
+    priority: tuple[int, ...]
+    duration: float
+    run_spec: SerializedTask
+    resource_restrictions: dict[str, float]
+    actor: bool
+    annotations: dict
+    __slots__ = tuple(__annotations__)  # type: ignore
+
+    def __post_init__(self):
+        # Fixes after msgpack decode
+        if isinstance(self.priority, list):
+            self.priority = tuple(self.priority)
+
+        if isinstance(self.run_spec, dict):
+            self.run_spec = SerializedTask(**self.run_spec)
+        elif not isinstance(self.run_spec, SerializedTask):
+            self.run_spec = SerializedTask(task=self.run_spec)
+
+    def to_loggable(self, *, handled: float) -> StateMachineEvent:
+        out = copy(self)
+        out.handled = handled
+        out.run_spec = SerializedTask(task=None)
+        return out
+
+    def _after_from_dict(self) -> None:
+        self.run_spec = SerializedTask(task=None)
 
 
 @dataclass
@@ -531,6 +589,58 @@ class AlreadyCancelledEvent(StateMachineEvent):
 class RescheduleEvent(StateMachineEvent):
     __slots__ = ("key",)
     key: str
+
+
+@dataclass
+class AcquireReplicasEvent(StateMachineEvent):
+    __slots__ = ("who_has",)
+    who_has: dict[str, Collection[str]]
+
+
+@dataclass
+class RemoveReplicasEvent(StateMachineEvent):
+    __slots__ = ("keys",)
+    keys: list[str]
+
+
+@dataclass
+class FreeKeysEvent(StateMachineEvent):
+    __slots__ = ("keys",)
+    keys: list[str]
+
+
+@dataclass
+class StealRequestEvent(StateMachineEvent):
+    """Event that requests a worker to release a key because it's now being computed
+    somewhere else.
+
+    See also
+    --------
+    StealResponseMsg
+    """
+
+    __slots__ = ("key",)
+    key: str
+
+
+@dataclass
+class UpdateDataEvent(StateMachineEvent):
+    __slots__ = ("data", "report")
+    data: dict[str, object]
+    report: bool
+
+    def to_loggable(self, *, handled: float) -> StateMachineEvent:
+        out = copy(self)
+        out.handled = handled
+        out.data = dict.fromkeys(self.data)
+        return out
+
+
+@dataclass
+class SecedeEvent(StateMachineEvent):
+    __slots__ = ("key", "compute_duration")
+    key: str
+    compute_duration: float
 
 
 if TYPE_CHECKING:

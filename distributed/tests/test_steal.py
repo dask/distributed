@@ -29,6 +29,7 @@ from distributed.utils_test import (
     slowidentity,
     slowinc,
 )
+from distributed.worker_state_machine import StealRequestEvent
 
 pytestmark = pytest.mark.ci1
 
@@ -867,7 +868,7 @@ async def test_dont_steal_already_released(c, s, a, b):
     while key in a.tasks and a.tasks[key].state != "released":
         await asyncio.sleep(0.05)
 
-    a.handle_steal_request(key=key, stimulus_id="test")
+    a.handle_stimulus(StealRequestEvent(key=key, stimulus_id="test"))
     assert len(a.batched_stream.buffer) == 1
     msg = a.batched_stream.buffer[0]
     assert msg["op"] == "steal-response"

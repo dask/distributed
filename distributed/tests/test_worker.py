@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import importlib
 import logging
 import os
@@ -71,6 +72,14 @@ from distributed.worker import (
     benchmark_network,
     error_message,
     logger,
+)
+from distributed.worker_state_machine import (
+    ComputeTaskEvent,
+    ExecuteFailureEvent,
+    ExecuteSuccessEvent,
+    RemoveReplicasEvent,
+    SerializedTask,
+    StealRequestEvent,
 )
 
 pytestmark = pytest.mark.ci1
@@ -1839,31 +1848,67 @@ async def test_story(c, s, w):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_stimulus_story(c, s, a):
+    # Test that substrings aren't matched by stimulus_story()
+    f = c.submit(inc, 1, key="f")
+    f1 = c.submit(lambda: "foo", key="f1")
+    f2 = c.submit(inc, f1, key="f2")  # This will fail
+    await wait([f, f1, f2])
+
+    story = a.stimulus_story("f1", "f2")
+    assert len(story) == 4
+
+    assert isinstance(story[0], ComputeTaskEvent)
+    assert story[0].key == "f1"
+    assert story[0].run_spec == SerializedTask(task=None)  # Not logged
+
+    assert isinstance(story[1], ExecuteSuccessEvent)
+    assert story[1].key == "f1"
+    assert story[1].value is None  # Not logged
+    assert story[1].handled >= story[0].handled
+
+    assert isinstance(story[2], ComputeTaskEvent)
+    assert story[2].key == "f2"
+    assert story[2].who_has == {"f1": (a.address,)}
+    assert story[2].run_spec == SerializedTask(task=None)  # Not logged
+    assert story[2].handled >= story[1].handled
+
+    assert isinstance(story[3], ExecuteFailureEvent)
+    assert story[3].key == "f2"
+    assert story[3].handled >= story[2].handled
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_worker_descopes_data(c, s, a):
+    """Test that data is released on the worker:
+    1. when it's the output of a successful task
+    2. when it's the input of a failed task
+    3. when it's a local variable in the frame of a failed task
+    4. when it's embedded in the exception of a failed task
+    """
+
     class C:
-        pass
+        instances = weakref.WeakSet()
 
-    f = c.submit(C, key="f")  # Test that substrings aren't matched by story()
-    f2 = c.submit(inc, 2, key="f2")
-    f3 = c.submit(inc, 3, key="f3")
-    await wait([f, f2, f3])
+        def __init__(self):
+            C.instances.add(self)
 
-    # Test that ExecuteSuccessEvent.value is not stored in the the event log
-    assert isinstance(a.data["f"], C)
-    ref = weakref.ref(a.data["f"])
-    del f
-    while "f" in a.data:
+    def f(x):
+        y = C()
+        raise Exception(x, y)
+
+    f1 = c.submit(C, key="f1")
+    f2 = c.submit(f, f1, key="f2")
+    await wait([f2])
+
+    assert type(a.data["f1"]) is C
+
+    del f1
+    del f2
+    while a.data:
         await asyncio.sleep(0.01)
     with profile.lock:
-        assert ref() is None
-
-    story = a.stimulus_story("f", "f2")
-    assert {ev.key for ev in story} == {"f", "f2"}
-    assert {ev.type for ev in story} == {C, int}
-
-    prev_handled = story[0].handled
-    for ev in story[1:]:
-        assert ev.handled >= prev_handled
-        prev_handled = ev.handled
+        gc.collect()
+    assert not C.instances
 
 
 @gen_cluster(client=True)
@@ -2558,7 +2603,7 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
             await asyncio.sleep(0)
 
         ts = s.tasks[fut.key]
-        a.handle_steal_request(fut.key, stimulus_id="test")
+        a.handle_stimulus(StealRequestEvent(key=fut.key, stimulus_id="test"))
         stealing_ext.scheduler.send_task_to_worker(b.address, ts)
 
         fut2 = c.submit(inc, fut, workers=[a.address])
@@ -2744,41 +2789,31 @@ async def test_acquire_replicas_many(c, s, *workers):
         await asyncio.sleep(0.001)
 
 
-@pytest.mark.slow
-@gen_cluster(client=True, Worker=Nanny)
-async def test_acquire_replicas_already_in_flight(c, s, *nannies):
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_acquire_replicas_already_in_flight(c, s, a):
     """Trying to acquire a replica that is already in flight is a no-op"""
+    async with BlockedGatherDep(s.address) as b:
+        x = c.submit(inc, 1, workers=[a.address], key="x")
+        y = c.submit(inc, x, workers=[b.address], key="y")
+        await b.in_gather_dep.wait()
+        assert b.tasks["x"].state == "flight"
 
-    class SlowToFly:
-        def __getstate__(self):
-            sleep(0.9)
-            return {}
+        s.request_acquire_replicas(b.address, ["x"], stimulus_id=f"test-{time()}")
+        while not b.story("acquire-replicas"):
+            await asyncio.sleep(0.01)
 
-    a, b = s.workers
-    x = c.submit(SlowToFly, workers=[a], key="x")
-    await wait(x)
-    y = c.submit(lambda x: 123, x, workers=[b], key="y")
-    await asyncio.sleep(0.3)
-    s.request_acquire_replicas(b, [x.key], stimulus_id=f"test-{time()}")
-    assert await y == 123
+        assert b.tasks["x"].state == "flight"
+        b.block_gather_dep.set()
+        assert await y == 3
 
-    story = await c.run(lambda dask_worker: dask_worker.story("x"))
-    assert_story(
-        story[b],
-        [
-            ("x", "ensure-task-exists", "released"),
-            ("x", "released", "fetch", "fetch", {}),
-            ("gather-dependencies", a, {"x"}),
-            ("x", "fetch", "flight", "flight", {}),
-            ("request-dep", a, {"x"}),
-            ("x", "ensure-task-exists", "flight"),
-            ("x", "flight", "fetch", "flight", {}),
-            ("receive-dep", a, {"x"}),
-            ("x", "put-in-memory"),
-            ("x", "flight", "memory", "memory", {"y": "ready"}),
-        ],
-        strict=True,
-    )
+        assert_story(
+            b.story("x"),
+            [
+                ("x", "fetch", "flight", "flight", {}),
+                ("acquire-replicas", {"x"}),
+                ("x", "flight", "fetch", "flight", {}),
+            ],
+        )
 
 
 @gen_cluster(client=True)
@@ -2936,8 +2971,7 @@ async def test_who_has_consistent_remove_replicas(c, s, *workers):
         if w.address == a.tasks[f1.key].coming_from:
             break
 
-    coming_from.handle_remove_replicas([f1.key], "test")
-
+    coming_from.handle_stimulus(RemoveReplicasEvent(keys=[f1.key], stimulus_id="test"))
     await f2
 
     assert_story(a.story(f1.key), [(f1.key, "missing-dep")])

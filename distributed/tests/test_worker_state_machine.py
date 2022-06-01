@@ -15,6 +15,7 @@ from distributed.utils_test import (
     inc,
 )
 from distributed.worker_state_machine import (
+    ComputeTaskEvent,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     Instruction,
@@ -22,10 +23,12 @@ from distributed.worker_state_machine import (
     RescheduleEvent,
     RescheduleMsg,
     SendMessageToScheduler,
+    SerializedTask,
     StateMachineEvent,
     TaskState,
     TaskStateState,
     UniqueTaskHeap,
+    UpdateDataEvent,
     merge_recs_instructions,
 )
 
@@ -174,6 +177,70 @@ def test_event_to_dict():
     }
     ev3 = StateMachineEvent.from_dict(d)
     assert ev3 == ev
+
+
+def test_computetask_to_dict():
+    """The potentially very large ComputeTaskEvent.run_spec is not stored in the log"""
+    ev = ComputeTaskEvent(
+        key="x",
+        who_has={"y": ["w1"]},
+        nbytes={"y": 123},
+        priority=(0,),
+        duration=123.45,
+        # Automatically converted to SerializedTask on init
+        run_spec={"function": b"blob", "args": b"blob"},
+        resource_restrictions={},
+        actor=False,
+        annotations={},
+        stimulus_id="test",
+    )
+    assert ev.run_spec == SerializedTask(function=b"blob", args=b"blob")
+    ev2 = ev.to_loggable(handled=11.22)
+    assert ev2.handled == 11.22
+    assert ev2.run_spec == SerializedTask(task=None)
+    assert ev.run_spec == SerializedTask(function=b"blob", args=b"blob")
+    d = recursive_to_dict(ev2)
+    assert d == {
+        "cls": "ComputeTaskEvent",
+        "key": "x",
+        "who_has": {"y": ["w1"]},
+        "nbytes": {"y": 123},
+        "priority": [0],
+        "run_spec": [None, None, None, None],
+        "duration": 123.45,
+        "resource_restrictions": {},
+        "actor": False,
+        "annotations": {},
+        "stimulus_id": "test",
+        "handled": 11.22,
+    }
+    ev3 = StateMachineEvent.from_dict(d)
+    assert isinstance(ev3, ComputeTaskEvent)
+    assert ev3.run_spec == SerializedTask(task=None)
+    assert ev3.priority == (0,)  # List is automatically converted back to tuple
+
+
+def test_updatedata_to_dict():
+    """The potentially very large UpdateDataEvent.data is not stored in the log"""
+    ev = UpdateDataEvent(
+        data={"x": "foo", "y": "bar"},
+        report=True,
+        stimulus_id="test",
+    )
+    ev2 = ev.to_loggable(handled=11.22)
+    assert ev2.handled == 11.22
+    assert ev2.data == {"x": None, "y": None}
+    d = recursive_to_dict(ev2)
+    assert d == {
+        "cls": "UpdateDataEvent",
+        "data": {"x": None, "y": None},
+        "report": True,
+        "stimulus_id": "test",
+        "handled": 11.22,
+    }
+    ev3 = StateMachineEvent.from_dict(d)
+    assert isinstance(ev3, UpdateDataEvent)
+    assert ev3.data == {"x": None, "y": None}
 
 
 def test_executesuccess_to_dict():

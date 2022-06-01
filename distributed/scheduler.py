@@ -1088,7 +1088,7 @@ class TaskState:
         self.has_lost_dependencies = False
         self.host_restrictions = None  # type: ignore
         self.worker_restrictions = None  # type: ignore
-        self.resource_restrictions = None  # type: ignore
+        self.resource_restrictions = {}
         self.loose_restrictions = False
         self.actor = False
         self.prefix = None  # type: ignore
@@ -2670,14 +2670,12 @@ class SchedulerState:
         return s
 
     def consume_resources(self, ts: TaskState, ws: WorkerState):
-        if ts.resource_restrictions:
-            for r, required in ts.resource_restrictions.items():
-                ws.used_resources[r] += required
+        for r, required in ts.resource_restrictions.items():
+            ws.used_resources[r] += required
 
     def release_resources(self, ts: TaskState, ws: WorkerState):
-        if ts.resource_restrictions:
-            for r, required in ts.resource_restrictions.items():
-                ws.used_resources[r] -= required
+        for r, required in ts.resource_restrictions.items():
+            ws.used_resources[r] -= required
 
     def coerce_hostname(self, host):
         """
@@ -7076,29 +7074,28 @@ class Scheduler(SchedulerState, ServerNode):
             to_close = self.workers_to_close()
             return len(self.workers) - len(to_close)
 
-    def request_acquire_replicas(self, addr: str, keys: list, *, stimulus_id: str):
+    def request_acquire_replicas(
+        self, addr: str, keys: Iterable[str], *, stimulus_id: str
+    ) -> None:
         """Asynchronously ask a worker to acquire a replica of the listed keys from
         other workers. This is a fire-and-forget operation which offers no feedback for
         success or failure, and is intended for housekeeping and not for computation.
         """
-        who_has = {}
-        for key in keys:
-            ts = self.tasks[key]
-            who_has[key] = {ws.address for ws in ts.who_has}
-
+        who_has = {key: [ws.address for ws in self.tasks[key].who_has] for key in keys}
         if self.validate:
             assert all(who_has.values())
 
         self.stream_comms[addr].send(
             {
                 "op": "acquire-replicas",
-                "keys": keys,
                 "who_has": who_has,
                 "stimulus_id": stimulus_id,
             },
         )
 
-    def request_remove_replicas(self, addr: str, keys: list, *, stimulus_id: str):
+    def request_remove_replicas(
+        self, addr: str, keys: list[str], *, stimulus_id: str
+    ) -> None:
         """Asynchronously ask a worker to discard its replica of the listed keys.
         This must never be used to destroy the last replica of a key. This is a
         fire-and-forget operation, intended for housekeeping and not for computation.
@@ -7109,15 +7106,14 @@ class Scheduler(SchedulerState, ServerNode):
         to re-add itself to who_has. If the worker agrees to discard the task, there is
         no feedback.
         """
-        ws: WorkerState = self.workers[addr]
-        validate = self.validate
+        ws = self.workers[addr]
 
         # The scheduler immediately forgets about the replica and suggests the worker to
         # drop it. The worker may refuse, at which point it will send back an add-keys
         # message to reinstate it.
         for key in keys:
-            ts: TaskState = self.tasks[key]
-            if validate:
+            ts = self.tasks[key]
+            if self.validate:
                 # Do not destroy the last copy
                 assert len(ts.who_has) > 1
             self.remove_replica(ts, ws)
@@ -7298,22 +7294,16 @@ def _task_to_msg(
             dts.key: [ws.address for ws in dts.who_has] for dts in ts.dependencies
         },
         "nbytes": {dts.key: dts.nbytes for dts in ts.dependencies},
+        "run_spec": ts.run_spec,
+        "resource_restrictions": ts.resource_restrictions,
+        "actor": ts.actor,
+        "annotations": ts.annotations,
     }
     if state.validate:
         assert all(msg["who_has"].values())
-
-    if ts.resource_restrictions:
-        msg["resource_restrictions"] = ts.resource_restrictions
-    if ts.actor:
-        msg["actor"] = True
-
-    if isinstance(ts.run_spec, dict):
-        msg.update(ts.run_spec)
-    else:
-        msg["task"] = ts.run_spec
-
-    if ts.annotations:
-        msg["annotations"] = ts.annotations
+        if isinstance(msg["run_spec"], dict):
+            assert set(msg["run_spec"]).issubset({"function", "args", "kwargs"})
+            assert msg["run_spec"].get("function")
 
     return msg
 
