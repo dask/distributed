@@ -720,17 +720,18 @@ async def test_clean_nbytes(c, s, a, b):
 
 
 @pytest.mark.parametrize("as_deps", [True, False])
-@gen_cluster(client=True, nthreads=[("", 1)] * 20)
+@gen_cluster(client=True, nthreads=[("", 1)] * 21)
 async def test_gather_many_small(c, s, a, *workers, as_deps):
-    """If the dependencies of a given task are very small, do not limit the
-    number of concurrent outgoing connections
+    """If the dependencies of a given task are very small, do not limit the number of
+    concurrent outgoing connections. If multiple small fetches from the same worker are
+    scheduled all at once, they will result in a single call to gather_dep.
     """
     a.total_out_connections = 2
     futures = await c.scatter(
         {f"x{i}": i for i in range(100)},
         workers=[w.address for w in workers],
     )
-    assert all(w.data for w in workers)
+    assert all(len(w.data) == 5 for w in workers)
 
     if as_deps:
         future = c.submit(lambda _: None, futures, key="y", workers=[a.address])
@@ -740,12 +741,15 @@ async def test_gather_many_small(c, s, a, *workers, as_deps):
         while len(a.data) < 100:
             await asyncio.sleep(0.01)
 
-    types = list(pluck(0, a.log))
-    req = [i for i, t in enumerate(types) if t == "request-dep"]
-    recv = [i for i, t in enumerate(types) if t == "receive-dep"]
-    assert len(req) == len(recv) == 19
-    assert min(recv) > max(req)
     assert a.comm_nbytes == 0
+
+    story = a.story("request-dep", "receive-dep")
+    assert len(story) == 40
+    for ev in story[:20]:
+        assert ev[0] == "request-dep"
+        assert len(ev[2]) == 5
+    for ev in story[20:]:
+        assert ev[0] == "receive-dep"
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
@@ -2744,36 +2748,32 @@ async def test_acquire_replicas_many(c, s, *workers):
         await asyncio.sleep(0.001)
 
 
-@pytest.mark.slow
-@gen_cluster(client=True, Worker=Nanny)
-async def test_acquire_replicas_already_in_flight(c, s, *nannies):
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_acquire_replicas_already_in_flight(c, s, a):
     """Trying to acquire a replica that is already in flight is a no-op"""
+    async with BlockedGetData(s.address) as b:
+        x = c.submit(inc, 1, key="x", workers=[b.address])
+        y = c.submit(inc, x, key="y", workers=[a.address])
+        await _wait_for_state("x", a, "flight")
 
-    class SlowToFly:
-        def __getstate__(self):
-            sleep(0.9)
-            return {}
+        s.request_acquire_replicas(a.address, ["x"], stimulus_id="test")
+        while a.log[-1][:5] != ("x", "flight", "fetch", "flight", {}):
+            await asyncio.sleep(0.01)
 
-    a, b = s.workers
-    x = c.submit(SlowToFly, workers=[a], key="x")
-    await wait(x)
-    y = c.submit(lambda x: 123, x, workers=[b], key="y")
-    await asyncio.sleep(0.3)
-    s.request_acquire_replicas(b, [x.key], stimulus_id=f"test-{time()}")
-    assert await y == 123
+        b.block_get_data.set()
+        assert await y == 3
 
-    story = await c.run(lambda dask_worker: dask_worker.story("x"))
     assert_story(
-        story[b],
+        a.story("x"),
         [
             ("x", "ensure-task-exists", "released"),
             ("x", "released", "fetch", "fetch", {}),
-            ("gather-dependencies", a, {"x"}),
+            ("gather-dependencies", b.address, {"x"}),
             ("x", "fetch", "flight", "flight", {}),
-            ("request-dep", a, {"x"}),
+            ("request-dep", b.address, {"x"}),
             ("x", "ensure-task-exists", "flight"),
             ("x", "flight", "fetch", "flight", {}),
-            ("receive-dep", a, {"x"}),
+            ("receive-dep", b.address, {"x"}),
             ("x", "put-in-memory"),
             ("x", "flight", "memory", "memory", {"y": "ready"}),
         ],
@@ -3139,85 +3139,84 @@ async def test_task_flight_compute_oserror(c, s, a, b):
     assert_story(sum_story, expected_sum_story, strict=True)
 
 
-@gen_cluster(client=True, nthreads=[])
-async def test_gather_dep_cancelled_rescheduled(c, s):
-    """At time of writing, the gather_dep implementation filtered tasks again
-    for in-flight state. The response parser, however, did not distinguish
-    resulting in unwanted missing-data signals to the scheduler, causing
-    potential rescheduling or data leaks.
-
-    If a cancelled key is rescheduled for fetching while gather_dep waits
-    internally for get_data, the response parser would misclassify this key and
-    cause the key to be recommended for a release causing deadlocks and/or lost
-    keys.
-    At time of writing, this transition was implemented wrongly and caused a
-    flight->cancelled transition which should be recoverable but the cancelled
-    state was corrupted by this transition since ts.done==True. This attribute
-    setting would cause a cancelled->fetch transition to actually drop the key
-    instead, causing https://github.com/dask/distributed/issues/5366
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_gather_dep_cancelled_rescheduled(c, s, a):
+    """A task transitions flight->cancelled->fetch->flight, all while gather_dep is
+    waiting for the data of the initial flight.
 
     See also test_gather_dep_do_not_handle_response_of_not_requested_tasks
     """
-    async with BlockedGetData(s.address) as a:
-        async with BlockedGatherDep(s.address) as b:
-            fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
-            fut2 = c.submit(inc, fut1, workers=[a.address], key="f2")
-            await wait(fut2)
-            fut4 = c.submit(sum, fut1, fut2, workers=[b.address], key="f4")
-            fut3 = c.submit(inc, fut1, workers=[b.address], key="f3")
+    async with BlockedGetData(s.address) as b:
+        fut1 = c.submit(inc, 1, workers=[b.address], key="f1")
+        await wait(fut1)
 
-            await _wait_for_state(fut2.key, b, "flight")
-            await b.in_gather_dep.wait()
+        fut2 = c.submit(inc, fut1, workers=[a.address], key="f2")
+        await b.in_get_data.wait()
+        assert a.tasks[fut1.key].state == "flight"
 
-            fut4.release()
-            while fut4.key in b.tasks:
-                await asyncio.sleep(0)
+        fut2.release()
+        while fut2.key in a.tasks:
+            await asyncio.sleep(0.01)
+        assert a.tasks[fut1.key].state == "cancelled"
 
-            assert b.tasks[fut2.key].state == "cancelled"
+        fut2 = c.submit(inc, fut1, workers=[a.address], key="f2")
+        await _wait_for_state("f1", a, "flight")
 
-            b.block_gather_dep.set()
-            await a.in_get_data.wait()
-
-            fut4 = c.submit(sum, [fut1, fut2], workers=[b.address], key="f4")
-            await _wait_for_state(fut2.key, b, "flight")
-
-            a.block_get_data.set()
-            await wait([fut3, fut4])
-            f2_story = b.story(fut2.key)
-            assert f2_story
+        b.block_get_data.set()
+        assert await fut2 == 3
+        assert_story(
+            a.story(fut1.key),
+            [
+                (fut1.key, "fetch", "flight", "flight", {}),
+                (fut1.key, "flight", "released", "cancelled", {}),
+                (fut1.key, "cancelled", "fetch", "flight", {}),
+                (fut1.key, "flight", "memory", "memory", {"f2": "ready"}),
+            ],
+        )
+        # Test that the data transfer only happens once
+        assert_story(
+            a.story("request-dep"),
+            [
+                ("request-dep", b.address, {fut1.key}),
+            ],
+            strict=True,
+        )
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_gather_dep_do_not_handle_response_of_not_requested_tasks(c, s, a):
-    """At time of writing, the gather_dep implementation filtered tasks again
-    for in-flight state. The response parser, however, did not distinguish
-    resulting in unwanted missing-data signals to the scheduler, causing
-    potential rescheduling or data leaks.
-    This test may become obsolete if the implementation changes significantly.
+    """A task transitions from flight to cancelled while gather_dep is waiting for the
+    data.
+
+    See also test_gather_dep_cancelled_rescheduled
     """
     async with BlockedGatherDep(s.address) as b:
         fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
-        fut2 = c.submit(inc, fut1, workers=[a.address], key="f2")
-        await fut2
-        fut4 = c.submit(sum, fut1, fut2, workers=[b.address], key="f4")
-        fut3 = c.submit(inc, fut1, workers=[b.address], key="f3")
+        await fut1
 
+        fut2 = c.submit(inc, fut1, workers=[b.address], key="f2")
         await b.in_gather_dep.wait()
-        assert b.tasks[fut2.key].state == "flight"
+        assert b.tasks[fut1.key].state == "flight"
 
-        fut4.release()
-        while fut4.key in b.tasks:
+        fut2.release()
+        while fut2.key in b.tasks:
             await asyncio.sleep(0.01)
 
-        assert b.tasks[fut2.key].state == "cancelled"
+        assert b.tasks[fut1.key].state == "cancelled"
 
         b.block_gather_dep.set()
 
-        await fut3
-        assert fut2.key not in b.tasks
-        f2_story = b.story(fut2.key)
-        assert f2_story
-        assert not any("missing-dep" in msg for msg in f2_story)
+        while fut1.key in b.tasks:
+            await asyncio.sleep(0.01)
+
+        assert_story(
+            b.story(fut1.key),
+            [
+                (fut1.key, "flight", "released", "cancelled", {}),
+                (fut1.key, "cancelled", "memory", "released", {fut1.key: "forgotten"}),
+                (fut1.key, "released", "forgotten", "forgotten", {}),
+            ],
+        )
 
 
 @gen_cluster(
