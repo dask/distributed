@@ -224,6 +224,11 @@ class AsyncTaskGroup:
             except asyncio.TimeoutError:
                 pass
 
+            if self._ongoing_tasks:
+                raise RuntimeError(
+                    f"Expected all ongoing tasks to be cancelled and removed, found {self._ongoing_tasks}."
+                )
+
     def __len__(self):
         return len(self._ongoing_tasks)
 
