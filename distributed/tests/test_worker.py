@@ -3366,7 +3366,7 @@ async def test_log_invalid_transitions(c, s, a):
         await asyncio.sleep(0.01)
     ts = a.tasks[xkey]
     with pytest.raises(InvalidTransition):
-        a.transition(ts, "foo", stimulus_id="bar")
+        a._transition(ts, "foo", stimulus_id="bar")
 
     while not s.events["invalid-worker-transition"]:
         await asyncio.sleep(0.01)

@@ -2706,6 +2706,12 @@ class Worker(ServerNode):
         stimulus_id: str,
         **kwargs,
     ) -> RecsInstrs:
+        """Transition a key from its current state to the finish state
+
+        See Also
+        --------
+        Worker.transitions: wrapper around this method
+        """
         if isinstance(finish, tuple):
             # the concatenated transition path might need to access the tuple
             assert not args
@@ -2812,30 +2818,6 @@ class Worker(ServerNode):
             )
         )
         return recs, instructions
-
-    def transition(
-        self, ts: TaskState, finish: TaskStateState, *, stimulus_id: str, **kwargs
-    ) -> None:
-        """Transition a key from its current state to the finish state
-
-        Examples
-        --------
-        >>> self.transition('x', 'waiting', stimulus_id=f"test-{(time()}")
-        {'x': 'processing'}
-
-        Returns
-        -------
-        Dictionary of recommendations for future transitions
-
-        See Also
-        --------
-        Scheduler.transitions: transitive version of this function
-        """
-        recs, instructions = self._transition(
-            ts, finish, stimulus_id=stimulus_id, **kwargs
-        )
-        self._handle_instructions(instructions)
-        self.transitions(recs, stimulus_id=stimulus_id)
 
     def transitions(self, recommendations: Recs, *, stimulus_id: str) -> None:
         """Process transitions until none are left
