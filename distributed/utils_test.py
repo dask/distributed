@@ -1285,7 +1285,7 @@ def raises(func, exc=Exception):
         return True
 
 
-def _terminate_process(proc: subprocess.Popen):
+def _terminate_process(proc: subprocess.Popen) -> None:
     if proc.poll() is None:
         if sys.platform.startswith("win"):
             proc.send_signal(signal.CTRL_BREAK_EVENT)
