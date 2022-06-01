@@ -4250,13 +4250,13 @@ class Worker(ServerNode):
 
     def validate_task_cancelled(self, ts):
         assert ts.key not in self.data
-        assert ts._previous
+        assert ts._previous in {"long-running", "executing", "flight"}
         assert ts._next is None  # We'll always transition to released after it is done
 
     def validate_task_resumed(self, ts):
         assert ts.key not in self.data
         assert ts._next
-        assert ts._previous
+        assert ts._previous in {"long-running", "executing", "flight"}
 
     def validate_task_released(self, ts):
         assert ts.key not in self.data
