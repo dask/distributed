@@ -147,6 +147,13 @@ def init_once():
                 return a
 
             device_array = numba_device_array
+
+            pool_size_str = dask.config.get("distributed.rmm.pool-size")
+            if pool_size_str is not None:
+                warnings.warn(
+                    "Initial RMM pool size defined, but RMM is not available. "
+                    "Please consider installing RMM or removing the pool size option."
+                )
         except ImportError:
 
             def device_array(n):
