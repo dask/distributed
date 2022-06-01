@@ -534,7 +534,7 @@ async def test_io_loop_alternate_loop(s, loop):
     async def main():
         with pytest.warns(
             DeprecationWarning,
-            match=r"The `loop` argument to `Worker` is deprecated, and will be "
+            match=r"The `loop` argument to `Worker` is ignored, and will be "
             r"removed in a future release. The Worker always binds to the current loop",
         ):
             async with Worker(s.address, loop=loop) as w:

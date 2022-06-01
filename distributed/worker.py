@@ -580,7 +580,7 @@ class Worker(ServerNode):
                 )
         if loop is not None:
             warnings.warn(
-                "The `loop` argument to `Worker` is deprecated, and will be removed in a future release. "
+                "The `loop` argument to `Worker` is ignored, and will be removed in a future release. "
                 "The Worker always binds to the current loop",
                 DeprecationWarning,
                 stacklevel=2,

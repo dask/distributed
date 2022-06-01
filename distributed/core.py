@@ -164,7 +164,7 @@ class Server:
     ):
         if io_loop is not None:
             warnings.warn(
-                "The io_loop kwarg to Server is deprecated",
+                "The io_loop kwarg to Server is ignored and will be deprecated",
                 DeprecationWarning,
                 stacklevel=2,
             )

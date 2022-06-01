@@ -136,8 +136,8 @@ class Nanny(ServerNode):
     ):
         if loop is not None:
             warnings.warn(
-                "the `loop` kwarg to `Nanny` is deprecated, and will be removed in a future release. "
-                "the Nanny always binds to the current loop.",
+                "the `loop` kwarg to `Nanny` is ignored, and will be removed in a future release. "
+                "The Nanny always binds to the current loop.",
                 DeprecationWarning,
                 stacklevel=2,
             )
