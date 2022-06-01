@@ -955,13 +955,6 @@ class Worker(ServerNode):
         return self._deque_handler.deque
 
     def log_event(self, topic, msg):
-        if (
-            not self.batched_stream
-            or not self.batched_stream.comm
-            or self.batched_stream.comm.closed()
-        ):
-            return  # pragma: nocover
-
         full_msg = {
             "op": "log-event",
             "topic": topic,
@@ -1113,8 +1106,9 @@ class Worker(ServerNode):
 
     def batched_send(self, msg: dict[str, Any]) -> None:
         """Send a fire-and-forget message to the scheduler through bulk comms.
-        
-        If we're not currently connected to the scheduler, the message will be silently dropped!
+
+        If we're not currently connected to the scheduler, the message will be silently
+        dropped!
 
         Parameters
         ----------
