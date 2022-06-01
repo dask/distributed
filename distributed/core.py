@@ -206,6 +206,9 @@ class AsyncTaskGroup:
             except asyncio.TimeoutError:
                 pass
 
+    def __len__(self):
+        return len(self._ongoing_tasks)
+
 
 class Server:
     """Dask Distributed Server
