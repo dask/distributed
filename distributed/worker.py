@@ -129,6 +129,8 @@ from distributed.worker_state_machine import (
     RequestRefreshWhoHasMsg,
     RescheduleEvent,
     RescheduleMsg,
+    RetryBusyWorkerEvent,
+    RetryBusyWorkerLater,
     SendMessageToScheduler,
     SerializedTask,
     StateMachineEvent,
@@ -2856,6 +2858,7 @@ class Worker(ServerNode):
         else:
             self._handle_instructions(instructions)
 
+    @fail_hard
     @log_errors
     def handle_stimulus(self, stim: StateMachineEvent) -> None:
         if not isinstance(stim, FindMissingEvent):
@@ -2919,6 +2922,12 @@ class Worker(ServerNode):
                     task = asyncio.create_task(
                         self.execute(inst.key, stimulus_id=inst.stimulus_id),
                         name=f"execute({inst.key})",
+                    )
+
+                elif isinstance(inst, RetryBusyWorkerLater):
+                    task = asyncio.create_task(
+                        self.retry_busy_worker_later(inst.worker),
+                        name=f"retry_busy_worker_later({inst.worker})",
                     )
 
                 else:
@@ -3353,7 +3362,9 @@ class Worker(ServerNode):
                 # Avoid hammering the worker. If there are multiple replicas
                 # available, immediately try fetching from a different worker.
                 self.busy_workers.add(worker)
-                self.io_loop.call_later(0.15, self._readd_busy_worker, worker)
+                instructions.append(
+                    RetryBusyWorkerLater(worker=worker, stimulus_id=stimulus_id)
+                )
 
             refresh_who_has = []
 
@@ -3392,11 +3403,10 @@ class Worker(ServerNode):
             self.transitions(recommendations, stimulus_id=stimulus_id)
             self._handle_instructions(instructions)
 
-    @log_errors
-    def _readd_busy_worker(self, worker: str) -> None:
-        self.busy_workers.remove(worker)
-        self.handle_stimulus(
-            GatherDepDoneEvent(stimulus_id=f"readd-busy-worker-{time()}")
+    async def retry_busy_worker_later(self, worker: str) -> StateMachineEvent | None:
+        await asyncio.sleep(0.15)
+        return RetryBusyWorkerEvent(
+            worker=worker, stimulus_id=f"retry-busy-worker-{time()}"
         )
 
     @log_errors
@@ -3882,6 +3892,11 @@ class Worker(ServerNode):
     @handle_event.register
     def _(self, ev: GatherDepDoneEvent) -> RecsInstrs:
         """Temporary hack - to be removed"""
+        return self._ensure_communicating(stimulus_id=ev.stimulus_id)
+
+    @handle_event.register
+    def _(self, ev: RetryBusyWorkerEvent) -> RecsInstrs:
+        self.busy_workers.discard(ev.worker)
         return self._ensure_communicating(stimulus_id=ev.stimulus_id)
 
     @handle_event.register
