@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import asyncio
-from itertools import chain
+from collections.abc import Iterator
 
 import pytest
 
@@ -22,12 +24,10 @@ from distributed.worker_state_machine import (
     ReleaseWorkerDataMsg,
     RescheduleEvent,
     RescheduleMsg,
-    SendMessageToScheduler,
     SerializedTask,
     StateMachineEvent,
     TaskState,
     TaskStateState,
-    UniqueTaskHeap,
     UpdateDataEvent,
     merge_recs_instructions,
 )
@@ -69,56 +69,18 @@ def test_TaskState__to_dict():
     ]
 
 
-def test_unique_task_heap():
-    heap = UniqueTaskHeap()
-
-    for x in range(10):
-        ts = TaskState(f"f{x}", priority=(0,))
-        ts.priority = (0, 0, 1, x % 3)
-        heap.push(ts)
-
-    heap_list = list(heap)
-    # iteration does not empty heap
-    assert len(heap) == 10
-    assert heap_list == sorted(heap_list, key=lambda ts: ts.priority)
-
-    seen = set()
-    last_prio = (0, 0, 0, 0)
-    while heap:
-        peeked = heap.peek()
-        ts = heap.pop()
-        assert peeked == ts
-        seen.add(ts.key)
-        assert ts.priority
-        assert last_prio <= ts.priority
-        last_prio = last_prio
-
-    ts = TaskState("foo", priority=(0,))
-    heap.push(ts)
-    heap.push(ts)
-    assert len(heap) == 1
-
-    assert repr(heap) == "<UniqueTaskHeap: 1 items>"
-
-    assert heap.pop() == ts
-    assert not heap
-
-    # Test that we're cleaning the seen set on pop
-    heap.push(ts)
-    assert len(heap) == 1
-    assert heap.pop() == ts
-
-    assert repr(heap) == "<UniqueTaskHeap: 0 items>"
+def traverse_subclasses(cls: type) -> Iterator[type]:
+    yield cls
+    for subcls in cls.__subclasses__():
+        yield from traverse_subclasses(subcls)
 
 
 @pytest.mark.parametrize(
     "cls",
-    chain(
-        [UniqueTaskHeap],
-        Instruction.__subclasses__(),
-        SendMessageToScheduler.__subclasses__(),
-        StateMachineEvent.__subclasses__(),
-    ),
+    [
+        *traverse_subclasses(Instruction),
+        *traverse_subclasses(StateMachineEvent),
+    ],
 )
 def test_slots(cls):
     params = [
@@ -572,3 +534,31 @@ async def test_in_memory_while_in_flight(c, s, a, b):
     # Let the comm from b to a return the result
     event.set()
     assert await y == 4  # Data in flight from b has been discarded
+
+
+@gen_cluster(client=True)
+async def test_forget_data_needed(c, s, a, b):
+    """
+    1. A task transitions to fetch and is added to data_needed
+    2. _ensure_communicating runs, but the network is saturated so the task is not
+       popped from data_needed
+    3. Task is forgotten
+    4. Task is recreated from scratch and transitioned to fetch again
+    5. BUG: at the moment of writing this test, adding to data_needed silently did
+       nothing, because it still contained the forgotten task, which is a different
+       TaskState instance which will be no longer updated.
+    6. _ensure_communicating runs. It pops the forgotten task and discards it.
+    7. We now have a task stuck in fetch state.
+    """
+    x = c.submit(inc, 1, key="x", workers=[a.address])
+    with freeze_data_fetching(b):
+        y = c.submit(inc, x, key="y", workers=[b.address])
+        await wait_for_state("x", "fetch", b)
+        x.release()
+        y.release()
+        while s.tasks or a.tasks or b.tasks:
+            await asyncio.sleep(0.01)
+
+    x = c.submit(inc, 2, key="x", workers=[a.address])
+    y = c.submit(inc, x, key="y", workers=[b.address])
+    assert await y == 4

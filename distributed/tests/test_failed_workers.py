@@ -41,30 +41,30 @@ def test_submit_after_failed_worker_sync(loop):
 
 
 @pytest.mark.slow()
-@gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
-async def test_submit_after_failed_worker_async(c, s, a, b):
+@pytest.mark.parametrize("compute_on_failed", [False, True])
+@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "500ms"})
+async def test_submit_after_failed_worker_async(c, s, a, b, compute_on_failed):
     async with Nanny(s.address, nthreads=2) as n:
-        while len(s.workers) < 3:
-            await asyncio.sleep(0.1)
+        await c.wait_for_workers(3)
 
         L = c.map(inc, range(10))
         await wait(L)
 
-        s.loop.add_callback(n.kill)
-        total = c.submit(sum, L)
-        result = await total
-        assert result == sum(map(inc, range(10)))
+        kill_task = asyncio.create_task(n.kill())
+        compute_addr = n.worker_address if compute_on_failed else a.address
+        total = c.submit(sum, L, workers=[compute_addr], allow_other_workers=True)
+        assert await total == sum(range(1, 11))
+        await kill_task
 
 
 @gen_cluster(client=True, timeout=60)
 async def test_submit_after_failed_worker(c, s, a, b):
     L = c.map(inc, range(10))
     await wait(L)
-    await a.close()
 
+    await a.close()
     total = c.submit(sum, L)
-    result = await total
-    assert result == sum(map(inc, range(10)))
+    assert await total == sum(range(1, 11))
 
 
 @pytest.mark.slow
