@@ -1494,7 +1494,10 @@ class Worker(ServerNode):
                 )
 
         for preload in self.preloads:
-            await preload.teardown()
+            try:
+                await preload.teardown()
+            except Exception as e:
+                logger.exception(e)
 
         for extension in self.extensions.values():
             if hasattr(extension, "close"):
@@ -1892,7 +1895,7 @@ class Worker(ServerNode):
             if ts.state != "memory":
                 recommendations[ts] = "fetch"
 
-        self.update_who_has(who_has)
+        self._update_who_has(who_has)
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
         if self.validate:
@@ -1996,7 +1999,7 @@ class Worker(ServerNode):
             for dep_key, value in nbytes.items():
                 self.tasks[dep_key].nbytes = value
 
-            self.update_who_has(who_has)
+            self._update_who_has(who_has)
         else:  # pragma: nocover
             raise RuntimeError(f"Unexpected task state encountered {ts} {stimulus_id}")
 
@@ -2103,8 +2106,7 @@ class Worker(ServerNode):
             if dep_ts.state != "memory":
                 ts.waiting_for_data.add(dep_ts)
                 dep_ts.waiters.add(ts)
-                if dep_ts.state not in {"fetch", "flight"}:
-                    recommendations[dep_ts] = "fetch"
+                recommendations[dep_ts] = "fetch"
 
         if ts.waiting_for_data:
             self.waiting_for_data_count += 1
@@ -2691,7 +2693,7 @@ class Worker(ServerNode):
             assert not args
             finish, *args = finish  # type: ignore
 
-        if ts is None or ts.state == finish:
+        if ts.state == finish:
             return {}, []
 
         start = ts.state
@@ -2994,8 +2996,11 @@ class Worker(ServerNode):
             if ts.state != "fetch" or ts.key in all_keys_to_gather:
                 continue
 
+            if not ts.who_has:
+                recommendations[ts] = "missing"
+                continue
+
             if self.validate:
-                assert ts.who_has
                 assert self.address not in ts.who_has
 
             workers = [
@@ -3148,8 +3153,14 @@ class Worker(ServerNode):
 
         while tasks:
             ts = tasks.peek()
-            if ts.state != "fetch" or ts.key in all_keys_to_gather:
+            if (
+                ts.state != "fetch"
                 # Do not acquire the same key twice if multiple workers holds replicas
+                or ts.key in all_keys_to_gather
+                # A replica is still available (otherwise status would not be 'fetch'
+                # anymore), but not on this worker. See _update_who_has().
+                or worker not in ts.who_has
+            ):
                 tasks.pop()
                 continue
             if total_bytes + ts.get_nbytes() > self.target_message_size:
@@ -3375,7 +3386,7 @@ class Worker(ServerNode):
                 who_has = await retry_operation(
                     self.scheduler.who_has, keys=refresh_who_has
                 )
-                self.update_who_has(who_has)
+                self._update_who_has(who_has)
 
     @log_errors
     async def _readd_busy_worker(self, worker: str) -> None:
@@ -3399,7 +3410,7 @@ class Worker(ServerNode):
                 self.scheduler.who_has,
                 keys=[ts.key for ts in self._missing_dep_flight],
             )
-            self.update_who_has(who_has)
+            self._update_who_has(who_has)
             recommendations: Recs = {}
             for ts in self._missing_dep_flight:
                 if ts.who_has:
@@ -3413,34 +3424,46 @@ class Worker(ServerNode):
                 "find-missing"
             ].callback_time = self.periodic_callbacks["heartbeat"].callback_time
 
-    def update_who_has(self, who_has: dict[str, Collection[str]]) -> None:
-        try:
-            for dep, workers in who_has.items():
-                if not workers:
-                    continue
+    def _update_who_has(self, who_has: Mapping[str, Collection[str]]) -> None:
+        for key, workers in who_has.items():
+            ts = self.tasks.get(key)
+            if not ts:
+                # The worker sent a refresh-who-has request to the scheduler but, by the
+                # time the answer comes back, some of the keys have been forgotten.
+                continue
+            workers = set(workers)
 
-                if dep in self.tasks:
-                    dep_ts = self.tasks[dep]
-                    if self.address in workers and self.tasks[dep].state != "memory":
-                        logger.debug(
-                            "Scheduler claims worker %s holds data for task %s which is not true.",
-                            self.name,
-                            dep,
-                        )
-                        # Do not mutate the input dict. That's rude
-                        workers = set(workers) - {self.address}
-                    dep_ts.who_has.update(workers)
+            if self.address in workers:
+                workers.remove(self.address)
+                # This can only happen if rebalance() recently asked to release a key,
+                # but the RPC call hasn't returned yet. rebalance() is flagged as not
+                # being safe to run while the cluster is not at rest and has already
+                # been penned in to be redesigned on top of the AMM.
+                # It is not necessary to send a message back to the
+                # scheduler here, because it is guaranteed that there's already a
+                # release-worker-data message in transit to it.
+                if ts.state != "memory":
+                    logger.debug(  # pragma: nocover
+                        "Scheduler claims worker %s holds data for task %s, "
+                        "which is not true.",
+                        self.address,
+                        ts,
+                    )
 
-                    for worker in workers:
-                        self.has_what[worker].add(dep)
-                        self.data_needed_per_worker[worker].push(dep_ts)
-        except Exception as e:  # pragma: no cover
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
+            if ts.who_has == workers:
+                continue
 
-                pdb.set_trace()
-            raise
+            for worker in ts.who_has - workers:
+                self.has_what[worker].discard(key)
+                # Can't remove from self.data_needed_per_worker; there is logic
+                # in _select_keys_for_gather to deal with this
+
+            for worker in workers - ts.who_has:
+                self.has_what[worker].add(key)
+                if ts.state == "fetch":
+                    self.data_needed_per_worker[worker].push(ts)
+
+            ts.who_has = workers
 
     def handle_steal_request(self, key: str, stimulus_id: str) -> None:
         # There may be a race condition between stealing and releasing a task.
@@ -4173,8 +4196,8 @@ class Worker(ServerNode):
         assert self.address not in ts.who_has
         assert not ts.done
         assert ts in self.data_needed
-        assert ts.who_has
-
+        # Note: ts.who_has may be have been emptied by _update_who_has, but the task
+        # won't transition to missing until it reaches the top of the data_needed heap.
         for w in ts.who_has:
             assert ts.key in self.has_what[w]
             assert ts in self.data_needed_per_worker[w]
@@ -4265,6 +4288,7 @@ class Worker(ServerNode):
                 assert ts.state is not None
                 # check that worker has task
                 for worker in ts.who_has:
+                    assert worker != self.address
                     assert ts.key in self.has_what[worker]
                 # check that deps have a set state and that dependency<->dependent links
                 # are there
@@ -4289,6 +4313,7 @@ class Worker(ServerNode):
             # FIXME https://github.com/dask/distributed/issues/6319
             # assert self.waiting_for_data_count == waiting_for_data_count
             for worker, keys in self.has_what.items():
+                assert worker != self.address
                 for k in keys:
                     assert worker in self.tasks[k].who_has
 

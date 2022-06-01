@@ -34,6 +34,7 @@ from distributed import (
     default_client,
     get_client,
     get_worker,
+    profile,
     wait,
 )
 from distributed.comm.registry import backends
@@ -42,10 +43,11 @@ from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
-from distributed.profile import wait_profiler
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
 from distributed.utils_test import (
+    BlockedGatherDep,
+    BlockedGetData,
     TaskStateMetadataPlugin,
     _LockedCommPool,
     assert_story,
@@ -1384,7 +1386,7 @@ async def test_interface_async(Worker):
 @pytest.mark.gpu
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
 @gen_test()
-async def test_protocol_from_scheduler_address(Worker):
+async def test_protocol_from_scheduler_address(ucx_loop, Worker):
     pytest.importorskip("ucp")
 
     async with Scheduler(protocol="ucx", dashboard_address=":0") as s:
@@ -1741,7 +1743,7 @@ async def test_heartbeat_missing_real_cluster(s, a):
     ) as wlogger, captured_logger(
         "distributed.scheduler", level=logging.WARNING
     ) as slogger:
-        await s.remove_worker(a.address, "foo")
+        await s.remove_worker(a.address, stimulus_id="foo")
         assert not s.workers
 
         # Wait until the close signal reaches the worker and it starts shutting down.
@@ -1851,8 +1853,8 @@ async def test_stimulus_story(c, s, a):
     del f
     while "f" in a.data:
         await asyncio.sleep(0.01)
-    wait_profiler()
-    assert ref() is None
+    with profile.lock:
+        assert ref() is None
 
     story = a.stimulus_story("f", "f2")
     assert {ev.key for ev in story} == {"f", "f2"}
@@ -2618,7 +2620,7 @@ async def test_gather_dep_exception_one_task(c, s, a, b):
         if peer_addr == a.address and msg["op"] == "get_data":
             break
 
-    # Provoke an "impossible transision exception"
+    # Provoke an "impossible transition exception"
     # By choosing a state which doesn't exist we're not running into validation
     # errors and the state machine should raise if we want to transition from
     # fetch to memory
@@ -3135,30 +3137,6 @@ async def test_task_flight_compute_oserror(c, s, a, b):
         ("f1", "executing", "memory", "memory", {}),
     ]
     assert_story(sum_story, expected_sum_story, strict=True)
-
-
-class BlockedGatherDep(Worker):
-    def __init__(self, *args, **kwargs):
-        self.in_gather_dep = asyncio.Event()
-        self.block_gather_dep = asyncio.Event()
-        super().__init__(*args, **kwargs)
-
-    async def gather_dep(self, *args, **kwargs):
-        self.in_gather_dep.set()
-        await self.block_gather_dep.wait()
-        return await super().gather_dep(*args, **kwargs)
-
-
-class BlockedGetData(Worker):
-    def __init__(self, *args, **kwargs):
-        self.in_get_data = asyncio.Event()
-        self.block_get_data = asyncio.Event()
-        super().__init__(*args, **kwargs)
-
-    async def get_data(self, comm, *args, **kwargs):
-        self.in_get_data.set()
-        await self.block_get_data.wait()
-        return await super().get_data(comm, *args, **kwargs)
 
 
 @gen_cluster(client=True, nthreads=[])

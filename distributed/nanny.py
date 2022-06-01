@@ -16,7 +16,6 @@ from queue import Empty
 from time import sleep as sync_sleep
 from typing import TYPE_CHECKING, ClassVar
 
-import psutil
 from tornado import gen
 from tornado.ioloop import IOLoop
 
@@ -485,19 +484,6 @@ class Nanny(ServerNode):
             return "timed out"
         else:
             return "OK"
-
-    @property
-    def _psutil_process(self):
-        pid = self.process.process.pid
-        try:
-            self._psutil_process_obj
-        except AttributeError:
-            self._psutil_process_obj = psutil.Process(pid)
-
-        if self._psutil_process_obj.pid != pid:
-            self._psutil_process_obj = psutil.Process(pid)
-
-        return self._psutil_process_obj
 
     def is_alive(self):
         return self.process is not None and self.process.is_alive()
