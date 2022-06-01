@@ -134,6 +134,7 @@ def test_heapset():
     # Test resilience to failure in weakref.ref()
     class D:
         __slots__ = ("i",)
+
         def __init__(self, i):
             self.i = i
 
