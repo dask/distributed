@@ -1285,17 +1285,14 @@ def raises(func, exc=Exception):
         return True
 
 
-def _terminate_process(proc: subprocess.Popen, already_communicating: bool):
+def _terminate_process(proc: subprocess.Popen):
     if proc.poll() is None:
         if sys.platform.startswith("win"):
             proc.send_signal(signal.CTRL_BREAK_EVENT)
         else:
             proc.send_signal(signal.SIGINT)
         try:
-            if already_communicating:
-                proc.wait(timeout=30)
-            else:
-                proc.communicate(timeout=30)
+            proc.communicate(timeout=30)
         finally:
             # Make sure we don't leave the process lingering around
             with suppress(OSError):
@@ -1304,32 +1301,41 @@ def _terminate_process(proc: subprocess.Popen, already_communicating: bool):
 
 @contextmanager
 def popen(
-    args: list[str], flush_output: bool = True, **kwargs
+    args: list[str], capture_output: bool = False, **kwargs
 ) -> Iterator[subprocess.Popen[bytes]]:
     """Start a shell command in a subprocess.
     Yields a subprocess.Popen object.
 
-    stderr is redirected to stdout.
-    stdout is redirected to a pipe.
+    On exit, the subprocess is terminated.
 
     Parameters
     ----------
     args: list[str]
         Command line arguments
-    flush_output: bool, optional
-        If True (the default), the stdout/stderr pipe is emptied while it is being
-        filled. Set to False if you wish to read the output yourself. Note that setting
-        this to False and then failing to periodically read from the pipe may result in
-        a deadlock due to the pipe getting full.
+    capture_output: bool, default False
+        Set to True if you need to read output from the subprocess.
+        Stdout and stderr will both be piped to ``proc.stdout``.
+
+        If False, the subprocess will write to stdout/stderr normally.
+
+        When True, the test could deadlock if the stdout pipe's buffer gets full
+        (Linux default is 65536 bytes; macOS and Windows may be smaller).
+        Therefore, you may need to periodically read from ``proc.stdout``, or
+        use ``proc.communicate``. All the deadlock warnings apply from
+        https://docs.python.org/3/library/subprocess.html#subprocess.Popen.stderr.
+
+        Note that ``proc.communicate`` is called automatically when the
+        contextmanager exits. Calling code must not call ``proc.communicate``
+        in a separate thread, since it's not thread-safe.
     kwargs: optional
         optional arguments to subprocess.Popen
     """
-    kwargs["stdout"] = subprocess.PIPE
-    kwargs["stderr"] = subprocess.STDOUT
+    if capture_output:
+        kwargs["stdout"] = subprocess.PIPE
+        kwargs["stderr"] = subprocess.STDOUT
     if sys.platform.startswith("win"):
         # Allow using CTRL_C_EVENT / CTRL_BREAK_EVENT
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-    dump_stdout = False
 
     args = list(args)
     if sys.platform.startswith("win"):
@@ -1338,36 +1344,13 @@ def popen(
         args[0] = os.path.join(
             os.environ.get("DESTDIR", "") + sys.prefix, "bin", args[0]
         )
-    proc = subprocess.Popen(args, **kwargs)
-
-    if flush_output:
-        ex = concurrent.futures.ThreadPoolExecutor(1)
-        flush_future = ex.submit(proc.communicate)
-
-    try:
-        yield proc
-
-    # asyncio.CancelledError is raised by @gen_test/@gen_cluster timeout
-    except (Exception, asyncio.CancelledError):
-        dump_stdout = True
-        raise
-
-    finally:
+    with subprocess.Popen(args, **kwargs) as proc:
         try:
-            _terminate_process(proc, already_communicating=flush_output)
+            yield proc
         finally:
-            # XXX Also dump stdout if return code != 0 ?
-            if flush_output:
-                out, err = flush_future.result()
-                ex.shutdown()
-            else:
-                out, err = proc.communicate()
+            _terminate_process(proc)
+            out, err = proc.communicate()
             assert not err
-
-            if dump_stdout:
-                print("\n" + "-" * 27 + " Subprocess stdout/stderr" + "-" * 27)
-                print(out.decode().rstrip())
-                print("-" * 80)
 
 
 def wait_for(predicate, timeout, fail_func=None, period=0.05):

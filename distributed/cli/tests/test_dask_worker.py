@@ -244,7 +244,7 @@ async def test_nanny_worker_port_range_too_many_workers_raises(s):
             "9686:9687",
             "--no-dashboard",
         ],
-        flush_output=False,
+        capture_output=True,
     ) as worker:
         wait_for_log_line(b"Not enough ports in range", worker.stdout, max_lines=100)
 
@@ -278,14 +278,14 @@ async def test_no_nanny(c, s):
 async def test_reconnect_deprecated(c, s):
     with popen(
         ["dask-worker", s.address, "--reconnect"],
-        flush_output=False,
+        capture_output=True,
     ) as worker:
         wait_for_log_line(b"`--reconnect` option has been removed", worker.stdout)
         assert worker.wait() == 1
 
     with popen(
         ["dask-worker", s.address, "--no-reconnect"],
-        flush_output=False,
+        capture_output=True,
     ) as worker:
         wait_for_log_line(b"flag is deprecated, and will be removed", worker.stdout)
         await c.wait_for_workers(1)
@@ -361,7 +361,7 @@ def test_scheduler_address_env(loop, monkeypatch):
 async def test_nworkers_requires_nanny(s):
     with popen(
         ["dask-worker", s.address, "--nworkers=2", "--no-nanny"],
-        flush_output=False,
+        capture_output=True,
     ) as worker:
         wait_for_log_line(b"Failed to launch worker", worker.stdout, max_lines=15)
 
@@ -400,7 +400,7 @@ async def test_nworkers_expands_name(c, s):
 async def test_worker_cli_nprocs_renamed_to_nworkers(c, s):
     with popen(
         ["dask-worker", s.address, "--nprocs=2"],
-        flush_output=False,
+        capture_output=True,
     ) as worker:
         await c.wait_for_workers(2)
         wait_for_log_line(b"renamed to --nworkers", worker.stdout, max_lines=15)
@@ -410,7 +410,7 @@ async def test_worker_cli_nprocs_renamed_to_nworkers(c, s):
 async def test_worker_cli_nworkers_with_nprocs_is_an_error(s):
     with popen(
         ["dask-worker", s.address, "--nprocs=2", "--nworkers=2"],
-        flush_output=False,
+        capture_output=True,
     ) as worker:
         wait_for_log_line(b"Both --nprocs and --nworkers", worker.stdout, max_lines=15)
 
@@ -708,7 +708,7 @@ def test_error_during_startup(monkeypatch, nanny):
             "--port",
             scheduler_port,
         ],
-        flush_output=False,
+        capture_output=True,
     ) as scheduler:
         start = time()
         # Wait for the scheduler to be up

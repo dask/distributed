@@ -797,7 +797,7 @@ def test_popen_write_during_terminate_deadlock():
                 ]
             ),
         ],
-        flush_output=False,
+        capture_output=True,
     ) as proc:
         assert proc.stdout.readline().strip() == b"ready"
 
