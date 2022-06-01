@@ -122,3 +122,28 @@ def test_heapset():
     assert not heap
     heap.add(cx)
     assert cx in heap
+
+    # Test resilience to failure in key()
+    bad_key = C("bad_key", 0)
+    del bad_key.i
+    with pytest.raises(AttributeError):
+        heap.add(bad_key)
+    assert len(heap) == 1
+    assert set(heap) == {cx}
+
+    # Test resilience to failure in weakref.ref()
+    class D:
+        __slots__ = ("i",)
+        def __init__(self, i):
+            self.i = i
+
+    with pytest.raises(TypeError):
+        heap.add(D("bad_weakref", 2))
+    assert len(heap) == 1
+    assert set(heap) == {cx}
+
+    # Test resilience to key() returning non-sortable output
+    with pytest.raises(TypeError):
+        heap.add(C("unsortable_key", None))
+    assert len(heap) == 1
+    assert set(heap) == {cx}

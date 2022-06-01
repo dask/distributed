@@ -64,8 +64,8 @@ class HeapSet(MutableSet[T]):
             return
         k = self.key(value)  # type: ignore
         vref = weakref.ref(value)
-        self._data.add(value)
         heapq.heappush(self._heap, (k, self._inc, vref))
+        self._data.add(value)
         self._inc += 1
 
     def discard(self, value: T) -> None:
