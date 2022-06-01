@@ -12,6 +12,7 @@ import dask
 
 from distributed.comm.core import CommClosedError
 from distributed.core import (
+    AsyncTaskGroup,
     ConnectionPool,
     Server,
     Status,
@@ -71,6 +72,149 @@ def echo_serialize(comm, x):
 
 def echo_no_serialize(comm, x):
     return {"result": x}
+
+
+def test_async_task_group_initialization():
+    group = AsyncTaskGroup()
+    assert not group.closed
+    assert len(group) == 0
+
+
+@gen_test()
+async def test_async_task_group_call_soon_executes_task_in_background():
+    group = AsyncTaskGroup()
+    ev = asyncio.Event()
+    flag = False
+
+    async def set_flag():
+        nonlocal flag
+        await ev.wait()
+        flag = True
+
+    task = group.call_soon(set_flag)
+    assert task is not None
+    assert len(group) == 1
+    ev.set()
+    await task
+    assert len(group) == 0
+    assert flag
+
+
+@gen_test()
+async def test_async_task_group_call_later_executes_delayed_task_in_background():
+    group = AsyncTaskGroup()
+    flag = False
+
+    async def set_flag():
+        nonlocal flag
+        flag = True
+
+    start = time()
+    task = group.call_later(1, set_flag)
+    assert task is not None
+    assert len(group) == 1
+    await task
+    end = time()
+    assert len(group) == 0
+    assert flag
+    assert end - start > 1
+
+
+def test_async_task_group_close_closes():
+    group = AsyncTaskGroup()
+    group.close()
+    assert group.closed
+
+
+@gen_test()
+async def test_async_task_group_close_does_not_cancel_existing_tasks():
+    group = AsyncTaskGroup()
+
+    ev = asyncio.Event()
+    flag = False
+
+    async def set_flag():
+        nonlocal flag
+        await ev.wait()
+        flag = True
+        return True
+
+    task = group.call_soon(set_flag)
+
+    group.close()
+
+    assert not task.cancelled()
+    assert len(group) == 1
+
+    ev.set()
+    await task
+    assert task.result()
+    assert len(group) == 0
+
+
+@gen_test()
+async def test_async_task_group_close_prohibits_new_tasks():
+    group = AsyncTaskGroup()
+    group.close()
+
+    ev = asyncio.Event()
+    flag = False
+
+    async def set_flag():
+        nonlocal flag
+        await ev.wait()
+        flag = True
+        return True
+
+    task = group.call_soon(set_flag)
+    assert task is None
+    assert len(group) == 0
+
+    task = group.call_later(1, set_flag)
+    assert task is None
+    assert len(group) == 0
+
+    await asyncio.sleep(0.01)
+    assert not flag
+
+
+@gen_test()
+async def test_async_task_group_stop_allows_shutdown():
+    group = AsyncTaskGroup()
+
+    flag = False
+
+    async def set_flag():
+        nonlocal flag
+        while not group.closed:
+            asyncio.sleep(0.01)
+        flag = True
+        return True
+
+    task = group.call_soon(set_flag)
+    assert len(group) == 1
+    await group.stop(timeout=1)
+    assert not task.cancelled()
+    assert flag
+    assert task.result()
+
+
+@gen_test()
+async def test_async_task_group_stop_cancels_long_running():
+    group = AsyncTaskGroup()
+
+    flag = False
+
+    async def set_flag():
+        nonlocal flag
+        flag = True
+        return True
+
+    task = group.call_later(10, set_flag)
+    assert len(group) == 1
+    await group.stop(timeout=1)
+    assert task.cancelled()
+    assert not flag
 
 
 @gen_test()
