@@ -212,7 +212,7 @@ def fail_hard(method):
                         },
                     )
                     logger.exception(e)
-                self.loop.add_callback(_force_close, self)
+                self.call_soon(_force_close, self)
                 raise
 
     return wrapper
@@ -5005,7 +5005,7 @@ async def run(server, comm, function, args=(), kwargs=None, wait=True):
             if wait:
                 result = await function(*args, **kwargs)
             else:
-                server.loop.add_callback(function, *args, **kwargs)
+                server.call_soon(function, *args, **kwargs)
                 result = None
 
     except Exception as e:
