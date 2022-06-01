@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import heapq
 import sys
-from collections.abc import Callable, Container, Iterator
+from collections.abc import Callable, Container
 from copy import copy
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Collection  # TODO move to collections.abc (requires Python >=3.9)
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict
 
 import dask
@@ -175,6 +173,12 @@ class TaskState:
     def __repr__(self) -> str:
         return f"<TaskState {self.key!r} {self.state}>"
 
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, TaskState) and other.key == self.key
+
+    def __hash__(self) -> int:
+        return hash(self.key)
+
     def get_nbytes(self) -> int:
         nbytes = self.nbytes
         return nbytes if nbytes is not None else _default_data_size()
@@ -204,58 +208,6 @@ class TaskState:
         return self.state in PROCESSING or any(
             dep_ts.state in PROCESSING for dep_ts in self.dependents
         )
-
-
-class UniqueTaskHeap(Collection[TaskState]):
-    """A heap of TaskState objects ordered by TaskState.priority.
-    Ties are broken by string comparison of the key. Keys are guaranteed to be
-    unique. Iterating over this object returns the elements in priority order.
-    """
-
-    __slots__ = ("_known", "_heap")
-    _known: set[str]
-    _heap: list[tuple[tuple[int, ...], str, TaskState]]
-
-    def __init__(self):
-        self._known = set()
-        self._heap = []
-
-    def push(self, ts: TaskState) -> None:
-        """Add a new TaskState instance to the heap. If the key is already
-        known, no object is added.
-
-        Note: This does not update the priority / heap order in case priority
-        changes.
-        """
-        assert isinstance(ts, TaskState)
-        if ts.key not in self._known:
-            assert ts.priority
-            heapq.heappush(self._heap, (ts.priority, ts.key, ts))
-            self._known.add(ts.key)
-
-    def pop(self) -> TaskState:
-        """Pop the task with highest priority from the heap."""
-        _, key, ts = heapq.heappop(self._heap)
-        self._known.remove(key)
-        return ts
-
-    def peek(self) -> TaskState:
-        """Get the highest priority TaskState without removing it from the heap"""
-        return self._heap[0][2]
-
-    def __contains__(self, x: object) -> bool:
-        if isinstance(x, TaskState):
-            x = x.key
-        return x in self._known
-
-    def __iter__(self) -> Iterator[TaskState]:
-        return (ts for _, _, ts in sorted(self._heap))
-
-    def __len__(self) -> int:
-        return len(self._known)
-
-    def __repr__(self) -> str:
-        return f"<{type(self).__name__}: {len(self)} items>"
 
 
 @dataclass
