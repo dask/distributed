@@ -227,9 +227,16 @@ async def _force_close(self):
     """
     try:
         await asyncio.wait_for(self.close(nanny=False, executor_wait=False), 30)
-    except (Exception, BaseException):  # <-- include BaseException here or not??
-        # Worker is in a very broken state if closing fails. We need to shut down immediately,
-        # to ensure things don't get even worse and this worker potentially deadlocks the cluster.
+    except (KeyboardInterrupt, SystemExit):  # pragma: nocover
+        raise
+    except (Exception, BaseException):  # pragma: nocover
+        # Worker is in a very broken state if closing fails. We need to shut down
+        # immediately, to ensure things don't get even worse and this worker potentially
+        # deadlocks the cluster.
+        if self.validate and not self.nanny:
+            # We're likely in a unit test. Don't kill the whole test suite!
+            raise
+
         logger.critical(
             "Error trying close worker in response to broken internal state. "
             "Forcibly exiting worker NOW",
@@ -948,6 +955,13 @@ class Worker(ServerNode):
         return self._deque_handler.deque
 
     def log_event(self, topic, msg):
+        if (
+            not self.batched_stream
+            or not self.batched_stream.comm
+            or self.batched_stream.comm.closed()
+        ):
+            return  # pragma: nocover
+
         full_msg = {
             "op": "log-event",
             "topic": topic,
@@ -4327,8 +4341,6 @@ class Worker(ServerNode):
             ) from e
 
     def validate_state(self):
-        if self.status not in WORKER_ANY_RUNNING:
-            return
         try:
             assert self.executing_count >= 0
             waiting_for_data_count = 0
