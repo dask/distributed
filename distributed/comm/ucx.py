@@ -125,13 +125,14 @@ def init_once():
 
     ucp.init(options=ucx_config, env_takes_precedence=True)
 
+    pool_size_str = dask.config.get("distributed.rmm.pool-size")
+
     # Find the function, `cuda_array()`, to use when allocating new CUDA arrays
     try:
         import rmm
 
         device_array = lambda n: rmm.DeviceBuffer(size=n)
 
-        pool_size_str = dask.config.get("distributed.rmm.pool-size")
         if pool_size_str is not None:
             pool_size = parse_bytes(pool_size_str)
             rmm.reinitialize(
@@ -148,18 +149,18 @@ def init_once():
 
             device_array = numba_device_array
 
-            pool_size_str = dask.config.get("distributed.rmm.pool-size")
-            if pool_size_str is not None:
-                warnings.warn(
-                    "Initial RMM pool size defined, but RMM is not available. "
-                    "Please consider installing RMM or removing the pool size option."
-                )
         except ImportError:
 
             def device_array(n):
                 raise RuntimeError(
                     "In order to send/recv CUDA arrays, Numba or RMM is required"
                 )
+
+        if pool_size_str is not None:
+            warnings.warn(
+                "Initial RMM pool size defined, but RMM is not available. "
+                "Please consider installing RMM or removing the pool size option."
+            )
 
 
 def _close_comm(ref):
