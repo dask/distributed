@@ -33,14 +33,3 @@ async def test_logs_deprecated():
     cluster = Cluster(asynchronous=True)
     with pytest.warns(FutureWarning, match="get_logs"):
         cluster.logs()
-
-
-@gen_test()
-async def test_cluster_info():
-    class FooCluster(Cluster):
-        def __init__(self):
-            self._cluster_info["foo"] = "bar"
-            super().__init__(asynchronous=False)
-
-    cluster = FooCluster()
-    assert "foo" in cluster._cluster_info

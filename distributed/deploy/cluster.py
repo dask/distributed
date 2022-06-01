@@ -51,7 +51,6 @@ class Cluster(SyncMethodMixin):
     """
 
     _supports_scaling = True
-    _cluster_info: dict = {}
 
     def __init__(
         self,
@@ -80,11 +79,9 @@ class Cluster(SyncMethodMixin):
         if name is None:
             name = str(uuid.uuid4())[:8]
 
-        # Mask class attribute with instance attribute
         self._cluster_info = {
             "name": name,
             "type": typename(type(self)),
-            **type(self)._cluster_info,
         }
         self.status = Status.created
 
