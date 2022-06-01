@@ -3030,6 +3030,7 @@ class Scheduler(SchedulerState, ServerNode):
             "keep-alive": lambda *args, **kwargs: None,
             "log-event": self.log_worker_event,
             "worker-status-change": self.handle_worker_status_change,
+            "request-refresh-who-has": self.handle_request_refresh_who_has,
         }
 
         client_handlers = {
@@ -4783,6 +4784,21 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             self.running.discard(ws)
 
+    async def handle_request_refresh_who_has(
+        self, keys: Iterable[str], worker: str, stimulus_id: str
+    ) -> None:
+        """Asynchronous request (through bulk comms) from a Worker to refresh the
+        who_has for some keys. Not to be confused with scheduler.who_has, which is a
+        synchronous RPC request from a Client.
+        """
+        self.stream_comms[worker].send(
+            {
+                "op": "refresh-who-has",
+                "who_has": self.get_who_has(keys),
+                "stimulus_id": stimulus_id,
+            },
+        )
+
     async def handle_worker(self, comm=None, worker=None, stimulus_id=None):
         """
         Listen to responses from a single worker
@@ -6231,13 +6247,13 @@ class Scheduler(SchedulerState, ServerNode):
                 w: [ts.key for ts in ws.processing] for w, ws in self.workers.items()
             }
 
-    def get_who_has(self, keys=None):
+    def get_who_has(self, keys: Iterable[str] | None = None) -> dict[str, list[str]]:
         if keys is not None:
             return {
-                k: [ws.address for ws in self.tasks[k].who_has]
-                if k in self.tasks
+                key: [ws.address for ws in self.tasks[key].who_has]
+                if key in self.tasks
                 else []
-                for k in keys
+                for key in keys
             }
         else:
             return {

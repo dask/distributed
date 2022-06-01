@@ -281,6 +281,12 @@ class Execute(Instruction):
 
 
 @dataclass
+class RetryBusyWorkerLater(Instruction):
+    __slots__ = ("worker",)
+    worker: str
+
+
+@dataclass
 class EnsureCommunicatingAfterTransitions(Instruction):
     __slots__ = ()
 
@@ -381,6 +387,26 @@ class AddKeysMsg(SendMessageToScheduler):
 
 
 @dataclass
+class RequestRefreshWhoHasMsg(SendMessageToScheduler):
+    """Worker -> Scheduler asynchronous request for updated who_has information.
+    Not to be confused with the scheduler.who_has synchronous RPC call, which is used
+    by the Client.
+
+    See also
+    --------
+    RefreshWhoHasEvent
+    distributed.scheduler.Scheduler.request_refresh_who_has
+    distributed.client.Client.who_has
+    distributed.scheduler.Scheduler.get_who_has
+    """
+
+    op = "request-refresh-who-has"
+
+    __slots__ = ("keys",)
+    keys: list[str]
+
+
+@dataclass
 class StateMachineEvent:
     __slots__ = ("stimulus_id", "handled")
     stimulus_id: str
@@ -442,6 +468,12 @@ class StateMachineEvent:
 @dataclass
 class UnpauseEvent(StateMachineEvent):
     __slots__ = ()
+
+
+@dataclass
+class RetryBusyWorkerEvent(StateMachineEvent):
+    __slots__ = ("worker",)
+    worker: str
 
 
 @dataclass
@@ -531,6 +563,25 @@ class AlreadyCancelledEvent(StateMachineEvent):
 class RescheduleEvent(StateMachineEvent):
     __slots__ = ("key",)
     key: str
+
+
+@dataclass
+class FindMissingEvent(StateMachineEvent):
+    __slots__ = ()
+
+
+@dataclass
+class RefreshWhoHasEvent(StateMachineEvent):
+    """Scheduler -> Worker message containing updated who_has information.
+
+    See also
+    --------
+    RequestRefreshWhoHasMsg
+    """
+
+    __slots__ = ("who_has",)
+    # {key: [worker address, ...]}
+    who_has: dict[str, list[str]]
 
 
 if TYPE_CHECKING:
