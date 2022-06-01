@@ -62,11 +62,11 @@ class HeapSet(MutableSet[T]):
     def add(self, value: T) -> None:
         if value in self._data:
             return
-        self._data.add(value)
-        i = self._inc
-        self._inc += 1
         k = self.key(value)  # type: ignore
-        heapq.heappush(self._heap, (k, i, weakref.ref(value)))
+        vref = weakref.ref(value)
+        self._data.add(value)
+        heapq.heappush(self._heap, (k, self._inc, vref))
+        self._inc += 1
 
     def discard(self, value: T) -> None:
         self._data.discard(value)
@@ -90,7 +90,7 @@ class HeapSet(MutableSet[T]):
             _, _, vref = heapq.heappop(self._heap)
             value = vref()
             if value in self._data:
-                self._data.remove(value)
+                self._data.discard(value)
                 return value
 
     def __iter__(self) -> Iterator[T]:
@@ -100,7 +100,7 @@ class HeapSet(MutableSet[T]):
         return iter(self._data)
 
     def sorted(self) -> Iterator[T]:
-        """Iterate ofer all elements. This is a O(n*logn) operation which returns the
+        """Iterate over all elements. This is a O(n*logn) operation which returns the
         elements in order, from smallest to largest according to the key and insertion
         order.
         """
