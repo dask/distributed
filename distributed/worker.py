@@ -7,6 +7,7 @@ import errno
 import functools
 import heapq
 import logging
+import operator
 import os
 import pathlib
 import random
@@ -50,6 +51,7 @@ from dask.utils import (
 from distributed import comm, preloading, profile, utils
 from distributed._stories import worker_story
 from distributed.batched import BatchedSend
+from distributed.collections import LRU, HeapSet
 from distributed.comm import connect, get_address_host
 from distributed.comm.addressing import address_from_user_args, parse_address
 from distributed.comm.utils import OFFLOAD_THRESHOLD
@@ -79,7 +81,6 @@ from distributed.sizeof import safe_sizeof as sizeof
 from distributed.threadpoolexecutor import ThreadPoolExecutor
 from distributed.threadpoolexecutor import secede as tpe_secede
 from distributed.utils import (
-    LRU,
     TimeoutError,
     _maybe_complex,
     get_ip,
@@ -139,7 +140,6 @@ from distributed.worker_state_machine import (
     TaskState,
     TaskStateState,
     TransitionCounterMaxExceeded,
-    UniqueTaskHeap,
     UnpauseEvent,
     merge_recs_instructions,
 )
@@ -311,10 +311,10 @@ class Worker(ServerNode):
 
     * **tasks**: ``{key: TaskState}``
         The tasks currently executing on this worker (and any dependencies of those tasks)
-    * **data_needed**: UniqueTaskHeap
+    * **data_needed**: HeapSet[TaskState]
         The tasks which still require data in order to execute and are in memory on at
         least another worker, prioritized as a heap
-    * **data_needed_per_worker**: ``{worker: UniqueTaskHeap}``
+    * **data_needed_per_worker**: ``{worker: HeapSet[TaskState]}``
         Same as data_needed, split by worker
     * **ready**: [keys]
         Keys that are ready to run.  Stored in a LIFO stack
@@ -359,7 +359,7 @@ class Worker(ServerNode):
     scheduler_ip: str, optional
     scheduler_port: int, optional
     scheduler_file: str, optional
-    ip: str, optional
+    host: str, optional
     data: MutableMapping, type, None
         The object to use for storage, builds a disk-backed LRU dict by default
     nthreads: int, optional
@@ -434,8 +434,8 @@ class Worker(ServerNode):
     tasks: dict[str, TaskState]
     waiting_for_data_count: int
     has_what: defaultdict[str, set[str]]  # {worker address: {ts.key, ...}
-    data_needed: UniqueTaskHeap
-    data_needed_per_worker: defaultdict[str, UniqueTaskHeap]
+    data_needed: HeapSet[TaskState]
+    data_needed_per_worker: defaultdict[str, HeapSet[TaskState]]
     nanny: Nanny | None
     _lock: threading.Lock
     in_flight_workers: dict[str, set[str]]  # {worker address: {ts.key, ...}}
@@ -594,8 +594,10 @@ class Worker(ServerNode):
         self.tasks = {}
         self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)
-        self.data_needed = UniqueTaskHeap()
-        self.data_needed_per_worker = defaultdict(UniqueTaskHeap)
+        self.data_needed = HeapSet(key=operator.attrgetter("priority"))
+        self.data_needed_per_worker = defaultdict(
+            lambda: HeapSet(key=operator.attrgetter("priority"))
+        )
         self.nanny = nanny
         self._lock = threading.Lock()
 
@@ -1091,9 +1093,9 @@ class Worker(ServerNode):
             "status": self.status,
             "ready": self.ready,
             "constrained": self.constrained,
-            "data_needed": list(self.data_needed),
+            "data_needed": list(self.data_needed.sorted()),
             "data_needed_per_worker": {
-                w: list(v) for w, v in self.data_needed_per_worker.items()
+                w: list(v.sorted()) for w, v in self.data_needed_per_worker.items()
             },
             "long_running": self.long_running,
             "executing_count": self.executing_count,
@@ -2030,10 +2032,17 @@ class Worker(ServerNode):
     # Worker State Machine #
     ########################
 
-    def _add_to_data_needed(self, ts: TaskState, stimulus_id: str) -> RecsInstrs:
-        self.data_needed.push(ts)
+    def transition_generic_fetch(self, ts: TaskState, stimulus_id: str) -> RecsInstrs:
+        if not ts.who_has:
+            return {ts: "missing"}, []
+
+        ts.state = "fetch"
+        ts.done = False
+        assert ts.priority
+        self.data_needed.add(ts)
         for w in ts.who_has:
-            self.data_needed_per_worker[w].push(ts)
+            self.data_needed_per_worker[w].add(ts)
+
         # This is the same as `return self._ensure_communicating()`, except that when
         # many tasks transition to fetch at the same time, e.g. from a single
         # compute-task or acquire-replicas command from the scheduler, it allows
@@ -2046,13 +2055,10 @@ class Worker(ServerNode):
     ) -> RecsInstrs:
         if self.validate:
             assert ts.state == "missing"
-            assert ts.priority is not None
             assert ts.who_has
 
         self._missing_dep_flight.discard(ts)
-        ts.state = "fetch"
-        ts.done = False
-        return self._add_to_data_needed(ts, stimulus_id=stimulus_id)
+        return self.transition_generic_fetch(ts, stimulus_id=stimulus_id)
 
     def transition_missing_released(
         self, ts: TaskState, *, stimulus_id: str
@@ -2068,14 +2074,14 @@ class Worker(ServerNode):
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         assert ts.done
-        ts.state = "missing"
-        self._missing_dep_flight.add(ts)
-        ts.done = False
-        return {}, []
+        return self.transition_generic_missing(ts, stimulus_id=stimulus_id)
 
     def transition_generic_missing(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
+        if self.validate:
+            assert not ts.who_has
+
         ts.state = "missing"
         self._missing_dep_flight.add(ts)
         ts.done = False
@@ -2086,12 +2092,7 @@ class Worker(ServerNode):
     ) -> RecsInstrs:
         if self.validate:
             assert ts.state == "released"
-            assert ts.priority is not None
-        if not ts.who_has:
-            return {ts: "missing"}, []
-        ts.state = "fetch"
-        ts.done = False
-        return self._add_to_data_needed(ts, stimulus_id=stimulus_id)
+        return self.transition_generic_fetch(ts, stimulus_id=stimulus_id)
 
     def transition_generic_released(
         self, ts: TaskState, *, stimulus_id: str
@@ -2139,17 +2140,27 @@ class Worker(ServerNode):
         return recommendations, []
 
     def transition_fetch_flight(
-        self, ts: TaskState, worker, *, stimulus_id: str
+        self, ts: TaskState, worker: str, *, stimulus_id: str
     ) -> RecsInstrs:
         if self.validate:
             assert ts.state == "fetch"
             assert ts.who_has
+            # The task has already been removed by _ensure_communicating
+            assert ts not in self.data_needed
+            for w in ts.who_has:
+                assert ts not in self.data_needed_per_worker[w]
 
         ts.done = False
         ts.state = "flight"
         ts.coming_from = worker
         self._in_flight_tasks.add(ts)
         return {}, []
+
+    def transition_fetch_missing(
+        self, ts: TaskState, *, stimulus_id: str
+    ) -> RecsInstrs:
+        self.data_needed.remove(ts)
+        return self.transition_generic_missing(ts, stimulus_id=stimulus_id)
 
     def transition_memory_released(
         self, ts: TaskState, *, stimulus_id: str
@@ -2540,13 +2551,8 @@ class Worker(ServerNode):
         if not ts.done:
             return {}, []
 
-        ts.state = "fetch"
         ts.coming_from = None
-        ts.done = False
-        if ts.who_has:
-            return self._add_to_data_needed(ts, stimulus_id=stimulus_id)
-        else:
-            return {ts: "missing"}, []
+        return self.transition_generic_fetch(ts, stimulus_id=stimulus_id)
 
     def transition_flight_error(
         self,
@@ -2680,7 +2686,7 @@ class Worker(ServerNode):
         ("executing", "released"): transition_executing_released,
         ("executing", "rescheduled"): transition_executing_rescheduled,
         ("fetch", "flight"): transition_fetch_flight,
-        ("fetch", "missing"): transition_generic_missing,
+        ("fetch", "missing"): transition_fetch_missing,
         ("fetch", "released"): transition_generic_released,
         ("flight", "error"): transition_flight_error,
         ("flight", "fetch"): transition_flight_fetch,
@@ -3014,7 +3020,6 @@ class Worker(ServerNode):
 
         recommendations: Recs = {}
         instructions: Instructions = []
-        all_keys_to_gather: set[str] = set()
 
         while self.data_needed and (
             len(self.in_flight_workers) < self.total_out_connections
@@ -3030,10 +3035,8 @@ class Worker(ServerNode):
 
             ts = self.data_needed.pop()
 
-            if ts.state != "fetch" or ts.key in all_keys_to_gather:
-                continue
-
             if self.validate:
+                assert ts.state == "fetch"
                 assert ts.who_has
                 assert self.address not in ts.who_has
 
@@ -3046,23 +3049,23 @@ class Worker(ServerNode):
                 skipped_worker_in_flight_or_busy.append(ts)
                 continue
 
+            for w in ts.who_has:
+                self.data_needed_per_worker[w].remove(ts)
+
             host = get_address_host(self.address)
             local = [w for w in workers if get_address_host(w) == host]
             worker = random.choice(local or workers)
 
-            to_gather, total_nbytes = self._select_keys_for_gather(
-                worker, ts.key, all_keys_to_gather
-            )
-            all_keys_to_gather |= to_gather
+            to_gather_tasks, total_nbytes = self._select_keys_for_gather(worker, ts)
+            to_gather_keys = {ts.key for ts in to_gather_tasks}
 
             self.log.append(
-                ("gather-dependencies", worker, to_gather, stimulus_id, time())
+                ("gather-dependencies", worker, to_gather_keys, stimulus_id, time())
             )
 
             self.comm_nbytes += total_nbytes
-            self.in_flight_workers[worker] = to_gather
-            for d_key in to_gather:
-                d_ts = self.tasks[d_key]
+            self.in_flight_workers[worker] = to_gather_keys
+            for d_ts in to_gather_tasks:
                 if self.validate:
                     assert d_ts.state == "fetch"
                     assert d_ts not in recommendations
@@ -3076,14 +3079,14 @@ class Worker(ServerNode):
             instructions.append(
                 GatherDep(
                     worker=worker,
-                    to_gather=to_gather,
+                    to_gather=to_gather_keys,
                     total_nbytes=total_nbytes,
                     stimulus_id=stimulus_id,
                 )
             )
 
         for ts in skipped_worker_in_flight_or_busy:
-            self.data_needed.push(ts)
+            self.data_needed.add(ts)
 
         return recommendations, instructions
 
@@ -3172,38 +3175,35 @@ class Worker(ServerNode):
         return recommendations
 
     def _select_keys_for_gather(
-        self, worker: str, dep: str, all_keys_to_gather: Container[str]
-    ) -> tuple[set[str], int]:
+        self, worker: str, ts: TaskState
+    ) -> tuple[set[TaskState], int]:
         """``_ensure_communicating`` decided to fetch a single task from a worker,
         following priority. In order to minimise overhead, request fetching other tasks
         from the same worker within the message, following priority for the single
         worker but ignoring higher priority tasks from other workers, up to
         ``target_message_size``.
         """
-        deps = {dep}
-
-        total_bytes = self.tasks[dep].get_nbytes()
+        tss = {ts}
+        total_bytes = ts.get_nbytes()
         tasks = self.data_needed_per_worker[worker]
 
         while tasks:
             ts = tasks.peek()
-            if (
-                ts.state != "fetch"
-                # Do not acquire the same key twice if multiple workers holds replicas
-                or ts.key in all_keys_to_gather
-                # A replica is still available (otherwise status would not be 'fetch'
-                # anymore), but not on this worker. See _update_who_has().
-                or worker not in ts.who_has
-            ):
-                tasks.pop()
-                continue
+            if self.validate:
+                assert ts.state == "fetch"
+                assert worker in ts.who_has
             if total_bytes + ts.get_nbytes() > self.target_message_size:
                 break
             tasks.pop()
-            deps.add(ts.key)
+            self.data_needed.remove(ts)
+            for other_worker in ts.who_has:
+                if other_worker != worker:
+                    self.data_needed_per_worker[other_worker].remove(ts)
+
+            tss.add(ts)
             total_bytes += ts.get_nbytes()
 
-        return deps, total_bytes
+        return tss, total_bytes
 
     @property
     def total_comm_bytes(self):
@@ -3403,6 +3403,7 @@ class Worker(ServerNode):
                 elif ts not in recommendations:
                     ts.who_has.discard(worker)
                     self.has_what[worker].discard(ts.key)
+                    self.data_needed_per_worker[worker].discard(ts)
                     self.log.append((d, "missing-dep", stimulus_id, time()))
                     instructions.append(
                         MissingDataMsg(
@@ -3471,14 +3472,14 @@ class Worker(ServerNode):
                 continue
 
             for worker in ts.who_has - workers:
-                self.has_what[worker].discard(key)
-                # Can't remove from self.data_needed_per_worker; there is logic
-                # in _select_keys_for_gather to deal with this
+                self.has_what[worker].remove(key)
+                if ts.state == "fetch":
+                    self.data_needed_per_worker[worker].remove(ts)
 
             for worker in workers - ts.who_has:
                 self.has_what[worker].add(key)
                 if ts.state == "fetch":
-                    self.data_needed_per_worker[worker].push(ts)
+                    self.data_needed_per_worker[worker].add(ts)
 
             ts.who_has = workers
 
@@ -3554,8 +3555,10 @@ class Worker(ServerNode):
             if key in self.actors:
                 del self.actors[key]
 
-            for worker in ts.who_has:
-                self.has_what[worker].discard(ts.key)
+            self.data_needed.discard(ts)
+            for w in ts.who_has:
+                self.has_what[w].discard(ts.key)
+                self.data_needed_per_worker[w].discard(ts)
             ts.who_has.clear()
 
             if key in self.threads:
@@ -4285,6 +4288,9 @@ class Worker(ServerNode):
         assert ts.key not in self.data
         assert not ts._next
         assert not ts._previous
+        assert ts not in self.data_needed
+        for tss in self.data_needed_per_worker.values():
+            assert ts not in tss
         assert ts not in self._executing
         assert ts not in self._in_flight_tasks
         assert ts not in self._missing_dep_flight
@@ -4376,6 +4382,16 @@ class Worker(ServerNode):
                 assert worker != self.address
                 for k in keys:
                     assert worker in self.tasks[k].who_has
+
+            for ts in self.data_needed:
+                assert ts.state == "fetch"
+                assert self.tasks[ts.key] is ts
+            for worker, tss in self.data_needed_per_worker.items():
+                for ts in tss:
+                    assert ts.state == "fetch"
+                    assert self.tasks[ts.key] is ts
+                    assert ts in self.data_needed
+                    assert worker in ts.who_has
 
             for ts in self.tasks.values():
                 self.validate_task(ts)

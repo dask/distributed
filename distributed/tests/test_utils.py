@@ -19,7 +19,6 @@ import dask
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.metrics import time
 from distributed.utils import (
-    LRU,
     All,
     Log,
     Logs,
@@ -592,24 +591,6 @@ def test_parse_ports():
         parse_ports("foo")
     with pytest.raises(ValueError):
         parse_ports("100.5")
-
-
-def test_lru():
-
-    l = LRU(maxsize=3)
-    l["a"] = 1
-    l["b"] = 2
-    l["c"] = 3
-    assert list(l.keys()) == ["a", "b", "c"]
-
-    # Use "a" and ensure it becomes the most recently used item
-    l["a"]
-    assert list(l.keys()) == ["b", "c", "a"]
-
-    # Ensure maxsize is respected
-    l["d"] = 4
-    assert len(l) == 3
-    assert list(l.keys()) == ["c", "a", "d"]
 
 
 @gen_test()
