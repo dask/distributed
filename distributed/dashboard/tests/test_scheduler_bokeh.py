@@ -788,6 +788,7 @@ async def test_TaskGroupGraph_arrows(c, s, a, b):
 @gen_cluster(
     client=True,
     config={
+        "distributed.worker.profile.enabled": True,
         "distributed.worker.profile.interval": "10ms",
         "distributed.worker.profile.cycle": "50ms",
     },

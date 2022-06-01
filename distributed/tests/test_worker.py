@@ -1104,7 +1104,13 @@ async def test_statistical_profiling_2(c, s, a, b):
             break
 
 
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "50 ms"})
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": True,
+        "distributed.worker.profile.cycle": "100ms",
+    },
+)
 async def test_statistical_profiling_cycle(c, s, a, b):
     futures = c.map(slowinc, range(20), delay=0.05)
     await wait(futures)
