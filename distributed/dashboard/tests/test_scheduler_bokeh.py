@@ -845,11 +845,11 @@ async def test_proxy_to_workers(c, s, a, b):
 
         assert response_proxy.code == 200
         if proxy_exists:
-            assert b"Crossfilter" in response_proxy.body
+            assert b"System" in response_proxy.body
         else:
             assert b"python -m pip install jupyter-server-proxy" in response_proxy.body
         assert response_direct.code == 200
-        assert b"Crossfilter" in response_direct.body
+        assert b"System" in response_direct.body
 
 
 @gen_cluster(
