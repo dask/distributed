@@ -273,7 +273,7 @@ class ProfileTimePlot(DashboardComponent):
         self.subtitle = Title(text=" ", text_font_style="italic")
         self.profile_plot.add_layout(self.subtitle, "above")
         if not dask.config.get("distributed.worker.profile.enabled"):
-            self.subtitle.text = "Profiling is deactivated."
+            self.subtitle.text = "Profiling is disabled."
             self.select.disabled = True
             self.reset_button.disabled = True
             self.update_button.disabled = True
@@ -399,7 +399,7 @@ class ProfileServer(DashboardComponent):
         self.subtitle = Title(text=" ", text_font_style="italic")
         self.profile_plot.add_layout(self.subtitle, "above")
         if not dask.config.get("distributed.worker.profile.enabled"):
-            self.subtitle.text = "Profiling is deactivated."
+            self.subtitle.text = "Profiling is disabled."
             self.reset_button.disabled = True
             self.update_button.disabled = True
 
