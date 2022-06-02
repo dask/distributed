@@ -1202,7 +1202,7 @@ class Worker(ServerNode):
         self.batched_stream.start(comm)
         self.periodic_callbacks["keep-alive"].start()
         self.periodic_callbacks["heartbeat"].start()
-        self.call_soon(self.handle_scheduler, comm)
+        self.loop.add_callback(self.handle_scheduler, comm)
 
     def _update_latency(self, latency):
         self.latency = latency * 0.05 + self.latency * 0.95
