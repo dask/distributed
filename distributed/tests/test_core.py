@@ -3,6 +3,7 @@ import contextlib
 import os
 import socket
 import threading
+import time as timemod
 import weakref
 
 import pytest
@@ -109,15 +110,15 @@ async def test_async_task_group_call_later_executes_delayed_task_in_background()
         nonlocal flag
         flag = True
 
-    start = time()
+    start = timemod.monotonic()
     task = group.call_later(1, set_flag)
     assert task is not None
     assert len(group) == 1
     await task
-    end = time()
+    end = timemod.monotonic()
     assert len(group) == 0
     assert flag
-    assert end - start > 1
+    assert end - start > 1 - timemod.get_clock_info("monotonic").resolution
 
 
 def test_async_task_group_close_closes():
