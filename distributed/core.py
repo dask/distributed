@@ -190,6 +190,8 @@ class AsyncTaskGroup:
         asyncio.Task | None
             The scheduled Task object, or None if the group is closed.
         """
+        if self.closed:
+            return None
         return self.call_soon(delayed(afunc, delay), *args, **kwargs)
 
     def close(self) -> None:
@@ -207,9 +209,14 @@ class AsyncTaskGroup:
         """
         self.close()
 
-        tasks_to_stop = [
-            t for t in self._ongoing_tasks if t is not asyncio.current_task()
-        ]
+        current_task = asyncio.current_task()
+        if current_task:
+            self._ongoing_tasks.discard(
+                current_task
+            )  #: Discard to avoid cancelling the current task
+
+        tasks_to_stop = list(self._ongoing_tasks)
+
         if tasks_to_stop:
             # Wrap gather in task to avoid Python3.8 issue,
             # see https://github.com/dask/distributed/pull/6478#discussion_r885696827
@@ -222,7 +229,7 @@ class AsyncTaskGroup:
                     timeout,
                 )
             except asyncio.TimeoutError:
-                pass
+                await asyncio.gather(*tasks_to_stop, return_exceptions=True)
 
             if self._ongoing_tasks:
                 raise RuntimeError(
