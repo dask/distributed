@@ -875,14 +875,15 @@ class Worker(ServerNode):
 
         setproctitle("dask-worker [not started]")
 
-        profile_trigger_interval = parse_timedelta(
-            dask.config.get("distributed.worker.profile.interval"), default="ms"
-        )
-        pc = PeriodicCallback(self.trigger_profile, profile_trigger_interval * 1000)
-        self.periodic_callbacks["profile"] = pc
+        if dask.config.get("distributed.worker.profile.enabled"):
+            profile_trigger_interval = parse_timedelta(
+                dask.config.get("distributed.worker.profile.interval"), default="ms"
+            )
+            pc = PeriodicCallback(self.trigger_profile, profile_trigger_interval * 1000)
+            self.periodic_callbacks["profile"] = pc
 
-        pc = PeriodicCallback(self.cycle_profile, profile_cycle_interval * 1000)
-        self.periodic_callbacks["profile-cycle"] = pc
+            pc = PeriodicCallback(self.cycle_profile, profile_cycle_interval * 1000)
+            self.periodic_callbacks["profile-cycle"] = pc
 
         self.plugins = {}
         self._pending_plugins = plugins

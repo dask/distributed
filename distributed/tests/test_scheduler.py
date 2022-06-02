@@ -1300,7 +1300,13 @@ async def test_profile_metadata(c, s, a, b):
     assert not meta["counts"][-1][1]
 
 
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": True,
+        "distributed.worker.profile.cycle": "100ms",
+    },
+)
 async def test_profile_metadata_timeout(c, s, a, b):
     start = time() - 1
 
@@ -1321,7 +1327,13 @@ async def test_profile_metadata_timeout(c, s, a, b):
     assert not meta["counts"][-1][1]
 
 
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": True,
+        "distributed.worker.profile.cycle": "100ms",
+    },
+)
 async def test_profile_metadata_keys(c, s, a, b):
     x = c.map(slowinc, range(10), delay=0.05)
     y = c.map(slowdec, range(10), delay=0.05)
@@ -1337,6 +1349,7 @@ async def test_profile_metadata_keys(c, s, a, b):
 @gen_cluster(
     client=True,
     config={
+        "distributed.worker.profile.enabled": True,
         "distributed.worker.profile.interval": "1ms",
         "distributed.worker.profile.cycle": "100ms",
     },
@@ -1353,6 +1366,7 @@ async def test_statistical_profiling(c, s, a, b):
 @gen_cluster(
     client=True,
     config={
+        "distributed.worker.profile.enabled": True,
         "distributed.worker.profile.interval": "1ms",
         "distributed.worker.profile.cycle": "100ms",
     },
