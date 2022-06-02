@@ -1237,17 +1237,12 @@ class Worker(BaseWorker, ServerNode):
             )
             self.bandwidth_workers.clear()
             self.bandwidth_types.clear()
-        except CommClosedError:
-            logger.warning("Heartbeat to scheduler failed", exc_info=True)
-            await self.close()
         except OSError as e:
-            # Scheduler is gone. Respect distributed.comm.timeouts.connect
-            if "Timed out trying to connect" in str(e):
-                logger.info("Timed out while trying to connect during heartbeat")
-                await self.close()
-            else:
-                logger.exception(e)
-                raise e
+            logger.exception(e)
+        except Exception as e:
+            logger.exception("Unexpected exception during heartbeat. Closing worker.")
+            await self.close()
+            raise e
         finally:
             self.heartbeat_active = False
 
