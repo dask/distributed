@@ -505,6 +505,7 @@ async def test_missing_handle_compute_dependency(c, s, w1, w2, w3):
 
     f1 = c.submit(inc, 1, key="f1", workers=[w1.address])
     f2 = c.submit(inc, 2, key="f2", workers=[w1.address])
+    await wait_for_state(f1.key, "memory", w1)
 
     w3.handle_acquire_replicas(
         keys=[f1.key], who_has={f1.key: [w2.address]}, stimulus_id="acquire"
@@ -515,3 +516,22 @@ async def test_missing_handle_compute_dependency(c, s, w1, w2, w3):
     f3 = c.submit(sum, [f1, f2], key="f3", workers=[w3.address])
 
     await f3
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+async def test_missing_to_waiting(c, s, w1, w2, w3):
+    w3.periodic_callbacks["find-missing"].stop()
+
+    f1 = c.submit(inc, 1, key="f1", workers=[w1.address], allow_other_workers=True)
+    await wait_for_state(f1.key, "memory", w1)
+
+    w3.handle_acquire_replicas(
+        keys=[f1.key], who_has={f1.key: [w2.address]}, stimulus_id="acquire"
+    )
+
+    await wait_for_state(f1.key, "missing", w3)
+
+    await w2.close()
+    await w1.close()
+
+    await f1
