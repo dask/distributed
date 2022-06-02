@@ -117,6 +117,7 @@ class AsyncTaskGroup:
 
     def __init__(self) -> None:
         self.closed = False
+        self._lock = threading.Lock()
         self._ongoing_tasks: set[asyncio.Task] = set()
 
     def schedule(self, coro: Coroutine) -> asyncio.Task | None:
@@ -132,13 +133,14 @@ class AsyncTaskGroup:
         asyncio.Task | None
             The scheduled Task object, or None if the group is closed.
         """
-        if self.closed:
-            coro.close()
-            return None
-        task = asyncio.create_task(coro)
-        self._ongoing_tasks.add(task)
-        task.add_done_callback(self._ongoing_tasks.remove)
-        return task
+        with self._lock:
+            if self.closed:
+                coro.close()
+                return None
+            task = asyncio.create_task(coro)
+            task.add_done_callback(self._ongoing_tasks.remove)
+            self._ongoing_tasks.add(task)
+            return task
 
     def call_soon(
         self, afunc: Callable[..., Coroutine], *args, **kwargs
@@ -162,8 +164,6 @@ class AsyncTaskGroup:
         asyncio.Task | None
             The scheduled Task object, or None if the group is closed.
         """
-        if self.closed:
-            return None
         return self.schedule(afunc(*args, **kwargs))
 
     def call_later(
@@ -190,8 +190,6 @@ class AsyncTaskGroup:
         asyncio.Task | None
             The scheduled Task object, or None if the group is closed.
         """
-        if self.closed:
-            return None
         return self.call_soon(delayed(afunc, delay), *args, **kwargs)
 
     def close(self) -> None:
@@ -199,7 +197,8 @@ class AsyncTaskGroup:
 
         Existing tasks continue to run.
         """
-        self.closed = True
+        with self._lock:
+            self.closed = True
 
     async def stop(self, timeout=1) -> None:
         """Close the group and stop all currently running tasks.
@@ -210,12 +209,7 @@ class AsyncTaskGroup:
         self.close()
 
         current_task = asyncio.current_task()
-        if current_task:
-            self._ongoing_tasks.discard(
-                current_task
-            )  #: Discard to avoid cancelling the current task
-
-        tasks_to_stop = list(self._ongoing_tasks)
+        tasks_to_stop = [t for t in self._ongoing_tasks if t is not current_task]
 
         if tasks_to_stop:
             # Wrap gather in task to avoid Python3.8 issue,
@@ -231,7 +225,7 @@ class AsyncTaskGroup:
             except asyncio.TimeoutError:
                 await asyncio.gather(*tasks_to_stop, return_exceptions=True)
 
-            if self._ongoing_tasks:
+            if [t for t in self._ongoing_tasks if t is not current_task]:
                 raise RuntimeError(
                     f"Expected all ongoing tasks to be cancelled and removed, found {self._ongoing_tasks}."
                 )
