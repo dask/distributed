@@ -212,7 +212,7 @@ def fail_hard(method):
                         },
                     )
                     logger.exception(e)
-                self.call_soon(_force_close, self)
+                self.loop.add_callback(_force_close, self)
                 raise
 
     return wrapper
