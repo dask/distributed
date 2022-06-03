@@ -632,7 +632,7 @@ async def test_restart(c, s, a, b):
 async def test_restart_some_nannies_some_not(
     c: Client, s: Scheduler, a: Nanny, b: Nanny
 ):
-    original_pids = await c.run(os.getpid)
+    original_pids = set((await c.run(os.getpid)).values())
     original_workers = dict(s.workers)
     async with Worker(s.address, nthreads=1) as w:
         await c.wait_for_workers(3)
@@ -667,7 +667,7 @@ async def test_restart_some_nannies_some_not(
 
         assert len(s.workers) == 2
         # Confirm they restarted
-        new_pids = await c.run(os.getpid)
+        new_pids = set((await c.run(os.getpid)).values())
         assert new_pids != original_pids
         # The workers should have new addresses
         assert s.workers.keys().isdisjoint(original_workers.keys())
