@@ -1,4 +1,5 @@
 import pickle
+from typing import Any, List
 
 from toolz import first
 
@@ -12,16 +13,14 @@ except ImportError:
         raise ImportError("pyarrow.plasma was not importable")
 
 
-PLASMA_SIZE_LIMIT = dask.config.get("distributed.protocol.shared.minsize", 1)
 PLASMA_PATH = dask.config.get("distributed.protocol.shared.plasma_path", "tmp/plasma")
-PLASMA_ON = dask.config.get("distributed.protocol.shared.plasma", "true") == "true"
 
-plasma = [None]
+plasma: "List[Any]" = []
 
 
 def _get_plasma():
-    if plasma[0] is None:
-        plasma[0] = connect("/tmp/plasma")
+    if not plasma:
+        plasma.append(connect("/tmp/plasma"))
     return plasma[0]
 
 
@@ -37,7 +36,9 @@ def _put_buffer(buf):
 def ser(x, context=None):
     from distributed.worker import get_worker
 
-    frames = [None]
+    plasma_size_limit = dask.config.get("distributed.protocol.shared.minsize", 1)
+
+    frames: "List[bytes|memoryview]" = [b""]
     try:
         worker = get_worker()
     except ValueError:
@@ -52,10 +53,10 @@ def ser(x, context=None):
 
     frames[0] = pickle.dumps(x, protocol=-1, buffer_callback=add_buf)
     head = {"serializer": "plasma"}
-    if any(buf.nbytes > PLASMA_SIZE_LIMIT for buf in frames[1:]):
+    if any(buf.nbytes > plasma_size_limit for buf in frames[1:]):
 
         frames[1:] = [
-            _put_buffer(buf) if buf.nbytes > PLASMA_SIZE_LIMIT else buf
+            _put_buffer(buf) if buf.nbytes > plasma_size_limit else buf
             for buf in frames[1:]
         ]
         if worker is not None:

@@ -590,7 +590,7 @@ class Worker(ServerNode):
 
         self.in_flight_workers = {}
         self.busy_workers = set()
-        self.shared_data = {}
+        self.shared_data: dict[int, Any] = {}
         self.total_out_connections = dask.config.get(
             "distributed.worker.connections.outgoing"
         )
