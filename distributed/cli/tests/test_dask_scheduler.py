@@ -99,7 +99,8 @@ def test_dashboard_non_standard_ports(loop):
     pytest.importorskip("bokeh")
 
     with popen(
-        ["dask-scheduler", "--port", "23448", "--dashboard-address", ":24832"]
+        ["dask-scheduler", "--port", "23448", "--dashboard-address", ":24832"],
+        flush_output=False,
     ) as proc:
         line = wait_for_log_line(b"dashboard at", proc.stdout)
         with Client("127.0.0.1:23448", loop=loop) as c:
@@ -208,7 +209,8 @@ def test_pid_file(loop):
 def test_scheduler_port_zero(loop):
     with tmpfile() as fn:
         with popen(
-            ["dask-scheduler", "--no-dashboard", "--scheduler-file", fn, "--port", "0"]
+            ["dask-scheduler", "--no-dashboard", "--scheduler-file", fn, "--port", "0"],
+            flush_output=False,
         ) as proc:
             line = wait_for_log_line(b"dashboard at", proc.stdout)
             with Client(scheduler_file=fn, loop=loop) as c:
