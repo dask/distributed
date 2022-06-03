@@ -112,7 +112,6 @@ from distributed.worker_state_machine import (
     AddKeysMsg,
     AlreadyCancelledEvent,
     CancelComputeEvent,
-    EnsureCommunicatingAfterTransitions,
     Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -875,15 +874,14 @@ class Worker(ServerNode):
 
         setproctitle("dask-worker [not started]")
 
-        if dask.config.get("distributed.worker.profile.enabled"):
-            profile_trigger_interval = parse_timedelta(
-                dask.config.get("distributed.worker.profile.interval"), default="ms"
-            )
-            pc = PeriodicCallback(self.trigger_profile, profile_trigger_interval * 1000)
-            self.periodic_callbacks["profile"] = pc
+        profile_trigger_interval = parse_timedelta(
+            dask.config.get("distributed.worker.profile.interval"), default="ms"
+        )
+        pc = PeriodicCallback(self.trigger_profile, profile_trigger_interval * 1000)
+        self.periodic_callbacks["profile"] = pc
 
-            pc = PeriodicCallback(self.cycle_profile, profile_cycle_interval * 1000)
-            self.periodic_callbacks["profile-cycle"] = pc
+        pc = PeriodicCallback(self.cycle_profile, profile_cycle_interval * 1000)
+        self.periodic_callbacks["profile-cycle"] = pc
 
         self.plugins = {}
         self._pending_plugins = plugins
@@ -2042,12 +2040,7 @@ class Worker(ServerNode):
         for w in ts.who_has:
             self.data_needed_per_worker[w].add(ts)
 
-        # This is the same as `return self._ensure_communicating()`, except that when
-        # many tasks transition to fetch at the same time, e.g. from a single
-        # compute-task or acquire-replicas command from the scheduler, it allows
-        # clustering the transfers into less GatherDep instructions; see
-        # _select_keys_for_gather().
-        return {}, [EnsureCommunicatingAfterTransitions(stimulus_id=stimulus_id)]
+        return self._ensure_communicating(stimulus_id=stimulus_id)
 
     def transition_missing_fetch(
         self, ts: TaskState, *, stimulus_id: str
@@ -2905,69 +2898,45 @@ class Worker(ServerNode):
 
     @fail_hard
     def _handle_instructions(self, instructions: Instructions) -> None:
-        while instructions:
-            ensure_communicating: EnsureCommunicatingAfterTransitions | None = None
-            for inst in instructions:
-                task: asyncio.Task | None = None
+        for inst in instructions:
+            task: asyncio.Task | None = None
 
-                if isinstance(inst, SendMessageToScheduler):
-                    self.batched_send(inst.to_dict())
+            if isinstance(inst, SendMessageToScheduler):
+                self.batched_send(inst.to_dict())
 
-                elif isinstance(inst, EnsureCommunicatingAfterTransitions):
-                    # A single compute-task or acquire-replicas command may cause
-                    # multiple tasks to transition to fetch; this in turn means that we
-                    # will receive multiple instances of this instruction.
-                    # _ensure_communicating is a no-op if it runs twice in a row; we're
-                    # not calling it inside the for loop to avoid a O(n^2) condition
-                    # when
-                    # 1. there are many fetches queued because all workers are in flight
-                    # 2. a single compute-task or acquire-replicas command just sent
-                    #    many dependencies to fetch at once.
-                    ensure_communicating = inst
-
-                elif isinstance(inst, GatherDep):
-                    assert inst.to_gather
-                    keys_str = ", ".join(peekn(27, inst.to_gather)[0])
-                    if len(keys_str) > 80:
-                        keys_str = keys_str[:77] + "..."
-                    task = asyncio.create_task(
-                        self.gather_dep(
-                            inst.worker,
-                            inst.to_gather,
-                            total_nbytes=inst.total_nbytes,
-                            stimulus_id=inst.stimulus_id,
-                        ),
-                        name=f"gather_dep({inst.worker}, {{{keys_str}}})",
-                    )
-
-                elif isinstance(inst, Execute):
-                    task = asyncio.create_task(
-                        self.execute(inst.key, stimulus_id=inst.stimulus_id),
-                        name=f"execute({inst.key})",
-                    )
-
-                elif isinstance(inst, RetryBusyWorkerLater):
-                    task = asyncio.create_task(
-                        self.retry_busy_worker_later(inst.worker),
-                        name=f"retry_busy_worker_later({inst.worker})",
-                    )
-
-                else:
-                    raise TypeError(inst)  # pragma: nocover
-
-                if task is not None:
-                    self._async_instructions.add(task)
-                    task.add_done_callback(self._handle_stimulus_from_task)
-
-            if ensure_communicating:
-                # Potentially re-fill instructions, causing a second iteration of `while
-                # instructions` at the top of this method
-                recs, instructions = self._ensure_communicating(
-                    stimulus_id=ensure_communicating.stimulus_id
+            elif isinstance(inst, GatherDep):
+                assert inst.to_gather
+                keys_str = ", ".join(peekn(27, inst.to_gather)[0])
+                if len(keys_str) > 80:
+                    keys_str = keys_str[:77] + "..."
+                task = asyncio.create_task(
+                    self.gather_dep(
+                        inst.worker,
+                        inst.to_gather,
+                        total_nbytes=inst.total_nbytes,
+                        stimulus_id=inst.stimulus_id,
+                    ),
+                    name=f"gather_dep({inst.worker}, {{{keys_str}}})",
                 )
-                self.transitions(recs, stimulus_id=ensure_communicating.stimulus_id)
+
+            elif isinstance(inst, Execute):
+                task = asyncio.create_task(
+                    self.execute(inst.key, stimulus_id=inst.stimulus_id),
+                    name=f"execute({inst.key})",
+                )
+
+            elif isinstance(inst, RetryBusyWorkerLater):
+                task = asyncio.create_task(
+                    self.retry_busy_worker_later(inst.worker),
+                    name=f"retry_busy_worker_later({inst.worker})",
+                )
+
             else:
-                instructions = []
+                raise TypeError(inst)  # pragma: nocover
+
+            if task is not None:
+                self._async_instructions.add(task)
+                task.add_done_callback(self._handle_stimulus_from_task)
 
     def maybe_transition_long_running(
         self, ts: TaskState, *, compute_duration: float, stimulus_id: str

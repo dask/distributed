@@ -104,6 +104,22 @@ _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
 
 
+class _Watch:
+    def __init__(self, duration: float):
+        self.duration = duration
+        self.started_at = None
+
+    def start(self) -> None:
+        self.started_at = time()
+
+    def elapsed(self) -> float:
+        assert self.started_at
+        return time() - self.started_at
+
+    def leftover(self) -> float:
+        return max(0, self.duration - self.elapsed())
+
+
 @pytest.fixture(scope="session")
 def valid_python_script(tmpdir_factory):
     local_file = tmpdir_factory.mktemp("data").join("file.py")
@@ -1039,7 +1055,8 @@ def gen_cluster(
     )
     if is_debugging():
         timeout = 3600
-
+    watch = _Watch(timeout)
+    watch.start()
     scheduler_kwargs = merge(
         dict(
             dashboard=False,
@@ -1051,7 +1068,7 @@ def gen_cluster(
     worker_kwargs = merge(
         dict(
             memory_limit=system.MEMORY_LIMIT,
-            death_timeout=15,
+            death_timeout=min(15, int(watch.leftover())),
             transition_counter_max=50_000,
         ),
         worker_kwargs,
@@ -1107,7 +1124,9 @@ def gen_cluster(
                         try:
                             coro = func(*args, *outer_args, **kwargs)
                             task = asyncio.create_task(coro)
-                            coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
+                            coro2 = asyncio.wait_for(
+                                asyncio.shield(task), timeout=watch.leftover()
+                            )
                             result = await coro2
                             validate_state(s, *workers)
 
@@ -1138,7 +1157,7 @@ def gen_cluster(
                             # uninteresting boilerplate from utils_test and asyncio
                             # and not from the code being tested.
                             raise asyncio.TimeoutError(
-                                f"Test timeout after {timeout}s.\n"
+                                f"Test timeout ({timeout}) hit after {watch.elapsed()}s.\n"
                                 "========== Test stack trace starts here ==========\n"
                                 f"{buffer.getvalue()}"
                             ) from None
@@ -1179,8 +1198,7 @@ def gen_cluster(
                             ]
 
                         try:
-                            start = time()
-                            while time() < start + 60:
+                            while watch.leftover():
                                 gc.collect()
                                 if not get_unclosed():
                                     break

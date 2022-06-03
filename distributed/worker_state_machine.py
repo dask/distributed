@@ -244,12 +244,6 @@ class RetryBusyWorkerLater(Instruction):
     worker: str
 
 
-@dataclass
-class EnsureCommunicatingAfterTransitions(Instruction):
-    __slots__ = ()
-
-
-@dataclass
 class SendMessageToScheduler(Instruction):
     #: Matches a key in Scheduler.stream_handlers
     op: ClassVar[str]
