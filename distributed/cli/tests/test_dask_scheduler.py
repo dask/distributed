@@ -101,6 +101,7 @@ def test_dashboard_non_standard_ports(loop):
     with popen(
         ["dask-scheduler", "--port", "3448", "--dashboard-address", ":4832"]
     ) as proc:
+        line = wait_for_log_line(b"dashboard at", proc.stdout)
         with Client("127.0.0.1:3448", loop=loop) as c:
             pass
 
@@ -208,7 +209,8 @@ def test_scheduler_port_zero(loop):
     with tmpfile() as fn:
         with popen(
             ["dask-scheduler", "--no-dashboard", "--scheduler-file", fn, "--port", "0"]
-        ):
+        ) as proc:
+            line = wait_for_log_line(b"dashboard at", proc.stdout)
             with Client(scheduler_file=fn, loop=loop) as c:
                 assert c.scheduler.port
                 assert c.scheduler.port != 8786
