@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
 import operator
+import os
 import pickle
 import re
 import sys
@@ -623,6 +626,53 @@ async def test_restart(c, s, a, b):
         assert not ws.processing
 
     assert not s.tasks
+
+
+@gen_cluster(client=True, Worker=Nanny, timeout=60)
+async def test_restart_some_nannies_some_not(
+    c: Client, s: Scheduler, a: Nanny, b: Nanny
+):
+    original_pids = await c.run(os.getpid)
+    original_workers = dict(s.workers)
+    async with Worker(s.address, nthreads=1) as w:
+        await c.wait_for_workers(3)
+
+        # Halfway through `Scheduler.restart`, only the non-Nanny workers should be removed.
+        # Nanny-based workers should be kept around so we can call their `restart` RPC.
+        class ValidateRestartPlugin(SchedulerPlugin):
+            error: Exception | None
+
+            def restart(self, scheduler: Scheduler) -> None:
+                try:
+                    assert scheduler.workers.keys() == {
+                        a.worker_address,
+                        b.worker_address,
+                    }
+                    assert all(ws.nanny for ws in scheduler.workers.values())
+                except Exception as e:
+                    # `Scheduler.restart` swallows exceptions within plugins
+                    self.error = e
+                    raise
+                else:
+                    self.error = None
+
+        plugin = ValidateRestartPlugin()
+        s.add_plugin(plugin)
+        await s.restart()
+
+        if plugin.error:
+            raise plugin.error
+
+        assert w.status == Status.closed
+
+        assert len(s.workers) == 2
+        # Confirm they restarted
+        new_pids = await c.run(os.getpid)
+        assert new_pids != original_pids
+        # The workers should have new addresses
+        assert s.workers.keys().isdisjoint(original_workers.keys())
+        # The old WorkerState instances should be replaced
+        assert set(s.workers.values()).isdisjoint(original_workers.values())
 
 
 @gen_cluster()

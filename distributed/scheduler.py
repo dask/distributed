@@ -5091,19 +5091,24 @@ class Scheduler(SchedulerState, ServerNode):
                 stimulus_id=stimulus_id,
             )
 
-        nannies = {addr: ws.nanny for addr, ws in self.workers.items()}
+        nanny_workers: dict[str, str] = {
+            addr: ws.nanny for addr, ws in self.workers.items() if ws.nanny
+        }
 
-        for addr in list(self.workers):
-            try:
-                # Ask the worker to close if it doesn't have a nanny,
-                # otherwise the nanny will kill it anyway
-                await self.remove_worker(
-                    address=addr, close=addr not in nannies, stimulus_id=stimulus_id
-                )
-            except Exception:
-                logger.info(
-                    "Exception while restarting.  This is normal", exc_info=True
-                )
+        # Close non-Nanny workers. We have no way to restart them, so we just let them go,
+        # and assume a deployment system is going to restart them for us.
+        close_results = await asyncio.gather(
+            *(
+                self.remove_worker(address=addr, stimulus_id=stimulus_id)
+                for addr in self.workers
+                if addr not in nanny_workers
+            ),
+            return_exceptions=True,
+        )
+        for r in close_results:
+            if isinstance(r, Exception):
+                # TODO this is probably not, in fact, normal.
+                logger.info("Exception while restarting.  This is normal.", exc_info=r)
 
         self.clear_task_state()
 
@@ -5113,21 +5118,27 @@ class Scheduler(SchedulerState, ServerNode):
             except Exception as e:
                 logger.exception(e)
 
-        logger.debug("Send kill signal to nannies: %s", nannies)
+        logger.debug("Send kill signal to nannies: %s", nanny_workers)
         async with contextlib.AsyncExitStack() as stack:
             nannies = [
                 await stack.enter_async_context(
                     rpc(nanny_address, connection_args=self.connection_args)
                 )
-                for nanny_address in nannies.values()
-                if nanny_address is not None
+                for nanny_address in nanny_workers.values()
             ]
 
-            resps = All(
-                [nanny.restart(close=True, timeout=timeout * 0.8) for nanny in nannies]
-            )
             try:
-                resps = await asyncio.wait_for(resps, timeout)
+                resps = await asyncio.wait_for(
+                    asyncio.gather(
+                        *(
+                            nanny.restart(close=True, timeout=timeout * 0.8)
+                            for nanny in nannies
+                        )
+                    ),
+                    timeout,
+                )
+                # NOTE: the `WorkerState` entries for these workers will be removed
+                # naturally when they disconnect from the scheduler.
             except TimeoutError:
                 logger.error(
                     "Nannies didn't report back restarted within "
