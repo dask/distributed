@@ -5422,7 +5422,13 @@ async def test_call_stack_collections_all(c, s, a, b):
 
 
 @pytest.mark.flaky(condition=WINDOWS, reruns=10, reruns_delay=5)
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": True,
+        "distributed.worker.profile.cycle": "100ms",
+    },
+)
 async def test_profile(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
     await wait(futures)
@@ -5444,7 +5450,33 @@ async def test_profile(c, s, a, b):
     assert not result["count"]
 
 
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": False,
+        "distributed.worker.profile.cycle": "100ms",
+    },
+)
+async def test_profile_disabled(c, s, a, b):
+    futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
+    await wait(futures)
+
+    x = await c.profile(start=time() + 10, stop=time() + 20)
+    assert x["count"] == 0
+
+    x = await c.profile(start=0, stop=time())
+    assert x["count"] == 0
+
+    y = await c.profile(start=time() - 0.300, stop=time())
+    assert 0 == y["count"] == x["count"]
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.cycle": "100ms",
+    },
+)
 async def test_profile_keys(c, s, a, b):
     x = c.map(slowinc, range(10), delay=0.05, workers=a.address)
     y = c.map(slowdec, range(10), delay=0.05, workers=a.address)
@@ -6169,7 +6201,13 @@ async def test_futures_of_sorted(c, s, a, b):
 
 
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "10ms"})
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": True,
+        "distributed.worker.profile.cycle": "10ms",
+    },
+)
 async def test_profile_server(c, s, a, b):
     for i in range(5):
         try:
@@ -6191,6 +6229,27 @@ async def test_profile_server(c, s, a, b):
                 pass
         else:
             break
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": False,
+        "distributed.worker.profile.cycle": "10ms",
+    },
+)
+async def test_profile_server_disabled(c, s, a, b):
+    x = c.map(slowinc, range(10), delay=0.01, workers=a.address, pure=False)
+    await wait(x)
+    await asyncio.gather(
+        c.run(slowinc, 1, delay=0.5), c.run_on_scheduler(slowdec, 1, delay=0.5)
+    )
+
+    p = await c.profile(server=True)  # All worker servers
+    assert "slowinc" not in str(p)
+
+    p = await c.profile(scheduler=True)  # Scheduler
+    assert "slowdec" not in str(p)
 
 
 @gen_cluster(client=True)

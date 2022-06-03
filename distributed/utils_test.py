@@ -1888,6 +1888,7 @@ def _reconfigure():
         {
             "distributed.comm.timeouts.connect": "5s",
             "distributed.admin.tick.interval": "500 ms",
+            "distributed.worker.profile.enabled": False,
         }
     ):
         # Restore default logging levels

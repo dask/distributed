@@ -530,7 +530,10 @@ def test_compute_sync(client):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)],
-    config={"distributed.worker.profile.interval": "1ms"},
+    config={
+        "distributed.worker.profile.enabled": True,
+        "distributed.worker.profile.interval": "1ms",
+    },
 )
 async def test_actors_in_profile(c, s, a):
     class Sleeper:

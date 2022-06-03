@@ -1074,7 +1074,12 @@ async def test_scheduler_delay(c, s, a, b):
 
 
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": True,
+    },
+)
 async def test_statistical_profiling(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.1)
     await wait(futures)
@@ -1089,6 +1094,7 @@ async def test_statistical_profiling(c, s, a, b):
     client=True,
     timeout=30,
     config={
+        "distributed.worker.profile.enabled": True,
         "distributed.worker.profile.interval": "1ms",
         "distributed.worker.profile.cycle": "100ms",
     },
@@ -1106,7 +1112,13 @@ async def test_statistical_profiling_2(c, s, a, b):
             break
 
 
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "50 ms"})
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": True,
+        "distributed.worker.profile.cycle": "100ms",
+    },
+)
 async def test_statistical_profiling_cycle(c, s, a, b):
     futures = c.map(slowinc, range(20), delay=0.05)
     await wait(futures)
