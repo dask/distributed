@@ -675,6 +675,47 @@ async def test_restart_some_nannies_some_not(
         assert set(s.workers.values()).isdisjoint(original_workers.values())
 
 
+class SlowRestartNanny(Nanny):
+    def __init__(self, *args, **kwargs):
+        self.restart_proceed = asyncio.Event()
+        self.restart_called = asyncio.Event()
+        super().__init__(*args, **kwargs)
+
+    async def restart(self, **kwargs):
+        self.restart_called.set()
+        await self.restart_proceed.wait()
+        return await super().restart(**kwargs)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    Worker=SlowRestartNanny,
+    worker_kwargs={"heartbeat_interval": "1ms"},
+)
+async def test_restart_heartbeat_before_closing(c, s: Scheduler, n: SlowRestartNanny):
+    """
+    Ensure that if workers heartbeat in the middle of `Scheduler.restart`, they don't close themselves.
+    https://github.com/dask/distributed/issues/6494
+    """
+    prev_workers = dict(s.workers)
+    restart_task = asyncio.create_task(s.restart())
+
+    await n.restart_called.wait()
+    await asyncio.sleep(0.5)  # significantly longer than the heartbeat interval
+
+    # WorkerState should not be removed yet, because the worker hasn't been told to close
+    assert s.workers
+
+    n.restart_proceed.set()
+    # Wait until the worker has left (possibly until it's come back too)
+    while s.workers == prev_workers:
+        await asyncio.sleep(0.01)
+
+    await restart_task
+    await c.wait_for_workers(1)
+
+
 @gen_cluster()
 async def test_broadcast(s, a, b):
     result = await s.broadcast(msg={"op": "ping"})
