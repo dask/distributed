@@ -945,8 +945,7 @@ class Worker(ServerNode):
     def logs(self):
         return self._deque_handler.deque
 
-    def log_event(self, topic, msg):
-        msg["worker"] = self.id
+    def log_event(self, topic: str | Collection[str], msg: Any) -> None:
         full_msg = {
             "op": "log-event",
             "topic": topic,
