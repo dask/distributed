@@ -1,7 +1,6 @@
 import asyncio
 import subprocess
 import sys
-import unittest
 from threading import Lock
 from time import sleep
 from urllib.parse import urlparse
@@ -15,7 +14,6 @@ from dask.system import CPU_COUNT
 from distributed import Client, LocalCluster, Nanny, Worker, get_client
 from distributed.compatibility import LINUX
 from distributed.core import Status
-from distributed.deploy.utils_test import ClusterTest
 from distributed.metrics import time
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import TimeoutError, sync
@@ -170,9 +168,49 @@ def test_transports_tcp_port():
             assert e.submit(inc, 4).result() == 5
 
 
-class LocalTest(ClusterTest, unittest.TestCase):
-    Cluster = LocalCluster  # type: ignore
-    kwargs = {"silence_logs": False, "dashboard_address": ":0", "processes": False}
+def test_cores(loop):
+    with LocalCluster(
+        2,
+        scheduler_port=0,
+        silence_logs=False,
+        dashboard_address=":0",
+        processes=False,
+        loop=loop,
+    ) as cluster, Client(cluster.scheduler_address, loop=loop) as client:
+        client.scheduler_info()
+        assert len(client.nthreads()) == 2
+
+
+def test_submit(loop):
+    with LocalCluster(
+        2,
+        scheduler_port=0,
+        silence_logs=False,
+        dashboard_address=":0",
+        processes=False,
+        loop=loop,
+    ) as cluster, Client(cluster.scheduler_address, loop=loop) as client:
+        future = client.submit(lambda x: x + 1, 1)
+        assert future.result() == 2
+
+
+def test_context_manager(loop):
+    with LocalCluster(
+        silence_logs=False, dashboard_address=":0", processes=False, loop=loop
+    ) as c, Client(c) as e:
+        assert e.nthreads()
+
+
+def test_no_workers_sync(loop):
+    with LocalCluster(
+        0,
+        scheduler_port=0,
+        silence_logs=False,
+        dashboard_address=":0",
+        processes=False,
+        loop=loop,
+    ):
+        pass
 
 
 def test_Client_with_local(loop):
