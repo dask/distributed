@@ -1856,7 +1856,6 @@ class Worker(ServerNode):
 
         For stronger guarantees, see handler free_keys
         """
-        self.log.append(("remove-replicas", ev.keys, ev.stimulus_id, time()))
         recommendations: Recs = {}
         instructions: Instructions = []
 
@@ -1912,7 +1911,6 @@ class Worker(ServerNode):
 
     @handle_event.register
     def _(self, ev: AcquireReplicasEvent) -> RecsInstrs:
-        self.log.append(("acquire-replicas", set(ev.who_has), ev.stimulus_id, time()))
         if self.validate:
             assert all(ev.who_has.values())
 
