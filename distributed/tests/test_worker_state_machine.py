@@ -17,6 +17,7 @@ from distributed.utils_test import (
     inc,
 )
 from distributed.worker_state_machine import (
+    AcquireReplicasEvent,
     ComputeTaskEvent,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -566,18 +567,18 @@ async def test_forget_data_needed(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
 async def test_missing_handle_compute_dependency(c, s, w1, w2, w3):
-    """Test that it is OK for a dependency to be in state missing if a dependent is asked to be computed"""
-
+    """Test that it is OK for a dependency to be in state missing if a dependent is
+    asked to be computed
+    """
     w3.periodic_callbacks["find-missing"].stop()
 
     f1 = c.submit(inc, 1, key="f1", workers=[w1.address])
     f2 = c.submit(inc, 2, key="f2", workers=[w1.address])
     await wait_for_state(f1.key, "memory", w1)
 
-    w3.handle_acquire_replicas(
-        keys=[f1.key], who_has={f1.key: [w2.address]}, stimulus_id="acquire"
+    w3.handle_stimulus(
+        AcquireReplicasEvent(who_has={f1.key: [w2.address]}, stimulus_id="acquire")
     )
-
     await wait_for_state(f1.key, "missing", w3)
 
     f3 = c.submit(sum, [f1, f2], key="f3", workers=[w3.address])
@@ -592,10 +593,9 @@ async def test_missing_to_waiting(c, s, w1, w2, w3):
     f1 = c.submit(inc, 1, key="f1", workers=[w1.address], allow_other_workers=True)
     await wait_for_state(f1.key, "memory", w1)
 
-    w3.handle_acquire_replicas(
-        keys=[f1.key], who_has={f1.key: [w2.address]}, stimulus_id="acquire"
+    w3.handle_stimulus(
+        AcquireReplicasEvent(who_has={f1.key: [w2.address]}, stimulus_id="acquire")
     )
-
     await wait_for_state(f1.key, "missing", w3)
 
     await w2.close()

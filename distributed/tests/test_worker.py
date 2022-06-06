@@ -74,6 +74,7 @@ from distributed.worker import (
     logger,
 )
 from distributed.worker_state_machine import (
+    AcquireReplicasEvent,
     ComputeTaskEvent,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -2735,10 +2736,9 @@ async def test_acquire_replicas_already_in_flight(c, s, a):
         await b.in_gather_dep.wait()
         assert b.tasks["x"].state == "flight"
 
-        s.request_acquire_replicas(b.address, ["x"], stimulus_id=f"test-{time()}")
-        while not b.story("acquire-replicas"):
-            await asyncio.sleep(0.01)
-
+        b.handle_stimulus(
+            AcquireReplicasEvent(who_has={"x": a.address}, stimulus_id="test")
+        )
         assert b.tasks["x"].state == "flight"
         b.block_gather_dep.set()
         assert await y == 3
@@ -2747,7 +2747,6 @@ async def test_acquire_replicas_already_in_flight(c, s, a):
             b.story("x"),
             [
                 ("x", "fetch", "flight", "flight", {}),
-                ("acquire-replicas", {"x"}),
                 ("x", "flight", "fetch", "flight", {}),
             ],
         )
