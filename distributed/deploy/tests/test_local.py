@@ -170,7 +170,7 @@ def test_transports_tcp_port():
 
 def test_cores(loop):
     with LocalCluster(
-        2,
+        n_workers=2,
         scheduler_port=0,
         silence_logs=False,
         dashboard_address=":0",
@@ -183,7 +183,7 @@ def test_cores(loop):
 
 def test_submit(loop):
     with LocalCluster(
-        2,
+        n_workers=2,
         scheduler_port=0,
         silence_logs=False,
         dashboard_address=":0",
@@ -203,7 +203,7 @@ def test_context_manager(loop):
 
 def test_no_workers_sync(loop):
     with LocalCluster(
-        0,
+        n_workers=0,
         scheduler_port=0,
         silence_logs=False,
         dashboard_address=":0",
