@@ -366,7 +366,7 @@ class AddKeysMsg(SendMessageToScheduler):
     op = "add-keys"
 
     __slots__ = ("keys",)
-    keys: list[str]
+    keys: Collection[str]
 
 
 @dataclass
@@ -386,7 +386,7 @@ class RequestRefreshWhoHasMsg(SendMessageToScheduler):
     op = "request-refresh-who-has"
 
     __slots__ = ("keys",)
-    keys: list[str]
+    keys: Collection[str]
 
 
 @dataclass
@@ -613,7 +613,7 @@ class RefreshWhoHasEvent(StateMachineEvent):
 
     __slots__ = ("who_has",)
     # {key: [worker address, ...]}
-    who_has: dict[str, list[str]]
+    who_has: dict[str, Collection[str]]
 
 
 @dataclass
@@ -625,13 +625,13 @@ class AcquireReplicasEvent(StateMachineEvent):
 @dataclass
 class RemoveReplicasEvent(StateMachineEvent):
     __slots__ = ("keys",)
-    keys: list[str]
+    keys: Collection[str]
 
 
 @dataclass
 class FreeKeysEvent(StateMachineEvent):
     __slots__ = ("keys",)
-    keys: list[str]
+    keys: Collection[str]
 
 
 @dataclass
