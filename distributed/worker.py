@@ -4264,6 +4264,8 @@ class Worker(ServerNode):
         # normally in released state. However, the compute-task call for their
         # previous dependent provided them with who_has, such that this assert
         # is no longer true.
+        # assert not any(ts.key in has_what for has_what in self.has_what.values())
+
         assert not ts.waiting_for_data
         assert not ts.done
         assert not ts.exception
