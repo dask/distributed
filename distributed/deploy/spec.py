@@ -670,7 +670,7 @@ async def run_spec(spec: dict[str, Any], *args: Any) -> dict[str, Worker | Nanny
 @atexit.register
 def close_clusters():
     for cluster in list(SpecCluster._instances):
-        if cluster.shutdown_on_close:
+        if getattr(cluster, "shutdown_on_close", False):
             with suppress(gen.TimeoutError, TimeoutError):
-                if cluster.status != Status.closed:
+                if getattr(cluster, "status", Status.closed) != Status.closed:
                     cluster.close(timeout=10)
