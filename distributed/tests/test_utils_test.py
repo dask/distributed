@@ -34,7 +34,12 @@ from distributed.utils_test import (
     raises_with_cause,
     tls_only_security,
 )
-from distributed.worker import InvalidTransition, fail_hard
+from distributed.worker import fail_hard
+from distributed.worker_state_machine import (
+    InvalidTaskState,
+    InvalidTransition,
+    StateMachineEvent,
+)
 
 
 def test_bare_cluster(loop):
@@ -645,18 +650,22 @@ def test_start_failure_scheduler():
 
 
 def test_invalid_transitions(capsys):
-    @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+    class BrokenEvent(StateMachineEvent):
+        pass
+
+    class MyWorker(Worker):
+        @Worker.handle_event.register
+        def _(self, ev: BrokenEvent):
+            ts = next(iter(self.tasks.values()))
+            return {ts: "foo"}, []
+
+    @gen_cluster(client=True, Worker=MyWorker, nthreads=[("", 1)])
     async def test_log_invalid_transitions(c, s, a):
         x = c.submit(inc, 1, key="task-name")
-        y = c.submit(inc, x)
-        xkey = x.key
-        del x
-        await y
-        while a.tasks[xkey].state != "released":
-            await asyncio.sleep(0.01)
-        ts = a.tasks[xkey]
+        await x
+
         with pytest.raises(InvalidTransition):
-            a.transition(ts, "foo", stimulus_id="bar")
+            a.handle_stimulus(BrokenEvent(stimulus_id="test"))
 
         while not s.events["invalid-worker-transition"]:
             await asyncio.sleep(0.01)
@@ -674,20 +683,20 @@ def test_invalid_transitions(capsys):
     assert "task-name" in out + err
 
 
-def test_invalid_worker_states(capsys):
+def test_invalid_worker_state(capsys):
     @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
-    async def test_log_invalid_worker_task_states(c, s, a):
+    async def test_log_invalid_worker_task_state(c, s, a):
         x = c.submit(inc, 1, key="task-name")
         await x
         a.tasks[x.key].state = "released"
-        with pytest.raises(Exception):
-            a.validate_task(a.tasks[x.key])
+        with pytest.raises(InvalidTaskState):
+            a.validate_state()
 
-        while not s.events["invalid-worker-task-states"]:
+        while not s.events["invalid-worker-task-state"]:
             await asyncio.sleep(0.01)
 
     with pytest.raises(Exception) as info:
-        test_log_invalid_worker_task_states()
+        test_log_invalid_worker_task_state()
 
     out, err = capsys.readouterr()
 

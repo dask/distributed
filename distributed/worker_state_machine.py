@@ -88,13 +88,58 @@ class InvalidTransition(Exception):
 
     __str__ = __repr__
 
-
-class RecommendationsConflict(Exception):
-    """Two or more recommendations for the same task suggested different finish states"""
+    def to_event(self) -> tuple[str, dict[str, Any]]:
+        return (
+            "invalid-worker-transition",
+            {
+                "key": self.key,
+                "start": self.start,
+                "finish": self.finish,
+                "story": self.story,
+            },
+        )
 
 
 class TransitionCounterMaxExceeded(InvalidTransition):
-    pass
+    def to_event(self) -> tuple[str, dict[str, Any]]:
+        topic, msg = super().to_event()
+        return "transition-counter-max-exceeded", msg
+
+
+class InvalidTaskState(Exception):
+    def __init__(
+        self,
+        key: str,
+        state: TaskStateState,
+        story: list[tuple],
+    ):
+        self.key = key
+        self.state = state
+        self.story = story
+
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}: {self.key} :: {self.state}"
+            + "\n"
+            + "  Story:\n    "
+            + "\n    ".join(map(str, self.story))
+        )
+
+    __str__ = __repr__
+
+    def to_event(self) -> tuple[str, dict[str, Any]]:
+        return (
+            "invalid-worker-task-state",
+            {
+                "key": self.key,
+                "state": self.state,
+                "story": self.story,
+            },
+        )
+
+
+class RecommendationsConflict(Exception):
+    """Two or more recommendations for the same task suggested different finish states"""
 
 
 @lru_cache
