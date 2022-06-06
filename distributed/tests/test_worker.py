@@ -3059,7 +3059,6 @@ async def test_task_flight_compute_oserror(c, s, a, b):
         ),
         # inc is lost and needs to be recomputed. Therefore, sum is released
         ("free-keys", ("f1",)),
-        ("f1", "release-key"),
         # The recommendations here are hard to predict. Whatever key is
         # currently scheduled to be fetched, if any, will be recommended to be
         # released.

@@ -196,32 +196,6 @@ async def test_default_name(c, s, w):
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
-async def test_release_key_deprecated(c, s, a):
-    class ReleaseKeyDeprecated(WorkerPlugin):
-        def __init__(self):
-            self._called = False
-
-        def release_key(self, key, state, cause, reason, report):
-            # Ensure that the handler still works
-            self._called = True
-            assert state == "memory"
-            assert key == "task"
-
-        def teardown(self, worker):
-            assert self._called
-            return super().teardown(worker)
-
-    await c.register_worker_plugin(ReleaseKeyDeprecated())
-
-    with pytest.warns(
-        FutureWarning, match="The `WorkerPlugin.release_key` hook is deprecated"
-    ):
-        assert await c.submit(inc, 1, key="x") == 2
-        while "x" in a.tasks:
-            await asyncio.sleep(0.01)
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_assert_no_warning_no_overload(c, s, a):
     """Assert we do not receive a deprecation warning if we do not overload any
     methods
