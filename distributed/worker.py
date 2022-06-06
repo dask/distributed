@@ -881,14 +881,15 @@ class Worker(ServerNode):
 
         setproctitle("dask-worker [not started]")
 
-        profile_trigger_interval = parse_timedelta(
-            dask.config.get("distributed.worker.profile.interval"), default="ms"
-        )
-        pc = PeriodicCallback(self.trigger_profile, profile_trigger_interval * 1000)
-        self.periodic_callbacks["profile"] = pc
+        if dask.config.get("distributed.worker.profile.enabled"):
+            profile_trigger_interval = parse_timedelta(
+                dask.config.get("distributed.worker.profile.interval"), default="ms"
+            )
+            pc = PeriodicCallback(self.trigger_profile, profile_trigger_interval * 1000)
+            self.periodic_callbacks["profile"] = pc
 
-        pc = PeriodicCallback(self.cycle_profile, profile_cycle_interval * 1000)
-        self.periodic_callbacks["profile-cycle"] = pc
+            pc = PeriodicCallback(self.cycle_profile, profile_cycle_interval * 1000)
+            self.periodic_callbacks["profile-cycle"] = pc
 
         self.plugins = {}
         self._pending_plugins = plugins
@@ -1277,7 +1278,9 @@ class Worker(ServerNode):
     async def handle_scheduler(self, comm):
         await self.handle_stream(comm)
         logger.info(
-            "Connection to scheduler broken. Closing without reporting.  Status: %s",
+            "Connection to scheduler broken. Closing without reporting. ID: %s Address %s Status: %s",
+            self.id,
+            self.address,
             self.status,
         )
         await self.close()
@@ -1957,57 +1960,73 @@ class Worker(ServerNode):
             self.tasks[ev.key] = ts = TaskState(ev.key)
         self.log.append((ev.key, "compute-task", ts.state, ev.stimulus_id, time()))
 
-        if ts.state in READY | {"executing", "long-running", "waiting", "resumed"}:
-            return {}, []
+        recommendations: Recs = {}
+        instructions: Instructions = []
 
-        if ts.state == "memory":
-            return {}, [self._get_task_finished_msg(ts, stimulus_id=ev.stimulus_id)]
-
-        if self.validate:
-            assert ts.state in {
-                "released",
-                "fetch",
-                "flight",
-                "missing",
-                "cancelled",
-                "error",
-            }, self.story(ts)
-
-        ts.run_spec = ev.run_spec
-        priority = ev.priority + (self.generation,)
-        self.generation -= 1
-
-        if ev.actor:
-            self.actors[ts.key] = None
-
-        ts.exception = None
-        ts.traceback = None
-        ts.exception_text = ""
-        ts.traceback_text = ""
-        ts.priority = priority
-        ts.duration = ev.duration
-        ts.resource_restrictions = ev.resource_restrictions
-        ts.annotations = ev.annotations
-
-        if self.validate:
-            assert ev.who_has.keys() == ev.nbytes.keys()
-            assert all(ev.who_has.values())
-
-        for dep_key, dep_workers in ev.who_has.items():
-            dep_ts = self.ensure_task_exists(
-                key=dep_key,
-                priority=priority,
-                stimulus_id=ev.stimulus_id,
+        if ts.state in READY | {
+            "executing",
+            "long-running",
+            "waiting",
+        }:
+            pass
+        elif ts.state == "memory":
+            instructions.append(
+                self._get_task_finished_msg(ts, stimulus_id=ev.stimulus_id)
             )
-            # link up to child / parents
-            ts.dependencies.add(dep_ts)
-            dep_ts.dependents.add(ts)
+        elif ts.state == "error":
+            instructions.append(TaskErredMsg.from_task(ts, stimulus_id=ev.stimulus_id))
+        elif ts.state in {
+            "released",
+            "fetch",
+            "flight",
+            "missing",
+            "cancelled",
+            "resumed",
+        }:
+            recommendations[ts] = "waiting"
 
-        for dep_key, value in ev.nbytes.items():
-            self.tasks[dep_key].nbytes = value
+            ts.run_spec = ev.run_spec
 
-        self._update_who_has(ev.who_has)
-        return {ts: "waiting"}, []
+            priority = ev.priority + (self.generation,)
+            self.generation -= 1
+
+            if ev.actor:
+                self.actors[ts.key] = None
+
+            ts.exception = None
+            ts.traceback = None
+            ts.exception_text = ""
+            ts.traceback_text = ""
+            ts.priority = priority
+            ts.duration = ev.duration
+            ts.resource_restrictions = ev.resource_restrictions
+            ts.annotations = ev.annotations
+
+            if self.validate:
+                assert ev.who_has.keys() == ev.nbytes.keys()
+                assert all(ev.who_has.values())
+
+            for dep_key, dep_workers in ev.who_has.items():
+                dep_ts = self.ensure_task_exists(
+                    key=dep_key,
+                    priority=priority,
+                    stimulus_id=ev.stimulus_id,
+                )
+                # link up to child / parents
+                ts.dependencies.add(dep_ts)
+                dep_ts.dependents.add(ts)
+
+            for dep_key, value in ev.nbytes.items():
+                self.tasks[dep_key].nbytes = value
+
+            self._update_who_has(ev.who_has)
+        else:
+            raise RuntimeError(  # pragma: nocover
+                f"Unexpected task state encountered for {ts}; "
+                f"stimulus_id={ev.stimulus_id}; story={self.story(ts)}"
+            )
+
+        return recommendations, instructions
 
     ########################
     # Worker State Machine #
@@ -2031,12 +2050,21 @@ class Worker(ServerNode):
         # _select_keys_for_gather().
         return {}, [EnsureCommunicatingAfterTransitions(stimulus_id=stimulus_id)]
 
+    def transition_missing_waiting(
+        self, ts: TaskState, *, stimulus_id: str
+    ) -> RecsInstrs:
+        self._missing_dep_flight.discard(ts)
+        self._purge_state(ts)
+        return self.transition_released_waiting(ts, stimulus_id=stimulus_id)
+
     def transition_missing_fetch(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         if self.validate:
             assert ts.state == "missing"
-            assert ts.who_has
+
+        if not ts.who_has:
+            return {}, []
 
         self._missing_dep_flight.discard(ts)
         return self.transition_generic_fetch(ts, stimulus_id=stimulus_id)
@@ -2078,7 +2106,7 @@ class Worker(ServerNode):
     def transition_generic_released(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
-        self.release_key(ts.key, stimulus_id=stimulus_id)
+        self._purge_state(ts)
         recs: Recs = {}
         for dependency in ts.dependencies:
             if (
@@ -2087,6 +2115,7 @@ class Worker(ServerNode):
             ):
                 recs[dependency] = "released"
 
+        ts.state = "released"
         if not ts.dependents:
             recs[ts] = "forgotten"
 
@@ -2099,7 +2128,6 @@ class Worker(ServerNode):
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         if self.validate:
-            assert ts.state == "released"
             assert all(d.key in self.tasks for d in ts.dependencies)
 
         recommendations: Recs = {}
@@ -2256,15 +2284,10 @@ class Worker(ServerNode):
         ts.exception_text = exception_text
         ts.traceback_text = traceback_text
         ts.state = "error"
-        smsg = TaskErredMsg(
-            key=ts.key,
-            exception=exception,
-            traceback=traceback,
-            exception_text=exception_text,
-            traceback_text=traceback_text,
-            thread=self.threads.get(ts.key),
-            startstops=ts.startstops,
+        smsg = TaskErredMsg.from_task(
+            ts,
             stimulus_id=stimulus_id,
+            thread=self.threads.get(ts.key),
         )
 
         return {}, [smsg]
@@ -2421,7 +2444,6 @@ class Worker(ServerNode):
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         if not ts.done:
-            ts._next = "released"
             return {}, []
         self._executing.discard(ts)
         self._in_flight_tasks.discard(ts)
@@ -2630,7 +2652,7 @@ class Worker(ServerNode):
             dep.dependents.discard(ts)
             if dep.state == "released" and not dep.dependents:
                 recommendations[dep] = "forgotten"
-
+        self._purge_state(ts)
         # Mark state as forgotten in case it is still referenced
         ts.state = "forgotten"
         self.tasks.pop(ts.key, None)
@@ -2682,6 +2704,7 @@ class Worker(ServerNode):
         ("missing", "fetch"): transition_missing_fetch,
         ("missing", "released"): transition_missing_released,
         ("missing", "error"): transition_generic_error,
+        ("missing", "waiting"): transition_missing_waiting,
         ("ready", "error"): transition_generic_error,
         ("ready", "executing"): transition_ready_executing,
         ("ready", "released"): transition_generic_released,
@@ -2773,7 +2796,9 @@ class Worker(ServerNode):
                     (recs, instructions),
                     self._transition(ts, finish, *args, stimulus_id=stimulus_id),
                 )
-            except InvalidTransition:
+            # ValueError may be raised by merge_recs_instructions
+            # TODO: should merge_recs raise InvalidTransition?
+            except (ValueError, InvalidTransition):
                 self.log_event(
                     "invalid-worker-transition",
                     {
@@ -3470,80 +3495,37 @@ class Worker(ServerNode):
             # Update status and send confirmation to the Scheduler (see status.setter)
             self.status = new_status
 
-    def release_key(
-        self,
-        key: str,
-        cause: TaskState | None = None,
-        report: bool = True,
-        *,
-        stimulus_id: str,
-    ) -> None:
-        try:
-            if self.validate:
-                assert not isinstance(key, TaskState)
-            ts = self.tasks[key]
-            # needed for legacy notification support
-            state_before = ts.state
-            ts.state = "released"
+    def _purge_state(self, ts: TaskState) -> None:
+        """Ensure that TaskState attributes are reset to a neutral default and
+        Worker-level state associated to the provided key is cleared (e.g.
+        who_has)
+        This is idempotent
+        """
+        key = ts.key
+        logger.debug("Purge task key: %s state: %s; stimulus_id=%s", ts.key, ts.state)
+        self.data.pop(key, None)
+        self.actors.pop(key, None)
 
-            logger.debug(
-                "Release key %s",
-                {"key": key, "cause": cause, "stimulus_id": stimulus_id},
-            )
-            if cause:
-                self.log.append(
-                    (key, "release-key", {"cause": cause}, stimulus_id, time())
-                )
-            else:
-                self.log.append((key, "release-key", stimulus_id, time()))
-            if key in self.data:
-                try:
-                    del self.data[key]
-                except FileNotFoundError:
-                    logger.error("Tried to delete %s but no file found", exc_info=True)
-            if key in self.actors:
-                del self.actors[key]
+        for worker in ts.who_has:
+            self.has_what[worker].discard(ts.key)
+            self.data_needed_per_worker[worker].discard(ts)
+        ts.who_has.clear()
+        self.data_needed.discard(ts)
 
-            self.data_needed.discard(ts)
-            for w in ts.who_has:
-                self.has_what[w].discard(ts.key)
-                self.data_needed_per_worker[w].discard(ts)
-            ts.who_has.clear()
+        self.threads.pop(key, None)
 
-            if key in self.threads:
-                del self.threads[key]
+        for d in ts.dependencies:
+            ts.waiting_for_data.discard(d)
+            d.waiters.discard(ts)
 
-            if ts.resource_restrictions is not None:
-                if ts.state == "executing":
-                    for resource, quantity in ts.resource_restrictions.items():
-                        self.available_resources[resource] += quantity
+        ts.waiting_for_data.clear()
+        ts.nbytes = None
+        ts._previous = None
+        ts._next = None
+        ts.done = False
 
-            for d in ts.dependencies:
-                ts.waiting_for_data.discard(d)
-                d.waiters.discard(ts)
-
-            ts.waiting_for_data.clear()
-            ts.nbytes = None
-            ts._previous = None
-            ts._next = None
-            ts.done = False
-
-            self._executing.discard(ts)
-            self._in_flight_tasks.discard(ts)
-
-            self._notify_plugins(
-                "release_key", key, state_before, cause, stimulus_id, report
-            )
-        except CommClosedError:
-            # Batched stream send might raise if it was already closed
-            pass
-        except Exception as e:  # pragma: no cover
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
+        self._executing.discard(ts)
+        self._in_flight_tasks.discard(ts)
 
     ################
     # Execute Task #
@@ -3948,7 +3930,8 @@ class Worker(ServerNode):
             return {}, []
 
         if self.validate:
-            assert not any(ts.who_has for ts in self._missing_dep_flight)
+            for ts in self._missing_dep_flight:
+                assert not ts.who_has, self.story(ts)
 
         smsg = RequestRefreshWhoHasMsg(
             keys=[ts.key for ts in self._missing_dep_flight],
@@ -4131,15 +4114,6 @@ class Worker(ServerNode):
     def _notify_plugins(self, method_name, *args, **kwargs):
         for name, plugin in self.plugins.items():
             if hasattr(plugin, method_name):
-                if method_name == "release_key":
-                    warnings.warn(
-                        "The `WorkerPlugin.release_key` hook is deprecated and will be "
-                        "removed in a future version. A similar event can now be "
-                        "caught by filtering for a `finish=='released'` event in the "
-                        "`WorkerPlugin.transition` hook.",
-                        FutureWarning,
-                    )
-
                 try:
                     getattr(plugin, method_name)(*args, **kwargs)
                 except Exception:
@@ -4224,7 +4198,8 @@ class Worker(ServerNode):
     def validate_task_cancelled(self, ts):
         assert ts.key not in self.data
         assert ts._previous in {"long-running", "executing", "flight"}
-        assert ts._next is None  # We'll always transition to released after it is done
+        # We'll always transition to released after it is done
+        assert ts._next is None, (ts.key, ts._next, self.story(ts))
 
     def validate_task_resumed(self, ts):
         assert ts.key not in self.data
@@ -4241,8 +4216,14 @@ class Worker(ServerNode):
         assert ts not in self._executing
         assert ts not in self._in_flight_tasks
         assert ts not in self._missing_dep_flight
-        assert ts not in self._missing_dep_flight
-        assert not any(ts.key in has_what for has_what in self.has_what.values())
+
+        # FIXME the below assert statement is true most of the time. If a task
+        # performs the transition flight->cancel->waiting, its dependencies are
+        # normally in released state. However, the compute-task call for their
+        # previous dependent provided them with who_has, such that this assert
+        # is no longer true.
+        # assert not any(ts.key in has_what for has_what in self.has_what.values())
+
         assert not ts.waiting_for_data
         assert not ts.done
         assert not ts.exception
@@ -4290,7 +4271,7 @@ class Worker(ServerNode):
             )
 
             raise AssertionError(
-                f"Invalid TaskState encountered for {ts!r}.\nStory:\n{self.story(ts)}\n"
+                f"Invalid TaskState encountered on {self.id} for {ts!r}.\nStory:\n{self.story(ts)}\n"
             ) from e
 
     def validate_state(self):
@@ -4328,10 +4309,11 @@ class Worker(ServerNode):
             for worker, keys in self.has_what.items():
                 assert worker != self.address
                 for k in keys:
+                    assert k in self.tasks, self.story(k)
                     assert worker in self.tasks[k].who_has
 
             for ts in self.data_needed:
-                assert ts.state == "fetch"
+                assert ts.state == "fetch", self.story(ts)
                 assert self.tasks[ts.key] is ts
             for worker, tss in self.data_needed_per_worker.items():
                 for ts in tss:

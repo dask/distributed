@@ -1,5 +1,3 @@
-import asyncio
-
 import pytest
 
 pytest.importorskip("bokeh")
@@ -21,7 +19,11 @@ def test_basic(Component):
     assert isinstance(c.root, Model)
 
 
-@gen_cluster(client=True, clean_kwargs={"threads": False})
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={"distributed.worker.profile.enabled": True},
+)
 async def test_profile_plot(c, s, a, b):
     p = ProfilePlot()
     assert not p.source.data["left"]
@@ -30,20 +32,54 @@ async def test_profile_plot(c, s, a, b):
         p.update(a.profile_recent)
 
 
-@gen_cluster(client=True, clean_kwargs={"threads": False})
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={
+        "distributed.worker.profile.enabled": True,
+        "distributed.worker.profile.interval": "10ms",
+        "distributed.worker.profile.cycle": "50ms",
+    },
+)
 async def test_profile_time_plot(c, s, a, b):
     from bokeh.io import curdoc
 
     sp = ProfileTimePlot(s, doc=curdoc())
+    assert "disabled" not in sp.subtitle.text
     sp.trigger_update()
 
     ap = ProfileTimePlot(a, doc=curdoc())
+    assert "disabled" not in sp.subtitle.text
     ap.trigger_update()
 
-    assert not len(sp.source.data["left"])
-    assert not len(ap.source.data["left"])
+    assert len(sp.source.data["left"]) == 0
+    assert len(ap.source.data["left"]) == 0
 
     await c.gather(c.map(slowinc, range(10), delay=0.05))
+
     ap.trigger_update()
     sp.trigger_update()
-    await asyncio.sleep(0.05)
+
+
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={
+        "distributed.worker.profile.enabled": False,
+        "distributed.worker.profile.interval": "10ms",
+        "distributed.worker.profile.cycle": "50ms",
+    },
+)
+async def test_profile_time_plot_disabled(c, s, a, b):
+    from bokeh.io import curdoc
+
+    sp = ProfileTimePlot(s, doc=curdoc())
+    assert "disabled" in sp.subtitle.text
+    sp.trigger_update()
+
+    ap = ProfileTimePlot(a, doc=curdoc())
+    assert "disabled" in sp.subtitle.text
+    ap.trigger_update()
+
+    assert len(sp.source.data["left"]) == 0
+    assert len(ap.source.data["left"]) == 0

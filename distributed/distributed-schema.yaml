@@ -405,6 +405,10 @@ properties:
               This data gets collected into statistical profiling information,
               which is then periodically bundled together and sent along to the scheduler.
             properties:
+              enabled:
+                type: boolean
+                description: |
+                  Whether or not to enable profiling
               interval:
                 type: string
                 description: |
