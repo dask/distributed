@@ -66,7 +66,13 @@ class StartStop(TypedDict, total=False):
 
 
 class InvalidTransition(Exception):
-    def __init__(self, key, start, finish, story):
+    def __init__(
+        self,
+        key: str,
+        start: TaskStateState,
+        finish: TaskStateState,
+        story: list[tuple],
+    ):
         self.key = key
         self.start = start
         self.finish = finish
@@ -81,6 +87,10 @@ class InvalidTransition(Exception):
         )
 
     __str__ = __repr__
+
+
+class RecommendationsConflict(Exception):
+    """Two or more recommendations for the same task suggested different finish states"""
 
 
 class TransitionCounterMaxExceeded(InvalidTransition):
@@ -578,11 +588,11 @@ def merge_recs_instructions(*args: RecsInstrs) -> RecsInstrs:
     recs: Recs = {}
     instr: Instructions = []
     for recs_i, instr_i in args:
-        for k, v in recs_i.items():
-            if k in recs and recs[k] != v:
-                raise ValueError(
-                    f"Mismatched recommendations for {k}: {recs[k]} vs. {v}"
+        for ts, finish in recs_i.items():
+            if ts in recs and recs[ts] != finish:
+                raise RecommendationsConflict(
+                    f"Mismatched recommendations for {ts.key}: {recs[ts]} vs. {finish}"
                 )
-            recs[k] = v
+            recs[ts] = finish
         instr += instr_i
     return recs, instr

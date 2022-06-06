@@ -123,6 +123,7 @@ from distributed.worker_state_machine import (
     InvalidTransition,
     LongRunningMsg,
     MissingDataMsg,
+    RecommendationsConflict,
     Recs,
     RecsInstrs,
     RefreshWhoHasEvent,
@@ -2737,13 +2738,14 @@ class Worker(ServerNode):
         if isinstance(finish, tuple):
             # the concatenated transition path might need to access the tuple
             assert not args
-            finish, *args = finish  # type: ignore
+            args = finish[1:]
+            finish = cast(TaskStateState, finish[0])
 
         if ts.state == finish:
             return {}, []
 
         start = ts.state
-        func = self._TRANSITIONS_TABLE.get((start, cast(TaskStateState, finish)))
+        func = self._TRANSITIONS_TABLE.get((start, finish))
 
         # Notes:
         # - in case of transition through released, this counter is incremented by 2
@@ -2797,9 +2799,7 @@ class Worker(ServerNode):
                     (recs, instructions),
                     self._transition(ts, finish, *args, stimulus_id=stimulus_id),
                 )
-            # ValueError may be raised by merge_recs_instructions
-            # TODO: should merge_recs raise InvalidTransition?
-            except (ValueError, InvalidTransition):
+            except (InvalidTransition, RecommendationsConflict):
                 self.log_event(
                     "invalid-worker-transition",
                     {
