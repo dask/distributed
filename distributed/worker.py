@@ -1769,7 +1769,7 @@ class Worker(ServerNode):
     ###################
 
     @functools.singledispatchmethod
-    def handle_event(self, ev: StateMachineEvent) -> RecsInstrs:
+    def _handle_event(self, ev: StateMachineEvent) -> RecsInstrs:
         raise TypeError(ev)  # pragma: nocover
 
     def update_data(
@@ -1787,8 +1787,8 @@ class Worker(ServerNode):
         )
         return {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
 
-    @handle_event.register
-    def _(self, ev: UpdateDataEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_update_data(self, ev: UpdateDataEvent) -> RecsInstrs:
         recommendations: Recs = {}
         instructions: Instructions = []
         for key, value in ev.data.items():
@@ -1817,8 +1817,8 @@ class Worker(ServerNode):
 
         return recommendations, instructions
 
-    @handle_event.register
-    def _(self, ev: FreeKeysEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_free_keys(self, ev: FreeKeysEvent) -> RecsInstrs:
         """Handler to be called by the scheduler.
 
         The given keys are no longer referred to and required by the scheduler.
@@ -1836,8 +1836,8 @@ class Worker(ServerNode):
                 recommendations[ts] = "released"
         return recommendations, []
 
-    @handle_event.register
-    def _(self, ev: RemoveReplicasEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_remove_replicas(self, ev: RemoveReplicasEvent) -> RecsInstrs:
         """Stream handler notifying the worker that it might be holding unreferenced,
         superfluous data.
 
@@ -1909,8 +1909,8 @@ class Worker(ServerNode):
         _.__name__ = f"_handle_remote_stimulus({cls.__name__})"
         return _
 
-    @handle_event.register
-    def _(self, ev: AcquireReplicasEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_acquire_replicas(self, ev: AcquireReplicasEvent) -> RecsInstrs:
         if self.validate:
             assert all(ev.who_has.values())
 
@@ -1946,8 +1946,8 @@ class Worker(ServerNode):
         self.log.append((key, "ensure-task-exists", ts.state, stimulus_id, time()))
         return ts
 
-    @handle_event.register
-    def _(self, ev: ComputeTaskEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_compute_task(self, ev: ComputeTaskEvent) -> RecsInstrs:
         try:
             ts = self.tasks[ev.key]
             logger.debug(
@@ -2872,7 +2872,7 @@ class Worker(ServerNode):
     def handle_stimulus(self, stim: StateMachineEvent) -> None:
         if not isinstance(stim, FindMissingEvent):
             self.stimulus_log.append(stim.to_loggable(handled=time()))
-        recs, instructions = self.handle_event(stim)
+        recs, instructions = self._handle_event(stim)
         self.transitions(recs, stimulus_id=stim.stimulus_id)
         self._handle_instructions(instructions)
 
@@ -2956,8 +2956,8 @@ class Worker(ServerNode):
             else:
                 instructions = []
 
-    @handle_event.register
-    def _(self, ev: SecedeEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_secede(self, ev: SecedeEvent) -> RecsInstrs:
         ts = self.tasks.get(ev.key)
         if ts and ts.state == "executing":
             return {ts: ("long-running", ev.compute_duration)}, []
@@ -3459,8 +3459,8 @@ class Worker(ServerNode):
 
             ts.who_has = workers
 
-    @handle_event.register
-    def _(self, ev: StealRequestEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_steal_request(self, ev: StealRequestEvent) -> RecsInstrs:
         # There may be a race condition between stealing and releasing a task.
         # In this case the self.tasks is already cleared. The `None` will be
         # registered as `already-computing` on the other end
@@ -3829,8 +3829,8 @@ class Worker(ServerNode):
                 stimulus_id=f"execute-unknown-error-{time()}",
             )
 
-    @handle_event.register
-    def _(self, ev: UnpauseEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_unpause(self, ev: UnpauseEvent) -> RecsInstrs:
         """Emerge from paused status. Do not send this event directly. Instead, just set
         Worker.status back to running.
         """
@@ -3840,18 +3840,18 @@ class Worker(ServerNode):
             self._ensure_communicating(stimulus_id=ev.stimulus_id),
         )
 
-    @handle_event.register
-    def _(self, ev: GatherDepDoneEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_gather_dep_done(self, ev: GatherDepDoneEvent) -> RecsInstrs:
         """Temporary hack - to be removed"""
         return self._ensure_communicating(stimulus_id=ev.stimulus_id)
 
-    @handle_event.register
-    def _(self, ev: RetryBusyWorkerEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_retry_busy_worker(self, ev: RetryBusyWorkerEvent) -> RecsInstrs:
         self.busy_workers.discard(ev.worker)
         return self._ensure_communicating(stimulus_id=ev.stimulus_id)
 
-    @handle_event.register
-    def _(self, ev: CancelComputeEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_cancel_compute(self, ev: CancelComputeEvent) -> RecsInstrs:
         """Cancel a task on a best-effort basis. This is only possible while a task
         is in state `waiting` or `ready`; nothing will happen otherwise.
         """
@@ -3865,8 +3865,8 @@ class Worker(ServerNode):
         assert not ts.dependents
         return {ts: "released"}, []
 
-    @handle_event.register
-    def _(self, ev: AlreadyCancelledEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_already_cancelled(self, ev: AlreadyCancelledEvent) -> RecsInstrs:
         """Task is already cancelled by the time execute() runs"""
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
@@ -3875,8 +3875,8 @@ class Worker(ServerNode):
         ts.done = True
         return {ts: "released"}, []
 
-    @handle_event.register
-    def _(self, ev: ExecuteSuccessEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_execute_success(self, ev: ExecuteSuccessEvent) -> RecsInstrs:
         """Task completed successfully"""
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
@@ -3889,8 +3889,8 @@ class Worker(ServerNode):
         ts.type = ev.type
         return {ts: ("memory", ev.value)}, []
 
-    @handle_event.register
-    def _(self, ev: ExecuteFailureEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_execute_failure(self, ev: ExecuteFailureEvent) -> RecsInstrs:
         """Task execution failed"""
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
@@ -3913,8 +3913,8 @@ class Worker(ServerNode):
             )
         }, []
 
-    @handle_event.register
-    def _(self, ev: RescheduleEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_reschedule(self, ev: RescheduleEvent) -> RecsInstrs:
         """Task raised Reschedule exception while it was running"""
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
@@ -3922,8 +3922,8 @@ class Worker(ServerNode):
         assert ts, self.story(ev.key)
         return {ts: "rescheduled"}, []
 
-    @handle_event.register
-    def _(self, ev: FindMissingEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_find_missing(self, ev: FindMissingEvent) -> RecsInstrs:
         if not self._missing_dep_flight:
             return {}, []
 
@@ -3937,8 +3937,8 @@ class Worker(ServerNode):
         )
         return {}, [smsg]
 
-    @handle_event.register
-    def _(self, ev: RefreshWhoHasEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_refresh_who_has(self, ev: RefreshWhoHasEvent) -> RecsInstrs:
         self._update_who_has(ev.who_has)
         recommendations: Recs = {}
         instructions: Instructions = []
