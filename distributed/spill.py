@@ -230,7 +230,12 @@ class Slow(zict.Func):
     total_weight: SpilledSize
     memmap: bool
 
-    def __init__(self, spill_directory: str, max_weight: int | Literal[False] = False, memmap: bool = False):
+    def __init__(
+        self,
+        spill_directory: str,
+        max_weight: int | Literal[False] = False,
+        memmap: bool = False,
+    ):
         file_kwargs = {}
         if memmap:
             file_kwargs["memmap"] = memmap
