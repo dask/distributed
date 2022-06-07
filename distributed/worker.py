@@ -21,6 +21,7 @@ from collections.abc import (
     Collection,
     Container,
     Iterable,
+    Iterator,
     Mapping,
     MutableMapping,
 )
@@ -122,7 +123,11 @@ from distributed.worker_state_machine import (
     FindMissingEvent,
     FreeKeysEvent,
     GatherDep,
+    GatherDepBusyEvent,
     GatherDepDoneEvent,
+    GatherDepFailureEvent,
+    GatherDepNetworkFailureEvent,
+    GatherDepSuccessEvent,
     Instructions,
     InvalidTaskState,
     InvalidTransition,
@@ -3275,13 +3280,6 @@ class Worker(ServerNode):
         if self.status not in WORKER_ANY_RUNNING:
             return None
 
-        recommendations: Recs = {}
-        instructions: Instructions = []
-        response = {}
-
-        def done_event():
-            return GatherDepDoneEvent(stimulus_id=f"gather-dep-done-{time()}")
-
         try:
             self.log.append(("request-dep", worker, to_gather, stimulus_id, time()))
             logger.debug("Request %d keys from %s", len(to_gather), worker)
@@ -3292,8 +3290,13 @@ class Worker(ServerNode):
             )
             stop = time()
             if response["status"] == "busy":
-                return done_event()
+                return GatherDepBusyEvent(
+                    worker=worker,
+                    total_nbytes=total_nbytes,
+                    stimulus_id=f"gather-dep-busy-{time()}",
+                )
 
+            assert response["status"] == "OK"
             cause = self._get_cause(to_gather)
             self._update_metrics_received_data(
                 start=start,
@@ -3302,96 +3305,192 @@ class Worker(ServerNode):
                 cause=cause,
                 worker=worker,
             )
-            self.log.append(
-                ("receive-dep", worker, set(response["data"]), stimulus_id, time())
+
+            return GatherDepSuccessEvent(
+                worker=worker,
+                total_nbytes=total_nbytes,
+                data=response["data"],
+                stimulus_id=f"gather-dep-success-{time()}",
             )
-            return done_event()
 
         except OSError:
-            logger.exception("Worker stream died during communication: %s", worker)
-            has_what = self.has_what.pop(worker)
-            self.data_needed_per_worker.pop(worker)
-            self.log.append(
-                ("receive-dep-failed", worker, has_what, stimulus_id, time())
+            return GatherDepNetworkFailureEvent(
+                worker=worker,
+                total_nbytes=total_nbytes,
+                stimulus_id=f"gather-dep-network-failure-{time()}",
             )
-            for d in has_what:
-                ts = self.tasks[d]
-                ts.who_has.remove(worker)
-                if not ts.who_has and ts.state in (
-                    "fetch",
-                    "flight",
-                    "resumed",
-                    "cancelled",
-                ):
-                    recommendations[ts] = "missing"
-                    self.log.append(
-                        ("missing-who-has", worker, ts.key, stimulus_id, time())
-                    )
-            return done_event()
 
         except Exception as e:
+            # e.g. data failed to deserialize
             logger.exception(e)
-            if self.batched_stream and LOG_PDB:
-                import pdb
+            return GatherDepFailureEvent.from_exception(
+                e,
+                worker=worker,
+                total_nbytes=total_nbytes,
+                stimulus_id=f"gather-dep-failure-{time()}",
+            )
 
-                pdb.set_trace()
-            msg = error_message(e)
-            for k in self.in_flight_workers[worker]:
-                ts = self.tasks[k]
-                recommendations[ts] = tuple(msg.values())
-            return done_event()
+    def _gather_dep_done_common(self, ev: GatherDepDoneEvent) -> Iterator[TaskState]:
+        """Common code for all subclasses of GatherDepDoneEvent"""
+        self.comm_nbytes -= ev.total_nbytes
+        for key in self.in_flight_workers.pop(ev.worker):
+            ts = self.tasks[key]
+            ts.done = True
+            yield ts
 
-        finally:
-            self.comm_nbytes -= total_nbytes
-            busy = response.get("status", "") == "busy"
-            data = response.get("data", {})
+    def _refetch_missing_data(
+        self, worker: str, tasks: Iterable[TaskState], stimulus_id: str
+    ) -> RecsInstrs:
+        """Helper of GatherDepDoneEvent subclass handlers"""
+        recommendations: Recs = {}
+        instructions: Instructions = []
 
-            if busy:
-                self.log.append(("busy-gather", worker, to_gather, stimulus_id, time()))
-                # Avoid hammering the worker. If there are multiple replicas
-                # available, immediately try fetching from a different worker.
-                self.busy_workers.add(worker)
-                instructions.append(
-                    RetryBusyWorkerLater(worker=worker, stimulus_id=stimulus_id)
+        for ts in tasks:
+            ts.who_has.discard(worker)
+            self.has_what[worker].discard(ts.key)
+            self.log.append((ts.key, "missing-dep", stimulus_id, time()))
+            instructions.append(
+                MissingDataMsg(
+                    key=ts.key,
+                    errant_worker=worker,
+                    stimulus_id=stimulus_id,
+                )
+            )
+            recommendations[ts] = "fetch"
+        return recommendations, instructions
+
+    @_handle_event.register
+    def _handle_gather_dep_success(self, ev: GatherDepSuccessEvent) -> RecsInstrs:
+        """gather_dep terminated successfully.
+        The response may contain less keys than the request.
+        """
+        self.log.append(
+            ("receive-dep", ev.worker, set(ev.data), ev.stimulus_id, time())
+        )
+
+        recommendations: Recs = {}
+        refetch = set()
+        for ts in self._gather_dep_done_common(ev):
+            if ts.key in ev.data:
+                recommendations[ts] = ("memory", ev.data[ts.key])
+            else:
+                refetch.add(ts)
+
+        return merge_recs_instructions(
+            (recommendations, []),
+            self._ensure_communicating(stimulus_id=ev.stimulus_id),
+            self._refetch_missing_data(ev.worker, refetch, ev.stimulus_id),
+        )
+
+    @_handle_event.register
+    def _handle_gather_dep_busy(self, ev: GatherDepBusyEvent) -> RecsInstrs:
+        """gather_dep terminated: remote worker is busy"""
+        self.log.append(
+            (
+                "busy-gather",
+                ev.worker,
+                set(self.in_flight_workers[ev.worker]),
+                ev.stimulus_id,
+                time(),
+            )
+        )
+
+        # Avoid hammering the worker. If there are multiple replicas
+        # available, immediately try fetching from a different worker.
+        self.busy_workers.add(ev.worker)
+
+        recommendations: Recs = {}
+        refresh_who_has = []
+        for ts in self._gather_dep_done_common(ev):
+            recommendations[ts] = "fetch"
+            if not ts.who_has - self.busy_workers:
+                refresh_who_has.append(ts.key)
+
+        instructions: Instructions = [
+            RetryBusyWorkerLater(worker=ev.worker, stimulus_id=ev.stimulus_id),
+        ]
+        if refresh_who_has:
+            # All workers that hold known replicas of our tasks are busy.
+            # Try querying the scheduler for unknown ones.
+            instructions.append(
+                RequestRefreshWhoHasMsg(
+                    keys=refresh_who_has, stimulus_id=ev.stimulus_id
+                )
+            )
+
+        return merge_recs_instructions(
+            (recommendations, instructions),
+            self._ensure_communicating(stimulus_id=ev.stimulus_id),
+        )
+
+    @_handle_event.register
+    def _handle_gather_dep_network_failure(
+        self, ev: GatherDepNetworkFailureEvent
+    ) -> RecsInstrs:
+        """gather_dep terminated: network failure while trying to
+        communicate with remote worker
+        """
+        logger.exception("Worker stream died during communication: %s", ev.worker)
+
+        # if state in (fetch, flight, resumed, cancelled):
+        #     if ts.who_has is now empty:
+        #         transition to missing; don't send data-missing
+        #     elif ts in GatherDep.keys:
+        #         transition to fetch; send data-missing
+        #     else:
+        #         don't transition
+        # elif ts in GatherDep.keys:
+        #     transition to fetch; send data-missing
+        # else:
+        #     don't transition
+
+        has_what = self.has_what.pop(ev.worker)
+        self.data_needed_per_worker.pop(ev.worker)
+        self.log.append(
+            ("receive-dep-failed", ev.worker, has_what, ev.stimulus_id, time())
+        )
+        recommendations: Recs = {}
+        for d in has_what:
+            ts = self.tasks[d]
+            ts.who_has.remove(ev.worker)
+            if not ts.who_has and ts.state in (
+                "fetch",
+                "flight",
+                "resumed",
+                "cancelled",
+            ):
+                recommendations[ts] = "missing"
+                self.log.append(
+                    ("missing-who-has", ev.worker, ts.key, ev.stimulus_id, time())
                 )
 
-            refresh_who_has = []
+        refetch_tasks = set(self._gather_dep_done_common(ev)) - recommendations.keys()
+        return merge_recs_instructions(
+            (recommendations, []),
+            self._ensure_communicating(stimulus_id=ev.stimulus_id),
+            self._refetch_missing_data(ev.worker, refetch_tasks, ev.stimulus_id),
+        )
 
-            for d in self.in_flight_workers.pop(worker):
-                ts = self.tasks[d]
-                ts.done = True
-                if d in data:
-                    recommendations[ts] = ("memory", data[d])
-                elif busy:
-                    recommendations[ts] = "fetch"
-                    if not ts.who_has - self.busy_workers:
-                        refresh_who_has.append(d)
-                elif ts not in recommendations:
-                    ts.who_has.discard(worker)
-                    self.has_what[worker].discard(ts.key)
-                    self.data_needed_per_worker[worker].discard(ts)
-                    self.log.append((d, "missing-dep", stimulus_id, time()))
-                    instructions.append(
-                        MissingDataMsg(
-                            key=d,
-                            errant_worker=worker,
-                            stimulus_id=stimulus_id,
-                        )
-                    )
-                    recommendations[ts] = "fetch"
+    @_handle_event.register
+    def _handle_gather_dep_failure(self, ev: GatherDepFailureEvent) -> RecsInstrs:
+        """gather_dep terminated: generic error raised (not a network failure);
+        e.g. data failed to deserialize.
+        """
+        recommendations: Recs = {
+            ts: (
+                "error",
+                ev.exception,
+                ev.traceback,
+                ev.exception_text,
+                ev.traceback_text,
+            )
+            for ts in self._gather_dep_done_common(ev)
+        }
 
-            if refresh_who_has:
-                # All workers that hold known replicas of our tasks are busy.
-                # Try querying the scheduler for unknown ones.
-                instructions.append(
-                    RequestRefreshWhoHasMsg(
-                        keys=refresh_who_has,
-                        stimulus_id=f"gather-dep-busy-{time()}",
-                    )
-                )
-
-            self.transitions(recommendations, stimulus_id=stimulus_id)
-            self._handle_instructions(instructions)
+        return merge_recs_instructions(
+            (recommendations, []),
+            self._ensure_communicating(stimulus_id=ev.stimulus_id),
+        )
 
     async def retry_busy_worker_later(self, worker: str) -> StateMachineEvent | None:
         await asyncio.sleep(0.15)
@@ -3829,11 +3928,6 @@ class Worker(ServerNode):
             self._ensure_computing(),
             self._ensure_communicating(stimulus_id=ev.stimulus_id),
         )
-
-    @_handle_event.register
-    def _handle_gather_dep_done(self, ev: GatherDepDoneEvent) -> RecsInstrs:
-        """Temporary hack - to be removed"""
-        return self._ensure_communicating(stimulus_id=ev.stimulus_id)
 
     @_handle_event.register
     def _handle_retry_busy_worker(self, ev: RetryBusyWorkerEvent) -> RecsInstrs:
