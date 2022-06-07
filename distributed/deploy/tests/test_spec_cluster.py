@@ -82,9 +82,14 @@ def test_spec_sync(loop):
             assert result == 11
 
 
-def test_loop_started():
-    with SpecCluster(worker_spec, scheduler=scheduler):
-        pass
+def test_loop_started_in_constructor(cleanup):
+    # test that SpecCluster.__init__ starts a loop in another thread
+    cluster = SpecCluster(worker_spec, scheduler=scheduler, loop=None)
+    try:
+        assert cluster.loop.asyncio_loop.is_running()
+    finally:
+        with cluster:
+            pass
 
 
 @gen_test()
