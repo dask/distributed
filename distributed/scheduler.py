@@ -2887,7 +2887,7 @@ class Scheduler(SchedulerState, ServerNode):
                 stacklevel=2,
             )
 
-        self.loop = IOLoop.current()
+        self.loop = self.io_loop = IOLoop.current()
         self._setup_logging(logger)
 
         # Attributes
@@ -3123,7 +3123,6 @@ class Scheduler(SchedulerState, ServerNode):
             self,
             handlers=self.handlers,
             stream_handlers=merge(worker_handlers, client_handlers),
-            io_loop=self.loop,
             connection_limit=connection_limit,
             deserialize=False,
             connection_args=self.connection_args,

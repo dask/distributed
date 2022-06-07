@@ -2980,7 +2980,7 @@ async def test_unrunnable_task_runs(c, s, a, b):
     assert s.tasks[x.key] in s.unrunnable
     assert s.get_task_status(keys=[x.key]) == {x.key: "no-worker"}
 
-    w = await Worker(s.address, loop=s.loop)
+    w = await Worker(s.address)
 
     while x.status != "finished":
         await asyncio.sleep(0.01)

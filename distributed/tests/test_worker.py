@@ -20,6 +20,7 @@ from unittest import mock
 import psutil
 import pytest
 from tlz import first, pluck, sliding_window
+from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
@@ -39,7 +40,7 @@ from distributed import (
     wait,
 )
 from distributed.comm.registry import backends
-from distributed.compatibility import LINUX, WINDOWS
+from distributed.compatibility import LINUX, WINDOWS, to_thread
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import PipInstall
@@ -536,8 +537,22 @@ async def test_gather_missing_workers_replicated(c, s, a, b, missing_first):
 
 @gen_cluster(nthreads=[])
 async def test_io_loop(s):
-    async with Worker(s.address, loop=s.loop) as w:
-        assert w.io_loop is s.loop
+    async with Worker(s.address) as w:
+        assert w.io_loop is w.loop is s.loop
+
+
+@gen_cluster(nthreads=[])
+async def test_io_loop_alternate_loop(s, loop):
+    async def main():
+        with pytest.warns(
+            DeprecationWarning,
+            match=r"The `loop` argument to `Worker` is ignored, and will be "
+            r"removed in a future release. The Worker always binds to the current loop",
+        ):
+            async with Worker(s.address, loop=loop) as w:
+                assert w.io_loop is w.loop is IOLoop.current()
+
+    await to_thread(asyncio.run, main())
 
 
 @gen_cluster(client=True)
@@ -1016,7 +1031,7 @@ async def test_worker_fds(s):
     proc = psutil.Process()
     before = psutil.Process().num_fds()
 
-    async with Worker(s.address, loop=s.loop):
+    async with Worker(s.address):
         assert proc.num_fds() > before
 
     while proc.num_fds() > before:
@@ -1206,7 +1221,7 @@ def test_get_worker_name(client):
 @gen_cluster(nthreads=[], client=True)
 async def test_scheduler_address_config(c, s):
     with dask.config.set({"scheduler-address": s.address}):
-        worker = await Worker(loop=s.loop)
+        worker = await Worker()
         assert worker.scheduler.address == s.address
     await worker.close()
 
@@ -1300,7 +1315,7 @@ async def test_register_worker_callbacks(c, s, a, b):
     assert list(result.values()) == [False] * 2
 
     # Start a worker and check that startup is not run
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     result = await c.run(test_import, workers=[worker.address])
     assert list(result.values()) == [False]
     await worker.close()
@@ -1314,7 +1329,7 @@ async def test_register_worker_callbacks(c, s, a, b):
     assert list(result.values()) == [True] * 2
 
     # Start a worker and check it is ran on it
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     result = await c.run(test_import, workers=[worker.address])
     assert list(result.values()) == [True]
     await worker.close()
@@ -1328,7 +1343,7 @@ async def test_register_worker_callbacks(c, s, a, b):
     assert list(result.values()) == [True] * 2
 
     # Start a worker and check it is ran on it
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     result = await c.run(test_import, workers=[worker.address])
     assert list(result.values()) == [True]
     result = await c.run(test_startup2, workers=[worker.address])
