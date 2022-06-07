@@ -1808,6 +1808,28 @@ async def test_heartbeat_missing_real_cluster(s, a):
         assert not s.workers
 
 
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    Worker=Nanny,
+    worker_kwargs={"heartbeat_interval": "1ms"},
+)
+async def test_heartbeat_missing_restarts(c, s: Scheduler, n: Nanny):
+    old_heartbeat_handler = s.handlers["heartbeat_worker"]
+    s.handlers["heartbeat_worker"] = lambda *args, **kwargs: {"status": "missing"}
+
+    assert n.process
+    await n.process.stopped.wait()
+
+    assert not s.workers
+    s.handlers["heartbeat_worker"] = old_heartbeat_handler
+
+    await n.process.running.wait()
+    assert n.status == Status.running
+
+    await c.wait_for_workers(1)
+
+
 @gen_cluster(nthreads=[])
 async def test_bad_local_directory(s):
     try:

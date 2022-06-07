@@ -1257,7 +1257,8 @@ class Worker(ServerNode):
                 logger.error(
                     f"Scheduler was unaware of this worker {self.address!r}. Shutting down."
                 )
-                await self.close()
+                # Something is out of sync; have the nanny restart us if possible.
+                await self.close(nanny=False)
                 return
 
             self.scheduler_delay = response["time"] - middle
