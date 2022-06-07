@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import functools
 import gc
 import inspect
@@ -4046,48 +4047,27 @@ async def test_as_current(c, s, a, b):
     await c2.close()
 
 
-def test_as_current_is_thread_local(s):
-    l1 = threading.Lock()
-    l2 = threading.Lock()
-    l3 = threading.Lock()
-    l4 = threading.Lock()
-    l1.acquire()
-    l2.acquire()
-    l3.acquire()
-    l4.acquire()
+def test_as_current_is_thread_local(s, loop):
+    parties = 2
+    cm_after_enter = threading.Barrier(parties=parties, timeout=5)
+    cm_before_exit = threading.Barrier(parties=parties, timeout=5)
 
-    def run1():
-        with Client(s["address"]) as c:
+    def run():
+        with Client(s["address"], loop=loop) as c:
             with c.as_current():
-                l1.acquire()
-                l2.release()
+                cm_after_enter.wait()
                 try:
-                    # This line runs only when both run1 and run2 are inside the
+                    # This line runs only when all parties are inside the
                     # context manager
                     assert Client.current(allow_global=False) is c
                 finally:
-                    l3.acquire()
-                    l4.release()
+                    cm_before_exit.wait()
 
-    def run2():
-        with Client(s["address"]) as c:
-            with c.as_current():
-                l1.release()
-                l2.acquire()
-                try:
-                    # This line runs only when both run1 and run2 are inside the
-                    # context manager
-                    assert Client.current(allow_global=False) is c
-                finally:
-                    l3.release()
-                    l4.acquire()
-
-    t1 = threading.Thread(target=run1)
-    t2 = threading.Thread(target=run2)
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=parties) as tpe:
+        for fut in concurrent.futures.as_completed(
+            [tpe.submit(run) for _ in range(parties)]
+        ):
+            fut.result()
 
 
 @gen_cluster()
