@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable, Container
+from collections.abc import Collection, Container
 from copy import copy
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -51,11 +51,20 @@ PROCESSING: set[TaskStateState] = {
 READY: set[TaskStateState] = {"ready", "constrained"}
 
 
+NO_VALUE = "--no-value-sentinel--"
+
+
 class SerializedTask(NamedTuple):
-    function: Callable
-    args: tuple
-    kwargs: dict[str, Any]
-    task: object  # distributed.scheduler.TaskState.run_spec
+    """Info from distributed.scheduler.TaskState.run_spec
+    Input to distributed.worker._deserialize
+
+    (function, args kwargs) and task are mutually exclusive
+    """
+
+    function: bytes | None = None
+    args: bytes | tuple | list | None = None
+    kwargs: bytes | dict[str, Any] | None = None
+    task: object = NO_VALUE
 
 
 class StartStop(TypedDict, total=False):
@@ -66,7 +75,13 @@ class StartStop(TypedDict, total=False):
 
 
 class InvalidTransition(Exception):
-    def __init__(self, key, start, finish, story):
+    def __init__(
+        self,
+        key: str,
+        start: TaskStateState,
+        finish: TaskStateState,
+        story: list[tuple],
+    ):
         self.key = key
         self.start = start
         self.finish = finish
@@ -82,9 +97,58 @@ class InvalidTransition(Exception):
 
     __str__ = __repr__
 
+    def to_event(self) -> tuple[str, dict[str, Any]]:
+        return (
+            "invalid-worker-transition",
+            {
+                "key": self.key,
+                "start": self.start,
+                "finish": self.finish,
+                "story": self.story,
+            },
+        )
+
 
 class TransitionCounterMaxExceeded(InvalidTransition):
-    pass
+    def to_event(self) -> tuple[str, dict[str, Any]]:
+        topic, msg = super().to_event()
+        return "transition-counter-max-exceeded", msg
+
+
+class InvalidTaskState(Exception):
+    def __init__(
+        self,
+        key: str,
+        state: TaskStateState,
+        story: list[tuple],
+    ):
+        self.key = key
+        self.state = state
+        self.story = story
+
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}: {self.key} :: {self.state}"
+            + "\n"
+            + "  Story:\n    "
+            + "\n    ".join(map(str, self.story))
+        )
+
+    __str__ = __repr__
+
+    def to_event(self) -> tuple[str, dict[str, Any]]:
+        return (
+            "invalid-worker-task-state",
+            {
+                "key": self.key,
+                "state": self.state,
+                "story": self.story,
+            },
+        )
+
+
+class RecommendationsConflict(Exception):
+    """Two or more recommendations for the same task suggested different finish states"""
 
 
 @lru_cache
@@ -300,6 +364,22 @@ class TaskErredMsg(SendMessageToScheduler):
         d["status"] = "error"
         return d
 
+    @staticmethod
+    def from_task(
+        ts: TaskState, stimulus_id: str, thread: int | None = None
+    ) -> TaskErredMsg:
+        assert ts.exception
+        return TaskErredMsg(
+            key=ts.key,
+            exception=ts.exception,
+            traceback=ts.traceback,
+            exception_text=ts.exception_text,
+            traceback_text=ts.traceback_text,
+            thread=thread,
+            startstops=ts.startstops,
+            stimulus_id=stimulus_id,
+        )
+
 
 @dataclass
 class ReleaseWorkerDataMsg(SendMessageToScheduler):
@@ -341,7 +421,7 @@ class AddKeysMsg(SendMessageToScheduler):
     op = "add-keys"
 
     __slots__ = ("keys",)
-    keys: list[str]
+    keys: Collection[str]
 
 
 @dataclass
@@ -361,7 +441,23 @@ class RequestRefreshWhoHasMsg(SendMessageToScheduler):
     op = "request-refresh-who-has"
 
     __slots__ = ("keys",)
-    keys: list[str]
+    keys: Collection[str]
+
+
+@dataclass
+class StealResponseMsg(SendMessageToScheduler):
+    """Worker->Scheduler response to ``{op: steal-request}``
+
+    See also
+    --------
+    StealRequestEvent
+    """
+
+    op = "steal-response"
+
+    __slots__ = ("key", "state")
+    key: str
+    state: TaskStateState | None
 
 
 @dataclass
@@ -439,6 +535,39 @@ class GatherDepDoneEvent(StateMachineEvent):
     """Temporary hack - to be removed"""
 
     __slots__ = ()
+
+
+@dataclass
+class ComputeTaskEvent(StateMachineEvent):
+    key: str
+    who_has: dict[str, Collection[str]]
+    nbytes: dict[str, int]
+    priority: tuple[int, ...]
+    duration: float
+    run_spec: SerializedTask
+    resource_restrictions: dict[str, float]
+    actor: bool
+    annotations: dict
+    __slots__ = tuple(__annotations__)  # type: ignore
+
+    def __post_init__(self):
+        # Fixes after msgpack decode
+        if isinstance(self.priority, list):
+            self.priority = tuple(self.priority)
+
+        if isinstance(self.run_spec, dict):
+            self.run_spec = SerializedTask(**self.run_spec)
+        elif not isinstance(self.run_spec, SerializedTask):
+            self.run_spec = SerializedTask(task=self.run_spec)
+
+    def to_loggable(self, *, handled: float) -> StateMachineEvent:
+        out = copy(self)
+        out.handled = handled
+        out.run_spec = SerializedTask(task=None)
+        return out
+
+    def _after_from_dict(self) -> None:
+        self.run_spec = SerializedTask(task=None)
 
 
 @dataclass
@@ -539,7 +668,59 @@ class RefreshWhoHasEvent(StateMachineEvent):
 
     __slots__ = ("who_has",)
     # {key: [worker address, ...]}
-    who_has: dict[str, list[str]]
+    who_has: dict[str, Collection[str]]
+
+
+@dataclass
+class AcquireReplicasEvent(StateMachineEvent):
+    __slots__ = ("who_has",)
+    who_has: dict[str, Collection[str]]
+
+
+@dataclass
+class RemoveReplicasEvent(StateMachineEvent):
+    __slots__ = ("keys",)
+    keys: Collection[str]
+
+
+@dataclass
+class FreeKeysEvent(StateMachineEvent):
+    __slots__ = ("keys",)
+    keys: Collection[str]
+
+
+@dataclass
+class StealRequestEvent(StateMachineEvent):
+    """Event that requests a worker to release a key because it's now being computed
+    somewhere else.
+
+    See also
+    --------
+    StealResponseMsg
+    """
+
+    __slots__ = ("key",)
+    key: str
+
+
+@dataclass
+class UpdateDataEvent(StateMachineEvent):
+    __slots__ = ("data", "report")
+    data: dict[str, object]
+    report: bool
+
+    def to_loggable(self, *, handled: float) -> StateMachineEvent:
+        out = copy(self)
+        out.handled = handled
+        out.data = dict.fromkeys(self.data)
+        return out
+
+
+@dataclass
+class SecedeEvent(StateMachineEvent):
+    __slots__ = ("key", "compute_duration")
+    key: str
+    compute_duration: float
 
 
 if TYPE_CHECKING:
@@ -562,11 +743,11 @@ def merge_recs_instructions(*args: RecsInstrs) -> RecsInstrs:
     recs: Recs = {}
     instr: Instructions = []
     for recs_i, instr_i in args:
-        for k, v in recs_i.items():
-            if k in recs and recs[k] != v:
-                raise ValueError(
-                    f"Mismatched recommendations for {k}: {recs[k]} vs. {v}"
+        for ts, finish in recs_i.items():
+            if ts in recs and recs[ts] != finish:
+                raise RecommendationsConflict(
+                    f"Mismatched recommendations for {ts.key}: {recs[ts]} vs. {finish}"
                 )
-            recs[k] = v
+            recs[ts] = finish
         instr += instr_i
     return recs, instr

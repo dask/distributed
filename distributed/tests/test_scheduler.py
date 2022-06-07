@@ -952,7 +952,7 @@ async def test_file_descriptors(c, s):
     num_fds_1 = proc.num_fds()
 
     N = 20
-    nannies = await asyncio.gather(*(Nanny(s.address, loop=s.loop) for _ in range(N)))
+    nannies = await asyncio.gather(*(Nanny(s.address) for _ in range(N)))
 
     while len(s.workers) < N:
         await asyncio.sleep(0.1)
@@ -2234,7 +2234,7 @@ async def test_worker_name_collision(s, a):
         with raises_with_cause(
             RuntimeError, None, ValueError, f"name taken, {a.name!r}"
         ):
-            await Worker(s.address, name=a.name, loop=s.loop, host="127.0.0.1")
+            await Worker(s.address, name=a.name, host="127.0.0.1")
 
     s.validate_state()
     assert set(s.workers) == {a.address}
