@@ -6603,8 +6603,8 @@ async def test_register_worker_plugin_exception(c, s, a, b):
         await c.register_worker_plugin(MyPlugin())
 
 
-@gen_cluster(client=True)
-async def test_log_event(c, s, a, b):
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_log_event(c, s, a):
 
     # Log an event from inside a task
     def foo():
@@ -6614,7 +6614,7 @@ async def test_log_event(c, s, a, b):
     await c.submit(foo)
     events = await c.get_events("topic1")
     assert len(events) == 1
-    assert events[0][1] == {"foo": "bar"}
+    assert events[0][1] == {"foo": "bar", "worker": a.address}
 
     # Log an event while on the scheduler
     def log_scheduler(dask_scheduler):
@@ -7135,7 +7135,7 @@ async def test_events_subscribe_topic(c, s, a):
 
     time_, msg = log[0]
     assert isinstance(time_, float)
-    assert msg == {"important": "event"}
+    assert msg == {"important": "event", "worker": a.address}
 
     c.unsubscribe_topic("test-topic")
 
@@ -7166,7 +7166,7 @@ async def test_events_subscribe_topic(c, s, a):
     assert len(log) == 2
     time_, msg = log[1]
     assert isinstance(time_, float)
-    assert msg == {"async": "event"}
+    assert msg == {"async": "event", "worker": a.address}
 
     # Even though the middle event was not subscribed to, the scheduler still
     # knows about all and we can retrieve them

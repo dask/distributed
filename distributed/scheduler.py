@@ -3070,7 +3070,7 @@ class Scheduler(SchedulerState, ServerNode):
             "get_logs": self.get_logs,
             "logs": self.get_logs,
             "worker_logs": self.get_worker_logs,
-            "log_event": self.log_worker_event,
+            "log_event": self.log_event,
             "events": self.get_events,
             "nbytes": self.get_nbytes,
             "versions": self.versions,

@@ -654,7 +654,7 @@ def test_invalid_transitions(capsys):
         pass
 
     class MyWorker(Worker):
-        @Worker.handle_event.register
+        @Worker._handle_event.register
         def _(self, ev: BrokenEvent):
             ts = next(iter(self.tasks.values()))
             return {ts: "foo"}, []
