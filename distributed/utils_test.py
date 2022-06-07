@@ -70,6 +70,7 @@ from distributed.utils import (
     sync,
 )
 from distributed.worker import WORKER_ANY_RUNNING, InvalidTransition, Worker
+from distributed.worker_state_machine import TaskState as WorkerTaskState
 
 try:
     import ssl
@@ -1823,9 +1824,7 @@ def check_instances():
     Scheduler._instances.clear()
     SpecCluster._instances.clear()
     Worker._initialized_clients.clear()
-    # assert all(n.status == "closed" for n in Nanny._instances), {
-    #     n: n.status for n in Nanny._instances
-    # }
+    WorkerTaskState._instances.clear()
     Nanny._instances.clear()
     _global_clients.clear()
     Comm._instances.clear()

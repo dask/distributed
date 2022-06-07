@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Iterator
 
 import pytest
+from tlz import first
 
 from distributed import Worker, wait
 from distributed.protocol.serialize import Serialize
@@ -38,6 +39,12 @@ from distributed.worker_state_machine import (
 async def wait_for_state(key: str, state: TaskStateState, dask_worker: Worker) -> None:
     while key not in dask_worker.tasks or dask_worker.tasks[key].state != state:
         await asyncio.sleep(0.005)
+
+
+def test_task_state_is_added_to_instances():
+    x = TaskState("x")
+    assert len(TaskState._instances) == 1
+    assert first(TaskState._instances) == x
 
 
 def test_TaskState_get_nbytes():
