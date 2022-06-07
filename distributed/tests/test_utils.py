@@ -19,7 +19,6 @@ import dask
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.metrics import time
 from distributed.utils import (
-    LRU,
     All,
     Log,
     Logs,
@@ -259,8 +258,12 @@ def test_seek_delimiter_endline():
         memoryview(bytearray(b"1")),
         array("B", b"1"),
         array("I", range(5)),
+        memoryview(b"123456")[1:-1],
         memoryview(b"123456")[::2],
+        memoryview(array("I", range(5)))[1:-1],
+        memoryview(array("I", range(5)))[::2],
         memoryview(b"123456").cast("B", (2, 3)),
+        memoryview(b"0123456789").cast("B", (5, 2))[1:-1],
         memoryview(b"0123456789").cast("B", (5, 2))[::2],
     ],
 )
@@ -273,7 +276,6 @@ def test_ensure_memoryview(data):
     assert result.format == "B"
     assert result == bytes(data_mv)
     if data_mv.nbytes and data_mv.contiguous:
-        assert id(result.obj) == id(data_mv.obj)
         assert result.readonly == data_mv.readonly
         if isinstance(data, memoryview):
             if data.ndim == 1 and data.format == "B":
@@ -589,24 +591,6 @@ def test_parse_ports():
         parse_ports("foo")
     with pytest.raises(ValueError):
         parse_ports("100.5")
-
-
-def test_lru():
-
-    l = LRU(maxsize=3)
-    l["a"] = 1
-    l["b"] = 2
-    l["c"] = 3
-    assert list(l.keys()) == ["a", "b", "c"]
-
-    # Use "a" and ensure it becomes the most recently used item
-    l["a"]
-    assert list(l.keys()) == ["b", "c", "a"]
-
-    # Ensure maxsize is respected
-    l["d"] = 4
-    assert len(l) == 3
-    assert list(l.keys()) == ["c", "a", "d"]
 
 
 @gen_test()

@@ -26,6 +26,7 @@ from distributed.utils_test import (
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_locally_4,
     popen,
+    wait_for_log_line,
 )
 
 
@@ -66,12 +67,8 @@ def test_dashboard(loop):
     pytest.importorskip("bokeh")
 
     with popen(["dask-scheduler"], flush_output=False) as proc:
-        for line in proc.stdout:
-            if b"dashboard at" in line:
-                dashboard_port = int(line.decode().split(":")[-1].strip())
-                break
-        else:
-            assert False  # pragma: nocover
+        line = wait_for_log_line(b"dashboard at", proc.stdout)
+        dashboard_port = int(line.decode().split(":")[-1].strip())
 
         with Client(f"127.0.0.1:{Scheduler.default_port}", loop=loop):
             pass
@@ -223,13 +220,9 @@ def test_dashboard_port_zero(loop):
         ["dask-scheduler", "--dashboard-address", ":0"],
         flush_output=False,
     ) as proc:
-        for line in proc.stdout:
-            if b"dashboard at" in line:
-                dashboard_port = int(line.decode().split(":")[-1].strip())
-                assert dashboard_port != 0
-                break
-        else:
-            assert False  # pragma: nocover
+        line = wait_for_log_line(b"dashboard at", proc.stdout)
+        dashboard_port = int(line.decode().split(":")[-1].strip())
+        assert dashboard_port != 0
 
 
 PRELOAD_TEXT = """

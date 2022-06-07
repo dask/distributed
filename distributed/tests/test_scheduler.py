@@ -15,6 +15,7 @@ import cloudpickle
 import psutil
 import pytest
 from tlz import concat, first, merge, valmap
+from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
@@ -780,8 +781,14 @@ async def test_update_graph_culls(s, a, b):
 
 
 def test_io_loop(loop):
-    s = Scheduler(loop=loop, dashboard_address=":0", validate=True)
-    assert s.io_loop is loop
+    async def main():
+        with pytest.warns(
+            DeprecationWarning, match=r"the loop kwarg to Scheduler is deprecated"
+        ):
+            s = Scheduler(loop=loop, dashboard_address=":0", validate=True)
+        assert s.io_loop is IOLoop.current()
+
+    asyncio.run(main())
 
 
 @gen_cluster(client=True)
@@ -946,7 +953,7 @@ async def test_file_descriptors(c, s):
     num_fds_1 = proc.num_fds()
 
     N = 20
-    nannies = await asyncio.gather(*(Nanny(s.address, loop=s.loop) for _ in range(N)))
+    nannies = await asyncio.gather(*(Nanny(s.address) for _ in range(N)))
 
     while len(s.workers) < N:
         await asyncio.sleep(0.1)
@@ -1294,7 +1301,13 @@ async def test_profile_metadata(c, s, a, b):
     assert not meta["counts"][-1][1]
 
 
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": True,
+        "distributed.worker.profile.cycle": "100ms",
+    },
+)
 async def test_profile_metadata_timeout(c, s, a, b):
     start = time() - 1
 
@@ -1315,7 +1328,13 @@ async def test_profile_metadata_timeout(c, s, a, b):
     assert not meta["counts"][-1][1]
 
 
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": True,
+        "distributed.worker.profile.cycle": "100ms",
+    },
+)
 async def test_profile_metadata_keys(c, s, a, b):
     x = c.map(slowinc, range(10), delay=0.05)
     y = c.map(slowdec, range(10), delay=0.05)
@@ -1331,6 +1350,7 @@ async def test_profile_metadata_keys(c, s, a, b):
 @gen_cluster(
     client=True,
     config={
+        "distributed.worker.profile.enabled": True,
         "distributed.worker.profile.interval": "1ms",
         "distributed.worker.profile.cycle": "100ms",
     },
@@ -1347,6 +1367,7 @@ async def test_statistical_profiling(c, s, a, b):
 @gen_cluster(
     client=True,
     config={
+        "distributed.worker.profile.enabled": True,
         "distributed.worker.profile.interval": "1ms",
         "distributed.worker.profile.cycle": "100ms",
     },
@@ -2214,7 +2235,7 @@ async def test_worker_name_collision(s, a):
         with raises_with_cause(
             RuntimeError, None, ValueError, f"name taken, {a.name!r}"
         ):
-            await Worker(s.address, name=a.name, loop=s.loop, host="127.0.0.1")
+            await Worker(s.address, name=a.name, host="127.0.0.1")
 
     s.validate_state()
     assert set(s.workers) == {a.address}

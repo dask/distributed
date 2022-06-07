@@ -788,18 +788,38 @@ async def test_TaskGroupGraph_arrows(c, s, a, b):
 @gen_cluster(
     client=True,
     config={
+        "distributed.worker.profile.enabled": True,
         "distributed.worker.profile.interval": "10ms",
         "distributed.worker.profile.cycle": "50ms",
     },
 )
 async def test_profile_server(c, s, a, b):
     ptp = ProfileServer(s)
+    assert "disabled" not in ptp.subtitle.text
     start = time()
     await asyncio.sleep(0.100)
     while len(ptp.ts_source.data["time"]) < 2:
         await asyncio.sleep(0.100)
         ptp.trigger_update()
         assert time() < start + 2
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": False,
+        "distributed.worker.profile.interval": "5ms",
+        "distributed.worker.profile.cycle": "10ms",
+    },
+)
+async def test_profile_server_disabled(c, s, a, b):
+    ptp = ProfileServer(s)
+    assert "disabled" in ptp.subtitle.text
+    start = time()
+    await asyncio.sleep(0.1)
+    ptp.trigger_update()
+    assert len(ptp.ts_source.data["time"]) == 0
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
@@ -845,11 +865,11 @@ async def test_proxy_to_workers(c, s, a, b):
 
         assert response_proxy.code == 200
         if proxy_exists:
-            assert b"Crossfilter" in response_proxy.body
+            assert b"System" in response_proxy.body
         else:
             assert b"python -m pip install jupyter-server-proxy" in response_proxy.body
         assert response_direct.code == 200
-        assert b"Crossfilter" in response_direct.body
+        assert b"System" in response_direct.body
 
 
 @gen_cluster(

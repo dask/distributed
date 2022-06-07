@@ -2980,7 +2980,7 @@ async def test_unrunnable_task_runs(c, s, a, b):
     assert s.tasks[x.key] in s.unrunnable
     assert s.get_task_status(keys=[x.key]) == {x.key: "no-worker"}
 
-    w = await Worker(s.address, loop=s.loop)
+    w = await Worker(s.address)
 
     while x.status != "finished":
         await asyncio.sleep(0.01)
@@ -5422,7 +5422,13 @@ async def test_call_stack_collections_all(c, s, a, b):
 
 
 @pytest.mark.flaky(condition=WINDOWS, reruns=10, reruns_delay=5)
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": True,
+        "distributed.worker.profile.cycle": "100ms",
+    },
+)
 async def test_profile(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
     await wait(futures)
@@ -5444,7 +5450,33 @@ async def test_profile(c, s, a, b):
     assert not result["count"]
 
 
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": False,
+        "distributed.worker.profile.cycle": "100ms",
+    },
+)
+async def test_profile_disabled(c, s, a, b):
+    futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
+    await wait(futures)
+
+    x = await c.profile(start=time() + 10, stop=time() + 20)
+    assert x["count"] == 0
+
+    x = await c.profile(start=0, stop=time())
+    assert x["count"] == 0
+
+    y = await c.profile(start=time() - 0.300, stop=time())
+    assert 0 == y["count"] == x["count"]
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.cycle": "100ms",
+    },
+)
 async def test_profile_keys(c, s, a, b):
     x = c.map(slowinc, range(10), delay=0.05, workers=a.address)
     y = c.map(slowdec, range(10), delay=0.05, workers=a.address)
@@ -6169,7 +6201,13 @@ async def test_futures_of_sorted(c, s, a, b):
 
 
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "10ms"})
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": True,
+        "distributed.worker.profile.cycle": "10ms",
+    },
+)
 async def test_profile_server(c, s, a, b):
     for i in range(5):
         try:
@@ -6191,6 +6229,27 @@ async def test_profile_server(c, s, a, b):
                 pass
         else:
             break
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": False,
+        "distributed.worker.profile.cycle": "10ms",
+    },
+)
+async def test_profile_server_disabled(c, s, a, b):
+    x = c.map(slowinc, range(10), delay=0.01, workers=a.address, pure=False)
+    await wait(x)
+    await asyncio.gather(
+        c.run(slowinc, 1, delay=0.5), c.run_on_scheduler(slowdec, 1, delay=0.5)
+    )
+
+    p = await c.profile(server=True)  # All worker servers
+    assert "slowinc" not in str(p)
+
+    p = await c.profile(scheduler=True)  # Scheduler
+    assert "slowdec" not in str(p)
 
 
 @gen_cluster(client=True)
@@ -6544,8 +6603,8 @@ async def test_register_worker_plugin_exception(c, s, a, b):
         await c.register_worker_plugin(MyPlugin())
 
 
-@gen_cluster(client=True)
-async def test_log_event(c, s, a, b):
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_log_event(c, s, a):
 
     # Log an event from inside a task
     def foo():
@@ -6555,7 +6614,7 @@ async def test_log_event(c, s, a, b):
     await c.submit(foo)
     events = await c.get_events("topic1")
     assert len(events) == 1
-    assert events[0][1] == {"foo": "bar"}
+    assert events[0][1] == {"foo": "bar", "worker": a.address}
 
     # Log an event while on the scheduler
     def log_scheduler(dask_scheduler):
@@ -7076,7 +7135,7 @@ async def test_events_subscribe_topic(c, s, a):
 
     time_, msg = log[0]
     assert isinstance(time_, float)
-    assert msg == {"important": "event"}
+    assert msg == {"important": "event", "worker": a.address}
 
     c.unsubscribe_topic("test-topic")
 
@@ -7107,7 +7166,7 @@ async def test_events_subscribe_topic(c, s, a):
     assert len(log) == 2
     time_, msg = log[1]
     assert isinstance(time_, float)
-    assert msg == {"async": "event"}
+    assert msg == {"async": "event", "worker": a.address}
 
     # Even though the middle event was not subscribed to, the scheduler still
     # knows about all and we can retrieve them

@@ -19,7 +19,7 @@ import warnings
 import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
-from collections import OrderedDict, UserDict, deque
+from collections import deque
 from collections.abc import Callable, Collection, Container, KeysView, ValuesView
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
@@ -1029,9 +1029,8 @@ def ensure_memoryview(obj):
     elif mv.ndim != 1 or mv.format != "B":
         # Perform zero-copy reshape & cast
         # Use `PickleBuffer.raw()` as `memoryview.cast()` fails with F-order
-        # Pass `mv.obj` so the created `memoryview` has that as its `obj`
         # xref: https://github.com/python/cpython/issues/91484
-        return PickleBuffer(mv.obj).raw()
+        return PickleBuffer(mv).raw()
     else:
         # Return `memoryview` as it already meets requirements
         return mv
@@ -1446,25 +1445,6 @@ class EmptyContext:
 
 
 empty_context = EmptyContext()
-
-
-class LRU(UserDict):
-    """Limited size mapping, evicting the least recently looked-up key when full"""
-
-    def __init__(self, maxsize):
-        super().__init__()
-        self.data = OrderedDict()
-        self.maxsize = maxsize
-
-    def __getitem__(self, key):
-        value = super().__getitem__(key)
-        self.data.move_to_end(key)
-        return value
-
-    def __setitem__(self, key, value):
-        if len(self) >= self.maxsize:
-            self.data.popitem(last=False)
-        super().__setitem__(key, value)
 
 
 def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list[dict]:

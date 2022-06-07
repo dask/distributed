@@ -4,7 +4,7 @@ from click.testing import CliRunner
 from distributed import Client
 from distributed.cli.dask_ssh import main
 from distributed.compatibility import MACOS, WINDOWS
-from distributed.utils_test import popen
+from distributed.utils_test import popen, wait_for_log_line
 
 pytest.importorskip("paramiko")
 pytestmark = [
@@ -30,9 +30,7 @@ def test_ssh_cli_nprocs_renamed_to_nworkers(loop):
         # This interrupt is necessary for the cluster to place output into the stdout
         # and stderr pipes
         proc.send_signal(2)
-        assert any(
-            b"renamed to --nworkers" in proc.stdout.readline() for _ in range(15)
-        )
+        wait_for_log_line(b"renamed to --nworkers", proc.stdout, max_lines=15)
 
 
 def test_ssh_cli_nworkers_with_nprocs_is_an_error():
@@ -40,6 +38,4 @@ def test_ssh_cli_nworkers_with_nprocs_is_an_error():
         ["dask-ssh", "localhost", "--nprocs=2", "--nworkers=2"],
         flush_output=False,
     ) as proc:
-        assert any(
-            b"Both --nprocs and --nworkers" in proc.stdout.readline() for _ in range(15)
-        )
+        wait_for_log_line(b"Both --nprocs and --nworkers", proc.stdout, max_lines=15)
