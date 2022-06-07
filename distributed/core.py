@@ -109,7 +109,26 @@ def _expects_comm(func: Callable) -> bool:
     return False
 
 
-class AsyncTaskGroup:
+class _LoopBoundMixin:
+    """Backport of the private asyncio.mixins._LoopBoundMixin from 3.11"""
+
+    _global_lock = threading.Lock()
+
+    _loop = None
+
+    def _get_loop(self):
+        loop = asyncio.get_running_loop()
+
+        if self._loop is None:
+            with self._global_lock:
+                if self._loop is None:
+                    self._loop = loop
+        if loop is not self._loop:
+            raise RuntimeError(f"{self!r} is bound to a different event loop")
+        return loop
+
+
+class AsyncTaskGroup(_LoopBoundMixin):
     """Collection tracking all currently running asynchronous tasks within a group"""
 
     #: If True, the group is closed and does not allow adding new tasks.
@@ -117,7 +136,6 @@ class AsyncTaskGroup:
 
     def __init__(self) -> None:
         self.closed = False
-        self._lock = threading.Lock()
         self._ongoing_tasks: set[asyncio.Task] = set()
 
     def schedule(self, coro: Coroutine) -> asyncio.Task | None:
@@ -125,22 +143,20 @@ class AsyncTaskGroup:
 
         Parameters
         ----------
-        coro : Coroutine
+        coro
             Coroutine object to schedule.
 
         Returns
         -------
-        asyncio.Task | None
             The scheduled Task object, or None if the group is closed.
         """
-        with self._lock:
-            if self.closed:
-                coro.close()
-                return None
-            task = asyncio.create_task(coro)
-            task.add_done_callback(self._ongoing_tasks.remove)
-            self._ongoing_tasks.add(task)
-            return task
+        if self.closed:
+            coro.close()
+            return None
+        task = self._get_loop().create_task(coro)
+        task.add_done_callback(self._ongoing_tasks.remove)
+        self._ongoing_tasks.add(task)
+        return task
 
     def call_soon(
         self, afunc: Callable[..., Coroutine], *args, **kwargs
@@ -161,7 +177,6 @@ class AsyncTaskGroup:
 
         Returns
         -------
-        asyncio.Task | None
             The scheduled Task object, or None if the group is closed.
         """
         return self.schedule(afunc(*args, **kwargs))
@@ -187,7 +202,6 @@ class AsyncTaskGroup:
 
         Returns
         -------
-        asyncio.Task | None
             The scheduled Task object, or None if the group is closed.
         """
         return self.call_soon(delayed(afunc, delay), *args, **kwargs)
@@ -197,8 +211,7 @@ class AsyncTaskGroup:
 
         Existing tasks continue to run.
         """
-        with self._lock:
-            self.closed = True
+        self.closed = True
 
     async def stop(self, timeout=1) -> None:
         """Close the group and stop all currently running tasks.
@@ -208,7 +221,7 @@ class AsyncTaskGroup:
         """
         self.close()
 
-        current_task = asyncio.current_task()
+        current_task = asyncio.current_task(self._get_loop())
         tasks_to_stop = [t for t in self._ongoing_tasks if t is not current_task]
 
         if tasks_to_stop:
