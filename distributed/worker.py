@@ -107,16 +107,20 @@ from distributed.worker_memory import (
     WorkerMemoryManager,
 )
 from distributed.worker_state_machine import (
+    NO_VALUE,
     PROCESSING,
     READY,
+    AcquireReplicasEvent,
     AddKeysMsg,
     AlreadyCancelledEvent,
     CancelComputeEvent,
+    ComputeTaskEvent,
     EnsureCommunicatingAfterTransitions,
     Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     FindMissingEvent,
+    FreeKeysEvent,
     GatherDep,
     GatherDepDoneEvent,
     Instructions,
@@ -129,20 +133,24 @@ from distributed.worker_state_machine import (
     RecsInstrs,
     RefreshWhoHasEvent,
     ReleaseWorkerDataMsg,
+    RemoveReplicasEvent,
     RequestRefreshWhoHasMsg,
     RescheduleEvent,
     RescheduleMsg,
     RetryBusyWorkerEvent,
     RetryBusyWorkerLater,
+    SecedeEvent,
     SendMessageToScheduler,
-    SerializedTask,
     StateMachineEvent,
+    StealRequestEvent,
+    StealResponseMsg,
     TaskErredMsg,
     TaskFinishedMsg,
     TaskState,
     TaskStateState,
     TransitionCounterMaxExceeded,
     UnpauseEvent,
+    UpdateDataEvent,
     merge_recs_instructions,
 )
 
@@ -156,8 +164,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
-
-no_value = "--no-value-sentinel--"
 
 DEFAULT_EXTENSIONS: dict[str, type] = {
     "pubsub": PubSubWorkerExtension,
@@ -788,7 +794,7 @@ class Worker(ServerNode):
             "run_coroutine": self.run_coroutine,
             "get_data": self.get_data,
             "update_data": self.update_data,
-            "free_keys": self.handle_free_keys,
+            "free_keys": self._handle_remote_stimulus(FreeKeysEvent),
             "terminate": self.close,
             "ping": pingpong,
             "upload_file": self.upload_file,
@@ -811,13 +817,13 @@ class Worker(ServerNode):
 
         stream_handlers = {
             "close": self.close,
-            "cancel-compute": self.handle_cancel_compute,
-            "acquire-replicas": self.handle_acquire_replicas,
-            "compute-task": self.handle_compute_task,
-            "free-keys": self.handle_free_keys,
-            "remove-replicas": self.handle_remove_replicas,
-            "steal-request": self.handle_steal_request,
-            "refresh-who-has": self.handle_refresh_who_has,
+            "cancel-compute": self._handle_remote_stimulus(CancelComputeEvent),
+            "acquire-replicas": self._handle_remote_stimulus(AcquireReplicasEvent),
+            "compute-task": self._handle_remote_stimulus(ComputeTaskEvent),
+            "free-keys": self._handle_remote_stimulus(FreeKeysEvent),
+            "remove-replicas": self._handle_remote_stimulus(RemoveReplicasEvent),
+            "steal-request": self._handle_remote_stimulus(StealRequestEvent),
+            "refresh-who-has": self._handle_remote_stimulus(RefreshWhoHasEvent),
             "worker-status-change": self.handle_worker_status_change,
         }
 
@@ -1752,17 +1758,30 @@ class Worker(ServerNode):
     # Local Execution #
     ###################
 
+    @functools.singledispatchmethod
+    def _handle_event(self, ev: StateMachineEvent) -> RecsInstrs:
+        raise TypeError(ev)  # pragma: nocover
+
     def update_data(
         self,
         data: dict[str, object],
         report: bool = True,
         stimulus_id: str = None,
     ) -> dict[str, Any]:
-        if stimulus_id is None:
-            stimulus_id = f"update-data-{time()}"
+        self.handle_stimulus(
+            UpdateDataEvent(
+                data=data,
+                report=report,
+                stimulus_id=stimulus_id or f"update-data-{time()}",
+            )
+        )
+        return {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
+
+    @_handle_event.register
+    def _handle_update_data(self, ev: UpdateDataEvent) -> RecsInstrs:
         recommendations: Recs = {}
         instructions: Instructions = []
-        for key, value in data.items():
+        for key, value in ev.data.items():
             try:
                 ts = self.tasks[key]
                 recommendations[ts] = ("memory", value)
@@ -1770,25 +1789,27 @@ class Worker(ServerNode):
                 self.tasks[key] = ts = TaskState(key)
 
                 try:
-                    recs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
+                    recs = self._put_key_in_memory(
+                        ts, value, stimulus_id=ev.stimulus_id
+                    )
                 except Exception as e:
                     msg = error_message(e)
                     recommendations = {ts: tuple(msg.values())}
                 else:
                     recommendations.update(recs)
 
-            self.log.append((key, "receive-from-scatter", stimulus_id, time()))
+            self.log.append((key, "receive-from-scatter", ev.stimulus_id, time()))
 
-        if report:
-            instructions.append(AddKeysMsg(keys=list(data), stimulus_id=stimulus_id))
+        if ev.report:
+            instructions.append(
+                AddKeysMsg(keys=list(ev.data), stimulus_id=ev.stimulus_id)
+            )
 
-        self.transitions(recommendations, stimulus_id=stimulus_id)
-        self._handle_instructions(instructions)
-        return {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
+        return recommendations, instructions
 
-    def handle_free_keys(self, keys: list[str], stimulus_id: str) -> None:
-        """
-        Handler to be called by the scheduler.
+    @_handle_event.register
+    def _handle_free_keys(self, ev: FreeKeysEvent) -> RecsInstrs:
+        """Handler to be called by the scheduler.
 
         The given keys are no longer referred to and required by the scheduler.
         The worker is now allowed to release the key, if applicable.
@@ -1797,16 +1818,16 @@ class Worker(ServerNode):
         still decide to hold on to the data and task since it is required by an
         upstream dependency.
         """
-        self.log.append(("free-keys", keys, stimulus_id, time()))
+        self.log.append(("free-keys", ev.keys, ev.stimulus_id, time()))
         recommendations: Recs = {}
-        for key in keys:
+        for key in ev.keys:
             ts = self.tasks.get(key)
             if ts:
                 recommendations[ts] = "released"
+        return recommendations, []
 
-        self.transitions(recommendations, stimulus_id=stimulus_id)
-
-    def handle_remove_replicas(self, keys: list[str], stimulus_id: str) -> str:
+    @_handle_event.register
+    def _handle_remove_replicas(self, ev: RemoveReplicasEvent) -> RecsInstrs:
         """Stream handler notifying the worker that it might be holding unreferenced,
         superfluous data.
 
@@ -1825,37 +1846,29 @@ class Worker(ServerNode):
 
         For stronger guarantees, see handler free_keys
         """
-        self.log.append(("remove-replicas", keys, stimulus_id, time()))
         recommendations: Recs = {}
+        instructions: Instructions = []
 
         rejected = []
-        for key in keys:
+        for key in ev.keys:
             ts = self.tasks.get(key)
             if ts is None or ts.state != "memory":
                 continue
             if not ts.is_protected():
                 self.log.append(
-                    (ts.key, "remove-replica-confirmed", stimulus_id, time())
+                    (ts.key, "remove-replica-confirmed", ev.stimulus_id, time())
                 )
                 recommendations[ts] = "released"
             else:
                 rejected.append(key)
 
         if rejected:
-            self.log.append(("remove-replica-rejected", rejected, stimulus_id, time()))
-            smsg = AddKeysMsg(keys=rejected, stimulus_id=stimulus_id)
-            self._handle_instructions([smsg])
+            self.log.append(
+                ("remove-replica-rejected", rejected, ev.stimulus_id, time())
+            )
+            instructions.append(AddKeysMsg(keys=rejected, stimulus_id=ev.stimulus_id))
 
-        self.transitions(recommendations, stimulus_id=stimulus_id)
-
-        return "OK"
-
-    def handle_refresh_who_has(
-        self, who_has: dict[str, list[str]], stimulus_id: str
-    ) -> None:
-        self.handle_stimulus(
-            RefreshWhoHasEvent(who_has=who_has, stimulus_id=stimulus_id)
-        )
+        return recommendations, instructions
 
     async def set_resources(self, **resources) -> None:
         for r, quantity in resources.items():
@@ -1875,27 +1888,24 @@ class Worker(ServerNode):
     # Task Management #
     ###################
 
-    def handle_cancel_compute(self, key: str, stimulus_id: str) -> None:
-        """
-        Cancel a task on a best effort basis. This is only possible while a task
-        is in state `waiting` or `ready`.
-        Nothing will happen otherwise.
-        """
-        self.handle_stimulus(CancelComputeEvent(key=key, stimulus_id=stimulus_id))
+    @fail_hard
+    def _handle_remote_stimulus(
+        self, cls: type[StateMachineEvent]
+    ) -> Callable[..., None]:
+        def _(**kwargs):
+            event = cls(**kwargs)
+            self.handle_stimulus(event)
 
-    def handle_acquire_replicas(
-        self,
-        *,
-        keys: Collection[str],
-        who_has: dict[str, Collection[str]],
-        stimulus_id: str,
-    ) -> None:
+        _.__name__ = f"_handle_remote_stimulus({cls.__name__})"
+        return _
+
+    @_handle_event.register
+    def _handle_acquire_replicas(self, ev: AcquireReplicasEvent) -> RecsInstrs:
         if self.validate:
-            assert set(keys) == who_has.keys()
-            assert all(who_has.values())
+            assert all(ev.who_has.values())
 
         recommendations: Recs = {}
-        for key in keys:
+        for key in ev.who_has:
             ts = self.ensure_task_exists(
                 key=key,
                 # Transfer this data after all dependency tasks of computations with
@@ -1903,17 +1913,13 @@ class Worker(ServerNode):
                 # computations with low priority (<0). Note that the priority= parameter
                 # of compute() is multiplied by -1 before it reaches TaskState.priority.
                 priority=(1,),
-                stimulus_id=stimulus_id,
+                stimulus_id=ev.stimulus_id,
             )
             if ts.state != "memory":
                 recommendations[ts] = "fetch"
 
-        self._update_who_has(who_has)
-        self.transitions(recommendations, stimulus_id=stimulus_id)
-
-        if self.validate:
-            for key in keys:
-                assert self.tasks[key].state != "released", self.story(key)
+        self._update_who_has(ev.who_has)
+        return recommendations, []
 
     def ensure_task_exists(
         self, key: str, *, priority: tuple[int, ...], stimulus_id: str
@@ -1930,32 +1936,17 @@ class Worker(ServerNode):
         self.log.append((key, "ensure-task-exists", ts.state, stimulus_id, time()))
         return ts
 
-    def handle_compute_task(
-        self,
-        *,
-        key: str,
-        who_has: dict[str, Collection[str]],
-        nbytes: dict[str, int],
-        priority: tuple[int, ...],
-        duration: float,
-        function=None,
-        args=None,
-        kwargs=None,
-        task=no_value,  # distributed.scheduler.TaskState.run_spec
-        resource_restrictions: dict[str, float] | None = None,
-        actor: bool = False,
-        annotations: dict | None = None,
-        stimulus_id: str,
-    ) -> None:
+    @_handle_event.register
+    def _handle_compute_task(self, ev: ComputeTaskEvent) -> RecsInstrs:
         try:
-            ts = self.tasks[key]
+            ts = self.tasks[ev.key]
             logger.debug(
                 "Asked to compute an already known task %s",
-                {"task": ts, "stimulus_id": stimulus_id},
+                {"task": ts, "stimulus_id": ev.stimulus_id},
             )
         except KeyError:
-            self.tasks[key] = ts = TaskState(key)
-        self.log.append((key, "compute-task", ts.state, stimulus_id, time()))
+            self.tasks[ev.key] = ts = TaskState(ev.key)
+        self.log.append((ev.key, "compute-task", ts.state, ev.stimulus_id, time()))
 
         recommendations: Recs = {}
         instructions: Instructions = []
@@ -1968,10 +1959,10 @@ class Worker(ServerNode):
             pass
         elif ts.state == "memory":
             instructions.append(
-                self._get_task_finished_msg(ts, stimulus_id=stimulus_id)
+                self._get_task_finished_msg(ts, stimulus_id=ev.stimulus_id)
             )
         elif ts.state == "error":
-            instructions.append(TaskErredMsg.from_task(ts, stimulus_id=stimulus_id))
+            instructions.append(TaskErredMsg.from_task(ts, stimulus_id=ev.stimulus_id))
         elif ts.state in {
             "released",
             "fetch",
@@ -1982,13 +1973,12 @@ class Worker(ServerNode):
         }:
             recommendations[ts] = "waiting"
 
-            ts.run_spec = SerializedTask(function, args, kwargs, task)
+            ts.run_spec = ev.run_spec
 
-            assert isinstance(priority, tuple)
-            priority = priority + (self.generation,)
+            priority = ev.priority + (self.generation,)
             self.generation -= 1
 
-            if actor:
+            if ev.actor:
                 self.actors[ts.key] = None
 
             ts.exception = None
@@ -1996,34 +1986,35 @@ class Worker(ServerNode):
             ts.exception_text = ""
             ts.traceback_text = ""
             ts.priority = priority
-            ts.duration = duration
-            if resource_restrictions:
-                ts.resource_restrictions = resource_restrictions
-            ts.annotations = annotations
+            ts.duration = ev.duration
+            ts.resource_restrictions = ev.resource_restrictions
+            ts.annotations = ev.annotations
 
             if self.validate:
-                assert who_has.keys() == nbytes.keys()
-                assert all(who_has.values())
+                assert ev.who_has.keys() == ev.nbytes.keys()
+                assert all(ev.who_has.values())
 
-            for dep_key, dep_workers in who_has.items():
+            for dep_key, dep_workers in ev.who_has.items():
                 dep_ts = self.ensure_task_exists(
                     key=dep_key,
                     priority=priority,
-                    stimulus_id=stimulus_id,
+                    stimulus_id=ev.stimulus_id,
                 )
                 # link up to child / parents
                 ts.dependencies.add(dep_ts)
                 dep_ts.dependents.add(ts)
 
-            for dep_key, value in nbytes.items():
+            for dep_key, value in ev.nbytes.items():
                 self.tasks[dep_key].nbytes = value
 
-            self._update_who_has(who_has)
-        else:  # pragma: nocover
-            raise RuntimeError(f"Unexpected task state encountered {ts} {stimulus_id}")
+            self._update_who_has(ev.who_has)
+        else:
+            raise RuntimeError(  # pragma: nocover
+                f"Unexpected task state encountered for {ts}; "
+                f"stimulus_id={ev.stimulus_id}; story={self.story(ts)}"
+            )
 
-        self.transitions(recommendations, stimulus_id=stimulus_id)
-        self._handle_instructions(instructions)
+        return recommendations, instructions
 
     ########################
     # Worker State Machine #
@@ -2461,15 +2452,15 @@ class Worker(ServerNode):
         return self._ensure_computing()
 
     def transition_long_running_memory(
-        self, ts: TaskState, value=no_value, *, stimulus_id: str
+        self, ts: TaskState, value=NO_VALUE, *, stimulus_id: str
     ) -> RecsInstrs:
         self.executed_count += 1
         return self.transition_generic_memory(ts, value=value, stimulus_id=stimulus_id)
 
     def transition_generic_memory(
-        self, ts: TaskState, value=no_value, *, stimulus_id: str
+        self, ts: TaskState, value=NO_VALUE, *, stimulus_id: str
     ) -> RecsInstrs:
-        if value is no_value and ts.key not in self.data:
+        if value is NO_VALUE and ts.key not in self.data:
             raise RuntimeError(
                 f"Tried to transition task {ts} to `memory` without data available"
             )
@@ -2498,7 +2489,7 @@ class Worker(ServerNode):
         return recs, instructions
 
     def transition_executing_memory(
-        self, ts: TaskState, value=no_value, *, stimulus_id: str
+        self, ts: TaskState, value=NO_VALUE, *, stimulus_id: str
     ) -> RecsInstrs:
         if self.validate:
             assert ts.state == "executing" or ts.key in self.long_running
@@ -2724,6 +2715,12 @@ class Worker(ServerNode):
         stimulus_id: str,
         **kwargs,
     ) -> RecsInstrs:
+        """Transition a key from its current state to the finish state
+
+        See Also
+        --------
+        Worker.transitions: wrapper around this method
+        """
         if isinstance(finish, tuple):
             # the concatenated transition path might need to access the tuple
             assert not args
@@ -2802,30 +2799,6 @@ class Worker(ServerNode):
         )
         return recs, instructions
 
-    def transition(
-        self, ts: TaskState, finish: TaskStateState, *, stimulus_id: str, **kwargs
-    ) -> None:
-        """Transition a key from its current state to the finish state
-
-        Examples
-        --------
-        >>> self.transition('x', 'waiting', stimulus_id=f"test-{(time()}")
-        {'x': 'processing'}
-
-        Returns
-        -------
-        Dictionary of recommendations for future transitions
-
-        See Also
-        --------
-        Scheduler.transitions: transitive version of this function
-        """
-        recs, instructions = self._transition(
-            ts, finish, stimulus_id=stimulus_id, **kwargs
-        )
-        self._handle_instructions(instructions)
-        self.transitions(recs, stimulus_id=stimulus_id)
-
     def transitions(self, recommendations: Recs, *, stimulus_id: str) -> None:
         """Process transitions until none are left
 
@@ -2859,7 +2832,7 @@ class Worker(ServerNode):
         if not isinstance(stim, FindMissingEvent):
             self.stimulus_log.append(stim.to_loggable(handled=time()))
         try:
-            recs, instructions = self.handle_event(stim)
+            recs, instructions = self._handle_event(stim)
             self.transitions(recs, stimulus_id=stim.stimulus_id)
             self._handle_instructions(instructions)
         except Exception as e:
@@ -2948,17 +2921,13 @@ class Worker(ServerNode):
             else:
                 instructions = []
 
-    def maybe_transition_long_running(
-        self, ts: TaskState, *, compute_duration: float, stimulus_id: str
-    ):
-        if ts.state == "executing":
-            self.transition(
-                ts,
-                "long-running",
-                compute_duration=compute_duration,
-                stimulus_id=stimulus_id,
-            )
-            assert ts.state == "long-running"
+    @_handle_event.register
+    def _handle_secede(self, ev: SecedeEvent) -> RecsInstrs:
+        ts = self.tasks.get(ev.key)
+        if ts and ts.state == "executing":
+            return {ts: ("long-running", ev.compute_duration)}, []
+        else:
+            return {}, []
 
     def stateof(self, key: str) -> dict[str, Any]:
         ts = self.tasks[key]
@@ -3455,27 +3424,23 @@ class Worker(ServerNode):
 
             ts.who_has = workers
 
-    def handle_steal_request(self, key: str, stimulus_id: str) -> None:
+    @_handle_event.register
+    def _handle_steal_request(self, ev: StealRequestEvent) -> RecsInstrs:
         # There may be a race condition between stealing and releasing a task.
         # In this case the self.tasks is already cleared. The `None` will be
         # registered as `already-computing` on the other end
-        ts = self.tasks.get(key)
+        ts = self.tasks.get(ev.key)
         state = ts.state if ts is not None else None
-
-        response = {
-            "op": "steal-response",
-            "key": key,
-            "state": state,
-            "stimulus_id": stimulus_id,
-        }
-        self.batched_send(response)
+        smsg = StealResponseMsg(key=ev.key, state=state, stimulus_id=ev.stimulus_id)
 
         if state in READY | {"waiting"}:
-            assert ts
             # If task is marked as "constrained" we haven't yet assigned it an
             # `available_resources` to run on, that happens in
             # `transition_constrained_executing`
-            self.transition(ts, "released", stimulus_id=stimulus_id)
+            assert ts
+            return {ts: "released"}, [smsg]
+        else:
+            return {}, [smsg]
 
     def handle_worker_status_change(self, status: str, stimulus_id: str) -> None:
         new_status = Status.lookup[status]  # type: ignore
@@ -3829,12 +3794,8 @@ class Worker(ServerNode):
                 stimulus_id=f"execute-unknown-error-{time()}",
             )
 
-    @functools.singledispatchmethod
-    def handle_event(self, ev: StateMachineEvent) -> RecsInstrs:
-        raise TypeError(ev)  # pragma: nocover
-
-    @handle_event.register
-    def _(self, ev: UnpauseEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_unpause(self, ev: UnpauseEvent) -> RecsInstrs:
         """Emerge from paused status. Do not send this event directly. Instead, just set
         Worker.status back to running.
         """
@@ -3844,19 +3805,21 @@ class Worker(ServerNode):
             self._ensure_communicating(stimulus_id=ev.stimulus_id),
         )
 
-    @handle_event.register
-    def _(self, ev: GatherDepDoneEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_gather_dep_done(self, ev: GatherDepDoneEvent) -> RecsInstrs:
         """Temporary hack - to be removed"""
         return self._ensure_communicating(stimulus_id=ev.stimulus_id)
 
-    @handle_event.register
-    def _(self, ev: RetryBusyWorkerEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_retry_busy_worker(self, ev: RetryBusyWorkerEvent) -> RecsInstrs:
         self.busy_workers.discard(ev.worker)
         return self._ensure_communicating(stimulus_id=ev.stimulus_id)
 
-    @handle_event.register
-    def _(self, ev: CancelComputeEvent) -> RecsInstrs:
-        """Scheduler requested to cancel a task"""
+    @_handle_event.register
+    def _handle_cancel_compute(self, ev: CancelComputeEvent) -> RecsInstrs:
+        """Cancel a task on a best-effort basis. This is only possible while a task
+        is in state `waiting` or `ready`; nothing will happen otherwise.
+        """
         ts = self.tasks.get(ev.key)
         if not ts or ts.state not in READY | {"waiting"}:
             return {}, []
@@ -3867,8 +3830,8 @@ class Worker(ServerNode):
         assert not ts.dependents
         return {ts: "released"}, []
 
-    @handle_event.register
-    def _(self, ev: AlreadyCancelledEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_already_cancelled(self, ev: AlreadyCancelledEvent) -> RecsInstrs:
         """Task is already cancelled by the time execute() runs"""
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
@@ -3877,8 +3840,8 @@ class Worker(ServerNode):
         ts.done = True
         return {ts: "released"}, []
 
-    @handle_event.register
-    def _(self, ev: ExecuteSuccessEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_execute_success(self, ev: ExecuteSuccessEvent) -> RecsInstrs:
         """Task completed successfully"""
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
@@ -3891,8 +3854,8 @@ class Worker(ServerNode):
         ts.type = ev.type
         return {ts: ("memory", ev.value)}, []
 
-    @handle_event.register
-    def _(self, ev: ExecuteFailureEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_execute_failure(self, ev: ExecuteFailureEvent) -> RecsInstrs:
         """Task execution failed"""
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
@@ -3915,8 +3878,8 @@ class Worker(ServerNode):
             )
         }, []
 
-    @handle_event.register
-    def _(self, ev: RescheduleEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_reschedule(self, ev: RescheduleEvent) -> RecsInstrs:
         """Task raised Reschedule exception while it was running"""
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
@@ -3924,8 +3887,8 @@ class Worker(ServerNode):
         assert ts, self.story(ev.key)
         return {ts: "rescheduled"}, []
 
-    @handle_event.register
-    def _(self, ev: FindMissingEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_find_missing(self, ev: FindMissingEvent) -> RecsInstrs:
         if not self._missing_dep_flight:
             return {}, []
 
@@ -3939,8 +3902,8 @@ class Worker(ServerNode):
         )
         return {}, [smsg]
 
-    @handle_event.register
-    def _(self, ev: RefreshWhoHasEvent) -> RecsInstrs:
+    @_handle_event.register
+    def _handle_refresh_who_has(self, ev: RefreshWhoHasEvent) -> RecsInstrs:
         self._update_who_has(ev.who_has)
         recommendations: Recs = {}
         instructions: Instructions = []
@@ -4548,10 +4511,12 @@ def secede():
     tpe_secede()  # have this thread secede from the thread pool
     duration = time() - thread_state.start_time
     worker.loop.add_callback(
-        worker.maybe_transition_long_running,
-        worker.tasks[thread_state.key],
-        compute_duration=duration,
-        stimulus_id=f"secede-{thread_state.key}-{time()}",
+        worker.handle_stimulus,
+        SecedeEvent(
+            key=thread_state.key,
+            compute_duration=duration,
+            stimulus_id=f"secede-{time()}",
+        ),
     )
 
 
@@ -4639,7 +4604,7 @@ def loads_function(bytes_object):
     return pickle.loads(bytes_object)
 
 
-def _deserialize(function=None, args=None, kwargs=None, task=no_value):
+def _deserialize(function=None, args=None, kwargs=None, task=NO_VALUE):
     """Deserialize task inputs and regularize to func, args, kwargs"""
     if function is not None:
         function = loads_function(function)
@@ -4648,7 +4613,7 @@ def _deserialize(function=None, args=None, kwargs=None, task=no_value):
     if kwargs and isinstance(kwargs, bytes):
         kwargs = pickle.loads(kwargs)
 
-    if task is not no_value:
+    if task is not NO_VALUE:
         assert not function and not args and not kwargs
         function = execute_task
         args = (task,)

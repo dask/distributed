@@ -17,6 +17,8 @@ from distributed.utils_test import (
     inc,
 )
 from distributed.worker_state_machine import (
+    AcquireReplicasEvent,
+    ComputeTaskEvent,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     Instruction,
@@ -24,9 +26,11 @@ from distributed.worker_state_machine import (
     ReleaseWorkerDataMsg,
     RescheduleEvent,
     RescheduleMsg,
+    SerializedTask,
     StateMachineEvent,
     TaskState,
     TaskStateState,
+    UpdateDataEvent,
     merge_recs_instructions,
 )
 
@@ -137,6 +141,70 @@ def test_event_to_dict():
     }
     ev3 = StateMachineEvent.from_dict(d)
     assert ev3 == ev
+
+
+def test_computetask_to_dict():
+    """The potentially very large ComputeTaskEvent.run_spec is not stored in the log"""
+    ev = ComputeTaskEvent(
+        key="x",
+        who_has={"y": ["w1"]},
+        nbytes={"y": 123},
+        priority=(0,),
+        duration=123.45,
+        # Automatically converted to SerializedTask on init
+        run_spec={"function": b"blob", "args": b"blob"},
+        resource_restrictions={},
+        actor=False,
+        annotations={},
+        stimulus_id="test",
+    )
+    assert ev.run_spec == SerializedTask(function=b"blob", args=b"blob")
+    ev2 = ev.to_loggable(handled=11.22)
+    assert ev2.handled == 11.22
+    assert ev2.run_spec == SerializedTask(task=None)
+    assert ev.run_spec == SerializedTask(function=b"blob", args=b"blob")
+    d = recursive_to_dict(ev2)
+    assert d == {
+        "cls": "ComputeTaskEvent",
+        "key": "x",
+        "who_has": {"y": ["w1"]},
+        "nbytes": {"y": 123},
+        "priority": [0],
+        "run_spec": [None, None, None, None],
+        "duration": 123.45,
+        "resource_restrictions": {},
+        "actor": False,
+        "annotations": {},
+        "stimulus_id": "test",
+        "handled": 11.22,
+    }
+    ev3 = StateMachineEvent.from_dict(d)
+    assert isinstance(ev3, ComputeTaskEvent)
+    assert ev3.run_spec == SerializedTask(task=None)
+    assert ev3.priority == (0,)  # List is automatically converted back to tuple
+
+
+def test_updatedata_to_dict():
+    """The potentially very large UpdateDataEvent.data is not stored in the log"""
+    ev = UpdateDataEvent(
+        data={"x": "foo", "y": "bar"},
+        report=True,
+        stimulus_id="test",
+    )
+    ev2 = ev.to_loggable(handled=11.22)
+    assert ev2.handled == 11.22
+    assert ev2.data == {"x": None, "y": None}
+    d = recursive_to_dict(ev2)
+    assert d == {
+        "cls": "UpdateDataEvent",
+        "data": {"x": None, "y": None},
+        "report": True,
+        "stimulus_id": "test",
+        "handled": 11.22,
+    }
+    ev3 = StateMachineEvent.from_dict(d)
+    assert isinstance(ev3, UpdateDataEvent)
+    assert ev3.data == {"x": None, "y": None}
 
 
 def test_executesuccess_to_dict():
@@ -500,18 +568,18 @@ async def test_forget_data_needed(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
 async def test_missing_handle_compute_dependency(c, s, w1, w2, w3):
-    """Test that it is OK for a dependency to be in state missing if a dependent is asked to be computed"""
-
+    """Test that it is OK for a dependency to be in state missing if a dependent is
+    asked to be computed
+    """
     w3.periodic_callbacks["find-missing"].stop()
 
     f1 = c.submit(inc, 1, key="f1", workers=[w1.address])
     f2 = c.submit(inc, 2, key="f2", workers=[w1.address])
     await wait_for_state(f1.key, "memory", w1)
 
-    w3.handle_acquire_replicas(
-        keys=[f1.key], who_has={f1.key: [w2.address]}, stimulus_id="acquire"
+    w3.handle_stimulus(
+        AcquireReplicasEvent(who_has={f1.key: [w2.address]}, stimulus_id="acquire")
     )
-
     await wait_for_state(f1.key, "missing", w3)
 
     f3 = c.submit(sum, [f1, f2], key="f3", workers=[w3.address])
@@ -526,10 +594,9 @@ async def test_missing_to_waiting(c, s, w1, w2, w3):
     f1 = c.submit(inc, 1, key="f1", workers=[w1.address], allow_other_workers=True)
     await wait_for_state(f1.key, "memory", w1)
 
-    w3.handle_acquire_replicas(
-        keys=[f1.key], who_has={f1.key: [w2.address]}, stimulus_id="acquire"
+    w3.handle_stimulus(
+        AcquireReplicasEvent(who_has={f1.key: [w2.address]}, stimulus_id="acquire")
     )
-
     await wait_for_state(f1.key, "missing", w3)
 
     await w2.close()
