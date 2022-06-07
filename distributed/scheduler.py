@@ -3070,7 +3070,7 @@ class Scheduler(SchedulerState, ServerNode):
             "get_logs": self.get_logs,
             "logs": self.get_logs,
             "worker_logs": self.get_worker_logs,
-            "log_event": self.log_worker_event,
+            "log_event": self.log_event,
             "events": self.get_events,
             "nbytes": self.get_nbytes,
             "versions": self.versions,
@@ -6223,7 +6223,11 @@ class Scheduler(SchedulerState, ServerNode):
             if teardown:
                 teardown(self, state)
 
-    def log_worker_event(self, worker=None, topic=None, msg=None):
+    def log_worker_event(
+        self, worker: str, topic: str | Collection[str], msg: Any
+    ) -> None:
+        if isinstance(msg, dict):
+            msg["worker"] = worker
         self.log_event(topic, msg)
 
     def subscribe_worker_status(self, comm=None):
@@ -6905,21 +6909,21 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return results
 
-    def log_event(self, name, msg):
+    def log_event(self, topic: str | Collection[str], msg: Any) -> None:
         event = (time(), msg)
-        if isinstance(name, (list, tuple)):
-            for n in name:
-                self.events[n].append(event)
-                self.event_counts[n] += 1
-                self._report_event(n, event)
+        if not isinstance(topic, str):
+            for t in topic:
+                self.events[t].append(event)
+                self.event_counts[t] += 1
+                self._report_event(t, event)
         else:
-            self.events[name].append(event)
-            self.event_counts[name] += 1
-            self._report_event(name, event)
+            self.events[topic].append(event)
+            self.event_counts[topic] += 1
+            self._report_event(topic, event)
 
             for plugin in list(self.plugins.values()):
                 try:
-                    plugin.log_event(name, msg)
+                    plugin.log_event(topic, msg)
                 except Exception:
                     logger.info("Plugin failed with exception", exc_info=True)
 

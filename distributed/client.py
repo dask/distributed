@@ -24,7 +24,7 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
@@ -51,6 +51,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import PeriodicCallback
 
+import distributed.utils
 from distributed import cluster_dump, preloading
 from distributed import versions as version_module
 from distributed.batched import BatchedSend
@@ -80,8 +81,6 @@ from distributed.security import Security
 from distributed.sizeof import sizeof
 from distributed.threadpoolexecutor import rejoin
 from distributed.utils import (
-    All,
-    Any,
     CancelledError,
     LoopRunner,
     NoOpAwaitable,
@@ -2028,7 +2027,7 @@ class Client(SyncMethodMixin):
             logger.debug("Waiting on futures to clear before gather")
 
             with suppress(AllExit):
-                await All(
+                await distributed.utils.All(
                     [wait(key) for key in keys if key in self.futures],
                     quiet_exceptions=AllExit,
                 )
@@ -4053,12 +4052,12 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self.scheduler.benchmark_hardware)
 
-    def log_event(self, topic, msg):
+    def log_event(self, topic: str | Collection[str], msg: Any):
         """Log an event under a given topic
 
         Parameters
         ----------
-        topic : str, list
+        topic : str, list[str]
             Name of the topic under which to log an event. To log the same
             event under multiple topics, pass a list of topic names.
         msg
@@ -4648,9 +4647,9 @@ async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
         )
     fs = futures_of(fs)
     if return_when == ALL_COMPLETED:
-        wait_for = All
+        wait_for = distributed.utils.All
     elif return_when == FIRST_COMPLETED:
-        wait_for = Any
+        wait_for = distributed.utils.Any
     else:
         raise NotImplementedError(
             "Only return_when='ALL_COMPLETED' and 'FIRST_COMPLETED' are supported"

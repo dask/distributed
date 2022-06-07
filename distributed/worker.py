@@ -124,9 +124,11 @@ from distributed.worker_state_machine import (
     GatherDep,
     GatherDepDoneEvent,
     Instructions,
+    InvalidTaskState,
     InvalidTransition,
     LongRunningMsg,
     MissingDataMsg,
+    RecommendationsConflict,
     Recs,
     RecsInstrs,
     RefreshWhoHasEvent,
@@ -191,13 +193,7 @@ def fail_hard(method):
                 return await method(self, *args, **kwargs)
             except Exception as e:
                 if self.status not in (Status.closed, Status.closing):
-                    self.log_event(
-                        "worker-fail-hard",
-                        {
-                            **error_message(e),
-                            "worker": self.address,
-                        },
-                    )
+                    self.log_event("worker-fail-hard", error_message(e))
                     logger.exception(e)
                 await _force_close(self)
                 raise
@@ -210,13 +206,7 @@ def fail_hard(method):
                 return method(self, *args, **kwargs)
             except Exception as e:
                 if self.status not in (Status.closed, Status.closing):
-                    self.log_event(
-                        "worker-fail-hard",
-                        {
-                            **error_message(e),
-                            "worker": self.address,
-                        },
-                    )
+                    self.log_event("worker-fail-hard", error_message(e))
                     logger.exception(e)
                 self.loop.add_callback(_force_close, self)
                 raise
@@ -967,7 +957,7 @@ class Worker(ServerNode):
     def logs(self):
         return self._deque_handler.deque
 
-    def log_event(self, topic, msg):
+    def log_event(self, topic: str | Collection[str], msg: Any) -> None:
         full_msg = {
             "op": "log-event",
             "topic": topic,
@@ -2741,13 +2731,14 @@ class Worker(ServerNode):
         if isinstance(finish, tuple):
             # the concatenated transition path might need to access the tuple
             assert not args
-            finish, *args = finish  # type: ignore
+            args = finish[1:]
+            finish = cast(TaskStateState, finish[0])
 
         if ts.state == finish:
             return {}, []
 
         start = ts.state
-        func = self._TRANSITIONS_TABLE.get((start, cast(TaskStateState, finish)))
+        func = self._TRANSITIONS_TABLE.get((start, finish))
 
         # Notes:
         # - in case of transition through released, this counter is incremented by 2
@@ -2758,16 +2749,6 @@ class Worker(ServerNode):
             self.transition_counter_max
             and self.transition_counter >= self.transition_counter_max
         ):
-            self.log_event(
-                "transition-counter-max-exceeded",
-                {
-                    "key": ts.key,
-                    "start": start,
-                    "finish": finish,
-                    "story": self.story(ts),
-                    "worker": self.address,
-                },
-            )
             raise TransitionCounterMaxExceeded(ts.key, start, finish, self.story(ts))
 
         if func is not None:
@@ -2801,32 +2782,10 @@ class Worker(ServerNode):
                     (recs, instructions),
                     self._transition(ts, finish, *args, stimulus_id=stimulus_id),
                 )
-            # ValueError may be raised by merge_recs_instructions
-            # TODO: should merge_recs raise InvalidTransition?
-            except (ValueError, InvalidTransition):
-                self.log_event(
-                    "invalid-worker-transition",
-                    {
-                        "key": ts.key,
-                        "start": start,
-                        "finish": finish,
-                        "story": self.story(ts),
-                        "worker": self.address,
-                    },
-                )
-                raise InvalidTransition(ts.key, start, finish, self.story(ts))
+            except (InvalidTransition, RecommendationsConflict) as e:
+                raise InvalidTransition(ts.key, start, finish, self.story(ts)) from e
 
         else:
-            self.log_event(
-                "invalid-worker-transition",
-                {
-                    "key": ts.key,
-                    "start": start,
-                    "finish": finish,
-                    "story": self.story(ts),
-                    "worker": self.address,
-                },
-            )
             raise InvalidTransition(ts.key, start, finish, self.story(ts))
 
         self.log.append(
@@ -2879,9 +2838,15 @@ class Worker(ServerNode):
     def handle_stimulus(self, stim: StateMachineEvent) -> None:
         if not isinstance(stim, FindMissingEvent):
             self.stimulus_log.append(stim.to_loggable(handled=time()))
-        recs, instructions = self._handle_event(stim)
-        self.transitions(recs, stimulus_id=stim.stimulus_id)
-        self._handle_instructions(instructions)
+        try:
+            recs, instructions = self._handle_event(stim)
+            self.transitions(recs, stimulus_id=stim.stimulus_id)
+            self._handle_instructions(instructions)
+        except Exception as e:
+            if hasattr(e, "to_event"):
+                topic, msg = e.to_event()  # type: ignore
+                self.log_event(topic, msg)
+            raise
 
     @fail_hard
     @log_errors
@@ -4265,18 +4230,8 @@ class Worker(ServerNode):
 
                 pdb.set_trace()
 
-            self.log_event(
-                "invalid-worker-task-states",
-                {
-                    "key": ts.key,
-                    "state": ts.state,
-                    "story": self.story(ts),
-                    "worker": self.address,
-                },
-            )
-
-            raise AssertionError(
-                f"Invalid TaskState encountered on {self.id} for {ts!r}.\nStory:\n{self.story(ts)}\n"
+            raise InvalidTaskState(
+                key=ts.key, state=ts.state, story=self.story(ts)
             ) from e
 
     def validate_state(self):
@@ -4334,12 +4289,17 @@ class Worker(ServerNode):
                 assert self.transition_counter < self.transition_counter_max
 
         except Exception as e:
-            logger.error("Validate state failed.  Closing.", exc_info=e)
+            logger.error("Validate state failed", exc_info=e)
             logger.exception(e)
             if LOG_PDB:
                 import pdb
 
                 pdb.set_trace()
+
+            if hasattr(e, "to_event"):
+                topic, msg = e.to_event()
+                self.log_event(topic, msg)
+
             raise
 
     #######################################

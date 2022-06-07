@@ -66,7 +66,6 @@ from distributed.utils_test import (
     slowsum,
 )
 from distributed.worker import (
-    InvalidTransition,
     Worker,
     benchmark_disk,
     benchmark_memory,
@@ -3400,29 +3399,6 @@ async def test_tick_interval(c, s, a, b):
     while s.workers[a.address].metrics["event_loop_interval"] < 0.100:
         await asyncio.sleep(0.01)
         time.sleep(0.200)
-
-
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
-async def test_log_invalid_transitions(c, s, a):
-    x = c.submit(inc, 1)
-    y = c.submit(inc, x)
-    xkey = x.key
-    del x
-    await y
-    while a.tasks[xkey].state != "released":
-        await asyncio.sleep(0.01)
-    ts = a.tasks[xkey]
-    with pytest.raises(InvalidTransition):
-        a._transition(ts, "foo", stimulus_id="bar")
-
-    while not s.events["invalid-worker-transition"]:
-        await asyncio.sleep(0.01)
-
-    assert "foo" in str(s.events["invalid-worker-transition"])
-    assert a.address in str(s.events["invalid-worker-transition"])
-    assert ts.key in str(s.events["invalid-worker-transition"])
-
-    del s.events["invalid-worker-transition"]  # for test cleanup
 
 
 class BreakingWorker(Worker):

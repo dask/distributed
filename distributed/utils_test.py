@@ -949,10 +949,10 @@ def check_invalid_worker_transitions(s: Scheduler) -> None:
 
 
 def check_invalid_task_states(s: Scheduler) -> None:
-    if not s.events.get("invalid-worker-task-states"):
+    if not s.events.get("invalid-worker-task-state"):
         return
 
-    for timestamp, msg in s.events["invalid-worker-task-states"]:
+    for timestamp, msg in s.events["invalid-worker-task-state"]:
         print("Worker:", msg["worker"])
         print("State:", msg["state"])
         for line in msg["story"]:

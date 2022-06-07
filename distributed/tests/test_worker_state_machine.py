@@ -22,6 +22,7 @@ from distributed.worker_state_machine import (
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     Instruction,
+    RecommendationsConflict,
     ReleaseWorkerDataMsg,
     RescheduleEvent,
     RescheduleMsg,
@@ -123,7 +124,7 @@ def test_merge_recs_instructions():
         {x: "memory"},
         [],
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(RecommendationsConflict):
         merge_recs_instructions(({x: "memory"}, []), ({x: "released"}, []))
 
 
