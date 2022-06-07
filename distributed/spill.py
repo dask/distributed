@@ -242,7 +242,7 @@ class Slow(zict.Func):
         super().__init__(
             partial(serialize_bytelist, on_error="raise"),
             deserialize_bytes,
-            zict.File(spill_directory, **file_kwargs),
+            zict.File(spill_directory, **file_kwargs),  # type: ignore
         )
         self.max_weight = max_weight
         self.weight_by_key = {}
