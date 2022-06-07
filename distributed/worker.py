@@ -1484,11 +1484,11 @@ class Worker(ServerNode):
 
         Parameters
         ----------
-        timeout : float, optional
+        timeout : float, default 30
             Timeout in seconds for shutting down individual instructions
-        executor_wait : bool, optional
+        executor_wait : bool, default True
             If True, shut down executors synchronously, otherwise asynchronously
-        nanny : bool, optional
+        nanny : bool, default True
             If True, close the nanny
 
         Returns
