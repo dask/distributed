@@ -640,7 +640,10 @@ class Server:
 
     def handle_comm(self, comm):
         """Start a background task that dispatches new communications to coroutine-handlers"""
-        self._ongoing_background_tasks.call_soon(self._handle_comm, comm)
+        try:
+            self._ongoing_background_tasks.call_soon(self._handle_comm, comm)
+        except AsyncTaskGroupClosedError:
+            comm.abort()
         return NoOpAwaitable()
 
     async def _handle_comm(self, comm):
