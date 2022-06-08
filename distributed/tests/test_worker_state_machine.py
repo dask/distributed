@@ -655,7 +655,7 @@ def test_task_state_instance_are_garbage_collected(processes, tmp_path):
         stderr=subprocess.PIPE,
     )
 
-    out, err = proc.communicate(timeout=10)
+    out, err = proc.communicate()
 
     assert not out
     assert not err
