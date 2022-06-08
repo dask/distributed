@@ -642,7 +642,7 @@ async def test_fetch_to_missing_on_refresh_who_has(c, s, w1, w2, w3):
     # When request-refresh-who-has lands, the scheduler will respond:
     # {op: refresh-who-has, who_has={x: [], y: [w2.address]}}
     w3.handle_stimulus(
-        RefreshWhoHasEvent(who_has={"x": {}, "y": {w2.address}}, stimulus_id="test3")
+        RefreshWhoHasEvent(who_has={"x": [], "y": [w2.address]}, stimulus_id="test3")
     )
     assert w3.tasks["x"].state == "missing"
     assert w3.tasks["y"].state == "flight"
