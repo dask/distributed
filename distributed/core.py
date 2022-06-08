@@ -15,7 +15,7 @@ from collections.abc import Container
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import Callable, ClassVar, TypedDict, TypeVar
+from typing import Callable, ClassVar, TypedDict, TypeVar, final
 
 import tblib
 from tlz import merge
@@ -300,6 +300,7 @@ class Server:
         await self.rpc.start()
         return self
 
+    @final
     async def start(self):
         async with self._startup_lock:
             if self.status == Status.failed:
