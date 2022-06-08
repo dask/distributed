@@ -530,7 +530,10 @@ def test_compute_sync(client):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)],
-    config={"distributed.worker.profile.interval": "1ms"},
+    config={
+        "distributed.worker.profile.enabled": True,
+        "distributed.worker.profile.interval": "1ms",
+    },
 )
 async def test_actors_in_profile(c, s, a):
     class Sleeper:
@@ -635,8 +638,7 @@ def test_one_thread_deadlock():
         def do_inc(self, ac):
             return ac.increment().result()
 
-    with cluster(nworkers=1) as (cl, _):
-        client = Client(cl["address"])
+    with cluster(nworkers=1) as (cl, _), Client(cl["address"]) as client:
         ac = client.submit(Counter, actor=True).result()
         ac2 = client.submit(UsesCounter, actor=True).result()
 
@@ -652,8 +654,7 @@ def test_one_thread_deadlock_timeout():
             # cannot expire
             return ac.increment().result(timeout=0.001)
 
-    with cluster(nworkers=1) as (cl, _):
-        client = Client(cl["address"])
+    with cluster(nworkers=1) as (cl, _), Client(cl["address"]) as client:
         ac = client.submit(Counter, actor=True).result()
         ac2 = client.submit(UsesCounter, actor=True).result()
 
@@ -667,8 +668,7 @@ def test_one_thread_deadlock_sync_client():
         def do_inc(self, ac):
             return get_client().sync(ac.increment)
 
-    with cluster(nworkers=1) as (cl, _):
-        client = Client(cl["address"])
+    with cluster(nworkers=1) as (cl, _), Client(cl["address"]) as client:
         ac = client.submit(Counter, actor=True).result()
         ac2 = client.submit(UsesCounter, actor=True).result()
 
@@ -701,8 +701,7 @@ def test_exception():
         def prop(self):
             raise MyException
 
-    with cluster(nworkers=2) as (cl, w):
-        client = Client(cl["address"])
+    with cluster(nworkers=2) as (cl, w), Client(cl["address"]) as client:
         ac = client.submit(Broken, actor=True).result()
         acfut = ac.method()
         with pytest.raises(MyException):

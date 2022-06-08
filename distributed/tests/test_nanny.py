@@ -21,12 +21,11 @@ from tornado.ioloop import IOLoop
 import dask
 from dask.utils import tmpfile
 
-from distributed import Nanny, Scheduler, Worker, rpc, wait, worker
+from distributed import Nanny, Scheduler, Worker, profile, rpc, wait, worker
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
-from distributed.profile import wait_profiler
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, parse_ports
 from distributed.utils_test import (
@@ -172,8 +171,8 @@ async def test_num_fds(s):
     # Warm up
     async with Nanny(s.address):
         pass
-    wait_profiler()
-    gc.collect()
+    with profile.lock:
+        gc.collect()
 
     before = proc.num_fds()
 
@@ -278,8 +277,8 @@ async def test_wait_for_scheduler():
 
 @gen_cluster(nthreads=[], client=True)
 async def test_environment_variable(c, s):
-    a = Nanny(s.address, loop=s.loop, memory_limit=0, env={"FOO": "123"})
-    b = Nanny(s.address, loop=s.loop, memory_limit=0, env={"FOO": "456"})
+    a = Nanny(s.address, memory_limit=0, env={"FOO": "123"})
+    b = Nanny(s.address, memory_limit=0, env={"FOO": "456"})
     await asyncio.gather(a, b)
     results = await c.run(lambda: os.environ["FOO"])
     assert results == {a.worker_address: "123", b.worker_address: "456"}
@@ -291,7 +290,7 @@ async def test_environment_variable_by_config(c, s, monkeypatch):
 
     with dask.config.set({"distributed.nanny.environ": "456"}):
         with pytest.raises(TypeError, match="configuration must be of type dict"):
-            Nanny(s.address, loop=s.loop, memory_limit=0)
+            Nanny(s.address, memory_limit=0)
 
     with dask.config.set({"distributed.nanny.environ": {"FOO": "456"}}):
 
@@ -299,10 +298,10 @@ async def test_environment_variable_by_config(c, s, monkeypatch):
         # kwargs > env var > config
 
         with mock.patch.dict(os.environ, {"FOO": "BAR"}, clear=True):
-            a = Nanny(s.address, loop=s.loop, memory_limit=0, env={"FOO": "123"})
-            x = Nanny(s.address, loop=s.loop, memory_limit=0)
+            a = Nanny(s.address, memory_limit=0, env={"FOO": "123"})
+            x = Nanny(s.address, memory_limit=0)
 
-        b = Nanny(s.address, loop=s.loop, memory_limit=0)
+        b = Nanny(s.address, memory_limit=0)
 
         await asyncio.gather(a, b, x)
         results = await c.run(lambda: os.environ["FOO"])
@@ -462,7 +461,7 @@ class KeyboardInterruptWorker(worker.Worker):
 
 @pytest.mark.parametrize("protocol", ["tcp", "ucx"])
 @gen_test()
-async def test_nanny_closed_by_keyboard_interrupt(protocol):
+async def test_nanny_closed_by_keyboard_interrupt(ucx_loop, protocol):
     if protocol == "ucx":  # Skip if UCX isn't available
         pytest.importorskip("ucp")
 
@@ -631,3 +630,19 @@ async def test_close_joins(s):
 
         assert p.status == Status.closed
         assert not p.process
+
+
+@gen_cluster(Worker=Nanny, nthreads=[("", 1)])
+async def test_scheduler_crash_doesnt_restart(s, a):
+    # Simulate a scheduler crash by disconnecting it first
+    # (`s.close()` would tell workers to cleanly shut down)
+    bcomm = next(iter(s.stream_comms.values()))
+    bcomm.abort()
+    await s.close()
+
+    while a.status != Status.closing_gracefully:
+        await asyncio.sleep(0.01)
+
+    await a.finished()
+    assert a.status == Status.closed
+    assert a.process is None

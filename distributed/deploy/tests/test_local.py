@@ -582,6 +582,34 @@ def test_ipywidgets(loop):
         assert isinstance(box, ipywidgets.Widget)
 
 
+def test_ipywidgets_loop(loop):
+    """
+    Previously cluster._ipython_display_ attached the PeriodicCallback to the
+    currently running loop, See https://github.com/dask/distributed/pull/6444
+    """
+    ipywidgets = pytest.importorskip("ipywidgets")
+
+    async def get_ioloop(cluster):
+        return cluster.periodic_callbacks["cluster-repr"].io_loop
+
+    async def amain():
+        # running synchronous code in an async context to setup a
+        # IOLoop.current() that's different from cluster.loop
+        with LocalCluster(
+            n_workers=0,
+            silence_logs=False,
+            loop=loop,
+            dashboard_address=":0",
+            processes=False,
+        ) as cluster:
+            cluster._ipython_display_()
+            assert cluster.sync(get_ioloop, cluster) is loop
+            box = cluster._cached_widget
+            assert isinstance(box, ipywidgets.Widget)
+
+    asyncio.run(amain())
+
+
 def test_no_ipywidgets(loop, monkeypatch):
     from unittest.mock import MagicMock
 
@@ -1172,6 +1200,9 @@ class MyPlugin:
 async def test_localcluster_start_exception():
     with raises_with_cause(RuntimeError, None, ImportError, "my_nonexistent_library"):
         async with LocalCluster(
+            n_workers=1,
+            threads_per_worker=1,
+            processes=True,
             plugins={MyPlugin()},
         ):
             return

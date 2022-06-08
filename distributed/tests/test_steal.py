@@ -12,12 +12,11 @@ from tlz import concat, sliding_window
 
 import dask
 
-from distributed import Event, Lock, Nanny, Worker, wait, worker_client
+from distributed import Event, Lock, Nanny, Worker, profile, wait, worker_client
 from distributed.compatibility import LINUX
 from distributed.config import config
 from distributed.core import Status
 from distributed.metrics import time
-from distributed.profile import wait_profiler
 from distributed.scheduler import key_split
 from distributed.system import MEMORY_LIMIT
 from distributed.utils_test import (
@@ -30,6 +29,7 @@ from distributed.utils_test import (
     slowidentity,
     slowinc,
 )
+from distributed.worker_state_machine import StealRequestEvent
 
 pytestmark = pytest.mark.ci1
 
@@ -325,7 +325,7 @@ async def test_new_worker_steals(c, s, a):
     while len(a.tasks) < 10:
         await asyncio.sleep(0.01)
 
-    b = await Worker(s.address, loop=s.loop, nthreads=1, memory_limit=MEMORY_LIMIT)
+    b = await Worker(s.address, nthreads=1, memory_limit=MEMORY_LIMIT)
 
     result = await total
     assert result == sum(map(inc, range(100)))
@@ -479,7 +479,7 @@ async def test_steal_resource_restrictions(c, s, a):
         await asyncio.sleep(0.01)
     assert len(a.tasks) == 101
 
-    b = await Worker(s.address, loop=s.loop, nthreads=1, resources={"A": 4})
+    b = await Worker(s.address, nthreads=1, resources={"A": 4})
 
     while not b.tasks or len(a.tasks) == 101:
         await asyncio.sleep(0.01)
@@ -501,15 +501,7 @@ async def test_steal_resource_restrictions_asym_diff(c, s, a):
         await asyncio.sleep(0.01)
     assert len(a.tasks) == 101
 
-    b = await Worker(
-        s.address,
-        loop=s.loop,
-        nthreads=1,
-        resources={
-            "A": 4,
-            "B": 5,
-        },
-    )
+    b = await Worker(s.address, nthreads=1, resources={"A": 4, "B": 5})
 
     while not b.tasks or len(a.tasks) == 101:
         await asyncio.sleep(0.01)
@@ -868,7 +860,7 @@ async def test_dont_steal_already_released(c, s, a, b):
     while key in a.tasks and a.tasks[key].state != "released":
         await asyncio.sleep(0.05)
 
-    a.handle_steal_request(key=key, stimulus_id="test")
+    a.handle_stimulus(StealRequestEvent(key=key, stimulus_id="test"))
     assert len(a.batched_stream.buffer) == 1
     msg = a.batched_stream.buffer[0]
     assert msg["op"] == "steal-response"
@@ -948,8 +940,8 @@ async def test_cleanup_repeated_tasks(c, s, a, b):
 
     assert not s.tasks
 
-    wait_profiler()
-    assert not list(ws)
+    with profile.lock:
+        assert not list(ws)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)

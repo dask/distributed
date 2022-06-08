@@ -1,6 +1,125 @@
 Changelog
 =========
 
+.. _v2022.05.2:
+
+2022.05.2
+---------
+
+Released on May 26, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Add a lock to ``distributed.profile`` for better concurrency control (:pr:`6421`) `Hendrik Makait`_
+- Send ``SIGKILL`` after ``SIGTERM`` when passing 95% memory (:pr:`6419`) `crusaderky`_
+
+Bug Fixes
+^^^^^^^^^
+- Log rather than raise exceptions in ``preload.teardown()`` (:pr:`6458`) `Matthew Rocklin`_
+- Handle failing ``plugin.close()`` calls during scheduler shutdown (:pr:`6450`) `Matthew Rocklin`_
+- Fix slicing bug in ``ensure_memoryview`` (:pr:`6449`) `jakirkham`_
+- Generalize UCX errors on ``connect()`` and correct pytest fixtures (:pr:`6434`) `Peter Andreas Entschev`_
+- Run cluster widget periodic callbacks on the correct event loop (:pr:`6444`) `Thomas Grainger`_
+
+Maintenance
+^^^^^^^^^^^
+- Disable ``pytest-asyncio`` if installed (:pr:`6436`) `Jacob Tomlinson`_
+- Close client in sync test_actor tests (:pr:`6459`) `Thomas Grainger`_
+- Ignore ``ServerSession.with_document_locked unawaited`` (:pr:`6447`) `Thomas Grainger`_
+- Remove ``coverage`` pin from Python 3.10 environment (:pr:`6439`) `Thomas Grainger`_
+- Annotate ``remove_worker`` (:pr:`6441`) `crusaderky`_
+- Update gpuCI ``RAPIDS_VER`` to ``22.08`` (:pr:`6428`)
+
+
+.. _v2022.05.1:
+
+2022.05.1
+---------
+
+Released on May 24, 2022
+
+New Features
+^^^^^^^^^^^^
+- Add HTTP API to scheduler (:pr:`6270`) `Matthew Murray`_
+- Shuffle Service with Scheduler Logic (:pr:`6007`) `Matthew Rocklin`_
+
+Enhancements
+^^^^^^^^^^^^
+- Follow-up on removing ``report`` and ``safe`` from ``Worker.close`` (:pr:`6423`) `Gabe Joseph`_
+- Server close faster (:pr:`6415`) `Florian Jetter`_
+- Disable HTTP API by default (:pr:`6420`) `Jacob Tomlinson`_
+- Remove ``report`` and ``safe`` from ``Worker.close`` (:pr:`6363`) `Florian Jetter`_
+- Allow deserialized plugins in ``register_scheduler_plugin`` (:pr:`6401`) `Matthew Rocklin`_
+- ``WorkerState`` are different for different addresses (:pr:`6398`) `Florian Jetter`_
+- Do not filter tasks before gathering data (:pr:`6371`) `crusaderky`_
+- Remove worker reconnect (:pr:`6361`) `Gabe Joseph`_
+- Add ``SchedulerPlugin.log_event handler`` (:pr:`6381`) `Matthew Rocklin`_
+- Ensure occupancy tracking works as expected for long running tasks (:pr:`6351`) `Florian Jetter`_
+- ``stimulus_id`` for all ``Instructions`` (:pr:`6347`) `crusaderky`_
+- Refactor missing-data command (:pr:`6332`) `crusaderky`_
+- Add ``idempotent`` to ``register_scheduler_plugin`` client (:pr:`6328`) `Alex Ford`_
+- Add option to specify a scheduler address for workers to use (:pr:`5944`) `Enric Tejedor`_
+
+Bug Fixes
+^^^^^^^^^
+- Remove stray ``breakpoint`` (:pr:`6417`) `Thomas Grainger`_
+- Fix API JSON MIME type (:pr:`6397`) `Jacob Tomlinson`_
+- Remove wrong ``assert`` in handle compute (:pr:`6370`) `Florian Jetter`_
+- Ensure multiple clients can cancel their key without interference (:pr:`6016`) `Florian Jetter`_
+- Fix ``Nanny`` shutdown assertion (:pr:`6357`) `Gabe Joseph`_
+- Fix ``fail_hard`` for sync functions (:pr:`6269`) `Gabe Joseph`_
+- Prevent infinite transition loops; more aggressive ``validate_state()`` (:pr:`6318`) `crusaderky`_
+- Ensure cleanup of many GBs of spilled data on terminate (:pr:`6280`) `crusaderky`_
+- Fix ``WORKER_ANY_RUNNING`` regression (:pr:`6297`) `Florian Jetter`_
+- Race conditions from fetch to compute while AMM requests replica (:pr:`6248`) `Florian Jetter`_
+- Ensure resumed tasks are not accidentally forgotten (:pr:`6217`) `Florian Jetter`_
+- Do not allow closing workers to be awaited again (:pr:`5910`) `Florian Jetter`_
+
+Deprecations
+^^^^^^^^^^^^
+- Move ``wait_for_signals`` to private module and deprecate ``distributed.cli.utils`` (:pr:`6367`) `Hendrik Makait`_
+
+Documentation
+^^^^^^^^^^^^^
+- Fix typos and whitespace in ``worker.py`` (:pr:`6326`) `Hendrik Makait`_
+- Fix link to memory trimming documentation (:pr:`6317`) `Marco Wolsza`_
+
+Maintenance
+^^^^^^^^^^^
+- Make ``gen_test`` show up in VSCode test discovery (:pr:`6424`) `Gabe Joseph`_
+- WSMR / ``deserialize_task`` (:pr:`6411`) `crusaderky`_
+- Restore signal handlers after wait for signals is done (:pr:`6400`) `Thomas Grainger`_
+- ``fail_hard`` should reraise (:pr:`6399`) `crusaderky`_
+- Revisit tests mocking ``gather_dep`` (:pr:`6385`) `crusaderky`_
+- Fix flaky ``test_in_flight_lost_after_resumed`` (:pr:`6372`) `Florian Jetter`_
+- Restore install_signal_handlers due to downstream dependencies (:pr:`6366`) `Hendrik Makait`_
+- Improve ``catch_unhandled_exceptions`` (:pr:`6358`) `Gabe Joseph`_
+- Remove all invocations of ``IOLoop.run_sync`` from CLI (:pr:`6205`) `Hendrik Makait`_
+- Remove ``transition-counter-max`` from config (:pr:`6349`) `crusaderky`_
+- Use ``list`` comprehension in ``pickle_loads`` (:pr:`6343`) `jakirkham`_
+- Improve ``ensure_memoryview`` test coverage & make minor fixes (:pr:`6333`) `jakirkham`_
+- Remove leaking reference to ``workers`` from ``gen_cluster`` (:pr:`6337`) `Hendrik Makait`_
+- Partial annotations for ``stealing.py`` (:pr:`6338`) `crusaderky`_
+- Validate and debug state machine on ``handle_compute_task`` (:pr:`6327`) `crusaderky`_
+- Bump pyupgrade and clean up ``# type: ignore`` (:pr:`6293`) `crusaderky`_
+- ``gen_cluster`` to write to ``/tmp`` (:pr:`6335`) `crusaderky`_
+- Transition table as a ``ClassVar`` (:pr:`6331`) `crusaderky`_
+- Simplify ``ensure_memoryview`` test with ``array`` (:pr:`6322`) `jakirkham`_
+- Refactor ``ensure_communicating`` (:pr:`6165`) `crusaderky`_
+- Review scheduler annotations, part 2 (:pr:`6253`) `crusaderky`_
+- Use ``w`` for ``writeable`` branch in ``pickle_loads`` (:pr:`6314`) `jakirkham`_
+- Simplify frame handling in ``ws`` (:pr:`6294`) `jakirkham`_
+- Use ``ensure_bytes`` from ``dask.utils`` (:pr:`6295`) `jakirkham`_
+- Use ``ensure_memoryview`` in ``array`` deserialization (:pr:`6300`) `jakirkham`_
+- Escape < > when generating Junit report (:pr:`6306`) `crusaderky`_
+- Use ``codecs.decode`` to deserialize errors (:pr:`6274`) `jakirkham`_
+- Minimize copying in ``maybe_compress`` & ``byte_sample`` (:pr:`6273`) `jakirkham`_
+- Skip ``test_release_evloop_while_spilling`` on OSX (:pr:`6291`) `Florian Jetter`_
+- Simplify logic in ``get_default_compression`` (:pr:`6260`) `jakirkham`_
+- Cleanup old compression workarounds (:pr:`6259`) `jakirkham`_
+- Re-enable NVML monitoring for WSL (:pr:`6119`) `Charles Blackmon-Luca`_
+
+
 .. _v2022.05.0:
 
 2022.05.0
@@ -2847,7 +2966,7 @@ This is a small bugfix release due to a config change upstream.
 
 -  Fixed an uncaught exception in ``distributed.joblib`` with a ``LocalCluster`` using only threads (:issue:`1775`) `Tom Augspurger`_
 -  Format bytes in info worker page (:pr:`1752`) `Matthew Rocklin`_
--  Add pass-through arguments for scheduler/worker `--preload` modules. (:pr:`1634`) `Alexander Ford`_
+-  Add pass-through arguments for scheduler/worker `--preload` modules. (:pr:`1634`) `Alex Ford`_
 -  Use new LZ4 API (:pr:`1757`) `Thrasibule`_
 -  Replace dask.optimize with dask.optimization (:pr:`1754`) `Matthew Rocklin`_
 -  Add graph layout engine and bokeh plot (:pr:`1756`) `Matthew Rocklin`_
@@ -2879,7 +2998,7 @@ This is a small bugfix release due to a config change upstream.
 -  Ensure dumps_function works with unhashable functions (:pr:`1662`) `Matthew Rocklin`_
 -  Collect client name ids rom client-name config variable (:pr:`1664`) `Matthew Rocklin`_
 -  Allow simultaneous use of --name and --nprocs in dask-worker (:pr:`1665`) `Matthew Rocklin`_
--  Add support for grouped adaptive scaling and adaptive behavior overrides (:pr:`1632`) `Alexander Ford`_
+-  Add support for grouped adaptive scaling and adaptive behavior overrides (:pr:`1632`) `Alex Ford`_
 -  Share scheduler RPC between worker and client (:pr:`1673`) `Matthew Rocklin`_
 -  Allow ``retries=`` in ClientExecutor (:pr:`1672`) `@rqx`_
 -  Improve documentation for get_client and dask.compute examples (:pr:`1638`) `Scott Sievert`_
@@ -3409,7 +3528,7 @@ significantly without many new features.
 .. _`Daniel Li`: https://github.com/li-dan
 .. _`Brett Naul`: https://github.com/bnaul
 .. _`Cornelius Riemenschneider`: https://github.com/corni
-.. _`Alexander Ford`: https://github.com/asford
+.. _`Alex Ford`: https://github.com/asford
 .. _`@rqx`: https://github.com/rqx
 .. _`Min RK`: https://github.comminrk/
 .. _`Bruce Merry`: https://github.com/bmerry
@@ -3607,3 +3726,7 @@ significantly without many new features.
 .. _`Duncan McGregor`: https://github.com/dmcg
 .. _`Eric Engestrom`: https://github.com/lace
 .. _`ungarj`: https://github.com/ungarj
+.. _`Matthew Murray`: https://github.com/Matt711
+.. _`Enric Tejedor`: https://github.com/etejedor
+.. _`Hendrik Makait`: https://github.com/hendrikmakait
+.. _`Marco Wolsza`: https://github.com/maawoo

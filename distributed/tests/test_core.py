@@ -978,22 +978,22 @@ async def test_server_comms_mark_active_handlers():
             await asyncio.sleep(0.01)
 
 
+@pytest.mark.parametrize("close_via_rpc", [True, False])
 @gen_test()
-async def test_close_fast_without_active_handlers():
-    async def very_fast(comm):
-        return "done"
+async def test_close_fast_without_active_handlers(close_via_rpc):
 
-    server = await Server({"do_stuff": very_fast})
+    server = await Server({})
+    server.handlers["terminate"] = server.close
     await server.listen(0)
     assert server._comms == {}
 
-    comm = await connect(server.address)
-    await comm.write({"op": "do_stuff"})
-    while not server._comms:
-        await asyncio.sleep(0.05)
-    fut = server.close()
-
-    await asyncio.wait_for(fut, 0.1)
+    if not close_via_rpc:
+        fut = server.close()
+        await asyncio.wait_for(fut, 0.5)
+    else:
+        async with rpc(server.address) as _rpc:
+            fut = _rpc.terminate(reply=False)
+            await asyncio.wait_for(fut, 0.5)
 
 
 @gen_test()
@@ -1010,13 +1010,14 @@ async def test_close_grace_period_for_handlers():
     await comm.write({"op": "wait"})
     while not server._comms:
         await asyncio.sleep(0.05)
-    fut = server.close()
+    task = asyncio.create_task(server.close())
+    wait_for_close = asyncio.Event()
+    task.add_done_callback(lambda _: wait_for_close.set)
     # since the handler is running for a while, the close will not immediately
     # go through. We'll give the comm about a second to close itself
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(fut, 0.5)
-    await comm.close()
-    await server.close()
+        await asyncio.wait_for(wait_for_close.wait(), 0.5)
+    await task
 
 
 def test_expects_comm():

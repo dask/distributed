@@ -16,7 +16,6 @@ from queue import Empty
 from time import sleep as sync_sleep
 from typing import TYPE_CHECKING, ClassVar
 
-import psutil
 from tornado import gen
 from tornado.ioloop import IOLoop
 
@@ -135,8 +134,16 @@ class Nanny(ServerNode):
         config=None,
         **worker_kwargs,
     ):
+        if loop is not None:
+            warnings.warn(
+                "the `loop` kwarg to `Nanny` is ignored, and will be removed in a future release. "
+                "The Nanny always binds to the current loop.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         self._setup_logging(logger)
-        self.loop = loop or IOLoop.current()
+        self.loop = self.io_loop = IOLoop.current()
 
         if isinstance(security, dict):
             security = Security(**security)
@@ -247,9 +254,7 @@ class Nanny(ServerNode):
 
         self.plugins: dict[str, NannyPlugin] = {}
 
-        super().__init__(
-            handlers=handlers, io_loop=self.loop, connection_args=self.connection_args
-        )
+        super().__init__(handlers=handlers, connection_args=self.connection_args)
 
         self.scheduler = self.rpc(self.scheduler_addr)
         self.memory_manager = NannyMemoryManager(self, memory_limit=memory_limit)
@@ -485,19 +490,6 @@ class Nanny(ServerNode):
             return "timed out"
         else:
             return "OK"
-
-    @property
-    def _psutil_process(self):
-        pid = self.process.process.pid
-        try:
-            self._psutil_process_obj
-        except AttributeError:
-            self._psutil_process_obj = psutil.Process(pid)
-
-        if self._psutil_process_obj.pid != pid:
-            self._psutil_process_obj = psutil.Process(pid)
-
-        return self._psutil_process_obj
 
     def is_alive(self):
         return self.process is not None and self.process.is_alive()

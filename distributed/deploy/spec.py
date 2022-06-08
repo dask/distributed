@@ -418,7 +418,11 @@ class SpecCluster(Cluster):
 
             await self.scheduler.close()
             for w in self._created:
-                assert w.status in {Status.closed, Status.failed}, w.status
+                assert w.status in {
+                    Status.closing,
+                    Status.closed,
+                    Status.failed,
+                }, w.status
 
         if hasattr(self, "_old_logging_level"):
             silence_logging(self._old_logging_level)
