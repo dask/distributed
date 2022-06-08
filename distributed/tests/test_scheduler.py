@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import operator
-import os
 import pickle
 import re
 import sys
@@ -629,11 +628,8 @@ async def test_restart(c, s, a, b):
 
 
 @gen_cluster(client=True, Worker=Nanny, timeout=60)
-async def test_restart_some_nannies_some_not(
-    c, s, a, b
-):
-    original_pids = {a.process.process.pid, b.process.process.pid}
-    assert all(original_pids)
+async def test_restart_some_nannies_some_not(c, s, a, b):
+    original_procs = {a.process.process, b.process.process}
     original_workers = dict(s.workers)
     async with Worker(s.address, nthreads=1) as w:
         await c.wait_for_workers(3)
@@ -668,8 +664,9 @@ async def test_restart_some_nannies_some_not(
 
         assert len(s.workers) == 2
         # Confirm they restarted
-        new_pids = set((await c.run(os.getpid)).values())
-        assert new_pids != original_pids
+        # NOTE: == for `psutil.Process` compares PID and creation time
+        new_procs = {a.process.process, b.process.process}
+        assert new_procs != original_procs
         # The workers should have new addresses
         assert s.workers.keys().isdisjoint(original_workers.keys())
         # The old WorkerState instances should be replaced
