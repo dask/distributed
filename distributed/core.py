@@ -506,14 +506,13 @@ class Server:
             self.__stopped = True
 
             for listener in self.listeners:
-                # Delay closing the server socket until the next IO loop tick.
-                # Otherwise race conditions can appear if an event handler
-                # for an accept() call is already scheduled by the IO loop,
-                # raising EBADF.
-                # The demonstrator for this is Worker.terminate(), which
-                # closes the server socket in response to an incoming message.
-                # See https://github.com/tornadoweb/tornado/issues/2069
-                listener.stop()
+
+                async def stop_listener(listener):
+                    v = listener.stop()
+                    if inspect.isawaitable(v):
+                        await v
+
+                self._ongoing_background_tasks.call_soon(stop_listener, listener)
 
     @property
     def listener(self):
