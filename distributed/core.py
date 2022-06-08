@@ -160,7 +160,6 @@ class AsyncTaskGroup(_LoopBoundMixin):
             If the task group is closed.
         """
         if self.closed:
-            coro.close()
             raise AsyncTaskGroupClosedError(
                 "Cannot schedule a new coroutine as the group is already closed."
             )
@@ -195,6 +194,10 @@ class AsyncTaskGroup(_LoopBoundMixin):
         AsyncTaskGroupClosedError
             If the task group is closed.
         """
+        if self.closed:
+            raise AsyncTaskGroupClosedError(
+                "Cannot schedule a new coroutine function as the group is already closed."
+            )
         return self.schedule(afunc(*args, **kwargs))
 
     def call_later(
@@ -747,7 +750,11 @@ class Server:
                         else:
                             result = handler(**msg)
                         if inspect.iscoroutine(result):
-                            result = self._ongoing_comm_handlers.schedule(result)
+                            try:
+                                result = self._ongoing_comm_handlers.schedule(result)
+                            except AsyncTaskGroupClosedError:
+                                result.close()  # TODO: Don't call coroutinefunctions that we can't await
+                                return
                             result = await result
                         elif inspect.isawaitable(result):
                             raise RuntimeError(
