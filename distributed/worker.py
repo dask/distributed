@@ -1215,9 +1215,6 @@ class Worker(ServerNode):
         if self.heartbeat_active:
             logger.debug("Heartbeat skipped: channel busy")
             return
-        if self.status in {Status.closing, Status.closed, Status.failed}:
-            logger.debug(f"Heartbeat skipped: {self.status=}")
-            return
         self.heartbeat_active = True
         logger.debug("Heartbeat: %s", self.address)
         try:
