@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
 from collections.abc import Iterator
 
 import pytest
@@ -613,3 +615,45 @@ async def test_missing_to_waiting(c, s, w1, w2, w3):
     await w1.close()
 
     await f1
+
+
+client_script = """
+from dask.distributed import Client
+from dask.distributed.worker_state_machine import TaskState
+
+
+def inc(x):
+    return x + 1
+
+
+if __name__ == "__main__":
+    with Client(processes=%s, n_workers=1) as client:
+        futs = client.map(inc, range(10))
+        red = client.submit(sum, futs)
+        f1 = client.submit(inc, red, pure=False)
+        f2 = client.submit(inc, red, pure=False)
+        f2.result()
+        del futs, red, f1, f2
+
+        def check():
+            assert not TaskState._instances, len(TaskState._instances)
+
+        client.run(check)
+"""
+
+
+@pytest.mark.parametrize("processes", [True, False])
+def test_task_state_instance_are_garbage_collected(processes, tmp_path):
+    with open(tmp_path / "script.py", mode="w") as f:
+        f.write(client_script % processes)
+
+    proc = subprocess.Popen(
+        [sys.executable, tmp_path / "script.py"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    out, err = proc.communicate(timeout=10)
+
+    assert not out
+    assert not err
