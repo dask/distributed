@@ -3459,17 +3459,16 @@ class Worker(ServerNode):
         """gather_dep terminated: network failure while trying to
         communicate with remote worker
         """
-        self.data_needed_per_worker.pop(ev.worker)
-
-        refetch_tasks = set(self._gather_dep_done_common(ev))
-        for key in self.has_what[ev.worker]:
-            refetch_tasks.add(self.tasks[key])
+        refetch = set(self._gather_dep_done_common(ev))
+        refetch |= {self.tasks[key] for key in self.has_what[ev.worker]}
 
         recs, instrs = merge_recs_instructions(
-            self._refetch_missing_data(ev.worker, refetch_tasks, ev.stimulus_id),
+            self._refetch_missing_data(ev.worker, refetch, ev.stimulus_id),
             self._ensure_communicating(stimulus_id=ev.stimulus_id),
         )
+        # This cleanup must happen after _refetch_missing_data
         del self.has_what[ev.worker]
+        del self.data_needed_per_worker[ev.worker]
         return recs, instrs
 
     @_handle_event.register
