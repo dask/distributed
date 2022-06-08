@@ -5097,18 +5097,13 @@ class Scheduler(SchedulerState, ServerNode):
 
         # Close non-Nanny workers. We have no way to restart them, so we just let them go,
         # and assume a deployment system is going to restart them for us.
-        close_results = await asyncio.gather(
+        await asyncio.gather(
             *(
                 self.remove_worker(address=addr, stimulus_id=stimulus_id)
                 for addr in self.workers
                 if addr not in nanny_workers
-            ),
-            return_exceptions=True,
+            )
         )
-        for r in close_results:
-            if isinstance(r, Exception):
-                # TODO this is probably not, in fact, normal.
-                logger.info("Exception while restarting.  This is normal.", exc_info=r)
 
         self.clear_task_state()
 
