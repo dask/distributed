@@ -238,6 +238,7 @@ class AsyncTaskGroup(_LoopBoundMixin):
                     timeout,
                 )
             except asyncio.TimeoutError:
+                # The timeout on gather has cancelled the tasks, so this will not hang indefinitely
                 await asyncio.gather(*tasks_to_stop, return_exceptions=True)
 
             if [t for t in self._ongoing_tasks if t is not current_task]:
