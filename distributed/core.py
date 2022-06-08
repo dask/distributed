@@ -194,7 +194,7 @@ class AsyncTaskGroup(_LoopBoundMixin):
         AsyncTaskGroupClosedError
             If the task group is closed.
         """
-        if self.closed:
+        if self.closed:  # Avoid creating a coroutine
             raise AsyncTaskGroupClosedError(
                 "Cannot schedule a new coroutine function as the group is already closed."
             )
