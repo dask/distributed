@@ -244,8 +244,6 @@ class TaskState:
         return f"<TaskState {self.key!r} {self.state}>"
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, TaskState) or other.key != self.key:
-            return False
         return other is self
 
     def __hash__(self) -> int:
