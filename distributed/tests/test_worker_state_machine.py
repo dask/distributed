@@ -15,6 +15,7 @@ from distributed.utils_test import (
     BlockedGetData,
     _LockedCommPool,
     assert_story,
+    clean,
     freeze_data_fetching,
     gen_cluster,
     inc,
@@ -43,6 +44,7 @@ async def wait_for_state(key: str, state: TaskStateState, dask_worker: Worker) -
         await asyncio.sleep(0.005)
 
 
+@clean()
 def test_task_state_tracking():
     x = TaskState("x")
     assert len(TaskState._instances) == 1
