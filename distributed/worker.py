@@ -3377,7 +3377,14 @@ class Worker(ServerNode):
                     stimulus_id=stimulus_id,
                 )
             )
-            recommendations[ts] = "fetch"
+            if ts.state in ("flight", "resumed", "cancelled"):
+                # This will actually transition to missing if who_has is empty
+                recommendations[ts] = "fetch"
+            elif ts.state == "fetch":
+                self.data_needed_per_worker[worker].discard(ts)
+                if not ts.who_has:
+                    recommendations[ts] = "missing"
+
         return recommendations, instructions
 
     @_handle_event.register
@@ -3395,8 +3402,8 @@ class Worker(ServerNode):
 
         return merge_recs_instructions(
             (recommendations, []),
-            self._ensure_communicating(stimulus_id=ev.stimulus_id),
             self._refetch_missing_data(ev.worker, refetch, ev.stimulus_id),
+            self._ensure_communicating(stimulus_id=ev.stimulus_id),
         )
 
     @_handle_event.register
@@ -3438,43 +3445,18 @@ class Worker(ServerNode):
         """gather_dep terminated: network failure while trying to
         communicate with remote worker
         """
-        logger.exception("Worker stream died during communication: %s", ev.worker)
-
-        # if state in (fetch, flight, resumed, cancelled):
-        #     if ts.who_has is now empty:
-        #         transition to missing; don't send data-missing
-        #     elif ts in GatherDep.keys:
-        #         transition to fetch; send data-missing
-        #     else:
-        #         don't transition
-        # elif ts in GatherDep.keys:
-        #     transition to fetch; send data-missing
-        # else:
-        #     don't transition
-
-        has_what = self.has_what.pop(ev.worker)
         self.data_needed_per_worker.pop(ev.worker)
-        recommendations: Recs = {}
-        for d in has_what:
-            ts = self.tasks[d]
-            ts.who_has.remove(ev.worker)
-            if not ts.who_has and ts.state in (
-                "fetch",
-                "flight",
-                "resumed",
-                "cancelled",
-            ):
-                recommendations[ts] = "missing"
-                self.log.append(
-                    ("missing-who-has", ev.worker, ts.key, ev.stimulus_id, time())
-                )
 
-        refetch_tasks = set(self._gather_dep_done_common(ev)) - recommendations.keys()
-        return merge_recs_instructions(
-            (recommendations, []),
-            self._ensure_communicating(stimulus_id=ev.stimulus_id),
+        refetch_tasks = set(self._gather_dep_done_common(ev))
+        for key in self.has_what[ev.worker]:
+            refetch_tasks.add(self.tasks[key])
+
+        recs, instrs = merge_recs_instructions(
             self._refetch_missing_data(ev.worker, refetch_tasks, ev.stimulus_id),
+            self._ensure_communicating(stimulus_id=ev.stimulus_id),
         )
+        del self.has_what[ev.worker]
+        return recs, instrs
 
     @_handle_event.register
     def _handle_gather_dep_failure(self, ev: GatherDepFailureEvent) -> RecsInstrs:
