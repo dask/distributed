@@ -2186,7 +2186,14 @@ class Worker(ServerNode):
     def transition_fetch_missing(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
-        self.data_needed.remove(ts)
+        # There's a use case where ts won't be found in self.data_needed, so
+        # `self.data_needed.remove(ts)` would crash:
+        # 1. An event handler empties who_has and pushes a recommendation to missing
+        # 2. The same event handler calls _ensure_communicating, which pops the task
+        #    from data_needed
+        # 3. The recommendation is enacted
+        # See matching code in _ensure_communicating.
+        self.data_needed.discard(ts)
         return self.transition_generic_missing(ts, stimulus_id=stimulus_id)
 
     def transition_memory_released(
@@ -3008,8 +3015,15 @@ class Worker(ServerNode):
 
             if self.validate:
                 assert ts.state == "fetch"
-                assert ts.who_has
                 assert self.address not in ts.who_has
+
+            if not ts.who_has:
+                # An event handler just emptied who_has and recommended a fetch->missing
+                # transition. Then, the same handler called _ensure_communicating. The
+                # transition hasn't been enacted yet, so the task is still in fetch
+                # state and in data_needed.
+                # See matching code in transition_fetch_missing.
+                continue
 
             workers = [
                 w
