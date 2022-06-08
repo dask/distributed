@@ -14,7 +14,7 @@ from tornado.ioloop import IOLoop
 import dask
 from dask.utils import key_split
 
-from distributed.client import default_client, futures_of
+from distributed.client import Client, futures_of
 from distributed.core import (
     CommClosedError,
     clean_exception,
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 def get_scheduler(scheduler):
     if scheduler is None:
-        return default_client().scheduler.address
+        return Client.current().scheduler.address
     return coerce_to_address(scheduler)
 
 

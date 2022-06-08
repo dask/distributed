@@ -691,7 +691,7 @@ def cluster(
                 for w in workers_by_pid.values()
             ]
         try:
-            client = default_client()
+            client = Client.current()
         except ValueError:
             pass
         else:

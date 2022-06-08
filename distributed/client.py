@@ -1447,10 +1447,12 @@ class Client(SyncMethodMixin):
     def __enter__(self):
         if not self._loop_runner.is_started():
             self.start()
+        self._previous_as_current = _current_client.set(self)
         return self
 
     async def __aenter__(self):
         await self
+        self._previous_as_current = _current_client.set(self)
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
@@ -1460,9 +1462,17 @@ class Client(SyncMethodMixin):
             fast=exc_type
             is not None
         )
+        try:
+            _current_client.reset(self._previous_as_current)
+        except ValueError:
+            raise RuntimeError("Closed Clients in wrong order")
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
+        try:
+            _current_client.reset(self._previous_as_current)
+        except ValueError:
+            raise RuntimeError("Closed Clients in wrong order")
 
     def __del__(self):
         # If the loop never got assigned, we failed early in the constructor,
@@ -4900,7 +4910,7 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
     """
     if timeout is not None and isinstance(timeout, (Number, str)):
         timeout = parse_timedelta(timeout, default="s")
-    client = default_client()
+    client = Client.current()
     result = client.sync(_wait, fs, timeout=timeout, return_when=return_when)
     return result
 
@@ -4997,7 +5007,7 @@ class as_completed:
         self.futures = defaultdict(lambda: 0)
         self.queue = pyQueue()
         self.lock = threading.Lock()
-        self.loop = loop or default_client().loop
+        self.loop = loop or Client.current().loop
         self.thread_condition = threading.Condition()
         self.with_results = with_results
         self.raise_errors = raise_errors
@@ -5538,7 +5548,7 @@ def temp_default_client(c):
     c : Client
         This is what default_client() will return within the with-block.
     """
-    old_exec = default_client()
+    old_exec = Client.current()
     _set_global_client(c)
     try:
         yield
