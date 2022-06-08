@@ -143,32 +143,6 @@ class AsyncTaskGroup(_LoopBoundMixin):
         self.closed = False
         self._ongoing_tasks: set[asyncio.Task] = set()
 
-    def schedule(self, coro: Coroutine) -> asyncio.Task:
-        """Schedules a coroutine object to be executed as an `asyncio.Task`.
-
-        Parameters
-        ----------
-        coro
-            Coroutine object to schedule.
-
-        Returns
-        -------
-            The scheduled Task object.
-
-        Raises
-        ------
-        AsyncTaskGroupClosedError
-            If the task group is closed.
-        """
-        if self.closed:
-            raise AsyncTaskGroupClosedError(
-                "Cannot schedule a new coroutine as the group is already closed."
-            )
-        task = self._get_loop().create_task(coro)
-        task.add_done_callback(self._ongoing_tasks.remove)
-        self._ongoing_tasks.add(task)
-        return task
-
     def call_soon(
         self, afunc: Callable[..., Coroutine], *args, **kwargs
     ) -> asyncio.Task:
@@ -199,7 +173,10 @@ class AsyncTaskGroup(_LoopBoundMixin):
             raise AsyncTaskGroupClosedError(
                 "Cannot schedule a new coroutine function as the group is already closed."
             )
-        return self.schedule(afunc(*args, **kwargs))
+        task = self._get_loop().create_task(afunc(*args, **kwargs))
+        task.add_done_callback(self._ongoing_tasks.remove)
+        self._ongoing_tasks.add(task)
+        return task
 
     def call_later(
         self, delay: float, afunc: Callable[..., Coroutine], *args, **kwargs
