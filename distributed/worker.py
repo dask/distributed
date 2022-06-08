@@ -4951,7 +4951,7 @@ async def run(server, comm, function, args=(), kwargs=None, wait=True):
             if wait:
                 result = await function(*args, **kwargs)
             else:
-                server.call_soon(function, *args, **kwargs)
+                server._ongoing_background_tasks.call_soon(function, *args, **kwargs)
                 result = None
 
     except Exception as e:

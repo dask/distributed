@@ -5129,7 +5129,7 @@ async def test_long_running_not_in_occupancy(c, s, a, raise_exception):
     assert s.total_occupancy == 0
     assert ws.occupancy == 0
 
-    s.call_soon(s.reevaluate_occupancy, 0)
+    s._ongoing_background_tasks.call_soon(s.reevaluate_occupancy, 0)
     assert s.workers[a.address].occupancy == 0
     await l.release()
 
