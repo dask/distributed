@@ -37,6 +37,7 @@ from distributed.comm import (
 from distributed.metrics import time
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
+    NoOpAwaitable,
     delayed,
     get_traceback,
     has_keyword,
@@ -511,16 +512,17 @@ class Server:
         """Start Periodic Callbacks consistently
 
         This starts all PeriodicCallbacks stored in self.periodic_callbacks if
-        they are not yet running.  It does this safely on the IOLoop.
+        they are not yet running. It does this safely by checking that it is using the
+        correct event loop.
         """
+        if self.io_loop.asyncio_loop is not asyncio.get_running_loop():
+            raise RuntimeError(f"{self!r} is bound to a different event loop")
+
         self._last_tick = time()
-
-        async def start_pcs():
-            for pc in self.periodic_callbacks.values():
-                if not pc.is_running():
-                    pc.start()
-
-        self._ongoing_background_tasks.call_soon(start_pcs)
+        for pc in self.periodic_callbacks.values():
+            if not pc.is_running():
+                logger.info("Starting periodic callback {pc!r}")
+                pc.start()
 
     def stop(self):
         if not self.__stopped:
@@ -534,10 +536,7 @@ class Server:
                 # The demonstrator for this is Worker.terminate(), which
                 # closes the server socket in response to an incoming message.
                 # See https://github.com/tornadoweb/tornado/issues/2069
-                async def _stop_listener():
-                    listener.stop()
-
-                self._ongoing_background_tasks.call_soon(_stop_listener)
+                listener.stop()
 
     @property
     def listener(self):
@@ -662,7 +661,11 @@ class Server:
         )
         self.listeners.append(listener)
 
-    async def handle_comm(self, comm):
+    def handle_comm(self, comm):
+        self._ongoing_background_tasks.call_soon(self._handle_comm, comm)
+        return NoOpAwaitable()
+
+    async def _handle_comm(self, comm):
         """Dispatch new communications to coroutine-handlers
 
         Handlers is a dictionary mapping operation names to functions or
@@ -756,11 +759,6 @@ class Server:
                         else:
                             result = handler(**msg)
                         if inspect.iscoroutine(result):
-                            try:
-                                result = self._ongoing_comm_handlers.schedule(result)
-                            except AsyncTaskGroupClosedError:
-                                result.close()  # TODO: Don't call coroutinefunctions that we can't await
-                                return
                             result = await result
                         elif inspect.isawaitable(result):
                             raise RuntimeError(
