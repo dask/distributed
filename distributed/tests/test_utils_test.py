@@ -777,11 +777,12 @@ def test_fail_hard(sync):
 
 
 def test_popen_write_during_terminate_deadlock():
-    # Fabricate a command which, when terminated, tries to write more than the pipe buffer can hold
-    # (OS specific: on Linux it's typically 65536 bytes; on Windows it's less).
-    # This would deadlock if `proc.wait()` was called, since the process will be trying to write to stdout, but
-    # stdout isn't being cleared because our process is blocked in `proc.wait()`.
-    # `proc.communicate()` is necessary: https://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
+    # Fabricate a command which, when terminated, tries to write more than the pipe
+    # buffer can hold (OS specific: on Linux it's typically 65536 bytes; on Windows it's
+    # less). This would deadlock if `proc.wait()` was called, since the process will be
+    # trying to write to stdout, but stdout isn't being cleared because our process is
+    # blocked in `proc.wait()`. `proc.communicate()` is necessary:
+    # https://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
     with popen(
         [
             sys.executable,
@@ -808,5 +809,5 @@ def test_popen_write_during_terminate_deadlock():
     ) as proc:
         assert proc.stdout.readline().strip() == b"ready"
 
-    # Exiting the context manager (terminating the subprocess) will raise `subprocess.TimeoutExpired`
-    # if this test breaks.
+    # Exiting the context manager (terminating the subprocess) will raise
+    # `subprocess.TimeoutExpired` if this test breaks.
