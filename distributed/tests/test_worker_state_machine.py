@@ -638,7 +638,7 @@ async def test_fetch_to_missing_on_refresh_who_has(c, s, w1, w2, w3):
     # {op: refresh-who-has, who_has={x: [w1.address], y: [w1.address]}}
 
     # Let's instead simulate that, while request-refresh-who-has was in transit,
-    # w2 gained a replica of y and then subsequently w1 closed down.
+    # w2 gained a replica of y and w1 closed down.
     # When request-refresh-who-has lands, the scheduler will respond:
     # {op: refresh-who-has, who_has={x: [], y: [w2.address]}}
     w3.handle_stimulus(
