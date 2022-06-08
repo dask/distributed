@@ -4288,6 +4288,11 @@ class Worker(ServerNode):
             if self.transition_counter_max:
                 assert self.transition_counter < self.transition_counter_max
 
+            # Test that there aren't multiple TaskState objects with the same key in data_needed
+            assert len({ts.key for ts in self.data_needed}) == len(self.data_needed)
+            for tss in self.data_needed_per_worker.values():
+                assert len({ts.key for ts in tss}) == len(tss)
+
         except Exception as e:
             logger.error("Validate state failed", exc_info=e)
             logger.exception(e)
