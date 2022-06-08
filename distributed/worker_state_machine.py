@@ -244,6 +244,10 @@ class TaskState:
         return f"<TaskState {self.key!r} {self.state}>"
 
     def __eq__(self, other: object) -> bool:
+        # A task may be forgotten and a new TaskState object with the same key may be created in
+        # its place later on. In the Worker state, you should never have multiple TaskState objects with
+        # the same key. We can't assert it here however, as this comparison is also used in WeakSets
+        # for instance tracking purposes.
         return other is self
 
     def __hash__(self) -> int:
