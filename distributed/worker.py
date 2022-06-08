@@ -1471,17 +1471,35 @@ class Worker(ServerNode):
     @log_errors
     async def close(
         self,
-        timeout=30,
-        executor_wait=True,
-        nanny=True,
-    ):
+        timeout: float = 30,
+        executor_wait: bool = True,
+        nanny: bool = True,
+    ) -> str | None:
+        """Close the worker
+
+        Close asynchronous operations running on the worker, stop all executors and comms. If requested, this also closes the nanny.
+
+        Parameters
+        ----------
+        timeout : float, default 30
+            Timeout in seconds for shutting down individual instructions
+        executor_wait : bool, default True
+            If True, shut down executors synchronously, otherwise asynchronously
+        nanny : bool, default True
+            If True, close the nanny
+
+        Returns
+        -------
+        str | None
+            None if worker already in closing state or failed, "OK" otherwise
+        """
         # FIXME: The worker should not be allowed to close the nanny. Ownership
         # is the other way round. If an external caller wants to close
         # nanny+worker, the nanny must be notified first. ==> Remove kwarg
         # nanny, see also Scheduler.retire_workers
         if self.status in (Status.closed, Status.closing, Status.failed):
             await self.finished()
-            return
+            return None
 
         if self.status == Status.init:
             # If the worker is still in startup/init and is started by a nanny,
