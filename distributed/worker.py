@@ -3290,6 +3290,7 @@ class Worker(ServerNode):
             )
             stop = time()
             if response["status"] == "busy":
+                self.log.append(("busy-gather", worker, to_gather, stimulus_id, time()))
                 return GatherDepBusyEvent(
                     worker=worker,
                     total_nbytes=total_nbytes,
@@ -3305,7 +3306,9 @@ class Worker(ServerNode):
                 cause=cause,
                 worker=worker,
             )
-
+            self.log.append(
+                ("receive-dep", worker, set(response["data"]), stimulus_id, time())
+            )
             return GatherDepSuccessEvent(
                 worker=worker,
                 total_nbytes=total_nbytes,
@@ -3314,6 +3317,10 @@ class Worker(ServerNode):
             )
 
         except OSError:
+            logger.exception("Worker stream died during communication: %s", worker)
+            self.log.append(
+                ("receive-dep-failed", worker, to_gather, stimulus_id, time())
+            )
             return GatherDepNetworkFailureEvent(
                 worker=worker,
                 total_nbytes=total_nbytes,
@@ -3323,6 +3330,11 @@ class Worker(ServerNode):
         except Exception as e:
             # e.g. data failed to deserialize
             logger.exception(e)
+            if self.batched_stream and LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+
             return GatherDepFailureEvent.from_exception(
                 e,
                 worker=worker,
@@ -3331,9 +3343,13 @@ class Worker(ServerNode):
             )
 
     def _gather_dep_done_common(self, ev: GatherDepDoneEvent) -> Iterator[TaskState]:
-        """Common code for all subclasses of GatherDepDoneEvent"""
+        """Common code for all subclasses of GatherDepDoneEvent.
+
+        Yields the tasks that need to transition out of flight.
+        """
         self.comm_nbytes -= ev.total_nbytes
-        for key in self.in_flight_workers.pop(ev.worker):
+        keys = self.in_flight_workers.pop(ev.worker)
+        for key in keys:
             ts = self.tasks[key]
             ts.done = True
             yield ts
@@ -3341,7 +3357,12 @@ class Worker(ServerNode):
     def _refetch_missing_data(
         self, worker: str, tasks: Iterable[TaskState], stimulus_id: str
     ) -> RecsInstrs:
-        """Helper of GatherDepDoneEvent subclass handlers"""
+        """Helper of GatherDepSuccessEvent and GatherDepNetworkFailureEvent handlers.
+
+        Remove tasks that were not returned from the peer worker from has_what and
+        inform the scheduler with a missing-data message. Then, transition them back to
+        'fetch' so that they can be fetched from another worker.
+        """
         recommendations: Recs = {}
         instructions: Instructions = []
 
@@ -3364,10 +3385,6 @@ class Worker(ServerNode):
         """gather_dep terminated successfully.
         The response may contain less keys than the request.
         """
-        self.log.append(
-            ("receive-dep", ev.worker, set(ev.data), ev.stimulus_id, time())
-        )
-
         recommendations: Recs = {}
         refetch = set()
         for ts in self._gather_dep_done_common(ev):
@@ -3385,16 +3402,6 @@ class Worker(ServerNode):
     @_handle_event.register
     def _handle_gather_dep_busy(self, ev: GatherDepBusyEvent) -> RecsInstrs:
         """gather_dep terminated: remote worker is busy"""
-        self.log.append(
-            (
-                "busy-gather",
-                ev.worker,
-                set(self.in_flight_workers[ev.worker]),
-                ev.stimulus_id,
-                time(),
-            )
-        )
-
         # Avoid hammering the worker. If there are multiple replicas
         # available, immediately try fetching from a different worker.
         self.busy_workers.add(ev.worker)
@@ -3409,6 +3416,7 @@ class Worker(ServerNode):
         instructions: Instructions = [
             RetryBusyWorkerLater(worker=ev.worker, stimulus_id=ev.stimulus_id),
         ]
+
         if refresh_who_has:
             # All workers that hold known replicas of our tasks are busy.
             # Try querying the scheduler for unknown ones.
@@ -3446,9 +3454,6 @@ class Worker(ServerNode):
 
         has_what = self.has_what.pop(ev.worker)
         self.data_needed_per_worker.pop(ev.worker)
-        self.log.append(
-            ("receive-dep-failed", ev.worker, has_what, ev.stimulus_id, time())
-        )
         recommendations: Recs = {}
         for d in has_what:
             ts = self.tasks[d]
