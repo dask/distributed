@@ -128,6 +128,10 @@ class _LoopBoundMixin:
         return loop
 
 
+class AsyncTaskGroupClosedError(RuntimeError):
+    pass
+
+
 class AsyncTaskGroup(_LoopBoundMixin):
     """Collection tracking all currently running asynchronous tasks within a group"""
 
@@ -138,7 +142,7 @@ class AsyncTaskGroup(_LoopBoundMixin):
         self.closed = False
         self._ongoing_tasks: set[asyncio.Task] = set()
 
-    def schedule(self, coro: Coroutine) -> asyncio.Task | None:
+    def schedule(self, coro: Coroutine) -> asyncio.Task:
         """Schedules a coroutine object to be executed as an `asyncio.Task`.
 
         Parameters
@@ -148,11 +152,18 @@ class AsyncTaskGroup(_LoopBoundMixin):
 
         Returns
         -------
-            The scheduled Task object, or None if the group is closed.
+            The scheduled Task object.
+
+        Raises
+        ------
+        AsyncTaskGroupClosedError
+            If the task group is closed.
         """
         if self.closed:
             coro.close()
-            return None
+            raise AsyncTaskGroupClosedError(
+                "Cannot schedule a new coroutine as the group is already closed."
+            )
         task = self._get_loop().create_task(coro)
         task.add_done_callback(self._ongoing_tasks.remove)
         self._ongoing_tasks.add(task)
@@ -160,7 +171,7 @@ class AsyncTaskGroup(_LoopBoundMixin):
 
     def call_soon(
         self, afunc: Callable[..., Coroutine], *args, **kwargs
-    ) -> asyncio.Task | None:
+    ) -> asyncio.Task:
         """Schedule a coroutine function to be executed as an `asyncio.Task`.
 
         The coroutine function `afunc` is scheduled with `args` arguments and `kwargs` keyword arguments
@@ -177,13 +188,18 @@ class AsyncTaskGroup(_LoopBoundMixin):
 
         Returns
         -------
-            The scheduled Task object, or None if the group is closed.
+            The scheduled Task object.
+
+        Raises
+        ------
+        AsyncTaskGroupClosedError
+            If the task group is closed.
         """
         return self.schedule(afunc(*args, **kwargs))
 
     def call_later(
         self, delay: float, afunc: Callable[..., Coroutine], *args, **kwargs
-    ) -> asyncio.Task | None:
+    ) -> asyncio.Task:
         """Schedule a coroutine function to be executed after `delay` seconds as an `asyncio.Task`.
 
         The coroutine function `afunc` is scheduled with `args` arguments and `kwargs` keyword arguments
@@ -202,7 +218,12 @@ class AsyncTaskGroup(_LoopBoundMixin):
 
         Returns
         -------
-            The scheduled Task object, or None if the group is closed.
+            The scheduled Task object.
+
+        Raises
+        ------
+        AsyncTaskGroupClosedError
+            If the task group is closed.
         """
         return self.call_soon(delayed(afunc, delay), *args, **kwargs)
 
