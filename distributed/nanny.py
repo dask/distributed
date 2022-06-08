@@ -498,7 +498,7 @@ class Nanny(ServerNode):
         return run(self, comm, *args, **kwargs)
 
     def _on_exit_sync(self, exitcode):
-        self.call_soon(self._on_exit, exitcode)
+        self._ongoing_background_tasks.call_soon(self._on_exit, exitcode)
 
     @log_errors
     async def _on_exit(self, exitcode):
@@ -595,7 +595,7 @@ class Nanny(ServerNode):
         )
 
     def log_event(self, topic, msg):
-        self.call_soon(self._log_event, topic, msg)
+        self._ongoing_background_tasks.call_soon(self._log_event, topic, msg)
 
 
 class WorkerProcess:

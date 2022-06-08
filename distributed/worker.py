@@ -1683,7 +1683,7 @@ class Worker(ServerNode):
 
                 bcomm.start(comm)
 
-            self.call_soon(batched_send_connect)
+            self._ongoing_background_tasks.call_soon(batched_send_connect)
 
         self.stream_comms[address].send(msg)
 
