@@ -28,6 +28,7 @@ from concurrent.futures import Executor
 from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
+from itertools import groupby
 from pickle import PicklingError
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
@@ -4287,6 +4288,9 @@ class Worker(ServerNode):
 
             if self.transition_counter_max:
                 assert self.transition_counter < self.transition_counter_max
+
+            for _, tss in groupby(TaskState._instances, key=lambda ts: ts.key):
+                assert sum(ts.state != "forgotten" for ts in tss) <= 1
 
         except Exception as e:
             logger.error("Validate state failed", exc_info=e)
