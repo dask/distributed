@@ -3458,6 +3458,14 @@ class Worker(ServerNode):
     ) -> RecsInstrs:
         """gather_dep terminated: network failure while trying to
         communicate with remote worker
+        
+        Though the network failure could be transient, we assume it is not, and
+        preemptively act as though the other worker has died (including removing all
+        keys from it, even ones we did not fetch).
+
+        This optimization leads to faster completion of the fetch, since we immediately
+        either retry a different worker, or ask the scheduler to inform us of a new
+        worker if no other worker is available.
         """
         refetch = set(self._gather_dep_done_common(ev))
         refetch |= {self.tasks[key] for key in self.has_what[ev.worker]}
