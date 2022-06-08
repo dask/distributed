@@ -634,7 +634,7 @@ async def test_fetch_to_missing_on_refresh_who_has(c, s, w1, w2, w3):
     assert w1.address in w3.busy_workers
     # w3 sent {op: request-refresh-who-has, keys: [x, y]}
     # There also may have been enough time for a refresh-who-has message to come back,
-    # which reiterated what the w3 already knew:
+    # which reiterated what w3 already knew:
     # {op: refresh-who-has, who_has={x: [w1.address], y: [w1.address]}}
 
     # Let's instead simulate that, while request-refresh-who-has was in transit,
