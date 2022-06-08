@@ -34,7 +34,6 @@ from distributed.utils_test import (
     gen_cluster,
     gen_test,
     raises_with_cause,
-    raises_with_causes,
 )
 
 pytestmark = pytest.mark.ci1
@@ -476,10 +475,6 @@ async def test_nanny_closed_by_keyboard_interrupt(protocol):
             assert "remove-worker" in str(s.events)
 
 
-class StartException(Exception):
-    pass
-
-
 class BrokenWorker(worker.Worker):
     def __init__(self, startup_attempts, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -488,7 +483,7 @@ class BrokenWorker(worker.Worker):
     async def start_unsafe(self):
         with self.startup_attempts.get_lock():
             self.startup_attempts.value += 1
-        raise StartException("broken")
+        raise ValueError("broken")
 
 
 @gen_cluster(nthreads=[])
@@ -498,10 +493,11 @@ async def test_worker_start_exception(s):
         s.address, worker_class=BrokenWorker, startup_attempts=startup_attempts
     )
     with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
-        with raises_with_causes(
-            (RuntimeError, "Nanny failed to start"),
-            (RuntimeError, "Worker failed to start"),
-            (StartException, "broken"),
+        with raises_with_cause(
+            RuntimeError,
+            "Nanny failed to start",
+            RuntimeError,
+            "BrokenWorker failed to start",
         ):
             async with nanny:
                 pass
@@ -511,9 +507,7 @@ async def test_worker_start_exception(s):
     assert startup_attempts.value == 1
     assert "Restarting worker" not in logs.getvalue()
     # Avoid excessive spewing. (It's also printed once extra within the subprocess, which is okay.)
-    assert (
-        logs.getvalue().count("test_nanny.StartException: broken") == 1
-    ), logs.getvalue()
+    assert logs.getvalue().count("ValueError: broken") == 1, logs.getvalue()
 
 
 @gen_cluster(nthreads=[])

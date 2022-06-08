@@ -2152,33 +2152,3 @@ def raises_with_cause(
         assert re.search(
             match_cause, str(exc.__cause__)
         ), f"Pattern ``{match_cause}`` not found in ``{exc.__cause__}``"
-
-
-@contextmanager
-def raises_with_causes(
-    *exceptions_matches: tuple[
-        type[BaseException] | tuple[type[BaseException], ...], str | None
-    ]
-) -> Generator[None, None, None]:
-    """Contextmanager to assert that an exception with an arbitrary chain of causes was raised
-
-    Like `raises_with_cause`, but supports multiple chained causes (with more verbose syntax).
-    """
-    assert exceptions_matches
-    expected, match = exceptions_matches[0]
-
-    with pytest.raises(expected, match=match) as exc_info:
-        yield
-
-    exc = exc_info.value
-    for expected, match in exceptions_matches[1:]:
-        assert (cause := exc.__cause__)
-        assert isinstance(
-            cause, expected
-        ), f"Exception {exc} not caused by {expected}, but rather {exc.__cause__}"
-        if match:
-            assert re.search(
-                match, str(exc.__cause__)
-            ), f"Pattern ``{match}`` not found in ``{exc.__cause__}``"
-
-        exc = cause
