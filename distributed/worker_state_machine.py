@@ -246,11 +246,7 @@ class TaskState:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, TaskState) or other.key != self.key:
             return False
-        # When a task transitions to forgotten and exits Worker.tasks, it should be
-        # immediately dereferenced. If the same task is recreated later on on the
-        # worker, we should not have to deal with its previous incarnation lingering.
-        assert other is self
-        return True
+        return other is self
 
     def __hash__(self) -> int:
         return hash(self.key)
