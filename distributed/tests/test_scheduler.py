@@ -630,9 +630,10 @@ async def test_restart(c, s, a, b):
 
 @gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_restart_some_nannies_some_not(
-    c: Client, s: Scheduler, a: Nanny, b: Nanny
+    c, s, a, b
 ):
-    original_pids = set((await c.run(os.getpid)).values())
+    original_pids = {a.process.process.pid, b.process.process.pid}
+    assert all(original_pids)
     original_workers = dict(s.workers)
     async with Worker(s.address, nthreads=1) as w:
         await c.wait_for_workers(3)

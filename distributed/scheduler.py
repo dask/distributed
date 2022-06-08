@@ -5091,7 +5091,7 @@ class Scheduler(SchedulerState, ServerNode):
                 stimulus_id=stimulus_id,
             )
 
-        nanny_workers: dict[str, str] = {
+        nanny_workers = {
             addr: ws.nanny for addr, ws in self.workers.items() if ws.nanny
         }
 
