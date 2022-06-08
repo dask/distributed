@@ -14,6 +14,7 @@ import dask
 from distributed.comm.core import CommClosedError
 from distributed.core import (
     AsyncTaskGroup,
+    AsyncTaskGroupClosedError,
     ConnectionPool,
     Server,
     Status,
@@ -167,12 +168,12 @@ async def test_async_task_group_close_prohibits_new_tasks():
         flag = True
         return True
 
-    task = group.call_soon(set_flag)
-    assert task is None
+    with pytest.raises(AsyncTaskGroupClosedError):
+        group.call_soon(set_flag)
     assert len(group) == 0
 
-    task = group.call_later(1, set_flag)
-    assert task is None
+    with pytest.raises(AsyncTaskGroupClosedError):
+        task = group.call_later(1, set_flag)
     assert len(group) == 0
 
     await asyncio.sleep(0.01)

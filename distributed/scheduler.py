@@ -4628,8 +4628,8 @@ class Scheduler(SchedulerState, ServerNode):
         cleanup_delay = parse_timedelta(
             dask.config.get("distributed.scheduler.events-cleanup-delay")
         )
-
-        self.call_later(cleanup_delay, remove_client_from_events)
+        if not self._ongoing_background_tasks.closed:
+            self.call_later(cleanup_delay, remove_client_from_events)
 
     def send_task_to_worker(self, worker, ts: TaskState, duration: float = -1):
         """Send a single computational task to a worker"""
