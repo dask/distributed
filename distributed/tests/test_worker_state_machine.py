@@ -41,10 +41,13 @@ async def wait_for_state(key: str, state: TaskStateState, dask_worker: Worker) -
         await asyncio.sleep(0.005)
 
 
-def test_task_state_is_added_to_instances():
+def test_task_state_tracking():
     x = TaskState("x")
     assert len(TaskState._instances) == 1
     assert first(TaskState._instances) == x
+
+    del x
+    assert len(TaskState._instances) == 0
 
 
 def test_TaskState_get_nbytes():
