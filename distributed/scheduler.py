@@ -1087,7 +1087,7 @@ class TaskState:
         self.has_lost_dependencies = False
         self.host_restrictions = None  # type: ignore
         self.worker_restrictions = None  # type: ignore
-        self.resource_restrictions = None  # type: ignore
+        self.resource_restrictions = {}
         self.loose_restrictions = False
         self.actor = False
         self.prefix = None  # type: ignore
@@ -2669,14 +2669,12 @@ class SchedulerState:
         return s
 
     def consume_resources(self, ts: TaskState, ws: WorkerState):
-        if ts.resource_restrictions:
-            for r, required in ts.resource_restrictions.items():
-                ws.used_resources[r] += required
+        for r, required in ts.resource_restrictions.items():
+            ws.used_resources[r] += required
 
     def release_resources(self, ts: TaskState, ws: WorkerState):
-        if ts.resource_restrictions:
-            for r, required in ts.resource_restrictions.items():
-                ws.used_resources[r] -= required
+        for r, required in ts.resource_restrictions.items():
+            ws.used_resources[r] -= required
 
     def coerce_hostname(self, host):
         """
@@ -2888,7 +2886,7 @@ class Scheduler(SchedulerState, ServerNode):
                 stacklevel=2,
             )
 
-        self.loop = IOLoop.current()
+        self.loop = self.io_loop = IOLoop.current()
         self._setup_logging(logger)
 
         # Attributes
@@ -3071,7 +3069,7 @@ class Scheduler(SchedulerState, ServerNode):
             "get_logs": self.get_logs,
             "logs": self.get_logs,
             "worker_logs": self.get_worker_logs,
-            "log_event": self.log_worker_event,
+            "log_event": self.log_event,
             "events": self.get_events,
             "nbytes": self.get_nbytes,
             "versions": self.versions,
@@ -3124,7 +3122,6 @@ class Scheduler(SchedulerState, ServerNode):
             self,
             handlers=self.handlers,
             stream_handlers=merge(worker_handlers, client_handlers),
-            io_loop=self.loop,
             connection_limit=connection_limit,
             deserialize=False,
             connection_args=self.connection_args,
@@ -6227,7 +6224,11 @@ class Scheduler(SchedulerState, ServerNode):
             if teardown:
                 teardown(self, state)
 
-    def log_worker_event(self, worker=None, topic=None, msg=None):
+    def log_worker_event(
+        self, worker: str, topic: str | Collection[str], msg: Any
+    ) -> None:
+        if isinstance(msg, dict):
+            msg["worker"] = worker
         self.log_event(topic, msg)
 
     def subscribe_worker_status(self, comm=None):
@@ -6909,21 +6910,21 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return results
 
-    def log_event(self, name, msg):
+    def log_event(self, topic: str | Collection[str], msg: Any) -> None:
         event = (time(), msg)
-        if isinstance(name, (list, tuple)):
-            for n in name:
-                self.events[n].append(event)
-                self.event_counts[n] += 1
-                self._report_event(n, event)
+        if not isinstance(topic, str):
+            for t in topic:
+                self.events[t].append(event)
+                self.event_counts[t] += 1
+                self._report_event(t, event)
         else:
-            self.events[name].append(event)
-            self.event_counts[name] += 1
-            self._report_event(name, event)
+            self.events[topic].append(event)
+            self.event_counts[topic] += 1
+            self._report_event(topic, event)
 
             for plugin in list(self.plugins.values()):
                 try:
-                    plugin.log_event(name, msg)
+                    plugin.log_event(topic, msg)
                 except Exception:
                     logger.info("Plugin failed with exception", exc_info=True)
 
@@ -7089,29 +7090,28 @@ class Scheduler(SchedulerState, ServerNode):
             to_close = self.workers_to_close()
             return len(self.workers) - len(to_close)
 
-    def request_acquire_replicas(self, addr: str, keys: list, *, stimulus_id: str):
+    def request_acquire_replicas(
+        self, addr: str, keys: Iterable[str], *, stimulus_id: str
+    ) -> None:
         """Asynchronously ask a worker to acquire a replica of the listed keys from
         other workers. This is a fire-and-forget operation which offers no feedback for
         success or failure, and is intended for housekeeping and not for computation.
         """
-        who_has = {}
-        for key in keys:
-            ts = self.tasks[key]
-            who_has[key] = {ws.address for ws in ts.who_has}
-
+        who_has = {key: [ws.address for ws in self.tasks[key].who_has] for key in keys}
         if self.validate:
             assert all(who_has.values())
 
         self.stream_comms[addr].send(
             {
                 "op": "acquire-replicas",
-                "keys": keys,
                 "who_has": who_has,
                 "stimulus_id": stimulus_id,
             },
         )
 
-    def request_remove_replicas(self, addr: str, keys: list, *, stimulus_id: str):
+    def request_remove_replicas(
+        self, addr: str, keys: list[str], *, stimulus_id: str
+    ) -> None:
         """Asynchronously ask a worker to discard its replica of the listed keys.
         This must never be used to destroy the last replica of a key. This is a
         fire-and-forget operation, intended for housekeeping and not for computation.
@@ -7122,15 +7122,14 @@ class Scheduler(SchedulerState, ServerNode):
         to re-add itself to who_has. If the worker agrees to discard the task, there is
         no feedback.
         """
-        ws: WorkerState = self.workers[addr]
-        validate = self.validate
+        ws = self.workers[addr]
 
         # The scheduler immediately forgets about the replica and suggests the worker to
         # drop it. The worker may refuse, at which point it will send back an add-keys
         # message to reinstate it.
         for key in keys:
-            ts: TaskState = self.tasks[key]
-            if validate:
+            ts = self.tasks[key]
+            if self.validate:
                 # Do not destroy the last copy
                 assert len(ts.who_has) > 1
             self.remove_replica(ts, ws)
@@ -7311,22 +7310,16 @@ def _task_to_msg(
             dts.key: [ws.address for ws in dts.who_has] for dts in ts.dependencies
         },
         "nbytes": {dts.key: dts.nbytes for dts in ts.dependencies},
+        "run_spec": ts.run_spec,
+        "resource_restrictions": ts.resource_restrictions,
+        "actor": ts.actor,
+        "annotations": ts.annotations,
     }
     if state.validate:
         assert all(msg["who_has"].values())
-
-    if ts.resource_restrictions:
-        msg["resource_restrictions"] = ts.resource_restrictions
-    if ts.actor:
-        msg["actor"] = True
-
-    if isinstance(ts.run_spec, dict):
-        msg.update(ts.run_spec)
-    else:
-        msg["task"] = ts.run_spec
-
-    if ts.annotations:
-        msg["annotations"] = ts.annotations
+        if isinstance(msg["run_spec"], dict):
+            assert set(msg["run_spec"]).issubset({"function", "args", "kwargs"})
+            assert msg["run_spec"].get("function")
 
     return msg
 

@@ -755,8 +755,13 @@ async def test_disk_cleanup_on_terminate(c, s, a, ignore_sigterm):
     At the next iteration of the memory manager, if the process is still alive, the
     nanny sends SIGKILL.
     """
+
+    def do_ignore_sigterm():
+        # ignore the return value of signal.signal:  it may not be serializable
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
     if ignore_sigterm:
-        await c.run(signal.signal, signal.SIGTERM, signal.SIG_IGN)
+        await c.run(do_ignore_sigterm)
 
     fut = c.submit(inc, 1, key="myspill")
     await wait(fut)
