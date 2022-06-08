@@ -127,6 +127,10 @@ def test_async_task_group_close_closes():
     group.close()
     assert group.closed
 
+    # Test idempotency
+    group.close()
+    assert group.closed
+
 
 @gen_test()
 async def test_async_task_group_close_does_not_cancel_existing_tasks():
