@@ -776,7 +776,8 @@ def test_fail_hard(sync):
 
 
 def test_popen_write_during_terminate_deadlock():
-    # Fabricate a command which, when terminated, tries to write more than the pipe buffer can hold (65536 bytes).
+    # Fabricate a command which, when terminated, tries to write more than the pipe buffer can hold
+    # (OS specific: on Linux it's typically 65536 bytes; on Windows it's less).
     # This would deadlock if `proc.wait()` was called, since the process will be trying to write to stdout, but
     # stdout isn't being cleared because our process is blocked in `proc.wait()`.
     # `proc.communicate()` is necessary: https://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
@@ -784,17 +785,22 @@ def test_popen_write_during_terminate_deadlock():
         [
             sys.executable,
             "-c",
-            "; ".join(
-                [
-                    "import signal",
-                    "import time",
-                    "import threading",
-                    "e = threading.Event()",
-                    "signal.signal(signal.SIGINT, lambda *args: [print('x' * 131072), e.set()])",
-                    # ^ 131072 is 2x the size of the default Linux pipe buffer
-                    "print('ready', flush=True)",
-                    "e.wait()",
-                ]
+            textwrap.dedent(
+                """
+                import signal
+                import threading
+
+                e = threading.Event()
+
+                def cb(signum, frame):
+                    # 131072 is 2x the size of the default Linux pipe buffer
+                    print('x' * 131072)
+                    e.set()
+
+                signal.signal(signal.SIGINT, cb)
+                print('ready', flush=True)
+                e.wait()
+                """
             ),
         ],
         capture_output=True,
