@@ -1715,13 +1715,9 @@ def is_python_shutting_down() -> bool:
     return _python_shutting_down
 
 
-_P = ParamSpec("_P")
-_T = TypeVar("_T")
-
-
 def delayed(
-    corofunc: Callable[_P, Coroutine[AnyType, AnyType, _T]], delay: float
-) -> Callable[_P, Coroutine[AnyType, AnyType, _T]]:
+    corofunc: Callable[P, Coroutine[AnyType, AnyType, T]], delay: float
+) -> Callable[P, Coroutine[AnyType, AnyType, T]]:
     """Decorator to delay the evaluation of a coroutine function by the given delay in seconds."""
 
     async def wrapper(*args, **kwargs):
