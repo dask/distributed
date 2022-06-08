@@ -405,7 +405,7 @@ class Nanny(ServerNode):
             self.process = WorkerProcess(
                 worker_kwargs=worker_kwargs,
                 silence_logs=self.silence_logs,
-                on_exit=self._on_exit_sync,
+                on_exit=self._on_worker_exit_sync,
                 worker=self.Worker,
                 env=self.env,
                 config=self.config,
@@ -497,11 +497,11 @@ class Nanny(ServerNode):
     def run(self, comm, *args, **kwargs):
         return run(self, comm, *args, **kwargs)
 
-    def _on_exit_sync(self, exitcode):
-        self.loop.add_callback(self._on_exit, exitcode)
+    def _on_worker_exit_sync(self, exitcode):
+        self.loop.add_callback(self._on_worker_exit, exitcode)
 
     @log_errors
-    async def _on_exit(self, exitcode):
+    async def _on_worker_exit(self, exitcode):
         if self.status not in (
             Status.init,
             Status.closing,
