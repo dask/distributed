@@ -492,22 +492,18 @@ async def test_worker_start_exception(s):
     nanny = Nanny(
         s.address, worker_class=BrokenWorker, startup_attempts=startup_attempts
     )
-    with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
-        with raises_with_cause(
-            RuntimeError,
-            "Nanny failed to start",
-            RuntimeError,
-            "BrokenWorker failed to start",
-        ):
-            async with nanny:
-                pass
+    with raises_with_cause(
+        RuntimeError,
+        "Nanny failed to start",
+        RuntimeError,
+        "BrokenWorker failed to start",
+    ):
+        async with nanny:
+            pass
     assert nanny.status == Status.failed
     # ^ NOTE: `Nanny.close` sets it to `closed`, then `Server.start._close_on_failure` sets it to `failed`
     assert nanny.process is None
     assert startup_attempts.value == 1
-    assert "Restarting worker" not in logs.getvalue()
-    # Avoid excessive spewing. (It's also printed once extra within the subprocess, which is okay.)
-    assert logs.getvalue().count("ValueError: broken") == 1, logs.getvalue()
 
 
 @gen_cluster(nthreads=[])
