@@ -37,6 +37,7 @@ import dask
 
 from distributed import Scheduler, system
 from distributed import versions as version_module
+from distributed.batched import BatchedSend
 from distributed.client import Client, _global_clients, default_client
 from distributed.comm import Comm
 from distributed.comm.tcp import TCP
@@ -885,14 +886,12 @@ def gen_test(
 async def start_cluster(
     nthreads: list[tuple[str, int] | tuple[str, int, dict]],
     scheduler_addr: str,
-    loop: IOLoop | None = None,
     security: Security | dict[str, Any] | None = None,
     Worker: type[ServerNode] = Worker,
     scheduler_kwargs: dict[str, Any] = {},
     worker_kwargs: dict[str, Any] = {},
 ) -> tuple[Scheduler, list[ServerNode]]:
     s = await Scheduler(
-        loop=loop,
         validate=True,
         security=security,
         port=0,
@@ -906,7 +905,6 @@ async def start_cluster(
             nthreads=ncore[1],
             name=i,
             security=security,
-            loop=loop,
             validate=True,
             host=ncore[0],
             **(
@@ -952,10 +950,10 @@ def check_invalid_worker_transitions(s: Scheduler) -> None:
 
 
 def check_invalid_task_states(s: Scheduler) -> None:
-    if not s.events.get("invalid-worker-task-states"):
+    if not s.events.get("invalid-worker-task-state"):
         return
 
-    for timestamp, msg in s.events["invalid-worker-task-states"]:
+    for timestamp, msg in s.events["invalid-worker-task-state"]:
         print("Worker:", msg["worker"])
         print("State:", msg["state"])
         for line in msg["story"]:
@@ -1874,6 +1872,7 @@ def _reconfigure():
         {
             "distributed.comm.timeouts.connect": "5s",
             "distributed.admin.tick.interval": "500 ms",
+            "distributed.worker.profile.enabled": False,
         }
     ):
         # Restore default logging levels
@@ -2247,3 +2246,119 @@ def wait_for_log_line(
         if match in line:
             return line
         i += 1
+
+
+class BlockedGatherDep(Worker):
+    """A Worker that sets event `in_gather_dep` the first time it enters the gather_dep
+    method and then does not initiate any comms, thus leaving the task(s) in flight
+    indefinitely, until the test sets `block_gather_dep`
+
+    Example
+    -------
+    .. code-block:: python
+
+        @gen_test()
+        async def test1(s, a, b):
+            async with BlockedGatherDep(s.address) as x:
+                # [do something to cause x to fetch data from a or b]
+                await x.in_gather_dep.wait()
+                # [do something that must happen while the tasks are in flight]
+                x.block_gather_dep.set()
+                # [from this moment on, x is a regular worker]
+
+    See also
+    --------
+    BlockedGetData
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.in_gather_dep = asyncio.Event()
+        self.block_gather_dep = asyncio.Event()
+        super().__init__(*args, **kwargs)
+
+    async def gather_dep(self, *args, **kwargs):
+        self.in_gather_dep.set()
+        await self.block_gather_dep.wait()
+        return await super().gather_dep(*args, **kwargs)
+
+
+class BlockedGetData(Worker):
+    """A Worker that sets event `in_get_data` the first time it enters the get_data
+    method and then does not answer the comms, thus leaving the task(s) in flight
+    indefinitely, until the test sets `block_get_data`
+
+    See also
+    --------
+    BlockedGatherDep
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.in_get_data = asyncio.Event()
+        self.block_get_data = asyncio.Event()
+        super().__init__(*args, **kwargs)
+
+    async def get_data(self, comm, *args, **kwargs):
+        self.in_get_data.set()
+        await self.block_get_data.wait()
+        return await super().get_data(comm, *args, **kwargs)
+
+
+@contextmanager
+def freeze_data_fetching(w: Worker, *, jump_start: bool = False):
+    """Prevent any task from transitioning from fetch to flight on the worker while
+    inside the context, simulating a situation where the worker's network comms are
+    saturated.
+
+    This is not the same as setting the worker to Status=paused, which would also
+    inform the Scheduler and prevent further tasks to be enqueued on the worker.
+
+    Parameters
+    ----------
+    w: Worker
+        The Worker on which tasks will not transition from fetch to flight
+    jump_start: bool
+        If False, tasks will remain in fetch state after exiting the context, until
+        something else triggers ensure_communicating.
+        If True, trigger ensure_communicating on exit; this simulates e.g. an unrelated
+        worker moving out of in_flight_workers.
+    """
+    old_out_connections = w.total_out_connections
+    old_comm_threshold = w.comm_threshold_bytes
+    w.total_out_connections = 0
+    w.comm_threshold_bytes = 0
+    yield
+    w.total_out_connections = old_out_connections
+    w.comm_threshold_bytes = old_comm_threshold
+    if jump_start:
+        w.status = Status.paused
+        w.status = Status.running
+
+
+@contextmanager
+def freeze_batched_send(bcomm: BatchedSend) -> Iterator[LockedComm]:
+    """
+    Contextmanager blocking writes to a `BatchedSend` from sending over the network.
+
+    The returned `LockedComm` object can be used for control flow and inspection via its
+    ``read_event``, ``read_queue``, ``write_event``, and ``write_queue`` attributes.
+
+    On exit, any writes that were blocked are un-blocked, and the original comm of the
+    `BatchedSend` is restored.
+    """
+    assert not bcomm.closed()
+    assert bcomm.comm
+    assert not bcomm.comm.closed()
+    orig_comm = bcomm.comm
+
+    write_event = asyncio.Event()
+    write_queue: asyncio.Queue = asyncio.Queue()
+
+    bcomm.comm = locked_comm = LockedComm(
+        orig_comm, None, None, write_event, write_queue
+    )
+
+    try:
+        yield locked_comm
+    finally:
+        write_event.set()
+        bcomm.comm = orig_comm

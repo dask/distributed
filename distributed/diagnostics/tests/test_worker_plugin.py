@@ -42,7 +42,7 @@ class MyPlugin(WorkerPlugin):
 async def test_create_with_client(c, s):
     await c.register_worker_plugin(MyPlugin(123))
 
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     assert worker._my_plugin_status == "setup"
     assert worker._my_plugin_data == 123
 
@@ -55,7 +55,7 @@ async def test_remove_with_client(c, s):
     await c.register_worker_plugin(MyPlugin(123), name="foo")
     await c.register_worker_plugin(MyPlugin(546), name="bar")
 
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     # remove the 'foo' plugin
     await c.unregister_worker_plugin("foo")
     assert worker._my_plugin_status == "teardown"
@@ -79,7 +79,7 @@ async def test_remove_with_client(c, s):
 async def test_remove_with_client_raises(c, s):
     await c.register_worker_plugin(MyPlugin(123), name="foo")
 
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     with pytest.raises(ValueError, match="bar"):
         await c.unregister_worker_plugin("bar")
 
@@ -193,32 +193,6 @@ async def test_default_name(c, s, w):
     await c.register_worker_plugin(MyCustomPlugin())
     assert len(w.plugins) == 1
     assert next(iter(w.plugins)).startswith("MyCustomPlugin-")
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_release_key_deprecated(c, s, a):
-    class ReleaseKeyDeprecated(WorkerPlugin):
-        def __init__(self):
-            self._called = False
-
-        def release_key(self, key, state, cause, reason, report):
-            # Ensure that the handler still works
-            self._called = True
-            assert state == "memory"
-            assert key == "task"
-
-        def teardown(self, worker):
-            assert self._called
-            return super().teardown(worker)
-
-    await c.register_worker_plugin(ReleaseKeyDeprecated())
-
-    with pytest.warns(
-        FutureWarning, match="The `WorkerPlugin.release_key` hook is deprecated"
-    ):
-        assert await c.submit(inc, 1, key="x") == 2
-        while "x" in a.tasks:
-            await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])

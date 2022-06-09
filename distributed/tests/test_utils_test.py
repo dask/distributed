@@ -16,9 +16,12 @@ from tornado import gen
 import dask.config
 
 from distributed import Client, Nanny, Scheduler, Worker, config, default_client
+from distributed.batched import BatchedSend
+from distributed.comm.core import connect
 from distributed.compatibility import WINDOWS
 from distributed.core import Server, Status, rpc
 from distributed.metrics import time
+from distributed.tests.test_batched import EchoServer
 from distributed.utils import mp_context
 from distributed.utils_test import (
     _LockedCommPool,
@@ -28,6 +31,7 @@ from distributed.utils_test import (
     check_process_leak,
     cluster,
     dump_cluster_state,
+    freeze_batched_send,
     gen_cluster,
     gen_test,
     inc,
@@ -36,7 +40,12 @@ from distributed.utils_test import (
     raises_with_cause,
     tls_only_security,
 )
-from distributed.worker import InvalidTransition, fail_hard
+from distributed.worker import fail_hard
+from distributed.worker_state_machine import (
+    InvalidTaskState,
+    InvalidTransition,
+    StateMachineEvent,
+)
 
 
 def test_bare_cluster(loop):
@@ -647,18 +656,22 @@ def test_start_failure_scheduler():
 
 
 def test_invalid_transitions(capsys):
-    @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+    class BrokenEvent(StateMachineEvent):
+        pass
+
+    class MyWorker(Worker):
+        @Worker._handle_event.register
+        def _(self, ev: BrokenEvent):
+            ts = next(iter(self.tasks.values()))
+            return {ts: "foo"}, []
+
+    @gen_cluster(client=True, Worker=MyWorker, nthreads=[("", 1)])
     async def test_log_invalid_transitions(c, s, a):
         x = c.submit(inc, 1, key="task-name")
-        y = c.submit(inc, x)
-        xkey = x.key
-        del x
-        await y
-        while a.tasks[xkey].state != "released":
-            await asyncio.sleep(0.01)
-        ts = a.tasks[xkey]
+        await x
+
         with pytest.raises(InvalidTransition):
-            a.transition(ts, "foo", stimulus_id="bar")
+            a.handle_stimulus(BrokenEvent(stimulus_id="test"))
 
         while not s.events["invalid-worker-transition"]:
             await asyncio.sleep(0.01)
@@ -676,20 +689,20 @@ def test_invalid_transitions(capsys):
     assert "task-name" in out + err
 
 
-def test_invalid_worker_states(capsys):
+def test_invalid_worker_state(capsys):
     @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
-    async def test_log_invalid_worker_task_states(c, s, a):
+    async def test_log_invalid_worker_task_state(c, s, a):
         x = c.submit(inc, 1, key="task-name")
         await x
         a.tasks[x.key].state = "released"
-        with pytest.raises(Exception):
-            a.validate_task(a.tasks[x.key])
+        with pytest.raises(InvalidTaskState):
+            a.validate_state()
 
-        while not s.events["invalid-worker-task-states"]:
+        while not s.events["invalid-worker-task-state"]:
             await asyncio.sleep(0.01)
 
     with pytest.raises(Exception) as info:
-        test_log_invalid_worker_task_states()
+        test_log_invalid_worker_task_state()
 
     out, err = capsys.readouterr()
 
@@ -808,6 +821,42 @@ def test_popen_write_during_terminate_deadlock():
         capture_output=True,
     ) as proc:
         assert proc.stdout.readline().strip() == b"ready"
-
     # Exiting the context manager (terminating the subprocess) will raise
     # `subprocess.TimeoutExpired` if this test breaks.
+
+
+@gen_test()
+async def test_freeze_batched_send():
+    async with EchoServer() as e:
+        comm = await connect(e.address)
+        b = BatchedSend(interval=0)
+        b.start(comm)
+
+        b.send("hello")
+        assert await comm.read() == ("hello",)
+
+        with freeze_batched_send(b) as locked_comm:
+            b.send("foo")
+            b.send("bar")
+
+            # Sent messages are available on the write queue
+            msg = await locked_comm.write_queue.get()
+            assert msg == (comm.peer_address, ["foo", "bar"])
+
+            # Sent messages will not reach the echo server
+            await asyncio.sleep(0.01)
+            assert e.count == 1
+
+            # Now we let messages send to the echo server
+            locked_comm.write_event.set()
+            assert await comm.read() == ("foo", "bar")
+            assert e.count == 2
+
+            locked_comm.write_event.clear()
+            b.send("baz")
+            await asyncio.sleep(0.01)
+            assert e.count == 2
+
+        assert b.comm is comm
+        assert await comm.read() == ("baz",)
+        assert e.count == 3

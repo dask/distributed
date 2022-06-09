@@ -10,7 +10,7 @@ import types
 import uuid
 import warnings
 import weakref
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Container
 from contextlib import suppress
 from enum import Enum
@@ -162,6 +162,13 @@ class Server:
         timeout=None,
         io_loop=None,
     ):
+        if io_loop is not None:
+            warnings.warn(
+                "The io_loop kwarg to Server is ignored and will be deprecated",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         self._status = Status.init
         self.handlers = {
             "identity": self.identity,
@@ -191,22 +198,24 @@ class Server:
         self._event_finished = asyncio.Event()
 
         self.listeners = []
-        self.io_loop = io_loop or IOLoop.current()
-        self.loop = self.io_loop
+        self.io_loop = self.loop = IOLoop.current()
 
         if not hasattr(self.io_loop, "profile"):
-            ref = weakref.ref(self.io_loop)
+            if dask.config.get("distributed.worker.profile.enabled"):
+                ref = weakref.ref(self.io_loop)
 
-            def stop() -> bool:
-                loop = ref()
-                return loop is None or loop.asyncio_loop.is_closed()
+                def stop() -> bool:
+                    loop = ref()
+                    return loop is None or loop.asyncio_loop.is_closed()
 
-            self.io_loop.profile = profile.watch(
-                omit=("profile.py", "selectors.py"),
-                interval=dask.config.get("distributed.worker.profile.interval"),
-                cycle=dask.config.get("distributed.worker.profile.cycle"),
-                stop=stop,
-            )
+                self.io_loop.profile = profile.watch(
+                    omit=("profile.py", "selectors.py"),
+                    interval=dask.config.get("distributed.worker.profile.interval"),
+                    cycle=dask.config.get("distributed.worker.profile.cycle"),
+                    stop=stop,
+                )
+            else:
+                self.io_loop.profile = deque()
 
         # Statistics counters for various events
         with suppress(ImportError):
