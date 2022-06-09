@@ -3129,6 +3129,7 @@ async def test_gather_dep_cancelled_rescheduled(c, s):
     for in-flight state. The response parser, however, did not distinguish
     resulting in unwanted missing-data signals to the scheduler, causing
     potential rescheduling or data leaks.
+    (Note: missing-data was removed in #6445).
 
     If a cancelled key is rescheduled for fetching while gather_dep waits
     internally for get_data, the response parser would misclassify this key and
@@ -3177,6 +3178,8 @@ async def test_gather_dep_do_not_handle_response_of_not_requested_tasks(c, s, a)
     for in-flight state. The response parser, however, did not distinguish
     resulting in unwanted missing-data signals to the scheduler, causing
     potential rescheduling or data leaks.
+    (Note: missing-data was removed in #6445).
+
     This test may become obsolete if the implementation changes significantly.
     """
     async with BlockedGatherDep(s.address) as b:

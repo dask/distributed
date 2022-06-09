@@ -127,7 +127,6 @@ from distributed.worker_state_machine import (
     InvalidTaskState,
     InvalidTransition,
     LongRunningMsg,
-    MissingDataMsg,
     RecommendationsConflict,
     Recs,
     RecsInstrs,
@@ -3387,13 +3386,6 @@ class Worker(ServerNode):
                     self.has_what[worker].discard(ts.key)
                     self.data_needed_per_worker[worker].discard(ts)
                     self.log.append((d, "missing-dep", stimulus_id, time()))
-                    instructions.append(
-                        MissingDataMsg(
-                            key=d,
-                            errant_worker=worker,
-                            stimulus_id=stimulus_id,
-                        )
-                    )
                     recommendations[ts] = "fetch"
 
             if refresh_who_has:
