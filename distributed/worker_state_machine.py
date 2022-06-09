@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import heapq
 import sys
-from collections.abc import Callable, Container, Iterator
+from collections.abc import Collection, Container
 from copy import copy
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Collection  # TODO move to collections.abc (requires Python >=3.9)
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict
 
 import dask
@@ -53,11 +51,20 @@ PROCESSING: set[TaskStateState] = {
 READY: set[TaskStateState] = {"ready", "constrained"}
 
 
+NO_VALUE = "--no-value-sentinel--"
+
+
 class SerializedTask(NamedTuple):
-    function: Callable
-    args: tuple
-    kwargs: dict[str, Any]
-    task: object  # distributed.scheduler.TaskState.run_spec
+    """Info from distributed.scheduler.TaskState.run_spec
+    Input to distributed.worker._deserialize
+
+    (function, args kwargs) and task are mutually exclusive
+    """
+
+    function: bytes | None = None
+    args: bytes | tuple | list | None = None
+    kwargs: bytes | dict[str, Any] | None = None
+    task: object = NO_VALUE
 
 
 class StartStop(TypedDict, total=False):
@@ -68,7 +75,13 @@ class StartStop(TypedDict, total=False):
 
 
 class InvalidTransition(Exception):
-    def __init__(self, key, start, finish, story):
+    def __init__(
+        self,
+        key: str,
+        start: TaskStateState,
+        finish: TaskStateState,
+        story: list[tuple],
+    ):
         self.key = key
         self.start = start
         self.finish = finish
@@ -84,9 +97,58 @@ class InvalidTransition(Exception):
 
     __str__ = __repr__
 
+    def to_event(self) -> tuple[str, dict[str, Any]]:
+        return (
+            "invalid-worker-transition",
+            {
+                "key": self.key,
+                "start": self.start,
+                "finish": self.finish,
+                "story": self.story,
+            },
+        )
+
 
 class TransitionCounterMaxExceeded(InvalidTransition):
-    pass
+    def to_event(self) -> tuple[str, dict[str, Any]]:
+        topic, msg = super().to_event()
+        return "transition-counter-max-exceeded", msg
+
+
+class InvalidTaskState(Exception):
+    def __init__(
+        self,
+        key: str,
+        state: TaskStateState,
+        story: list[tuple],
+    ):
+        self.key = key
+        self.state = state
+        self.story = story
+
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}: {self.key} :: {self.state}"
+            + "\n"
+            + "  Story:\n    "
+            + "\n    ".join(map(str, self.story))
+        )
+
+    __str__ = __repr__
+
+    def to_event(self) -> tuple[str, dict[str, Any]]:
+        return (
+            "invalid-worker-task-state",
+            {
+                "key": self.key,
+                "state": self.state,
+                "story": self.story,
+            },
+        )
+
+
+class RecommendationsConflict(Exception):
+    """Two or more recommendations for the same task suggested different finish states"""
 
 
 @lru_cache
@@ -175,6 +237,18 @@ class TaskState:
     def __repr__(self) -> str:
         return f"<TaskState {self.key!r} {self.state}>"
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, TaskState) or other.key != self.key:
+            return False
+        # When a task transitions to forgotten and exits Worker.tasks, it should be
+        # immediately dereferenced. If the same task is recreated later on on the
+        # worker, we should not have to deal with its previous incarnation lingering.
+        assert other is self
+        return True
+
+    def __hash__(self) -> int:
+        return hash(self.key)
+
     def get_nbytes(self) -> int:
         nbytes = self.nbytes
         return nbytes if nbytes is not None else _default_data_size()
@@ -204,58 +278,6 @@ class TaskState:
         return self.state in PROCESSING or any(
             dep_ts.state in PROCESSING for dep_ts in self.dependents
         )
-
-
-class UniqueTaskHeap(Collection[TaskState]):
-    """A heap of TaskState objects ordered by TaskState.priority.
-    Ties are broken by string comparison of the key. Keys are guaranteed to be
-    unique. Iterating over this object returns the elements in priority order.
-    """
-
-    __slots__ = ("_known", "_heap")
-    _known: set[str]
-    _heap: list[tuple[tuple[int, ...], str, TaskState]]
-
-    def __init__(self):
-        self._known = set()
-        self._heap = []
-
-    def push(self, ts: TaskState) -> None:
-        """Add a new TaskState instance to the heap. If the key is already
-        known, no object is added.
-
-        Note: This does not update the priority / heap order in case priority
-        changes.
-        """
-        assert isinstance(ts, TaskState)
-        if ts.key not in self._known:
-            assert ts.priority
-            heapq.heappush(self._heap, (ts.priority, ts.key, ts))
-            self._known.add(ts.key)
-
-    def pop(self) -> TaskState:
-        """Pop the task with highest priority from the heap."""
-        _, key, ts = heapq.heappop(self._heap)
-        self._known.remove(key)
-        return ts
-
-    def peek(self) -> TaskState:
-        """Get the highest priority TaskState without removing it from the heap"""
-        return self._heap[0][2]
-
-    def __contains__(self, x: object) -> bool:
-        if isinstance(x, TaskState):
-            x = x.key
-        return x in self._known
-
-    def __iter__(self) -> Iterator[TaskState]:
-        return (ts for _, _, ts in sorted(self._heap))
-
-    def __len__(self) -> int:
-        return len(self._known)
-
-    def __repr__(self) -> str:
-        return f"<{type(self).__name__}: {len(self)} items>"
 
 
 @dataclass
@@ -342,6 +364,22 @@ class TaskErredMsg(SendMessageToScheduler):
         d["status"] = "error"
         return d
 
+    @staticmethod
+    def from_task(
+        ts: TaskState, stimulus_id: str, thread: int | None = None
+    ) -> TaskErredMsg:
+        assert ts.exception
+        return TaskErredMsg(
+            key=ts.key,
+            exception=ts.exception,
+            traceback=ts.traceback,
+            exception_text=ts.exception_text,
+            traceback_text=ts.traceback_text,
+            thread=thread,
+            startstops=ts.startstops,
+            stimulus_id=stimulus_id,
+        )
+
 
 @dataclass
 class ReleaseWorkerDataMsg(SendMessageToScheduler):
@@ -383,7 +421,7 @@ class AddKeysMsg(SendMessageToScheduler):
     op = "add-keys"
 
     __slots__ = ("keys",)
-    keys: list[str]
+    keys: Collection[str]
 
 
 @dataclass
@@ -403,7 +441,23 @@ class RequestRefreshWhoHasMsg(SendMessageToScheduler):
     op = "request-refresh-who-has"
 
     __slots__ = ("keys",)
-    keys: list[str]
+    keys: Collection[str]
+
+
+@dataclass
+class StealResponseMsg(SendMessageToScheduler):
+    """Worker->Scheduler response to ``{op: steal-request}``
+
+    See also
+    --------
+    StealRequestEvent
+    """
+
+    op = "steal-response"
+
+    __slots__ = ("key", "state")
+    key: str
+    state: TaskStateState | None
 
 
 @dataclass
@@ -481,6 +535,39 @@ class GatherDepDoneEvent(StateMachineEvent):
     """Temporary hack - to be removed"""
 
     __slots__ = ()
+
+
+@dataclass
+class ComputeTaskEvent(StateMachineEvent):
+    key: str
+    who_has: dict[str, Collection[str]]
+    nbytes: dict[str, int]
+    priority: tuple[int, ...]
+    duration: float
+    run_spec: SerializedTask
+    resource_restrictions: dict[str, float]
+    actor: bool
+    annotations: dict
+    __slots__ = tuple(__annotations__)  # type: ignore
+
+    def __post_init__(self):
+        # Fixes after msgpack decode
+        if isinstance(self.priority, list):
+            self.priority = tuple(self.priority)
+
+        if isinstance(self.run_spec, dict):
+            self.run_spec = SerializedTask(**self.run_spec)
+        elif not isinstance(self.run_spec, SerializedTask):
+            self.run_spec = SerializedTask(task=self.run_spec)
+
+    def to_loggable(self, *, handled: float) -> StateMachineEvent:
+        out = copy(self)
+        out.handled = handled
+        out.run_spec = SerializedTask(task=None)
+        return out
+
+    def _after_from_dict(self) -> None:
+        self.run_spec = SerializedTask(task=None)
 
 
 @dataclass
@@ -581,7 +668,59 @@ class RefreshWhoHasEvent(StateMachineEvent):
 
     __slots__ = ("who_has",)
     # {key: [worker address, ...]}
-    who_has: dict[str, list[str]]
+    who_has: dict[str, Collection[str]]
+
+
+@dataclass
+class AcquireReplicasEvent(StateMachineEvent):
+    __slots__ = ("who_has",)
+    who_has: dict[str, Collection[str]]
+
+
+@dataclass
+class RemoveReplicasEvent(StateMachineEvent):
+    __slots__ = ("keys",)
+    keys: Collection[str]
+
+
+@dataclass
+class FreeKeysEvent(StateMachineEvent):
+    __slots__ = ("keys",)
+    keys: Collection[str]
+
+
+@dataclass
+class StealRequestEvent(StateMachineEvent):
+    """Event that requests a worker to release a key because it's now being computed
+    somewhere else.
+
+    See also
+    --------
+    StealResponseMsg
+    """
+
+    __slots__ = ("key",)
+    key: str
+
+
+@dataclass
+class UpdateDataEvent(StateMachineEvent):
+    __slots__ = ("data", "report")
+    data: dict[str, object]
+    report: bool
+
+    def to_loggable(self, *, handled: float) -> StateMachineEvent:
+        out = copy(self)
+        out.handled = handled
+        out.data = dict.fromkeys(self.data)
+        return out
+
+
+@dataclass
+class SecedeEvent(StateMachineEvent):
+    __slots__ = ("key", "compute_duration")
+    key: str
+    compute_duration: float
 
 
 if TYPE_CHECKING:
@@ -604,11 +743,11 @@ def merge_recs_instructions(*args: RecsInstrs) -> RecsInstrs:
     recs: Recs = {}
     instr: Instructions = []
     for recs_i, instr_i in args:
-        for k, v in recs_i.items():
-            if k in recs and recs[k] != v:
-                raise ValueError(
-                    f"Mismatched recommendations for {k}: {recs[k]} vs. {v}"
+        for ts, finish in recs_i.items():
+            if ts in recs and recs[ts] != finish:
+                raise RecommendationsConflict(
+                    f"Mismatched recommendations for {ts.key}: {recs[ts]} vs. {finish}"
                 )
-            recs[k] = v
+            recs[ts] = finish
         instr += instr_i
     return recs, instr

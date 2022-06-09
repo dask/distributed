@@ -37,6 +37,7 @@ import dask
 
 from distributed import Scheduler, system
 from distributed import versions as version_module
+from distributed.batched import BatchedSend
 from distributed.client import Client, _global_clients, default_client
 from distributed.comm import Comm
 from distributed.comm.tcp import TCP
@@ -885,14 +886,12 @@ def gen_test(
 async def start_cluster(
     nthreads: list[tuple[str, int] | tuple[str, int, dict]],
     scheduler_addr: str,
-    loop: IOLoop | None = None,
     security: Security | dict[str, Any] | None = None,
     Worker: type[ServerNode] = Worker,
     scheduler_kwargs: dict[str, Any] = {},
     worker_kwargs: dict[str, Any] = {},
 ) -> tuple[Scheduler, list[ServerNode]]:
     s = await Scheduler(
-        loop=loop,
         validate=True,
         security=security,
         port=0,
@@ -906,7 +905,6 @@ async def start_cluster(
             nthreads=ncore[1],
             name=i,
             security=security,
-            loop=loop,
             validate=True,
             host=ncore[0],
             **(
@@ -952,10 +950,10 @@ def check_invalid_worker_transitions(s: Scheduler) -> None:
 
 
 def check_invalid_task_states(s: Scheduler) -> None:
-    if not s.events.get("invalid-worker-task-states"):
+    if not s.events.get("invalid-worker-task-state"):
         return
 
-    for timestamp, msg in s.events["invalid-worker-task-states"]:
+    for timestamp, msg in s.events["invalid-worker-task-state"]:
         print("Worker:", msg["worker"])
         print("State:", msg["state"])
         for line in msg["story"]:
@@ -1888,6 +1886,7 @@ def _reconfigure():
         {
             "distributed.comm.timeouts.connect": "5s",
             "distributed.admin.tick.interval": "500 ms",
+            "distributed.worker.profile.enabled": False,
         }
     ):
         # Restore default logging levels
@@ -2347,3 +2346,33 @@ def freeze_data_fetching(w: Worker, *, jump_start: bool = False):
     if jump_start:
         w.status = Status.paused
         w.status = Status.running
+
+
+@contextmanager
+def freeze_batched_send(bcomm: BatchedSend) -> Iterator[LockedComm]:
+    """
+    Contextmanager blocking writes to a `BatchedSend` from sending over the network.
+
+    The returned `LockedComm` object can be used for control flow and inspection via its
+    ``read_event``, ``read_queue``, ``write_event``, and ``write_queue`` attributes.
+
+    On exit, any writes that were blocked are un-blocked, and the original comm of the
+    `BatchedSend` is restored.
+    """
+    assert not bcomm.closed()
+    assert bcomm.comm
+    assert not bcomm.comm.closed()
+    orig_comm = bcomm.comm
+
+    write_event = asyncio.Event()
+    write_queue: asyncio.Queue = asyncio.Queue()
+
+    bcomm.comm = locked_comm = LockedComm(
+        orig_comm, None, None, write_event, write_queue
+    )
+
+    try:
+        yield locked_comm
+    finally:
+        write_event.set()
+        bcomm.comm = orig_comm
