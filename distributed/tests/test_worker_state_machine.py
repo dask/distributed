@@ -615,10 +615,10 @@ async def test_fetch_to_missing_on_refresh_who_has(c, s, w1, w2, w3):
        additional replica
     3. The handler for RefreshWhoHasEvent empties x.who_has and recommends a transition
        to missing.
-    5. Before the recommendation can be implemented, the same event invokes
+    4. Before the recommendation can be implemented, the same event invokes
        _ensure_communicating to let y to transition to flight. This in turn pops x from
        data_needed - but x has an empty who_has, which is an exceptional situation.
-    6. The transition fetch->missing is executed, but x is  no longer in
+    5. The transition fetch->missing is executed, but x is no longer in
        data_needed - another exceptional situation.
     """
     x = c.submit(inc, 1, key="x", workers=[w1.address])
@@ -634,15 +634,15 @@ async def test_fetch_to_missing_on_refresh_who_has(c, s, w1, w2, w3):
     assert w1.address in w3.busy_workers
     # w3 sent {op: request-refresh-who-has, keys: [x, y]}
     # There also may have been enough time for a refresh-who-has message to come back,
-    # which reiterated what the w3 already knew:
+    # which reiterated what w3 already knew:
     # {op: refresh-who-has, who_has={x: [w1.address], y: [w1.address]}}
 
     # Let's instead simulate that, while request-refresh-who-has was in transit,
-    # w2 gained a replica of y and then subsequently w1 closed down.
+    # w2 gained a replica of y and w1 closed down.
     # When request-refresh-who-has lands, the scheduler will respond:
     # {op: refresh-who-has, who_has={x: [], y: [w2.address]}}
     w3.handle_stimulus(
-        RefreshWhoHasEvent(who_has={"x": {}, "y": {w2.address}}, stimulus_id="test3")
+        RefreshWhoHasEvent(who_has={"x": [], "y": [w2.address]}, stimulus_id="test2")
     )
     assert w3.tasks["x"].state == "missing"
     assert w3.tasks["y"].state == "flight"

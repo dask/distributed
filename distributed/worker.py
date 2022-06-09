@@ -3458,7 +3458,7 @@ class Worker(ServerNode):
     ) -> RecsInstrs:
         """gather_dep terminated: network failure while trying to
         communicate with remote worker
-        
+
         Though the network failure could be transient, we assume it is not, and
         preemptively act as though the other worker has died (including removing all
         keys from it, even ones we did not fetch).
