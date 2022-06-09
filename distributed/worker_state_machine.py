@@ -389,15 +389,6 @@ class ReleaseWorkerDataMsg(SendMessageToScheduler):
     key: str
 
 
-@dataclass
-class MissingDataMsg(SendMessageToScheduler):
-    op = "missing-data"
-
-    __slots__ = ("key", "errant_worker")
-    key: str
-    errant_worker: str
-
-
 # Not to be confused with RescheduleEvent below or the distributed.Reschedule Exception
 @dataclass
 class RescheduleMsg(SendMessageToScheduler):

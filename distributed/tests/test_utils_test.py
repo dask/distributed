@@ -15,9 +15,12 @@ from tornado import gen
 import dask.config
 
 from distributed import Client, Nanny, Scheduler, Worker, config, default_client
+from distributed.batched import BatchedSend
+from distributed.comm.core import connect
 from distributed.compatibility import WINDOWS
 from distributed.core import Server, Status, rpc
 from distributed.metrics import time
+from distributed.tests.test_batched import EchoServer
 from distributed.utils import mp_context
 from distributed.utils_test import (
     _LockedCommPool,
@@ -27,6 +30,7 @@ from distributed.utils_test import (
     check_process_leak,
     cluster,
     dump_cluster_state,
+    freeze_batched_send,
     gen_cluster,
     gen_test,
     inc,
@@ -781,3 +785,40 @@ def test_fail_hard(sync):
     with pytest.raises(CustomError):
         test()
     assert test_done
+
+
+@gen_test()
+async def test_freeze_batched_send():
+    async with EchoServer() as e:
+        comm = await connect(e.address)
+        b = BatchedSend(interval=0)
+        b.start(comm)
+
+        b.send("hello")
+        assert await comm.read() == ("hello",)
+
+        with freeze_batched_send(b) as locked_comm:
+            b.send("foo")
+            b.send("bar")
+
+            # Sent messages are available on the write queue
+            msg = await locked_comm.write_queue.get()
+            assert msg == (comm.peer_address, ["foo", "bar"])
+
+            # Sent messages will not reach the echo server
+            await asyncio.sleep(0.01)
+            assert e.count == 1
+
+            # Now we let messages send to the echo server
+            locked_comm.write_event.set()
+            assert await comm.read() == ("foo", "bar")
+            assert e.count == 2
+
+            locked_comm.write_event.clear()
+            b.send("baz")
+            await asyncio.sleep(0.01)
+            assert e.count == 2
+
+        assert b.comm is comm
+        assert await comm.read() == ("baz",)
+        assert e.count == 3

@@ -56,6 +56,7 @@ from distributed.utils_test import (
     captured_logger,
     dec,
     div,
+    freeze_batched_send,
     gen_cluster,
     gen_test,
     inc,
@@ -1751,59 +1752,37 @@ async def test_heartbeat_missing_real_cluster(s, a):
     # However, `Scheduler.remove_worker` and `Worker.close` both currently leave things
     # in degenerate, half-closed states while they're running (and yielding control
     # via `await`).
+    # When https://github.com/dask/distributed/issues/6390 is fixed, this should no
+    # longer be possible.
 
-    # Currently this is easy because of https://github.com/dask/distributed/issues/6354.
-    # But even with that fixed, it may still be possible, since `Worker.close`
-    # could take an arbitrarily long time, and things can keep running
-    # while it's closing.
     assumption_msg = "Test assumptions have changed. Race condition may have been fixed; this test may be removable."
-
-    class BlockCloseExtension:
-        def __init__(self) -> None:
-            self.close_reached = asyncio.Event()
-            self.unblock_close = asyncio.Event()
-
-        async def close(self):
-            self.close_reached.set()
-            await self.unblock_close.wait()
-
-    # `Worker.close` awaits extensions' `close` methods midway though.
-    # During this `await`, the Worker is in state `closing`, but the heartbeat
-    # `PeriodicCallback` is still running. We will intentionally pause
-    # the worker here to simulate the timing of a heartbeat happing in this
-    # degenerate state.
-    a.extensions["block-close"] = block_close = BlockCloseExtension()
 
     with captured_logger(
         "distributed.worker", level=logging.WARNING
     ) as wlogger, captured_logger(
         "distributed.scheduler", level=logging.WARNING
     ) as slogger:
-        await s.remove_worker(a.address, stimulus_id="foo")
-        assert not s.workers
+        with freeze_batched_send(s.stream_comms[a.address]):
+            await s.remove_worker(a.address, stimulus_id="foo")
+            assert not s.workers
 
-        # Wait until the close signal reaches the worker and it starts shutting down.
-        await block_close.close_reached.wait()
-        assert a.status == Status.closing, assumption_msg
-        assert a.periodic_callbacks["heartbeat"].is_running(), assumption_msg
-        # The heartbeat PeriodicCallback is still running, so one _could_ fire
-        # while `Worker.close` has yielded control. We simulate that explicitly.
+            # The scheduler has removed the worker state, but the close message has
+            # not reached the worker yet.
+            assert a.status == Status.running, assumption_msg
+            assert a.periodic_callbacks["heartbeat"].is_running(), assumption_msg
 
-        # Because `hearbeat` will `await self.close`, which is blocking on our
-        # extension, we have to run it concurrently.
-        hbt = asyncio.create_task(a.heartbeat())
+            # The heartbeat PeriodicCallback is still running, so one _could_ fire
+            # before the `op: close` message reaches the worker. We simulate that explicitly.
+            await a.heartbeat()
 
-        # Worker was already closing, so the second `.close()` will be idempotent.
-        # Best we can test for is this log message.
-        while "Scheduler was unaware of this worker" not in wlogger.getvalue():
-            await asyncio.sleep(0.01)
+            # The heartbeat receives a `status: missing` from the scheduler, so it
+            # closes the worker. Heartbeats aren't sent over batched comms, so
+            # `freeze_batched_send` doesn't affect them.
+            assert a.status == Status.closed
 
-        assert "Received heartbeat from unregistered worker" in slogger.getvalue()
-        assert not s.workers
+            assert "Scheduler was unaware of this worker" in wlogger.getvalue()
+            assert "Received heartbeat from unregistered worker" in slogger.getvalue()
 
-        block_close.unblock_close.set()
-        await hbt
-        await a.finished()
         assert not s.workers
 
 
@@ -3150,6 +3129,7 @@ async def test_gather_dep_cancelled_rescheduled(c, s):
     for in-flight state. The response parser, however, did not distinguish
     resulting in unwanted missing-data signals to the scheduler, causing
     potential rescheduling or data leaks.
+    (Note: missing-data was removed in #6445).
 
     If a cancelled key is rescheduled for fetching while gather_dep waits
     internally for get_data, the response parser would misclassify this key and
@@ -3198,6 +3178,8 @@ async def test_gather_dep_do_not_handle_response_of_not_requested_tasks(c, s, a)
     for in-flight state. The response parser, however, did not distinguish
     resulting in unwanted missing-data signals to the scheduler, causing
     potential rescheduling or data leaks.
+    (Note: missing-data was removed in #6445).
+
     This test may become obsolete if the implementation changes significantly.
     """
     async with BlockedGatherDep(s.address) as b:

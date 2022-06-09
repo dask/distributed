@@ -3023,7 +3023,6 @@ class Scheduler(SchedulerState, ServerNode):
             "task-erred": self.handle_task_erred,
             "release-worker-data": self.release_worker_data,
             "add-keys": self.add_keys,
-            "missing-data": self.handle_missing_data,
             "long-running": self.handle_long_running,
             "reschedule": self.reschedule,
             "keep-alive": lambda *args, **kwargs: None,
@@ -4666,40 +4665,6 @@ class Scheduler(SchedulerState, ServerNode):
         recommendations, client_msgs, worker_msgs = r
         self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
         self.send_all(client_msgs, worker_msgs)
-
-    def handle_missing_data(
-        self, key: str, worker: str, errant_worker: str, stimulus_id: str
-    ) -> None:
-        """Signal that `errant_worker` does not hold `key`.
-
-        This may either indicate that `errant_worker` is dead or that we may be working
-        with stale data and need to remove `key` from the workers `has_what`. If no
-        replica of a task is available anymore, the task is transitioned back to
-        released and rescheduled, if possible.
-
-        Parameters
-        ----------
-        key : str
-            Task key that could not be found
-        worker : str
-            Address of the worker informing the scheduler
-        errant_worker : str
-            Address of the worker supposed to hold a replica
-        """
-        logger.debug(f"handle missing data {key=} {worker=} {errant_worker=}")
-        self.log_event(errant_worker, {"action": "missing-data", "key": key})
-
-        ts = self.tasks.get(key)
-        ws = self.workers.get(errant_worker)
-        if not ts or not ws or ws not in ts.who_has:
-            return
-
-        self.remove_replica(ts, ws)
-        if ts.state == "memory" and not ts.who_has:
-            if ts.run_spec:
-                self.transitions({key: "released"}, stimulus_id)
-            else:
-                self.transitions({key: "forgotten"}, stimulus_id)
 
     def release_worker_data(self, key: str, worker: str, stimulus_id: str) -> None:
         ts = self.tasks.get(key)
