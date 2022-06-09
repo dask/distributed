@@ -2972,17 +2972,17 @@ class Worker(ServerNode):
             "data": key in self.data,
         }
 
-    def story(self, *keys_or_tasks_or_tags: str | TaskState) -> list[tuple]:
-        """Return all records from the transitions log involving one or more tasks;
-        it can also be used for arbitrary non-transition tags.
+    def story(self, *keys_or_tasks_or_stimuli: str | TaskState) -> list[tuple]:
+        """Return all records from the transitions log involving one or more tasks or
+        stimulus_id's
         """
-        keys_or_tags = {
-            e.key if isinstance(e, TaskState) else e for e in keys_or_tasks_or_tags
+        keys_or_stimuli = {
+            e.key if isinstance(e, TaskState) else e for e in keys_or_tasks_or_stimuli
         }
-        return worker_story(keys_or_tags, self.log)
+        return worker_story(keys_or_stimuli, self.log)
 
-    async def get_story(self, keys_or_tags: Iterable[str]) -> list[tuple]:
-        return self.story(*keys_or_tags)
+    async def get_story(self, keys_or_stimuli: Iterable[str]) -> list[tuple]:
+        return self.story(*keys_or_stimuli)
 
     def stimulus_story(
         self, *keys_or_tasks: str | TaskState

@@ -27,14 +27,14 @@ def scheduler_story(
     ]
 
 
-def worker_story(keys_or_tags: set[str], log: Iterable[tuple]) -> list:
+def worker_story(keys_or_stimuli: set[str], log: Iterable[tuple]) -> list:
     """Creates a story from the worker log given a set of keys
     describing tasks or stimuli.
 
     Parameters
     ----------
-    keys_or_tags : set[str]
-        Task keys or arbitrary tags from the transition log, e.g. stimulus_id's
+    keys_or_stimuli : set[str]
+        Task keys or stimulus_id's
     log : iterable
         The worker log
 
@@ -45,10 +45,10 @@ def worker_story(keys_or_tags: set[str], log: Iterable[tuple]) -> list:
     return [
         msg
         for msg in log
-        if any(key in msg for key in keys_or_tags)
+        if any(key in msg for key in keys_or_stimuli)
         or any(
             key in c
-            for key in keys_or_tags
+            for key in keys_or_stimuli
             for c in msg
             if isinstance(c, (tuple, list, set))
         )
