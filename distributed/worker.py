@@ -2187,13 +2187,7 @@ class Worker(ServerNode):
     def transition_fetch_missing(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
-        # There's a use case where ts won't be found in self.data_needed, so
-        # `self.data_needed.remove(ts)` would crash:
-        # 1. An event handler empties who_has and pushes a recommendation to missing
-        # 2. The same event handler calls _ensure_communicating, which pops the task
-        #    from data_needed
-        # 3. The recommendation is enacted
-        # See matching code in _ensure_communicating.
+        # _ensure_communicating could have just popped this task out of data_needed
         self.data_needed.discard(ts)
         return self.transition_generic_missing(ts, stimulus_id=stimulus_id)
 
@@ -3019,11 +3013,7 @@ class Worker(ServerNode):
                 assert self.address not in ts.who_has
 
             if not ts.who_has:
-                # An event handler just emptied who_has and recommended a fetch->missing
-                # transition. Then, the same handler called _ensure_communicating. The
-                # transition hasn't been enacted yet, so the task is still in fetch
-                # state and in data_needed.
-                # See matching code in transition_fetch_missing.
+                recommendations[ts] = "missing"
                 continue
 
             workers = [
@@ -3369,48 +3359,26 @@ class Worker(ServerNode):
             ts.done = True
             yield ts
 
-    def _refetch_missing_data(
-        self, worker: str, tasks: Iterable[TaskState], stimulus_id: str
-    ) -> RecsInstrs:
-        """Helper of GatherDepSuccessEvent and GatherDepNetworkFailureEvent handlers.
-
-        Remove tasks that were not returned from the peer worker from has_what and
-        inform the scheduler with a missing-data message. Then, transition them back to
-        'fetch' so that they can be fetched from another worker.
-        """
-        recommendations: Recs = {}
-        instructions: Instructions = []
-
-        for ts in tasks:
-            ts.who_has.discard(worker)
-            self.has_what[worker].discard(ts.key)
-            self.log.append((ts.key, "missing-dep", stimulus_id, time()))
-            if ts.state in ("flight", "resumed", "cancelled"):
-                # This will actually transition to missing if who_has is empty
-                recommendations[ts] = "fetch"
-            elif ts.state == "fetch":
-                self.data_needed_per_worker[worker].discard(ts)
-                if not ts.who_has:
-                    recommendations[ts] = "missing"
-
-        return recommendations, instructions
-
     @_handle_event.register
     def _handle_gather_dep_success(self, ev: GatherDepSuccessEvent) -> RecsInstrs:
         """gather_dep terminated successfully.
         The response may contain less keys than the request.
         """
         recommendations: Recs = {}
-        refetch = set()
         for ts in self._gather_dep_done_common(ev):
             if ts.key in ev.data:
                 recommendations[ts] = ("memory", ev.data[ts.key])
             else:
-                refetch.add(ts)
+                self.log.append((ts.key, "missing-dep", ev.stimulus_id, time()))
+                if self.validate:
+                    assert ts.state != "fetch"
+                    assert ts not in self.data_needed_per_worker[ev.worker]
+                ts.who_has.discard(ev.worker)
+                self.has_what[ev.worker].discard(ts.key)
+                recommendations[ts] = "fetch"
 
         return merge_recs_instructions(
             (recommendations, []),
-            self._refetch_missing_data(ev.worker, refetch, ev.stimulus_id),
             self._ensure_communicating(stimulus_id=ev.stimulus_id),
         )
 
@@ -3461,17 +3429,20 @@ class Worker(ServerNode):
         either retry a different worker, or ask the scheduler to inform us of a new
         worker if no other worker is available.
         """
-        refetch = set(self._gather_dep_done_common(ev))
-        refetch |= {self.tasks[key] for key in self.has_what[ev.worker]}
+        self.data_needed_per_worker.pop(ev.worker)
+        for key in self.has_what.pop(ev.worker):
+            ts = self.tasks[key]
+            ts.who_has.discard(ev.worker)
 
-        recs, instrs = merge_recs_instructions(
-            self._refetch_missing_data(ev.worker, refetch, ev.stimulus_id),
+        recommendations: Recs = {}
+        for ts in self._gather_dep_done_common(ev):
+            self.log.append((ts.key, "missing-dep", ev.stimulus_id, time()))
+            recommendations[ts] = "fetch"
+
+        return merge_recs_instructions(
+            (recommendations, []),
             self._ensure_communicating(stimulus_id=ev.stimulus_id),
         )
-        # This cleanup must happen after _refetch_missing_data
-        del self.has_what[ev.worker]
-        del self.data_needed_per_worker[ev.worker]
-        return recs, instrs
 
     @_handle_event.register
     def _handle_gather_dep_failure(self, ev: GatherDepFailureEvent) -> RecsInstrs:
@@ -4266,8 +4237,7 @@ class Worker(ServerNode):
         assert self.address not in ts.who_has
         assert not ts.done
         assert ts in self.data_needed
-        assert ts.who_has
-
+        # Note: ts.who_has may be empty; see GatherDepNetworkFailureEvent
         for w in ts.who_has:
             assert ts.key in self.has_what[w]
             assert ts in self.data_needed_per_worker[w]

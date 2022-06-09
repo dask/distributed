@@ -2925,7 +2925,6 @@ async def test_who_has_consistent_remove_replicas(c, s, *workers):
     coming_from.handle_stimulus(RemoveReplicasEvent(keys=[f1.key], stimulus_id="test"))
     await f2
 
-    assert_story(a.story(f1.key), [(f1.key, "missing-dep")])
     assert a.tasks[f1.key].suspicious_count == 0
     assert s.tasks[f1.key].suspicious == 0
 

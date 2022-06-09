@@ -655,12 +655,11 @@ async def test_fetch_to_missing_on_network_failure(c, s, a):
     1. Two tasks, x and y, are respectively in flight and fetch state from the same
        worker, which holds the only replica of both.
     2. gather_dep for x returns GatherDepNetworkFailureEvent
-    3. The event empties has_what, x.who_has, and y.who_has; it recommends a transition
-       to missing for both x and y.
-    5. Before the recommendation can be implemented, the same event invokes
-       _ensure_communicating, which pops y from data_needed - but y has an empty
-       who_has, which is an exceptional situation.
-    6. The fetch->missing transition is executed, but y is no longer in data_needed -
+    3. The event empties has_what, x.who_has, and y.who_has.
+    4. The same event invokes _ensure_communicating, which pops y from data_needed
+       - but y has an empty who_has, which is an exceptional situation.
+       _ensure_communicating recommends a transition to missing for x.
+    5. The fetch->missing transition is executed, but y is no longer in data_needed -
        another exceptional situation.
     """
     block_get_data = asyncio.Event()
