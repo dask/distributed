@@ -652,18 +652,16 @@ async def test_fetch_to_missing_on_refresh_who_has(c, s, w1, w2, w3):
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_fetch_to_missing_on_network_failure(c, s, a):
     """
-    1. Multiple tasks can be fetched from the same worker
-    2. Only some transition to flight, while the others remain in fetch state, e.g.
-       because of excessive size
-    3. gather_dep returns GatherDepNetworkFailureEvent
-    4. The event empties has_what. This impacts both the tasks in fetch as well as those
-       in flight. The event recommends a transition to missing for all tasks with empty
-       who_has.
+    1. Two tasks, x and y, are respectively in flight and fetch state from the same
+       worker, which holds the only replica of both.
+    2. gather_dep for x returns GatherDepNetworkFailureEvent
+    3. The event empties has_what, x.who_has, and y.who_has; it recommends a transition
+       to missing for both x and y.
     5. Before the recommendation can be implemented, the same event invokes
-       _ensure_communicating, which pops the tasks in fetch state from data_needed - but
-       they have an empty who_has, which is an exceptional situation.
-    7. The transition fetch->missing is executed, but the tasks are no longer in
-       data_needed - another exceptional situation.
+       _ensure_communicating, which pops y from data_needed - but y has an empty
+       who_has, which is an exceptional situation.
+    6. The fetch->missing transition is executed, but y is no longer in data_needed -
+       another exceptional situation.
     """
     block_get_data = asyncio.Event()
 
