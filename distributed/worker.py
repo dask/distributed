@@ -1524,6 +1524,11 @@ class Worker(ServerNode):
             logger.info("Not waiting on executor to close")
         self.status = Status.closing
 
+        # Stop callbacks before giving up control in any `await`.
+        # We don't want to heartbeat while closing.
+        for pc in self.periodic_callbacks.values():
+            pc.stop()
+
         if self._async_instructions:
             for task in self._async_instructions:
                 task.cancel()
@@ -1560,9 +1565,6 @@ class Worker(ServerNode):
         ]
 
         await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
-
-        for pc in self.periodic_callbacks.values():
-            pc.stop()
 
         if self._client:
             # If this worker is the last one alive, clean up the worker
