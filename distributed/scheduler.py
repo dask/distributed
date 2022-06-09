@@ -3341,7 +3341,10 @@ class Scheduler(SchedulerState, ServerNode):
             weakref.finalize(self, del_scheduler_file)
 
         for preload in self.preloads:
-            await preload.start()
+            try:
+                await preload.start()
+            except Exception:
+                logger.exception("Failed to start preload")
 
         await asyncio.gather(
             *[plugin.start(self) for plugin in list(self.plugins.values())]
@@ -3381,8 +3384,8 @@ class Scheduler(SchedulerState, ServerNode):
         for preload in self.preloads:
             try:
                 await preload.teardown()
-            except Exception as e:
-                logger.exception(e)
+            except Exception:
+                logger.exception("Failed to tear down preload")
 
         await asyncio.gather(
             *[log_errors(plugin.close) for plugin in list(self.plugins.values())]
