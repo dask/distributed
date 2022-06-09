@@ -37,6 +37,7 @@ import dask
 
 from distributed import Scheduler, system
 from distributed import versions as version_module
+from distributed.batched import BatchedSend
 from distributed.client import Client, _global_clients, default_client
 from distributed.comm import Comm
 from distributed.comm.tcp import TCP
@@ -2345,3 +2346,33 @@ def freeze_data_fetching(w: Worker, *, jump_start: bool = False):
     if jump_start:
         w.status = Status.paused
         w.status = Status.running
+
+
+@contextmanager
+def freeze_batched_send(bcomm: BatchedSend) -> Iterator[LockedComm]:
+    """
+    Contextmanager blocking writes to a `BatchedSend` from sending over the network.
+
+    The returned `LockedComm` object can be used for control flow and inspection via its
+    ``read_event``, ``read_queue``, ``write_event``, and ``write_queue`` attributes.
+
+    On exit, any writes that were blocked are un-blocked, and the original comm of the
+    `BatchedSend` is restored.
+    """
+    assert not bcomm.closed()
+    assert bcomm.comm
+    assert not bcomm.comm.closed()
+    orig_comm = bcomm.comm
+
+    write_event = asyncio.Event()
+    write_queue: asyncio.Queue = asyncio.Queue()
+
+    bcomm.comm = locked_comm = LockedComm(
+        orig_comm, None, None, write_event, write_queue
+    )
+
+    try:
+        yield locked_comm
+    finally:
+        write_event.set()
+        bcomm.comm = orig_comm
