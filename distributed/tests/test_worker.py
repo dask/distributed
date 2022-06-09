@@ -1972,8 +1972,8 @@ async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     story = b.story("busy-gather")
     # 1 busy response straight away, followed by 1 retry every 150ms for 800ms.
     # The requests for b and g are clustered together in single messages.
-    # We need to be very lax in measuring as PeriodicCallback has been observed on CI to
-    # occasionally lag behind by >350ms.
+    # We need to be very lax in measuring as PeriodicCallback+network comms have been
+    # observed on CI to occasionally lag behind by several hundreds of ms.
     assert 2 <= len(story) <= 8
 
     async with Worker(s.address, name="x") as x:
