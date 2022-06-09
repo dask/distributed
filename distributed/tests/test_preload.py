@@ -171,7 +171,7 @@ async def test_web_preload():
         assert (
             re.match(
                 r"(?s).*Downloading preload at http://example.com/preload\n"
-                r".*Run preload setup function: http://example.com/preload\n"
+                r".*Run preload setup: http://example.com/preload\n"
                 r".*",
                 log.getvalue(),
             )
