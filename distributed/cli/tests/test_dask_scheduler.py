@@ -99,22 +99,24 @@ def test_dashboard_non_standard_ports(loop):
     pytest.importorskip("bokeh")
 
     with popen(
-        ["dask-scheduler", "--port", "3448", "--dashboard-address", ":4832"]
+        ["dask-scheduler", "--port", "23448", "--dashboard-address", ":24832"],
+        flush_output=False,
     ) as proc:
-        with Client("127.0.0.1:3448", loop=loop) as c:
+        line = wait_for_log_line(b"dashboard at", proc.stdout)
+        with Client("127.0.0.1:23448", loop=loop) as c:
             pass
 
         start = time()
         while True:
             try:
-                response = requests.get("http://localhost:4832/status/")
+                response = requests.get("http://localhost:24832/status/")
                 assert response.ok
                 break
             except Exception:
                 sleep(0.1)
                 assert time() < start + 20
     with pytest.raises(Exception):
-        requests.get("http://localhost:4832/status/")
+        requests.get("http://localhost:24832/status/")
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
@@ -207,8 +209,10 @@ def test_pid_file(loop):
 def test_scheduler_port_zero(loop):
     with tmpfile() as fn:
         with popen(
-            ["dask-scheduler", "--no-dashboard", "--scheduler-file", fn, "--port", "0"]
-        ):
+            ["dask-scheduler", "--no-dashboard", "--scheduler-file", fn, "--port", "0"],
+            flush_output=False,
+        ) as proc:
+            line = wait_for_log_line(b"dashboard at", proc.stdout)
             with Client(scheduler_file=fn, loop=loop) as c:
                 assert c.scheduler.port
                 assert c.scheduler.port != 8786

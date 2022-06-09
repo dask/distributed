@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import importlib
 import logging
 import os
@@ -19,6 +20,7 @@ from unittest import mock
 import psutil
 import pytest
 from tlz import first, pluck, sliding_window
+from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
@@ -38,7 +40,7 @@ from distributed import (
     wait,
 )
 from distributed.comm.registry import backends
-from distributed.compatibility import LINUX, WINDOWS
+from distributed.compatibility import LINUX, WINDOWS, to_thread
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import PipInstall
@@ -54,6 +56,7 @@ from distributed.utils_test import (
     captured_logger,
     dec,
     div,
+    freeze_batched_send,
     gen_cluster,
     gen_test,
     inc,
@@ -64,13 +67,21 @@ from distributed.utils_test import (
     slowsum,
 )
 from distributed.worker import (
-    InvalidTransition,
     Worker,
     benchmark_disk,
     benchmark_memory,
     benchmark_network,
     error_message,
     logger,
+)
+from distributed.worker_state_machine import (
+    AcquireReplicasEvent,
+    ComputeTaskEvent,
+    ExecuteFailureEvent,
+    ExecuteSuccessEvent,
+    RemoveReplicasEvent,
+    SerializedTask,
+    StealRequestEvent,
 )
 
 pytestmark = pytest.mark.ci1
@@ -526,8 +537,22 @@ async def test_gather_missing_workers_replicated(c, s, a, b, missing_first):
 
 @gen_cluster(nthreads=[])
 async def test_io_loop(s):
-    async with Worker(s.address, loop=s.loop) as w:
-        assert w.io_loop is s.loop
+    async with Worker(s.address) as w:
+        assert w.io_loop is w.loop is s.loop
+
+
+@gen_cluster(nthreads=[])
+async def test_io_loop_alternate_loop(s, loop):
+    async def main():
+        with pytest.warns(
+            DeprecationWarning,
+            match=r"The `loop` argument to `Worker` is ignored, and will be "
+            r"removed in a future release. The Worker always binds to the current loop",
+        ):
+            async with Worker(s.address, loop=loop) as w:
+                assert w.io_loop is w.loop is IOLoop.current()
+
+    await to_thread(asyncio.run, main())
 
 
 @gen_cluster(client=True)
@@ -1010,7 +1035,7 @@ async def test_worker_fds(s):
     proc = psutil.Process()
     before = psutil.Process().num_fds()
 
-    async with Worker(s.address, loop=s.loop):
+    async with Worker(s.address):
         assert proc.num_fds() > before
 
     while proc.num_fds() > before:
@@ -1078,7 +1103,12 @@ async def test_scheduler_delay(c, s, a, b):
 
 
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": True,
+    },
+)
 async def test_statistical_profiling(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.1)
     await wait(futures)
@@ -1093,6 +1123,7 @@ async def test_statistical_profiling(c, s, a, b):
     client=True,
     timeout=30,
     config={
+        "distributed.worker.profile.enabled": True,
         "distributed.worker.profile.interval": "1ms",
         "distributed.worker.profile.cycle": "100ms",
     },
@@ -1110,7 +1141,13 @@ async def test_statistical_profiling_2(c, s, a, b):
             break
 
 
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "50 ms"})
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": True,
+        "distributed.worker.profile.cycle": "100ms",
+    },
+)
 async def test_statistical_profiling_cycle(c, s, a, b):
     futures = c.map(slowinc, range(20), delay=0.05)
     await wait(futures)
@@ -1188,7 +1225,7 @@ def test_get_worker_name(client):
 @gen_cluster(nthreads=[], client=True)
 async def test_scheduler_address_config(c, s):
     with dask.config.set({"scheduler-address": s.address}):
-        worker = await Worker(loop=s.loop)
+        worker = await Worker()
         assert worker.scheduler.address == s.address
     await worker.close()
 
@@ -1282,7 +1319,7 @@ async def test_register_worker_callbacks(c, s, a, b):
     assert list(result.values()) == [False] * 2
 
     # Start a worker and check that startup is not run
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     result = await c.run(test_import, workers=[worker.address])
     assert list(result.values()) == [False]
     await worker.close()
@@ -1296,7 +1333,7 @@ async def test_register_worker_callbacks(c, s, a, b):
     assert list(result.values()) == [True] * 2
 
     # Start a worker and check it is ran on it
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     result = await c.run(test_import, workers=[worker.address])
     assert list(result.values()) == [True]
     await worker.close()
@@ -1310,7 +1347,7 @@ async def test_register_worker_callbacks(c, s, a, b):
     assert list(result.values()) == [True] * 2
 
     # Start a worker and check it is ran on it
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     result = await c.run(test_import, workers=[worker.address])
     assert list(result.values()) == [True]
     result = await c.run(test_startup2, workers=[worker.address])
@@ -1719,60 +1756,60 @@ async def test_heartbeat_missing_real_cluster(s, a):
     # However, `Scheduler.remove_worker` and `Worker.close` both currently leave things
     # in degenerate, half-closed states while they're running (and yielding control
     # via `await`).
+    # When https://github.com/dask/distributed/issues/6390 is fixed, this should no
+    # longer be possible.
 
-    # Currently this is easy because of https://github.com/dask/distributed/issues/6354.
-    # But even with that fixed, it may still be possible, since `Worker.close`
-    # could take an arbitrarily long time, and things can keep running
-    # while it's closing.
     assumption_msg = "Test assumptions have changed. Race condition may have been fixed; this test may be removable."
-
-    class BlockCloseExtension:
-        def __init__(self) -> None:
-            self.close_reached = asyncio.Event()
-            self.unblock_close = asyncio.Event()
-
-        async def close(self):
-            self.close_reached.set()
-            await self.unblock_close.wait()
-
-    # `Worker.close` awaits extensions' `close` methods midway though.
-    # During this `await`, the Worker is in state `closing`, but the heartbeat
-    # `PeriodicCallback` is still running. We will intentionally pause
-    # the worker here to simulate the timing of a heartbeat happing in this
-    # degenerate state.
-    a.extensions["block-close"] = block_close = BlockCloseExtension()
 
     with captured_logger(
         "distributed.worker", level=logging.WARNING
     ) as wlogger, captured_logger(
         "distributed.scheduler", level=logging.WARNING
     ) as slogger:
-        await s.remove_worker(a.address, stimulus_id="foo")
+        with freeze_batched_send(s.stream_comms[a.address]):
+            await s.remove_worker(a.address, stimulus_id="foo")
+            assert not s.workers
+
+            # The scheduler has removed the worker state, but the close message has
+            # not reached the worker yet.
+            assert a.status == Status.running, assumption_msg
+            assert a.periodic_callbacks["heartbeat"].is_running(), assumption_msg
+
+            # The heartbeat PeriodicCallback is still running, so one _could_ fire
+            # before the `op: close` message reaches the worker. We simulate that explicitly.
+            await a.heartbeat()
+
+            # The heartbeat receives a `status: missing` from the scheduler, so it
+            # closes the worker. Heartbeats aren't sent over batched comms, so
+            # `freeze_batched_send` doesn't affect them.
+            assert a.status == Status.closed
+
+            assert "Scheduler was unaware of this worker" in wlogger.getvalue()
+            assert "Received heartbeat from unregistered worker" in slogger.getvalue()
+
         assert not s.workers
 
-        # Wait until the close signal reaches the worker and it starts shutting down.
-        await block_close.close_reached.wait()
-        assert a.status == Status.closing, assumption_msg
-        assert a.periodic_callbacks["heartbeat"].is_running(), assumption_msg
-        # The heartbeat PeriodicCallback is still running, so one _could_ fire
-        # while `Worker.close` has yielded control. We simulate that explicitly.
 
-        # Because `hearbeat` will `await self.close`, which is blocking on our
-        # extension, we have to run it concurrently.
-        hbt = asyncio.create_task(a.heartbeat())
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    Worker=Nanny,
+    worker_kwargs={"heartbeat_interval": "1ms"},
+)
+async def test_heartbeat_missing_restarts(c, s: Scheduler, n: Nanny):
+    old_heartbeat_handler = s.handlers["heartbeat_worker"]
+    s.handlers["heartbeat_worker"] = lambda *args, **kwargs: {"status": "missing"}
 
-        # Worker was already closing, so the second `.close()` will be idempotent.
-        # Best we can test for is this log message.
-        while "Scheduler was unaware of this worker" not in wlogger.getvalue():
-            await asyncio.sleep(0.01)
+    assert n.process
+    await n.process.stopped.wait()
 
-        assert "Received heartbeat from unregistered worker" in slogger.getvalue()
-        assert not s.workers
+    assert not s.workers
+    s.handlers["heartbeat_worker"] = old_heartbeat_handler
 
-        block_close.unblock_close.set()
-        await hbt
-        await a.finished()
-        assert not s.workers
+    await n.process.running.wait()
+    assert n.status == Status.running
+
+    await c.wait_for_workers(1)
 
 
 @gen_cluster(nthreads=[])
@@ -1843,31 +1880,67 @@ async def test_story(c, s, w):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_stimulus_story(c, s, a):
+    # Test that substrings aren't matched by stimulus_story()
+    f = c.submit(inc, 1, key="f")
+    f1 = c.submit(lambda: "foo", key="f1")
+    f2 = c.submit(inc, f1, key="f2")  # This will fail
+    await wait([f, f1, f2])
+
+    story = a.stimulus_story("f1", "f2")
+    assert len(story) == 4
+
+    assert isinstance(story[0], ComputeTaskEvent)
+    assert story[0].key == "f1"
+    assert story[0].run_spec == SerializedTask(task=None)  # Not logged
+
+    assert isinstance(story[1], ExecuteSuccessEvent)
+    assert story[1].key == "f1"
+    assert story[1].value is None  # Not logged
+    assert story[1].handled >= story[0].handled
+
+    assert isinstance(story[2], ComputeTaskEvent)
+    assert story[2].key == "f2"
+    assert story[2].who_has == {"f1": (a.address,)}
+    assert story[2].run_spec == SerializedTask(task=None)  # Not logged
+    assert story[2].handled >= story[1].handled
+
+    assert isinstance(story[3], ExecuteFailureEvent)
+    assert story[3].key == "f2"
+    assert story[3].handled >= story[2].handled
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_worker_descopes_data(c, s, a):
+    """Test that data is released on the worker:
+    1. when it's the output of a successful task
+    2. when it's the input of a failed task
+    3. when it's a local variable in the frame of a failed task
+    4. when it's embedded in the exception of a failed task
+    """
+
     class C:
-        pass
+        instances = weakref.WeakSet()
 
-    f = c.submit(C, key="f")  # Test that substrings aren't matched by story()
-    f2 = c.submit(inc, 2, key="f2")
-    f3 = c.submit(inc, 3, key="f3")
-    await wait([f, f2, f3])
+        def __init__(self):
+            C.instances.add(self)
 
-    # Test that ExecuteSuccessEvent.value is not stored in the the event log
-    assert isinstance(a.data["f"], C)
-    ref = weakref.ref(a.data["f"])
-    del f
-    while "f" in a.data:
+    def f(x):
+        y = C()
+        raise Exception(x, y)
+
+    f1 = c.submit(C, key="f1")
+    f2 = c.submit(f, f1, key="f2")
+    await wait([f2])
+
+    assert type(a.data["f1"]) is C
+
+    del f1
+    del f2
+    while a.data:
         await asyncio.sleep(0.01)
     with profile.lock:
-        assert ref() is None
-
-    story = a.stimulus_story("f", "f2")
-    assert {ev.key for ev in story} == {"f", "f2"}
-    assert {ev.type for ev in story} == {C, int}
-
-    prev_handled = story[0].handled
-    for ev in story[1:]:
-        assert ev.handled >= prev_handled
-        prev_handled = ev.handled
+        gc.collect()
+    assert not C.instances
 
 
 @gen_cluster(client=True)
@@ -2562,7 +2635,7 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
             await asyncio.sleep(0)
 
         ts = s.tasks[fut.key]
-        a.handle_steal_request(fut.key, stimulus_id="test")
+        a.handle_stimulus(StealRequestEvent(key=fut.key, stimulus_id="test"))
         stealing_ext.scheduler.send_task_to_worker(b.address, ts)
 
         fut2 = c.submit(inc, fut, workers=[a.address])
@@ -2676,24 +2749,26 @@ async def test_acquire_replicas_many(c, s, *workers):
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_acquire_replicas_already_in_flight(c, s, a):
     """Trying to acquire a replica that is already in flight is a no-op"""
-    async with BlockedGetData(s.address) as b:
-        x = c.submit(inc, 1, key="x", workers=[b.address])
-        y = c.submit(inc, x, key="y", workers=[a.address])
-        await _wait_for_state("x", a, "flight")
+    async with BlockedGatherDep(s.address) as b:
+        x = c.submit(inc, 1, workers=[a.address], key="x")
+        y = c.submit(inc, x, workers=[b.address], key="y")
+        await b.in_gather_dep.wait()
+        assert b.tasks["x"].state == "flight"
 
-        a.handle_acquire_replicas(
-            keys=["x"], who_has={"x": [b.address]}, stimulus_id="test"
+        b.handle_stimulus(
+            AcquireReplicasEvent(who_has={"x": a.address}, stimulus_id="test")
         )
-        b.block_get_data.set()
+        assert b.tasks["x"].state == "flight"
+        b.block_gather_dep.set()
         assert await y == 3
 
-    assert_story(
-        a.story("x"),
-        [
-            ("x", "fetch", "flight", "flight", {}),
-            ("x", "flight", "fetch", "flight", {}),
-        ],
-    )
+        assert_story(
+            b.story("x"),
+            [
+                ("x", "fetch", "flight", "flight", {}),
+                ("x", "flight", "fetch", "flight", {}),
+            ],
+        )
 
 
 @gen_cluster(client=True)
@@ -2851,8 +2926,7 @@ async def test_who_has_consistent_remove_replicas(c, s, *workers):
         if w.address == a.tasks[f1.key].coming_from:
             break
 
-    coming_from.handle_remove_replicas([f1.key], "test")
-
+    coming_from.handle_stimulus(RemoveReplicasEvent(keys=[f1.key], stimulus_id="test"))
     await f2
 
     assert_story(a.story(f1.key), [(f1.key, "missing-dep")])
@@ -3037,7 +3111,6 @@ async def test_task_flight_compute_oserror(c, s, a, b):
         ),
         # inc is lost and needs to be recomputed. Therefore, sum is released
         ("free-keys", ("f1",)),
-        ("f1", "release-key"),
         # The recommendations here are hard to predict. Whatever key is
         # currently scheduled to be fetched, if any, will be recommended to be
         # released.
@@ -3299,29 +3372,6 @@ async def test_tick_interval(c, s, a, b):
     while s.workers[a.address].metrics["event_loop_interval"] < 0.100:
         await asyncio.sleep(0.01)
         time.sleep(0.200)
-
-
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
-async def test_log_invalid_transitions(c, s, a):
-    x = c.submit(inc, 1)
-    y = c.submit(inc, x)
-    xkey = x.key
-    del x
-    await y
-    while a.tasks[xkey].state != "released":
-        await asyncio.sleep(0.01)
-    ts = a.tasks[xkey]
-    with pytest.raises(InvalidTransition):
-        a.transition(ts, "foo", stimulus_id="bar")
-
-    while not s.events["invalid-worker-transition"]:
-        await asyncio.sleep(0.01)
-
-    assert "foo" in str(s.events["invalid-worker-transition"])
-    assert a.address in str(s.events["invalid-worker-transition"])
-    assert ts.key in str(s.events["invalid-worker-transition"])
-
-    del s.events["invalid-worker-transition"]  # for test cleanup
 
 
 class BreakingWorker(Worker):

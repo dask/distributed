@@ -17,15 +17,21 @@ from distributed.utils_test import (
     inc,
 )
 from distributed.worker_state_machine import (
+    AcquireReplicasEvent,
+    ComputeTaskEvent,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     Instruction,
+    RecommendationsConflict,
+    RefreshWhoHasEvent,
     ReleaseWorkerDataMsg,
     RescheduleEvent,
     RescheduleMsg,
+    SerializedTask,
     StateMachineEvent,
     TaskState,
     TaskStateState,
+    UpdateDataEvent,
     merge_recs_instructions,
 )
 
@@ -119,7 +125,7 @@ def test_merge_recs_instructions():
         {x: "memory"},
         [],
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(RecommendationsConflict):
         merge_recs_instructions(({x: "memory"}, []), ({x: "released"}, []))
 
 
@@ -136,6 +142,70 @@ def test_event_to_dict():
     }
     ev3 = StateMachineEvent.from_dict(d)
     assert ev3 == ev
+
+
+def test_computetask_to_dict():
+    """The potentially very large ComputeTaskEvent.run_spec is not stored in the log"""
+    ev = ComputeTaskEvent(
+        key="x",
+        who_has={"y": ["w1"]},
+        nbytes={"y": 123},
+        priority=(0,),
+        duration=123.45,
+        # Automatically converted to SerializedTask on init
+        run_spec={"function": b"blob", "args": b"blob"},
+        resource_restrictions={},
+        actor=False,
+        annotations={},
+        stimulus_id="test",
+    )
+    assert ev.run_spec == SerializedTask(function=b"blob", args=b"blob")
+    ev2 = ev.to_loggable(handled=11.22)
+    assert ev2.handled == 11.22
+    assert ev2.run_spec == SerializedTask(task=None)
+    assert ev.run_spec == SerializedTask(function=b"blob", args=b"blob")
+    d = recursive_to_dict(ev2)
+    assert d == {
+        "cls": "ComputeTaskEvent",
+        "key": "x",
+        "who_has": {"y": ["w1"]},
+        "nbytes": {"y": 123},
+        "priority": [0],
+        "run_spec": [None, None, None, None],
+        "duration": 123.45,
+        "resource_restrictions": {},
+        "actor": False,
+        "annotations": {},
+        "stimulus_id": "test",
+        "handled": 11.22,
+    }
+    ev3 = StateMachineEvent.from_dict(d)
+    assert isinstance(ev3, ComputeTaskEvent)
+    assert ev3.run_spec == SerializedTask(task=None)
+    assert ev3.priority == (0,)  # List is automatically converted back to tuple
+
+
+def test_updatedata_to_dict():
+    """The potentially very large UpdateDataEvent.data is not stored in the log"""
+    ev = UpdateDataEvent(
+        data={"x": "foo", "y": "bar"},
+        report=True,
+        stimulus_id="test",
+    )
+    ev2 = ev.to_loggable(handled=11.22)
+    assert ev2.handled == 11.22
+    assert ev2.data == {"x": None, "y": None}
+    d = recursive_to_dict(ev2)
+    assert d == {
+        "cls": "UpdateDataEvent",
+        "data": {"x": None, "y": None},
+        "report": True,
+        "stimulus_id": "test",
+        "handled": 11.22,
+    }
+    ev3 = StateMachineEvent.from_dict(d)
+    assert isinstance(ev3, UpdateDataEvent)
+    assert ev3.data == {"x": None, "y": None}
 
 
 def test_executesuccess_to_dict():
@@ -495,3 +565,85 @@ async def test_forget_data_needed(c, s, a, b):
     x = c.submit(inc, 2, key="x", workers=[a.address])
     y = c.submit(inc, x, key="y", workers=[b.address])
     assert await y == 4
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+async def test_missing_handle_compute_dependency(c, s, w1, w2, w3):
+    """Test that it is OK for a dependency to be in state missing if a dependent is
+    asked to be computed
+    """
+    w3.periodic_callbacks["find-missing"].stop()
+
+    f1 = c.submit(inc, 1, key="f1", workers=[w1.address])
+    f2 = c.submit(inc, 2, key="f2", workers=[w1.address])
+    await wait_for_state(f1.key, "memory", w1)
+
+    w3.handle_stimulus(
+        AcquireReplicasEvent(who_has={f1.key: [w2.address]}, stimulus_id="acquire")
+    )
+    await wait_for_state(f1.key, "missing", w3)
+
+    f3 = c.submit(sum, [f1, f2], key="f3", workers=[w3.address])
+
+    await f3
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+async def test_missing_to_waiting(c, s, w1, w2, w3):
+    w3.periodic_callbacks["find-missing"].stop()
+
+    f1 = c.submit(inc, 1, key="f1", workers=[w1.address], allow_other_workers=True)
+    await wait_for_state(f1.key, "memory", w1)
+
+    w3.handle_stimulus(
+        AcquireReplicasEvent(who_has={f1.key: [w2.address]}, stimulus_id="acquire")
+    )
+    await wait_for_state(f1.key, "missing", w3)
+
+    await w2.close()
+    await w1.close()
+
+    await f1
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+async def test_fetch_to_missing_on_refresh_who_has(c, s, w1, w2, w3):
+    """
+    1. Two tasks, x and y, are only available on a busy worker.
+       The worker sends request-refresh-who-has to the scheduler.
+    2. The scheduler responds that x has become missing, while y has gained an
+       additional replica
+    3. The handler for RefreshWhoHasEvent empties x.who_has and recommends a transition
+       to missing.
+    4. Before the recommendation can be implemented, the same event invokes
+       _ensure_communicating to let y to transition to flight. This in turn pops x from
+       data_needed - but x has an empty who_has, which is an exceptional situation.
+    5. The transition fetch->missing is executed, but x is no longer in
+       data_needed - another exceptional situation.
+    """
+    x = c.submit(inc, 1, key="x", workers=[w1.address])
+    y = c.submit(inc, 2, key="y", workers=[w1.address])
+    await wait([x, y])
+    w1.total_in_connections = 0
+    s.request_acquire_replicas(w3.address, ["x", "y"], stimulus_id="test1")
+
+    # The tasks will now flip-flop between fetch and flight every 150ms
+    # (see Worker.retry_busy_worker_later)
+    await wait_for_state("x", "fetch", w3)
+    await wait_for_state("y", "fetch", w3)
+    assert w1.address in w3.busy_workers
+    # w3 sent {op: request-refresh-who-has, keys: [x, y]}
+    # There also may have been enough time for a refresh-who-has message to come back,
+    # which reiterated what w3 already knew:
+    # {op: refresh-who-has, who_has={x: [w1.address], y: [w1.address]}}
+
+    # Let's instead simulate that, while request-refresh-who-has was in transit,
+    # w2 gained a replica of y and w1 closed down.
+    # When request-refresh-who-has lands, the scheduler will respond:
+    # {op: refresh-who-has, who_has={x: [], y: [w2.address]}}
+    w3.handle_stimulus(
+        RefreshWhoHasEvent(who_has={"x": [], "y": [w2.address]}, stimulus_id="test2")
+    )
+    assert w3.tasks["x"].state == "missing"
+    assert w3.tasks["y"].state == "flight"
+    assert w3.tasks["y"].who_has == {w2.address}
