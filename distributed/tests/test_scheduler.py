@@ -23,6 +23,7 @@ import dask
 from dask import delayed
 from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
 
+import distributed
 from distributed import (
     CancelledError,
     Client,
@@ -3595,3 +3596,56 @@ async def test_worker_state_unique_regardless_of_address(s, w):
     assert ws1 is not ws2
     assert ws1 != ws2
     assert hash(ws1) != ws2
+
+
+@gen_cluster(
+    client=True, nthreads=[("", 1)] * 4, worker_kwargs={"resources": {"FOO": 1}}
+)
+async def test_scheduling_waits_for_resources(
+    c: Client, s: Scheduler, *workers: Worker
+):
+    """
+    If there aren't enough resources *currently* available in the cluster,
+    tasks that need resources shouldn't be sent to any workers---hold onto them
+    until a worker is freed up.
+    """
+    # Use events to freeze state, instead of relying on timing
+    nw = len(workers)
+    started_events = [distributed.Event(f"started-{i}") for i in range(nw + 2)]
+    blocker_events = [
+        distributed.Event(f"blocker-{i}") for i in range(len(started_events))
+    ]
+
+    fs = c.map(
+        lambda started, blocker: (started.set(), blocker.wait()),
+        started_events,
+        blocker_events,
+        resources={"FOO": 1},
+        key=[f"t-{i}" for i in range(len(blocker_events))],
+    )
+
+    # Wait until a task has started on each worker
+    await asyncio.gather(*(started.wait() for started in started_events[:nw]))
+
+    # Only the first 4 tasks should be scheduled.
+    # (Scheduling order is determined by priority, which is determined by task name.)
+    tasks_in_order = [s.tasks[f.key] for f in fs]
+    expected_states = ["processing"] * nw + ["no-worker", "no-worker"]
+    assert [ts.state for ts in tasks_in_order] == expected_states
+
+    # Each worker should only know about 1 task
+    for w in workers:
+        assert len(w.tasks) == 1
+
+    # Let one task finish
+    await blocker_events[0].set()
+    # Just the next task should be scheduled
+    await asyncio.sleep(1)
+    await started_events[-2].wait()
+    expected_states = ["memory"] + ["processing"] * nw + ["no-worker"]
+    assert [ts.state for ts in tasks_in_order] == expected_states
+
+    # TODO: test losing a worker
+
+    await asyncio.gather(*(b.set() for b in blocker_events[1:]))
+    await wait(fs)
