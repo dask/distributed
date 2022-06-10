@@ -668,11 +668,13 @@ class WorkerProcess:
             await self.process.start()
         except OSError:
             logger.exception("Nanny failed to start process", exc_info=True)
+            # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
             await self.process.terminate()
             self.status = Status.failed
         try:
             msg = await self._wait_until_connected(uid)
         except Exception:
+            # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
             await self.process.terminate()
             self.status = Status.failed
             raise
