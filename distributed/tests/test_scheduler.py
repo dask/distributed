@@ -3595,3 +3595,11 @@ async def test_worker_state_unique_regardless_of_address(s, w):
     assert ws1 is not ws2
     assert ws1 != ws2
     assert hash(ws1) != ws2
+
+
+@gen_cluster(nthreads=[("", 1)])
+async def test_scheduler_close_fast_deprecated(s, w):
+    ws1 = s.workers[w.address]
+    host, port = parse_host_port(ws1.address)
+    with pytest.warns(FutureWarning):
+        await s.close(fast=True)
