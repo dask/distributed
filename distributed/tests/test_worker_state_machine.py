@@ -647,3 +647,38 @@ async def test_fetch_to_missing_on_refresh_who_has(c, s, w1, w2, w3):
     assert w3.tasks["x"].state == "missing"
     assert w3.tasks["y"].state == "flight"
     assert w3.tasks["y"].who_has == {w2.address}
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_fetch_to_missing_on_network_failure(c, s, a):
+    """
+    1. Two tasks, x and y, are respectively in flight and fetch state from the same
+       worker, which holds the only replica of both.
+    2. gather_dep for x returns GatherDepNetworkFailureEvent
+    3. The event empties has_what, x.who_has, and y.who_has.
+    4. The same event invokes _ensure_communicating, which pops y from data_needed
+       - but y has an empty who_has, which is an exceptional situation.
+       _ensure_communicating recommends a transition to missing for x.
+    5. The fetch->missing transition is executed, but y is no longer in data_needed -
+       another exceptional situation.
+    """
+    block_get_data = asyncio.Event()
+
+    class BlockedBreakingWorker(Worker):
+        async def get_data(self, comm, *args, **kwargs):
+            await block_get_data.wait()
+            raise OSError("fake error")
+
+    async with BlockedBreakingWorker(s.address) as b:
+        x = c.submit(inc, 1, key="x", workers=[b.address])
+        y = c.submit(inc, 2, key="y", workers=[b.address])
+        await wait([x, y])
+        s.request_acquire_replicas(a.address, ["x"], stimulus_id="test_x")
+        await wait_for_state("x", "flight", a)
+        s.request_acquire_replicas(a.address, ["y"], stimulus_id="test_y")
+        await wait_for_state("y", "fetch", a)
+
+        block_get_data.set()
+
+        await wait_for_state("x", "missing", a)
+        await wait_for_state("y", "missing", a)
