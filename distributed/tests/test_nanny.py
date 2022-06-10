@@ -625,7 +625,7 @@ async def test_close_joins(s):
         assert nanny.status == Status.closed
         assert not nanny.process
 
-        assert p.status == Status.closed
+        assert p.status == Status.stopped
         assert not p.process
 
 
