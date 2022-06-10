@@ -475,22 +475,16 @@ async def test_nanny_closed_by_keyboard_interrupt(ucx_loop, protocol):
 
 
 class BrokenWorker(worker.Worker):
-    def __init__(self, startup_attempts, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.startup_attempts = startup_attempts
 
     async def start_unsafe(self):
-        with self.startup_attempts.get_lock():
-            self.startup_attempts.value += 1
         raise ValueError("broken")
 
 
 @gen_cluster(nthreads=[])
 async def test_worker_start_exception(s):
-    startup_attempts = mp.Value("i", 0)
-    nanny = Nanny(
-        s.address, worker_class=BrokenWorker, startup_attempts=startup_attempts
-    )
+    nanny = Nanny(s.address, worker_class=BrokenWorker)
     with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
         with raises_with_cause(
             RuntimeError,
@@ -503,7 +497,6 @@ async def test_worker_start_exception(s):
     assert nanny.status == Status.failed
     # ^ NOTE: `Nanny.close` sets it to `closed`, then `Server.start._close_on_failure` sets it to `failed`
     assert nanny.process is None
-    assert startup_attempts.value == 1
     assert "Restarting worker" not in logs.getvalue()
     # Avoid excessive spewing. (It's also printed once extra within the subprocess, which is okay.)
     assert logs.getvalue().count("ValueError: broken") == 1, logs.getvalue()
