@@ -984,8 +984,8 @@ class WorkerNetworkBandwidth(DashboardComponent):
         for ws in workers:
             x_read.append(ws.metrics["read_bytes"])
             x_write.append(ws.metrics["write_bytes"])
-            x_read_disk.append(ws.metrics["read_bytes_disk"])
-            x_write_disk.append(ws.metrics["write_bytes_disk"])
+            x_read_disk.append(ws.metrics.get("read_bytes_disk", 0))
+            x_write_disk.append(ws.metrics.get("write_bytes_disk", 0))
 
         if self.scheduler.workers:
             self.bandwidth.x_range.end = max(
@@ -1173,8 +1173,8 @@ class SystemTimeseries(DashboardComponent):
             write_bytes += ws.metrics["write_bytes"]
             cpu += ws.metrics["cpu"]
             memory += ws.metrics["memory"]
-            read_bytes_disk += ws.metrics["read_bytes_disk"]
-            write_bytes_disk += ws.metrics["write_bytes_disk"]
+            read_bytes_disk += ws.metrics.get("read_bytes_disk", 0)
+            write_bytes_disk += ws.metrics.get("write_bytes_disk", 0)
             time += ws.metrics["time"]
 
         result = {
