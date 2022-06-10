@@ -582,43 +582,31 @@ async def test_restart_memory(c, s, n):
         await asyncio.sleep(0.1)
 
 
-class BlockSigterm(WorkerPlugin):
-    def __init__(self, term_happened, term_proceed) -> None:
-        self.term_happened = term_happened
-        self.term_proceed = term_proceed
-
-    def setup(self, worker):
-        import signal
-
-        signal.signal(signal.SIGTERM, self.sigterm)
-
-    def sigterm(self, *args):
-        self.term_happened.set()
-        self.term_proceed.wait()
+class BlockClose(WorkerPlugin):
+    def __init__(self, close_happened) -> None:
+        self.close_happened = close_happened
 
     async def teardown(self, worker):
         # Never let the worker cleanly shut down, so it has to be killed
+        self.close_happened.set()
         while True:
             await asyncio.sleep(10)
 
 
 @gen_cluster(nthreads=[])
 async def test_close_joins(s):
-    term_happened = mp.Event()
-    term_proceed = mp.Event()
+    close_happened = mp.Event()
 
-    nanny = Nanny(s.address, plugins=[BlockSigterm(term_happened, term_proceed)])
+    nanny = Nanny(s.address, plugins=[BlockClose(close_happened)])
     async with nanny:
         p = nanny.process
         assert p
         close_t = asyncio.create_task(nanny.close())
-        await to_thread(term_happened.wait)
+        await to_thread(close_happened.wait)
 
         assert not close_t.done()
         assert nanny.status == Status.closing
         assert nanny.process and nanny.process.status == Status.stopping
-
-        term_proceed.set()
 
         await close_t
 

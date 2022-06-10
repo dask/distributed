@@ -735,7 +735,12 @@ class WorkerProcess:
     async def kill(self, timeout: float = 2, executor_wait: bool = True):
         """
         Ensure the worker process is stopped, waiting at most
-        *timeout* seconds before terminating it abruptly.
+        ``timeout * 0.8`` seconds before killing it abruptly.
+
+        When `kill` returns, the worker process has been joined.
+
+        If the worker process does not terminate within ``timeout`` seconds,
+        even after being killed, `asyncio.TimeoutError` is raised.
         """
         deadline = time() + timeout
 
@@ -754,8 +759,7 @@ class WorkerProcess:
 
         process = self.process
         assert self.process
-        wait_timeout = max(0, deadline - time()) * 0.8
-        wait_deadline = time() + wait_timeout
+        wait_timeout = timeout * 0.8
         self.child_stop_q.put(
             {
                 "op": "stop",
@@ -766,23 +770,17 @@ class WorkerProcess:
         await asyncio.sleep(0)  # otherwise we get broken pipe errors
         self.child_stop_q.close()
 
-        while process.is_alive() and time() < wait_deadline:
-            await asyncio.sleep(0.05)
+        try:
+            await process.join(wait_timeout)
+            return
+        except asyncio.TimeoutError:
+            pass
 
-        if process.is_alive():
-            logger.warning(
-                f"Worker process still alive after {timeout} seconds, terminating"
-            )
-            await process.terminate()
-            try:
-                await process.join(max(0, (deadline - time()) * 0.5))
-                return
-            except asyncio.TimeoutError:
-                pass
-
-            logger.error("Timed out waiting for worker process to exit. Killing.")
-            await process.kill()
-            await process.join(max(0, deadline - time()))
+        logger.warning(
+            f"Worker process still alive after {wait_timeout} seconds, killing"
+        )
+        await process.kill()
+        await process.join(max(0, deadline - time()))
 
     async def _wait_until_connected(self, uid):
         while True:
