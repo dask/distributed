@@ -389,15 +389,6 @@ class ReleaseWorkerDataMsg(SendMessageToScheduler):
     key: str
 
 
-@dataclass
-class MissingDataMsg(SendMessageToScheduler):
-    op = "missing-data"
-
-    __slots__ = ("key", "errant_worker")
-    key: str
-    errant_worker: str
-
-
 # Not to be confused with RescheduleEvent below or the distributed.Reschedule Exception
 @dataclass
 class RescheduleMsg(SendMessageToScheduler):
@@ -532,9 +523,86 @@ class RetryBusyWorkerEvent(StateMachineEvent):
 
 @dataclass
 class GatherDepDoneEvent(StateMachineEvent):
-    """Temporary hack - to be removed"""
+    """:class:`GatherDep` instruction terminated (abstract base class)"""
+
+    __slots__ = ("worker", "total_nbytes")
+    worker: str
+    total_nbytes: int  # Must be the same as in GatherDep instruction
+
+
+@dataclass
+class GatherDepSuccessEvent(GatherDepDoneEvent):
+    """:class:`GatherDep` instruction terminated:
+    remote worker fetched successfully
+    """
+
+    __slots__ = ("data",)
+
+    data: dict[str, object]  # There may be less keys than in GatherDep
+
+    def to_loggable(self, *, handled: float) -> StateMachineEvent:
+        out = copy(self)
+        out.handled = handled
+        out.data = {k: None for k in self.data}
+        return out
+
+    def _after_from_dict(self) -> None:
+        self.data = {k: None for k in self.data}
+
+
+@dataclass
+class GatherDepBusyEvent(GatherDepDoneEvent):
+    """:class:`GatherDep` instruction terminated:
+    remote worker is busy
+    """
 
     __slots__ = ()
+
+
+@dataclass
+class GatherDepNetworkFailureEvent(GatherDepDoneEvent):
+    """:class:`GatherDep` instruction terminated:
+    network failure while trying to communicate with remote worker
+    """
+
+    __slots__ = ()
+
+
+@dataclass
+class GatherDepFailureEvent(GatherDepDoneEvent):
+    """class:`GatherDep` instruction terminated:
+    generic error raised (not a network failure); e.g. data failed to deserialize.
+    """
+
+    exception: Serialize
+    traceback: Serialize | None
+    exception_text: str
+    traceback_text: str
+    __slots__ = tuple(__annotations__)  # type: ignore
+
+    def _after_from_dict(self) -> None:
+        self.exception = Serialize(Exception())
+        self.traceback = None
+
+    @classmethod
+    def from_exception(
+        cls,
+        err: BaseException,
+        *,
+        worker: str,
+        total_nbytes: int,
+        stimulus_id: str,
+    ) -> GatherDepFailureEvent:
+        msg = error_message(err)
+        return cls(
+            worker=worker,
+            total_nbytes=total_nbytes,
+            exception=msg["exception"],
+            traceback=msg["traceback"],
+            exception_text=msg["exception_text"],
+            traceback_text=msg["traceback_text"],
+            stimulus_id=stimulus_id,
+        )
 
 
 @dataclass

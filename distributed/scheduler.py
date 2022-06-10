@@ -3023,7 +3023,6 @@ class Scheduler(SchedulerState, ServerNode):
             "task-erred": self.handle_task_erred,
             "release-worker-data": self.release_worker_data,
             "add-keys": self.add_keys,
-            "missing-data": self.handle_missing_data,
             "long-running": self.handle_long_running,
             "reschedule": self.reschedule,
             "keep-alive": lambda *args, **kwargs: None,
@@ -3341,7 +3340,10 @@ class Scheduler(SchedulerState, ServerNode):
             weakref.finalize(self, del_scheduler_file)
 
         for preload in self.preloads:
-            await preload.start()
+            try:
+                await preload.start()
+            except Exception:
+                logger.exception("Failed to start preload")
 
         await asyncio.gather(
             *[plugin.start(self) for plugin in list(self.plugins.values())]
@@ -3381,8 +3383,8 @@ class Scheduler(SchedulerState, ServerNode):
         for preload in self.preloads:
             try:
                 await preload.teardown()
-            except Exception as e:
-                logger.exception(e)
+            except Exception:
+                logger.exception("Failed to tear down preload")
 
         await asyncio.gather(
             *[log_errors(plugin.close) for plugin in list(self.plugins.values())]
@@ -4667,40 +4669,6 @@ class Scheduler(SchedulerState, ServerNode):
         self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
         self.send_all(client_msgs, worker_msgs)
 
-    def handle_missing_data(
-        self, key: str, worker: str, errant_worker: str, stimulus_id: str
-    ) -> None:
-        """Signal that `errant_worker` does not hold `key`.
-
-        This may either indicate that `errant_worker` is dead or that we may be working
-        with stale data and need to remove `key` from the workers `has_what`. If no
-        replica of a task is available anymore, the task is transitioned back to
-        released and rescheduled, if possible.
-
-        Parameters
-        ----------
-        key : str
-            Task key that could not be found
-        worker : str
-            Address of the worker informing the scheduler
-        errant_worker : str
-            Address of the worker supposed to hold a replica
-        """
-        logger.debug(f"handle missing data {key=} {worker=} {errant_worker=}")
-        self.log_event(errant_worker, {"action": "missing-data", "key": key})
-
-        ts = self.tasks.get(key)
-        ws = self.workers.get(errant_worker)
-        if not ts or not ws or ws not in ts.who_has:
-            return
-
-        self.remove_replica(ts, ws)
-        if ts.state == "memory" and not ts.who_has:
-            if ts.run_spec:
-                self.transitions({key: "released"}, stimulus_id)
-            else:
-                self.transitions({key: "forgotten"}, stimulus_id)
-
     def release_worker_data(self, key: str, worker: str, stimulus_id: str) -> None:
         ts = self.tasks.get(key)
         ws = self.workers.get(worker)
@@ -5088,19 +5056,19 @@ class Scheduler(SchedulerState, ServerNode):
                 stimulus_id=stimulus_id,
             )
 
-        nannies = {addr: ws.nanny for addr, ws in self.workers.items()}
+        nanny_workers = {
+            addr: ws.nanny for addr, ws in self.workers.items() if ws.nanny
+        }
 
-        for addr in list(self.workers):
-            try:
-                # Ask the worker to close if it doesn't have a nanny,
-                # otherwise the nanny will kill it anyway
-                await self.remove_worker(
-                    address=addr, close=addr not in nannies, stimulus_id=stimulus_id
-                )
-            except Exception:
-                logger.info(
-                    "Exception while restarting.  This is normal", exc_info=True
-                )
+        # Close non-Nanny workers. We have no way to restart them, so we just let them go,
+        # and assume a deployment system is going to restart them for us.
+        await asyncio.gather(
+            *(
+                self.remove_worker(address=addr, stimulus_id=stimulus_id)
+                for addr in self.workers
+                if addr not in nanny_workers
+            )
+        )
 
         self.clear_task_state()
 
@@ -5110,21 +5078,27 @@ class Scheduler(SchedulerState, ServerNode):
             except Exception as e:
                 logger.exception(e)
 
-        logger.debug("Send kill signal to nannies: %s", nannies)
+        logger.debug("Send kill signal to nannies: %s", nanny_workers)
         async with contextlib.AsyncExitStack() as stack:
             nannies = [
                 await stack.enter_async_context(
                     rpc(nanny_address, connection_args=self.connection_args)
                 )
-                for nanny_address in nannies.values()
-                if nanny_address is not None
+                for nanny_address in nanny_workers.values()
             ]
 
-            resps = All(
-                [nanny.restart(close=True, timeout=timeout * 0.8) for nanny in nannies]
-            )
             try:
-                resps = await asyncio.wait_for(resps, timeout)
+                resps = await asyncio.wait_for(
+                    asyncio.gather(
+                        *(
+                            nanny.restart(close=True, timeout=timeout * 0.8)
+                            for nanny in nannies
+                        )
+                    ),
+                    timeout,
+                )
+                # NOTE: the `WorkerState` entries for these workers will be removed
+                # naturally when they disconnect from the scheduler.
             except TimeoutError:
                 logger.error(
                     "Nannies didn't report back restarted within "

@@ -4914,7 +4914,8 @@ def test_quiet_client_close(loop):
         for line in lines:
             assert (
                 not line
-                or "Reconnecting" in line
+                or "heartbeat from unregistered worker" in line
+                or "unaware of this worker" in line
                 or "garbage" in line
                 or set(line) == {"-"}
             ), line
