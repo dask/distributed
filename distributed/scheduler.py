@@ -3354,13 +3354,18 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle(f"dask-scheduler [{self.address}]")
         return self
 
-    async def close(self):
+    async def close(self, fast=None, close_workers=None):
         """Send cleanup signal to all coroutines then wait until finished
 
         See Also
         --------
         Scheduler.cleanup
         """
+        if fast is not None or close_workers is not None:
+            warnings.warn(
+                "The 'fast' and 'close_workers' parameters in Scheduler.close have no effect and will be removed in a future version of distributed.",
+                FutureWarning,
+            )
         if self.status in (Status.closing, Status.closed):
             await self.finished()
             return
