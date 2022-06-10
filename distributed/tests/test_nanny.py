@@ -475,9 +475,6 @@ async def test_nanny_closed_by_keyboard_interrupt(ucx_loop, protocol):
 
 
 class BrokenWorker(worker.Worker):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
     async def start_unsafe(self):
         raise ValueError("broken")
 
