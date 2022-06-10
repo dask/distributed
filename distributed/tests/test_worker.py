@@ -1939,6 +1939,7 @@ async def test_worker_descopes_data(c, s, a):
     assert not C.instances
 
 
+@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     # Ensure that both dependencies for H are on another worker than H itself.
@@ -1966,12 +1967,14 @@ async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     assert b.tasks[g.key].state in ("flight", "fetch")
 
     with pytest.raises(asyncio.TimeoutError):
-        await h.result(timeout=0.5)
+        await h.result(timeout=0.8)
 
     story = b.story("busy-gather")
-    # 1 busy response straight away, followed by 1 retry every 150ms for 500ms.
+    # 1 busy response straight away, followed by 1 retry every 150ms for 800ms.
     # The requests for b and g are clustered together in single messages.
-    assert 3 <= len(story) <= 7
+    # We need to be very lax in measuring as PeriodicCallback+network comms have been
+    # observed on CI to occasionally lag behind by several hundreds of ms.
+    assert 2 <= len(story) <= 8
 
     async with Worker(s.address, name="x") as x:
         # We "scatter" the data to another worker which is able to serve this data.
