@@ -593,6 +593,7 @@ class BlockClose(WorkerPlugin):
             await asyncio.sleep(10)
 
 
+@pytest.mark.slow
 @gen_cluster(nthreads=[])
 async def test_close_joins(s):
     close_happened = mp.Event()
