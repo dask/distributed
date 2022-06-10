@@ -232,7 +232,7 @@ class TCP(Comm):
                 range(0, frames_nbytes + OPENSSL_MAX_CHUNKSIZE, OPENSSL_MAX_CHUNKSIZE),
             ):
                 chunk = frames[i:j]
-                chunk_nbytes = len(chunk)
+                chunk_nbytes = chunk.nbytes
                 n = await stream.read_into(chunk)
                 assert n == chunk_nbytes, (n, chunk_nbytes)
         except StreamClosedError as e:
@@ -299,16 +299,25 @@ class TCP(Comm):
             # trick to enque all frames for writing beforehand
             for each_frame_nbytes, each_frame in zip(frames_nbytes, frames):
                 if each_frame_nbytes:
-                    if stream._write_buffer is None:
-                        raise StreamClosedError()
+                    each_frame = memoryview(each_frame)
 
                     if isinstance(each_frame, memoryview):
                         # Make sure that `len(data) == data.nbytes`
                         # See <https://github.com/tornadoweb/tornado/pull/2996>
                         each_frame = ensure_memoryview(each_frame)
 
-                    stream._write_buffer.append(each_frame)
-                    stream._total_write_index += each_frame_nbytes
+                    # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
+                    for i, j in sliding_window(
+                        2, range(0, each_frame_nbytes + C_INT_MAX, C_INT_MAX)
+                    ):
+                        chunk = each_frame[i:j]
+                        chunk_nbytes = chunk.nbytes
+
+                        if stream._write_buffer is None:
+                            raise StreamClosedError()
+
+                        stream._write_buffer.append(chunk)
+                        stream._total_write_index += chunk_nbytes
 
             # start writing frames
             stream.write(b"")
