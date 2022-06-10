@@ -1416,7 +1416,10 @@ class Worker(ServerNode):
             self.name = self.address
 
         for preload in self.preloads:
-            await preload.start()
+            try:
+                await preload.start()
+            except Exception:
+                logger.exception("Failed to start preload")
 
         # Services listen on all addresses
         # Note Nanny is not a "real" service, just some metadata
@@ -1543,8 +1546,8 @@ class Worker(ServerNode):
         for preload in self.preloads:
             try:
                 await preload.teardown()
-            except Exception as e:
-                logger.exception(e)
+            except Exception:
+                logger.exception("Failed to tear down preload")
 
         for extension in self.extensions.values():
             if hasattr(extension, "close"):
