@@ -771,17 +771,18 @@ class WorkerProcess:
 
         if process.is_alive():
             logger.warning(
-                f"Worker process still alive after {timeout} seconds, killing"
+                f"Worker process still alive after {timeout} seconds, terminating"
             )
+            await process.terminate()
             try:
-                await process.terminate()
-            except Exception as e:
-                logger.error("Failed to kill worker process: %s", e)
-            else:
-                try:
-                    await process.join(max(0, deadline - time()))
-                except asyncio.TimeoutError:
-                    logger.error("Timed out waiting for worker process to exit")
+                await process.join(max(0, (deadline - time()) * 0.5))
+                return
+            except asyncio.TimeoutError:
+                pass
+
+            logger.error("Timed out waiting for worker process to exit. Killing.")
+            await process.kill()
+            await process.join(max(0, deadline - time()))
 
     async def _wait_until_connected(self, uid):
         while True:
