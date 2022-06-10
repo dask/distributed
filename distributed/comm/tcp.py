@@ -299,16 +299,11 @@ class TCP(Comm):
             # trick to enque all frames for writing beforehand
             for each_frame_nbytes, each_frame in zip(frames_nbytes, frames):
                 if each_frame_nbytes:
-                    each_frame = memoryview(each_frame)
-
-                    if isinstance(each_frame, memoryview):
-                        # Make sure that `len(data) == data.nbytes`
-                        # See <https://github.com/tornadoweb/tornado/pull/2996>
-                        each_frame = ensure_memoryview(each_frame)
-
-                    # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
+                    # Make sure that `len(data) == data.nbytes`
+                    # See <https://github.com/tornadoweb/tornado/pull/2996>
+                    each_frame = ensure_memoryview(each_frame)
                     for i, j in sliding_window(
-                        2, range(0, each_frame_nbytes + C_INT_MAX, C_INT_MAX)
+                        2, range(0, each_frame_nbytes + OPENSSL_MAX_CHUNKSIZE, OPENSSL_MAX_CHUNKSIZE)
                     ):
                         chunk = each_frame[i:j]
                         chunk_nbytes = chunk.nbytes
