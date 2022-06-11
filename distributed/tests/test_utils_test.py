@@ -3,6 +3,7 @@ import os
 import pathlib
 import signal
 import socket
+import subprocess
 import sys
 import textwrap
 import threading
@@ -823,6 +824,41 @@ def test_popen_write_during_terminate_deadlock():
         assert proc.stdout.readline().strip() == b"ready"
     # Exiting the context manager (terminating the subprocess) will raise
     # `subprocess.TimeoutExpired` if this test breaks.
+
+
+def test_popen_timeout(capsys: pytest.CaptureFixture):
+    with pytest.raises(subprocess.TimeoutExpired):
+        with popen(
+            [
+                sys.executable,
+                "-c",
+                textwrap.dedent(
+                    """
+                    import time
+
+                    print('ready', flush=True)
+                    while True:
+                        try:
+                            time.sleep(0.1)
+                            print("slept", flush=True)
+                        except KeyboardInterrupt:
+                            print("interrupted", flush=True)
+                    """
+                ),
+            ],
+            capture_output=True,
+            terminate_timeout=1,
+        ) as proc:
+            assert proc.stdout
+            assert proc.stdout.readline().strip() == b"ready"
+    # Exiting contextmanager sends SIGINT, waits 1s for shutdown.
+    # Our script ignores SIGINT, so after 1s it sends SIGKILL.
+    # The contextmanager raises `TimeoutExpired` once the process is killed,
+    # because it failed the 1s timeout
+    captured = capsys.readouterr()
+    assert "stdout of" in captured.out
+    assert "interrupted" in captured.out
+    assert "slept" in captured.out
 
 
 @gen_test()

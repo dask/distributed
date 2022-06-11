@@ -1283,23 +1283,30 @@ def raises(func, exc=Exception):
         return True
 
 
-def _terminate_process(proc: subprocess.Popen) -> None:
+def _terminate_process(
+    proc: subprocess.Popen, terminate_timeout: float, kill_timeout: float
+) -> None:
     if proc.poll() is None:
         if sys.platform.startswith("win"):
             proc.send_signal(signal.CTRL_BREAK_EVENT)
         else:
             proc.send_signal(signal.SIGINT)
         try:
-            proc.communicate(timeout=30)
+            proc.communicate(timeout=terminate_timeout)
         finally:
             # Make sure we don't leave the process lingering around
             with suppress(OSError):
                 proc.kill()
+                proc.communicate(timeout=kill_timeout)
 
 
 @contextmanager
 def popen(
-    args: list[str], capture_output: bool = False, **kwargs
+    args: list[str],
+    capture_output: bool = False,
+    terminate_timeout: float = 30,
+    kill_timeout: float = 10,
+    **kwargs,
 ) -> Iterator[subprocess.Popen[bytes]]:
     """Start a shell command in a subprocess.
     Yields a subprocess.Popen object.
@@ -1325,6 +1332,18 @@ def popen(
         Note that ``proc.communicate`` is called automatically when the
         contextmanager exits. Calling code must not call ``proc.communicate``
         in a separate thread, since it's not thread-safe.
+    terminate_timeout: optional, default 30
+        When the contextmanager exits, SIGINT is sent to the subprocess.
+        ``terminate_timeout`` sets how many seconds to wait for the subprocess
+        to terminate after that. If the timeout expires, SIGKILL is sent to
+        the subprocess (which cannot be blocked); see ``kill_timeout``.
+        If this timeout expires, `subprocess.TimeoutExpired` is raised.
+    kill_timeout: optional, default 10
+        When the contextmanger exits, if the subprocess does not shut down
+        after ``terminate_timeout`` seconds in response to SIGINT, SIGKILL
+        is sent to the subprocess (which cannot be blocked). ``kill_timeout``
+        controls how long to wait after SIGKILL to join the process.
+        If this timeout expires, `subprocess.TimeoutExpired` is raised.
     kwargs: optional
         optional arguments to subprocess.Popen
     """
@@ -1346,9 +1365,24 @@ def popen(
         try:
             yield proc
         finally:
-            _terminate_process(proc)
-            out, err = proc.communicate()
-            assert not err
+            try:
+                _terminate_process(proc, terminate_timeout, kill_timeout)
+            except subprocess.TimeoutExpired as err:
+                if err.stdout:
+                    print(f"------ stdout of {err.cmd} ------")
+                    print(
+                        err.stdout.decode()
+                        if isinstance(err.stdout, bytes)
+                        else err.stdout
+                    )
+                if err.stderr:
+                    print(f"------ stderr of {err.cmd} ------")
+                    print(
+                        err.stderr.decode()
+                        if isinstance(err.stderr, bytes)
+                        else err.stderr
+                    )
+                raise
 
 
 def wait_for(predicate, timeout, fail_func=None, period=0.05):
