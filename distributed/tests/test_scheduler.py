@@ -17,7 +17,7 @@ import cloudpickle
 import psutil
 import pytest
 from tlz import concat, first, merge, valmap
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask import delayed
@@ -1788,16 +1788,17 @@ async def test_collect_versions(c, s, a, b):
     assert cs.versions == w1.versions == w2.versions
 
 
-@pytest.mark.xfail(reason="flaky and re-fails on rerun")
-@gen_cluster(client=True, config={"distributed.scheduler.idle-timeout": "500ms"})
+@gen_cluster(client=True)
 async def test_idle_timeout(c, s, a, b):
     beginning = time()
-    assert s.idle_since <= beginning
+    s.idle_timeout = 0.500
+    pc = PeriodicCallback(s.check_idle, 10)
     future = c.submit(slowinc, 1)
+    while not s.tasks:
+        await asyncio.sleep(0.01)
+    pc.start()
     await future
     assert s.idle_since is None or s.idle_since > beginning
-
-    assert s.status != Status.closed
 
     with captured_logger("distributed.scheduler") as logs:
         start = time()
@@ -1814,6 +1815,26 @@ async def test_idle_timeout(c, s, a, b):
     assert "500" in logs.getvalue()
     assert "ms" in logs.getvalue()
     assert s.idle_since > beginning
+    pc.stop()
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[],
+)
+async def test_idle_timeout_no_workers(c, s):
+    future = c.submit(inc, 1)
+
+    s.idle_timeout = 0.010
+    pc = PeriodicCallback(s.check_idle, 10)
+    pc.start()
+    s.idle_since = None
+
+    for _ in range(10):
+        await asyncio.sleep(0.10)
+        assert not s.idle_since
+
+    pc.stop()
 
 
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
