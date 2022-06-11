@@ -11,7 +11,7 @@ Leave data on the cluster
 
 Wait as long as possible to gather data locally.  If you want to ask a question
 of a large piece of data on the cluster it is often faster to submit a function
-onto that data then to bring the data down to your local computer.
+onto that data than to bring the data down to your local computer.
 
 
 For example if we have a numpy array on the cluster and we want to know its
@@ -85,7 +85,7 @@ worker processes on each node, each using one thread.  When configuring your
 cluster you may want to use the options to the ``dask-worker`` executable as
 follows::
 
-   $ dask-worker ip:port --nprocs 8 --nthreads 1
+   $ dask-worker ip:port --nworkers 8 --nthreads 1
 
 Note that if you're primarily using NumPy, Pandas, SciPy, Scikit Learn, Numba,
 or other C/Fortran/LLVM/Cython-accelerated libraries then this is not an issue

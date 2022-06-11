@@ -8,15 +8,17 @@ import weakref
 from datetime import timedelta
 from time import sleep
 
+import psutil
 import pytest
 from tornado import gen
+from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
 from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.process import AsyncProcess
 from distributed.utils import mp_context
-from distributed.utils_test import gen_test, nodebug, pristine_loop
+from distributed.utils_test import gen_test, nodebug
 
 
 def feed(in_q, out_q):
@@ -49,7 +51,6 @@ def threads_info(q):
     q.put(threading.current_thread().name)
 
 
-@pytest.mark.xfail()
 @nodebug
 @gen_test()
 async def test_simple():
@@ -79,7 +80,7 @@ async def test_simple():
     t1 = time()
     await proc.join(timeout=0.02)
     dt = time() - t1
-    assert 0.2 >= dt >= 0.01
+    assert 0.2 >= dt >= 0.001
     assert proc.is_alive()
     assert proc.pid is not None
     assert proc.exitcode is None
@@ -107,13 +108,14 @@ async def test_simple():
     assert dt <= 0.6
 
     del proc
-    gc.collect()
+
     start = time()
     while wr1() is not None and time() < start + 1:
         # Perhaps the GIL switched before _watch_process() exit,
         # help it a little
         sleep(0.001)
         gc.collect()
+
     if wr1() is not None:
         # Help diagnosing
         from types import FrameType
@@ -191,7 +193,7 @@ async def test_terminate():
     await proc.start()
     await proc.terminate()
 
-    await proc.join(timeout=30)
+    await proc.join()
     assert not proc.is_alive()
     assert proc.exitcode in (-signal.SIGTERM, 255)
 
@@ -243,7 +245,7 @@ async def test_exit_callback():
     assert not evt.is_set()
 
     to_child.put(None)
-    await evt.wait(timedelta(seconds=3))
+    await evt.wait(timedelta(seconds=5))
     assert evt.is_set()
     assert not proc.is_alive()
 
@@ -259,7 +261,7 @@ async def test_exit_callback():
     assert not evt.is_set()
 
     await proc.terminate()
-    await evt.wait(timedelta(seconds=3))
+    await evt.wait(timedelta(seconds=5))
     assert evt.is_set()
 
 
@@ -281,13 +283,9 @@ async def test_child_main_thread():
     q._writer.close()
 
 
-@pytest.mark.skipif(
-    sys.platform.startswith("win"), reason="num_fds not supported on windows"
-)
+@pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @gen_test()
 async def test_num_fds():
-    psutil = pytest.importorskip("psutil")
-
     # Warm up
     proc = AsyncProcess(target=exit_now)
     proc.daemon = True
@@ -304,11 +302,8 @@ async def test_num_fds():
     assert not proc.is_alive()
     assert proc.exitcode == 0
 
-    start = time()
     while p.num_fds() > before:
-        await asyncio.sleep(0.1)
-        print("fds:", before, p.num_fds())
-        assert time() < start + 10
+        await asyncio.sleep(0.01)
 
 
 @gen_test()
@@ -317,6 +312,26 @@ async def test_terminate_after_stop():
     await proc.start()
     await asyncio.sleep(0.1)
     await proc.terminate()
+    await proc.join()
+
+
+def kill_target(ev):
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    ev.set()
+    sleep(300)
+
+
+@pytest.mark.skipif(WINDOWS, reason="Needs SIGKILL")
+@gen_test()
+async def test_kill():
+    ev = mp_context.Event()
+    proc = AsyncProcess(target=kill_target, args=(ev,))
+    await proc.start()
+    ev.wait()
+    await proc.kill()
+    await proc.join()
+    assert not proc.is_alive()
+    assert proc.exitcode in (-signal.SIGKILL, 255)
 
 
 def _worker_process(worker_ready, child_pipe):
@@ -346,6 +361,7 @@ def _parent_process(child_pipe):
     be used to determine if it exited correctly."""
 
     async def parent_process_coroutine():
+        IOLoop.current()
         worker_ready = mp_context.Event()
 
         worker = AsyncProcess(target=_worker_process, args=(worker_ready, child_pipe))
@@ -360,13 +376,12 @@ def _parent_process(child_pipe):
         # worker_process to also exit.
         os._exit(255)
 
-    with pristine_loop() as loop:
-        try:
-            loop.run_sync(parent_process_coroutine(), timeout=10)
-        finally:
-            loop.stop()
+    async def run_with_timeout():
+        t = asyncio.create_task(parent_process_coroutine())
+        return await asyncio.wait_for(t, timeout=10)
 
-            raise RuntimeError("this should be unreachable due to os._exit")
+    asyncio.run(run_with_timeout())
+    raise RuntimeError("this should be unreachable due to os._exit")
 
 
 def test_asyncprocess_child_teardown_on_parent_exit():
@@ -407,10 +422,8 @@ def test_asyncprocess_child_teardown_on_parent_exit():
         # test failure.
         try:
             readable = children_alive.poll(short_timeout)
-        except EnvironmentError:
-            # Windows can raise BrokenPipeError. EnvironmentError is caught for
-            # Python2/3 portability.
-            assert sys.platform.startswith("win"), "should only raise on windows"
+        except BrokenPipeError:
+            assert WINDOWS, "should only raise on windows"
             # Broken pipe implies closed, which is readable.
             readable = True
 
@@ -424,16 +437,14 @@ def test_asyncprocess_child_teardown_on_parent_exit():
             result = children_alive.recv()
         except EOFError:
             pass  # Test passes.
-        except EnvironmentError:
-            # Windows can raise BrokenPipeError. EnvironmentError is caught for
-            # Python2/3 portability.
-            assert sys.platform.startswith("win"), "should only raise on windows"
+        except BrokenPipeError:
+            assert WINDOWS, "should only raise on windows"
             # Test passes.
         else:
             # Oops, children_alive read something. It should be closed. If
             # something was read, it's a message from the child telling us they
             # are still alive!
-            raise RuntimeError("unreachable: {}".format(result))
+            raise RuntimeError(f"unreachable: {result}")
 
     finally:
         # Cleanup.

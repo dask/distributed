@@ -9,9 +9,9 @@ from tlz import identity
 try:
     import numpy as np
 except ImportError:
-    np = None
+    np = None  # type: ignore
 
-from dask.utils_test import inc
+import dask
 
 from distributed import Nanny, wait
 from distributed.comm.utils import from_frames, to_frames
@@ -32,7 +32,7 @@ from distributed.protocol import (
     to_serialize,
 )
 from distributed.protocol.serialize import check_dask_serializable
-from distributed.utils import nbytes
+from distributed.utils import ensure_memoryview, nbytes
 from distributed.utils_test import gen_test, inc
 
 
@@ -88,18 +88,44 @@ def test_serialize_bytestrings():
         assert bb == b
 
 
+def test_serialize_empty_array():
+    a = array("I")
+
+    # serialize array
+    header, frames = serialize(a)
+    assert frames[0] == memoryview(a)
+    # drop empty frame
+    del frames[:]
+    # deserialize with no frames
+    a2 = deserialize(header, frames)
+    assert type(a2) == type(a)
+    assert a2.typecode == a.typecode
+    assert a2 == a
+
+
 @pytest.mark.parametrize(
     "typecode", ["b", "B", "h", "H", "i", "I", "l", "L", "q", "Q", "f", "d"]
 )
 def test_serialize_arrays(typecode):
-    a = array(typecode)
-    a.extend(range(5))
+    a = array(typecode, range(5))
+
+    # handle normal round trip through serialization
     header, frames = serialize(a)
     assert frames[0] == memoryview(a)
     a2 = deserialize(header, frames)
     assert type(a2) == type(a)
     assert a2.typecode == a.typecode
     assert a2 == a
+
+    # split up frames to test joining them back together
+    header, frames = serialize(a)
+    (f,) = frames
+    f = ensure_memoryview(f)
+    frames = [f[:1], f[1:2], f[2:-1], f[-1:]]
+    a3 = deserialize(header, frames)
+    assert type(a3) == type(a)
+    assert a3.typecode == a.typecode
+    assert a3 == a
 
 
 def test_Serialize():
@@ -242,8 +268,8 @@ def test_serialize_bytes(kwargs):
         "abc",
         np.arange(5),
         b"ab" * int(40e6),
-        int(2 ** 26) * b"ab",
-        (int(2 ** 25) * b"ab", int(2 ** 25) * b"ab"),
+        int(2**26) * b"ab",
+        (int(2**25) * b"ab", int(2**25) * b"ab"),
     ]:
         b = serialize_bytes(x, **kwargs)
         assert isinstance(b, bytes)
@@ -415,7 +441,7 @@ def test_serialize_raises():
     assert "Hello-123" in str(info.value)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_profile_nested_sizeof():
     # https://github.com/dask/distributed/issues/1674
     n = 500
@@ -430,18 +456,60 @@ async def test_profile_nested_sizeof():
     frames = await to_frames(msg)
 
 
-def test_compression_numpy_list():
-    class MyObj:
+def test_different_compression_families():
+    """Test serialization of a collection of items that use different compression
+
+    This scenario happens for instance when serializing collections of
+    cupy and numpy arrays.
+    """
+
+    class MyObjWithCompression:
         pass
 
-    @dask_serialize.register(MyObj)
-    def _(x):
-        header = {"compression": [False]}
-        frames = [b""]
-        return header, frames
+    class MyObjWithNoCompression:
+        pass
 
-    header, frames = serialize([MyObj(), MyObj()])
-    assert header["compression"] == [False, False]
+    def my_dumps_compression(obj, context=None):
+        if not isinstance(obj, MyObjWithCompression):
+            raise NotImplementedError()
+        header = {"compression": [True]}
+        return header, [bytes(2**20)]
+
+    def my_dumps_no_compression(obj, context=None):
+        if not isinstance(obj, MyObjWithNoCompression):
+            raise NotImplementedError()
+
+        header = {"compression": [False]}
+        return header, [bytes(2**20)]
+
+    def my_loads(header, frames):
+        return pickle.loads(frames[0])
+
+    register_serialization_family("with-compression", my_dumps_compression, my_loads)
+    register_serialization_family("no-compression", my_dumps_no_compression, my_loads)
+
+    header, _ = serialize(
+        [MyObjWithCompression(), MyObjWithNoCompression()],
+        serializers=("with-compression", "no-compression"),
+        on_error="raise",
+        iterate_collection=True,
+    )
+    assert header["compression"] == [True, False]
+
+
+@gen_test()
+async def test_frame_split():
+    data = b"1234abcd" * (2**20)  # 8 MiB
+    assert dask.sizeof.sizeof(data) == dask.utils.parse_bytes("8MiB")
+
+    size = dask.utils.parse_bytes("3MiB")
+    split_frames = await to_frames({"x": to_serialize(data)}, frame_split_size=size)
+    print(split_frames)
+    assert len(split_frames) == 3 + 2  # Three splits and two headers
+
+    size = dask.utils.parse_bytes("5MiB")
+    split_frames = await to_frames({"x": to_serialize(data)}, frame_split_size=size)
+    assert len(split_frames) == 2 + 2  # Two splits and two headers
 
 
 @pytest.mark.parametrize(
@@ -465,7 +533,9 @@ def test_compression_numpy_list():
         (memoryview(b"hello"), True),
         pytest.param(
             memoryview(
-                np.random.random((3, 4)) if np is not None else b"skip np.random"
+                np.random.random((3, 4))  # type: ignore
+                if np is not None
+                else b"skip np.random"
             ),
             True,
             marks=pytest.mark.skipif(np is None, reason="Test needs numpy"),
@@ -497,7 +567,9 @@ def test_serialize_lists(serializers):
         memoryview(b"hello"),
         pytest.param(
             memoryview(
-                np.random.random((3, 4)) if np is not None else b"skip np.random"
+                np.random.random((3, 4))  # type: ignore
+                if np is not None
+                else b"skip np.random"
             ),
             marks=pytest.mark.skipif(np is None, reason="Test needs numpy"),
         ),
@@ -505,7 +577,7 @@ def test_serialize_lists(serializers):
 )
 def test_deser_memoryview(data_in):
     header, frames = serialize(data_in)
-    assert header["type"] == "builtins.memoryview"
+    assert header["type"] == "memoryview"
     assert frames[0] is data_in
     data_out = deserialize(header, frames)
     assert data_in == data_out

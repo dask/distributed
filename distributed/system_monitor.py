@@ -2,13 +2,15 @@ from collections import deque
 
 import psutil
 
-from .compatibility import WINDOWS
-from .metrics import time
+import dask
+
+from distributed.compatibility import WINDOWS
+from distributed.metrics import time
 
 try:
-    from .diagnostics import nvml
+    from distributed.diagnostics import nvml
 except Exception:
-    nvml = None
+    nvml = None  # type: ignore
 
 
 class SystemMonitor:
@@ -35,13 +37,32 @@ class SystemMonitor:
             self._last_io_counters = ioc
             self._collect_net_io_counters = True
 
+        try:
+            disk_ioc = psutil.disk_io_counters()
+        except Exception:
+            self._collect_disk_io_counters = False
+        else:
+            if disk_ioc is None or not dask.config.get(  # diskless machine
+                "distributed.admin.system-monitor.disk"
+            ):
+                self._collect_disk_io_counters = False
+            else:
+                self.last_time_disk = time()
+                self.read_bytes_disk = deque(maxlen=n)
+                self.write_bytes_disk = deque(maxlen=n)
+                self.quantities["read_bytes_disk"] = self.read_bytes_disk
+                self.quantities["write_bytes_disk"] = self.write_bytes_disk
+                self._last_disk_io_counters = disk_ioc
+                self._collect_disk_io_counters = True
+
         if not WINDOWS:
             self.num_fds = deque(maxlen=n)
             self.quantities["num_fds"] = self.num_fds
 
-        if nvml is not None:
-            self.gpu_name = None
-            self.gpu_memory_total = None
+        if nvml.device_get_count() > 0:
+            gpu_extra = nvml.one_time()
+            self.gpu_name = gpu_extra["name"]
+            self.gpu_memory_total = gpu_extra["memory-total"]
             self.gpu_utilization = deque(maxlen=n)
             self.gpu_memory_used = deque(maxlen=n)
             self.quantities["gpu_utilization"] = self.gpu_utilization
@@ -55,10 +76,18 @@ class SystemMonitor:
         except IndexError:
             return {k: None for k, v in self.quantities.items()}
 
+    def get_process_memory(self) -> int:
+        """Sample process memory, as reported by the OS.
+        This one-liner function exists so that it can be easily mocked in unit tests,
+        as the OS allocating and releasing memory is highly volatile and a constant
+        source of flakiness.
+        """
+        return self.proc.memory_info().rss
+
     def update(self):
         with self.proc.oneshot():
             cpu = self.proc.cpu_percent()
-            memory = self.proc.memory_info().rss
+            memory = self.get_process_memory()
         now = time()
 
         self.cpu.append(cpu)
@@ -85,17 +114,36 @@ class SystemMonitor:
                 result["read_bytes"] = read_bytes
                 result["write_bytes"] = write_bytes
 
+        if self._collect_disk_io_counters:
+            try:
+                disk_ioc = psutil.disk_io_counters()
+            except Exception:
+                pass
+            else:
+                if disk_ioc is None:  # diskless machine
+                    self._collect_disk_io_counters = False
+                else:
+                    last_disk = self._last_disk_io_counters
+                    duration_disk = now - self.last_time_disk
+                    read_bytes_disk = (disk_ioc.read_bytes - last_disk.read_bytes) / (
+                        duration_disk or 0.5
+                    )
+                    write_bytes_disk = (
+                        disk_ioc.write_bytes - last_disk.write_bytes
+                    ) / (duration_disk or 0.5)
+                    self.last_time_disk = now
+                    self._last_disk_io_counters = disk_ioc
+                    self.read_bytes_disk.append(read_bytes_disk)
+                    self.write_bytes_disk.append(write_bytes_disk)
+                    result["read_bytes_disk"] = read_bytes_disk
+                    result["write_bytes_disk"] = write_bytes_disk
+
         if not WINDOWS:
             num_fds = self.proc.num_fds()
             self.num_fds.append(num_fds)
             result["num_fds"] = num_fds
 
-        # give external modules (like dask-cuda) a chance to initialize CUDA context
-        if nvml is not None and nvml.nvmlInit is not None:
-            if self.gpu_name is None:
-                gpu_extra = nvml.one_time()
-                self.gpu_name = gpu_extra["name"]
-                self.gpu_memory_total = gpu_extra["memory-total"]
+        if nvml.device_get_count() > 0:
             gpu_metrics = nvml.real_time()
             self.gpu_utilization.append(gpu_metrics["utilization"])
             self.gpu_memory_used.append(gpu_metrics["memory-used"])

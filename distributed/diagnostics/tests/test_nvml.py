@@ -1,14 +1,22 @@
+import multiprocessing as mp
 import os
 
 import pytest
 
+pytestmark = pytest.mark.gpu
+
 pynvml = pytest.importorskip("pynvml")
+
+import dask
 
 from distributed.diagnostics import nvml
 from distributed.utils_test import gen_cluster
 
 
 def test_one_time():
+    if nvml.device_get_count() < 1:
+        pytest.skip("No GPUs available")
+
     output = nvml.one_time()
     assert "memory-total" in output
     assert "name" in output
@@ -16,7 +24,74 @@ def test_one_time():
     assert len(output["name"]) > 0
 
 
+def test_enable_disable_nvml():
+    try:
+        pynvml.nvmlShutdown()
+    except pynvml.NVMLError_Uninitialized:
+        pass
+    else:
+        nvml.nvmlInitialized = False
+
+    with dask.config.set({"distributed.diagnostics.nvml": False}):
+        nvml.init_once()
+        assert nvml.nvmlInitialized is False
+
+    with dask.config.set({"distributed.diagnostics.nvml": True}):
+        nvml.init_once()
+        assert (
+            nvml.nvmlInitialized
+            ^ nvml.nvmlLibraryNotFound
+            ^ nvml.nvmlWslInsufficientDriver
+        )
+
+
+def test_wsl_monitoring_enabled():
+    try:
+        pynvml.nvmlShutdown()
+    except pynvml.NVMLError_Uninitialized:
+        pass
+    else:
+        nvml.nvmlInitialized = False
+
+    nvml.init_once()
+    assert nvml.nvmlWslInsufficientDriver is False
+
+
+def run_has_cuda_context(queue):
+    try:
+        assert not nvml.has_cuda_context()
+
+        import numba.cuda
+
+        numba.cuda.current_context()
+        assert nvml.has_cuda_context() == 0
+
+        queue.put(None)
+
+    except Exception as e:
+        queue.put(e)
+
+
+def test_has_cuda_context():
+    if nvml.device_get_count() < 1:
+        pytest.skip("No GPUs available")
+
+    # This test should be run in a new process so that it definitely doesn't have a CUDA context
+    # and uses a queue to pass exceptions back
+    ctx = mp.get_context("spawn")
+    queue = ctx.Queue()
+    p = ctx.Process(target=run_has_cuda_context, args=(queue,))
+    p.start()
+    p.join()  # this blocks until the process terminates
+    e = queue.get()
+    if e is not None:
+        raise e
+
+
 def test_1_visible_devices():
+    if nvml.device_get_count() < 1:
+        pytest.skip("No GPUs available")
+
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     output = nvml.one_time()
     h = nvml._pynvml_handles()
@@ -25,8 +100,8 @@ def test_1_visible_devices():
 
 @pytest.mark.parametrize("CVD", ["1,0", "0,1"])
 def test_2_visible_devices(CVD):
-    if pynvml.nvmlDeviceGetCount() <= 1:
-        pytest.skip("Machine only has a single GPU")
+    if nvml.device_get_count() < 2:
+        pytest.skip("Less than two GPUs available")
 
     os.environ["CUDA_VISIBLE_DEVICES"] = CVD
     idx = int(CVD.split(",")[0])
@@ -42,6 +117,9 @@ def test_2_visible_devices(CVD):
 
 @gen_cluster()
 async def test_gpu_metrics(s, a, b):
+    if nvml.device_get_count() < 1:
+        pytest.skip("No GPUs available")
+
     h = nvml._pynvml_handles()
 
     assert "gpu" in a.metrics
@@ -56,8 +134,12 @@ async def test_gpu_metrics(s, a, b):
     )
 
 
+@pytest.mark.flaky(reruns=5, reruns_delay=2)
 @gen_cluster()
-async def test_gpu_monitoring(s, a, b):
+async def test_gpu_monitoring_recent(s, a, b):
+    if nvml.device_get_count() < 1:
+        pytest.skip("No GPUs available")
+
     h = nvml._pynvml_handles()
     res = await s.get_worker_monitor_info(recent=True)
 
@@ -71,3 +153,16 @@ async def test_gpu_monitoring(s, a, b):
     )
     assert res[a.address]["gpu_name"] == pynvml.nvmlDeviceGetName(h).decode()
     assert res[a.address]["gpu_memory_total"] == pynvml.nvmlDeviceGetMemoryInfo(h).total
+
+
+@gen_cluster()
+async def test_gpu_monitoring_range_query(s, a, b):
+    if nvml.device_get_count() < 1:
+        pytest.skip("No GPUs available")
+
+    res = await s.get_worker_monitor_info()
+    ms = ["gpu_utilization", "gpu_memory_used"]
+    for w in (a, b):
+        assert all(res[w.address]["range_query"][m] is not None for m in ms)
+        assert res[w.address]["count"] is not None
+        assert res[w.address]["last_time"] is not None

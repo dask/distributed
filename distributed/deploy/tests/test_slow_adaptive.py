@@ -5,7 +5,7 @@ import pytest
 from dask.distributed import Client, Scheduler, SpecCluster, Worker
 
 from distributed.metrics import time
-from distributed.utils_test import cleanup, slowinc  # noqa: F401
+from distributed.utils_test import gen_test, slowinc
 
 
 class SlowWorker:
@@ -32,31 +32,32 @@ class SlowWorker:
         self.status = "closed"
 
 
-scheduler = {"cls": Scheduler, "options": {"port": 0}}
+scheduler = {"cls": Scheduler, "options": {"dashboard_address": ":0"}}
 
 
-@pytest.mark.asyncio
-async def test_startup(cleanup):
+@gen_test()
+async def test_startup():
     start = time()
     async with SpecCluster(
         scheduler=scheduler,
         workers={
             0: {"cls": Worker, "options": {}},
-            1: {"cls": SlowWorker, "options": {"delay": 5}},
+            1: {"cls": SlowWorker, "options": {"delay": 120}},
             2: {"cls": SlowWorker, "options": {"delay": 0}},
         },
         asynchronous=True,
     ) as cluster:
         assert len(cluster.workers) == len(cluster.worker_spec) == 3
-        assert time() < start + 5
+        assert time() < start + 60
         assert 0 <= len(cluster.scheduler_info["workers"]) <= 2
 
         async with Client(cluster, asynchronous=True) as client:
             await client.wait_for_workers(n_workers=2)
 
 
-@pytest.mark.asyncio
-async def test_scale_up_down(cleanup):
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
+@gen_test()
+async def test_scale_up_down():
     start = time()
     async with SpecCluster(
         scheduler=scheduler,
@@ -76,8 +77,8 @@ async def test_scale_up_down(cleanup):
         assert not cluster.worker_spec
 
 
-@pytest.mark.asyncio
-async def test_adaptive(cleanup):
+@gen_test()
+async def test_adaptive():
     start = time()
     async with SpecCluster(
         scheduler=scheduler,

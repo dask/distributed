@@ -10,19 +10,13 @@ import dask
 from dask.distributed import Client
 
 from distributed import Semaphore, fire_and_forget
-from distributed.comm import Comm
-from distributed.compatibility import WINDOWS
 from distributed.core import ConnectionPool
 from distributed.metrics import time
-from distributed.utils_test import (  # noqa: F401
-    async_wait_for,
+from distributed.utils_test import (
+    BrokenComm,
     captured_logger,
-    cleanup,
-    client,
     cluster,
-    cluster_fixture,
     gen_cluster,
-    loop,
     slowidentity,
 )
 
@@ -101,21 +95,17 @@ def test_timeout_sync(client):
 
 
 @gen_cluster(
-    client=True,
-    timeout=20,
     config={
         "distributed.scheduler.locks.lease-validation-interval": "200ms",
         "distributed.scheduler.locks.lease-timeout": "200ms",
     },
 )
-async def test_release_semaphore_after_timeout(c, s, a, b):
+async def test_release_semaphore_after_timeout(s, a, b):
     sem = await Semaphore(name="x", max_leases=2)
     await sem.acquire()  # leases: 2 - 1 = 1
 
     semB = await Semaphore(name="x", max_leases=2)
-
     assert await semB.acquire()  # leases: 1 - 1 = 0
-
     assert not (await sem.acquire(timeout=0.01))
     assert not (await semB.acquire(timeout=0.01))
 
@@ -124,9 +114,7 @@ async def test_release_semaphore_after_timeout(c, s, a, b):
 
     semB.refresh_callback.stop()
     del semB
-
     assert await sem.acquire(timeout=1)
-
     assert not (await sem.acquire(timeout=0.1))
 
 
@@ -200,7 +188,8 @@ async def test_access_semaphore_by_name(c, s, a, b):
     assert result.count(False) == 9
 
 
-@gen_cluster(client=True)
+@pytest.mark.slow
+@gen_cluster(client=True, timeout=120)
 async def test_close_async(c, s, a, b):
     sem = await Semaphore(name="test")
 
@@ -279,26 +268,6 @@ async def test_release_once_too_many_resilience(c, s, a, b):
     assert len(s.extensions["semaphores"].leases["x"]) == 1
 
 
-class BrokenComm(Comm):
-    peer_address = None
-    local_address = None
-
-    def close(self):
-        pass
-
-    def closed(self):
-        return True
-
-    def abort(self):
-        pass
-
-    def read(self, deserializers=None):
-        raise EnvironmentError
-
-    def write(self, msg, serializers=None, on_error=None):
-        raise EnvironmentError
-
-
 class FlakyConnectionPool(ConnectionPool):
     def __init__(self, *args, failing_connections=0, **kwargs):
         self.cnn_count = 0
@@ -348,7 +317,6 @@ async def test_retry_acquire(c, s, a, b):
         assert result is False
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
 @gen_cluster(
     client=True,
     config={
@@ -447,12 +415,13 @@ async def test_oversubscribing_leases(c, s, a, b):
     logs = caplog.getvalue().split("\n")
     timeouts = [log for log in logs if "timed out" in log]
     refresh_unknown = [log for log in logs if "Refreshing an unknown lease ID" in log]
-    assert len(timeouts) == 2
-    assert len(refresh_unknown) == 2
+    assert len(timeouts) >= 2
+    assert len(refresh_unknown) >= 2
 
     assert sorted(payload) == [0, 1]
     # Back to normal
-    assert await sem.get_value() == 0
+    while await sem.get_value():
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)
@@ -532,7 +501,9 @@ def test_threadpoolworkers_pick_correct_ioloop(cleanup):
             "distributed.scheduler.locks.lease-timeout": 0.1,
         }
     ):
-        with Client(processes=False, threads_per_worker=4) as client:
+        with Client(
+            processes=False, dashboard_address=":0", threads_per_worker=4
+        ) as client:
             sem = Semaphore(max_leases=1, name="database")
             protected_resource = []
 
@@ -574,7 +545,6 @@ async def test_release_retry(c, s, a, b):
         assert await semaphore.release() is True
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
 @gen_cluster(
     client=True,
     config={

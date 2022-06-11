@@ -1,29 +1,27 @@
+from __future__ import annotations
+
 import asyncio
 import atexit
 import copy
 import logging
 import math
-import warnings
 import weakref
 from contextlib import suppress
+from inspect import isawaitable
+from typing import ClassVar
 
 from tornado import gen
 
 import dask
+from dask.utils import parse_bytes, parse_timedelta
+from dask.widgets import get_template
 
-from ..core import CommClosedError, Status, rpc
-from ..scheduler import Scheduler
-from ..security import Security
-from ..utils import (
-    LoopRunner,
-    TimeoutError,
-    import_term,
-    parse_bytes,
-    parse_timedelta,
-    silence_logging,
-)
-from .adaptive import Adaptive
-from .cluster import Cluster
+from distributed.core import Status, rpc
+from distributed.deploy.adaptive import Adaptive
+from distributed.deploy.cluster import Cluster
+from distributed.scheduler import Scheduler
+from distributed.security import Security
+from distributed.utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
 
 logger = logging.getLogger(__name__)
 
@@ -43,19 +41,9 @@ class ProcessInterface:
 
     @status.setter
     def status(self, new_status):
-        if isinstance(new_status, Status):
-            self._status = new_status
-        elif isinstance(new_status, str) or new_status is None:
-            warnings.warn(
-                f"Since distributed 2.19 `.status` is now an Enum, please assign `Status.{new_status}`",
-                PendingDeprecationWarning,
-                stacklevel=1,
-            )
-            corresponding_enum_variants = [s for s in Status if s.value == new_status]
-            assert len(corresponding_enum_variants) == 1
-            self._status = corresponding_enum_variants[0]
-        else:
-            raise TypeError(f"expected Status or str, got {new_status}")
+        if not isinstance(new_status, Status):
+            raise TypeError(f"Expected Status; got {new_status!r}")
+        self._status = new_status
 
     def __init__(self, scheduler=None, name=None):
         self.address = getattr(self, "address", None)
@@ -98,31 +86,21 @@ class ProcessInterface:
         self._event_finished.set()
 
     async def finished(self):
-        """ Wait until the server has finished """
+        """Wait until the server has finished"""
         await self._event_finished.wait()
 
     def __repr__(self):
-        return "<%s: status=%s>" % (type(self).__name__, self.status)
+        return f"<{dask.utils.typename(type(self))}: status={self.status.name}>"
+
+    def _repr_html_(self):
+        return get_template("process_interface.html.j2").render(process_interface=self)
 
     async def __aenter__(self):
         await self
         return self
 
-    async def __aexit__(self, *args, **kwargs):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         await self.close()
-
-
-class NoOpAwaitable:
-    """An awaitable object that always returns None.
-
-    Useful to return from a method that can be called in both asynchronous and
-    synchronous contexts"""
-
-    def __await__(self):
-        async def f():
-            return None
-
-        return f().__await__()
 
 
 class SpecCluster(Cluster):
@@ -233,7 +211,7 @@ class SpecCluster(Cluster):
     ["0-0", "0-1", "0-2", "1-0", "1-1"]
     """
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[SpecCluster]] = weakref.WeakSet()
 
     def __init__(
         self,
@@ -246,6 +224,7 @@ class SpecCluster(Cluster):
         silence_logs=False,
         name=None,
         shutdown_on_close=True,
+        scheduler_sync_interval=1,
     ):
         self._created = weakref.WeakSet()
 
@@ -264,9 +243,6 @@ class SpecCluster(Cluster):
                 level=silence_logs, root="bokeh"
             )
 
-        self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
-        self.loop = self._loop_runner.loop
-
         self._instances.add(self)
         self._correct_state_waiting = None
         self._name = name or type(self).__name__
@@ -274,13 +250,19 @@ class SpecCluster(Cluster):
 
         super().__init__(
             asynchronous=asynchronous,
+            loop=loop,
             name=name,
+            scheduler_sync_interval=scheduler_sync_interval,
         )
 
         if not self.asynchronous:
             self._loop_runner.start()
             self.sync(self._start)
-            self.sync(self._correct_state)
+            try:
+                self.sync(self._correct_state)
+            except Exception:
+                self.sync(self.close)
+                raise
 
     async def _start(self):
         while self.status == Status.starting:
@@ -302,23 +284,24 @@ class SpecCluster(Cluster):
                 options = {"dashboard": True}
             self.scheduler_spec = {"cls": Scheduler, "options": options}
 
-        # Check if scheduler has already been created by a subclass
-        if self.scheduler is None:
-            cls = self.scheduler_spec["cls"]
-            if isinstance(cls, str):
-                cls = import_term(cls)
-            self.scheduler = cls(**self.scheduler_spec.get("options", {}))
-            self.scheduler = await self.scheduler
-        self.scheduler_comm = rpc(
-            getattr(self.scheduler, "external_address", None) or self.scheduler.address,
-            connection_args=self.security.get_connection_args("client"),
-        )
         try:
+            # Check if scheduler has already been created by a subclass
+            if self.scheduler is None:
+                cls = self.scheduler_spec["cls"]
+                if isinstance(cls, str):
+                    cls = import_term(cls)
+                self.scheduler = cls(**self.scheduler_spec.get("options", {}))
+                self.scheduler = await self.scheduler
+            self.scheduler_comm = rpc(
+                getattr(self.scheduler, "external_address", None)
+                or self.scheduler.address,
+                connection_args=self.security.get_connection_args("client"),
+            )
             await super()._start()
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             self.status = Status.failed
             await self._close()
-            raise RuntimeError(f"Cluster failed to start. {str(e)}") from e
+            raise RuntimeError(f"Cluster failed to start: {e}") from e
 
     def _correct_state(self):
         if self._correct_state_waiting:
@@ -333,7 +316,6 @@ class SpecCluster(Cluster):
         async with self._lock:
             self._correct_state_waiting = None
 
-            pre = list(set(self.workers))
             to_close = set(self.workers) - set(self.worker_spec)
             if to_close:
                 if self.scheduler.status == Status.running:
@@ -343,10 +325,7 @@ class SpecCluster(Cluster):
                     for w in to_close
                     if w in self.workers
                 ]
-                await asyncio.wait(tasks)
-                for task in tasks:  # for tornado gen.coroutine support
-                    with suppress(RuntimeError):
-                        await task
+                await asyncio.gather(*tasks)
             for name in to_close:
                 if name in self.workers:
                     del self.workers[name]
@@ -361,7 +340,11 @@ class SpecCluster(Cluster):
                     opts["name"] = name
                 if isinstance(cls, str):
                     cls = import_term(cls)
-                worker = cls(self.scheduler.address, **opts)
+                worker = cls(
+                    getattr(self.scheduler, "contact_address", None)
+                    or self.scheduler.address,
+                    **opts,
+                )
                 self._created.add(worker)
                 workers.append(worker)
             if workers:
@@ -391,7 +374,7 @@ class SpecCluster(Cluster):
                 dask.config.get("distributed.deploy.lost-worker-timeout")
             )
 
-            asyncio.get_event_loop().call_later(delay, f)
+            asyncio.get_running_loop().call_later(delay, f)
         super()._update_worker_status(op, msg)
 
     def __await__(self):
@@ -413,20 +396,33 @@ class SpecCluster(Cluster):
             return
         if self.status == Status.running or self.status == Status.failed:
             self.status = Status.closing
-            self.scale(0)
+
+            # Need to call stop here before we close all servers to avoid having
+            # dangling tasks in the ioloop
+            with suppress(AttributeError):
+                self._adaptive.stop()
+
+            f = self.scale(0)
+            if isawaitable(f):
+                await f
             await self._correct_state()
-            for future in self._futures:
-                await future
-            async with self._lock:
-                with suppress(CommClosedError, OSError):
-                    if self.scheduler_comm:
-                        await self.scheduler_comm.close(close_workers=True)
-                    else:
-                        logger.warning("Cluster closed without starting up")
+            await asyncio.gather(*self._futures)
+
+            if self.scheduler_comm:
+                async with self._lock:
+                    with suppress(OSError):
+                        await self.scheduler_comm.terminate()
+                    await self.scheduler_comm.close_rpc()
+            else:
+                logger.warning("Cluster closed without starting up")
 
             await self.scheduler.close()
             for w in self._created:
-                assert w.status == Status.closed, w.status
+                assert w.status in {
+                    Status.closing,
+                    Status.closed,
+                    Status.failed,
+                }, w.status
 
         if hasattr(self, "_old_logging_level"):
             silence_logging(self._old_logging_level)
@@ -441,27 +437,26 @@ class SpecCluster(Cluster):
         assert self.status == Status.running
         return self
 
-    def __exit__(self, typ, value, traceback):
-        super().__exit__(typ, value, traceback)
+    def __exit__(self, exc_type, exc_value, traceback):
+        super().__exit__(exc_type, exc_value, traceback)
         self._loop_runner.stop()
 
     def _threads_per_worker(self) -> int:
-        """ Return the number of threads per worker for new workers """
-        if not self.new_spec:
+        """Return the number of threads per worker for new workers"""
+        if not self.new_spec:  # pragma: no cover
             raise ValueError("To scale by cores= you must specify cores per worker")
 
         for name in ["nthreads", "ncores", "threads", "cores"]:
             with suppress(KeyError):
                 return self.new_spec["options"][name]
-
-        if not self.new_spec:
-            raise ValueError("To scale by cores= you must specify cores per worker")
+        assert False, "unreachable"
 
     def _memory_per_worker(self) -> int:
-        """ Return the memory limit per worker for new workers """
-        if not self.new_spec:
+        """Return the memory limit per worker for new workers"""
+        if not self.new_spec:  # pragma: no cover
             raise ValueError(
-                "to scale by memory= your worker definition must include a memory_limit definition"
+                "to scale by memory= your worker definition must include a "
+                "memory_limit definition"
             )
 
         for name in ["memory_limit", "memory"]:
@@ -469,7 +464,8 @@ class SpecCluster(Cluster):
                 return parse_bytes(self.new_spec["options"][name])
 
         raise ValueError(
-            "to use scale(memory=...) your worker definition must include a memory_limit definition"
+            "to use scale(memory=...) your worker definition must include a "
+            "memory_limit definition"
         )
 
     def scale(self, n=0, memory=None, cores=None):
@@ -526,7 +522,7 @@ class SpecCluster(Cluster):
 
     @property
     def _supports_scaling(self):
-        return not not self.new_spec
+        return bool(self.new_spec)
 
     async def scale_down(self, workers):
         # We may have groups, if so, map worker addresses to job names

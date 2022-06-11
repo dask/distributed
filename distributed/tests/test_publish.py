@@ -8,16 +8,10 @@ from distributed import Client
 from distributed.client import futures_of
 from distributed.metrics import time
 from distributed.protocol import Serialized
-from distributed.utils_test import (  # noqa F401
-    client,
-    cluster_fixture,
-    gen_cluster,
-    inc,
-    loop,
-)
+from distributed.utils_test import gen_cluster, inc
 
 
-@gen_cluster(client=False)
+@gen_cluster()
 async def test_publish_simple(s, a, b):
     c = Client(s.address, asynchronous=True)
     f = Client(s.address, asynchronous=True)
@@ -43,7 +37,7 @@ async def test_publish_simple(s, a, b):
     await asyncio.gather(c.close(), f.close())
 
 
-@gen_cluster(client=False)
+@gen_cluster()
 async def test_publish_non_string_key(s, a, b):
     async with Client(s.address, asynchronous=True) as c:
         for name in [("a", "b"), 9.0, 8]:
@@ -58,7 +52,7 @@ async def test_publish_non_string_key(s, a, b):
             assert name in datasets
 
 
-@gen_cluster(client=False)
+@gen_cluster()
 async def test_publish_roundtrip(s, a, b):
     c = await Client(s.address, asynchronous=True)
     f = await Client(s.address, asynchronous=True)
@@ -66,7 +60,9 @@ async def test_publish_roundtrip(s, a, b):
     data = await c.scatter([0, 1, 2])
     await c.publish_dataset(data=data)
 
-    assert "published-data" in s.who_wants[data[0].key]
+    assert any(
+        cs.client_key == "published-data" for cs in s.tasks[data[0].key].who_wants
+    )
     result = await f.get_dataset(name="data")
 
     assert len(result) == len(data)
@@ -96,7 +92,7 @@ async def test_unpublish(c, s, a, b):
     assert "data" not in s.extensions["publish"].datasets
 
     start = time()
-    while key in s.who_wants:
+    while key in s.tasks:
         await asyncio.sleep(0.01)
         assert time() < start + 5
 
@@ -153,7 +149,7 @@ def test_unpublish_multiple_datasets_sync(client):
     assert "y" in str(exc_info.value)
 
 
-@gen_cluster(client=False)
+@gen_cluster()
 async def test_publish_bag(s, a, b):
     db = pytest.importorskip("dask.bag")
     c = await Client(s.address, asynchronous=True)

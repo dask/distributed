@@ -5,9 +5,10 @@ from tornado import gen, locks
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.utils import parse_timedelta
 
-from .core import CommClosedError
-from .utils import parse_timedelta
+from distributed.core import CommClosedError
+from distributed.metrics import time
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class BatchedSend:
 
     Examples
     --------
-    >>> stream = yield connect(address)
+    >>> stream = await connect(address)
     >>> bstream = BatchedSend(interval='10 ms')
     >>> bstream.start(stream)
     >>> bstream.send('Hello,')
@@ -83,12 +84,12 @@ class BatchedSend:
                 # Nothing to send
                 self.next_deadline = None
                 continue
-            if self.next_deadline is not None and self.loop.time() < self.next_deadline:
+            if self.next_deadline is not None and time() < self.next_deadline:
                 # Send interval not expired yet
                 continue
             payload, self.buffer = self.buffer, []
             self.batch_count += 1
-            self.next_deadline = self.loop.time() + self.interval
+            self.next_deadline = time() + self.interval
             try:
                 nbytes = yield self.comm.write(
                     payload, serializers=self.serializers, on_error="raise"
@@ -98,8 +99,8 @@ class BatchedSend:
                 else:
                     self.recent_message_log.append("large-message")
                 self.byte_count += nbytes
-            except CommClosedError as e:
-                logger.info("Batched Comm Closed: %s", e)
+            except CommClosedError:
+                logger.info("Batched Comm Closed %r", self.comm, exc_info=True)
                 break
             except Exception:
                 # We cannot safely retry self.comm.write, as we have no idea
@@ -127,13 +128,13 @@ class BatchedSend:
         self.stopped.set()
         self.abort()
 
-    def send(self, *msgs):
+    def send(self, *msgs) -> None:
         """Schedule a message for sending to the other side
 
         This completes quickly and synchronously
         """
         if self.comm is not None and self.comm.closed():
-            raise CommClosedError()
+            raise CommClosedError(f"Comm {self.comm!r} already closed.")
 
         self.message_count += len(msgs)
         self.buffer.extend(msgs)

@@ -1,6 +1,5 @@
 import asyncio
 import random
-import sys
 from contextlib import suppress
 from operator import add
 from time import sleep
@@ -11,16 +10,15 @@ from tlz import concat, sliding_window
 from dask import delayed
 
 from distributed import Client, Nanny, wait
-from distributed.client import wait
-from distributed.config import config
+from distributed.chaos import KillWorker
+from distributed.compatibility import WINDOWS
 from distributed.metrics import time
-from distributed.utils import All, CancelledError
-from distributed.utils_test import (  # noqa: F401
+from distributed.utils import CancelledError
+from distributed.utils_test import (
     bump_rlimit,
     cluster,
     gen_cluster,
     inc,
-    loop,
     nodebug_setup_module,
     nodebug_teardown_module,
     slowadd,
@@ -35,7 +33,7 @@ teardown_module = nodebug_teardown_module
 
 @gen_cluster(client=True)
 async def test_stress_1(c, s, a, b):
-    n = 2 ** 6
+    n = 2**6
 
     seq = c.map(inc, range(n))
     while len(seq) > 1:
@@ -45,6 +43,7 @@ async def test_stress_1(c, s, a, b):
     assert result == sum(map(inc, range(n)))
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(("func", "n"), [(slowinc, 100), (inc, 1000)])
 def test_stress_gc(loop, func, n):
     with cluster() as (s, [a, b]):
@@ -56,10 +55,8 @@ def test_stress_gc(loop, func, n):
             assert x.result() == n + 2
 
 
-@pytest.mark.skipif(
-    sys.platform.startswith("win"), reason="test can leave dangling RPC objects"
-)
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 8, timeout=None)
+@pytest.mark.skipif(WINDOWS, reason="test can leave dangling RPC objects")
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 8)
 async def test_cancel_stress(c, s, *workers):
     da = pytest.importorskip("dask.array")
     x = da.random.random((50, 50), chunks=(2, 2))
@@ -69,9 +66,12 @@ async def test_cancel_stress(c, s, *workers):
     n_todo = len(y.dask) - len(x.dask)
     for i in range(5):
         f = c.compute(y)
-        while len(s.waiting) > (random.random() + 1) * 0.5 * n_todo:
+        while (
+            len([ts for ts in s.tasks.values() if ts.waiting_on])
+            > (random.random() + 1) * 0.5 * n_todo
+        ):
             await asyncio.sleep(0.01)
-        await c._cancel(f)
+        await c.cancel(f)
 
 
 def test_cancel_stress_sync(loop):
@@ -88,81 +88,77 @@ def test_cancel_stress_sync(loop):
                 c.cancel(f)
 
 
-@gen_cluster(nthreads=[], client=True, timeout=None)
+@pytest.mark.xfail(
+    reason="Flaky and re-fails on rerun. See https://github.com/dask/distributed/issues/5388"
+)
+@pytest.mark.slow
+@gen_cluster(
+    nthreads=[],
+    client=True,
+    timeout=180,
+    scheduler_kwargs={"allowed_failures": 100_000},
+)
 async def test_stress_creation_and_deletion(c, s):
     # Assertions are handled by the validate mechanism in the scheduler
-    s.allowed_failures = 100000
     da = pytest.importorskip("dask.array")
 
-    x = da.random.random(size=(2000, 2000), chunks=(100, 100))
-    y = (x + 1).T + (x * 2) - x.mean(axis=1)
-
+    rng = da.random.RandomState(0)
+    x = rng.random(size=(2000, 2000), chunks=(100, 100))
+    y = ((x + 1).T + (x * 2) - x.mean(axis=1)).sum().round(2)
     z = c.persist(y)
 
     async def create_and_destroy_worker(delay):
         start = time()
         while time() < start + 5:
-            n = await Nanny(s.address, nthreads=2, loop=s.loop)
-            await asyncio.sleep(delay)
-            await n.close()
+            async with Nanny(s.address, nthreads=2) as n:
+                await asyncio.sleep(delay)
             print("Killed nanny")
 
-    await asyncio.wait_for(
-        All([create_and_destroy_worker(0.1 * i) for i in range(20)]), 60
-    )
+    await asyncio.gather(*(create_and_destroy_worker(0.1 * i) for i in range(20)))
+
+    async with Nanny(s.address, nthreads=2):
+        assert await c.compute(z) == 8000884.93
 
 
-@gen_cluster(nthreads=[("127.0.0.1", 1)] * 10, client=True, timeout=60)
+@gen_cluster(nthreads=[("", 1)] * 10, client=True)
 async def test_stress_scatter_death(c, s, *workers):
-    import random
-
     s.allowed_failures = 1000
     np = pytest.importorskip("numpy")
-    L = await c.scatter([np.random.random(10000) for i in range(len(workers))])
+    L = await c.scatter(
+        {f"scatter-{i}": np.random.random(10000) for i in range(len(workers))}
+    )
+    L = list(L.values())
     await c.replicate(L, n=2)
 
     adds = [
-        delayed(slowadd, pure=True)(
+        delayed(slowadd)(
             random.choice(L),
             random.choice(L),
             delay=0.05,
-            dask_key_name="slowadd-1-%d" % i,
+            dask_key_name=f"slowadd-1-{i}",
         )
         for i in range(50)
     ]
 
     adds = [
-        delayed(slowadd, pure=True)(a, b, delay=0.02, dask_key_name="slowadd-2-%d" % i)
+        delayed(slowadd)(a, b, delay=0.02, dask_key_name=f"slowadd-2-{i}")
         for i, (a, b) in enumerate(sliding_window(2, adds))
     ]
 
     futures = c.compute(adds)
-    L = adds = None
+    del L
+    del adds
 
-    alive = list(workers)
+    for w in random.sample(workers, 7):
+        s.validate_state()
+        for w2 in workers:
+            w2.validate_state()
 
-    from distributed.scheduler import logger
-
-    for i in range(7):
         await asyncio.sleep(0.1)
-        try:
-            s.validate_state()
-        except Exception as c:
-            logger.exception(c)
-            if config.get("log-on-err"):
-                import pdb
-
-                pdb.set_trace()
-            else:
-                raise
-        w = random.choice(alive)
         await w.close()
-        alive.remove(w)
 
     with suppress(CancelledError):
         await c.gather(futures)
-
-    futures = None
 
 
 def vsum(*args):
@@ -171,9 +167,11 @@ def vsum(*args):
 
 @pytest.mark.avoid_ci
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 80, timeout=1000)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 80)
 async def test_stress_communication(c, s, *workers):
     s.validate = False  # very slow otherwise
+    for w in workers:
+        w.validate = False
     da = pytest.importorskip("dask.array")
     # Test consumes many file descriptors and can hang if the limit is too low
     resource = pytest.importorskip("resource")
@@ -182,7 +180,7 @@ async def test_stress_communication(c, s, *workers):
     n = 20
     xs = [da.random.random((100, 100), chunks=(5, 5)) for i in range(n)]
     ys = [x + x.T for x in xs]
-    z = da.atop(vsum, "ij", *concat(zip(ys, ["ij"] * n)), dtype="float64")
+    z = da.blockwise(vsum, "ij", *concat(zip(ys, ["ij"] * n)), dtype="float64")
 
     future = c.compute(z.sum())
 
@@ -212,12 +210,18 @@ async def test_stress_steal(c, s, *workers):
             b = random.choice(workers)
             if a is not b:
                 s.work_steal(a.address, b.address, 0.5)
-        if not s.processing:
+        if not any(ws.processing for ws in s.workers.values()):
             break
 
 
 @pytest.mark.slow
-@gen_cluster(nthreads=[("127.0.0.1", 1)] * 10, client=True, timeout=120)
+@gen_cluster(
+    nthreads=[("", 1)] * 10,
+    client=True,
+    timeout=180,
+    scheduler_kwargs={"transition_counter_max": 500_000},
+    worker_kwargs={"transition_counter_max": 500_000},
+)
 async def test_close_connections(c, s, *workers):
     da = pytest.importorskip("dask.array")
     x = da.random.random(size=(1000, 1000), chunks=(1000, 1))
@@ -226,7 +230,7 @@ async def test_close_connections(c, s, *workers):
         x = x.rechunk((1000, 1))
 
     future = c.compute(x.sum())
-    while any(s.processing.values()):
+    while any(ws.processing for ws in s.workers.values()):
         await asyncio.sleep(0.5)
         worker = random.choice(list(workers))
         for comm in worker._comms:
@@ -277,3 +281,35 @@ async def test_no_delay_during_large_transfer(c, s, w):
     nbytes -= nbytes[0]
     assert nbytes.max() < (x_nbytes * 2) / 1e6
     assert nbytes[-1] < (x_nbytes * 1.2) / 1e6
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    nthreads=[("", 2)] * 6,
+    scheduler_kwargs={"transition_counter_max": 500_000},
+    worker_kwargs={"transition_counter_max": 500_000},
+)
+async def test_chaos_rechunk(c, s, *workers):
+    s.allowed_failures = 10000
+
+    plugin = KillWorker(delay="4 s", mode="sys.exit")
+
+    await c.register_worker_plugin(plugin, name="kill")
+
+    da = pytest.importorskip("dask.array")
+
+    x = da.random.random((10000, 10000))
+    y = x.rechunk((10000, 20)).rechunk((20, 10000)).sum()
+    z = c.compute(y)
+
+    start = time()
+    while time() < start + 10:
+        if z.status == "error":
+            await z
+        if z.status == "finished":
+            return
+        await asyncio.sleep(0.1)
+
+    await z.cancel()

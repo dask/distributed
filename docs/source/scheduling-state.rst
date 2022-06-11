@@ -11,7 +11,7 @@ The life of a computation with Dask can be described in the following stages:
 1.  The user authors a graph using some library, perhaps dask.delayed or
     dask.dataframe or the ``submit/map`` functions on the client.  They submit
     these tasks to the scheduler.
-2.  The schedulers assimilates these tasks into its graph of all tasks to
+2.  The scheduler assimilates these tasks into its graph of all tasks to
     track, and as their dependencies become available it asks workers to run
     each of these tasks in turn.
 3.  The worker receives information about how to run the task, communicates
@@ -66,7 +66,9 @@ Tasks flow along the following states with the following allowed transitions:
 *  *No-worker*: Ready to be computed, but no appropriate worker exists
    (for example because of resource restrictions, or because no worker is
    connected at all).
-*  *Processing*: Actively being computed by one or more workers
+*  *Processing*: All dependencies are available and the task is assigned to a
+   worker for compute (the scheduler doesn't know whether it's in a worker
+   queue or actively being computed).
 *  *Memory*: In memory on one or more workers
 *  *Erred*: Task computation, or one of its dependencies, has encountered an error
 *  *Forgotten* (not actually a state): Task is no longer needed by any client
@@ -77,7 +79,7 @@ kept and updated about each task.  Individual task state is stored in an
 object named :class:`TaskState` and consists of the following information:
 
 .. autoclass:: TaskState
-
+    :members:
 
 The scheduler keeps track of all the :class:`TaskState` objects (those
 not in the "forgotten" state) using several containers:
@@ -106,7 +108,7 @@ This information is involved in deciding
 :ref:`which worker to run a task on <decide-worker>`.
 
 .. autoclass:: WorkerState
-
+    :members:
 
 In addition to individual worker state, the scheduler maintains two
 containers to help with scheduling tasks:
@@ -137,6 +139,7 @@ Information about each individual client of the scheduler is kept
 in a :class:`ClientState` object:
 
 .. autoclass:: ClientState
+    :members:
 
 
 .. XXX list invariants somewhere?
@@ -310,5 +313,9 @@ API
 
 .. autoclass:: Scheduler
    :members:
+   :inherited-members:
 
 .. autofunction:: decide_worker
+
+.. autoclass:: MemoryState
+    :members:

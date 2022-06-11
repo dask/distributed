@@ -3,6 +3,7 @@ from tornado import web
 from tornado.httpclient import AsyncHTTPClient, HTTPClientError
 
 from distributed.http.routing import RoutingApplication
+from distributed.utils_test import gen_test
 
 
 class OneHandler(web.RequestHandler):
@@ -15,7 +16,7 @@ class TwoHandler(web.RequestHandler):
         self.write("two")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_basic():
     application = RoutingApplication([(r"/one", OneHandler)])
     two = web.Application([(r"/two", TwoHandler)])

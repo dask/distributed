@@ -4,14 +4,9 @@ from time import sleep
 
 import pytest
 
-from distributed import Client, Lock, get_client
+from distributed import Lock, get_client
 from distributed.metrics import time
-from distributed.utils_test import (  # noqa F401
-    client,
-    cluster_fixture,
-    gen_cluster,
-    loop,
-)
+from distributed.utils_test import gen_cluster
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 8)] * 2)
@@ -135,11 +130,10 @@ async def test_serializable(c, s, a, b):
     assert lock2.client is lock.client
 
 
-@pytest.mark.asyncio
-async def test_locks():
-    async with Client(processes=False, asynchronous=True) as c:
-        assert c.asynchronous
-        async with Lock("x"):
-            lock2 = Lock("x")
-            result = await lock2.acquire(timeout=0.1)
-            assert result is False
+@gen_cluster(client=True, nthreads=[])
+async def test_locks(c, s):
+    async with Lock("x") as l1:
+        l2 = Lock("x")
+        assert l1.client is c
+        assert l2.client is c
+        assert await l2.acquire(timeout=0.01) is False

@@ -4,9 +4,11 @@ import uuid
 from collections import defaultdict
 from contextlib import suppress
 
-from .client import Client
-from .utils import TimeoutError, log_errors, parse_timedelta
-from .worker import get_worker
+from dask.utils import parse_timedelta
+
+from distributed.client import Client
+from distributed.utils import TimeoutError, log_errors
+from distributed.worker import get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -56,90 +58,88 @@ class EventExtension:
             }
         )
 
-        self.scheduler.extensions["events"] = self
-
-    async def event_wait(self, comm=None, name=None, timeout=None):
+    @log_errors
+    async def event_wait(self, name=None, timeout=None):
         """Wait until the event is set to true.
         Returns false, when this did not happen in the given time
         and true otherwise.
         """
-        with log_errors():
-            name = self._normalize_name(name)
+        name = self._normalize_name(name)
 
-            event = self._events[name]
-            future = event.wait()
-            if timeout is not None:
-                future = asyncio.wait_for(future, timeout)
+        event = self._events[name]
+        future = event.wait()
+        if timeout is not None:
+            future = asyncio.wait_for(future, timeout)
 
-            self._waiter_count[name] += 1
-            try:
-                await future
-            except TimeoutError:
-                return False
-            finally:
-                self._waiter_count[name] -= 1
+        self._waiter_count[name] += 1
+        try:
+            await future
+        except TimeoutError:
+            return False
+        finally:
+            self._waiter_count[name] -= 1
 
-                if not self._waiter_count[name] and not event.is_set():
-                    # No one is waiting for this
-                    # and as the default flag for an event is false
-                    # we can safely remove it
-                    self._delete_event(name)
-
-            return True
-
-    def event_set(self, comm=None, name=None):
-        """Set the event with the given name to true.
-
-        All waiters on this event will be notified.
-        """
-        with log_errors():
-            name = self._normalize_name(name)
-            # No matter if someone is listening or not,
-            # we set the event to true
-            self._events[name].set()
-
-    def event_clear(self, comm=None, name=None):
-        """Set the event with the given name to false."""
-        with log_errors():
-            name = self._normalize_name(name)
-            if not self._waiter_count[name]:
+            if not self._waiter_count[name] and not event.is_set():
                 # No one is waiting for this
                 # and as the default flag for an event is false
                 # we can safely remove it
                 self._delete_event(name)
 
-            else:
-                # There are waiters
-                # This can happen if an event is "double-cleared"
-                # In principle, the event should be unset at this point
-                # (because if it is set, all waiters should have been
-                # notified). But to prevent race conditions
-                # due to unlucky timing, we clear anyways
-                assert name in self._events
-                event = self._events[name]
-                event.clear()
+        return True
 
-    def event_is_set(self, comm=None, name=None):
-        with log_errors():
-            name = self._normalize_name(name)
-            # the default flag value is false
-            # we could also let the defaultdict
-            # create a new event for us, but that
-            # could produce many unused events
-            if name not in self._events:
-                return False
+    @log_errors
+    def event_set(self, name=None):
+        """Set the event with the given name to true.
 
-            return self._events[name].is_set()
+        All waiters on this event will be notified.
+        """
+        name = self._normalize_name(name)
+        # No matter if someone is listening or not,
+        # we set the event to true
+        self._events[name].set()
+
+    @log_errors
+    def event_clear(self, name=None):
+        """Set the event with the given name to false."""
+        name = self._normalize_name(name)
+        if not self._waiter_count[name]:
+            # No one is waiting for this
+            # and as the default flag for an event is false
+            # we can safely remove it
+            self._delete_event(name)
+
+        else:
+            # There are waiters
+            # This can happen if an event is "double-cleared"
+            # In principle, the event should be unset at this point
+            # (because if it is set, all waiters should have been
+            # notified). But to prevent race conditions
+            # due to unlucky timing, we clear anyways
+            assert name in self._events
+            event = self._events[name]
+            event.clear()
+
+    @log_errors
+    def event_is_set(self, name=None):
+        name = self._normalize_name(name)
+        # the default flag value is false
+        # we could also let the defaultdict
+        # create a new event for us, but that
+        # could produce many unused events
+        if name not in self._events:
+            return False
+
+        return self._events[name].is_set()
 
     def _normalize_name(self, name):
-        """ Helper function to normalize an event name """
+        """Helper function to normalize an event name"""
         if isinstance(name, list):
             name = tuple(name)
 
         return name
 
     def _delete_event(self, name):
-        """ Helper function to delete an event """
+        """Helper function to delete an event"""
         # suppress key errors to make calling this method
         # also possible if we do not even have such an event
         with suppress(KeyError):
@@ -242,7 +242,7 @@ class Event:
         return result
 
     def is_set(self):
-        """ Check if the event is set """
+        """Check if the event is set"""
         result = self.client.sync(self.client.scheduler.event_is_set, name=self.name)
         return result
 

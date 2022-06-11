@@ -8,11 +8,18 @@ from timeit import default_timer
 from tlz import valmap
 from tornado.ioloop import IOLoop
 
-from ..client import default_client, futures_of
-from ..core import CommClosedError, coerce_to_address, connect
-from ..protocol.pickle import dumps
-from ..utils import LoopRunner, is_kernel, key_split, parse_timedelta
-from .progress import MultiProgress, Progress, format_time
+import dask
+
+from distributed.client import default_client, futures_of
+from distributed.core import (
+    CommClosedError,
+    clean_exception,
+    coerce_to_address,
+    connect,
+)
+from distributed.diagnostics.progress import MultiProgress, Progress, format_time
+from distributed.protocol.pickle import dumps
+from distributed.utils import LoopRunner, is_kernel, key_split
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +41,7 @@ class ProgressBar:
                 break
 
         self.keys = {k.key if hasattr(k, "key") else k for k in keys}
-        self.interval = parse_timedelta(interval, default="s")
+        self.interval = dask.utils.parse_timedelta(interval, default="s")
         self.complete = complete
         self._start_time = default_timer()
 
@@ -173,6 +180,7 @@ class ProgressWidget(ProgressBar):
 
     def _draw_stop(self, remaining, status, exception=None, **kwargs):
         if status == "error":
+            _, exception, _ = clean_exception(exception)
             self.bar.bar_style = "danger"
             self.elapsed_time.value = (
                 '<div style="padding: 0px 10px 5px 10px"><b>Exception</b> '
@@ -334,7 +342,7 @@ class MultiProgressWidget(MultiProgressBar):
         }
 
         def keyfunc(kv):
-            """ Order keys by most numerous, then by string name """
+            """Order keys by most numerous, then by string name"""
             return kv[::-1]
 
         key_order = [k for k, v in sorted(all.items(), key=keyfunc, reverse=True)]
@@ -359,6 +367,7 @@ class MultiProgressWidget(MultiProgressBar):
                 self.bars[k].bar_style = "danger"
 
         if status == "error":
+            _, exception, _ = clean_exception(exception)
             # self.bars[self.func(key)].bar_style = 'danger'  # TODO
             self.elapsed_time.value = (
                 '<div style="padding: 0px 10px 5px 10px"><b>Exception</b> '

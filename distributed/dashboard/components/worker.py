@@ -2,16 +2,15 @@ import logging
 import math
 import os
 
+from bokeh.core.properties import without_property_validation
 from bokeh.layouts import column, row
 from bokeh.models import (
-    BoxZoomTool,
     ColumnDataSource,
     DataRange1d,
     HoverTool,
     NumeralTickFormatter,
     PanTool,
     ResetTool,
-    Select,
     WheelZoomTool,
 )
 from bokeh.models.widgets import DataTable, TableColumn
@@ -20,7 +19,7 @@ from bokeh.plotting import figure
 from bokeh.themes import Theme
 from tlz import merge, partition_all
 
-from dask.utils import format_bytes
+from dask.utils import format_bytes, format_time
 
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
@@ -29,10 +28,9 @@ from distributed.dashboard.components.shared import (
     ProfileTimePlot,
     SystemMonitor,
 )
-from distributed.dashboard.utils import transpose, update, without_property_validation
-from distributed.diagnostics.progress_stream import color_of
+from distributed.dashboard.utils import transpose, update
 from distributed.metrics import time
-from distributed.utils import format_time, key_split, log_errors
+from distributed.utils import log_errors
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +42,32 @@ env = Environment(
     )
 )
 
-BOKEH_THEME = Theme(os.path.join(os.path.dirname(__file__), "..", "theme.yaml"))
+BOKEH_THEME = Theme(
+    filename=os.path.join(os.path.dirname(__file__), "..", "theme.yaml")
+)
 
-template_variables = {"pages": ["status", "system", "profile", "crossfilter"]}
+template_variables = {"pages": ["status", "system", "profile"]}
+
+
+def standard_doc(title, active_page, *, template="simple.html"):
+    def decorator(f):
+        @log_errors(unroll_stack=2)
+        def wrapper(arg, extra, doc):
+            doc.title = title
+            doc.template = env.get_template(template)
+            if active_page is not None:
+                doc.template_variables["active_page"] = active_page
+            doc.template_variables.update(extra)
+            doc.theme = BOKEH_THEME
+            return f(arg, extra, doc)
+
+        return wrapper
+
+    return decorator
 
 
 class StateTable(DashboardComponent):
-    """ Currently running tasks """
+    """Currently running tasks"""
 
     def __init__(self, worker):
         self.worker = worker
@@ -66,136 +83,136 @@ class StateTable(DashboardComponent):
         self.root = table
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
-            w = self.worker
-            d = {
-                "Stored": [len(w.data)],
-                "Executing": ["%d / %d" % (w.executing_count, w.nthreads)],
-                "Ready": [len(w.ready)],
-                "Waiting": [w.waiting_for_data_count],
-                "Connections": [len(w.in_flight_workers)],
-                "Serving": [len(w._comms)],
-            }
-            update(self.source, d)
+        w = self.worker
+        d = {
+            "Stored": [len(w.data)],
+            "Executing": ["%d / %d" % (w.executing_count, w.nthreads)],
+            "Ready": [len(w.ready)],
+            "Waiting": [w.waiting_for_data_count],
+            "Connections": [len(w.in_flight_workers)],
+            "Serving": [len(w._comms)],
+        }
+        update(self.source, d)
 
 
 class CommunicatingStream(DashboardComponent):
+    @log_errors
     def __init__(self, worker, height=300, **kwargs):
-        with log_errors():
-            self.worker = worker
-            names = [
-                "start",
-                "stop",
-                "middle",
-                "duration",
-                "who",
-                "y",
-                "hover",
-                "alpha",
-                "bandwidth",
-                "total",
-            ]
+        self.worker = worker
+        names = [
+            "start",
+            "stop",
+            "middle",
+            "duration",
+            "who",
+            "y",
+            "hover",
+            "alpha",
+            "bandwidth",
+            "total",
+        ]
 
-            self.incoming = ColumnDataSource({name: [] for name in names})
-            self.outgoing = ColumnDataSource({name: [] for name in names})
+        self.incoming = ColumnDataSource({name: [] for name in names})
+        self.outgoing = ColumnDataSource({name: [] for name in names})
 
-            x_range = DataRange1d(range_padding=0)
-            y_range = DataRange1d(range_padding=0)
+        x_range = DataRange1d(range_padding=0)
+        y_range = DataRange1d(range_padding=0)
 
-            fig = figure(
-                title="Peer Communications",
-                x_axis_type="datetime",
-                x_range=x_range,
-                y_range=y_range,
-                height=height,
-                tools="",
-                **kwargs
-            )
+        fig = figure(
+            title="Peer Communications",
+            x_axis_type="datetime",
+            x_range=x_range,
+            y_range=y_range,
+            height=height,
+            tools="",
+            **kwargs,
+        )
 
-            fig.rect(
-                source=self.incoming,
-                x="middle",
-                y="y",
-                width="duration",
-                height=0.9,
-                color="red",
-                alpha="alpha",
-            )
-            fig.rect(
-                source=self.outgoing,
-                x="middle",
-                y="y",
-                width="duration",
-                height=0.9,
-                color="blue",
-                alpha="alpha",
-            )
+        fig.rect(
+            source=self.incoming,
+            x="middle",
+            y="y",
+            width="duration",
+            height=0.9,
+            color="red",
+            alpha="alpha",
+        )
+        fig.rect(
+            source=self.outgoing,
+            x="middle",
+            y="y",
+            width="duration",
+            height=0.9,
+            color="blue",
+            alpha="alpha",
+        )
 
-            hover = HoverTool(point_policy="follow_mouse", tooltips="""@hover""")
-            fig.add_tools(
-                hover,
-                ResetTool(),
-                PanTool(dimensions="width"),
-                WheelZoomTool(dimensions="width"),
-            )
+        hover = HoverTool(point_policy="follow_mouse", tooltips="""@hover""")
+        fig.add_tools(
+            hover,
+            ResetTool(),
+            PanTool(dimensions="width"),
+            WheelZoomTool(dimensions="width"),
+        )
 
-            self.root = fig
+        self.root = fig
 
-            self.last_incoming = 0
-            self.last_outgoing = 0
-            self.who = dict()
+        self.last_incoming = 0
+        self.last_outgoing = 0
+        self.who = dict()
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
-            outgoing = self.worker.outgoing_transfer_log
-            n = self.worker.outgoing_count - self.last_outgoing
-            outgoing = [outgoing[-i].copy() for i in range(1, n + 1)]
-            self.last_outgoing = self.worker.outgoing_count
+        outgoing = self.worker.outgoing_transfer_log
+        n = self.worker.outgoing_count - self.last_outgoing
+        outgoing = [outgoing[-i].copy() for i in range(1, n + 1)]
+        self.last_outgoing = self.worker.outgoing_count
 
-            incoming = self.worker.incoming_transfer_log
-            n = self.worker.incoming_count - self.last_incoming
-            incoming = [incoming[-i].copy() for i in range(1, n + 1)]
-            self.last_incoming = self.worker.incoming_count
+        incoming = self.worker.incoming_transfer_log
+        n = self.worker.incoming_count - self.last_incoming
+        incoming = [incoming[-i].copy() for i in range(1, n + 1)]
+        self.last_incoming = self.worker.incoming_count
 
-            for [msgs, source] in [
-                [incoming, self.incoming],
-                [outgoing, self.outgoing],
-            ]:
+        for [msgs, source] in [
+            [incoming, self.incoming],
+            [outgoing, self.outgoing],
+        ]:
 
-                for msg in msgs:
-                    if "compressed" in msg:
-                        del msg["compressed"]
-                    del msg["keys"]
+            for msg in msgs:
+                if "compressed" in msg:
+                    del msg["compressed"]
+                del msg["keys"]
 
-                    bandwidth = msg["total"] / (msg["duration"] or 0.5)
-                    bw = max(min(bandwidth / 500e6, 1), 0.3)
-                    msg["alpha"] = bw
-                    try:
-                        msg["y"] = self.who[msg["who"]]
-                    except KeyError:
-                        self.who[msg["who"]] = len(self.who)
-                        msg["y"] = self.who[msg["who"]]
+                bandwidth = msg["total"] / (msg["duration"] or 0.5)
+                bw = max(min(bandwidth / 500e6, 1), 0.3)
+                msg["alpha"] = bw
+                try:
+                    msg["y"] = self.who[msg["who"]]
+                except KeyError:
+                    self.who[msg["who"]] = len(self.who)
+                    msg["y"] = self.who[msg["who"]]
 
-                    msg["hover"] = "%s / %s = %s/s" % (
-                        format_bytes(msg["total"]),
-                        format_time(msg["duration"]),
-                        format_bytes(msg["total"] / msg["duration"]),
-                    )
+                msg["hover"] = "{} / {} = {}/s".format(
+                    format_bytes(msg["total"]),
+                    format_time(msg["duration"]),
+                    format_bytes(msg["total"] / msg["duration"]),
+                )
 
-                    for k in ["middle", "duration", "start", "stop"]:
-                        msg[k] = msg[k] * 1000
+                for k in ["middle", "duration", "start", "stop"]:
+                    msg[k] = msg[k] * 1000
 
-                if msgs:
-                    msgs = transpose(msgs)
-                    if (
-                        len(source.data["stop"])
-                        and min(msgs["start"]) > source.data["stop"][-1] + 10000
-                    ):
-                        source.data.update(msgs)
-                    else:
-                        source.stream(msgs, rollover=10000)
+            if msgs:
+                msgs = transpose(msgs)
+                if (
+                    len(source.data["stop"])
+                    and min(msgs["start"]) > source.data["stop"][-1] + 10000
+                ):
+                    source.data.update(msgs)
+                else:
+                    source.stream(msgs, rollover=10000)
 
 
 class CommunicatingTimeSeries(DashboardComponent):
@@ -212,7 +229,7 @@ class CommunicatingTimeSeries(DashboardComponent):
             height=150,
             tools="",
             x_range=x_range,
-            **kwargs
+            **kwargs,
         )
         fig.line(source=self.source, x="x", y="in", color="red")
         fig.line(source=self.source, x="x", y="out", color="blue")
@@ -224,16 +241,16 @@ class CommunicatingTimeSeries(DashboardComponent):
         self.root = fig
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
-            self.source.stream(
-                {
-                    "x": [time() * 1000],
-                    "out": [len(self.worker._comms)],
-                    "in": [len(self.worker.in_flight_workers)],
-                },
-                10000,
-            )
+        self.source.stream(
+            {
+                "x": [time() * 1000],
+                "out": [len(self.worker._comms)],
+                "in": [len(self.worker.in_flight_workers)],
+            },
+            10000,
+        )
 
 
 class ExecutingTimeSeries(DashboardComponent):
@@ -250,7 +267,7 @@ class ExecutingTimeSeries(DashboardComponent):
             height=150,
             tools="",
             x_range=x_range,
-            **kwargs
+            **kwargs,
         )
         fig.line(source=self.source, x="x", y="y")
 
@@ -261,157 +278,11 @@ class ExecutingTimeSeries(DashboardComponent):
         self.root = fig
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
-            self.source.stream(
-                {"x": [time() * 1000], "y": [self.worker.executing_count]}, 1000
-            )
-
-
-class CrossFilter(DashboardComponent):
-    def __init__(self, worker, **kwargs):
-        with log_errors():
-            self.worker = worker
-
-            quantities = ["nbytes", "duration", "bandwidth", "count", "start", "stop"]
-            colors = ["inout-color", "type-color", "key-color"]
-
-            # self.source = ColumnDataSource({name: [] for name in names})
-            self.source = ColumnDataSource(
-                {
-                    "nbytes": [1, 2],
-                    "duration": [0.01, 0.02],
-                    "bandwidth": [0.01, 0.02],
-                    "count": [1, 2],
-                    "type": ["int", "str"],
-                    "inout-color": ["blue", "red"],
-                    "type-color": ["blue", "red"],
-                    "key": ["add", "inc"],
-                    "start": [1, 2],
-                    "stop": [1, 2],
-                }
-            )
-
-            self.x = Select(title="X-Axis", value="nbytes", options=quantities)
-            self.x.on_change("value", self.update_figure)
-
-            self.y = Select(title="Y-Axis", value="bandwidth", options=quantities)
-            self.y.on_change("value", self.update_figure)
-
-            self.color = Select(
-                title="Color", value="inout-color", options=["black"] + colors
-            )
-            self.color.on_change("value", self.update_figure)
-
-            if "sizing_mode" in kwargs:
-                kw = {"sizing_mode": kwargs["sizing_mode"]}
-            else:
-                kw = {}
-
-            self.control = column([self.x, self.y, self.color], width=200, **kw)
-
-            self.last_outgoing = 0
-            self.last_incoming = 0
-            self.kwargs = kwargs
-
-            self.layout = row(self.control, self.create_figure(**self.kwargs), **kw)
-
-            self.root = self.layout
-
-    @without_property_validation
-    def update(self):
-        with log_errors():
-            outgoing = self.worker.outgoing_transfer_log
-            n = self.worker.outgoing_count - self.last_outgoing
-            n = min(n, 1000)
-            outgoing = [outgoing[-i].copy() for i in range(1, n)]
-            self.last_outgoing = self.worker.outgoing_count
-
-            incoming = self.worker.incoming_transfer_log
-            n = self.worker.incoming_count - self.last_incoming
-            n = min(n, 1000)
-            incoming = [incoming[-i].copy() for i in range(1, n)]
-            self.last_incoming = self.worker.incoming_count
-
-            out = []
-
-            for msg in incoming:
-                if msg["keys"]:
-                    d = self.process_msg(msg)
-                    d["inout-color"] = "red"
-                    out.append(d)
-
-            for msg in outgoing:
-                if msg["keys"]:
-                    d = self.process_msg(msg)
-                    d["inout-color"] = "blue"
-                    out.append(d)
-
-            if out:
-                out = transpose(out)
-                if (
-                    len(self.source.data["stop"])
-                    and min(out["start"]) > self.source.data["stop"][-1] + 10
-                ):
-                    update(self.source, out)
-                else:
-                    self.source.stream(out, rollover=1000)
-
-    def create_figure(self, **kwargs):
-        with log_errors():
-            fig = figure(title="", tools="", **kwargs)
-            fig.circle(
-                source=self.source,
-                x=self.x.value,
-                y=self.y.value,
-                color=self.color.value,
-                size=10,
-                alpha=0.5,
-                hover_alpha=1,
-            )
-            fig.xaxis.axis_label = self.x.value
-            fig.yaxis.axis_label = self.y.value
-
-            fig.add_tools(
-                # self.hover,
-                ResetTool(),
-                PanTool(),
-                WheelZoomTool(),
-                BoxZoomTool(),
-            )
-            return fig
-
-    @without_property_validation
-    def update_figure(self, attr, old, new):
-        with log_errors():
-            fig = self.create_figure(**self.kwargs)
-            self.layout.children[1] = fig
-
-    def process_msg(self, msg):
-        try:
-
-            def func(k):
-                return msg["keys"].get(k, 0)
-
-            status_key = max(msg["keys"], key=func)
-            typ = self.worker.types.get(status_key, object).__name__
-            keyname = key_split(status_key)
-            d = {
-                "nbytes": msg["total"],
-                "duration": msg["duration"],
-                "bandwidth": msg["bandwidth"],
-                "count": len(msg["keys"]),
-                "type": typ,
-                "type-color": color_of(typ),
-                "key": keyname,
-                "key-color": color_of(keyname),
-                "start": msg["start"],
-                "stop": msg["stop"],
-            }
-            return d
-        except Exception as e:
-            logger.exception(e)
-            raise
+        self.source.stream(
+            {"x": [time() * 1000], "y": [self.worker.executing_count]}, 1000
+        )
 
 
 class Counters(DashboardComponent):
@@ -436,212 +307,162 @@ class Counters(DashboardComponent):
             self.root = column(figures, sizing_mode=sizing_mode)
         else:
             self.root = column(
-                *[
+                *(
                     row(*pair, sizing_mode=sizing_mode)
                     for pair in partition_all(2, figures)
-                ],
-                sizing_mode=sizing_mode
+                ),
+                sizing_mode=sizing_mode,
             )
 
+    @log_errors
     def add_digest_figure(self, name):
-        with log_errors():
-            n = len(self.server.digests[name].intervals)
-            sources = {i: ColumnDataSource({"x": [], "y": []}) for i in range(n)}
+        n = len(self.server.digests[name].intervals)
+        sources = {i: ColumnDataSource({"x": [], "y": []}) for i in range(n)}
 
-            kwargs = {}
-            if name.endswith("duration"):
-                kwargs["x_axis_type"] = "datetime"
+        kwargs = {}
+        if name.endswith("duration"):
+            kwargs["x_axis_type"] = "datetime"
 
-            fig = figure(
-                title=name, tools="", height=150, sizing_mode=self.sizing_mode, **kwargs
+        fig = figure(
+            title=name, tools="", height=150, sizing_mode=self.sizing_mode, **kwargs
+        )
+        fig.yaxis.visible = False
+        fig.ygrid.visible = False
+        if name.endswith("bandwidth") or name.endswith("bytes"):
+            fig.xaxis[0].formatter = NumeralTickFormatter(format="0.0b")
+
+        for i in range(n):
+            alpha = 0.3 + 0.3 * (n - i) / n
+            fig.line(
+                source=sources[i],
+                x="x",
+                y="y",
+                alpha=alpha,
+                color=RdBu[max(n, 3)][-i],
             )
-            fig.yaxis.visible = False
-            fig.ygrid.visible = False
-            if name.endswith("bandwidth") or name.endswith("bytes"):
-                fig.xaxis[0].formatter = NumeralTickFormatter(format="0.0b")
 
-            for i in range(n):
-                alpha = 0.3 + 0.3 * (n - i) / n
-                fig.line(
-                    source=sources[i],
-                    x="x",
-                    y="y",
-                    alpha=alpha,
-                    color=RdBu[max(n, 3)][-i],
-                )
+        fig.xaxis.major_label_orientation = math.pi / 12
+        self.digest_sources[name] = sources
+        self.digest_figures[name] = fig
+        return fig
 
-            fig.xaxis.major_label_orientation = math.pi / 12
-            fig.toolbar.logo = None
-            self.digest_sources[name] = sources
-            self.digest_figures[name] = fig
-            return fig
-
+    @log_errors
     def add_counter_figure(self, name):
-        with log_errors():
-            n = len(self.server.counters[name].intervals)
-            sources = {
-                i: ColumnDataSource({"x": [], "y": [], "y-center": [], "counts": []})
-                for i in range(n)
-            }
+        n = len(self.server.counters[name].intervals)
+        sources = {
+            i: ColumnDataSource({"x": [], "y": [], "y-center": [], "counts": []})
+            for i in range(n)
+        }
 
-            fig = figure(
-                title=name,
-                tools="",
-                height=150,
-                sizing_mode=self.sizing_mode,
-                x_range=sorted(map(str, self.server.counters[name].components[0])),
+        fig = figure(
+            title=name,
+            tools="",
+            height=150,
+            sizing_mode=self.sizing_mode,
+            x_range=sorted(str(x) for x in self.server.counters[name].components[0]),
+        )
+        fig.ygrid.visible = False
+
+        for i in range(n):
+            width = 0.5 + 0.4 * i / n
+            fig.rect(
+                source=sources[i],
+                x="x",
+                y="y-center",
+                width=width,
+                height="y",
+                alpha=0.3,
+                color=RdBu[max(n, 3)][-i],
             )
-            fig.ygrid.visible = False
+            hover = HoverTool(point_policy="follow_mouse", tooltips="""@x : @counts""")
+            fig.add_tools(hover)
+            fig.xaxis.major_label_orientation = math.pi / 12
 
-            for i in range(n):
-                width = 0.5 + 0.4 * i / n
-                fig.rect(
-                    source=sources[i],
-                    x="x",
-                    y="y-center",
-                    width=width,
-                    height="y",
-                    alpha=0.3,
-                    color=RdBu[max(n, 3)][-i],
-                )
-                hover = HoverTool(
-                    point_policy="follow_mouse", tooltips="""@x : @counts"""
-                )
-                fig.add_tools(hover)
-                fig.xaxis.major_label_orientation = math.pi / 12
-
-            fig.toolbar.logo = None
-
-            self.counter_sources[name] = sources
-            self.counter_figures[name] = fig
-            return fig
+        self.counter_sources[name] = sources
+        self.counter_figures[name] = fig
+        return fig
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
-            for name, fig in self.digest_figures.items():
-                digest = self.server.digests[name]
-                d = {}
-                for i, d in enumerate(digest.components):
-                    if d.size():
-                        ys, xs = d.histogram(100)
-                        xs = xs[1:]
-                        if name.endswith("duration"):
-                            xs *= 1000
-                        self.digest_sources[name][i].data.update({"x": xs, "y": ys})
-                fig.title.text = "%s: %d" % (name, digest.size())
+        for name, fig in self.digest_figures.items():
+            digest = self.server.digests[name]
+            d = {}
+            for i, d in enumerate(digest.components):
+                if d.size():
+                    ys, xs = d.histogram(100)
+                    xs = xs[1:]
+                    if name.endswith("duration"):
+                        xs *= 1000
+                    self.digest_sources[name][i].data.update({"x": xs, "y": ys})
+            fig.title.text = "%s: %d" % (name, digest.size())
 
-            for name, fig in self.counter_figures.items():
-                counter = self.server.counters[name]
-                d = {}
-                for i, d in enumerate(counter.components):
-                    if d:
-                        xs = sorted(d)
-                        factor = counter.intervals[0] / counter.intervals[i]
-                        counts = [d[x] for x in xs]
-                        ys = [factor * c for c in counts]
-                        y_centers = [y / 2 for y in ys]
-                        xs = list(map(str, xs))
-                        d = {"x": xs, "y": ys, "y-center": y_centers, "counts": counts}
-                        self.counter_sources[name][i].data.update(d)
-                    fig.title.text = "%s: %d" % (name, counter.size())
-                    fig.x_range.factors = list(map(str, xs))
+        for name, fig in self.counter_figures.items():
+            counter = self.server.counters[name]
+            d = {}
+            for i, d in enumerate(counter.components):
+                if d:
+                    xs = sorted(d)
+                    factor = counter.intervals[0] / counter.intervals[i]
+                    counts = [d[x] for x in xs]
+                    ys = [factor * c for c in counts]
+                    y_centers = [y / 2 for y in ys]
+                    xs = [str(x) for x in xs]
+                    d = {"x": xs, "y": ys, "y-center": y_centers, "counts": counts}
+                    self.counter_sources[name][i].data.update(d)
+                fig.title.text = "%s: %d" % (name, counter.size())
+                fig.x_range.factors = [str(x) for x in xs]
 
 
+@standard_doc("Dask Worker Internal Monitor", active_page="status")
 def status_doc(worker, extra, doc):
-    with log_errors():
-        statetable = StateTable(worker)
-        executing_ts = ExecutingTimeSeries(worker, sizing_mode="scale_width")
-        communicating_ts = CommunicatingTimeSeries(worker, sizing_mode="scale_width")
-        communicating_stream = CommunicatingStream(worker, sizing_mode="scale_width")
+    statetable = StateTable(worker)
+    executing_ts = ExecutingTimeSeries(worker, sizing_mode="scale_width")
+    communicating_ts = CommunicatingTimeSeries(worker, sizing_mode="scale_width")
+    communicating_stream = CommunicatingStream(worker, sizing_mode="scale_width")
 
-        xr = executing_ts.root.x_range
-        communicating_ts.root.x_range = xr
-        communicating_stream.root.x_range = xr
+    xr = executing_ts.root.x_range
+    communicating_ts.root.x_range = xr
+    communicating_stream.root.x_range = xr
 
-        doc.title = "Dask Worker Internal Monitor"
-        add_periodic_callback(doc, statetable, 200)
-        add_periodic_callback(doc, executing_ts, 200)
-        add_periodic_callback(doc, communicating_ts, 200)
-        add_periodic_callback(doc, communicating_stream, 200)
-        doc.add_root(
-            column(
-                statetable.root,
-                executing_ts.root,
-                communicating_ts.root,
-                communicating_stream.root,
-                sizing_mode="scale_width",
-            )
+    add_periodic_callback(doc, statetable, 200)
+    add_periodic_callback(doc, executing_ts, 200)
+    add_periodic_callback(doc, communicating_ts, 200)
+    add_periodic_callback(doc, communicating_stream, 200)
+    doc.add_root(
+        column(
+            statetable.root,
+            executing_ts.root,
+            communicating_ts.root,
+            communicating_stream.root,
+            sizing_mode="scale_width",
         )
-        doc.template = env.get_template("simple.html")
-        doc.template_variables["active_page"] = "status"
-        doc.template_variables.update(extra)
-        doc.theme = BOKEH_THEME
+    )
 
 
-def crossfilter_doc(worker, extra, doc):
-    with log_errors():
-        statetable = StateTable(worker)
-        crossfilter = CrossFilter(worker)
-
-        doc.title = "Dask Worker Cross-filter"
-        add_periodic_callback(doc, statetable, 500)
-        add_periodic_callback(doc, crossfilter, 500)
-
-        doc.add_root(column(statetable.root, crossfilter.root))
-        doc.template = env.get_template("simple.html")
-        doc.template_variables["active_page"] = "crossfilter"
-        doc.template_variables.update(extra)
-        doc.theme = BOKEH_THEME
-
-
+@standard_doc("Dask Worker Monitor", active_page="system")
 def systemmonitor_doc(worker, extra, doc):
-    with log_errors():
-        sysmon = SystemMonitor(worker, sizing_mode="scale_width")
-        doc.title = "Dask Worker Monitor"
-        add_periodic_callback(doc, sysmon, 500)
-
-        doc.add_root(sysmon.root)
-        doc.template = env.get_template("simple.html")
-        doc.template_variables["active_page"] = "system"
-        doc.template_variables.update(extra)
-        doc.theme = BOKEH_THEME
+    sysmon = SystemMonitor(worker, sizing_mode="scale_width")
+    add_periodic_callback(doc, sysmon, 500)
+    doc.add_root(sysmon.root)
 
 
+@standard_doc("Dask Work Counters", active_page="counters")
 def counters_doc(server, extra, doc):
-    with log_errors():
-        doc.title = "Dask Worker Counters"
-        counter = Counters(server, sizing_mode="stretch_both")
-        add_periodic_callback(doc, counter, 500)
-
-        doc.add_root(counter.root)
-        doc.template = env.get_template("simple.html")
-        doc.template_variables["active_page"] = "counters"
-        doc.template_variables.update(extra)
-        doc.theme = BOKEH_THEME
+    counter = Counters(server, sizing_mode="stretch_both")
+    add_periodic_callback(doc, counter, 500)
+    doc.add_root(counter.root)
 
 
+@standard_doc("Dask Worker Profile", active_page="profile")
 def profile_doc(server, extra, doc):
-    with log_errors():
-        doc.title = "Dask Worker Profile"
-        profile = ProfileTimePlot(server, sizing_mode="stretch_both", doc=doc)
-        profile.trigger_update()
-
-        doc.add_root(profile.root)
-        doc.template = env.get_template("simple.html")
-        doc.template_variables["active_page"] = "profile"
-        doc.template_variables.update(extra)
-        doc.theme = BOKEH_THEME
+    profile = ProfileTimePlot(server, sizing_mode="stretch_both", doc=doc)
+    doc.add_root(profile.root)
+    profile.trigger_update()
 
 
+@standard_doc("Dask: Profile of Event Loop", active_page=None)
 def profile_server_doc(server, extra, doc):
-    with log_errors():
-        doc.title = "Dask: Profile of Event Loop"
-        prof = ProfileServer(server, sizing_mode="stretch_both", doc=doc)
-        doc.add_root(prof.root)
-        doc.template = env.get_template("simple.html")
-        # doc.template_variables['active_page'] = ''
-        doc.template_variables.update(extra)
-        doc.theme = BOKEH_THEME
-
-        prof.trigger_update()
+    profile = ProfileServer(server, sizing_mode="stretch_both", doc=doc)
+    doc.add_root(profile.root)
+    profile.trigger_update()

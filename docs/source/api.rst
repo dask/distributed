@@ -23,11 +23,11 @@ API
    rejoin
    Reschedule
 
-.. currentmodule:: distributed.recreate_exceptions
+.. currentmodule:: distributed.recreate_tasks
 
 .. autosummary::
-   ReplayExceptionClient.get_futures_error
-   ReplayExceptionClient.recreate_error_locally
+   ReplayTaskClient.recreate_task_locally
+   ReplayTaskClient.recreate_error_locally
 
 .. currentmodule:: distributed
 
@@ -40,7 +40,7 @@ API
 .. autoautosummary:: distributed.Future
    :methods:
 
-**Client Coordination**
+**Synchronization**
 
 .. currentmodule:: distributed
 
@@ -48,6 +48,7 @@ API
    Event
    Lock
    MultiLock
+   Semaphore
    Queue
    Variable
 
@@ -56,12 +57,20 @@ API
 
 .. autosummary::
    as_completed
-   distributed.diagnostics.progress
+   distributed.diagnostics.progressbar.progress
    wait
    fire_and_forget
    futures_of
    get_task_stream
    get_task_metadata
+   performance_report
+
+
+**Utilities**
+
+.. autosummary::
+   distributed.utils.Log
+   distributed.utils.Logs
 
 
 Asynchronous methods
@@ -104,7 +113,7 @@ Client
 .. autoclass:: Client
    :members:
 
-.. autoclass:: distributed.recreate_exceptions.ReplayExceptionClient
+.. autoclass:: distributed.recreate_tasks.ReplayTaskClient
    :members:
 
 
@@ -113,6 +122,24 @@ Future
 
 .. autoclass:: Future
    :members:
+
+
+Synchronization
+---------------
+
+.. autoclass:: Event
+   :members:
+.. autoclass:: Lock
+   :members:
+.. autoclass:: MultiLock
+   :members:
+.. autoclass:: Semaphore
+   :members:
+.. autoclass:: Queue
+   :members:
+.. autoclass:: Variable
+   :members:
+
 
 Cluster
 -------
@@ -143,7 +170,7 @@ Other
 .. autoclass:: as_completed
    :members:
 
-.. autofunction:: distributed.diagnostics.progress
+.. autofunction:: distributed.diagnostics.progressbar.progress
 .. autofunction:: wait
 .. autofunction:: fire_and_forget
 .. autofunction:: futures_of
@@ -158,19 +185,14 @@ Other
 .. autoclass:: distributed.Reschedule
 .. autoclass:: get_task_stream
 .. autoclass:: get_task_metadata
+.. autoclass:: performance_report
 
-.. autoclass:: Event
-   :members:
-.. autoclass:: Lock
-   :members:
-.. autoclass:: MultiLock
-   :members:
-.. autoclass:: Semaphore
-   :members:
-.. autoclass:: Queue
-   :members:
-.. autoclass:: Variable
-   :members:
+
+Utilities
+---------
+
+.. autoclass:: distributed.utils.Log
+.. autoclass:: distributed.utils.Logs
 
 
 Adaptive

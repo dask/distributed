@@ -1,6 +1,8 @@
+import asyncio
 import json
 import re
 
+import aiohttp
 import pytest
 
 pytest.importorskip("bokeh")
@@ -8,10 +10,13 @@ pytest.importorskip("bokeh")
 from tornado.escape import url_escape
 from tornado.httpclient import AsyncHTTPClient, HTTPClientError
 
+import dask.config
 from dask.sizeof import sizeof
 
 from distributed.utils import is_valid_xml
 from distributed.utils_test import gen_cluster, inc, slowinc
+
+DEFAULT_ROUTES = dask.config.get("distributed.scheduler.http.routes")
 
 
 @gen_cluster(client=True)
@@ -139,6 +144,8 @@ async def test_prometheus_collect_task_states(c, s, a, b):
 
     # submit a task which should show up in the prometheus scraping
     future = c.submit(slowinc, 1, delay=0.5)
+    while not any(future.key in w.tasks for w in [a, b]):
+        await asyncio.sleep(0.001)
 
     active_metrics, forgotten_tasks = await fetch_metrics()
     assert active_metrics.keys() == expected
@@ -148,7 +155,11 @@ async def test_prometheus_collect_task_states(c, s, a, b):
     res = await c.gather(future)
     assert res == 2
 
-    del future
+    future.release()
+
+    while any(future.key in w.tasks for w in [a, b]):
+        await asyncio.sleep(0.001)
+
     active_metrics, forgotten_tasks = await fetch_metrics()
     assert active_metrics.keys() == expected
     assert sum(active_metrics.values()) == 0.0
@@ -238,3 +249,87 @@ async def test_eventstream(c, s, a, b):
     )
     assert "websocket" in str(s.plugins).lower()
     ws_client.close()
+
+
+def test_api_disabled_by_default():
+    assert "distributed.http.scheduler.api" not in dask.config.get(
+        "distributed.scheduler.http.routes"
+    )
+
+
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={
+        "distributed.scheduler.http.routes": DEFAULT_ROUTES
+        + ["distributed.http.scheduler.api"]
+    },
+)
+async def test_api(c, s, a, b):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            "http://localhost:%d/api/v1" % s.http_server.port
+        ) as resp:
+            assert resp.status == 200
+            assert resp.headers["Content-Type"] == "text/plain"
+            assert (await resp.text()) == "API V1"
+
+
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={
+        "distributed.scheduler.http.routes": DEFAULT_ROUTES
+        + ["distributed.http.scheduler.api"]
+    },
+)
+async def test_retire_workers(c, s, a, b):
+    async with aiohttp.ClientSession() as session:
+        params = {"workers": [a.address, b.address]}
+        async with session.post(
+            "http://localhost:%d/api/v1/retire_workers" % s.http_server.port,
+            json=params,
+        ) as resp:
+            assert resp.status == 200
+            assert resp.headers["Content-Type"] == "application/json"
+            retired_workers_info = json.loads(await resp.text())
+            assert len(retired_workers_info) == 2
+
+
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={
+        "distributed.scheduler.http.routes": DEFAULT_ROUTES
+        + ["distributed.http.scheduler.api"]
+    },
+)
+async def test_get_workers(c, s, a, b):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            "http://localhost:%d/api/v1/get_workers" % s.http_server.port
+        ) as resp:
+            assert resp.status == 200
+            assert resp.headers["Content-Type"] == "application/json"
+            workers_info = json.loads(await resp.text())["workers"]
+            workers_address = [worker.get("address") for worker in workers_info]
+            assert set(workers_address) == {a.address, b.address}
+
+
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={
+        "distributed.scheduler.http.routes": DEFAULT_ROUTES
+        + ["distributed.http.scheduler.api"]
+    },
+)
+async def test_adaptive_target(c, s, a, b):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            "http://localhost:%d/api/v1/adaptive_target" % s.http_server.port
+        ) as resp:
+            assert resp.status == 200
+            assert resp.headers["Content-Type"] == "application/json"
+            num_workers = json.loads(await resp.text())["workers"]
+            assert num_workers == 0

@@ -1,16 +1,7 @@
 import logging
-import sys
+import pickle
 
 import cloudpickle
-
-if sys.version_info < (3, 8):
-    try:
-        import pickle5 as pickle
-    except ImportError:
-        import pickle
-else:
-    import pickle
-
 
 HIGHEST_PROTOCOL = pickle.HIGHEST_PROTOCOL
 
@@ -73,6 +64,6 @@ def loads(x, *, buffers=()):
             return pickle.loads(x, buffers=buffers)
         else:
             return pickle.loads(x)
-    except Exception as e:
+    except Exception:
         logger.info("Failed to deserialize %s", x[:10000], exc_info=True)
         raise

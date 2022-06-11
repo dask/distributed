@@ -9,39 +9,7 @@ from dask.utils import stringify
 
 from distributed import Worker
 from distributed.client import wait
-from distributed.compatibility import WINDOWS
-from distributed.utils_test import (  # noqa: F401
-    a,
-    b,
-    client,
-    cluster_fixture,
-    gen_cluster,
-    inc,
-    loop,
-    s,
-    slowadd,
-    slowinc,
-)
-
-
-@gen_cluster(client=True, nthreads=[])
-async def test_resources(c, s):
-    assert not s.worker_resources
-    assert not s.resources
-
-    a = Worker(s.address, loop=s.loop, resources={"GPU": 2})
-    b = Worker(s.address, loop=s.loop, resources={"GPU": 1, "DB": 1})
-    await asyncio.gather(a, b)
-
-    assert s.resources == {"GPU": {a.address: 2, b.address: 1}, "DB": {b.address: 1}}
-    assert s.worker_resources == {a.address: {"GPU": 2}, b.address: {"GPU": 1, "DB": 1}}
-
-    await b.close()
-
-    assert s.resources == {"GPU": {a.address: 2}, "DB": {}}
-    assert s.worker_resources == {a.address: {"GPU": 2}}
-
-    await a.close()
+from distributed.utils_test import gen_cluster, inc, slowadd, slowinc
 
 
 @gen_cluster(
@@ -64,12 +32,9 @@ async def test_resource_submit(c, s, a, b):
 
     assert s.get_task_status(keys=[z.key]) == {z.key: "no-worker"}
 
-    d = await Worker(s.address, loop=s.loop, resources={"C": 10})
-
-    await wait(z)
-    assert z.key in d.data
-
-    await d.close()
+    async with Worker(s.address, resources={"C": 10}) as w:
+        await wait(z)
+        assert z.key in w.data
 
 
 @gen_cluster(
@@ -90,12 +55,32 @@ async def test_submit_many_non_overlapping(c, s, a, b):
 @gen_cluster(
     client=True,
     nthreads=[
+        ("127.0.0.1", 4, {"resources": {"A": 2}}),
+        ("127.0.0.1", 4, {"resources": {"A": 1}}),
+    ],
+)
+async def test_submit_many_non_overlapping_2(c, s, a, b):
+    futures = c.map(slowinc, range(100), resources={"A": 1}, delay=0.02)
+
+    while len(a.data) + len(b.data) < 100:
+        await asyncio.sleep(0.01)
+        assert a.executing_count <= 2
+        assert b.executing_count <= 1
+
+    await wait(futures)
+    assert a.total_resources == a.available_resources
+    assert b.total_resources == b.available_resources
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[
         ("127.0.0.1", 1, {"resources": {"A": 1}}),
         ("127.0.0.1", 1, {"resources": {"B": 1}}),
     ],
 )
 async def test_move(c, s, a, b):
-    [x] = await c._scatter([1], workers=b.address)
+    [x] = await c.scatter([1], workers=b.address)
 
     future = c.submit(inc, x, resources={"A": 1})
 
@@ -111,7 +96,7 @@ async def test_move(c, s, a, b):
     ],
 )
 async def test_dont_work_steal(c, s, a, b):
-    [x] = await c._scatter([1], workers=a.address)
+    [x] = await c.scatter([1], workers=a.address)
 
     futures = [
         c.submit(slowadd, x, i, resources={"A": 1}, delay=0.05) for i in range(10)
@@ -236,26 +221,6 @@ async def test_resources_str(c, s, a, b):
     assert ts_last.resource_restrictions == {"MyRes": 1}
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[
-        ("127.0.0.1", 4, {"resources": {"A": 2}}),
-        ("127.0.0.1", 4, {"resources": {"A": 1}}),
-    ],
-)
-async def test_submit_many_non_overlapping(c, s, a, b):
-    futures = c.map(slowinc, range(100), resources={"A": 1}, delay=0.02)
-
-    while len(a.data) + len(b.data) < 100:
-        await asyncio.sleep(0.01)
-        assert a.executing_count <= 2
-        assert b.executing_count <= 1
-
-    await wait(futures)
-    assert a.total_resources == a.available_resources
-    assert b.total_resources == b.available_resources
-
-
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 4, {"resources": {"A": 2, "B": 1}})])
 async def test_minimum_resource(c, s, a):
     futures = c.map(slowinc, range(30), resources={"A": 1, "B": 1}, delay=0.02)
@@ -277,10 +242,11 @@ async def test_prefer_constrained(c, s, a):
     await wait(constrained)
     end = time()
     assert end - start < 4
-    has_what = dict(s.has_what)
-    processing = dict(s.processing)
-    assert len(has_what) < len(constrained) + 2  # at most two slowinc's finished
-    assert s.processing[a.address]
+    assert (
+        len([ts for ts in s.tasks.values() if ts.state == "memory"])
+        <= len(constrained) + 2
+    )
+    assert s.workers[a.address].processing
 
 
 @pytest.mark.skip(reason="")
@@ -305,7 +271,7 @@ async def test_set_resources(c, s, a):
     await a.set_resources(A=2)
     assert a.total_resources["A"] == 2
     assert a.available_resources["A"] == 2
-    assert s.worker_resources[a.address] == {"A": 2}
+    assert s.workers[a.address].resources == {"A": 2}
 
     future = c.submit(slowinc, 1, delay=1, resources={"A": 1})
     while a.available_resources["A"] == 2:
@@ -314,7 +280,7 @@ async def test_set_resources(c, s, a):
     await a.set_resources(A=3)
     assert a.total_resources["A"] == 3
     assert a.available_resources["A"] == 2
-    assert s.worker_resources[a.address] == {"A": 3}
+    assert s.workers[a.address].resources == {"A": 3}
 
 
 @gen_cluster(
@@ -360,7 +326,7 @@ async def test_dont_optimize_out(c, s, a, b):
         assert "executing" in str(a.story(key))
 
 
-@pytest.mark.xfail(reason="atop fusion seemed to break this")
+@pytest.mark.skip(reason="atop fusion seemed to break this")
 @gen_cluster(
     client=True,
     nthreads=[
@@ -389,9 +355,7 @@ async def test_full_collections(c, s, a, b):
                 reason="don't track resources through optimization"
             ),
         ),
-        pytest.param(
-            False, marks=pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
-        ),
+        False,
     ],
 )
 def test_collections_get(client, optimize_graph, s, a, b):

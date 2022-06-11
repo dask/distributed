@@ -1,3 +1,5 @@
-from .core import PrometheusHandler
+from __future__ import annotations
 
-routes = [("/metrics", PrometheusHandler, {})]
+from distributed.http.worker.prometheus.core import PrometheusHandler
+
+routes: list[tuple] = [("/metrics", PrometheusHandler, {})]

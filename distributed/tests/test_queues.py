@@ -6,15 +6,7 @@ import pytest
 
 from distributed import Client, Nanny, Queue, TimeoutError, wait, worker_client
 from distributed.metrics import time
-from distributed.utils_test import (  # noqa: F401
-    client,
-    cluster_fixture,
-    div,
-    gen_cluster,
-    inc,
-    loop,
-    popen,
-)
+from distributed.utils_test import div, gen_cluster, inc, popen
 
 
 @gen_cluster(client=True)
@@ -118,7 +110,7 @@ def test_picklability_sync(client):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 5, Worker=Nanny, timeout=None)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 5, Worker=Nanny, timeout=60)
 async def test_race(c, s, *workers):
     def f(i):
         with worker_client() as c:
@@ -153,18 +145,18 @@ async def test_same_futures(c, s, a, b):
     for i in range(5):
         await q.put(future)
 
-    assert s.wants_what["queue-x"] == {future.key}
+    assert {ts.key for ts in s.clients["queue-x"].wants_what} == {future.key}
 
     for i in range(4):
         future2 = await q.get()
-        assert s.wants_what["queue-x"] == {future.key}
+        assert {ts.key for ts in s.clients["queue-x"].wants_what} == {future.key}
         await asyncio.sleep(0.05)
-        assert s.wants_what["queue-x"] == {future.key}
+        assert {ts.key for ts in s.clients["queue-x"].wants_what} == {future.key}
 
     await q.get()
 
     start = time()
-    while s.wants_what["queue-x"]:
+    while "queue-x" in s.clients and s.clients["queue-x"].wants_what:
         await asyncio.sleep(0.01)
         assert time() - start < 2
 

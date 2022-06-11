@@ -1,20 +1,51 @@
 name: Tests
 
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 6,18 * * *"
+
+# When this workflow is queued, automatically cancel any previous running
+# or pending jobs from the same branch
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
+    # Do not run the schedule job on forks
+    if: github.repository == 'dask/distributed' || github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
 
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.7", "3.8", "3.9"]
+        python-version: ["3.8", "3.9", "3.10"]
+        # Cherry-pick test modules to split the overall runtime roughly in half
+        partition: [ci1, not ci1]
+        exclude:
+          - os: macos-latest
+            python-version: 3.9
+        include:
+          - partition: "ci1"
+            partition-label: "ci1"
+          - partition: "not ci1"
+            partition-label: "notci1"
 
-        # Uncomment to stress-test the test suite for random failures
+        # Uncomment to stress-test the test suite for random failures.
+        # Must also change env.TEST_ID below.
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
+        # To avoid hamstringing other people, change 'on: [push, pull_request]' above
+        # to just 'on: [push]'; this way the stress test will run exclusively in your
+        # branch (https://github.com/<your name>/distributed/actions).
         # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+
+    env:
+      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}
+      # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}-${{ matrix.run }}
 
     steps:
       - name: Checkout source
@@ -27,19 +58,15 @@ jobs:
         with:
           miniforge-variant: Mambaforge
           miniforge-version: latest
+          condarc-file: continuous_integration/condarc
           use-mamba: true
-          channels: conda-forge,defaults
-          channel-priority: true
           python-version: ${{ matrix.python-version }}
           environment-file: continuous_integration/environment-${{ matrix.python-version }}.yaml
           activate-environment: dask-distributed
-          auto-activate-base: false
 
-      - name: Install stacktrace
+      - name: Show conda options
         shell: bash -l {0}
-        # stacktrace for Python 3.8 has not been released at the moment of writing
-        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version < '3.8' }}
-        run: mamba install -c conda-forge -c defaults -c numba libunwind stacktrace
+        run: conda config --show
 
       - name: Hack around https://github.com/ipython/ipython/issues/12197
         # This upstream issue causes an interpreter crash when running
@@ -51,14 +78,7 @@ jobs:
       - name: Install
         shell: bash -l {0}
         run: |
-          # Cythonize scheduler on Python 3.7 builds
-          if [[ "${{ matrix.python-version }}" = "3.7" ]]; then
-              python -m pip install -vv --no-deps --install-option="--with-cython" -e .
-              python -c "from distributed.scheduler import COMPILED; assert COMPILED"
-          else
-              python -m pip install --no-deps -e .
-              python -c "from distributed.scheduler import COMPILED; assert not COMPILED"
-          fi
+          python -m pip install --no-deps -e .
 
       - name: mamba list
         shell: bash -l {0}
@@ -77,7 +97,14 @@ jobs:
         if: ${{ matrix.os != 'windows-latest' }}
         run: bash continuous_integration/scripts/setup_ssh.sh
 
+      - name: Reconfigure pytest-timeout
+        shell: bash -l {0}
+        # No SIGALRM available on Windows
+        if: ${{ matrix.os != 'windows-latest' }}
+        run: sed -i.bak 's/timeout_method = thread/timeout_method = signal/' setup.cfg
+
       - name: Test
+        id: run_tests
         shell: bash -l {0}
         env:
           PYTHONFAULTHANDLER: 1
@@ -89,8 +116,64 @@ jobs:
           fi
 
           source continuous_integration/scripts/set_ulimit.sh
-          pytest distributed -m "not avoid_ci" --runslow
+          set -o pipefail
+          mkdir reports
+
+          pytest distributed \
+            -m "not avoid_ci and ${{ matrix.partition }}" --runslow \
+            --leaks=fds,processes,threads \
+            --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \
+            --cov=distributed --cov-report=xml \
+          | tee reports/stdout
+
+      - name: Generate junit XML report in case of pytest-timeout
+        if: ${{ failure() }}
+        shell: bash -l {0}
+        run: |
+          if [ ! -e reports/pytest.xml ]
+          then
+            # This should only ever happen on Windows.
+            # On Linux and MacOS, pytest-timeout kills off the individual tests
+            # See (reconfigure pytest-timeout above)
+            python continuous_integration/scripts/parse_stdout.py < reports/stdout > reports/pytest.xml
+          fi
 
       # - name: Debug with tmate on failure
       #   if: ${{ failure() }}
       #   uses: mxschmitt/action-tmate@v3
+
+      - name: Coverage
+        uses: codecov/codecov-action@v1
+
+      - name: Upload test results
+        # ensure this runs even if pytest fails
+        if: >
+          always() &&
+          (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ env.TEST_ID }}
+          path: reports
+      - name: Upload gen_cluster dumps for failed tests
+        # ensure this runs even if pytest fails
+        if: >
+          always() &&
+          (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ env.TEST_ID }}_cluster_dumps
+          path: test_cluster_dump
+          if-no-files-found: ignore
+
+  # Publish an artifact for the event; used by publish-test-results.yaml
+  event_file:
+    # Do not run the schedule job on forks
+    if: github.repository == 'dask/distributed' || github.event_name != 'schedule'
+    name: "Event File"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Upload
+        uses: actions/upload-artifact@v2
+        with:
+          name: Event File
+          path: ${{ github.event_path }}

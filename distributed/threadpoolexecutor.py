@@ -26,8 +26,8 @@ import os
 import queue
 import threading
 
-from . import _concurrent_futures_thread as thread
-from .metrics import time
+from distributed import _concurrent_futures_thread as thread
+from distributed.metrics import time
 
 logger = logging.getLogger(__name__)
 

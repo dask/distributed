@@ -1,18 +1,23 @@
+from __future__ import annotations
+
 import asyncio
+import inspect
 import logging
+import multiprocessing
 import os
 import re
 import threading
 import weakref
+from collections.abc import Callable
 from queue import Queue as PyQueue
+from typing import TypeVar
 
-from tornado import gen
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
 
 import dask
 
-from .utils import TimeoutError, mp_context
+from distributed.utils import TimeoutError, mp_context
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +50,20 @@ class _ProcessState:
     exitcode = None
 
 
+_T_async_process = TypeVar("_T_async_process", bound="AsyncProcess")
+
+
 class AsyncProcess:
     """
     A coroutine-compatible multiprocessing.Process-alike.
     All normally blocking methods are wrapped in Tornado coroutines.
     """
 
+    _process: multiprocessing.Process
+
     def __init__(self, loop=None, target=None, name=None, args=(), kwargs={}):
         if not callable(target):
-            raise TypeError("`target` needs to be callable, not %r" % (type(target),))
+            raise TypeError(f"`target` needs to be callable, not {type(target)!r}")
         self._state = _ProcessState()
         self._loop = loop or IOLoop.current(instance=False)
 
@@ -92,7 +102,7 @@ class AsyncProcess:
         self._start_threads()
 
     def __repr__(self):
-        return "<%s %s>" % (self.__class__.__name__, self._name)
+        return f"<{self.__class__.__name__} {self._name}>"
 
     def _check_closed(self):
         if self._closed:
@@ -122,9 +132,9 @@ class AsyncProcess:
         self._thread_finalizer = weakref.finalize(self, stop_thread, q=self._watch_q)
         self._thread_finalizer.atexit = False
 
-    def _on_exit(self, exitcode):
+    def _on_exit(self, exitcode: int) -> None:
         # Called from the event loop when the child process exited
-        self._process = None
+        self._process = None  # type: ignore[assignment]
         if self._exit_callback is not None:
             self._exit_callback(self)
         self._exit_future.set_result(exitcode)
@@ -161,26 +171,10 @@ class AsyncProcess:
         t.daemon = True
         t.start()
 
-    @staticmethod
-    def reset_logger_locks():
-        """Python 2's logger's locks don't survive a fork event
-
-        https://github.com/dask/distributed/issues/1491
-        """
-        for name in logging.Logger.manager.loggerDict.keys():
-            for handler in logging.getLogger(name).handlers:
-                handler.createLock()
-
     @classmethod
     def _run(
         cls, target, args, kwargs, parent_alive_pipe, _keep_child_alive, inherit_config
     ):
-        # On Python 2 with the fork method, we inherit the _keep_child_alive fd,
-        # whether it is passed or not. Therefore, pass it unconditionally and
-        # close it here, so that there are no other references to the pipe lying
-        # around.
-        cls.reset_logger_locks()
-
         _keep_child_alive.close()
 
         # Child process entry point
@@ -192,7 +186,9 @@ class AsyncProcess:
         target(*args, **kwargs)
 
     @classmethod
-    def _watch_message_queue(cls, selfref, process, loop, state, q, exit_future):
+    def _watch_message_queue(
+        cls, selfref, process: multiprocessing.Process, loop, state, q, exit_future
+    ):
         # As multiprocessing.Process is not thread-safe, we run all
         # blocking operations from this single loop and ship results
         # back to the caller when needed.
@@ -212,16 +208,21 @@ class AsyncProcess:
 
             state.is_alive = True
             state.pid = process.pid
-            logger.debug("[%s] created process with pid %r" % (r, state.pid))
+            logger.debug(f"[{r}] created process with pid {state.pid!r}")
 
         while True:
             msg = q.get()
-            logger.debug("[%s] got message %r" % (r, msg))
+            logger.debug(f"[{r}] got message {msg!r}")
             op = msg["op"]
             if op == "start":
                 _call_and_set_future(loop, msg["future"], _start)
             elif op == "terminate":
+                # Send SIGTERM
                 _call_and_set_future(loop, msg["future"], process.terminate)
+            elif op == "kill":
+                # Send SIGKILL
+                _call_and_set_future(loop, msg["future"], process.kill)
+
             elif op == "stop":
                 break
             else:
@@ -250,40 +251,59 @@ class AsyncProcess:
         """
         Start the child process.
 
-        This method is a coroutine.
+        This method returns a future.
         """
         self._check_closed()
         fut = Future()
         self._watch_q.put_nowait({"op": "start", "future": fut})
         return fut
 
-    def terminate(self):
-        """
-        Terminate the child process.
+    def terminate(self) -> asyncio.Future[None]:
+        """Terminate the child process.
 
-        This method is a coroutine.
+        This method returns a future.
+
+        See also
+        --------
+        multiprocessing.Process.terminate
         """
         self._check_closed()
-        fut = Future()
+        fut: Future[None] = Future()
         self._watch_q.put_nowait({"op": "terminate", "future": fut})
         return fut
 
-    @gen.coroutine
-    def join(self, timeout=None):
+    def kill(self) -> asyncio.Future[None]:
+        """Send SIGKILL to the child process.
+        On Windows, this is the same as terminate().
+
+        This method returns a future.
+
+        See also
+        --------
+        multiprocessing.Process.kill
+        """
+        self._check_closed()
+        fut: Future[None] = Future()
+        self._watch_q.put_nowait({"op": "kill", "future": fut})
+        return fut
+
+    async def join(self, timeout=None):
         """
         Wait for the child process to exit.
 
-        This method is a coroutine.
+        This method returns a coroutine.
         """
         self._check_closed()
         assert self._state.pid is not None, "can only join a started process"
         if self._state.exitcode is not None:
             return
         if timeout is None:
-            yield self._exit_future
+            await self._exit_future
         else:
             try:
-                yield asyncio.wait_for(self._exit_future, timeout)
+                # Shield otherwise the timeout cancels the future and our
+                # on_exit callback will try to set a result on a canceled future
+                await asyncio.wait_for(asyncio.shield(self._exit_future), timeout)
             except TimeoutError:
                 pass
 
@@ -297,14 +317,19 @@ class AsyncProcess:
             self._process = None
             self._closed = True
 
-    def set_exit_callback(self, func):
+    def set_exit_callback(
+        self: _T_async_process, func: Callable[[_T_async_process], None]
+    ) -> None:
         """
         Set a function to be called by the event loop when the process exits.
         The function is called with the AsyncProcess as sole argument.
 
-        The function may be a coroutine function.
+        The function may not be a coroutine function.
         """
         # XXX should this be a property instead?
+        assert not inspect.iscoroutinefunction(
+            func
+        ), "exit callback may not be a coroutine function"
         assert callable(func), "exit callback should be callable"
         assert (
             self._state.pid is None
@@ -338,7 +363,7 @@ class AsyncProcess:
 def _asyncprocess_finalizer(proc):
     if proc.is_alive():
         try:
-            logger.info("reaping stray process %s" % (proc,))
+            logger.info(f"reaping stray process {proc}")
             proc.terminate()
         except OSError:
             pass
