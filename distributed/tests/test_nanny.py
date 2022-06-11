@@ -22,7 +22,7 @@ import dask
 from dask.utils import tmpfile
 
 from distributed import Nanny, Scheduler, Worker, profile, rpc, wait, worker
-from distributed.compatibility import LINUX, WINDOWS, to_thread
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
@@ -600,7 +600,9 @@ async def test_close_joins(s):
         p = nanny.process
         assert p
         close_t = asyncio.create_task(nanny.close())
-        await to_thread(close_happened.wait)
+
+        while not close_happened.wait(0):
+            await asyncio.sleep(0.01)
 
         assert not close_t.done()
         assert nanny.status == Status.closing
