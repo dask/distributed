@@ -4,6 +4,7 @@ import datetime
 import os
 import sys
 import tempfile
+import warnings
 
 try:
     import ssl
@@ -120,6 +121,12 @@ class Security:
     )
 
     def __init__(self, require_encryption=None, **kwargs):
+        if _OPENSSL_VERSION_INFO < (1, 1, 1):
+            warnings.warn(
+                f"support for {ssl.OPENSSL_VERSION} is deprecated,"
+                " and will be removed in a future release",
+                DeprecationWarning,
+            )
         extra = set(kwargs).difference(self.__slots__)
         if extra:
             raise TypeError("Unknown parameters: %r" % sorted(extra))
