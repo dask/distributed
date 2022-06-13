@@ -334,7 +334,7 @@ class UploadFile(WorkerPlugin):
 
     async def setup(self, worker):
         response = await worker.upload_file(
-            comm=None, filename=self.filename, data=self.data, load=True
+            filename=self.filename, data=self.data, load=True
         )
         assert len(self.data) == response["nbytes"]
 

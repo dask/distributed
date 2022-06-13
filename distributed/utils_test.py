@@ -70,7 +70,8 @@ from distributed.utils import (
     reset_logger_locks,
     sync,
 )
-from distributed.worker import WORKER_ANY_RUNNING, InvalidTransition, Worker
+from distributed.worker import WORKER_ANY_RUNNING, Worker
+from distributed.worker_state_machine import InvalidTransition
 
 try:
     import ssl
@@ -1271,8 +1272,10 @@ def validate_state(*servers: Scheduler | Worker | Nanny) -> None:
     Excludes workers wrapped by Nannies and workers manually started by the test.
     """
     for s in servers:
-        if s.validate and hasattr(s, "validate_state"):
-            s.validate_state()  # type: ignore
+        if isinstance(s, Scheduler) and s.validate:
+            s.validate_state()
+        elif isinstance(s, Worker) and s.state.validate:
+            s.validate_state()
 
 
 def raises(func, exc=Exception):
@@ -2322,13 +2325,13 @@ def freeze_data_fetching(w: Worker, *, jump_start: bool = False):
         If True, trigger ensure_communicating on exit; this simulates e.g. an unrelated
         worker moving out of in_flight_workers.
     """
-    old_out_connections = w.total_out_connections
-    old_comm_threshold = w.comm_threshold_bytes
-    w.total_out_connections = 0
-    w.comm_threshold_bytes = 0
+    old_out_connections = w.state.total_out_connections
+    old_comm_threshold = w.state.comm_threshold_bytes
+    w.state.total_out_connections = 0
+    w.state.comm_threshold_bytes = 0
     yield
-    w.total_out_connections = old_out_connections
-    w.comm_threshold_bytes = old_comm_threshold
+    w.state.total_out_connections = old_out_connections
+    w.state.comm_threshold_bytes = old_comm_threshold
     if jump_start:
         w.status = Status.paused
         w.status = Status.running

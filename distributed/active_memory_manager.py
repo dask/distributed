@@ -416,8 +416,9 @@ class ActiveMemoryManagerPolicy(abc.ABC):
     ) -> SuggestionGenerator:
         """This method is invoked by the ActiveMemoryManager every few seconds, or
         whenever the user invokes ``client.amm.run_once``.
+
         It is an iterator that must emit
-        :class:`~distributed.active_memory_manager.Suggestion`s:
+        :class:`~distributed.active_memory_manager.Suggestion` objects:
 
         - ``Suggestion("replicate", <TaskState>)``
         - ``Suggestion("replicate", <TaskState>, {subset of potential workers to replicate to})``
