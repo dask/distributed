@@ -783,7 +783,13 @@ def _deserialize_memoryview(header, frames):
         out = ensure_memoryview(frames[0])
     else:
         out = memoryview(b"".join(frames))
-    out = out.cast(header["format"], header["shape"])
+
+    # handle empty bytearrays
+    if out.nbytes > 0:
+        out = out.cast(header["format"], header["shape"])
+    else:
+        out = out.cast(header["format"])
+
     return out
 
 
