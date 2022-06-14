@@ -12,6 +12,7 @@ distributed:
     allowed-failures: 3     # number of retries before a task is considered bad
     bandwidth: 100000000    # 100 MB/s estimated worker-worker bandwidth
     blocked-handlers: []
+    contact-address: null
     default-data-size: 1kiB
     # Number of seconds to wait until workers or clients are removed from the events log
     # after they have been removed from the scheduler
@@ -90,6 +91,7 @@ distributed:
       restart: False        # Do we ressurrect the worker after the lifetime deadline?
 
     profile:
+      enabled: True         # Whether or not to enable profiling
       interval: 10ms        # Time between statistical profiling queries
       cycle: 1000ms         # Time between starting new profile
       low-level: False      # Whether or not to include low-level functions
@@ -278,6 +280,7 @@ distributed:
     pdb-on-err: False       # enter debug mode on scheduling error
     system-monitor:
       interval: 500ms
+      disk: true
     event-loop: tornado
   rmm:
     pool-size: null

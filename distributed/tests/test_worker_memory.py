@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import glob
 import logging
+import os
+import signal
 import threading
 from collections import Counter, UserDict
 from time import sleep
 
+import psutil
 import pytest
 
 import dask.config
 
 import distributed.system
-from distributed import Client, Event, Nanny, Worker, wait
+from distributed import Client, Event, KilledWorker, Nanny, Scheduler, Worker, wait
+from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.metrics import monotonic
 from distributed.spill import has_zict_210
@@ -148,7 +153,7 @@ async def test_fail_to_pickle_target_2(c, s, a):
     config={
         "distributed.worker.memory.target": False,
         "distributed.worker.memory.spill": 0.7,
-        "distributed.worker.memory.monitor-interval": "10ms",
+        "distributed.worker.memory.monitor-interval": "100ms",
     },
 )
 async def test_fail_to_pickle_spill(c, s, a):
@@ -679,6 +684,39 @@ async def test_manual_evict_proto(c, s, a):
         await asyncio.sleep(0.01)
 
 
+async def leak_until_restart(c: Client, s: Scheduler) -> None:
+    s.allowed_failures = 0
+
+    def leak():
+        L = []
+        while True:
+            L.append(b"0" * 5_000_000)
+            sleep(0.01)
+
+    (addr,) = s.workers
+    pid = (await c.run(os.getpid))[addr]
+
+    future = c.submit(leak, key="leak")
+
+    # Wait until the worker is restarted
+    while len(s.workers) != 1 or set(s.workers) == {addr}:
+        await asyncio.sleep(0.01)
+
+    # Test that the process has been properly waited for and not just left there
+    with pytest.raises(psutil.NoSuchProcess):
+        psutil.Process(pid)
+
+    with pytest.raises(KilledWorker):
+        await future
+    assert s.tasks["leak"].suspicious == 1
+    assert not any(
+        (await c.run(lambda dask_worker: "leak" in dask_worker.tasks)).values()
+    )
+    future.release()
+    while "leak" in s.tasks:
+        await asyncio.sleep(0.01)
+
+
 @pytest.mark.slow
 @gen_cluster(
     nthreads=[("", 1)],
@@ -688,21 +726,54 @@ async def test_manual_evict_proto(c, s, a):
     config={"distributed.worker.memory.monitor-interval": "10ms"},
 )
 async def test_nanny_terminate(c, s, a):
-    def leak():
-        L = []
-        while True:
-            L.append(b"0" * 5_000_000)
-            sleep(0.01)
+    await leak_until_restart(c, s)
 
-    before = a.process.pid
-    with captured_logger(logging.getLogger("distributed.worker_memory")) as logger:
-        future = c.submit(leak)
-        while a.process.pid == before:
-            await asyncio.sleep(0.01)
 
-    out = logger.getvalue()
-    assert "restart" in out.lower()
-    assert "memory" in out.lower()
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "ignore_sigterm",
+    [
+        False,
+        pytest.param(True, marks=pytest.mark.skipif(WINDOWS, reason="Needs SIGKILL")),
+    ],
+)
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "400 MiB"},
+    config={"distributed.worker.memory.monitor-interval": "10ms"},
+)
+async def test_disk_cleanup_on_terminate(c, s, a, ignore_sigterm):
+    """Test that the spilled data on disk is cleaned up when the nanny kills the worker.
+
+    Unlike in a regular worker shutdown, where the worker deletes its own spill
+    directory, the cleanup in case of termination from the monitor is performed by the
+    nanny.
+
+    The worker may be slow to accept SIGTERM, for whatever reason.
+    At the next iteration of the memory manager, if the process is still alive, the
+    nanny sends SIGKILL.
+    """
+
+    def do_ignore_sigterm():
+        # ignore the return value of signal.signal:  it may not be serializable
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+    if ignore_sigterm:
+        await c.run(do_ignore_sigterm)
+
+    fut = c.submit(inc, 1, key="myspill")
+    await wait(fut)
+    await c.run(lambda dask_worker: dask_worker.data.evict())
+    glob_out = await c.run(
+        lambda dask_worker: glob.glob(dask_worker.local_directory + "/**/myspill")
+    )
+    spill_fname = next(iter(glob_out.values()))[0]
+    assert os.path.exists(spill_fname)
+
+    await leak_until_restart(c, s)
+    assert not os.path.exists(spill_fname)
 
 
 @gen_cluster(
@@ -763,6 +834,9 @@ async def test_pause_while_spilling(c, s, a):
 
 
 @pytest.mark.slow
+@pytest.mark.skipif(
+    condition=MACOS, reason="https://github.com/dask/distributed/issues/6233"
+)
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,

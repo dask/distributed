@@ -10,7 +10,7 @@ import types
 import uuid
 import warnings
 import weakref
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Container
 from contextlib import suppress
 from enum import Enum
@@ -38,7 +38,6 @@ from distributed.comm import (
 from distributed.metrics import time
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
-    TimeoutError,
     get_traceback,
     has_keyword,
     is_coroutine_function,
@@ -71,11 +70,6 @@ class Status(Enum):
 
 
 Status.lookup = {s.name: s for s in Status}  # type: ignore
-Status.ANY_RUNNING = {  # type: ignore
-    Status.running,
-    Status.paused,
-    Status.closing_gracefully,
-}
 
 
 class RPCClosed(IOError):
@@ -168,6 +162,14 @@ class Server:
         timeout=None,
         io_loop=None,
     ):
+        if io_loop is not None:
+            warnings.warn(
+                "The io_loop kwarg to Server is ignored and will be deprecated",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+        self._status = Status.init
         self.handlers = {
             "identity": self.identity,
             "echo": self.echo,
@@ -192,26 +194,28 @@ class Server:
         self.monitor = SystemMonitor()
         self.counters = None
         self.digests = None
-        self._ongoing_coroutines = weakref.WeakSet()
+        self._ongoing_coroutines = set()
         self._event_finished = asyncio.Event()
 
         self.listeners = []
-        self.io_loop = io_loop or IOLoop.current()
-        self.loop = self.io_loop
+        self.io_loop = self.loop = IOLoop.current()
 
         if not hasattr(self.io_loop, "profile"):
-            ref = weakref.ref(self.io_loop)
+            if dask.config.get("distributed.worker.profile.enabled"):
+                ref = weakref.ref(self.io_loop)
 
-            def stop() -> bool:
-                loop = ref()
-                return loop is None or loop.asyncio_loop.is_closed()
+                def stop() -> bool:
+                    loop = ref()
+                    return loop is None or loop.asyncio_loop.is_closed()
 
-            self.io_loop.profile = profile.watch(
-                omit=("profile.py", "selectors.py"),
-                interval=dask.config.get("distributed.worker.profile.interval"),
-                cycle=dask.config.get("distributed.worker.profile.cycle"),
-                stop=stop,
-            )
+                self.io_loop.profile = profile.watch(
+                    omit=("profile.py", "selectors.py"),
+                    interval=dask.config.get("distributed.worker.profile.interval"),
+                    cycle=dask.config.get("distributed.worker.profile.cycle"),
+                    stop=stop,
+                )
+            else:
+                self.io_loop.profile = deque()
 
         # Statistics counters for various events
         with suppress(ImportError):
@@ -257,7 +261,8 @@ class Server:
 
         self.io_loop.add_callback(set_thread_ident)
         self._startup_lock = asyncio.Lock()
-        self.status = Status.undefined
+        self.__startup_exc: Exception | None = None
+        self.__started = asyncio.Event()
 
         self.rpc = ConnectionPool(
             limit=connection_limit,
@@ -289,31 +294,48 @@ class Server:
         await self._event_finished.wait()
 
     def __await__(self):
-        async def _():
-            timeout = getattr(self, "death_timeout", 0)
-            async with self._startup_lock:
-                if self.status in Status.ANY_RUNNING:
-                    return self
-                if timeout:
-                    try:
-                        await asyncio.wait_for(self.start(), timeout=timeout)
-                        self.status = Status.running
-                    except Exception:
-                        await self.close(timeout=1)
-                        raise TimeoutError(
-                            "{} failed to start in {} seconds".format(
-                                type(self).__name__, timeout
-                            )
-                        )
-                else:
-                    await self.start()
-                    self.status = Status.running
-            return self
+        return self.start().__await__()
 
-        return _().__await__()
+    async def start_unsafe(self):
+        """Attempt to start the server. This is not idempotent and not protected against concurrent startup attempts.
+
+        This is intended to be overwritten or called by subclasses. For a safe
+        startup, please use ``Server.start`` instead.
+
+        If ``death_timeout`` is configured, we will require this coroutine to
+        finish before this timeout is reached. If the timeout is reached we will
+        close the instance and raise an ``asyncio.TimeoutError``
+        """
+        await self.rpc.start()
+        return self
 
     async def start(self):
-        await self.rpc.start()
+        async with self._startup_lock:
+            if self.status == Status.failed:
+                assert self.__startup_exc is not None
+                raise self.__startup_exc
+            elif self.status != Status.init:
+                return self
+            timeout = getattr(self, "death_timeout", None)
+
+            async def _close_on_failure(exc: Exception):
+                await self.close()
+                self.status = Status.failed
+                self.__startup_exc = exc
+
+            try:
+                await asyncio.wait_for(self.start_unsafe(), timeout=timeout)
+            except asyncio.TimeoutError as exc:
+                await _close_on_failure(exc)
+                raise asyncio.TimeoutError(
+                    f"{type(self).__name__} start timed out after {timeout}s."
+                ) from exc
+            except Exception as exc:
+                await _close_on_failure(exc)
+                raise RuntimeError(f"{type(self).__name__} failed to start.") from exc
+            self.status = Status.running
+            self.__started.set()
+        return self
 
     async def __aenter__(self):
         await self
@@ -382,15 +404,27 @@ class Server:
         self._tick_interval_observed = (time() - last) / (count or 1)
 
     @property
-    def address(self):
+    def address(self) -> str:
         """
         The address this Server can be contacted on.
+        If the server is not up, yet, this raises a ValueError.
         """
         if not self._address:
             if self.listener is None:
                 raise ValueError("cannot get address of non-running Server")
             self._address = self.listener.contact_address
         return self._address
+
+    @property
+    def address_safe(self) -> str:
+        """
+        The address this Server can be contacted on.
+        If the server is not up, yet, this returns a ``"not-running"``.
+        """
+        try:
+            return self.address
+        except ValueError:
+            return "not-running"
 
     @property
     def listen_address(self):
@@ -480,9 +514,10 @@ class Server:
 
         logger.debug("Connection from %r to %s", address, type(self).__name__)
         self._comms[comm] = op
+
         await self
         try:
-            while True:
+            while not self.__stopped:
                 try:
                     msg = await comm.read()
                     logger.debug("Message from %r: %s", address, msg)
@@ -553,12 +588,19 @@ class Server:
                             result = handler(comm, **msg)
                         else:
                             result = handler(**msg)
-                        if inspect.isawaitable(result):
-                            result = asyncio.ensure_future(result)
+                        if inspect.iscoroutine(result):
+                            result = asyncio.create_task(
+                                result, name=f"handle-comm-{address}-{op}"
+                            )
                             self._ongoing_coroutines.add(result)
+                            result.add_done_callback(self._ongoing_coroutines.remove)
                             result = await result
+                        elif inspect.isawaitable(result):
+                            raise RuntimeError(
+                                f"Comm handler returned unknown awaitable. Expected coroutine, instead got {type(result)}"
+                            )
                     except CommClosedError:
-                        if self.status in Status.ANY_RUNNING:
+                        if self.status == Status.running:
                             logger.info("Lost connection to %r", address, exc_info=True)
                         break
                     except Exception as e:
@@ -597,7 +639,7 @@ class Server:
                         "Failed while closing connection to %r: %s", address, e
                     )
 
-    async def handle_stream(self, comm, extra=None, every_cycle=()):
+    async def handle_stream(self, comm, extra=None):
         extra = extra or {}
         logger.info("Starting established connection")
 
@@ -627,12 +669,6 @@ class Server:
                             logger.error("odd message %s", msg)
                     await asyncio.sleep(0)
 
-                for func in every_cycle:
-                    if is_coroutine_function(func):
-                        self.loop.add_callback(func)
-                    else:
-                        func()
-
         except OSError:
             pass
         except Exception as e:
@@ -646,32 +682,36 @@ class Server:
             await comm.close()
             assert comm.closed()
 
-    @gen.coroutine
-    def close(self):
+    async def close(self, timeout=None):
         for pc in self.periodic_callbacks.values():
             pc.stop()
-        self.__stopped = True
-        for listener in self.listeners:
-            future = listener.stop()
-            if inspect.isawaitable(future):
-                yield future
-        for i in range(20):
-            # If there are still handlers running at this point, give them a
-            # second to finish gracefully themselves, otherwise...
-            if any(self._comms.values()):
-                yield asyncio.sleep(0.05)
-            else:
-                break
-        yield self.rpc.close()
-        yield [comm.close() for comm in list(self._comms)]  # then forcefully close
-        for cb in self._ongoing_coroutines:
-            cb.cancel()
-        for i in range(10):
-            if all(c.cancelled() for c in self._ongoing_coroutines):
-                break
-            else:
-                yield asyncio.sleep(0.01)
 
+        if not self.__stopped:
+            self.__stopped = True
+            _stops = set()
+            for listener in self.listeners:
+                future = listener.stop()
+                if inspect.isawaitable(future):
+                    _stops.add(future)
+            await asyncio.gather(*_stops)
+
+        def _ongoing_tasks():
+            return (
+                t for t in self._ongoing_coroutines if t is not asyncio.current_task()
+            )
+
+        # TODO: Deal with exceptions
+        try:
+            # Give the handlers a bit of time to finish gracefully
+            await asyncio.wait_for(
+                asyncio.gather(*_ongoing_tasks(), return_exceptions=True), 1
+            )
+        except asyncio.TimeoutError:
+            # the timeout on gather should've cancelled all the tasks
+            await asyncio.gather(*_ongoing_tasks(), return_exceptions=True)
+
+        await self.rpc.close()
+        await asyncio.gather(*[comm.close() for comm in list(self._comms)])
         self._event_finished.set()
 
 

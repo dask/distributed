@@ -19,7 +19,7 @@ import warnings
 import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
-from collections import OrderedDict, UserDict, deque
+from collections import deque
 from collections.abc import Callable, Collection, Container, KeysView, ValuesView
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
@@ -27,6 +27,7 @@ from contextvars import ContextVar
 from functools import wraps
 from hashlib import md5
 from importlib.util import cache_from_source
+from pickle import PickleBuffer
 from time import sleep
 from types import ModuleType
 from typing import TYPE_CHECKING
@@ -47,6 +48,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 from dask import istask
+from dask.utils import ensure_bytes as _ensure_bytes
 from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
@@ -1000,17 +1002,38 @@ def ensure_bytes(s):
     >>> ensure_bytes(b'123')
     b'123'
     """
-    if isinstance(s, bytes):
-        return s
-    elif hasattr(s, "encode"):
-        return s.encode()
+    warnings.warn(
+        "`distributed.utils.ensure_bytes` is deprecated. "
+        "Please switch to `dask.utils.ensure_bytes`. "
+        "This will be removed in `2022.6.0`.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _ensure_bytes(s)
+
+
+def ensure_memoryview(obj):
+    """Ensure `obj` is a 1-D contiguous `uint8` `memoryview`"""
+    mv: memoryview
+    if type(obj) is memoryview:
+        mv = obj
     else:
-        try:
-            return bytes(s)
-        except Exception as e:
-            raise TypeError(
-                "Object %s is neither a bytes object nor has an encode method" % s
-            ) from e
+        mv = memoryview(obj)
+
+    if not mv.nbytes:
+        # Drop `obj` reference to permit freeing underlying data
+        return memoryview(bytearray())
+    elif not mv.contiguous:
+        # Copy to contiguous form of expected shape & type
+        return memoryview(bytearray(mv))
+    elif mv.ndim != 1 or mv.format != "B":
+        # Perform zero-copy reshape & cast
+        # Use `PickleBuffer.raw()` as `memoryview.cast()` fails with F-order
+        # xref: https://github.com/python/cpython/issues/91484
+        return PickleBuffer(mv).raw()
+    else:
+        # Return `memoryview` as it already meets requirements
+        return mv
 
 
 def open_port(host=""):
@@ -1422,25 +1445,6 @@ class EmptyContext:
 
 
 empty_context = EmptyContext()
-
-
-class LRU(UserDict):
-    """Limited size mapping, evicting the least recently looked-up key when full"""
-
-    def __init__(self, maxsize):
-        super().__init__()
-        self.data = OrderedDict()
-        self.maxsize = maxsize
-
-    def __getitem__(self, key):
-        value = super().__getitem__(key)
-        self.data.move_to_end(key)
-        return value
-
-    def __setitem__(self, key, value):
-        if len(self) >= self.maxsize:
-            self.data.popitem(last=False)
-        super().__setitem__(key, value)
 
 
 def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list[dict]:

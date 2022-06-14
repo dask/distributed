@@ -73,11 +73,11 @@ def version_of_package(pkg: ModuleType) -> str | None:
     from contextlib import suppress
 
     with suppress(AttributeError):
-        return pkg.__version__  # type: ignore
+        return pkg.__version__
     with suppress(AttributeError):
-        return str(pkg.version)  # type: ignore
+        return str(pkg.version)
     with suppress(AttributeError):
-        return ".".join(map(str, pkg.version_info))  # type: ignore
+        return ".".join(map(str, pkg.version_info))
     return None
 
 

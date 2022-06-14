@@ -10,9 +10,7 @@ repos:
       - id: isort
         language_version: python3
   - repo: https://github.com/asottile/pyupgrade
-    # Do not upgrade: there's a bug in Cython that causes sum(... for ...) to fail;
-    # it needs sum([... for ...])
-    rev: v2.13.0
+    rev: v2.32.0
     hooks:
       - id: pyupgrade
         args:
@@ -45,8 +43,9 @@ repos:
           - types-psutil
           - types-setuptools
           # Typed libraries
-          - numpy
           - dask
+          - numpy
+          - pytest
           - tornado
           - zict
           - pyarrow

@@ -3,9 +3,12 @@ import os
 import pathlib
 import signal
 import socket
+import sys
+import textwrap
 import threading
 from contextlib import contextmanager
 from time import sleep
+from unittest import mock
 
 import pytest
 import yaml
@@ -14,24 +17,37 @@ from tornado import gen
 import dask.config
 
 from distributed import Client, Nanny, Scheduler, Worker, config, default_client
+from distributed.batched import BatchedSend
+from distributed.comm.core import connect
 from distributed.compatibility import WINDOWS
-from distributed.core import Server, rpc
+from distributed.core import Server, Status, rpc
 from distributed.metrics import time
+from distributed.tests.test_batched import EchoServer
 from distributed.utils import mp_context
 from distributed.utils_test import (
     _LockedCommPool,
     _UnhashableCallable,
     assert_story,
+    captured_logger,
     check_process_leak,
     cluster,
     dump_cluster_state,
+    freeze_batched_send,
     gen_cluster,
     gen_test,
     inc,
     new_config,
+    popen,
+    raises_with_cause,
     tls_only_security,
 )
-from distributed.worker import InvalidTransition
+from distributed.worker import fail_hard
+from distributed.worker_state_machine import (
+    InvalidTaskState,
+    InvalidTransition,
+    PauseEvent,
+    WorkerState,
+)
 
 
 def test_bare_cluster(loop):
@@ -562,9 +578,16 @@ async def test_dump_cluster_unresponsive_remote_worker(c, s, a, b, tmpdir):
     clog_fut.cancel()
 
 
+# Note: can't use WINDOWS constant as it upsets mypy
+if sys.platform == "win32":
+    TERM_SIGNALS = (signal.SIGTERM, signal.SIGINT)
+else:
+    TERM_SIGNALS = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
+
+
 def garbage_process(barrier, ignore_sigterm: bool = False, t: float = 3600) -> None:
     if ignore_sigterm:
-        for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):  # type: ignore
+        for signum in TERM_SIGNALS:
             signal.signal(signum, signal.SIG_IGN)
     barrier.wait()
     sleep(t)
@@ -619,7 +642,11 @@ def test_check_process_leak_post_cleanup(ignore_sigterm):
 
 @pytest.mark.parametrize("nanny", [True, False])
 def test_start_failure_worker(nanny):
-    with pytest.raises(TypeError):
+    if nanny:
+        ctx = raises_with_cause(RuntimeError, None, TypeError, None)
+    else:
+        ctx = pytest.raises(TypeError)
+    with ctx:
         with cluster(nanny=nanny, worker_kwargs={"foo": "bar"}):
             return
 
@@ -631,18 +658,17 @@ def test_start_failure_scheduler():
 
 
 def test_invalid_transitions(capsys):
-    @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+    @gen_cluster(client=True, nthreads=[("", 1)])
     async def test_log_invalid_transitions(c, s, a):
         x = c.submit(inc, 1, key="task-name")
-        y = c.submit(inc, x)
-        xkey = x.key
-        del x
-        await y
-        while a.tasks[xkey].state != "released":
-            await asyncio.sleep(0.01)
-        ts = a.tasks[xkey]
-        with pytest.raises(InvalidTransition):
-            a.transition(ts, "foo", stimulus_id="bar")
+        await x
+        ts = a.tasks["task-name"]
+        ev = PauseEvent(stimulus_id="test")
+        with mock.patch.object(
+            WorkerState, "_handle_event", return_value=({ts: "foo"}, [])
+        ):
+            with pytest.raises(InvalidTransition):
+                a.handle_stimulus(ev)
 
         while not s.events["invalid-worker-transition"]:
             await asyncio.sleep(0.01)
@@ -660,20 +686,20 @@ def test_invalid_transitions(capsys):
     assert "task-name" in out + err
 
 
-def test_invalid_worker_states(capsys):
+def test_invalid_worker_state(capsys):
     @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
-    async def test_log_invalid_worker_task_states(c, s, a):
+    async def test_log_invalid_worker_task_state(c, s, a):
         x = c.submit(inc, 1, key="task-name")
         await x
         a.tasks[x.key].state = "released"
-        with pytest.raises(Exception):
-            a.validate_task(a.tasks[x.key])
+        with pytest.raises(InvalidTaskState):
+            a.validate_state()
 
-        while not s.events["invalid-worker-task-states"]:
+        while not s.events["invalid-worker-task-state"]:
             await asyncio.sleep(0.01)
 
     with pytest.raises(Exception) as info:
-        test_log_invalid_worker_task_states()
+        test_log_invalid_worker_task_state()
 
     out, err = capsys.readouterr()
 
@@ -681,15 +707,153 @@ def test_invalid_worker_states(capsys):
     assert "task-name" in out + err
 
 
-def test_worker_fail_hard(capsys):
-    @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
-    async def test_fail_hard(c, s, a):
-        with pytest.raises(Exception):
-            await a.gather_dep(
-                worker="abcd", to_gather=["x"], total_nbytes=0, stimulus_id="foo"
-            )
+def test_raises_with_cause():
+    with raises_with_cause(RuntimeError, "exception", ValueError, "cause"):
+        raise RuntimeError("exception") from ValueError("cause")
 
-    with pytest.raises(Exception) as info:
-        test_fail_hard()
+    with raises_with_cause(RuntimeError, "exception", ValueError, "tial mat"):
+        raise RuntimeError("exception") from ValueError("partial match")
 
-    assert "abcd" in str(info.value)
+    with raises_with_cause(RuntimeError, None, ValueError, "cause"):
+        raise RuntimeError("exception") from ValueError("cause")
+
+    with raises_with_cause(RuntimeError, "exception", ValueError, None):
+        raise RuntimeError("exception") from ValueError("bar")
+
+    with raises_with_cause(RuntimeError, None, ValueError, None):
+        raise RuntimeError("foo") from ValueError("bar")
+
+    # we're trying to stick to pytest semantics
+    # If the exception types don't match, raise the original exception
+    # If the text doesn't match, raise an assert
+
+    with pytest.raises(RuntimeError):
+        with raises_with_cause(RuntimeError, "exception", ValueError, "cause"):
+            raise RuntimeError("exception") from OSError("cause")
+
+    with pytest.raises(ValueError):
+        with raises_with_cause(RuntimeError, "exception", ValueError, "cause"):
+            raise ValueError("exception") from ValueError("cause")
+
+    with pytest.raises(AssertionError):
+        with raises_with_cause(RuntimeError, "exception", ValueError, "foo"):
+            raise RuntimeError("exception") from ValueError("cause")
+
+    with pytest.raises(AssertionError):
+        with raises_with_cause(RuntimeError, "foo", ValueError, "cause"):
+            raise RuntimeError("exception") from ValueError("cause")
+
+
+@pytest.mark.parametrize("sync", [True, False])
+def test_fail_hard(sync):
+    """@fail_hard is a last resort when error handling for everything that we foresaw
+    could possibly go wrong failed.
+    Instead of trying to force a crash here, we'll write custom methods which do crash.
+    """
+
+    class CustomError(Exception):
+        pass
+
+    class FailWorker(Worker):
+        @fail_hard
+        def fail_sync(self):
+            raise CustomError()
+
+        @fail_hard
+        async def fail_async(self):
+            raise CustomError()
+
+    test_done = False
+
+    @gen_cluster(nthreads=[])
+    async def test(s):
+        nonlocal test_done
+        with captured_logger("distributed.worker") as logger:
+            async with FailWorker(s.address) as a:
+                with pytest.raises(CustomError):
+                    if sync:
+                        a.fail_sync()
+                    else:
+                        await a.fail_async()
+
+                while a.status != Status.closed:
+                    await asyncio.sleep(0.01)
+
+        test_done = True
+
+    with pytest.raises(CustomError):
+        test()
+    assert test_done
+
+
+def test_popen_write_during_terminate_deadlock():
+    # Fabricate a command which, when terminated, tries to write more than the pipe
+    # buffer can hold (OS specific: on Linux it's typically 65536 bytes; on Windows it's
+    # less). This would deadlock if `proc.wait()` was called, since the process will be
+    # trying to write to stdout, but stdout isn't being cleared because our process is
+    # blocked in `proc.wait()`. `proc.communicate()` is necessary:
+    # https://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
+    with popen(
+        [
+            sys.executable,
+            "-c",
+            textwrap.dedent(
+                """
+                import signal
+                import threading
+
+                e = threading.Event()
+
+                def cb(signum, frame):
+                    # 131072 is 2x the size of the default Linux pipe buffer
+                    print('x' * 131072)
+                    e.set()
+
+                signal.signal(signal.SIGINT, cb)
+                print('ready', flush=True)
+                e.wait()
+                """
+            ),
+        ],
+        capture_output=True,
+    ) as proc:
+        assert proc.stdout.readline().strip() == b"ready"
+    # Exiting the context manager (terminating the subprocess) will raise
+    # `subprocess.TimeoutExpired` if this test breaks.
+
+
+@gen_test()
+async def test_freeze_batched_send():
+    async with EchoServer() as e:
+        comm = await connect(e.address)
+        b = BatchedSend(interval=0)
+        b.start(comm)
+
+        b.send("hello")
+        assert await comm.read() == ("hello",)
+
+        with freeze_batched_send(b) as locked_comm:
+            b.send("foo")
+            b.send("bar")
+
+            # Sent messages are available on the write queue
+            msg = await locked_comm.write_queue.get()
+            assert msg == (comm.peer_address, ["foo", "bar"])
+
+            # Sent messages will not reach the echo server
+            await asyncio.sleep(0.01)
+            assert e.count == 1
+
+            # Now we let messages send to the echo server
+            locked_comm.write_event.set()
+            assert await comm.read() == ("foo", "bar")
+            assert e.count == 2
+
+            locked_comm.write_event.clear()
+            b.send("baz")
+            await asyncio.sleep(0.01)
+            assert e.count == 2
+
+        assert b.comm is comm
+        assert await comm.read() == ("baz",)
+        assert e.count == 3

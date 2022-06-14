@@ -1,4 +1,10 @@
+import warnings
+
 from tornado.ioloop import IOLoop
+
+warnings.warn(
+    "the distributed.cli.utils module is deprecated", DeprecationWarning, stacklevel=2
+)
 
 
 def install_signal_handlers(loop=None, cleanup=None):

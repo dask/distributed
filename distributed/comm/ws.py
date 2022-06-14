@@ -36,7 +36,6 @@ from distributed.comm.utils import (
     get_tcp_server_address,
     to_frames,
 )
-from distributed.utils import ensure_bytes, nbytes
 
 logger = logging.getLogger(__name__)
 
@@ -137,14 +136,18 @@ class WSHandlerComm(Comm):
             frame_split_size=BIG_BYTES_SHARD_SIZE,
         )
         n = struct.pack("Q", len(frames))
+        nbytes_frames = 0
         try:
             await self.handler.write_message(n, binary=True)
             for frame in frames:
-                await self.handler.write_message(ensure_bytes(frame), binary=True)
+                if type(frame) is not bytes:
+                    frame = bytes(frame)
+                await self.handler.write_message(frame, binary=True)
+                nbytes_frames += len(frame)
         except WebSocketClosedError as e:
             raise CommClosedError(str(e))
 
-        return sum(map(nbytes, frames))
+        return nbytes_frames
 
     def abort(self):
         self.handler.close()
@@ -226,14 +229,18 @@ class WS(Comm):
             frame_split_size=BIG_BYTES_SHARD_SIZE,
         )
         n = struct.pack("Q", len(frames))
+        nbytes_frames = 0
         try:
             await self.sock.write_message(n, binary=True)
             for frame in frames:
-                await self.sock.write_message(ensure_bytes(frame), binary=True)
+                if type(frame) is not bytes:
+                    frame = bytes(frame)
+                await self.sock.write_message(frame, binary=True)
+                nbytes_frames += len(frame)
         except WebSocketClosedError as e:
             raise CommClosedError(e)
 
-        return sum(map(nbytes, frames))
+        return nbytes_frames
 
     async def close(self):
         if not self.sock.close_code:

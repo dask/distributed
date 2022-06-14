@@ -197,7 +197,7 @@ class Shuffle:
             self.output_partitions_left > 0
         ), f"No outputs remaining, but requested output partition {i} on {self.worker.address}."
 
-        sync(self.worker.loop, self.multi_file.flush)  # type: ignore
+        sync(self.worker.loop, self.multi_file.flush)
         try:
             df = self.multi_file.read(i)
             with self.time("cpu"):
@@ -230,7 +230,7 @@ class ShuffleWorkerExtension:
         # Initialize
         self.worker: Worker = worker
         self.shuffles: dict[ShuffleId, Shuffle] = {}
-        self.executor = ThreadPoolExecutor(worker.nthreads)
+        self.executor = ThreadPoolExecutor(worker.state.nthreads)
 
     # Handlers
     ##########

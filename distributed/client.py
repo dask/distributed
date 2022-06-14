@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import atexit
 import copy
-import errno
 import inspect
 import json
 import logging
@@ -24,7 +23,7 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
@@ -51,8 +50,9 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import PeriodicCallback
 
+import distributed.utils
 from distributed import cluster_dump, preloading
-from distributed import versions as version_module  # type: ignore
+from distributed import versions as version_module
 from distributed.batched import BatchedSend
 from distributed.cfexecutor import ClientExecutor
 from distributed.core import (
@@ -80,8 +80,6 @@ from distributed.security import Security
 from distributed.sizeof import sizeof
 from distributed.threadpoolexecutor import rejoin
 from distributed.utils import (
-    All,
-    Any,
     CancelledError,
     LoopRunner,
     NoOpAwaitable,
@@ -1163,23 +1161,11 @@ class Client(SyncMethodMixin):
         elif self._start_arg is None:
             from distributed.deploy import LocalCluster
 
-            try:
-                self.cluster = await LocalCluster(
-                    loop=self.loop,
-                    asynchronous=self._asynchronous,
-                    **self._startup_kwargs,
-                )
-            except OSError as e:
-                if e.errno != errno.EADDRINUSE:
-                    raise
-                # The default port was taken, use a random one
-                self.cluster = await LocalCluster(
-                    scheduler_port=0,
-                    loop=self.loop,
-                    asynchronous=True,
-                    **self._startup_kwargs,
-                )
-
+            self.cluster = await LocalCluster(
+                loop=self.loop,
+                asynchronous=self._asynchronous,
+                **self._startup_kwargs,
+            )
             address = self.cluster.scheduler_address
 
         self._gather_semaphore = asyncio.Semaphore(5)
@@ -1315,11 +1301,21 @@ class Client(SyncMethodMixin):
             deadline = time() + parse_timedelta(timeout)
         else:
             deadline = None
-        while n_workers and len(info["workers"]) < n_workers:
+
+        def running_workers(info):
+            return len(
+                [
+                    ws
+                    for ws in info["workers"].values()
+                    if ws["status"] == Status.running.name
+                ]
+            )
+
+        while n_workers and running_workers(info) < n_workers:
             if deadline and time() > deadline:
                 raise TimeoutError(
                     "Only %d/%d workers arrived after %s"
-                    % (len(info["workers"]), n_workers, timeout)
+                    % (running_workers(info), n_workers, timeout)
                 )
             await asyncio.sleep(0.1)
             info = await self.scheduler.identity()
@@ -1620,7 +1616,7 @@ class Client(SyncMethodMixin):
         else:
             with suppress(CommClosedError):
                 self.status = "closing"
-                await self.scheduler.terminate(close_workers=True)
+                await self.scheduler.terminate()
 
     def shutdown(self):
         """Shut down the connected scheduler and workers
@@ -2018,7 +2014,7 @@ class Client(SyncMethodMixin):
             logger.debug("Waiting on futures to clear before gather")
 
             with suppress(AllExit):
-                await All(
+                await distributed.utils.All(
                     [wait(key) for key in keys if key in self.futures],
                     quiet_exceptions=AllExit,
                 )
@@ -3504,7 +3500,7 @@ class Client(SyncMethodMixin):
 
         Examples
         --------
-        >>> c.threads()  # doctest: +SKIP
+        >>> c.nthreads()  # doctest: +SKIP
         {'192.168.1.141:46784': 8,
          '192.167.1.142:47548': 8,
          '192.167.1.143:47329': 8,
@@ -4043,12 +4039,12 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self.scheduler.benchmark_hardware)
 
-    def log_event(self, topic, msg):
+    def log_event(self, topic: str | Collection[str], msg: Any):
         """Log an event under a given topic
 
         Parameters
         ----------
-        topic : str, list
+        topic : str, list[str]
             Name of the topic under which to log an event. To log the same
             event under multiple topics, pass a list of topic names.
         msg
@@ -4408,16 +4404,14 @@ class Client(SyncMethodMixin):
         else:
             return msgs
 
-    async def _register_scheduler_plugin(self, plugin, name, **kwargs):
-        if isinstance(plugin, type):
-            plugin = plugin(**kwargs)
-
+    async def _register_scheduler_plugin(self, plugin, name, idempotent=False):
         return await self.scheduler.register_scheduler_plugin(
             plugin=dumps(plugin, protocol=4),
             name=name,
+            idempotent=idempotent,
         )
 
-    def register_scheduler_plugin(self, plugin, name=None):
+    def register_scheduler_plugin(self, plugin, name=None, idempotent=False):
         """Register a scheduler plugin.
 
         See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
@@ -4429,6 +4423,8 @@ class Client(SyncMethodMixin):
         name : str
             Name for the plugin; if None, a name is taken from the
             plugin instance or automatically generated if not present.
+        idempotent : bool
+            Do not re-register if a plugin of the given name already exists.
         """
         if name is None:
             name = _get_plugin_name(plugin)
@@ -4437,6 +4433,7 @@ class Client(SyncMethodMixin):
             self._register_scheduler_plugin,
             plugin=plugin,
             name=name,
+            idempotent=idempotent,
         )
 
     def register_worker_callbacks(self, setup=None):
@@ -4637,9 +4634,9 @@ async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
         )
     fs = futures_of(fs)
     if return_when == ALL_COMPLETED:
-        wait_for = All
+        wait_for = distributed.utils.All
     elif return_when == FIRST_COMPLETED:
-        wait_for = Any
+        wait_for = distributed.utils.Any
     else:
         raise NotImplementedError(
             "Only return_when='ALL_COMPLETED' and 'FIRST_COMPLETED' are supported"
@@ -4870,6 +4867,8 @@ class as_completed:
             if self.raise_errors and future.status == "error":
                 typ, exc, tb = result
                 raise exc.with_traceback(tb)
+            elif future.status == "cancelled":
+                res = (res[0], CancelledError(future.key))
         return res
 
     def __next__(self):

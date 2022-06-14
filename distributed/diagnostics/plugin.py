@@ -72,7 +72,11 @@ class SchedulerPlugin:
         """
 
     def update_graph(
-        self, scheduler: Scheduler, keys: set[str], restrictions: dict, **kwargs
+        self,
+        scheduler: Scheduler,
+        keys: set[str],
+        restrictions: dict[str, float],
+        **kwargs,
     ) -> None:
         """Run when a new graph / tasks enter the scheduler"""
 
@@ -107,6 +111,9 @@ class SchedulerPlugin:
 
     def remove_client(self, scheduler: Scheduler, client: str) -> None:
         """Run when a client disconnects"""
+
+    def log_event(self, name, msg) -> None:
+        """Run when an event is logged"""
 
 
 class WorkerPlugin:
@@ -327,7 +334,7 @@ class UploadFile(WorkerPlugin):
 
     async def setup(self, worker):
         response = await worker.upload_file(
-            comm=None, filename=self.filename, data=self.data, load=True
+            filename=self.filename, data=self.data, load=True
         )
         assert len(self.data) == response["nbytes"]
 

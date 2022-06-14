@@ -193,7 +193,7 @@ async def test_terminate():
     await proc.start()
     await proc.terminate()
 
-    await proc.join(timeout=30)
+    await proc.join()
     assert not proc.is_alive()
     assert proc.exitcode in (-signal.SIGTERM, 255)
 
@@ -312,6 +312,26 @@ async def test_terminate_after_stop():
     await proc.start()
     await asyncio.sleep(0.1)
     await proc.terminate()
+    await proc.join()
+
+
+def kill_target(ev):
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    ev.set()
+    sleep(300)
+
+
+@pytest.mark.skipif(WINDOWS, reason="Needs SIGKILL")
+@gen_test()
+async def test_kill():
+    ev = mp_context.Event()
+    proc = AsyncProcess(target=kill_target, args=(ev,))
+    await proc.start()
+    ev.wait()
+    await proc.kill()
+    await proc.join()
+    assert not proc.is_alive()
+    assert proc.exitcode in (-signal.SIGKILL, 255)
 
 
 def _worker_process(worker_ready, child_pipe):

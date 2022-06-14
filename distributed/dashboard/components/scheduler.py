@@ -984,8 +984,8 @@ class WorkerNetworkBandwidth(DashboardComponent):
         for ws in workers:
             x_read.append(ws.metrics["read_bytes"])
             x_write.append(ws.metrics["write_bytes"])
-            x_read_disk.append(ws.metrics["read_bytes_disk"])
-            x_write_disk.append(ws.metrics["write_bytes_disk"])
+            x_read_disk.append(ws.metrics.get("read_bytes_disk", 0))
+            x_write_disk.append(ws.metrics.get("write_bytes_disk", 0))
 
         if self.scheduler.workers:
             self.bandwidth.x_range.end = max(
@@ -1173,8 +1173,8 @@ class SystemTimeseries(DashboardComponent):
             write_bytes += ws.metrics["write_bytes"]
             cpu += ws.metrics["cpu"]
             memory += ws.metrics["memory"]
-            read_bytes_disk += ws.metrics["read_bytes_disk"]
-            write_bytes_disk += ws.metrics["write_bytes_disk"]
+            read_bytes_disk += ws.metrics.get("read_bytes_disk", 0)
+            write_bytes_disk += ws.metrics.get("write_bytes_disk", 0)
             time += ws.metrics["time"]
 
         result = {
@@ -2794,7 +2794,7 @@ class TaskGroupProgress(DashboardComponent):
         back = None
         # Remove any periods of zero compute at the front or back of the timeseries
         if len(self.plugin.compute):
-            agg = sum([np.array(v[front:]) for v in self.plugin.compute.values()])
+            agg = sum(np.array(v[front:]) for v in self.plugin.compute.values())
             front2 = len(agg) - len(np.trim_zeros(agg, trim="f"))
             front += front2
             back = len(np.trim_zeros(agg, trim="b")) - len(agg) or None
@@ -3192,7 +3192,7 @@ class EventLoop(DashboardComponent):
             "names": ["Scheduler", "Workers"],
             "values": [
                 s._tick_interval_observed,
-                sum([w.metrics["event_loop_interval"] for w in s.workers.values()])
+                sum(w.metrics["event_loop_interval"] for w in s.workers.values())
                 / (len(s.workers) or 1),
             ],
         }
