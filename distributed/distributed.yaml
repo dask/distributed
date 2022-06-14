@@ -280,6 +280,7 @@ distributed:
     pdb-on-err: False       # enter debug mode on scheduling error
     system-monitor:
       interval: 500ms
+      disk: true
     event-loop: tornado
   rmm:
     pool-size: null

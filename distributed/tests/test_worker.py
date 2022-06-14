@@ -1557,7 +1557,9 @@ async def test_close_async_task_handles_cancellation(c, s, a):
         task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
     )
     start = time()
-    with captured_logger("distributed.worker", level=logging.ERROR) as logger:
+    with captured_logger(
+        "distributed.worker_state_machine", level=logging.ERROR
+    ) as logger:
         await a.close(timeout=1)
     assert "Failed to cancel asyncio task" in logger.getvalue()
     assert time() - start < 5
@@ -1939,6 +1941,7 @@ async def test_worker_descopes_data(c, s, a):
     assert not C.instances
 
 
+@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     # Ensure that both dependencies for H are on another worker than H itself.
@@ -1966,12 +1969,14 @@ async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     assert b.tasks[g.key].state in ("flight", "fetch")
 
     with pytest.raises(asyncio.TimeoutError):
-        await h.result(timeout=0.5)
+        await h.result(timeout=0.8)
 
     story = b.story("busy-gather")
-    # 1 busy response straight away, followed by 1 retry every 150ms for 500ms.
+    # 1 busy response straight away, followed by 1 retry every 150ms for 800ms.
     # The requests for b and g are clustered together in single messages.
-    assert 3 <= len(story) <= 7
+    # We need to be very lax in measuring as PeriodicCallback+network comms have been
+    # observed on CI to occasionally lag behind by several hundreds of ms.
+    assert 2 <= len(story) <= 8
 
     async with Worker(s.address, name="x") as x:
         # We "scatter" the data to another worker which is able to serve this data.
@@ -2027,7 +2032,7 @@ async def test_gather_dep_from_remote_workers_if_all_local_workers_are_busy(
     assert_story(a.story("receive-dep"), [("receive-dep", rw.address, {"f"})])
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 0)])
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_worker_client_uses_default_no_close(c, s, a):
     """
     If a default client is available in the process, the worker will pick this
@@ -2054,7 +2059,7 @@ async def test_worker_client_uses_default_no_close(c, s, a):
     assert c is c_def
 
 
-@gen_cluster(nthreads=[("127.0.0.1", 0)])
+@gen_cluster(nthreads=[("127.0.0.1", 1)])
 async def test_worker_client_closes_if_created_on_worker_one_worker(s, a):
     async with Client(s.address, set_as_default=False, asynchronous=True) as c:
         with pytest.raises(ValueError):
@@ -2539,7 +2544,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
             await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", x) for x in range(4)])
+@gen_cluster(client=True, nthreads=[("", x) for x in (1, 2, 3, 4)])
 async def test_hold_on_to_replicas(c, s, *workers):
     f1 = c.submit(inc, 1, workers=[workers[0].address], key="f1")
     f2 = c.submit(inc, 2, workers=[workers[1].address], key="f2")
@@ -2925,7 +2930,6 @@ async def test_who_has_consistent_remove_replicas(c, s, *workers):
     coming_from.handle_stimulus(RemoveReplicasEvent(keys=[f1.key], stimulus_id="test"))
     await f2
 
-    assert_story(a.story(f1.key), [(f1.key, "missing-dep")])
     assert a.tasks[f1.key].suspicious_count == 0
     assert s.tasks[f1.key].suspicious == 0
 
@@ -3129,6 +3133,7 @@ async def test_gather_dep_cancelled_rescheduled(c, s):
     for in-flight state. The response parser, however, did not distinguish
     resulting in unwanted missing-data signals to the scheduler, causing
     potential rescheduling or data leaks.
+    (Note: missing-data was removed in #6445).
 
     If a cancelled key is rescheduled for fetching while gather_dep waits
     internally for get_data, the response parser would misclassify this key and
@@ -3177,6 +3182,8 @@ async def test_gather_dep_do_not_handle_response_of_not_requested_tasks(c, s, a)
     for in-flight state. The response parser, however, did not distinguish
     resulting in unwanted missing-data signals to the scheduler, causing
     potential rescheduling or data leaks.
+    (Note: missing-data was removed in #6445).
+
     This test may become obsolete if the implementation changes significantly.
     """
     async with BlockedGatherDep(s.address) as b:
@@ -3278,28 +3285,14 @@ async def test_Worker__to_dict(c, s, a):
         "type",
         "id",
         "scheduler",
-        "nthreads",
         "address",
         "status",
         "thread_id",
-        "ready",
-        "constrained",
-        "long_running",
-        "executing_count",
-        "in_flight_tasks",
-        "in_flight_workers",
-        "busy_workers",
-        "log",
-        "stimulus_log",
-        "transition_counter",
-        "tasks",
         "logs",
         "config",
         "incoming_transfer_log",
         "outgoing_transfer_log",
-        "data_needed",
-        "data_needed_per_worker",
-        # attributes of WorkerMemoryManager
+        # Attributes of WorkerMemoryManager
         "data",
         "max_spill",
         "memory_limit",
@@ -3307,9 +3300,25 @@ async def test_Worker__to_dict(c, s, a):
         "memory_pause_fraction",
         "memory_spill_fraction",
         "memory_target_fraction",
+        # Attributes of WorkerState
+        "nthreads",
+        "running",
+        "ready",
+        "constrained",
+        "executing",
+        "long_running",
+        "in_flight_tasks",
+        "in_flight_workers",
+        "busy_workers",
+        "log",
+        "stimulus_log",
+        "transition_counter",
+        "tasks",
+        "data_needed",
+        "data_needed_per_worker",
     }
     assert d["tasks"]["x"]["key"] == "x"
-    assert d["data"] == ["x"]
+    assert d["data"] == {"x": None}
 
 
 @gen_cluster(nthreads=[])

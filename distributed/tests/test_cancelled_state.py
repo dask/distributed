@@ -102,19 +102,6 @@ async def test_abort_execution_to_fetch(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_worker_find_missing(c, s, a, b):
-    fut = c.submit(inc, 1, workers=[a.address])
-    await fut
-    # We do not want to use proper API since it would ensure that the cluster is
-    # informed properly
-    del a.data[fut.key]
-    del a.tasks[fut.key]
-
-    # Actually no worker has the data; the scheduler is supposed to reschedule
-    assert await c.submit(inc, fut, workers=[b.address]) == 3
-
-
-@gen_cluster(client=True)
 async def test_worker_stream_died_during_comm(c, s, a, b):
     write_queue = asyncio.Queue()
     write_event = asyncio.Event()
