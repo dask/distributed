@@ -347,7 +347,10 @@ class MemoryState:
 
 
 class WorkerState:
-    """A simple object holding information about a worker."""
+    """A simple object holding information about a worker.
+
+    Not to be confused with :class:`distributed.worker_state_machine.WorkerState`.
+    """
 
     #: This worker's unique key. This can be its connected address
     #: (such as ``"tcp://127.0.0.1:8891"``) or an alias (such as ``"alice"``).

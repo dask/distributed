@@ -230,7 +230,7 @@ class ShuffleWorkerExtension:
         # Initialize
         self.worker: Worker = worker
         self.shuffles: dict[ShuffleId, Shuffle] = {}
-        self.executor = ThreadPoolExecutor(worker.nthreads)
+        self.executor = ThreadPoolExecutor(worker.state.nthreads)
 
     # Handlers
     ##########

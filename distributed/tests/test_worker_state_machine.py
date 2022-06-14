@@ -32,6 +32,7 @@ from distributed.worker_state_machine import (
     TaskState,
     TaskStateState,
     UpdateDataEvent,
+    WorkerState,
     merge_recs_instructions,
 )
 
@@ -70,6 +71,74 @@ def test_TaskState__to_dict():
             "priority": [0],
         },
     ]
+
+
+def test_WorkerState__to_dict():
+    ws = WorkerState(8)
+    ws.address = "127.0.0.1.1234"
+    ws.handle_stimulus(
+        AcquireReplicasEvent(who_has={"x": ["127.0.0.1:1235"]}, stimulus_id="s1")
+    )
+    ws.handle_stimulus(
+        UpdateDataEvent(data={"y": object()}, report=False, stimulus_id="s2")
+    )
+
+    actual = recursive_to_dict(ws)
+    # Remove timestamps
+    for ev in actual["log"]:
+        del ev[-1]
+    for stim in actual["stimulus_log"]:
+        del stim["handled"]
+
+    expect = {
+        "address": "127.0.0.1.1234",
+        "busy_workers": [],
+        "constrained": [],
+        "data": {"y": None},
+        "data_needed": ["x"],
+        "data_needed_per_worker": {"127.0.0.1:1235": ["x"]},
+        "executing": [],
+        "in_flight_tasks": [],
+        "in_flight_workers": {},
+        "log": [
+            ["x", "ensure-task-exists", "released", "s1"],
+            ["x", "released", "fetch", "fetch", {}, "s1"],
+            ["y", "put-in-memory", "s2"],
+            ["y", "receive-from-scatter", "s2"],
+        ],
+        "long_running": [],
+        "nthreads": 8,
+        "ready": [],
+        "running": True,
+        "stimulus_log": [
+            {
+                "cls": "AcquireReplicasEvent",
+                "stimulus_id": "s1",
+                "who_has": {"x": ["127.0.0.1:1235"]},
+            },
+            {
+                "cls": "UpdateDataEvent",
+                "data": {"y": None},
+                "report": False,
+                "stimulus_id": "s2",
+            },
+        ],
+        "tasks": {
+            "x": {
+                "key": "x",
+                "priority": [1],
+                "state": "fetch",
+                "who_has": ["127.0.0.1:1235"],
+            },
+            "y": {
+                "key": "y",
+                "nbytes": 16,
+                "state": "memory",
+            },
+        },
+        "transition_counter": 1,
+    }
+    assert actual == expect
 
 
 def traverse_subclasses(cls: type) -> Iterator[type]:

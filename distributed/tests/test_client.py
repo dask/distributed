@@ -1612,6 +1612,7 @@ async def test_upload_file_zip(c, s, a, b):
                 os.remove("myfile.zip")
 
 
+@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_upload_file_egg(c, s, a, b):
     pytest.importorskip("setuptools")
@@ -6810,7 +6811,7 @@ async def test_workers_collection_restriction(c, s, a, b):
     assert a.data and not b.data
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 0)])
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_get_client_functions_spawn_clusters(c, s, a):
     # see gh4565
 

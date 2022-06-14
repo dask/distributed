@@ -8,6 +8,7 @@ import textwrap
 import threading
 from contextlib import contextmanager
 from time import sleep
+from unittest import mock
 
 import pytest
 import yaml
@@ -44,7 +45,8 @@ from distributed.worker import fail_hard
 from distributed.worker_state_machine import (
     InvalidTaskState,
     InvalidTransition,
-    StateMachineEvent,
+    PauseEvent,
+    WorkerState,
 )
 
 
@@ -656,22 +658,17 @@ def test_start_failure_scheduler():
 
 
 def test_invalid_transitions(capsys):
-    class BrokenEvent(StateMachineEvent):
-        pass
-
-    class MyWorker(Worker):
-        @Worker._handle_event.register
-        def _(self, ev: BrokenEvent):
-            ts = next(iter(self.tasks.values()))
-            return {ts: "foo"}, []
-
-    @gen_cluster(client=True, Worker=MyWorker, nthreads=[("", 1)])
+    @gen_cluster(client=True, nthreads=[("", 1)])
     async def test_log_invalid_transitions(c, s, a):
         x = c.submit(inc, 1, key="task-name")
         await x
-
-        with pytest.raises(InvalidTransition):
-            a.handle_stimulus(BrokenEvent(stimulus_id="test"))
+        ts = a.tasks["task-name"]
+        ev = PauseEvent(stimulus_id="test")
+        with mock.patch.object(
+            WorkerState, "_handle_event", return_value=({ts: "foo"}, [])
+        ):
+            with pytest.raises(InvalidTransition):
+                a.handle_stimulus(ev)
 
         while not s.events["invalid-worker-transition"]:
             await asyncio.sleep(0.01)

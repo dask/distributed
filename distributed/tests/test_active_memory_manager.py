@@ -866,8 +866,8 @@ async def test_RetireWorker_no_recipients(c, s, w1, w2, w3, w4):
     assert set(out) in ({w1.address, w3.address}, {w1.address, w4.address})
     assert not s.extensions["amm"].policies
     assert set(s.workers) in ({w2.address, w3.address}, {w2.address, w4.address})
-    # After a Scheduler -> Worker -> WorkerState roundtrip, workers that failed to
-    # retire went back from closing_gracefully to running and can run tasks
+    # After a Scheduler -> Worker -> Scheduler roundtrip, workers that failed to retire
+    # went back from closing_gracefully to running and can run tasks
     while any(ws.status != Status.running for ws in s.workers.values()):
         await asyncio.sleep(0.01)
     assert await c.submit(inc, 1) == 2
@@ -896,7 +896,7 @@ async def test_RetireWorker_all_recipients_are_paused(c, s, a, b):
     assert not s.extensions["amm"].policies
     assert set(s.workers) == {a.address, b.address}
 
-    # After a Scheduler -> Worker -> WorkerState roundtrip, workers that failed to
+    # After a Scheduler -> Worker -> Scheduler roundtrip, workers that failed to
     # retire went back from closing_gracefully to running and can run tasks
     while ws_a.status != Status.running:
         await asyncio.sleep(0.01)
