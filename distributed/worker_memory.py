@@ -68,6 +68,7 @@ class WorkerMemoryManager:
         self,
         worker: Worker,
         *,
+        nthreads: int,
         memory_limit: str | float = "auto",
         # This should be None most of the times, short of a power user replacing the
         # SpillBuffer with their own custom dict-like
@@ -84,7 +85,7 @@ class WorkerMemoryManager:
         memory_spill_fraction: float | Literal[False] | None = None,
         memory_pause_fraction: float | Literal[False] | None = None,
     ):
-        self.memory_limit = parse_memory_limit(memory_limit, worker.nthreads)
+        self.memory_limit = parse_memory_limit(memory_limit, nthreads)
 
         self.memory_target_fraction = _parse_threshold(
             "distributed.worker.memory.target",
@@ -293,12 +294,8 @@ class WorkerMemoryManager:
             )
 
     def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
-        info = {
-            k: v
-            for k, v in self.__dict__.items()
-            if not k.startswith("_") and k != "data" and k not in exclude
-        }
-        info["data"] = list(self.data)
+        info = {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
+        info["data"] = dict.fromkeys(self.data)
         return info
 
 

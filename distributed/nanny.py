@@ -809,12 +809,10 @@ class WorkerProcess:
         try:
             os.environ.update(env)
             dask.config.set(config)
-            try:
-                from dask.multiprocessing import initialize_worker_process
-            except ImportError:  # old Dask version
-                pass
-            else:
-                initialize_worker_process()
+
+            from dask.multiprocessing import default_initializer
+
+            default_initializer()
 
             if silence_logs:
                 logger.setLevel(silence_logs)
