@@ -9,14 +9,13 @@ from typing import Literal
 
 import pytest
 
-from distributed import Event, Nanny, wait
+from distributed import Event, Nanny, Scheduler, Worker, wait
 from distributed.active_memory_manager import (
     ActiveMemoryManagerExtension,
     ActiveMemoryManagerPolicy,
     RetireWorker,
 )
 from distributed.core import Status
-from distributed.scheduler import Scheduler
 from distributed.utils_test import (
     assert_story,
     captured_logger,
@@ -24,7 +23,6 @@ from distributed.utils_test import (
     inc,
     slowinc,
 )
-from distributed.worker import Worker
 
 NO_AMM_START = {"distributed.scheduler.active-memory-manager.start": False}
 
