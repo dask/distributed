@@ -90,6 +90,7 @@ from distributed.utils_test import (
     inc,
     map_varying,
     nodebug,
+    popen,
     pristine_loop,
     randominc,
     save_sys_modules,
@@ -7508,7 +7509,7 @@ async def test_wait_for_workers_updates_info(c, s):
 client_script = """
 from dask.distributed import Client
 if __name__ == "__main__":
-    client = Client(processes=%s, n_workers=1)
+    client = Client(processes=%s, n_workers=1, scheduler_port=0, dashboard_address=":0")
 """
 
 
@@ -7517,13 +7518,8 @@ def test_quiet_close_process(processes, tmp_path):
     with open(tmp_path / "script.py", mode="w") as f:
         f.write(client_script % processes)
 
-    proc = subprocess.Popen(
-        [sys.executable, tmp_path / "script.py"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-
-    out, err = proc.communicate(timeout=10)
+    with popen([sys.executable, tmp_path / "script.py"], capture_output=True) as proc:
+        out, err = proc.communicate(timeout=10)
 
     assert not out
     assert not err

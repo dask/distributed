@@ -3,6 +3,7 @@ import os
 import pathlib
 import signal
 import socket
+import subprocess
 import sys
 import textwrap
 import threading
@@ -820,6 +821,58 @@ def test_popen_write_during_terminate_deadlock():
         assert proc.stdout.readline().strip() == b"ready"
     # Exiting the context manager (terminating the subprocess) will raise
     # `subprocess.TimeoutExpired` if this test breaks.
+
+
+def test_popen_timeout(capsys: pytest.CaptureFixture):
+    with pytest.raises(subprocess.TimeoutExpired):
+        with popen(
+            [
+                sys.executable,
+                "-c",
+                textwrap.dedent(
+                    """
+                    import signal
+                    import sys
+                    import time
+
+                    if sys.platform == "win32":
+                        signal.signal(signal.SIGBREAK, signal.default_int_handler)
+                        # ^ Cause `CTRL_BREAK_EVENT` on Windows to raise `KeyboardInterrupt`
+
+                    print('ready', flush=True)
+                    while True:
+                        try:
+                            time.sleep(0.1)
+                            print("slept", flush=True)
+                        except KeyboardInterrupt:
+                            print("interrupted", flush=True)
+                    """
+                ),
+            ],
+            capture_output=True,
+            terminate_timeout=1,
+        ) as proc:
+            assert proc.stdout
+            assert proc.stdout.readline().strip() == b"ready"
+    # Exiting contextmanager sends SIGINT, waits 1s for shutdown.
+    # Our script ignores SIGINT, so after 1s it sends SIGKILL.
+    # The contextmanager raises `TimeoutExpired` once the process is killed,
+    # because it failed the 1s timeout
+    captured = capsys.readouterr()
+    assert "stdout: returncode" in captured.out
+    assert "interrupted" in captured.out
+    assert "slept" in captured.out
+
+
+def test_popen_always_prints_output(capsys: pytest.CaptureFixture):
+    # We always print stdout even if there was no error, in case some other assertion
+    # later in the test fails and the output would be useful.
+    with popen([sys.executable, "-c", "print('foo')"], capture_output=True) as proc:
+        proc.communicate(timeout=5)
+
+    captured = capsys.readouterr()
+    assert "stdout: returncode 0" in captured.out
+    assert "foo" in captured.out
 
 
 @gen_test()
