@@ -17,8 +17,8 @@ from distributed.utils_test import (
 
 
 async def wait_for_cancelled(key, dask_worker):
-    while key in dask_worker.tasks:
-        if dask_worker.tasks[key].state == "cancelled":
+    while key in dask_worker.state.tasks:
+        if dask_worker.state.tasks[key].state == "cancelled":
             return
         await asyncio.sleep(0.005)
     assert False
@@ -77,11 +77,11 @@ async def test_abort_execution_to_fetch(c, s, a, b):
     await ev.set()
     assert await fut == 124  # It would be 3 if the result was copied from b
     del fut
-    while "f1" in a.tasks:
+    while "f1" in a.state.tasks:
         await asyncio.sleep(0.01)
 
     assert_story(
-        a.story("f1"),
+        a.state.story("f1"),
         [
             ("f1", "compute-task", "released"),
             ("f1", "released", "waiting", "waiting", {"f1": "ready"}),
@@ -117,7 +117,7 @@ async def test_worker_stream_died_during_comm(c, s, a, b):
     write_event.set()
 
     await res
-    assert any("receive-dep-failed" in msg for msg in b.log)
+    assert any("receive-dep-failed" in msg for msg in b.state.log)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -161,7 +161,7 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
         await block_compute.release()
         assert await fut2 == 3
 
-        b_story = b.story(fut1.key)
+        b_story = b.state.story(fut1.key)
         assert any("receive-dep-failed" in msg for msg in b_story)
         assert any("cancelled" in msg for msg in b_story)
         assert any("resumed" in msg for msg in b_story)
@@ -193,7 +193,7 @@ async def test_executing_cancelled_error(c, s, w):
     # itself would raise a cancelled exception. At this point we're concerned
     # about the worker. The task should transition over error to be eventually
     # forgotten since we no longer hold a ref.
-    while fut.key in w.tasks:
+    while fut.key in w.state.tasks:
         await asyncio.sleep(0.01)
 
     assert await fut2 == 2
@@ -203,7 +203,7 @@ async def test_executing_cancelled_error(c, s, w):
     # Everything above this line should be generically true, regardless of
     # refactoring. Below verifies some implementation specific test assumptions
 
-    story = w.story(fut.key)
+    story = w.state.story(fut.key)
     start_finish = [(msg[1], msg[2], msg[3]) for msg in story if len(msg) == 7]
     assert ("executing", "released", "cancelled") in start_finish
     assert ("cancelled", "error", "error") in start_finish
@@ -239,7 +239,7 @@ async def test_flight_cancelled_error(c, s, b):
         # future itself would raise a cancelled exception. At this point we're
         # concerned about the worker. The task should transition over error to
         # be eventually forgotten since we no longer hold a ref.
-        while fut1.key in b.tasks:
+        while fut1.key in b.state.tasks:
             await asyncio.sleep(0.01)
         a.block_get_data = False
         # Everything should still be executing as usual after this
@@ -323,16 +323,16 @@ async def test_cancelled_error(c, s, a, b):
     )
 
     await executing.wait()
-    assert b.tasks[fut1.key].state == "executing"
+    assert b.state.tasks[fut1.key].state == "executing"
     fut1.release()
-    while b.tasks[fut1.key].state == "executing":
+    while b.state.tasks[fut1.key].state == "executing":
         await asyncio.sleep(0.01)
     await lock_executing.release()
-    while b.tasks:
+    while b.state.tasks:
         await asyncio.sleep(0.01)
 
     assert_story(
-        b.story(fut1.key),
+        b.state.story(fut1.key),
         [
             (fut1.key, "executing", "released", "cancelled", {}),
             (fut1.key, "cancelled", "error", "error", {fut1.key: "released"}),
@@ -362,11 +362,11 @@ async def test_cancelled_error_with_resources(c, s, a):
     await executing.wait()
     fut2 = c.submit(inc, 1, resources={"A": 1}, key="fut2")
 
-    while fut2.key not in a.tasks:
+    while fut2.key not in a.state.tasks:
         await asyncio.sleep(0.01)
 
     fut1.release()
-    while a.tasks[fut1.key].state == "executing":
+    while a.state.tasks[fut1.key].state == "executing":
         await asyncio.sleep(0.01)
     await lock_executing.release()
 
@@ -417,7 +417,7 @@ async def test_cancelled_resumed_after_flight_with_dependencies(c, s, w2, w3):
 
         await wait_for_state(f3.key, "resumed", w2)
         assert_story(
-            w2.log,
+            w2.state.log,
             [
                 (f3.key, "flight", "released", "cancelled", {}),
                 # ...
@@ -504,7 +504,7 @@ async def test_resumed_cancelled_handle_compute(
         assert await f4 == 4 + 2
 
         assert_story(
-            b.story(f3.key),
+            b.state.story(f3.key),
             expect=[
                 (f3.key, "ready", "executing", "executing", {}),
                 (f3.key, "executing", "released", "cancelled", {}),
@@ -518,7 +518,7 @@ async def test_resumed_cancelled_handle_compute(
             await f3
 
         assert_story(
-            b.story(f3.key),
+            b.state.story(f3.key),
             expect=[
                 (f3.key, "ready", "executing", "executing", {}),
                 (f3.key, "executing", "released", "cancelled", {}),

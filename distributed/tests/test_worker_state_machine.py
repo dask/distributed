@@ -45,8 +45,8 @@ def test_TaskState_get_nbytes():
 
 def test_TaskState__to_dict():
     """Tasks that are listed as dependencies or dependents of other tasks are dumped as
-    a short repr and always appear in full directly under Worker.tasks. Uninteresting
-    fields are omitted.
+    a short repr and always appear in full directly under Worker.state.tasks.
+    Uninteresting fields are omitted.
     """
     x = TaskState("x", state="memory", done=True)
     y = TaskState("y", priority=(0,), dependencies={x})
@@ -361,7 +361,7 @@ async def test_fetch_to_compute(c, s, a, b):
     await f2
 
     assert_story(
-        b.log,
+        b.state.log,
         # FIXME: This log should be replaced with a StateMachineEvent log
         [
             (f2.key, "compute-task", "released"),
@@ -391,7 +391,7 @@ async def test_fetch_via_amm_to_compute(c, s, a, b):
     await f1
 
     assert_story(
-        b.log,
+        b.state.log,
         # FIXME: This log should be replaced with a StateMachineEvent log
         [
             (f1.key, "ensure-task-exists", "released"),
@@ -437,7 +437,7 @@ async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
             s.request_acquire_replicas(w1.address, ["x"], stimulus_id="test")
 
         await wait_for_state("x", "fetch", w1)
-        assert w1.tasks["x"].who_has == {w2.address, w3.address}
+        assert w1.state.tasks["x"].who_has == {w2.address, w3.address}
 
         assert len(s.tasks["x"].who_has) == 2
         await w2.close()
@@ -449,12 +449,12 @@ async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
         else:
             s.request_acquire_replicas(w1.address, ["x"], stimulus_id="test")
 
-        while w1.tasks["x"].who_has != {w3.address}:
+        while w1.state.tasks["x"].who_has != {w3.address}:
             await asyncio.sleep(0.01)
 
     await wait_for_state("x", "memory", w1)
     assert_story(
-        w1.story("request-dep"),
+        w1.state.story("request-dep"),
         [("request-dep", w3.address, {"x"})],
         # This tests that there has been no attempt to contact w2.
         # If the assumption being tested breaks, this will fail 50% of the times.
@@ -483,7 +483,7 @@ async def test_fetch_to_missing(c, s, a, b):
     # state will flip-flop between fetch and flight every 150ms, which is the retry
     # period for busy workers.
     await wait_for_state("x", "fetch", a)
-    assert b.address in a.busy_workers
+    assert b.address in a.state.busy_workers
 
     # Sever connection between b and s, but not between b and a.
     # If a tries fetching from b after this, b will keep responding {status: busy}.
@@ -493,7 +493,7 @@ async def test_fetch_to_missing(c, s, a, b):
     await wait_for_state("x", "missing", a)
 
     assert_story(
-        a.story("x"),
+        a.state.story("x"),
         [
             ("x", "ensure-task-exists", "released"),
             ("x", "released", "fetch", "fetch", {}),
@@ -535,7 +535,7 @@ async def test_new_replica_while_all_workers_in_flight(c, s, w1, w2):
         await wait([x, y])
         s.request_acquire_replicas(w1.address, ["x"], stimulus_id="test")
         await w3.in_get_data.wait()
-        assert w1.tasks["x"].state == "flight"
+        assert w1.state.tasks["x"].state == "flight"
         s.request_acquire_replicas(w1.address, ["y"], stimulus_id="test")
         # This cannot progress beyond fetch because w3 is already in flight
         await wait_for_state("y", "fetch", w1)
@@ -571,7 +571,7 @@ async def test_cancelled_while_in_flight(c, s, a, b):
     # Let the comm from b to a return the result
     event.set()
     # upon reception, x transitions cancelled->forgotten
-    while a.tasks:
+    while a.state.tasks:
         await asyncio.sleep(0.01)
 
 
@@ -623,7 +623,7 @@ async def test_forget_data_needed(c, s, a, b):
         await wait_for_state("x", "fetch", b)
         x.release()
         y.release()
-        while s.tasks or a.tasks or b.tasks:
+        while s.tasks or a.state.tasks or b.state.tasks:
             await asyncio.sleep(0.01)
 
     x = c.submit(inc, 2, key="x", workers=[a.address])
@@ -695,7 +695,7 @@ async def test_fetch_to_missing_on_refresh_who_has(c, s, w1, w2, w3):
     # (see Worker.retry_busy_worker_later)
     await wait_for_state("x", "fetch", w3)
     await wait_for_state("y", "fetch", w3)
-    assert w1.address in w3.busy_workers
+    assert w1.address in w3.state.busy_workers
     # w3 sent {op: request-refresh-who-has, keys: [x, y]}
     # There also may have been enough time for a refresh-who-has message to come back,
     # which reiterated what w3 already knew:
@@ -708,9 +708,9 @@ async def test_fetch_to_missing_on_refresh_who_has(c, s, w1, w2, w3):
     w3.handle_stimulus(
         RefreshWhoHasEvent(who_has={"x": [], "y": [w2.address]}, stimulus_id="test2")
     )
-    assert w3.tasks["x"].state == "missing"
-    assert w3.tasks["y"].state == "flight"
-    assert w3.tasks["y"].who_has == {w2.address}
+    assert w3.state.tasks["x"].state == "missing"
+    assert w3.state.tasks["y"].state == "flight"
+    assert w3.state.tasks["y"].who_has == {w2.address}
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -746,3 +746,26 @@ async def test_fetch_to_missing_on_network_failure(c, s, a):
 
         await wait_for_state("x", "missing", a)
         await wait_for_state("y", "missing", a)
+
+
+@gen_cluster()
+async def test_deprecated_worker_attributes(s, a, b):
+    n = a.state.comm_threshold_bytes
+    msg = (
+        "The `Worker.comm_threshold_bytes` attribute has been moved to "
+        "`Worker.state.comm_threshold_bytes`"
+    )
+    with pytest.warns(FutureWarning, match=msg):
+        assert a.comm_threshold_bytes == n
+    with pytest.warns(FutureWarning, match=msg):
+        a.comm_threshold_bytes += 1
+        assert a.comm_threshold_bytes == n + 1
+    assert a.state.comm_threshold_bytes == n + 1
+
+    # Old and new names differ
+    msg = (
+        "The `Worker.in_flight_tasks` attribute has been moved to "
+        "`Worker.state.in_flight_tasks_count`"
+    )
+    with pytest.warns(FutureWarning, match=msg):
+        assert a.in_flight_tasks == 0

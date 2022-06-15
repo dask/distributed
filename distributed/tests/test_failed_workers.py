@@ -346,6 +346,7 @@ class SlowTransmitData:
         return parse_bytes(dask.config.get("distributed.comm.offload")) + 1
 
 
+@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     """This test is very sensitive to cluster state consistency. Timeouts often
@@ -381,9 +382,9 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
 
         await result_fut
 
-        assert not a.has_what.get(n_worker_address)
+        assert not a.state.has_what.get(n_worker_address)
         assert not any(
-            n_worker_address in s for ts in a.tasks.values() for s in ts.who_has
+            n_worker_address in s for ts in a.state.tasks.values() for s in ts.who_has
         )
 
 
@@ -481,7 +482,7 @@ async def test_forget_data_not_supposed_to_have(c, s, a):
         y = c.submit(inc, x, key="y", workers=[b.address])
 
         await b.in_gather_dep.wait()
-        assert b.tasks["x"].state == "flight"
+        assert b.state.tasks["x"].state == "flight"
 
         x.release()
         y.release()
@@ -489,7 +490,7 @@ async def test_forget_data_not_supposed_to_have(c, s, a):
             await asyncio.sleep(0.01)
 
         b.block_gather_dep.set()
-        while b.tasks:
+        while b.state.tasks:
             await asyncio.sleep(0.01)
 
 

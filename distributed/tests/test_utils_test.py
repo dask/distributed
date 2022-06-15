@@ -503,7 +503,7 @@ async def test_assert_story_identity(c, s, a, strict):
     assert await f2 == 3
     scheduler_story = s.story(f2.key)
     assert scheduler_story
-    worker_story = a.story(f2.key)
+    worker_story = a.state.story(f2.key)
     assert worker_story
     assert_story(worker_story, worker_story, strict=strict)
     assert_story(scheduler_story, scheduler_story, strict=strict)
@@ -664,7 +664,7 @@ def test_invalid_transitions(capsys):
     async def test_log_invalid_transitions(c, s, a):
         x = c.submit(inc, 1, key="task-name")
         await x
-        ts = a.tasks["task-name"]
+        ts = a.state.tasks["task-name"]
         ev = PauseEvent(stimulus_id="test")
         with mock.patch.object(
             WorkerState, "_handle_event", return_value=({ts: "foo"}, [])
@@ -693,7 +693,7 @@ def test_invalid_worker_state(capsys):
     async def test_log_invalid_worker_task_state(c, s, a):
         x = c.submit(inc, 1, key="task-name")
         await x
-        a.tasks[x.key].state = "released"
+        a.state.tasks[x.key].state = "released"
         with pytest.raises(InvalidTaskState):
             a.validate_state()
 

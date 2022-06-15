@@ -939,7 +939,7 @@ async def test_retire_workers(c, s, a, b):
 
     workers = await s.retire_workers()
     assert list(workers) == [a.address]
-    assert workers[a.address]["nthreads"] == a.nthreads
+    assert workers[a.address]["nthreads"] == a.state.nthreads
     assert list(s.workers) == [b.address]
 
     assert s.workers_to_close() == []
@@ -1601,7 +1601,7 @@ async def test_missing_data_errant_worker(c, s, w1, w2, w3):
         await c.replicate(x, workers=[w1.address, w2.address])
 
         y = c.submit(len, x, workers=w3.address)
-        while not w3.tasks:
+        while not w3.state.tasks:
             await asyncio.sleep(0.001)
         await w1.close()
         await wait(y)
@@ -1736,17 +1736,17 @@ async def test_resources_reset_after_cancelled_task(c, s, w):
     await lock.acquire()
     future = c.submit(block, lock, resources={"A": 1})
 
-    while not w.executing_count:
+    while not w.state.executing_count:
         await asyncio.sleep(0.01)
 
     await future.cancel()
     await lock.release()
 
-    while w.executing_count:
+    while w.state.executing_count:
         await asyncio.sleep(0.01)
 
     assert not s.workers[w.address].used_resources["A"]
-    assert w.available_resources == {"A": 1}
+    assert w.state.available_resources == {"A": 1}
 
     await c.submit(inc, 1, resources={"A": 1})
 
@@ -2267,8 +2267,8 @@ async def test_gather_bad_worker_removed(c, s, a, b):
             assert "Couldn't gather 1 keys, rescheduling" in client_logger
 
             assert s.tasks[fin.key].who_has == {s.workers[b.address]}
-            assert a.executed_count == 2
-            assert b.executed_count >= 1
+            assert a.state.executed_count == 2
+            assert b.state.executed_count >= 1
             # ^ leave room for a future switch from `remove_worker` to `retire_workers`
 
     # Ensure that the communication was done via the scheduler, i.e. we actually hit a
@@ -2399,7 +2399,7 @@ async def test_quiet_cluster_round_robin(c, s, a, b):
     await c.submit(inc, 1)
     await c.submit(inc, 2)
     await c.submit(inc, 3)
-    assert a.log and b.log
+    assert a.state.log and b.state.log
 
 
 def test_memorystate():
@@ -3212,10 +3212,10 @@ async def test_computations_futures(c, s, a, b):
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_transition_counter(c, s, a):
     assert s.transition_counter == 0
-    assert a.transition_counter == 0
+    assert a.state.transition_counter == 0
     await c.submit(inc, 1)
     assert s.transition_counter > 1
-    assert a.transition_counter > 1
+    assert a.state.transition_counter > 1
 
 
 @pytest.mark.slow
@@ -3239,7 +3239,7 @@ async def test_transition_counter_max_scheduler(c, s, a, b):
 async def test_transition_counter_max_worker(c, s, a):
     # This is set by @gen_cluster; it's False in production
     assert s.transition_counter_max > 0
-    a.transition_counter_max = 1
+    a.state.transition_counter_max = 1
     with captured_logger("distributed.core") as logger:
         fut = c.submit(inc, 2)
         while True:
@@ -3251,7 +3251,7 @@ async def test_transition_counter_max_worker(c, s, a):
 
     assert "TransitionCounterMaxExceeded" in logger.getvalue()
     # Worker state is corrupted. Avoid test failure on gen_cluster teardown.
-    a.validate = False
+    a.state.validate = False
 
 
 @gen_cluster(
@@ -3265,10 +3265,10 @@ async def test_disable_transition_counter_max(c, s, a, b):
     This is the default outside of @gen_cluster.
     """
     assert s.transition_counter_max is False
-    assert a.transition_counter_max is False
+    assert a.state.transition_counter_max is False
     assert await c.submit(inc, 1) == 2
     assert s.transition_counter > 1
-    assert a.transition_counter > 1
+    assert a.state.transition_counter > 1
     s.validate_state()
     a.validate_state()
 
@@ -3292,12 +3292,12 @@ async def test_worker_heartbeat_after_cancel(c, s, *workers):
 
     futs = c.map(slowinc, range(100), delay=0.1)
 
-    while sum(w.executing_count for w in workers) < len(workers):
+    while sum(w.state.executing_count for w in workers) < len(workers):
         await asyncio.sleep(0.001)
 
     await c.cancel(futs)
 
-    while any(w.tasks for w in workers):
+    while any(w.state.tasks for w in workers):
         await asyncio.gather(*(w.heartbeat() for w in workers))
 
 
@@ -3571,7 +3571,7 @@ async def test_ensure_events_dont_include_taskstate_objects(c, s, a, b):
         return x
 
     futs = c.map(block, range(100), event=event)
-    while not a.tasks:
+    while not a.state.tasks:
         await asyncio.sleep(0.1)
 
     await a.close(executor_wait=False)

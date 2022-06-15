@@ -121,8 +121,8 @@ async def test_stealing_events(c, s, a, b):
     await wait(futures)
     se.update()
     assert len(first(se.source.data.values()))
-    assert b.tasks
-    assert sum(se.source.data["count"]) >= len(b.tasks)
+    assert b.state.tasks
+    assert sum(se.source.data["count"]) >= len(b.state.tasks)
 
 
 @gen_cluster(client=True)
@@ -133,7 +133,7 @@ async def test_events(c, s, a, b):
         slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
     )
 
-    while not b.tasks:
+    while not b.state.tasks:
         await asyncio.sleep(0.01)
 
     e.update()
