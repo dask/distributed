@@ -834,7 +834,13 @@ def test_popen_timeout(capsys: pytest.CaptureFixture):
                 "-c",
                 textwrap.dedent(
                     """
+                    import signal
+                    import sys
                     import time
+
+                    if sys.platform == "win32":
+                        signal.signal(signal.SIGBREAK, signal.default_int_handler)
+                        # ^ Cause `CTRL_BREAK_EVENT` on Windows to raise `KeyboardInterrupt`
 
                     print('ready', flush=True)
                     while True:
