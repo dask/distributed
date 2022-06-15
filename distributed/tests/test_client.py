@@ -2197,7 +2197,9 @@ def long_running_client_connection(address):
 
 @gen_cluster()
 async def test_cleanup_after_broken_client_connection(s, a, b):
-    proc = get_mp_context().Process(target=long_running_client_connection, args=(s.address,))
+    proc = get_mp_context().Process(
+        target=long_running_client_connection, args=(s.address,)
+    )
     proc.daemon = True
     proc.start()
 

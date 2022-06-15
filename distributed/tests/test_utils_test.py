@@ -634,7 +634,9 @@ def test_check_process_leak_pre_cleanup(ignore_sigterm):
 def test_check_process_leak_post_cleanup(ignore_sigterm):
     barrier = get_mp_context().Barrier(parties=2)
     with check_process_leak(check=False, term_timeout=0.2):
-        p = get_mp_context().Process(target=garbage_process, args=(barrier, ignore_sigterm))
+        p = get_mp_context().Process(
+            target=garbage_process, args=(barrier, ignore_sigterm)
+        )
         p.start()
         barrier.wait()
     assert not p.is_alive()
