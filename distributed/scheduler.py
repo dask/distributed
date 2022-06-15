@@ -7085,14 +7085,19 @@ class Scheduler(SchedulerState, ServerNode):
         other workers. This is a fire-and-forget operation which offers no feedback for
         success or failure, and is intended for housekeeping and not for computation.
         """
-        who_has = {key: [ws.address for ws in self.tasks[key].who_has] for key in keys}
-        if self.validate:
-            assert all(who_has.values())
+        who_has = {}
+        nbytes = {}
+        for key in keys:
+            ts = self.tasks[key]
+            assert ts.who_has
+            who_has[key] = [ws.address for ws in ts.who_has]
+            nbytes[key] = ts.nbytes
 
         self.stream_comms[addr].send(
             {
                 "op": "acquire-replicas",
                 "who_has": who_has,
+                "nbytes": nbytes,
                 "stimulus_id": stimulus_id,
             },
         )
