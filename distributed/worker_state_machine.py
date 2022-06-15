@@ -2774,10 +2774,14 @@ class WorkerState:
     # Diagnostics #
     ###############
 
-    def story(self, *keys_or_tasks: str | TaskState) -> list[tuple]:
-        """Return all transitions involving one or more tasks"""
-        keys = {e.key if isinstance(e, TaskState) else e for e in keys_or_tasks}
-        return worker_story(keys, self.log)
+    def story(self, *keys_or_tasks_or_stimuli: str | TaskState) -> list[tuple]:
+        """Return all records from the transitions log involving one or more tasks or
+        stimulus_id's
+        """
+        keys_or_stimuli = {
+            e.key if isinstance(e, TaskState) else e for e in keys_or_tasks_or_stimuli
+        }
+        return worker_story(keys_or_stimuli, self.log)
 
     def stimulus_story(
         self, *keys_or_tasks: str | TaskState

@@ -1843,8 +1843,8 @@ class Worker(BaseWorker, ServerNode):
             "data": key in self.data,
         }
 
-    async def get_story(self, keys=None):
-        return self.story(*keys)
+    async def get_story(self, keys_or_stimuli: Iterable[str]) -> list[tuple]:
+        return self.state.story(*keys_or_stimuli)
 
     ##########################
     # Dependencies gathering #
