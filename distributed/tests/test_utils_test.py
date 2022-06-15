@@ -856,9 +856,20 @@ def test_popen_timeout(capsys: pytest.CaptureFixture):
     # The contextmanager raises `TimeoutExpired` once the process is killed,
     # because it failed the 1s timeout
     captured = capsys.readouterr()
-    assert "stdout of" in captured.out
+    assert "stdout: returncode -9" in captured.out
     assert "interrupted" in captured.out
     assert "slept" in captured.out
+
+
+def test_popen_always_prints_output(capsys: pytest.CaptureFixture):
+    # We always print stdout even if there was no error, in case some other assertion
+    # later in the test fails and the output would be useful.
+    with popen(["/bin/echo", "foo"], capture_output=True) as proc:
+        proc.communicate(timeout=5)
+
+    captured = capsys.readouterr()
+    assert "stdout: returncode 0" in captured.out
+    assert "foo" in captured.out
 
 
 @gen_test()

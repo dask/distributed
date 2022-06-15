@@ -1283,9 +1283,7 @@ def raises(func, exc=Exception):
         return True
 
 
-def _terminate_process(
-    proc: subprocess.Popen, terminate_timeout: float, kill_timeout: float
-) -> None:
+def _terminate_process(proc: subprocess.Popen, terminate_timeout: float) -> None:
     if proc.poll() is None:
         if sys.platform.startswith("win"):
             proc.send_signal(signal.CTRL_BREAK_EVENT)
@@ -1297,7 +1295,6 @@ def _terminate_process(
             # Make sure we don't leave the process lingering around
             with suppress(OSError):
                 proc.kill()
-                proc.communicate(timeout=kill_timeout)
 
 
 @contextmanager
@@ -1332,6 +1329,9 @@ def popen(
         Note that ``proc.communicate`` is called automatically when the
         contextmanager exits. Calling code must not call ``proc.communicate``
         in a separate thread, since it's not thread-safe.
+
+        When captured, the stdout/stderr of the process is always printed
+        when the process exits for easier test debugging.
     terminate_timeout: optional, default 30
         When the contextmanager exits, SIGINT is sent to the subprocess.
         ``terminate_timeout`` sets how many seconds to wait for the subprocess
@@ -1366,23 +1366,15 @@ def popen(
             yield proc
         finally:
             try:
-                _terminate_process(proc, terminate_timeout, kill_timeout)
-            except subprocess.TimeoutExpired as err:
-                if err.stdout:
-                    print(f"------ stdout of {err.cmd} ------")
-                    print(
-                        err.stdout.decode()
-                        if isinstance(err.stdout, bytes)
-                        else err.stdout
-                    )
-                if err.stderr:
-                    print(f"------ stderr of {err.cmd} ------")
-                    print(
-                        err.stderr.decode()
-                        if isinstance(err.stderr, bytes)
-                        else err.stderr
-                    )
-                raise
+                _terminate_process(proc, terminate_timeout)
+            finally:
+                out, err = proc.communicate(timeout=kill_timeout)
+                if out:
+                    print(f"------ stdout: returncode {proc.returncode}, {args} ------")
+                    print(out.decode() if isinstance(out, bytes) else out)
+                if err:
+                    print(f"------ stderr: returncode {proc.returncode}, {args} ------")
+                    print(err.decode() if isinstance(err, bytes) else err)
 
 
 def wait_for(predicate, timeout, fail_func=None, period=0.05):
