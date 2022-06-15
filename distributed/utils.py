@@ -78,11 +78,29 @@ if TYPE_CHECKING:
 
 no_default = "__no_default__"
 
+_forkserver_preload_set = False
 
-def _initialize_mp_context():
+
+def get_mp_context():
+    """Create a multiprocessing context
+
+    The context type is controlled by the
+    ``distributed.worker.multiprocessing-method`` configuration key.
+
+    Returns
+    -------
+    multiprocessing.BaseContext
+        The multiprocessing context
+
+    Notes
+    -----
+    Repeated calls with the same method will return the same object
+    (since multiprocessing.get_context returns singleton instances).
+    """
+    global _forkserver_preload_set
     method = dask.config.get("distributed.worker.multiprocessing-method")
     ctx = multiprocessing.get_context(method)
-    if method == "forkserver":
+    if method == "forkserver" and not _forkserver_preload_set:
         # Makes the test suite much faster
         preload = ["distributed"]
 
@@ -96,11 +114,9 @@ def _initialize_mp_context():
             else:
                 preload.append(pkg)
         ctx.set_forkserver_preload(preload)
+        _forkserver_preload_set = True
 
     return ctx
-
-
-mp_context = _initialize_mp_context()
 
 
 def has_arg(func, argname):

@@ -23,7 +23,7 @@ from distributed.compatibility import WINDOWS
 from distributed.core import Server, Status, rpc
 from distributed.metrics import time
 from distributed.tests.test_batched import EchoServer
-from distributed.utils import mp_context
+from distributed.utils import get_mp_context
 from distributed.utils_test import (
     _LockedCommPool,
     _UnhashableCallable,
@@ -594,10 +594,10 @@ def garbage_process(barrier, ignore_sigterm: bool = False, t: float = 3600) -> N
 
 
 def test_check_process_leak():
-    barrier = mp_context.Barrier(parties=2)
+    barrier = get_mp_context().Barrier(parties=2)
     with pytest.raises(AssertionError):
         with check_process_leak(check=True, check_timeout=0.01):
-            p = mp_context.Process(target=garbage_process, args=(barrier,))
+            p = get_mp_context().Process(target=garbage_process, args=(barrier,))
             p.start()
             barrier.wait()
     assert not p.is_alive()
@@ -605,9 +605,9 @@ def test_check_process_leak():
 
 def test_check_process_leak_slow_cleanup():
     """check_process_leak waits a bit for processes to terminate themselves"""
-    barrier = mp_context.Barrier(parties=2)
+    barrier = get_mp_context().Barrier(parties=2)
     with check_process_leak(check=True):
-        p = mp_context.Process(target=garbage_process, args=(barrier, False, 0.2))
+        p = get_mp_context().Process(target=garbage_process, args=(barrier, False, 0.2))
         p.start()
         barrier.wait()
     assert not p.is_alive()
@@ -618,8 +618,8 @@ def test_check_process_leak_slow_cleanup():
     [False, pytest.param(True, marks=pytest.mark.skipif(WINDOWS, reason="no SIGKILL"))],
 )
 def test_check_process_leak_pre_cleanup(ignore_sigterm):
-    barrier = mp_context.Barrier(parties=2)
-    p = mp_context.Process(target=garbage_process, args=(barrier, ignore_sigterm))
+    barrier = get_mp_context().Barrier(parties=2)
+    p = get_mp_context().Process(target=garbage_process, args=(barrier, ignore_sigterm))
     p.start()
     barrier.wait()
 
@@ -632,9 +632,9 @@ def test_check_process_leak_pre_cleanup(ignore_sigterm):
     [False, pytest.param(True, marks=pytest.mark.skipif(WINDOWS, reason="no SIGKILL"))],
 )
 def test_check_process_leak_post_cleanup(ignore_sigterm):
-    barrier = mp_context.Barrier(parties=2)
+    barrier = get_mp_context().Barrier(parties=2)
     with check_process_leak(check=False, term_timeout=0.2):
-        p = mp_context.Process(target=garbage_process, args=(barrier, ignore_sigterm))
+        p = get_mp_context().Process(target=garbage_process, args=(barrier, ignore_sigterm))
         p.start()
         barrier.wait()
     assert not p.is_alive()

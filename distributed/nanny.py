@@ -43,9 +43,9 @@ from distributed.security import Security
 from distributed.utils import (
     TimeoutError,
     get_ip,
+    get_mp_context,
     json_load_robust,
     log_errors,
-    mp_context,
     parse_ports,
     silence_logging,
 )
@@ -638,8 +638,8 @@ class WorkerProcess:
             await self.running.wait()
             return self.status
 
-        self.init_result_q = init_q = mp_context.Queue()
-        self.child_stop_q = mp_context.Queue()
+        self.init_result_q = init_q = get_mp_context().Queue()
+        self.child_stop_q = get_mp_context().Queue()
         uid = uuid.uuid4().hex
 
         self.process = AsyncProcess(
