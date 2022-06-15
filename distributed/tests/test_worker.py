@@ -65,6 +65,7 @@ from distributed.utils_test import (
     raises_with_cause,
     slowinc,
     slowsum,
+    wait_for_state,
 )
 from distributed.worker import (
     Worker,
@@ -3060,14 +3061,6 @@ async def test_worker_status_sync(s, a):
     ]
 
 
-async def _wait_for_state(key: str, worker: Worker, state: str):
-    # Keep the sleep interval at 0 since the tests using this are very sensitive
-    # about timing. they intend to capture loop cycles after this specific
-    # condition was set
-    while key not in worker.tasks or worker.tasks[key].state != state:
-        await asyncio.sleep(0)
-
-
 @gen_cluster(client=True)
 async def test_task_flight_compute_oserror(c, s, a, b):
     """If the remote worker dies while a task is in flight, the task may be
@@ -3161,7 +3154,7 @@ async def test_gather_dep_cancelled_rescheduled(c, s):
             fut4 = c.submit(sum, fut1, fut2, workers=[b.address], key="f4")
             fut3 = c.submit(inc, fut1, workers=[b.address], key="f3")
 
-            await _wait_for_state(fut2.key, b, "flight")
+            await wait_for_state(fut2.key, "flight", b)
             await b.in_gather_dep.wait()
 
             fut4.release()
@@ -3174,7 +3167,7 @@ async def test_gather_dep_cancelled_rescheduled(c, s):
             await a.in_get_data.wait()
 
             fut4 = c.submit(sum, [fut1, fut2], workers=[b.address], key="f4")
-            await _wait_for_state(fut2.key, b, "flight")
+            await wait_for_state(fut2.key, "flight", b)
 
             a.block_get_data.set()
             await wait([fut3, fut4])
@@ -3227,7 +3220,7 @@ async def test_gather_dep_no_longer_in_flight_tasks(c, s, a):
         fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
         fut2 = c.submit(sum, fut1, fut1, workers=[b.address], key="f2")
 
-        await _wait_for_state(fut1.key, b, "flight")
+        await wait_for_state(fut1.key, "flight", b)
         await b.in_gather_dep.wait()
 
         fut2.release()
@@ -3266,7 +3259,7 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
     async with BlockedGatherDep(s.address, name="b") as b:
         fut3 = c.submit(inc, fut2, workers=[b.address], key="f3")
 
-        await _wait_for_state(fut2.key, b, "flight")
+        await wait_for_state(fut2.key, "flight", b)
 
         s.set_restrictions(worker={fut1B.key: a.address, fut2.key: b.address})
 
@@ -3276,7 +3269,7 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
             address=x.address, safe=True, close=close_worker, stimulus_id="test"
         )
 
-        await _wait_for_state(fut2.key, b, intermediate_state)
+        await wait_for_state(fut2.key, intermediate_state, b, interval=0)
 
         b.block_gather_dep.set()
         await fut3

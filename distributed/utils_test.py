@@ -2391,3 +2391,30 @@ def freeze_batched_send(bcomm: BatchedSend) -> Iterator[LockedComm]:
     finally:
         write_event.set()
         bcomm.comm = orig_comm
+
+
+async def wait_for_state(
+    key: str, state: str, dask_worker: Worker | Scheduler, *, interval: float = 0.01
+) -> None:
+    if isinstance(dask_worker, Worker):
+        tasks = dask_worker.state.tasks
+    elif isinstance(dask_worker, Scheduler):
+        tasks = dask_worker.tasks
+    else:
+        raise TypeError(dask_worker)  # pragma: nocover
+
+    try:
+        while key not in tasks or tasks[key].state != state:
+            await asyncio.sleep(interval)
+    except (asyncio.CancelledError, asyncio.TimeoutError):
+        if key in tasks:
+            msg = (
+                f"tasks[{key}].state={tasks[key].state!r} on {dask_worker.address}; "
+                f"expected {state=}"
+            )
+        else:
+            msg = f"tasks[{key}] not found on {dask_worker.address}"
+        # 99% of the times this is triggered by @gen_cluster timeout, so raising the
+        # message as an exception wouldn't work.
+        print(msg)
+        raise

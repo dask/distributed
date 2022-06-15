@@ -15,6 +15,7 @@ from distributed.utils_test import (
     freeze_data_fetching,
     gen_cluster,
     inc,
+    wait_for_state,
 )
 from distributed.worker_state_machine import (
     AcquireReplicasEvent,
@@ -30,16 +31,10 @@ from distributed.worker_state_machine import (
     SerializedTask,
     StateMachineEvent,
     TaskState,
-    TaskStateState,
     UpdateDataEvent,
     WorkerState,
     merge_recs_instructions,
 )
-
-
-async def wait_for_state(key: str, state: TaskStateState, dask_worker: Worker) -> None:
-    while key not in dask_worker.tasks or dask_worker.tasks[key].state != state:
-        await asyncio.sleep(0.005)
 
 
 def test_TaskState_get_nbytes():

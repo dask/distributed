@@ -6,17 +6,14 @@ import distributed
 from distributed import Event, Lock, Worker
 from distributed.client import wait
 from distributed.utils_test import (
+    BlockedGetData,
     _LockedCommPool,
     assert_story,
     gen_cluster,
     inc,
     slowinc,
+    wait_for_state,
 )
-
-
-async def wait_for_state(key, state, dask_worker):
-    while key not in dask_worker.tasks or dask_worker.tasks[key].state != state:
-        await asyncio.sleep(0.005)
 
 
 async def wait_for_cancelled(key, dask_worker):
@@ -251,23 +248,13 @@ async def test_flight_cancelled_error(c, s, b):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_in_flight_lost_after_resumed(c, s, b):
-    block_get_data = asyncio.Lock()
-    in_get_data = asyncio.Event()
-
-    await block_get_data.acquire()
     lock_executing = Lock()
 
     def block_execution(lock):
-        with lock:
-            return 1
+        lock.acquire()
+        return 1
 
-    class BlockedGetData(Worker):
-        async def get_data(self, comm, *args, **kwargs):
-            in_get_data.set()
-            async with block_get_data:
-                return await super().get_data(comm, *args, **kwargs)
-
-    async with BlockedGetData(s.address, name="blocked-get-dataworker") as a:
+    async with BlockedGetData(s.address) as a:
         fut1 = c.submit(
             block_execution,
             lock_executing,
@@ -277,35 +264,34 @@ async def test_in_flight_lost_after_resumed(c, s, b):
         # Ensure fut1 is in memory but block any further execution afterwards to
         # ensure we control when the recomputation happens
         await wait(fut1)
-        await lock_executing.acquire()
         fut2 = c.submit(inc, fut1, workers=[b.address], key="fut2")
 
         # This ensures that B already fetches the task, i.e. after this the task
         # is guaranteed to be in flight
-        await in_get_data.wait()
-        assert fut1.key in b.tasks
-        assert b.tasks[fut1.key].state == "flight"
+        await a.in_get_data.wait()
+        assert fut1.key in b.state.tasks
+        assert b.state.tasks[fut1.key].state == "flight"
 
         s.set_restrictions({fut1.key: [a.address, b.address]})
         # It is removed, i.e. get_data is guaranteed to fail and f1 is scheduled
         # to be recomputed on B
         await s.remove_worker(a.address, stimulus_id="foo", close=False, safe=True)
 
-        while not b.tasks[fut1.key].state == "resumed":
+        while not b.state.tasks[fut1.key].state == "resumed":
             await asyncio.sleep(0.01)
 
         fut1.release()
         fut2.release()
 
-        while not b.tasks[fut1.key].state == "cancelled":
+        while not b.state.tasks[fut1.key].state == "cancelled":
             await asyncio.sleep(0.01)
 
-        block_get_data.release()
-        while b.tasks:
+        a.block_get_data.set()
+        while b.state.tasks:
             await asyncio.sleep(0.01)
 
     assert_story(
-        b.story(fut1.key),
+        b.state.story(fut1.key),
         expect=[
             # The initial free-keys is rejected
             ("free-keys", (fut1.key,)),
