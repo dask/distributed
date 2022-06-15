@@ -17,7 +17,13 @@ from distributed.active_memory_manager import (
 )
 from distributed.core import Status
 from distributed.scheduler import Scheduler
-from distributed.utils_test import captured_logger, gen_cluster, inc, slowinc
+from distributed.utils_test import (
+    assert_story,
+    captured_logger,
+    gen_cluster,
+    inc,
+    slowinc,
+)
 from distributed.worker import Worker
 
 NO_AMM_START = {"distributed.scheduler.active-memory-manager.start": False}
@@ -909,7 +915,7 @@ async def test_RetireWorker_all_recipients_are_paused(c, s, a, b):
 @gen_cluster(
     client=True,
     config={
-        "distributed.scheduler.active-memory-manager.start": True,
+        "distributed.scheduler.active-memory-manager.start": True,  # to avoid one-off AMM instance
         "distributed.scheduler.active-memory-manager.policies": [],
     },
     timeout=15,
@@ -930,15 +936,21 @@ async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(
     event = Event()
 
     # Put 200 keys on the worker, so `_track_retire_worker` will sleep for 0.5s
-    # (Note that if you decrease the 200 to a very small value (say 2), this test will time out.
-    # But just because `extra` is restricted to only run on worker A, and A gets closed before `extra` can run,
-    # so not a deadlock (just user error)).
     xs = c.map(lambda x: x, range(200), workers=[a.address])
     await wait(xs)
 
-    extra = c.submit(lambda: print(event.wait("2s")), workers=[a.address], allow_other_workers=True)
+    # Put an extra task on the worker, which we will allow to complete once the `xs`
+    # have been replicated.
+    extra = c.submit(
+        lambda: event.wait("2s"),
+        workers=[a.address],
+        allow_other_workers=True,
+        key="extra",
+    )
 
-    while extra.key not in a.tasks or a.tasks[extra.key].state != "executing":
+    while (
+        extra.key not in a.state.tasks or a.state.tasks[extra.key].state != "executing"
+    ):
         await asyncio.sleep(0.01)
 
     t = asyncio.create_task(c.retire_workers([a.address]))
@@ -950,22 +962,49 @@ async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(
     # `_track_retire_worker` _should_ now be sleeping for 0.5s, because there were >=200 keys on A.
     # In this test, everything from the beginning of the transfers needs to happen within 0.5s.
 
+    # Simulate the policy running again. Because the default 2s AMM interval is longer
+    # than the 0.5s wait, what we're about to trigger is unlikely, but still possible
+    # for the times to line up. (Especially with a custom AMM interval.)
     amm: ActiveMemoryManagerExtension = s.extensions["amm"]
-    assert amm.running
-        
-    # But what if a new key arrives now? Let `extra` complete.
+    assert len(amm.policies) == 1
+    policy = next(iter(amm.policies))
+    assert isinstance(policy, RetireWorker)
+
+    amm.run_once()
+
+    # The policy has removed itself, because all `xs` have been replicated.
+    assert not amm.policies
+    assert policy.done(), {ts.key: ts.who_has for ts in ws_a.has_what}
+
+    # But what if a new key arrives now while `_track_retire_worker` is still (maybe)
+    # sleeping? Let `extra` complete and wait for it to hit the scheduler.
     await event.set()
     await wait(extra)
-    assert amm.running  # Note: this line is timing sensitive
-        
-    # retire_workers doesn't hang
+
+    if a.address not in s.workers:
+        # It took more than 0.5s to get here, and the scheduler closed our worker. Dang.
+        pytest.skip(
+            "Timing didn't work out: `_track_retire_worker` finished before `extra` completed."
+        )
+
+    # `retire_workers` doesn't hang
     await t
     assert a.address not in s.workers
-    assert not amm.running()
-    
-    # extra was not transferred from a to be. Instead, it was recomputed on b.
-    story = b.story("extra")
-    assert_story(["extra", "ready", "executing"], story)  # Note: this line is timing sensitive
+    assert not amm.policies
+
+    # `extra` was not transferred from `a` to `b`. Instead, it was recomputed on `b`.
+    story = b.state.story(extra.key)
+    assert_story(
+        story,
+        [
+            (extra.key, "compute-task", "released"),
+            (extra.key, "released", "waiting", "waiting", {"extra": "ready"}),
+            (extra.key, "waiting", "ready", "ready", {"extra": "executing"}),
+        ],
+    )
+
+    # `extra` completes successfully and is fetched from the other worker.
+    await extra.result()
 
 
 # FIXME can't drop runtime of this test below 10s; see distributed#5585
