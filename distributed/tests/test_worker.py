@@ -2763,7 +2763,9 @@ async def test_acquire_replicas_already_in_flight(c, s, a):
         assert b.tasks["x"].state == "flight"
 
         b.handle_stimulus(
-            AcquireReplicasEvent(who_has={"x": a.address}, stimulus_id="test")
+            AcquireReplicasEvent(
+                who_has={"x": a.address}, nbytes={"x": 1}, stimulus_id="test"
+            )
         )
         assert b.tasks["x"].state == "flight"
         b.block_gather_dep.set()
