@@ -922,8 +922,6 @@ async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(
     before the worker has actually closed, make sure we still retire it (instead of hanging forever).
 
     This test is timing-sensitive. If it runs too slowly, it *should* `pytest.skip` itself.
-    However, this won't work until https://github.com/dask/distributed/issues/6239 is fixed.
-    So it may get stuck and fail at the 15s test timeout.
 
     See https://github.com/dask/distributed/issues/6223 for motivation.
     """
@@ -936,11 +934,9 @@ async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(
     # But just because `extra` is restricted to only run on worker A, and A gets closed before `extra` can run,
     # so not a deadlock (just user error)).
     xs = c.map(lambda x: x, range(200), workers=[a.address])
+    await wait(xs)
 
-    while len(a.data) < len(xs):
-        await asyncio.sleep(0.1)
-
-    extra = c.submit(lambda: print(event.wait("2s")), workers=[a.address])
+    extra = c.submit(lambda: print(event.wait("2s")), workers=[a.address], allow_other_workers=True)
 
     while extra.key not in a.tasks or a.tasks[extra.key].state != "executing":
         await asyncio.sleep(0.01)
@@ -949,7 +945,7 @@ async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(
 
     # Wait for all `xs` to be replicated.
     while not len(ws_b.has_what) == len(xs):
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0)
 
     # `_track_retire_worker` _should_ now be sleeping for 0.5s, because there were >=200 keys on A.
     # In this test, everything from here on needs to happen within 0.5s.
