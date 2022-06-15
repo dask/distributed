@@ -1,4 +1,3 @@
-import array
 import asyncio
 import contextvars
 import functools
@@ -8,6 +7,7 @@ import queue
 import socket
 import traceback
 import warnings
+from array import array
 from collections import deque
 from time import sleep
 
@@ -19,15 +19,14 @@ import dask
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.metrics import time
 from distributed.utils import (
-    LRU,
     All,
     Log,
     Logs,
     LoopRunner,
     TimeoutError,
     _maybe_complex,
-    ensure_bytes,
     ensure_ip,
+    ensure_memoryview,
     format_dashboard_link,
     get_ip_interface,
     get_traceback,
@@ -59,7 +58,8 @@ from distributed.utils_test import (
 )
 
 
-def test_All(loop):
+@gen_test()
+async def test_All():
     async def throws():
         1 / 0
 
@@ -69,21 +69,18 @@ def test_All(loop):
     async def inc(x):
         return x + 1
 
-    async def f():
-        results = await All([inc(i) for i in range(10)])
-        assert results == list(range(1, 11))
+    results = await All([inc(i) for i in range(10)])
+    assert results == list(range(1, 11))
 
-        start = time()
-        for tasks in [[throws(), slow()], [slow(), throws()]]:
-            try:
-                await All(tasks)
-                assert False
-            except ZeroDivisionError:
-                pass
-            end = time()
-            assert end - start < 10
-
-    loop.run_sync(f)
+    start = time()
+    for tasks in [[throws(), slow()], [slow(), throws()]]:
+        try:
+            await All(tasks)
+            assert False
+        except ZeroDivisionError:
+            pass
+        end = time()
+        assert end - start < 10
 
 
 def test_sync_error(loop_in_thread):
@@ -250,25 +247,73 @@ def test_seek_delimiter_endline():
     assert f.tell() == 7
 
 
-def test_ensure_bytes():
-    data = [b"1", "1", memoryview(b"1"), bytearray(b"1"), array.array("b", [49])]
-    for d in data:
-        result = ensure_bytes(d)
-        assert isinstance(result, bytes)
-        assert result == b"1"
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"",
+        bytearray(),
+        b"1",
+        bytearray(b"1"),
+        memoryview(b"1"),
+        memoryview(bytearray(b"1")),
+        array("B", b"1"),
+        array("I", range(5)),
+        memoryview(b"123456")[1:-1],
+        memoryview(b"123456")[::2],
+        memoryview(array("I", range(5)))[1:-1],
+        memoryview(array("I", range(5)))[::2],
+        memoryview(b"123456").cast("B", (2, 3)),
+        memoryview(b"0123456789").cast("B", (5, 2))[1:-1],
+        memoryview(b"0123456789").cast("B", (5, 2))[::2],
+    ],
+)
+def test_ensure_memoryview(data):
+    data_mv = memoryview(data)
+    result = ensure_memoryview(data)
+    assert isinstance(result, memoryview)
+    assert result.contiguous
+    assert result.ndim == 1
+    assert result.format == "B"
+    assert result == bytes(data_mv)
+    if data_mv.nbytes and data_mv.contiguous:
+        assert result.readonly == data_mv.readonly
+        if isinstance(data, memoryview):
+            if data.ndim == 1 and data.format == "B":
+                assert id(result) == id(data)
+            else:
+                assert id(data) != id(result)
+    else:
+        assert id(result.obj) != id(data_mv.obj)
+        assert not result.readonly
 
 
-def test_ensure_bytes_ndarray():
+@pytest.mark.parametrize(
+    "dt, nitems, shape, strides",
+    [
+        ("i8", 12, (12,), (8,)),
+        ("i8", 12, (3, 4), (32, 8)),
+        ("i8", 12, (4, 3), (8, 32)),
+        ("i8", 12, (3, 2), (32, 16)),
+        ("i8", 12, (2, 3), (16, 32)),
+    ],
+)
+def test_ensure_memoryview_ndarray(dt, nitems, shape, strides):
     np = pytest.importorskip("numpy")
-    result = ensure_bytes(np.arange(12))
-    assert isinstance(result, bytes)
+    data = np.ndarray(
+        shape, dtype=dt, buffer=np.arange(nitems, dtype=dt), strides=strides
+    )
+    result = ensure_memoryview(data)
+    assert isinstance(result, memoryview)
+    assert result.ndim == 1
+    assert result.format == "B"
+    assert result.contiguous
 
 
-def test_ensure_bytes_pyarrow_buffer():
+def test_ensure_memoryview_pyarrow_buffer():
     pa = pytest.importorskip("pyarrow")
     buf = pa.py_buffer(b"123")
-    result = ensure_bytes(buf)
-    assert isinstance(result, bytes)
+    result = ensure_memoryview(buf)
+    assert isinstance(result, memoryview)
 
 
 def test_nbytes():
@@ -546,24 +591,6 @@ def test_parse_ports():
         parse_ports("foo")
     with pytest.raises(ValueError):
         parse_ports("100.5")
-
-
-def test_lru():
-
-    l = LRU(maxsize=3)
-    l["a"] = 1
-    l["b"] = 2
-    l["c"] = 3
-    assert list(l.keys()) == ["a", "b", "c"]
-
-    # Use "a" and ensure it becomes the most recently used item
-    l["a"]
-    assert list(l.keys()) == ["b", "c", "a"]
-
-    # Ensure maxsize is respected
-    l["d"] = 4
-    assert len(l) == 3
-    assert list(l.keys()) == ["c", "a", "d"]
 
 
 @gen_test()

@@ -14,7 +14,7 @@ async def test_cluster_dump_plugin(c, s, *workers, tmp_path):
     f2 = c.submit(inc, f1)
 
     assert (await f2) == 3
-    await s.close(close_workers=True)
+    await s.close()
 
     dump = DumpArtefact.from_url(str(dump_file))
     assert {f1.key, f2.key} == set(dump.scheduler_story(f1.key, f2.key).keys())

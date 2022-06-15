@@ -16,7 +16,6 @@ from queue import Empty
 from time import sleep as sync_sleep
 from typing import TYPE_CHECKING, ClassVar
 
-import psutil
 from tornado import gen
 from tornado.ioloop import IOLoop
 
@@ -94,7 +93,6 @@ class Nanny(ServerNode):
 
     _instances: ClassVar[weakref.WeakSet[Nanny]] = weakref.WeakSet()
     process = None
-    status = Status.undefined
     memory_manager: NannyMemoryManager
 
     # Inputs to parse_ports()
@@ -136,8 +134,16 @@ class Nanny(ServerNode):
         config=None,
         **worker_kwargs,
     ):
+        if loop is not None:
+            warnings.warn(
+                "the `loop` kwarg to `Nanny` is ignored, and will be removed in a future release. "
+                "The Nanny always binds to the current loop.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         self._setup_logging(logger)
-        self.loop = loop or IOLoop.current()
+        self.loop = self.io_loop = IOLoop.current()
 
         if isinstance(security, dict):
             security = Security(**security)
@@ -248,9 +254,7 @@ class Nanny(ServerNode):
 
         self.plugins: dict[str, NannyPlugin] = {}
 
-        super().__init__(
-            handlers=handlers, io_loop=self.loop, connection_args=self.connection_args
-        )
+        super().__init__(handlers=handlers, connection_args=self.connection_args)
 
         self.scheduler = self.rpc(self.scheduler_addr)
         self.memory_manager = NannyMemoryManager(self, memory_limit=memory_limit)
@@ -269,7 +273,6 @@ class Nanny(ServerNode):
 
         self._listen_address = listen_address
         Nanny._instances.add(self)
-        self.status = Status.init
 
     # Deprecated attributes; use Nanny.memory_manager.<name> instead
     memory_limit = DeprecatedMemoryManagerAttribute()
@@ -289,7 +292,10 @@ class Nanny(ServerNode):
         allowed_errors = (TimeoutError, CommClosedError, EnvironmentError, RPCClosed)
         with suppress(allowed_errors):
             await asyncio.wait_for(
-                self.scheduler.unregister(address=self.worker_address), timeout
+                self.scheduler.unregister(
+                    address=self.worker_address, stimulus_id=f"nanny-close-{time()}"
+                ),
+                timeout,
             )
 
     @property
@@ -306,10 +312,10 @@ class Nanny(ServerNode):
         warnings.warn("The local_dir attribute has moved to local_directory")
         return self.local_directory
 
-    async def start(self):
+    async def start_unsafe(self):
         """Start nanny, start local process, start watching"""
 
-        await super().start()
+        await super().start_unsafe()
 
         ports = parse_ports(self._start_port)
         for port in ports:
@@ -334,7 +340,7 @@ class Nanny(ServerNode):
                 break
         else:
             raise ValueError(
-                f"Could not start Nanny on host {self._start_host}"
+                f"Could not start Nanny on host {self._start_host} "
                 f"with port {self._start_port}"
             )
 
@@ -349,11 +355,12 @@ class Nanny(ServerNode):
 
         logger.info("        Start Nanny at: %r", self.address)
         response = await self.instantiate()
-        if response == Status.running:
-            assert self.worker_address
-            self.status = Status.running
-        else:
+
+        if response != Status.running:
             await self.close()
+            return
+
+        assert self.worker_address
 
         self.start_periodic_callbacks()
 
@@ -385,7 +392,6 @@ class Nanny(ServerNode):
                 nanny=self.address,
                 name=self.name,
                 memory_limit=self.memory_manager.memory_limit,
-                reconnect=self.reconnect,
                 resources=self.resources,
                 validate=self.validate,
                 silence_logs=self.silence_logs,
@@ -469,7 +475,7 @@ class Nanny(ServerNode):
 
         return {"status": "OK"}
 
-    async def restart(self, timeout=30, executor_wait=True):
+    async def restart(self, timeout=30):
         async def _():
             if self.process is not None:
                 await self.kill()
@@ -484,19 +490,6 @@ class Nanny(ServerNode):
             return "timed out"
         else:
             return "OK"
-
-    @property
-    def _psutil_process(self):
-        pid = self.process.process.pid
-        try:
-            self._psutil_process_obj
-        except AttributeError:
-            self._psutil_process_obj = psutil.Process(pid)
-
-        if self._psutil_process_obj.pid != pid:
-            self._psutil_process_obj = psutil.Process(pid)
-
-        return self._psutil_process_obj
 
     def is_alive(self):
         return self.process is not None and self.process.is_alive()
@@ -555,7 +548,7 @@ class Nanny(ServerNode):
         """
         self.status = Status.closing_gracefully
 
-    async def close(self, comm=None, timeout=5, report=None):
+    async def close(self, timeout=5):
         """
         Close the worker process, stop all comms.
         """
@@ -568,7 +561,8 @@ class Nanny(ServerNode):
 
         self.status = Status.closing
         logger.info(
-            f"Closing Nanny at {self.address!r}. Report closure to scheduler: {report}"
+            "Closing Nanny at %r.",
+            self.address_safe,
         )
 
         for preload in self.preloads:
@@ -591,9 +585,8 @@ class Nanny(ServerNode):
         self.process = None
         await self.rpc.close()
         self.status = Status.closed
-        if comm:
-            await comm.write("OK")
         await super().close()
+        return "OK"
 
     async def _log_event(self, topic, msg):
         await self.scheduler.log_event(
@@ -816,12 +809,10 @@ class WorkerProcess:
         try:
             os.environ.update(env)
             dask.config.set(config)
-            try:
-                from dask.multiprocessing import initialize_worker_process
-            except ImportError:  # old Dask version
-                pass
-            else:
-                initialize_worker_process()
+
+            from dask.multiprocessing import default_initializer
+
+            default_initializer()
 
             if silence_logs:
                 logger.setLevel(silence_logs)
@@ -834,9 +825,7 @@ class WorkerProcess:
             async def do_stop(timeout=5, executor_wait=True):
                 try:
                     await worker.close(
-                        report=True,
                         nanny=False,
-                        safe=True,  # TODO: Graceful or not?
                         executor_wait=executor_wait,
                         timeout=timeout,
                     )
@@ -848,10 +837,16 @@ class WorkerProcess:
                 Wait for an incoming stop message and then stop the
                 worker cleanly.
                 """
-                msg = child_stop_q.get()
-                child_stop_q.close()
-                assert msg.pop("op") == "stop"
-                loop.add_callback(do_stop, **msg)
+                try:
+                    msg = child_stop_q.get()
+                except (TypeError, OSError, EOFError):
+                    logger.error("Worker process died unexpectedly")
+                    msg = {"op": "stop"}
+                finally:
+                    child_stop_q.close()
+                    assert msg["op"] == "stop", msg
+                    del msg["op"]
+                    loop.add_callback(do_stop, **msg)
 
             thread = threading.Thread(
                 target=watch_stop_q, name="Nanny stop queue watch"
@@ -916,8 +911,8 @@ class WorkerProcess:
                 loop.run_sync(do_stop)
             finally:
                 with suppress(ValueError):
-                    child_stop_q.put({"op": "close"})  # probably redundant
+                    child_stop_q.put({"op": "stop"})  # usually redundant
                 with suppress(ValueError):
-                    child_stop_q.close()  # probably redundant
+                    child_stop_q.close()  # usually redundant
                 child_stop_q.join_thread()
                 thread.join(timeout=2)

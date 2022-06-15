@@ -416,8 +416,9 @@ class ActiveMemoryManagerPolicy(abc.ABC):
     ) -> SuggestionGenerator:
         """This method is invoked by the ActiveMemoryManager every few seconds, or
         whenever the user invokes ``client.amm.run_once``.
+
         It is an iterator that must emit
-        :class:`~distributed.active_memory_manager.Suggestion`s:
+        :class:`~distributed.active_memory_manager.Suggestion` objects:
 
         - ``Suggestion("replicate", <TaskState>)``
         - ``Suggestion("replicate", <TaskState>, {subset of potential workers to replicate to})``
@@ -662,6 +663,10 @@ class RetireWorker(ActiveMemoryManagerPolicy):
     def done(self) -> bool:
         """Return True if it is safe to close the worker down; False otherwise"""
         if self not in self.manager.policies:
+            # Either the no_recipients flag has been raised, or there were no unique replicas
+            # as of the latest AMM run. Note that due to tasks transitioning from running to
+            # memory there may be some now; it's OK to lose them and just recompute them
+            # somewhere else.
             return True
         ws = self.manager.scheduler.workers.get(self.address)
         if ws is None:

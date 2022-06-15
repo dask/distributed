@@ -5,6 +5,8 @@ pytest.importorskip("requests")
 
 import os
 import shutil
+import signal
+import subprocess
 import sys
 import tempfile
 from time import sleep
@@ -17,13 +19,14 @@ from dask.utils import tmpfile
 import distributed
 import distributed.cli.dask_scheduler
 from distributed import Client, Scheduler
-from distributed.compatibility import LINUX
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.metrics import time
 from distributed.utils import get_ip, get_ip_interface
 from distributed.utils_test import (
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_locally_4,
     popen,
+    wait_for_log_line,
 )
 
 
@@ -63,13 +66,9 @@ def test_no_dashboard(loop):
 def test_dashboard(loop):
     pytest.importorskip("bokeh")
 
-    with popen(["dask-scheduler"], flush_output=False) as proc:
-        for line in proc.stdout:
-            if b"dashboard at" in line:
-                dashboard_port = int(line.decode().split(":")[-1].strip())
-                break
-        else:
-            assert False  # pragma: nocover
+    with popen(["dask-scheduler"], capture_output=True) as proc:
+        line = wait_for_log_line(b"dashboard at", proc.stdout)
+        dashboard_port = int(line.decode().split(":")[-1].strip())
 
         with Client(f"127.0.0.1:{Scheduler.default_port}", loop=loop):
             pass
@@ -219,15 +218,11 @@ def test_dashboard_port_zero(loop):
     pytest.importorskip("bokeh")
     with popen(
         ["dask-scheduler", "--dashboard-address", ":0"],
-        flush_output=False,
+        capture_output=True,
     ) as proc:
-        for line in proc.stdout:
-            if b"dashboard at" in line:
-                dashboard_port = int(line.decode().split(":")[-1].strip())
-                assert dashboard_port != 0
-                break
-        else:
-            assert False  # pragma: nocover
+        line = wait_for_log_line(b"dashboard at", proc.stdout)
+        dashboard_port = int(line.decode().split(":")[-1].strip())
+        assert dashboard_port != 0
 
 
 PRELOAD_TEXT = """
@@ -411,12 +406,32 @@ def test_version_option():
 
 
 @pytest.mark.slow
-def test_idle_timeout(loop):
+def test_idle_timeout():
     start = time()
     runner = CliRunner()
-    runner.invoke(distributed.cli.dask_scheduler.main, ["--idle-timeout", "1s"])
+    result = runner.invoke(
+        distributed.cli.dask_scheduler.main, ["--idle-timeout", "1s"]
+    )
     stop = time()
     assert 1 < stop - start < 10
+    assert result.exit_code == 0
+
+
+@pytest.mark.slow
+def test_restores_signal_handler():
+    # another test could have altered the signal handler, so use a new function
+    # that both has sensible sigint behaviour *and* can be used as a sentinel
+    def raise_ki():
+        raise KeyboardInterrupt
+
+    original_handler = signal.signal(signal.SIGINT, raise_ki)
+    try:
+        CliRunner().invoke(
+            distributed.cli.dask_scheduler.main, ["--idle-timeout", "1s"]
+        )
+        assert signal.getsignal(signal.SIGINT) is raise_ki
+    finally:
+        signal.signal(signal.SIGINT, original_handler)
 
 
 def test_multiple_workers_2(loop):
@@ -453,3 +468,25 @@ def test_multiple_workers(loop):
                     while len(c.nthreads()) < 2:
                         sleep(0.1)
                         assert time() < start + 10
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(WINDOWS, reason="POSIX only")
+@pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
+def test_signal_handling(loop, sig):
+    with subprocess.Popen(
+        ["python", "-m", "distributed.cli.dask_scheduler"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    ) as scheduler:
+        # Wait for scheduler to start
+        with Client(f"127.0.0.1:{Scheduler.default_port}", loop=loop) as c:
+            pass
+        scheduler.send_signal(sig)
+        stdout, stderr = scheduler.communicate()
+        logs = stdout.decode().lower()
+        assert stderr is None
+        assert scheduler.returncode == 0
+        assert sig.name.lower() in logs
+        assert "scheduler closing" in logs
+        assert "end scheduler" in logs

@@ -104,7 +104,9 @@ exclude_patterns: list[str] = []
 # show_authors = False
 
 # The name of the Pygments (syntax highlighting) style to use.
-pygments_style = "default"
+# Commenting this out for now, if we register dask pygments,
+# then eventually this line can be:
+# pygments_style = "dask"
 
 # A list of ignored prefixes for module index sorting.
 # modindex_common_prefix = []
@@ -426,7 +428,7 @@ def copy_legacy_redirects(app, docname):
                 f.write(page)
 
 
-from docutils.parsers.rst import directives  # type: ignore
+from docutils.parsers.rst import directives
 
 # -- Configuration to keep autosummary in sync with autoclass::members ----------------------------------------------
 # Fixes issues/3693

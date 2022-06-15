@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
+import subprocess
 import sys
 from multiprocessing import cpu_count
 from time import sleep
@@ -13,10 +15,11 @@ from dask.utils import tmpfile
 
 from distributed import Client
 from distributed.cli.dask_worker import _apportion_ports, main
-from distributed.compatibility import LINUX, to_thread
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
-from distributed.utils_test import gen_cluster, popen, requires_ipv6
+from distributed.utils import open_port
+from distributed.utils_test import gen_cluster, popen, requires_ipv6, wait_for_log_line
 
 
 @pytest.mark.parametrize(
@@ -241,11 +244,9 @@ async def test_nanny_worker_port_range_too_many_workers_raises(s):
             "9686:9687",
             "--no-dashboard",
         ],
-        flush_output=False,
+        capture_output=True,
     ) as worker:
-        assert any(
-            b"Not enough ports in range" in worker.stdout.readline() for _ in range(100)
-        )
+        wait_for_log_line(b"Not enough ports in range", worker.stdout, max_lines=100)
 
 
 @pytest.mark.slow
@@ -273,56 +274,22 @@ async def test_no_nanny(c, s):
         await c.wait_for_workers(1)
 
 
-@pytest.mark.slow
-@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 @gen_cluster(client=True, nthreads=[])
-async def test_no_reconnect(c, s, nanny):
+async def test_reconnect_deprecated(c, s):
     with popen(
-        [
-            "dask-worker",
-            s.address,
-            "--no-reconnect",
-            nanny,
-            "--no-dashboard",
-        ]
+        ["dask-worker", s.address, "--reconnect"],
+        capture_output=True,
     ) as worker:
-        # roundtrip works
-        assert await c.submit(lambda x: x + 1, 10) == 11
+        wait_for_log_line(b"`--reconnect` option has been removed", worker.stdout)
+        assert worker.wait() == 1
 
-        (comm,) = s.stream_comms.values()
-        comm.abort()
-
-        # worker terminates as soon as the connection is aborted
-        await to_thread(worker.wait, timeout=5)
-        assert worker.returncode == 0
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
-@gen_cluster(client=True, nthreads=[])
-async def test_reconnect(c, s, nanny):
     with popen(
-        [
-            "dask-worker",
-            s.address,
-            "--reconnect",
-            nanny,
-            "--no-dashboard",
-        ]
+        ["dask-worker", s.address, "--no-reconnect"],
+        capture_output=True,
     ) as worker:
-        # roundtrip works
-        assert await c.submit(lambda x: x + 1, 10) == 11
-
-        (comm,) = s.stream_comms.values()
-        comm.abort()
-
-        # roundtrip still works, which means the worker reconnected
-        assert await c.submit(lambda x: x + 1, 11) == 12
-
-        # closing the scheduler cleanly does terminate the worker
-        await s.close()
-        await to_thread(worker.wait, timeout=5)
-        assert worker.returncode == 0
+        wait_for_log_line(b"flag is deprecated, and will be removed", worker.stdout)
+        await c.wait_for_workers(1)
+        await c.shutdown()
 
 
 @pytest.mark.slow
@@ -394,11 +361,9 @@ def test_scheduler_address_env(loop, monkeypatch):
 async def test_nworkers_requires_nanny(s):
     with popen(
         ["dask-worker", s.address, "--nworkers=2", "--no-nanny"],
-        flush_output=False,
+        capture_output=True,
     ) as worker:
-        assert any(
-            b"Failed to launch worker" in worker.stdout.readline() for _ in range(15)
-        )
+        wait_for_log_line(b"Failed to launch worker", worker.stdout, max_lines=15)
 
 
 @pytest.mark.slow
@@ -435,24 +400,19 @@ async def test_nworkers_expands_name(c, s):
 async def test_worker_cli_nprocs_renamed_to_nworkers(c, s):
     with popen(
         ["dask-worker", s.address, "--nprocs=2"],
-        flush_output=False,
+        capture_output=True,
     ) as worker:
         await c.wait_for_workers(2)
-        assert any(
-            b"renamed to --nworkers" in worker.stdout.readline() for _ in range(15)
-        )
+        wait_for_log_line(b"renamed to --nworkers", worker.stdout, max_lines=15)
 
 
 @gen_cluster(nthreads=[])
 async def test_worker_cli_nworkers_with_nprocs_is_an_error(s):
     with popen(
         ["dask-worker", s.address, "--nprocs=2", "--nworkers=2"],
-        flush_output=False,
+        capture_output=True,
     ) as worker:
-        assert any(
-            b"Both --nprocs and --nworkers" in worker.stdout.readline()
-            for _ in range(15)
-        )
+        wait_for_log_line(b"Both --nprocs and --nworkers", worker.stdout, max_lines=15)
 
 
 @pytest.mark.slow
@@ -593,7 +553,7 @@ def test_worker_timeout(no_nanny):
     if no_nanny:
         args.append("--no-nanny")
     result = runner.invoke(main, args)
-    assert result.exit_code != 0
+    assert result.exit_code == 1
 
 
 def test_bokeh_deprecation():
@@ -682,3 +642,88 @@ def dask_setup(worker):
         await c.wait_for_workers(1)
         [foo] = (await c.run(lambda dask_worker: dask_worker.foo)).values()
         assert foo == "setup"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+def test_timeout(nanny):
+    worker = subprocess.run(
+        [
+            "python",
+            "-m",
+            "distributed.cli.dask_worker",
+            "192.168.1.100:7777",
+            nanny,
+            "--death-timeout=1",
+        ],
+        text=True,
+        encoding="utf8",
+        capture_output=True,
+    )
+
+    assert "timed out starting worker" in worker.stderr.lower()
+    assert "end worker" in worker.stderr.lower()
+    assert worker.returncode == 1
+
+
+@pytest.mark.skipif(WINDOWS, reason="POSIX only")
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+@pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
+@gen_cluster(client=True, nthreads=[])
+async def test_signal_handling(c, s, nanny, sig):
+    with subprocess.Popen(
+        ["python", "-m", "distributed.cli.dask_worker", s.address, nanny],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    ) as worker:
+        await c.wait_for_workers(1)
+
+        worker.send_signal(sig)
+        stdout, stderr = worker.communicate()
+        logs = stdout.decode().lower()
+        assert stderr is None
+        assert worker.returncode == 0
+        assert sig.name.lower() in logs
+        if nanny == "--nanny":
+            assert "closing nanny" in logs
+            assert "stopping worker" in logs
+        else:
+            assert "nanny" not in logs
+        assert "end worker" in logs
+        assert "timed out" not in logs
+        assert "error" not in logs
+        assert "exception" not in logs
+
+
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+def test_error_during_startup(monkeypatch, nanny):
+    # see https://github.com/dask/distributed/issues/6320
+    scheduler_port = str(open_port())
+    scheduler_addr = f"tcp://127.0.0.1:{scheduler_port}"
+
+    monkeypatch.setenv("DASK_SCHEDULER_ADDRESS", scheduler_addr)
+    with popen(
+        [
+            "dask-scheduler",
+            "--port",
+            scheduler_port,
+        ],
+        capture_output=True,
+    ) as scheduler:
+        start = time()
+        # Wait for the scheduler to be up
+        wait_for_log_line(b"Scheduler at", scheduler.stdout)
+        # Ensure this is not killed by pytest-timeout
+        if time() - start > 5:
+            raise TimeoutError("Scheduler failed to start in time.")
+
+        with popen(
+            [
+                "dask-worker",
+                scheduler_addr,
+                nanny,
+                "--worker-port",
+                scheduler_port,
+            ],
+        ) as worker:
+            assert worker.wait(5) == 1

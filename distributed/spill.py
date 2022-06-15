@@ -16,8 +16,7 @@ from distributed.sizeof import safe_sizeof
 
 logger = logging.getLogger(__name__)
 has_zict_210 = parse_version(zict.__version__) >= parse_version("2.1.0")
-# At the moment of writing, zict 2.2.0 has not been released yet. Support git tip.
-has_zict_220 = parse_version(zict.__version__) >= parse_version("2.2.0.dev2")
+has_zict_220 = parse_version(zict.__version__) >= parse_version("2.2.0")
 
 
 class SpilledSize(NamedTuple):
@@ -31,7 +30,7 @@ class SpilledSize(NamedTuple):
     def __add__(self, other: SpilledSize) -> SpilledSize:  # type: ignore
         return SpilledSize(self.memory + other.memory, self.disk + other.disk)
 
-    def __sub__(self, other: SpilledSize) -> SpilledSize:  # type: ignore
+    def __sub__(self, other: SpilledSize) -> SpilledSize:
         return SpilledSize(self.memory - other.memory, self.disk - other.disk)
 
 

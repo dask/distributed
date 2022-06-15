@@ -6,7 +6,6 @@ from functools import partial
 
 import pytest
 from tornado import ioloop
-from tornado.concurrent import Future
 
 import dask
 
@@ -24,6 +23,7 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.registry import backends, get_backend
+from distributed.compatibility import to_thread
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
 from distributed.utils import get_ip, get_ipv6, mp_context
@@ -423,28 +423,16 @@ async def check_inproc_specific(run_client):
         assert listener.contact_address not in client_addresses
 
 
-def run_coro(func, *args, **kwargs):
-    return func(*args, **kwargs)
+async def run_coro(func, *args, **kwargs):
+    return await func(*args, **kwargs)
 
 
-def run_coro_in_thread(func, *args, **kwargs):
-    fut = Future()
-    main_loop = ioloop.IOLoop.current()
+async def run_coro_in_thread(func, *args, **kwargs):
+    async def run_with_timeout():
+        t = asyncio.create_task(func(*args, **kwargs))
+        return await asyncio.wait_for(t, timeout=10)
 
-    def run():
-        thread_loop = ioloop.IOLoop()  # need fresh IO loop for run_sync()
-        try:
-            res = thread_loop.run_sync(partial(func, *args, **kwargs), timeout=10)
-        except Exception:
-            main_loop.add_callback(fut.set_exc_info, sys.exc_info())
-        else:
-            main_loop.add_callback(fut.set_result, res)
-        finally:
-            thread_loop.close()
-
-    t = threading.Thread(target=run)
-    t.start()
-    return fut
+    return await to_thread(asyncio.run, run_with_timeout())
 
 
 @gen_test()
@@ -575,7 +563,7 @@ async def check_client_server(
 
 @pytest.mark.gpu
 @gen_test()
-async def test_ucx_client_server():
+async def test_ucx_client_server(ucx_loop):
     pytest.importorskip("distributed.comm.ucx")
     ucp = pytest.importorskip("ucp")
 

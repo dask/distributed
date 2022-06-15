@@ -162,8 +162,18 @@ process.
 API Documentation
 -----------------
 
+.. currentmodule:: distributed.worker_state_machine
+
 .. autoclass:: distributed.worker_state_machine.TaskState
    :members:
+
+.. autoclass:: distributed.worker_state_machine.WorkerState
+   :members:
+
+.. autoclass:: distributed.worker_state_machine.BaseWorker
+   :members:
+
+.. currentmodule:: distributed.worker
 
 .. autoclass:: distributed.worker.Worker
    :members:

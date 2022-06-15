@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import shutil
@@ -170,7 +171,7 @@ async def test_web_preload():
         assert (
             re.match(
                 r"(?s).*Downloading preload at http://example.com/preload\n"
-                r".*Run preload setup function: http://example.com/preload\n"
+                r".*Run preload setup: http://example.com/preload\n"
                 r".*",
                 log.getvalue(),
             )
@@ -279,6 +280,28 @@ async def test_client_preload_click(s):
         address=s.address, asynchronous=True, preload=text, preload_argv=[[value]]
     ) as c:
         assert c.foo == value
+
+
+@gen_test()
+async def test_failure_doesnt_crash():
+    text = """
+def dask_setup(worker):
+    raise Exception(123)
+
+def dask_teardown(worker):
+    raise Exception(456)
+"""
+
+    with captured_logger(logging.getLogger("distributed.scheduler")) as s_logger:
+        with captured_logger(logging.getLogger("distributed.worker")) as w_logger:
+            async with Scheduler(dashboard_address=":0", preload=text) as s:
+                async with Worker(s.address, preload=[text]) as w:
+                    pass
+
+    assert "123" in s_logger.getvalue()
+    assert "123" in w_logger.getvalue()
+    assert "456" in s_logger.getvalue()
+    assert "456" in w_logger.getvalue()
 
 
 @gen_cluster(nthreads=[])

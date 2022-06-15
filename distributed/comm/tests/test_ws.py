@@ -20,6 +20,8 @@ from distributed.utils_test import (
     xfail_ssl_issue5601,
 )
 
+pytestmark = pytest.mark.flaky(reruns=2)
+
 
 def test_registered():
     assert "ws" in backends

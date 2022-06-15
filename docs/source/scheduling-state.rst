@@ -79,7 +79,7 @@ kept and updated about each task.  Individual task state is stored in an
 object named :class:`TaskState` and consists of the following information:
 
 .. autoclass:: TaskState
-
+    :members:
 
 The scheduler keeps track of all the :class:`TaskState` objects (those
 not in the "forgotten" state) using several containers:
@@ -318,3 +318,4 @@ API
 .. autofunction:: decide_worker
 
 .. autoclass:: MemoryState
+    :members:
