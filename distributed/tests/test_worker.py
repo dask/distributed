@@ -745,17 +745,18 @@ async def test_clean_nbytes(c, s, a, b):
 
 
 @pytest.mark.parametrize("as_deps", [True, False])
-@gen_cluster(client=True, nthreads=[("", 1)] * 20)
-async def test_gather_many_small(c, s, a, *workers, as_deps):
-    """If the dependencies of a given task are very small, do not limit the
-    number of concurrent outgoing connections
+@gen_cluster(client=True, nthreads=[("", 1)] * 21)
+async def test_gather_many_small(c, s, a, *snd_workers, as_deps):
+    """If the dependencies of a given task are very small, do not limit the number of
+    concurrent outgoing connections. If multiple small fetches from the same worker are
+    scheduled all at once, they will result in a single call to gather_dep.
     """
     a.total_out_connections = 2
     futures = await c.scatter(
         {f"x{i}": i for i in range(100)},
-        workers=[w.address for w in workers],
+        workers=[w.address for w in snd_workers],
     )
-    assert all(w.data for w in workers)
+    assert all(w.data for w in snd_workers)
 
     if as_deps:
         future = c.submit(lambda _: None, futures, key="y", workers=[a.address])
@@ -765,12 +766,17 @@ async def test_gather_many_small(c, s, a, *workers, as_deps):
         while len(a.data) < 100:
             await asyncio.sleep(0.01)
 
-    types = list(pluck(0, a.log))
-    req = [i for i, t in enumerate(types) if t == "request-dep"]
-    recv = [i for i, t in enumerate(types) if t == "receive-dep"]
-    assert len(req) == len(recv) == 19
-    assert min(recv) > max(req)
     assert a.comm_nbytes == 0
+
+    story = a.story("request-dep", "receive-dep")
+    assert len(story) == 40  # 1 request-dep + 1 receive-dep per sender worker
+    # All GatherDep instructions are fired at the same time; each fetches all keys
+    # available on the sender worker
+    for ev in story[:20]:
+        assert ev[0] == "request-dep"
+        assert len(ev[2]) > 1
+    for ev in story[20:]:
+        assert ev[0] == "receive-dep"
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
