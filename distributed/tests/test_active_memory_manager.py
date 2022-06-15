@@ -948,40 +948,24 @@ async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(
         await asyncio.sleep(0)
 
     # `_track_retire_worker` _should_ now be sleeping for 0.5s, because there were >=200 keys on A.
-    # In this test, everything from here on needs to happen within 0.5s.
+    # In this test, everything from the beginning of the transfers needs to happen within 0.5s.
 
-    # The policy runs again. Because the default 2s AMM interval is 4x longer than the 0.5s wait,
-    # what we're about to trigger is unlikely, but still theoretically possible for the times to line up.
     amm: ActiveMemoryManagerExtension = s.extensions["amm"]
-    assert len(amm.policies) == 1
-    policy = next(iter(amm.policies))
-    assert isinstance(policy, RetireWorker)
-
-    # This will drop all the `xs` from A (since they're already replicated on B).
-    amm.run_once()
-
-    # The policy has removed itself, because there's no more data in need of replication.
-    assert not ws_a.has_what
-    assert not amm.policies
-    assert policy.done(), {ts.key: ts.who_has for ts in ws_a.has_what}
-
-    # But what if a new key arrives now?
-    # Let `extra` complete.
+    assert amm.running
+        
+    # But what if a new key arrives now? Let `extra` complete.
     await event.set()
-    # ^ FIXME: this can hang forever if the worker is actually closing right now, see #6239.
-    while not s.tasks[extra.key].state == "memory":
-        await asyncio.sleep(0.01)
-        if a.address not in s.workers:
-            # It took more than 0.5s to get here, and the scheduler closed our worker. Dang.
-            # FIXME unreachable until https://github.com/dask/distributed/issues/6239 is fixed.
-            pytest.skip("Timing didn't work out.")
-
-    # Worker A is no longer empty
-    assert s.tasks[extra.key].who_has == {ws_a}
-
-    # Nonetheless, it should still retire.
-    while a.address in s.workers:
-        await asyncio.sleep(0.1)
+    await wait(extra)
+    assert amm.running  # Note: this line is timing sensitive
+        
+    # retire_workers doesn't hang
+    await t
+    assert a.address not in s.workers
+    assert not amm.running()
+    
+    # extra was not transferred from a to be. Instead, it was recomputed on b.
+    story = b.story("extra")
+    assert_story(["extra", "ready", "executing"], story)  # Note: this line is timing sensitive
 
 
 # FIXME can't drop runtime of this test below 10s; see distributed#5585
