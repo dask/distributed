@@ -3002,6 +3002,11 @@ class WorkerState:
         if self.transition_counter_max:
             assert self.transition_counter < self.transition_counter_max
 
+        # Test that there aren't multiple TaskState objects with the same key in data_needed
+        assert len({ts.key for ts in self.data_needed}) == len(self.data_needed)
+        for tss in self.data_needed_per_worker.values():
+            assert len({ts.key for ts in tss}) == len(tss)
+
 
 class BaseWorker(abc.ABC):
     """Wrapper around the :class:`WorkerState` that implements instructions handling.
