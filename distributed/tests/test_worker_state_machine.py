@@ -10,6 +10,7 @@ from tlz import first
 import distributed.profile as profile
 from distributed import Nanny, Worker, wait
 from distributed.protocol.serialize import Serialize
+from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.utils import recursive_to_dict
 from distributed.utils_test import (
     BlockedGetData,
@@ -707,6 +708,15 @@ async def test_task_state_instance_are_garbage_collected(c, s, a, b):
     await c.gather([f2, f1])
     del futs, red, f1, f2
     await c.run(check)
+
+    async def check(dask_scheduler):
+        while dask_scheduler.tasks:
+            await asyncio.sleep(0.01)
+        with profile.lock:
+            gc.collect()
+        assert not SchedulerTaskState._instances
+
+    await c.run_on_scheduler(check)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)

@@ -58,6 +58,7 @@ from distributed.nanny import Nanny
 from distributed.node import ServerNode
 from distributed.proctitle import enable_proctitle_on_children
 from distributed.protocol import deserialize
+from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.security import Security
 from distributed.utils import (
     DequeHandler,
@@ -1814,6 +1815,7 @@ def check_instances():
     Scheduler._instances.clear()
     SpecCluster._instances.clear()
     Worker._initialized_clients.clear()
+    SchedulerTaskState._instances.clear()
     WorkerTaskState._instances.clear()
     Nanny._instances.clear()
     _global_clients.clear()
