@@ -27,6 +27,7 @@ from distributed.worker_state_machine import (
     ExecuteSuccessEvent,
     Instruction,
     RecommendationsConflict,
+    RefreshWhoHasEvent,
     ReleaseWorkerDataMsg,
     RescheduleEvent,
     RescheduleMsg,
@@ -35,6 +36,7 @@ from distributed.worker_state_machine import (
     TaskState,
     TaskStateState,
     UpdateDataEvent,
+    WorkerState,
     merge_recs_instructions,
 )
 
@@ -83,6 +85,74 @@ def test_TaskState__to_dict():
             "priority": [0],
         },
     ]
+
+
+def test_WorkerState__to_dict():
+    ws = WorkerState(8)
+    ws.address = "127.0.0.1.1234"
+    ws.handle_stimulus(
+        AcquireReplicasEvent(who_has={"x": ["127.0.0.1:1235"]}, stimulus_id="s1")
+    )
+    ws.handle_stimulus(
+        UpdateDataEvent(data={"y": object()}, report=False, stimulus_id="s2")
+    )
+
+    actual = recursive_to_dict(ws)
+    # Remove timestamps
+    for ev in actual["log"]:
+        del ev[-1]
+    for stim in actual["stimulus_log"]:
+        del stim["handled"]
+
+    expect = {
+        "address": "127.0.0.1.1234",
+        "busy_workers": [],
+        "constrained": [],
+        "data": {"y": None},
+        "data_needed": ["x"],
+        "data_needed_per_worker": {"127.0.0.1:1235": ["x"]},
+        "executing": [],
+        "in_flight_tasks": [],
+        "in_flight_workers": {},
+        "log": [
+            ["x", "ensure-task-exists", "released", "s1"],
+            ["x", "released", "fetch", "fetch", {}, "s1"],
+            ["y", "put-in-memory", "s2"],
+            ["y", "receive-from-scatter", "s2"],
+        ],
+        "long_running": [],
+        "nthreads": 8,
+        "ready": [],
+        "running": True,
+        "stimulus_log": [
+            {
+                "cls": "AcquireReplicasEvent",
+                "stimulus_id": "s1",
+                "who_has": {"x": ["127.0.0.1:1235"]},
+            },
+            {
+                "cls": "UpdateDataEvent",
+                "data": {"y": None},
+                "report": False,
+                "stimulus_id": "s2",
+            },
+        ],
+        "tasks": {
+            "x": {
+                "key": "x",
+                "priority": [1],
+                "state": "fetch",
+                "who_has": ["127.0.0.1:1235"],
+            },
+            "y": {
+                "key": "y",
+                "nbytes": 16,
+                "state": "memory",
+            },
+        },
+        "transition_counter": 1,
+    }
+    assert actual == expect
 
 
 def traverse_subclasses(cls: type) -> Iterator[type]:
@@ -659,3 +729,81 @@ def test_task_state_instance_are_garbage_collected(processes, tmp_path):
 
     assert not out
     assert not err
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+async def test_fetch_to_missing_on_refresh_who_has(c, s, w1, w2, w3):
+    """
+    1. Two tasks, x and y, are only available on a busy worker.
+       The worker sends request-refresh-who-has to the scheduler.
+    2. The scheduler responds that x has become missing, while y has gained an
+       additional replica
+    3. The handler for RefreshWhoHasEvent empties x.who_has and recommends a transition
+       to missing.
+    4. Before the recommendation can be implemented, the same event invokes
+       _ensure_communicating to let y to transition to flight. This in turn pops x from
+       data_needed - but x has an empty who_has, which is an exceptional situation.
+    5. The transition fetch->missing is executed, but x is no longer in
+       data_needed - another exceptional situation.
+    """
+    x = c.submit(inc, 1, key="x", workers=[w1.address])
+    y = c.submit(inc, 2, key="y", workers=[w1.address])
+    await wait([x, y])
+    w1.total_in_connections = 0
+    s.request_acquire_replicas(w3.address, ["x", "y"], stimulus_id="test1")
+
+    # The tasks will now flip-flop between fetch and flight every 150ms
+    # (see Worker.retry_busy_worker_later)
+    await wait_for_state("x", "fetch", w3)
+    await wait_for_state("y", "fetch", w3)
+    assert w1.address in w3.busy_workers
+    # w3 sent {op: request-refresh-who-has, keys: [x, y]}
+    # There also may have been enough time for a refresh-who-has message to come back,
+    # which reiterated what w3 already knew:
+    # {op: refresh-who-has, who_has={x: [w1.address], y: [w1.address]}}
+
+    # Let's instead simulate that, while request-refresh-who-has was in transit,
+    # w2 gained a replica of y and w1 closed down.
+    # When request-refresh-who-has lands, the scheduler will respond:
+    # {op: refresh-who-has, who_has={x: [], y: [w2.address]}}
+    w3.handle_stimulus(
+        RefreshWhoHasEvent(who_has={"x": [], "y": [w2.address]}, stimulus_id="test2")
+    )
+    assert w3.tasks["x"].state == "missing"
+    assert w3.tasks["y"].state == "flight"
+    assert w3.tasks["y"].who_has == {w2.address}
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_fetch_to_missing_on_network_failure(c, s, a):
+    """
+    1. Two tasks, x and y, are respectively in flight and fetch state from the same
+       worker, which holds the only replica of both.
+    2. gather_dep for x returns GatherDepNetworkFailureEvent
+    3. The event empties has_what, x.who_has, and y.who_has.
+    4. The same event invokes _ensure_communicating, which pops y from data_needed
+       - but y has an empty who_has, which is an exceptional situation.
+       _ensure_communicating recommends a transition to missing for x.
+    5. The fetch->missing transition is executed, but y is no longer in data_needed -
+       another exceptional situation.
+    """
+    block_get_data = asyncio.Event()
+
+    class BlockedBreakingWorker(Worker):
+        async def get_data(self, comm, *args, **kwargs):
+            await block_get_data.wait()
+            raise OSError("fake error")
+
+    async with BlockedBreakingWorker(s.address) as b:
+        x = c.submit(inc, 1, key="x", workers=[b.address])
+        y = c.submit(inc, 2, key="y", workers=[b.address])
+        await wait([x, y])
+        s.request_acquire_replicas(a.address, ["x"], stimulus_id="test_x")
+        await wait_for_state("x", "flight", a)
+        s.request_acquire_replicas(a.address, ["y"], stimulus_id="test_y")
+        await wait_for_state("y", "fetch", a)
+
+        block_get_data.set()
+
+        await wait_for_state("x", "missing", a)
+        await wait_for_state("y", "missing", a)

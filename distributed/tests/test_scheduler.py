@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -623,6 +625,93 @@ async def test_restart(c, s, a, b):
         assert not ws.processing
 
     assert not s.tasks
+
+
+@gen_cluster(client=True, Worker=Nanny, timeout=60)
+async def test_restart_some_nannies_some_not(c, s, a, b):
+    original_procs = {a.process.process, b.process.process}
+    original_workers = dict(s.workers)
+    async with Worker(s.address, nthreads=1) as w:
+        await c.wait_for_workers(3)
+
+        # Halfway through `Scheduler.restart`, only the non-Nanny workers should be removed.
+        # Nanny-based workers should be kept around so we can call their `restart` RPC.
+        class ValidateRestartPlugin(SchedulerPlugin):
+            error: Exception | None
+
+            def restart(self, scheduler: Scheduler) -> None:
+                try:
+                    assert scheduler.workers.keys() == {
+                        a.worker_address,
+                        b.worker_address,
+                    }
+                    assert all(ws.nanny for ws in scheduler.workers.values())
+                except Exception as e:
+                    # `Scheduler.restart` swallows exceptions within plugins
+                    self.error = e
+                    raise
+                else:
+                    self.error = None
+
+        plugin = ValidateRestartPlugin()
+        s.add_plugin(plugin)
+        await s.restart()
+
+        if plugin.error:
+            raise plugin.error
+
+        assert w.status == Status.closed
+
+        assert len(s.workers) == 2
+        # Confirm they restarted
+        # NOTE: == for `psutil.Process` compares PID and creation time
+        new_procs = {a.process.process, b.process.process}
+        assert new_procs != original_procs
+        # The workers should have new addresses
+        assert s.workers.keys().isdisjoint(original_workers.keys())
+        # The old WorkerState instances should be replaced
+        assert set(s.workers.values()).isdisjoint(original_workers.values())
+
+
+class SlowRestartNanny(Nanny):
+    def __init__(self, *args, **kwargs):
+        self.restart_proceed = asyncio.Event()
+        self.restart_called = asyncio.Event()
+        super().__init__(*args, **kwargs)
+
+    async def restart(self, **kwargs):
+        self.restart_called.set()
+        await self.restart_proceed.wait()
+        return await super().restart(**kwargs)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    Worker=SlowRestartNanny,
+    worker_kwargs={"heartbeat_interval": "1ms"},
+)
+async def test_restart_heartbeat_before_closing(c, s: Scheduler, n: SlowRestartNanny):
+    """
+    Ensure that if workers heartbeat in the middle of `Scheduler.restart`, they don't close themselves.
+    https://github.com/dask/distributed/issues/6494
+    """
+    prev_workers = dict(s.workers)
+    restart_task = asyncio.create_task(s.restart())
+
+    await n.restart_called.wait()
+    await asyncio.sleep(0.5)  # significantly longer than the heartbeat interval
+
+    # WorkerState should not be removed yet, because the worker hasn't been told to close
+    assert s.workers
+
+    n.restart_proceed.set()
+    # Wait until the worker has left (possibly until it's come back too)
+    while s.workers == prev_workers:
+        await asyncio.sleep(0.01)
+
+    await restart_task
+    await c.wait_for_workers(1)
 
 
 @gen_cluster()
@@ -3506,3 +3595,9 @@ async def test_worker_state_unique_regardless_of_address(s, w):
     assert ws1 is not ws2
     assert ws1 != ws2
     assert hash(ws1) != ws2
+
+
+@gen_cluster(nthreads=[("", 1)])
+async def test_scheduler_close_fast_deprecated(s, w):
+    with pytest.warns(FutureWarning):
+        await s.close(fast=True)

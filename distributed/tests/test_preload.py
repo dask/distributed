@@ -171,7 +171,7 @@ async def test_web_preload():
         assert (
             re.match(
                 r"(?s).*Downloading preload at http://example.com/preload\n"
-                r".*Run preload setup function: http://example.com/preload\n"
+                r".*Run preload setup: http://example.com/preload\n"
                 r".*",
                 log.getvalue(),
             )
@@ -283,10 +283,13 @@ async def test_client_preload_click(s):
 
 
 @gen_test()
-async def test_teardown_failure_doesnt_crash_scheduler():
+async def test_failure_doesnt_crash():
     text = """
-def dask_teardown(worker):
+def dask_setup(worker):
     raise Exception(123)
+
+def dask_teardown(worker):
+    raise Exception(456)
 """
 
     with captured_logger(logging.getLogger("distributed.scheduler")) as s_logger:
@@ -297,6 +300,8 @@ def dask_teardown(worker):
 
     assert "123" in s_logger.getvalue()
     assert "123" in w_logger.getvalue()
+    assert "456" in s_logger.getvalue()
+    assert "456" in w_logger.getvalue()
 
 
 @gen_cluster(nthreads=[])

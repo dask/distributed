@@ -4,9 +4,11 @@ import pathlib
 import signal
 import socket
 import sys
+import textwrap
 import threading
 from contextlib import contextmanager
 from time import sleep
+from unittest import mock
 
 import pytest
 import yaml
@@ -15,9 +17,12 @@ from tornado import gen
 import dask.config
 
 from distributed import Client, Nanny, Scheduler, Worker, config, default_client
+from distributed.batched import BatchedSend
+from distributed.comm.core import connect
 from distributed.compatibility import WINDOWS
 from distributed.core import Server, Status, rpc
 from distributed.metrics import time
+from distributed.tests.test_batched import EchoServer
 from distributed.utils import mp_context
 from distributed.utils_test import (
     _LockedCommPool,
@@ -27,10 +32,12 @@ from distributed.utils_test import (
     check_process_leak,
     cluster,
     dump_cluster_state,
+    freeze_batched_send,
     gen_cluster,
     gen_test,
     inc,
     new_config,
+    popen,
     raises_with_cause,
     tls_only_security,
 )
@@ -38,7 +45,8 @@ from distributed.worker import fail_hard
 from distributed.worker_state_machine import (
     InvalidTaskState,
     InvalidTransition,
-    StateMachineEvent,
+    PauseEvent,
+    WorkerState,
 )
 
 
@@ -650,22 +658,17 @@ def test_start_failure_scheduler():
 
 
 def test_invalid_transitions(capsys):
-    class BrokenEvent(StateMachineEvent):
-        pass
-
-    class MyWorker(Worker):
-        @Worker._handle_event.register
-        def _(self, ev: BrokenEvent):
-            ts = next(iter(self.tasks.values()))
-            return {ts: "foo"}, []
-
-    @gen_cluster(client=True, Worker=MyWorker, nthreads=[("", 1)])
+    @gen_cluster(client=True, nthreads=[("", 1)])
     async def test_log_invalid_transitions(c, s, a):
         x = c.submit(inc, 1, key="task-name")
         await x
-
-        with pytest.raises(InvalidTransition):
-            a.handle_stimulus(BrokenEvent(stimulus_id="test"))
+        ts = a.tasks["task-name"]
+        ev = PauseEvent(stimulus_id="test")
+        with mock.patch.object(
+            WorkerState, "_handle_event", return_value=({ts: "foo"}, [])
+        ):
+            with pytest.raises(InvalidTransition):
+                a.handle_stimulus(ev)
 
         while not s.events["invalid-worker-transition"]:
             await asyncio.sleep(0.01)
@@ -781,3 +784,76 @@ def test_fail_hard(sync):
     with pytest.raises(CustomError):
         test()
     assert test_done
+
+
+def test_popen_write_during_terminate_deadlock():
+    # Fabricate a command which, when terminated, tries to write more than the pipe
+    # buffer can hold (OS specific: on Linux it's typically 65536 bytes; on Windows it's
+    # less). This would deadlock if `proc.wait()` was called, since the process will be
+    # trying to write to stdout, but stdout isn't being cleared because our process is
+    # blocked in `proc.wait()`. `proc.communicate()` is necessary:
+    # https://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
+    with popen(
+        [
+            sys.executable,
+            "-c",
+            textwrap.dedent(
+                """
+                import signal
+                import threading
+
+                e = threading.Event()
+
+                def cb(signum, frame):
+                    # 131072 is 2x the size of the default Linux pipe buffer
+                    print('x' * 131072)
+                    e.set()
+
+                signal.signal(signal.SIGINT, cb)
+                print('ready', flush=True)
+                e.wait()
+                """
+            ),
+        ],
+        capture_output=True,
+    ) as proc:
+        assert proc.stdout.readline().strip() == b"ready"
+    # Exiting the context manager (terminating the subprocess) will raise
+    # `subprocess.TimeoutExpired` if this test breaks.
+
+
+@gen_test()
+async def test_freeze_batched_send():
+    async with EchoServer() as e:
+        comm = await connect(e.address)
+        b = BatchedSend(interval=0)
+        b.start(comm)
+
+        b.send("hello")
+        assert await comm.read() == ("hello",)
+
+        with freeze_batched_send(b) as locked_comm:
+            b.send("foo")
+            b.send("bar")
+
+            # Sent messages are available on the write queue
+            msg = await locked_comm.write_queue.get()
+            assert msg == (comm.peer_address, ["foo", "bar"])
+
+            # Sent messages will not reach the echo server
+            await asyncio.sleep(0.01)
+            assert e.count == 1
+
+            # Now we let messages send to the echo server
+            locked_comm.write_event.set()
+            assert await comm.read() == ("foo", "bar")
+            assert e.count == 2
+
+            locked_comm.write_event.clear()
+            b.send("baz")
+            await asyncio.sleep(0.01)
+            assert e.count == 2
+
+        assert b.comm is comm
+        assert await comm.read() == ("baz",)
+        assert e.count == 3

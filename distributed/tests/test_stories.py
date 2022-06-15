@@ -138,8 +138,7 @@ async def test_worker_story_with_deps(c, s, a, b):
     # Story now includes randomized stimulus_ids and timestamps.
     story = b.story("res")
     stimulus_ids = {ev[-2].rsplit("-", 1)[0] for ev in story}
-    assert stimulus_ids == {"compute-task", "task-finished"}
-
+    assert stimulus_ids == {"compute-task", "gather-dep-success", "task-finished"}
     # This is a simple transition log
     expected = [
         ("res", "compute-task", "released"),
@@ -153,7 +152,7 @@ async def test_worker_story_with_deps(c, s, a, b):
 
     story = b.story("dep")
     stimulus_ids = {ev[-2].rsplit("-", 1)[0] for ev in story}
-    assert stimulus_ids == {"compute-task"}
+    assert stimulus_ids == {"compute-task", "gather-dep-success"}
     expected = [
         ("dep", "ensure-task-exists", "released"),
         ("dep", "released", "fetch", "fetch", {}),

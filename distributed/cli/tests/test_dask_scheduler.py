@@ -66,7 +66,7 @@ def test_no_dashboard(loop):
 def test_dashboard(loop):
     pytest.importorskip("bokeh")
 
-    with popen(["dask-scheduler"], flush_output=False) as proc:
+    with popen(["dask-scheduler"], capture_output=True) as proc:
         line = wait_for_log_line(b"dashboard at", proc.stdout)
         dashboard_port = int(line.decode().split(":")[-1].strip())
 
@@ -218,7 +218,7 @@ def test_dashboard_port_zero(loop):
     pytest.importorskip("bokeh")
     with popen(
         ["dask-scheduler", "--dashboard-address", ":0"],
-        flush_output=False,
+        capture_output=True,
     ) as proc:
         line = wait_for_log_line(b"dashboard at", proc.stdout)
         dashboard_port = int(line.decode().split(":")[-1].strip())
