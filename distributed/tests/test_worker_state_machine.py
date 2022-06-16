@@ -84,8 +84,7 @@ def test_TaskState__to_dict():
 
 
 def test_WorkerState__to_dict():
-    ws = WorkerState(8)
-    ws.address = "127.0.0.1.1234"
+    ws = WorkerState(address="127.0.0.1:1234", transition_counter_max=10)
     ws.handle_stimulus(
         AcquireReplicasEvent(
             who_has={"x": ["127.0.0.1:1235"]}, nbytes={"x": 123}, stimulus_id="s1"
@@ -103,7 +102,7 @@ def test_WorkerState__to_dict():
         del stim["handled"]
 
     expect = {
-        "address": "127.0.0.1.1234",
+        "address": "127.0.0.1:1234",
         "busy_workers": [],
         "constrained": [],
         "data": {"y": None},
@@ -119,7 +118,7 @@ def test_WorkerState__to_dict():
             ["y", "receive-from-scatter", "s2"],
         ],
         "long_running": [],
-        "nthreads": 8,
+        "nthreads": 1,
         "ready": [],
         "running": True,
         "stimulus_log": [
