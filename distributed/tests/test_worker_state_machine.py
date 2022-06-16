@@ -1,19 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 from collections.abc import Iterator
 
 import pytest
+from tlz import first
 
 from dask.sizeof import sizeof
 
-from distributed import Worker, wait
+import distributed.profile as profile
+from distributed import Nanny, Worker, wait
 from distributed.protocol.serialize import Serialize
+from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.utils import recursive_to_dict
 from distributed.utils_test import (
     BlockedGetData,
     _LockedCommPool,
     assert_story,
+    clean,
     freeze_data_fetching,
     gen_cluster,
     inc,
@@ -42,6 +47,17 @@ from distributed.worker_state_machine import (
 async def wait_for_state(key: str, state: TaskStateState, dask_worker: Worker) -> None:
     while key not in dask_worker.tasks or dask_worker.tasks[key].state != state:
         await asyncio.sleep(0.005)
+
+
+@clean()
+def test_task_state_tracking():
+    with clean():
+        x = TaskState("x")
+        assert len(TaskState._instances) == 1
+        assert first(TaskState._instances) == x
+
+        del x
+        assert len(TaskState._instances) == 0
 
 
 def test_TaskState_get_nbytes():
@@ -683,6 +699,34 @@ async def test_missing_to_waiting(c, s, w1, w2, w3):
     await w1.close()
 
     await f1
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_task_state_instance_are_garbage_collected(c, s, a, b):
+    futs = c.map(inc, range(10))
+    red = c.submit(sum, futs)
+    f1 = c.submit(inc, red, pure=False)
+    f2 = c.submit(inc, red, pure=False)
+
+    async def check(dask_worker):
+        while dask_worker.tasks:
+            await asyncio.sleep(0.01)
+        with profile.lock:
+            gc.collect()
+        assert not TaskState._instances
+
+    await c.gather([f2, f1])
+    del futs, red, f1, f2
+    await c.run(check)
+
+    async def check(dask_scheduler):
+        while dask_scheduler.tasks:
+            await asyncio.sleep(0.01)
+        with profile.lock:
+            gc.collect()
+        assert not SchedulerTaskState._instances
+
+    await c.run_on_scheduler(check)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
