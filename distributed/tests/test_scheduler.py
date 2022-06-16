@@ -16,12 +16,12 @@ from unittest import mock
 import cloudpickle
 import psutil
 import pytest
-from tlz import concat, first, merge, valmap
+from tlz import concat, first, merge, partition, valmap
 from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
-from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
+from dask.utils import apply, parse_bytes, parse_timedelta, stringify, tmpfile, typename
 
 from distributed import (
     CancelledError,
@@ -54,6 +54,7 @@ from distributed.utils_test import (
     raises_with_cause,
     slowadd,
     slowdec,
+    slowidentity,
     slowinc,
     tls_only_security,
     varying,
@@ -243,6 +244,43 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         assert len(unexpected_transfers) <= 3, unexpected_transfers
 
     test_decide_worker_coschedule_order_neighbors_()
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 2)] * 2,
+    worker_kwargs={"memory_limit": "1.0GiB"},
+    Worker=Nanny,
+    scheduler_kwargs=dict(  # TODO remove
+        dashboard=True,
+        dashboard_address=":8787",
+    ),
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": False,
+        "distributed.scheduler.work-stealing": False,
+    },
+)
+async def test_root_task_overproduction(c, s, *nannies):
+    """
+    Workload that would run out of memory and kill workers if >2 root tasks were
+    ever in memory at once on a worker.
+    """
+
+    @delayed(pure=True)
+    def big_data(size: int) -> str:
+        return "x" * size
+
+    roots = [
+        big_data(parse_bytes("300 MiB"), dask_key_name=f"root-{i}") for i in range(16)
+    ]
+    passthrough = [delayed(slowidentity)(x) for x in roots]
+    memory_consumed = [delayed(len)(x) for x in passthrough]
+    reduction = [sum(sizes) for sizes in partition(4, memory_consumed)]
+    final = sum(reduction)
+
+    await c.compute(final)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)

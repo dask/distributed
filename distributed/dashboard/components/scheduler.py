@@ -3096,8 +3096,12 @@ class TaskProgress(DashboardComponent):
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@erred</span>
                 </div>
                 <div>
-                    <span style="font-size: 14px; font-weight: bold;">Ready:</span>&nbsp;
+                    <span style="font-size: 14px; font-weight: bold;">Processing:</span>&nbsp;
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@processing</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">No worker:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@no_worker</span>
                 </div>
                 """,
         )
@@ -3112,6 +3116,7 @@ class TaskProgress(DashboardComponent):
             "released": {},
             "processing": {},
             "waiting": {},
+            "no_worker": {},
         }
 
         for tp in self.scheduler.task_prefixes.values():
@@ -3122,6 +3127,7 @@ class TaskProgress(DashboardComponent):
                 state["released"][tp.name] = active_states["released"]
                 state["processing"][tp.name] = active_states["processing"]
                 state["waiting"][tp.name] = active_states["waiting"]
+                state["no_worker"][tp.name] = active_states["no-worker"]
 
         state["all"] = {k: sum(v[k] for v in state.values()) for k in state["memory"]}
 
@@ -3134,7 +3140,7 @@ class TaskProgress(DashboardComponent):
 
         totals = {
             k: sum(state[k].values())
-            for k in ["all", "memory", "erred", "released", "waiting"]
+            for k in ["all", "memory", "erred", "released", "waiting", "no_worker"]
         }
         totals["processing"] = totals["all"] - sum(
             v for k, v in totals.items() if k != "all"
@@ -3144,6 +3150,7 @@ class TaskProgress(DashboardComponent):
             "Progress -- total: %(all)s, "
             "in-memory: %(memory)s, processing: %(processing)s, "
             "waiting: %(waiting)s, "
+            "no worker: %(no_worker)s, "
             "erred: %(erred)s" % totals
         )
 
