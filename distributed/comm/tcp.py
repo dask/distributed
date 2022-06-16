@@ -318,11 +318,14 @@ class TCP(Comm):
             self._closed = True
             if not sys.is_finalizing():
                 convert_stream_closed_error(self, e)
-        except Exception:
+        except BaseException:
             # Some OSError or a another "low-level" exception. We do not really know
             # what was already written to the underlying socket, so it is not even safe
             # to retry here using the same stream. The only safe thing to do is to
             # abort. (See also GitHub #4133).
+            # In case of, for instance, KeyboardInterrupts or other
+            # BaseExceptions that could be handled further upstream, we equally
+            # want to discard this comm
             self.abort()
             raise
 

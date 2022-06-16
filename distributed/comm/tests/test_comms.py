@@ -857,8 +857,15 @@ async def test_inproc_comm_closed_explicit_2():
     await comm.close()
 
 
+class CustomBase(BaseException):
+    # We don't want to interfere with KeyboardInterrupts or CancelledErrors for
+    # this test
+    ...
+
+
+@pytest.mark.parametrize("exc_type", [BufferError, CustomBase])
 @gen_test()
-async def test_comm_closed_on_buffer_error(tcp):
+async def test_comm_closed_on_write_error(tcp, exc_type):
     # Internal errors from comm.stream.write, such as
     # BufferError should lead to the stream being closed
     # and not re-used. See GitHub #4133
@@ -868,12 +875,29 @@ async def test_comm_closed_on_buffer_error(tcp):
     reader, writer = await get_tcp_comm_pair()
 
     def _write(data):
-        raise BufferError
+        raise exc_type()
 
     writer.stream.write = _write
-    with pytest.raises(BufferError):
+    with pytest.raises(exc_type):
         await writer.write("x")
-    assert writer.stream is None
+
+    assert writer.closed()
+
+    await reader.close()
+    await writer.close()
+
+
+@gen_test()
+async def test_comm_closed_on_read_error(tcp):
+    if tcp is asyncio_tcp:
+        pytest.skip("Not applicable for asyncio")
+
+    reader, writer = await get_tcp_comm_pair()
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(reader.read(), 0.01)
+
+    assert reader.closed()
 
     await reader.close()
     await writer.close()
