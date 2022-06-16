@@ -58,6 +58,7 @@ from distributed.nanny import Nanny
 from distributed.node import ServerNode
 from distributed.proctitle import enable_proctitle_on_children
 from distributed.protocol import deserialize
+from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.security import Security
 from distributed.utils import (
     DequeHandler,
@@ -72,6 +73,7 @@ from distributed.utils import (
 )
 from distributed.worker import WORKER_ANY_RUNNING, Worker
 from distributed.worker_state_machine import InvalidTransition
+from distributed.worker_state_machine import TaskState as WorkerTaskState
 
 try:
     import ssl
@@ -1839,9 +1841,8 @@ def check_instances():
     Scheduler._instances.clear()
     SpecCluster._instances.clear()
     Worker._initialized_clients.clear()
-    # assert all(n.status == "closed" for n in Nanny._instances), {
-    #     n: n.status for n in Nanny._instances
-    # }
+    SchedulerTaskState._instances.clear()
+    WorkerTaskState._instances.clear()
     Nanny._instances.clear()
     _global_clients.clear()
     Comm._instances.clear()
