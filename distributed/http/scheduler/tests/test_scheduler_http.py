@@ -144,7 +144,7 @@ async def test_prometheus_collect_task_states(c, s, a, b):
 
     # submit a task which should show up in the prometheus scraping
     future = c.submit(slowinc, 1, delay=0.5)
-    while not any(future.key in w.tasks for w in [a, b]):
+    while not any(future.key in w.state.tasks for w in [a, b]):
         await asyncio.sleep(0.001)
 
     active_metrics, forgotten_tasks = await fetch_metrics()
@@ -157,7 +157,7 @@ async def test_prometheus_collect_task_states(c, s, a, b):
 
     future.release()
 
-    while any(future.key in w.tasks for w in [a, b]):
+    while any(future.key in w.state.tasks for w in [a, b]):
         await asyncio.sleep(0.001)
 
     active_metrics, forgotten_tasks = await fetch_metrics()

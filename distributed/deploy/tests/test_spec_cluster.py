@@ -42,9 +42,9 @@ async def test_specification():
         assert isinstance(cluster.workers[1], Worker)
         assert isinstance(cluster.workers["my-worker"], MyWorker)
 
-        assert cluster.workers[0].nthreads == 1
-        assert cluster.workers[1].nthreads == 2
-        assert cluster.workers["my-worker"].nthreads == 3
+        assert cluster.workers[0].state.nthreads == 1
+        assert cluster.workers[1].state.nthreads == 2
+        assert cluster.workers["my-worker"].state.nthreads == 3
 
         async with Client(cluster, asynchronous=True) as client:
             result = await client.submit(lambda x: x + 1, 10)
@@ -69,9 +69,9 @@ def test_spec_sync(loop):
         assert isinstance(cluster.workers[1], Worker)
         assert isinstance(cluster.workers["my-worker"], MyWorker)
 
-        assert cluster.workers[0].nthreads == 1
-        assert cluster.workers[1].nthreads == 2
-        assert cluster.workers["my-worker"].nthreads == 3
+        assert cluster.workers[0].state.nthreads == 1
+        assert cluster.workers[1].state.nthreads == 2
+        assert cluster.workers["my-worker"].state.nthreads == 3
 
         with Client(cluster, loop=loop) as client:
             assert cluster.loop is cluster.scheduler.loop

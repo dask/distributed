@@ -90,7 +90,7 @@ def test_procs():
         assert len(c.workers) == 2
         assert all(isinstance(w, Worker) for w in c.workers.values())
         with Client(c.scheduler.address) as e:
-            assert all(w.nthreads == 3 for w in c.workers.values())
+            assert all(w.state.nthreads == 3 for w in c.workers.values())
             assert all(isinstance(w, Worker) for w in c.workers.values())
         repr(c)
 
@@ -324,7 +324,7 @@ async def test_defaults_2():
         dashboard_address=":0",
         asynchronous=True,
     ) as c:
-        assert sum(w.nthreads for w in c.workers.values()) == CPU_COUNT
+        assert sum(w.state.nthreads for w in c.workers.values()) == CPU_COUNT
         assert all(isinstance(w, Worker) for w in c.workers.values())
         assert len(c.workers) == 1
 

@@ -459,12 +459,12 @@ async def test_drop_with_paused_workers_with_running_tasks_1(c, s, a, b):
     x = (await c.scatter({"x": 1}, broadcast=True))["x"]
     y = c.submit(slowinc, x, delay=2.5, key="y", workers=[a.address])
 
-    while "y" not in a.tasks or a.tasks["y"].state != "executing":
+    while "y" not in a.state.tasks or a.state.tasks["y"].state != "executing":
         await asyncio.sleep(0.01)
     a.status = Status.paused
     while s.workers[a.address].status != Status.paused:
         await asyncio.sleep(0.01)
-    assert a.tasks["y"].state == "executing"
+    assert a.state.tasks["y"].state == "executing"
 
     s.extensions["amm"].run_once()
     await y
@@ -509,7 +509,7 @@ async def test_drop_with_paused_workers_with_running_tasks_3_4(c, s, a, b, pause
     """
     x = (await c.scatter({"x": 1}, broadcast=True))["x"]
     y = c.submit(slowinc, x, delay=2.5, key="y", workers=[a.address])
-    while "y" not in a.tasks or a.tasks["y"].state != "executing":
+    while "y" not in a.state.tasks or a.state.tasks["y"].state != "executing":
         await asyncio.sleep(0.01)
 
     if pause:
@@ -519,7 +519,7 @@ async def test_drop_with_paused_workers_with_running_tasks_3_4(c, s, a, b, pause
             await asyncio.sleep(0.01)
 
     assert s.tasks["y"].state == "processing"
-    assert a.tasks["y"].state == "executing"
+    assert a.state.tasks["y"].state == "executing"
 
     s.extensions["amm"].run_once()
     await y
@@ -544,10 +544,10 @@ async def test_drop_with_paused_workers_with_running_tasks_5(c, s, w1, w2, w3):
 
     def executing() -> bool:
         return (
-            "y1" in w1.tasks
-            and w1.tasks["y1"].state == "executing"
-            and "y2" in w3.tasks
-            and w3.tasks["y2"].state == "executing"
+            "y1" in w1.state.tasks
+            and w1.state.tasks["y1"].state == "executing"
+            and "y2" in w3.state.tasks
+            and w3.state.tasks["y2"].state == "executing"
         )
 
     while not executing():

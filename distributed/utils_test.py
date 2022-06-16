@@ -1933,10 +1933,10 @@ class TaskStateMetadataPlugin(WorkerPlugin):
     """WorkPlugin to populate TaskState.metadata"""
 
     def setup(self, worker):
-        self.worker = worker
+        self.tasks = worker.state.tasks
 
     def transition(self, key, start, finish, **kwargs):
-        ts = self.worker.tasks[key]
+        ts = self.tasks[key]
 
         if start == "ready" and finish == "executing":
             ts.metadata["start_time"] = time()

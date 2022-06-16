@@ -8,6 +8,7 @@ import logging
 import operator
 import random
 import sys
+import warnings
 import weakref
 from collections import defaultdict, deque
 from collections.abc import (
@@ -3194,12 +3195,11 @@ class DeprecatedWorkerStateAttribute:
         self.name = name
 
     def _warn_deprecated(self) -> None:
-        pass
-        # warnings.warn(
-        #     f"The `Worker.{self.name}` attribute has been moved to "
-        #     f"`Worker.state.{self.target or self.name}",
-        #     FutureWarning,
-        # )
+        warnings.warn(
+            f"The `Worker.{self.name}` attribute has been moved to "
+            f"`Worker.state.{self.target or self.name}`",
+            FutureWarning,
+        )
 
     def __get__(self, instance: Worker | None, _):
         if instance is None:
