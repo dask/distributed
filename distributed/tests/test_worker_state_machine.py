@@ -7,6 +7,8 @@ from collections.abc import Iterator
 import pytest
 from tlz import first
 
+from dask.sizeof import sizeof
+
 import distributed.profile as profile
 from distributed import Nanny, Worker, wait
 from distributed.protocol.serialize import Serialize
@@ -85,7 +87,9 @@ def test_WorkerState__to_dict():
     ws = WorkerState(8)
     ws.address = "127.0.0.1.1234"
     ws.handle_stimulus(
-        AcquireReplicasEvent(who_has={"x": ["127.0.0.1:1235"]}, stimulus_id="s1")
+        AcquireReplicasEvent(
+            who_has={"x": ["127.0.0.1:1235"]}, nbytes={"x": 123}, stimulus_id="s1"
+        )
     )
     ws.handle_stimulus(
         UpdateDataEvent(data={"y": object()}, report=False, stimulus_id="s2")
@@ -123,6 +127,7 @@ def test_WorkerState__to_dict():
                 "cls": "AcquireReplicasEvent",
                 "stimulus_id": "s1",
                 "who_has": {"x": ["127.0.0.1:1235"]},
+                "nbytes": {"x": 123},
             },
             {
                 "cls": "UpdateDataEvent",
@@ -134,13 +139,14 @@ def test_WorkerState__to_dict():
         "tasks": {
             "x": {
                 "key": "x",
+                "nbytes": 123,
                 "priority": [1],
                 "state": "fetch",
                 "who_has": ["127.0.0.1:1235"],
             },
             "y": {
                 "key": "y",
-                "nbytes": 16,
+                "nbytes": sizeof(object()),
                 "state": "memory",
             },
         },
@@ -656,7 +662,9 @@ async def test_missing_handle_compute_dependency(c, s, w1, w2, w3):
     await wait_for_state(f1.key, "memory", w1)
 
     w3.handle_stimulus(
-        AcquireReplicasEvent(who_has={f1.key: [w2.address]}, stimulus_id="acquire")
+        AcquireReplicasEvent(
+            who_has={f1.key: [w2.address]}, nbytes={f1.key: 1}, stimulus_id="acquire"
+        )
     )
     await wait_for_state(f1.key, "missing", w3)
 
@@ -673,7 +681,9 @@ async def test_missing_to_waiting(c, s, w1, w2, w3):
     await wait_for_state(f1.key, "memory", w1)
 
     w3.handle_stimulus(
-        AcquireReplicasEvent(who_has={f1.key: [w2.address]}, stimulus_id="acquire")
+        AcquireReplicasEvent(
+            who_has={f1.key: [w2.address]}, nbytes={f1.key: 1}, stimulus_id="acquire"
+        )
     )
     await wait_for_state(f1.key, "missing", w3)
 

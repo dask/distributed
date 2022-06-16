@@ -781,8 +781,9 @@ class RefreshWhoHasEvent(StateMachineEvent):
 
 @dataclass
 class AcquireReplicasEvent(StateMachineEvent):
-    __slots__ = ("who_has",)
+    __slots__ = ("who_has", "nbytes")
     who_has: dict[str, Collection[str]]
+    nbytes: dict[str, int]
 
 
 @dataclass
@@ -2395,10 +2396,11 @@ class WorkerState:
     @_handle_event.register
     def _handle_acquire_replicas(self, ev: AcquireReplicasEvent) -> RecsInstrs:
         if self.validate:
+            assert ev.who_has.keys() == ev.nbytes.keys()
             assert all(ev.who_has.values())
 
         recommendations: Recs = {}
-        for key in ev.who_has:
+        for key, nbytes in ev.nbytes.items():
             ts = self._ensure_task_exists(
                 key=key,
                 # Transfer this data after all dependency tasks of computations with
@@ -2409,6 +2411,7 @@ class WorkerState:
                 stimulus_id=ev.stimulus_id,
             )
             if ts.state != "memory":
+                ts.nbytes = nbytes
                 recommendations[ts] = "fetch"
 
         self._update_who_has(ev.who_has)
