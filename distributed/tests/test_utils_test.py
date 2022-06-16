@@ -17,7 +17,7 @@ from tornado import gen
 
 import dask.config
 
-from distributed import Client, Nanny, Scheduler, Worker, config, default_client
+from distributed import Client, Event, Nanny, Scheduler, Worker, config, default_client
 from distributed.batched import BatchedSend
 from distributed.comm.core import connect
 from distributed.compatibility import WINDOWS
@@ -41,6 +41,7 @@ from distributed.utils_test import (
     popen,
     raises_with_cause,
     tls_only_security,
+    wait_for_state,
 )
 from distributed.worker import fail_hard
 from distributed.worker_state_machine import (
@@ -912,3 +913,32 @@ async def test_freeze_batched_send():
         assert b.comm is comm
         assert await comm.read() == ("baz",)
         assert e.count == 3
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], timeout=2)
+async def test_wait_for_state(c, s, a, capsys):
+    ev = Event()
+    x = c.submit(lambda ev: ev.wait(), ev, key="x")
+
+    await asyncio.gather(
+        wait_for_state("x", "processing", s),
+        wait_for_state("x", "executing", a),
+        c.run(wait_for_state, "x", "executing"),
+    )
+
+    await ev.set()
+
+    await asyncio.gather(
+        wait_for_state("x", "memory", s),
+        wait_for_state("x", "memory", a),
+        c.run(wait_for_state, "x", "memory"),
+    )
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(wait_for_state("x", "bad_state", s), timeout=0.1)
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(wait_for_state("y", "memory", s), timeout=0.1)
+    assert capsys.readouterr().out == (
+        f"tasks[x].state='memory' on {s.address}; expected state='bad_state'\n"
+        f"tasks[y] not found on {s.address}\n"
+    )
