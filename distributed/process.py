@@ -17,7 +17,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from distributed.utils import TimeoutError, mp_context
+from distributed.utils import TimeoutError, get_mp_context
 
 logger = logging.getLogger(__name__)
 
@@ -76,9 +76,9 @@ class AsyncProcess:
         # monitor from the child and exit when the parent goes away unexpectedly
         # (for example due to SIGKILL). This variable is otherwise unused except
         # for the assignment here.
-        parent_alive_pipe, self._keep_child_alive = mp_context.Pipe(duplex=False)
+        parent_alive_pipe, self._keep_child_alive = get_mp_context().Pipe(duplex=False)
 
-        self._process = mp_context.Process(
+        self._process = get_mp_context().Process(
             target=self._run,
             name=name,
             args=(

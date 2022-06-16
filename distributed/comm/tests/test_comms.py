@@ -26,7 +26,7 @@ from distributed.comm.registry import backends, get_backend
 from distributed.compatibility import to_thread
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
-from distributed.utils import get_ip, get_ipv6, mp_context
+from distributed.utils import get_ip, get_ipv6, get_mp_context
 from distributed.utils_test import (
     gen_test,
     get_cert,
@@ -1328,6 +1328,6 @@ def test_register_backend_entrypoint(tmp_path):
     (dist_info / "entry_points.txt").write_bytes(
         b"[distributed.comm.backends]\nudp = dask_udp:udp_backend\n"
     )
-    with mp_context.Pool(1) as pool:
+    with get_mp_context().Pool(1) as pool:
         assert pool.apply(_get_backend_on_path, args=(tmp_path,)) == 1
     pool.join()
