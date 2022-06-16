@@ -2768,7 +2768,9 @@ async def test_acquire_replicas_already_in_flight(c, s, a):
         assert b.state.tasks["x"].state == "flight"
 
         b.handle_stimulus(
-            AcquireReplicasEvent(who_has={"x": a.address}, stimulus_id="test")
+            AcquireReplicasEvent(
+                who_has={"x": a.address}, nbytes={"x": 1}, stimulus_id="test"
+            )
         )
         assert b.state.tasks["x"].state == "flight"
         b.block_gather_dep.set()
@@ -2968,6 +2970,32 @@ async def test_acquire_replicas_with_no_priority(c, s, a, b):
     assert s.tasks["x"].priority is None
     assert a.state.tasks["x"].priority is None
     assert b.state.tasks["x"].priority is not None
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_acquire_replicas_large_data(c, s, a):
+    """When acquire-replicas is used to acquire multiple sizeable tasks, it respects
+    target_message_size and acquires them over multiple iterations.
+    """
+    size = a.target_message_size // 5 - 10_000
+
+    class C:
+        def __sizeof__(self):
+            return size
+
+    futs = [c.submit(C, key=f"x{i}", workers=[a.address]) for i in range(10)]
+    await wait(futs)
+
+    async with BlockedGatherDep(s.address) as b:
+        s.request_acquire_replicas(
+            b.address, [f"x{i}" for i in range(10)], stimulus_id="test"
+        )
+        await b.in_gather_dep.wait()
+        assert len(b.state.in_flight_tasks) == 5
+        assert len(b.state.data_needed) == 5
+        b.block_gather_dep.set()
+        while len(b.data) < 10:
+            await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)

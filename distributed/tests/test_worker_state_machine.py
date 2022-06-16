@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 from collections.abc import Iterator
 
 import pytest
+from tlz import first
 
-from distributed import Worker, wait
+from dask.sizeof import sizeof
+
+import distributed.profile as profile
+from distributed import Nanny, Worker, wait
 from distributed.protocol.serialize import Serialize
+from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.utils import recursive_to_dict
 from distributed.utils_test import (
     BlockedGetData,
@@ -35,6 +41,15 @@ from distributed.worker_state_machine import (
     WorkerState,
     merge_recs_instructions,
 )
+
+
+def test_TaskState_tracking(cleanup):
+    gc.collect()
+    x = TaskState("x")
+    assert len(TaskState._instances) == 1
+    assert first(TaskState._instances) == x
+    del x
+    assert len(TaskState._instances) == 0
 
 
 def test_TaskState_get_nbytes():
@@ -72,7 +87,9 @@ def test_WorkerState__to_dict():
     ws = WorkerState(8)
     ws.address = "127.0.0.1.1234"
     ws.handle_stimulus(
-        AcquireReplicasEvent(who_has={"x": ["127.0.0.1:1235"]}, stimulus_id="s1")
+        AcquireReplicasEvent(
+            who_has={"x": ["127.0.0.1:1235"]}, nbytes={"x": 123}, stimulus_id="s1"
+        )
     )
     ws.handle_stimulus(
         UpdateDataEvent(data={"y": object()}, report=False, stimulus_id="s2")
@@ -110,6 +127,7 @@ def test_WorkerState__to_dict():
                 "cls": "AcquireReplicasEvent",
                 "stimulus_id": "s1",
                 "who_has": {"x": ["127.0.0.1:1235"]},
+                "nbytes": {"x": 123},
             },
             {
                 "cls": "UpdateDataEvent",
@@ -121,13 +139,14 @@ def test_WorkerState__to_dict():
         "tasks": {
             "x": {
                 "key": "x",
+                "nbytes": 123,
                 "priority": [1],
                 "state": "fetch",
                 "who_has": ["127.0.0.1:1235"],
             },
             "y": {
                 "key": "y",
-                "nbytes": 16,
+                "nbytes": sizeof(object()),
                 "state": "memory",
             },
         },
@@ -643,7 +662,9 @@ async def test_missing_handle_compute_dependency(c, s, w1, w2, w3):
     await wait_for_state(f1.key, "memory", w1)
 
     w3.handle_stimulus(
-        AcquireReplicasEvent(who_has={f1.key: [w2.address]}, stimulus_id="acquire")
+        AcquireReplicasEvent(
+            who_has={f1.key: [w2.address]}, nbytes={f1.key: 1}, stimulus_id="acquire"
+        )
     )
     await wait_for_state(f1.key, "missing", w3)
 
@@ -660,7 +681,9 @@ async def test_missing_to_waiting(c, s, w1, w2, w3):
     await wait_for_state(f1.key, "memory", w1)
 
     w3.handle_stimulus(
-        AcquireReplicasEvent(who_has={f1.key: [w2.address]}, stimulus_id="acquire")
+        AcquireReplicasEvent(
+            who_has={f1.key: [w2.address]}, nbytes={f1.key: 1}, stimulus_id="acquire"
+        )
     )
     await wait_for_state(f1.key, "missing", w3)
 
@@ -668,6 +691,34 @@ async def test_missing_to_waiting(c, s, w1, w2, w3):
     await w1.close()
 
     await f1
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_task_state_instance_are_garbage_collected(c, s, a, b):
+    futs = c.map(inc, range(10))
+    red = c.submit(sum, futs)
+    f1 = c.submit(inc, red, pure=False)
+    f2 = c.submit(inc, red, pure=False)
+
+    async def check(dask_worker):
+        while dask_worker.tasks:
+            await asyncio.sleep(0.01)
+        with profile.lock:
+            gc.collect()
+        assert not TaskState._instances
+
+    await c.gather([f2, f1])
+    del futs, red, f1, f2
+    await c.run(check)
+
+    async def check(dask_scheduler):
+        while dask_scheduler.tasks:
+            await asyncio.sleep(0.01)
+        with profile.lock:
+            gc.collect()
+        assert not SchedulerTaskState._instances
+
+    await c.run_on_scheduler(check)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)

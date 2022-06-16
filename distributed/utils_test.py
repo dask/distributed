@@ -58,20 +58,22 @@ from distributed.nanny import Nanny
 from distributed.node import ServerNode
 from distributed.proctitle import enable_proctitle_on_children
 from distributed.protocol import deserialize
+from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.security import Security
 from distributed.utils import (
     DequeHandler,
     _offload_executor,
     get_ip,
     get_ipv6,
+    get_mp_context,
     iscoroutinefunction,
     log_errors,
-    mp_context,
     reset_logger_locks,
     sync,
 )
 from distributed.worker import WORKER_ANY_RUNNING, Worker
 from distributed.worker_state_machine import InvalidTransition
+from distributed.worker_state_machine import TaskState as WorkerTaskState
 
 try:
     import ssl
@@ -712,11 +714,11 @@ def cluster(
 
         with contextlib.ExitStack() as stack:
             # The scheduler queue will receive the scheduler's address
-            scheduler_q = mp_context.Queue()
+            scheduler_q = get_mp_context().Queue()
             stack.callback(_close_queue, scheduler_q)
 
             # Launch scheduler
-            scheduler = mp_context.Process(
+            scheduler = get_mp_context().Process(
                 name="Dask cluster test: Scheduler",
                 target=run_scheduler,
                 args=(scheduler_q, nworkers + 1, config),
@@ -729,7 +731,7 @@ def cluster(
 
             # Launch workers
             workers_by_pid = {}
-            q = mp_context.Queue()
+            q = get_mp_context().Queue()
             stack.callback(_close_queue, q)
             for _ in range(nworkers):
                 tmpdirname = stack.enter_context(
@@ -743,7 +745,7 @@ def cluster(
                     },
                     worker_kwargs,
                 )
-                proc = mp_context.Process(
+                proc = get_mp_context().Process(
                     name="Dask cluster test: Worker",
                     target=_run_worker,
                     args=(q, scheduler_q, config),
@@ -1770,15 +1772,15 @@ def check_thread_leak():
 
 
 def wait_active_children(timeout: float) -> list[multiprocessing.Process]:
-    """Wait until timeout for mp_context.active_children() to terminate.
+    """Wait until timeout for get_mp_context().active_children() to terminate.
     Return list of active subprocesses after the timeout expired.
     """
     t0 = time()
     while True:
         # Do not sample the subprocesses once at the beginning with
-        # `for proc in mp_context.active_children: ...`, assume instead that new
+        # `for proc in get_mp_context().active_children: ...`, assume instead that new
         # children processes may be spawned before the timeout expires.
-        children = mp_context.active_children()
+        children = get_mp_context().active_children()
         if not children:
             return []
         join_timeout = timeout - time() + t0
@@ -1788,10 +1790,10 @@ def wait_active_children(timeout: float) -> list[multiprocessing.Process]:
 
 
 def term_or_kill_active_children(timeout: float) -> None:
-    """Send SIGTERM to mp_context.active_children(), wait up to 3 seconds for processes
+    """Send SIGTERM to get_mp_context().active_children(), wait up to 3 seconds for processes
     to die, then send SIGKILL to the survivors
     """
-    children = mp_context.active_children()
+    children = get_mp_context().active_children()
     for proc in children:
         proc.terminate()
 
@@ -1839,9 +1841,8 @@ def check_instances():
     Scheduler._instances.clear()
     SpecCluster._instances.clear()
     Worker._initialized_clients.clear()
-    # assert all(n.status == "closed" for n in Nanny._instances), {
-    #     n: n.status for n in Nanny._instances
-    # }
+    SchedulerTaskState._instances.clear()
+    WorkerTaskState._instances.clear()
     Nanny._instances.clear()
     _global_clients.clear()
     Comm._instances.clear()

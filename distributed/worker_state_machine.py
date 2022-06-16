@@ -9,6 +9,7 @@ import operator
 import random
 import sys
 import warnings
+import weakref
 from collections import defaultdict, deque
 from collections.abc import (
     Callable,
@@ -263,20 +264,23 @@ class TaskState:
     #: True if the task is in memory or erred; False otherwise
     done: bool = False
 
+    _instances: ClassVar[weakref.WeakSet[TaskState]] = weakref.WeakSet()
+
     # Support for weakrefs to a class with __slots__
     __weakref__: Any = field(init=False)
+
+    def __post_init__(self):
+        TaskState._instances.add(self)
 
     def __repr__(self) -> str:
         return f"<TaskState {self.key!r} {self.state}>"
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, TaskState) or other.key != self.key:
-            return False
-        # When a task transitions to forgotten and exits Worker.tasks, it should be
-        # immediately dereferenced. If the same task is recreated later on on the
-        # worker, we should not have to deal with its previous incarnation lingering.
-        assert other is self
-        return True
+        # A task may be forgotten and a new TaskState object with the same key may be created in
+        # its place later on. In the Worker state, you should never have multiple TaskState objects with
+        # the same key. We can't assert it here however, as this comparison is also used in WeakSets
+        # for instance tracking purposes.
+        return other is self
 
     def __hash__(self) -> int:
         return hash(self.key)
@@ -778,8 +782,9 @@ class RefreshWhoHasEvent(StateMachineEvent):
 
 @dataclass
 class AcquireReplicasEvent(StateMachineEvent):
-    __slots__ = ("who_has",)
+    __slots__ = ("who_has", "nbytes")
     who_has: dict[str, Collection[str]]
+    nbytes: dict[str, int]
 
 
 @dataclass
@@ -2392,10 +2397,11 @@ class WorkerState:
     @_handle_event.register
     def _handle_acquire_replicas(self, ev: AcquireReplicasEvent) -> RecsInstrs:
         if self.validate:
+            assert ev.who_has.keys() == ev.nbytes.keys()
             assert all(ev.who_has.values())
 
         recommendations: Recs = {}
-        for key in ev.who_has:
+        for key, nbytes in ev.nbytes.items():
             ts = self._ensure_task_exists(
                 key=key,
                 # Transfer this data after all dependency tasks of computations with
@@ -2406,6 +2412,7 @@ class WorkerState:
                 stimulus_id=ev.stimulus_id,
             )
             if ts.state != "memory":
+                ts.nbytes = nbytes
                 recommendations[ts] = "fetch"
 
         self._update_who_has(ev.who_has)
@@ -3002,6 +3009,11 @@ class WorkerState:
 
         if self.transition_counter_max:
             assert self.transition_counter < self.transition_counter_max
+
+        # Test that there aren't multiple TaskState objects with the same key in data_needed
+        assert len({ts.key for ts in self.data_needed}) == len(self.data_needed)
+        for tss in self.data_needed_per_worker.values():
+            assert len({ts.key for ts in tss}) == len(tss)
 
 
 class BaseWorker(abc.ABC):

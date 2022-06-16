@@ -72,7 +72,7 @@ from distributed.core import Server, Status
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
 from distributed.sizeof import sizeof
-from distributed.utils import is_valid_xml, mp_context, sync, tmp_text
+from distributed.utils import get_mp_context, is_valid_xml, sync, tmp_text
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _UnhashableCallable,
@@ -2198,7 +2198,9 @@ def long_running_client_connection(address):
 
 @gen_cluster()
 async def test_cleanup_after_broken_client_connection(s, a, b):
-    proc = mp_context.Process(target=long_running_client_connection, args=(s.address,))
+    proc = get_mp_context().Process(
+        target=long_running_client_connection, args=(s.address,)
+    )
     proc.daemon = True
     proc.start()
 
