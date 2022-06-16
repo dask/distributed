@@ -1059,6 +1059,7 @@ def open_port(host=""):
     """
     # http://stackoverflow.com/questions/2838244/get-open-tcp-port-in-python
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind((host, 0))
     s.listen(1)
     port = s.getsockname()[1]
