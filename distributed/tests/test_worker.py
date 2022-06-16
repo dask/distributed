@@ -2977,7 +2977,7 @@ async def test_acquire_replicas_large_data(c, s, a):
     """When acquire-replicas is used to acquire multiple sizeable tasks, it respects
     target_message_size and acquires them over multiple iterations.
     """
-    size = a.target_message_size // 5 - 10_000
+    size = a.state.target_message_size // 5 - 10_000
 
     class C:
         def __sizeof__(self):
