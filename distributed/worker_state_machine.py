@@ -1191,8 +1191,8 @@ class WorkerState:
         who_has)
         This is idempotent
         """
+        logger.debug("Purge task: %s", ts)
         key = ts.key
-        logger.debug("Purge task key: %s state: %s; stimulus_id=%s", ts.key, ts.state)
         self.data.pop(key, None)
         self.actors.pop(key, None)
 
