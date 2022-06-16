@@ -1271,6 +1271,7 @@ class SchedulerState:
         "validate",
         "workers",
         "transition_counter",
+        "_idle_transition_counter",
         "transition_counter_max",
         "plugins",
         "UNKNOWN_TASK_DURATION",
@@ -1348,6 +1349,7 @@ class SchedulerState:
             / 2.0
         )
         self.transition_counter = 0
+        self._idle_transition_counter = 0
         self.transition_counter_max = transition_counter_max
 
     @property
@@ -7019,13 +7021,23 @@ class Scheduler(SchedulerState, ServerNode):
                 await self.remove_worker(address=ws.address, stimulus_id=stimulus_id)
 
     def check_idle(self):
+        if self.status in (Status.closing, Status.closed):
+            return
+
+        if self.transition_counter != self._idle_transition_counter:
+            self._idle_transition_counter = self.transition_counter
+            self.idle_since = None
+            return
+
         if any([ws.processing for ws in self.workers.values()]) or self.unrunnable:
             self.idle_since = None
             return
-        elif not self.idle_since:
+
+        if not self.idle_since:
             self.idle_since = time()
 
         if time() > self.idle_since + self.idle_timeout:
+            assert self.idle_since
             logger.info(
                 "Scheduler closing after being idle for %s",
                 format_time(self.idle_timeout),
