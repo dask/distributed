@@ -274,7 +274,7 @@ async def test_root_task_overproduction(c, s, *nannies):
         return "x" * size
 
     roots = [
-        big_data(parse_bytes("300 MiB"), dask_key_name=f"root-{i}") for i in range(16)
+        big_data(parse_bytes("350 MiB"), dask_key_name=f"root-{i}") for i in range(16)
     ]
     passthrough = [delayed(slowidentity)(x) for x in roots]
     memory_consumed = [delayed(len)(x) for x in passthrough]
