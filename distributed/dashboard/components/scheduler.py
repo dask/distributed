@@ -2980,7 +2980,7 @@ class TaskProgress(DashboardComponent):
         self.scheduler = scheduler
 
         data = progress_quads(
-            dict(all={}, memory={}, erred={}, released={}, processing={})
+            dict(all={}, memory={}, erred={}, released={}, processing={}, queued={})
         )
         self.source = ColumnDataSource(data=data)
 
@@ -3049,6 +3049,18 @@ class TaskProgress(DashboardComponent):
             left="erred-loc",
             right="processing-loc",
             fill_color="gray",
+            fill_alpha=0.35,
+            line_alpha=0,
+        )
+        self.root.quad(
+            source=self.source,
+            top="top",
+            bottom="bottom",
+            left="processing-loc",
+            right="queued-loc",
+            fill_color="gray",
+            hatch_pattern="/",
+            hatch_color="white",
             fill_alpha=0.35,
             line_alpha=0,
         )
