@@ -58,6 +58,7 @@ from distributed import versions as version_module
 from distributed._stories import scheduler_story
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
+from distributed.collections import HeapSet
 from distributed.comm import (
     Comm,
     CommClosedError,
@@ -129,7 +130,15 @@ DEFAULT_EXTENSIONS = {
     "stealing": WorkStealing,
 }
 
-ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
+ALL_TASK_STATES = {
+    "released",
+    "waiting",
+    "no-worker",
+    "queued",
+    "processing",
+    "erred",
+    "memory",
+}
 
 
 class ClientState:
@@ -440,6 +449,10 @@ class WorkerState:
     #: been running.
     executing: dict[TaskState, float]
 
+    #: Tasks queued to _potentially_ run on this worker in the future, ordered by priority.
+    #: The queuing is scheduler-side only; the worker is unaware of these tasks.
+    queued: HeapSet[TaskState]
+
     #: The available resources on this worker, e.g. ``{"GPU": 2}``.
     #: These are abstract quantities that constrain certain tasks from running at the
     #: same time on this worker.
@@ -494,6 +507,7 @@ class WorkerState:
         self.processing = {}
         self.long_running = set()
         self.executing = {}
+        self.queued = HeapSet(key=operator.attrgetter("priority"))
         self.resources = {}
         self.used_resources = {}
         self.extra = extra or {}
@@ -563,7 +577,8 @@ class WorkerState:
             f"<WorkerState {self.address!r}{name}, "
             f"status: {self.status.name}, "
             f"memory: {len(self.has_what)}, "
-            f"processing: {len(self.processing)}>"
+            f"processing: {len(self.processing)}, "
+            f"queued: {len(self.queued)}>"
         )
 
     def _repr_html_(self):
@@ -573,6 +588,7 @@ class WorkerState:
             status=self.status.name,
             has_what=self.has_what,
             processing=self.processing,
+            queued=self.queued,
         )
 
     def identity(self) -> dict[str, Any]:
@@ -972,6 +988,10 @@ class TaskState:
     #: it. This attribute is kept in sync with :attr:`WorkerState.processing`.
     processing_on: WorkerState | None
 
+    #: If this task is in the "queued" state, which worker is currently queued
+    #: it. This attribute is kept in sync with :attr:`WorkerState.queued`.
+    queued_on: WorkerState | None
+
     #: The number of times this task can automatically be retried in case of failure.
     #: If a task fails executing (the worker returns with an error), its :attr:`retries`
     #: attribute is checked. If it is equal to 0, the task is marked "erred". If it is
@@ -1065,7 +1085,7 @@ class TaskState:
     #: Cached hash of :attr:`~TaskState.client_key`
     _hash: int
 
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__) + ("__weakref__",)  # type: ignore
 
     def __init__(self, key: str, run_spec: object):
         self.key = key
@@ -1088,6 +1108,7 @@ class TaskState:
         self.waiters = set()
         self.who_has = set()
         self.processing_on = None
+        self.queued_on = None
         self.has_lost_dependencies = False
         self.host_restrictions = None  # type: ignore
         self.worker_restrictions = None  # type: ignore
@@ -1793,6 +1814,27 @@ class SchedulerState:
                 ws if tg.states["released"] + tg.states["waiting"] > 1 else None
             )
             tg.last_worker_tasks_left -= 1
+
+            # Queue if worker is full to avoid root task overproduction.
+            if len(ws.processing) >= ws.nthreads:
+                # TODO this should be a transition function instead.
+                # But how do we get the `ws` into it? Recommendations on the scheduler can't take arguments.
+
+                if self.validate:
+                    assert not ts.queued_on, ts.queued_on
+                    assert ts not in ws.queued
+
+                # TODO maintain global queue of tasks as well for newly arriving workers to use?
+                # QUESTION could `queued` be an OrderedSet instead of a HeapSet, giving us O(1)
+                # operations instead of O(logn)? Reasoning is that we're always inserting elements
+                # in priority order anyway.
+                # This wouldn't work in the case that a batch of lower-priority root tasks becomes
+                # ready before a batch of higher-priority root tasks.
+                ws.queued.add(ts)
+                ts.queued_on = ws
+                ts.state = "queued"
+                return None
+
             return ws
 
         if ts.dependencies or valid_workers is not None:
@@ -1841,6 +1883,7 @@ class SchedulerState:
                 assert not ts.who_has
                 assert not ts.exception_blame
                 assert not ts.processing_on
+                assert not ts.queued_on
                 assert not ts.has_lost_dependencies
                 assert ts not in self.unrunnable
                 assert all(dts.who_has for dts in ts.dependencies)
@@ -1892,6 +1935,7 @@ class SchedulerState:
 
             if self.validate:
                 assert not ts.processing_on
+                assert not ts.queued_on
                 assert ts.waiting_on
                 assert ts.state == "waiting"
 
@@ -1908,6 +1952,7 @@ class SchedulerState:
 
             if self.validate:
                 assert not ts.processing_on
+                assert not ts.queued_on
                 assert not ts.waiting_on
                 assert ts.who_has
 
@@ -1999,7 +2044,10 @@ class SchedulerState:
             if nbytes is not None:
                 ts.set_nbytes(nbytes)
 
-            _remove_from_processing(self, ts)
+            # NOTE: recommendations for queued tasks are added first, so they'll be popped last,
+            # allowing higher-priority downstream tasks to be transitioned first.
+            # FIXME: this would be incorrect if queued tasks are user-annotated as higher priority.
+            _remove_from_processing(self, ts, recommendations)
 
             _add_to_memory(
                 self, ts, ws, recommendations, client_msgs, type=type, typename=typename
@@ -2007,7 +2055,18 @@ class SchedulerState:
 
             if self.validate:
                 assert not ts.processing_on
+                assert not ts.queued_on
                 assert not ts.waiting_on
+                processing_recs = {
+                    k: r for k, r in recommendations.items() if r == "processing"
+                }
+                assert list(processing_recs) == (
+                    sr := sorted(
+                        processing_recs,
+                        key=lambda k: self.tasks[k].priority,
+                        reverse=True,
+                    )
+                ), (list(processing_recs), sr)
 
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
@@ -2030,6 +2089,7 @@ class SchedulerState:
             if self.validate:
                 assert not ts.waiting_on
                 assert not ts.processing_on
+                assert not ts.queued_on
                 if safe:
                     assert not ts.waiters
 
@@ -2191,6 +2251,7 @@ class SchedulerState:
             if self.validate:
                 assert not ts.who_has
                 assert not ts.processing_on
+                assert not ts.queued_on
 
             dts: TaskState
             for dts in ts.dependencies:
@@ -2232,9 +2293,9 @@ class SchedulerState:
                 assert not ts.waiting_on
                 assert self.tasks[key].state == "processing"
 
-            w: str = _remove_from_processing(self, ts)
-            if w:
-                worker_msgs[w] = [
+            ws = _remove_from_processing(self, ts, recommendations)
+            if ws:
+                worker_msgs[ws] = [
                     {
                         "op": "free-keys",
                         "keys": [key],
@@ -2259,6 +2320,7 @@ class SchedulerState:
 
             if self.validate:
                 assert not ts.processing_on
+                assert not ts.queued_on
 
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
@@ -2301,7 +2363,7 @@ class SchedulerState:
                 ws = ts.processing_on
                 ws.actors.remove(ts)
 
-            w = _remove_from_processing(self, ts)
+            w = _remove_from_processing(self, ts, recommendations)
 
             ts.erred_on.add(w or worker)  # type: ignore
             if exception is not None:
@@ -2350,6 +2412,7 @@ class SchedulerState:
 
             if self.validate:
                 assert not ts.processing_on
+                assert not ts.queued_on
 
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
@@ -2390,6 +2453,108 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    def transition_queued_released(self, key, stimulus_id):
+        try:
+            ts: TaskState = self.tasks[key]
+            recommendations: dict = {}
+            client_msgs: dict = {}
+            worker_msgs: dict = {}
+
+            # TODO allow `remove_worker` to clear `queued_on` and `ws.queued` eagerly; it's more efficient.
+            ws = ts.queued_on
+            assert ws
+
+            if self.validate:
+                assert ts in ws.queued
+                assert not ts.processing_on
+
+            ws.queued.remove(ts)
+            ts.queued_on = None
+
+            # TODO copied from `transition_processing_released`; factor out into helper function
+            ts.state = "released"
+
+            if ts.has_lost_dependencies:
+                recommendations[key] = "forgotten"
+            elif ts.waiters or ts.who_wants:
+                # TODO rescheduling of queued root tasks may be poor.
+                recommendations[key] = "waiting"
+
+            if recommendations.get(key) != "waiting":
+                for dts in ts.dependencies:
+                    if dts.state != "released":
+                        dts.waiters.discard(ts)
+                        if not dts.waiters and not dts.who_wants:
+                            recommendations[dts.key] = "released"
+                ts.waiters.clear()
+
+            return recommendations, client_msgs, worker_msgs
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
+    def transition_queued_processing(self, key, stimulus_id):
+        try:
+            ts: TaskState = self.tasks[key]
+            recommendations: dict = {}
+            client_msgs: dict = {}
+            worker_msgs: dict = {}
+
+            ws = ts.queued_on
+            assert ws
+            # TODO should this be a graceful transition to released? I think `remove_worker`
+            # makes it such that this should never happen.
+            assert (
+                self.workers[ws.address] is ws
+            ), f"Task {ts} queued on stale worker {ws}"
+
+            if self.validate:
+                assert not ts.actor, "Actors can't be queued wat"
+                assert ts in ws.queued
+                # Copied from `transition_waiting_processing`
+                assert not ts.processing_on
+                assert not ts.waiting_on
+                assert not ts.who_has
+                assert not ts.exception_blame
+                assert not ts.has_lost_dependencies
+                assert ts not in self.unrunnable
+                assert all(dts.who_has for dts in ts.dependencies)
+
+            # TODO other validation that this is still an appropriate worker?
+
+            if len(ws.processing) < ws.nthreads:
+                # If more important tasks already got scheduled, remain queued
+
+                ts.queued_on = None
+                ws.queued.remove(ts)
+                # TODO Copied from `transition_waiting_processing`; factor out into helper function
+                self._set_duration_estimate(ts, ws)
+                ts.processing_on = ws
+                ts.state = "processing"
+                self.consume_resources(ts, ws)
+                self.check_idle_saturated(ws)
+                self.n_tasks += 1
+
+                if ts.actor:
+                    ws.actors.add(ts)
+
+                # logger.debug("Send job to worker: %s, %s", worker, key)
+
+                worker_msgs[ws.address] = [_task_to_msg(self, ts)]
+
+            return recommendations, client_msgs, worker_msgs
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
     def _remove_key(self, key):
         ts: TaskState = self.tasks.pop(key)
         assert ts.state == "forgotten"
@@ -2413,6 +2578,7 @@ class SchedulerState:
             if self.validate:
                 assert ts.state == "memory"
                 assert not ts.processing_on
+                assert not ts.queued_on
                 assert not ts.waiting_on
                 if not ts.run_spec:
                     # It's ok to forget a pure data task
@@ -2455,6 +2621,7 @@ class SchedulerState:
                 assert ts.state in ("released", "erred")
                 assert not ts.who_has
                 assert not ts.processing_on
+                assert not ts.queued_on
                 assert not ts.waiting_on, (ts, ts.waiting_on)
                 if not ts.run_spec:
                     # It's ok to forget a pure data task
@@ -2495,6 +2662,8 @@ class SchedulerState:
         ("waiting", "released"): transition_waiting_released,
         ("waiting", "processing"): transition_waiting_processing,
         ("waiting", "memory"): transition_waiting_memory,
+        ("queued", "released"): transition_queued_released,
+        ("queued", "processing"): transition_queued_processing,
         ("processing", "released"): transition_processing_released,
         ("processing", "memory"): transition_processing_memory,
         ("processing", "erred"): transition_processing_erred,
@@ -2766,6 +2935,8 @@ class SchedulerState:
         """
         ts: TaskState
         tasks = []
+        # TODO maintain global queue of tasks and reallocate them here
+        # FIXME queued tasks will not be assigned to a new worker at all!!
         for ts in self.unrunnable:
             valid: set = self.valid_workers(ts)
             if valid is None or ws in valid:
@@ -4253,6 +4424,10 @@ class Scheduler(SchedulerState, ServerNode):
                 else:  # pure data
                     recommendations[ts.key] = "forgotten"
 
+        for ts in ws.queued.sorted():
+            recommendations[ts.key] = "released"
+        # ws.queued.clear()  # TODO more performant
+
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
         for plugin in list(self.plugins.values()):
@@ -4371,6 +4546,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert not ts.waiting_on
         assert not ts.who_has
         assert not ts.processing_on
+        assert not ts.queued_on
         assert not any([ts in dts.waiters for dts in ts.dependencies])
         assert ts not in self.unrunnable
 
@@ -4379,11 +4555,26 @@ class Scheduler(SchedulerState, ServerNode):
         assert ts.waiting_on
         assert not ts.who_has
         assert not ts.processing_on
+        assert not ts.queued_on
         assert ts not in self.unrunnable
         for dts in ts.dependencies:
             # We are waiting on a dependency iff it's not stored
             assert bool(dts.who_has) != (dts in ts.waiting_on)
             assert ts in dts.waiters  # XXX even if dts._who_has?
+
+    def validate_queued(self, key):
+        ts: TaskState = self.tasks[key]
+        dts: TaskState
+        assert not ts.waiting_on
+        ws = ts.queued_on
+        assert ws
+        assert self.workers.get(ws.address) is ws, f"{ts} queued on stale worker {ws}"
+        assert ts in ws.queued
+        assert not ts.who_has
+        assert not ts.processing_on
+        for dts in ts.dependencies:
+            assert dts.who_has
+            assert ts in dts.waiters
 
     def validate_processing(self, key):
         ts: TaskState = self.tasks[key]
@@ -4403,6 +4594,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert ts.who_has
         assert bool(ts in self.replicated_tasks) == (len(ts.who_has) > 1)
         assert not ts.processing_on
+        assert not ts.queued_on
         assert not ts.waiting_on
         assert ts not in self.unrunnable
         for dts in ts.dependents:
@@ -4417,6 +4609,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert not ts.waiting_on
         assert ts in self.unrunnable
         assert not ts.processing_on
+        assert not ts.queued_on
         assert not ts.who_has
         for dts in ts.dependencies:
             assert dts.who_has
@@ -7131,7 +7324,9 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
 
-def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str | None:
+def _remove_from_processing(
+    state: SchedulerState, ts: TaskState, recommendations: dict
+) -> str | None:
     """Remove *ts* from the set of processing tasks.
 
     See also
@@ -7156,6 +7351,19 @@ def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str | None:
 
     state.check_idle_saturated(ws)
     state.release_resources(ts, ws)
+
+    # If a slot has opened up for a queued task, schedule it.
+    if ws.queued and len(ws.processing) < ws.nthreads:
+        # TODO peek or pop?
+        # What if multiple tasks complete on a worker in one transition cycle? Is that possible?
+        # TODO should we only be scheduling 1 taks? Or N open threads? Is there a possible deadlock
+        # where tasks remain queued on a worker forever?
+        qts = ws.queued.peek()
+        if state.validate:
+            assert qts.state == "queued"
+            assert qts.queued_on is ws, (qts.queued_on, ws)
+            assert qts.key not in recommendations, recommendations[qts.key]
+        recommendations[qts.key] = "processing"
 
     return ws.address
 
@@ -7434,7 +7642,17 @@ def validate_task_state(ts: TaskState) -> None:
         assert dts.state != "forgotten"
 
     assert (ts.processing_on is not None) == (ts.state == "processing")
+    assert not (ts.processing_on and ts.queued_on), (ts.processing_on, ts.queued_on)
     assert bool(ts.who_has) == (ts.state == "memory"), (ts, ts.who_has, ts.state)
+
+    if ts.queued_on:
+        assert ts.state == "queued"
+        assert ts in ts.queued_on.queued
+
+    if ts.state == "queued":
+        assert ts.queued_on
+        assert not ts.processing_on
+        assert not ts.who_has
 
     if ts.state == "processing":
         assert all(dts.who_has for dts in ts.dependencies), (
@@ -7443,6 +7661,7 @@ def validate_task_state(ts: TaskState) -> None:
             str(ts.dependencies),
         )
         assert not ts.waiting_on
+        assert not ts.queued_on
 
     if ts.who_has:
         assert ts.waiters or ts.who_wants, (

@@ -62,6 +62,9 @@ class HeapSet(MutableSet[T]):
     def __contains__(self, value: object) -> bool:
         return value in self._data
 
+    def __bool__(self) -> bool:
+        return bool(self._data)
+
     def __len__(self) -> int:
         return len(self._data)
 
