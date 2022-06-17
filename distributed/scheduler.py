@@ -1294,6 +1294,7 @@ class SchedulerState:
         "MEMORY_REBALANCE_SENDER_MIN",
         "MEMORY_REBALANCE_RECIPIENT_MAX",
         "MEMORY_REBALANCE_HALF_GAP",
+        "WORKER_OVERSATURATION",
     }
 
     def __init__(
@@ -1361,6 +1362,9 @@ class SchedulerState:
         self.MEMORY_REBALANCE_HALF_GAP = (
             dask.config.get("distributed.worker.memory.rebalance.sender-recipient-gap")
             / 2.0
+        )
+        self.WORKER_OVERSATURATION = dask.config.get(
+            "distributed.scheduler.worker-oversaturation"
         )
         self.transition_counter = 0
         self.transition_counter_max = transition_counter_max
@@ -1816,7 +1820,7 @@ class SchedulerState:
             tg.last_worker_tasks_left -= 1
 
             # Queue if worker is full to avoid root task overproduction.
-            if len(ws.processing) >= ws.nthreads:
+            if worker_saturated(ws, self.WORKER_OVERSATURATION):
                 # TODO this should be a transition function instead.
                 # But how do we get the `ws` into it? Recommendations on the scheduler can't take arguments.
 
@@ -2526,7 +2530,7 @@ class SchedulerState:
 
             # TODO other validation that this is still an appropriate worker?
 
-            if len(ws.processing) < ws.nthreads:
+            if not worker_saturated(ws, self.WORKER_OVERSATURATION):
                 # If more important tasks already got scheduled, remain queued
 
                 ts.queued_on = None
@@ -7353,7 +7357,7 @@ def _remove_from_processing(
     state.release_resources(ts, ws)
 
     # If a slot has opened up for a queued task, schedule it.
-    if ws.queued and len(ws.processing) < ws.nthreads:
+    if ws.queued and not worker_saturated(ws, state.WORKER_OVERSATURATION):
         # TODO peek or pop?
         # What if multiple tasks complete on a worker in one transition cycle? Is that possible?
         # TODO should we only be scheduling 1 taks? Or N open threads? Is there a possible deadlock
@@ -7747,6 +7751,15 @@ def heartbeat_interval(n: int) -> float:
     else:
         # No more than 200 hearbeats a second scaled by workers
         return n / 200 + 1
+
+
+def worker_saturated(ws: WorkerState, oversaturation_factor: int | float) -> bool:
+    if math.isinf(oversaturation_factor):
+        return False
+    nthreads = ws.nthreads
+    if isinstance(oversaturation_factor, float):
+        oversaturation_factor = math.floor(oversaturation_factor * nthreads)
+    return len(ws.processing) >= max(nthreads + oversaturation_factor, 1)
 
 
 class KilledWorker(Exception):
