@@ -106,14 +106,16 @@ def test_WorkerState__to_dict():
         "busy_workers": [],
         "constrained": [],
         "data": {"y": None},
-        "data_needed": ["x"],
-        "data_needed_per_worker": {"127.0.0.1:1235": ["x"]},
+        "data_needed": [],
+        "data_needed_per_worker": {"127.0.0.1:1235": []},
         "executing": [],
-        "in_flight_tasks": [],
-        "in_flight_workers": {},
+        "in_flight_tasks": ["x"],
+        "in_flight_workers": {"127.0.0.1:1235": ["x"]},
         "log": [
             ["x", "ensure-task-exists", "released", "s1"],
             ["x", "released", "fetch", "fetch", {}, "s1"],
+            ["gather-dependencies", "127.0.0.1:1235", ["x"], "s1"],
+            ["x", "fetch", "flight", "flight", {}, "s1"],
             ["y", "put-in-memory", "s2"],
             ["y", "receive-from-scatter", "s2"],
         ],
@@ -137,10 +139,11 @@ def test_WorkerState__to_dict():
         ],
         "tasks": {
             "x": {
+                "coming_from": "127.0.0.1:1235",
                 "key": "x",
                 "nbytes": 123,
                 "priority": [1],
-                "state": "fetch",
+                "state": "flight",
                 "who_has": ["127.0.0.1:1235"],
             },
             "y": {
@@ -149,7 +152,7 @@ def test_WorkerState__to_dict():
                 "state": "memory",
             },
         },
-        "transition_counter": 1,
+        "transition_counter": 2,
     }
     assert actual == expect
 
@@ -819,3 +822,20 @@ async def test_deprecated_worker_attributes(s, a, b):
     )
     with pytest.warns(FutureWarning, match=msg):
         assert a.in_flight_tasks == 0
+
+
+@pytest.mark.parametrize("nbytes,n_in_flight", [(1, 3), (2**30, 1)])
+def test_cluster_gather_deps(nbytes, n_in_flight):
+    ws = WorkerState(address="127.0.0.1:1234", transition_counter_max=10)
+    ws.handle_stimulus(
+        AcquireReplicasEvent(
+            who_has={
+                "x1": ["127.0.0.1:1235"],
+                "x2": ["127.0.0.1:1235"],
+                "x3": ["127.0.0.1:1235"],
+            },
+            nbytes={"x1": nbytes, "x2": nbytes, "x3": nbytes},
+            stimulus_id="test",
+        )
+    )
+    assert len(ws.in_flight_tasks) == n_in_flight
