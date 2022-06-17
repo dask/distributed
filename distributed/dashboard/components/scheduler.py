@@ -28,6 +28,7 @@ from bokeh.models import (
     FactorRange,
     GroupFilter,
     HoverTool,
+    HTMLTemplateFormatter,
     NumberFormatter,
     NumeralTickFormatter,
     OpenURL,
@@ -78,6 +79,7 @@ from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.diagnostics.task_stream import color_of as ts_color_of
 from distributed.diagnostics.task_stream import colors as ts_color_lookup
 from distributed.metrics import time
+from distributed.scheduler import Scheduler
 from distributed.utils import Log, log_errors
 
 if dask.config.get("distributed.dashboard.export-tool"):
@@ -3207,6 +3209,95 @@ class EventLoop(DashboardComponent):
         update(self.source, data)
 
 
+class ExceptionsTable(DashboardComponent):
+    """
+    Exceptions logged in tasks.
+
+    Since there might be many related exceptions (e.g., all tasks in a given
+    task group fail for the same reason), we make a best-effort attempt to
+    (1) aggregate to the task group, and (2) deduplicate similar looking tasks.
+    """
+
+    scheduler: Scheduler
+
+    def __init__(self, scheduler: Scheduler, width: int = 1000, **kwargs):
+        self.scheduler = scheduler
+
+        self.names = [
+            "Task Group",
+            "Exception",
+            "Traceback",
+            "Worker(s)",
+            "Count",
+        ]
+
+        self.source = ColumnDataSource({k: [] for k in self.names})
+
+        code_formatter = HTMLTemplateFormatter(
+            template='<code title="<%- value %>"><%= value %></code>'
+        )
+        end_code_formatter = HTMLTemplateFormatter(
+            template=(
+                """
+                <p style="direction: rtl; text-align: left; margin: 0 8px 0 8px; overflow: hidden; text-overflow: ellipsis">
+                <code title="<%- value %>"><%= value %></code>
+                </p>'
+                """
+            )
+        )
+        columns = [
+            TableColumn(field="Task Group", title="Task Group", width=150),
+            TableColumn(
+                field="Exception",
+                title="Exception",
+                formatter=code_formatter,
+                width=300,
+            ),
+            TableColumn(
+                field="Traceback",
+                title="Traceback",
+                formatter=end_code_formatter,
+                width=300,
+            ),
+            TableColumn(
+                field="Worker(s)",
+                title="Worker(s)",
+                formatter=code_formatter,
+                width=200,
+            ),
+            TableColumn(
+                field="Count",
+                title="Count",
+                formatter=NumberFormatter(format="0,0"),
+                width=50,
+            ),
+        ]
+
+        self.root = DataTable(
+            source=self.source,
+            columns=columns,
+            reorderable=True,
+            sortable=True,
+            width=width,
+            index_position=None,
+        )
+
+    @without_property_validation
+    def update(self):
+        new_data = {name: [] for name in self.names}
+        group_exceptions = self.scheduler.group_exceptions
+
+        for key, ex in group_exceptions.items():
+            task_group, _ = key
+            new_data["Task Group"].append(task_group)
+            new_data["Exception"].append(ex["exception"])
+            new_data["Traceback"].append(ex["traceback"])
+            new_data["Worker(s)"].append(",\n".join(ex["workers"]))
+            new_data["Count"].append(ex["count"])
+
+        update(self.source, new_data)
+
+
 class WorkerTable(DashboardComponent):
     """Status of the current workers
 
@@ -3841,6 +3932,18 @@ def events_doc(scheduler, extra, doc):
     add_periodic_callback(doc, events, 500)
     doc.title = "Dask: Scheduler Events"
     doc.add_root(column(events.root, sizing_mode="scale_width"))
+    doc.template = env.get_template("simple.html")
+    doc.template_variables.update(extra)
+    doc.theme = BOKEH_THEME
+
+
+@log_errors
+def exceptions_doc(scheduler, extra, doc):
+    table = ExceptionsTable(scheduler)
+    table.update()
+    add_periodic_callback(doc, table, 1000)
+    doc.title = "Dask: Exceptions"
+    doc.add_root(table.root)
     doc.template = env.get_template("simple.html")
     doc.template_variables.update(extra)
     doc.theme = BOKEH_THEME
