@@ -2992,7 +2992,7 @@ async def test_acquire_replicas_large_data(c, s, a):
         )
         await b.in_gather_dep.wait()
         assert len(b.state.in_flight_tasks) == 5
-        assert len(b.state.data_needed) == 5
+        assert len(b.state.data_needed[a.address]) == 5
         b.block_gather_dep.set()
         while len(b.data) < 10:
             await asyncio.sleep(0.01)
@@ -3348,7 +3348,6 @@ async def test_Worker__to_dict(c, s, a):
         "transition_counter",
         "tasks",
         "data_needed",
-        "data_needed_per_worker",
     }
     assert d["tasks"]["x"]["key"] == "x"
     assert d["data"] == {"x": None}

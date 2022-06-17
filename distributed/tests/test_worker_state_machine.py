@@ -106,8 +106,7 @@ def test_WorkerState__to_dict():
         "busy_workers": [],
         "constrained": [],
         "data": {"y": None},
-        "data_needed": ["x"],
-        "data_needed_per_worker": {"127.0.0.1:1235": ["x"]},
+        "data_needed": {"127.0.0.1:1235": ["x"]},
         "executing": [],
         "in_flight_tasks": [],
         "in_flight_workers": {},
@@ -819,3 +818,6 @@ async def test_deprecated_worker_attributes(s, a, b):
     )
     with pytest.warns(FutureWarning, match=msg):
         assert a.in_flight_tasks == 0
+
+    with pytest.warns(FutureWarning, match="attribute has been removed"):
+        assert a.data_needed == set()
