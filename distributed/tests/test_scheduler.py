@@ -249,7 +249,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
 @pytest.mark.slow
 @gen_cluster(
     client=True,
-    nthreads=[("127.0.0.1", 2)] * 2,
+    nthreads=[("", 2)] * 2,
     worker_kwargs={"memory_limit": "1.0GiB"},
     timeout=3600,  # TODO remove
     Worker=Nanny,
@@ -274,7 +274,7 @@ async def test_root_task_overproduction(c, s, *nannies):
         return "x" * size
 
     roots = [
-        big_data(parse_bytes("300 MiB"), dask_key_name=f"root-{i}") for i in range(1600)
+        big_data(parse_bytes("300 MiB"), dask_key_name=f"root-{i}") for i in range(16)
     ]
     passthrough = [delayed(slowidentity)(x) for x in roots]
     memory_consumed = [delayed(len)(x) for x in passthrough]
@@ -282,6 +282,43 @@ async def test_root_task_overproduction(c, s, *nannies):
     final = sum(reduction)
 
     await c.compute(final)
+
+
+@pytest.mark.parametrize(
+    "oversaturation, expected_task_counts",
+    [
+        (1.5, (5, 2)),
+        (1, (3, 2)),
+        (1.0, (4, 2)),
+        (0, (2, 1)),
+        (-1, (1, 1)),
+        (float("inf"), (7, 3))
+        # ^ depends on root task assignment logic; ok if changes, just needs to add up to 10
+    ],
+)
+def test_oversaturation_factor(oversaturation, expected_task_counts: tuple[int, int]):
+    @gen_cluster(
+        client=True,
+        nthreads=[("", 2), ("", 1)],
+        config={
+            "distributed.scheduler.worker-oversaturation": oversaturation,
+        },
+    )
+    async def _test_oversaturation_factor(c, s, a, b):
+        event = Event()
+        fs = c.map(lambda _: event.wait(), range(10))
+        while a.state.executing_count < min(
+            a.nthreads, expected_task_counts[0]
+        ) or b.state.executing_count < min(b.nthreads, expected_task_counts[1]):
+            await asyncio.sleep(0.01)
+
+        assert len(a.state.tasks) == expected_task_counts[0]
+        assert len(b.state.tasks) == expected_task_counts[1]
+
+        await event.set()
+        await c.gather(fs)
+
+    _test_oversaturation_factor()
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
