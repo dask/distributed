@@ -7753,13 +7753,13 @@ def heartbeat_interval(n: int) -> float:
         return n / 200 + 1
 
 
-def worker_saturated(ws: WorkerState, oversaturation_factor: int | float) -> bool:
+def worker_saturated(ws: WorkerState, oversaturation_factor: float) -> bool:
     if math.isinf(oversaturation_factor):
         return False
     nthreads = ws.nthreads
-    if isinstance(oversaturation_factor, float):
-        oversaturation_factor = math.floor(oversaturation_factor * nthreads)
-    return len(ws.processing) >= max(nthreads + oversaturation_factor, 1)
+    return len(ws.processing) >= max(
+        nthreads + int(oversaturation_factor * nthreads), 1
+    )
 
 
 class KilledWorker(Exception):

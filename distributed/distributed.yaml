@@ -22,7 +22,7 @@ distributed:
     events-log-length: 100000
     work-stealing: True     # workers should steal tasks from each other
     work-stealing-interval: 100ms  # Callback time for work stealing
-    worker-oversaturation: 0  # Amount of extra root tasks to send to workers, as fixed count or fraction of nthreads.
+    worker-oversaturation: 0.0  # Send this fraction of nthreads extra root tasks to workers
     worker-ttl: "5 minutes" # like '60s'. Time to live for workers.  They must heartbeat faster than this
     pickle: True            # Is the scheduler allowed to deserialize arbitrary bytestrings
     preload: []             # Run custom modules with Scheduler

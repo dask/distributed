@@ -288,10 +288,9 @@ async def test_root_task_overproduction(c, s, *nannies):
     "oversaturation, expected_task_counts",
     [
         (1.5, (5, 2)),
-        (1, (3, 2)),
         (1.0, (4, 2)),
-        (0, (2, 1)),
-        (-1, (1, 1)),
+        (0.0, (2, 1)),
+        (-1.0, (1, 1)),
         (float("inf"), (7, 3))
         # ^ depends on root task assignment logic; ok if changes, just needs to add up to 10
     ],

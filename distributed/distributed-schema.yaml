@@ -118,16 +118,12 @@ properties:
               How frequently to balance worker loads
 
           worker-oversaturation:
-            type:
-            - integer
-            - float
+            type: float
             description: |
-              Controls how many extra root tasks are sent to workers (like a readahead).
+              Controls how many extra root tasks are sent to workers (like a `readahead`).
 
-              As an integer, this many _extra_ root tasks are sent to the worker, beyond that worker's
-              thread count. As a float, `worker-oversaturation * worker.nthreads` _extra_ tasks are sent
-              to the worker beyond its thread count. If `.inf`, all runnable tasks are immediately sent
-              to workers.
+              `floor(worker-oversaturation * worker.nthreads)` _extra_ tasks are sent to the worker
+              beyond its thread count. If `.inf`, all runnable tasks are immediately sent to workers.
 
               Allowing oversaturation means a worker will start running a new root task as soon as
               it completes the previous, even if there is a higher-priority downstream task to run.
@@ -137,8 +133,9 @@ properties:
               This generally comes  at the expense of increased memory usage. It leads to "wider"
               (more breadth-first) execution of the graph.
 
-              Compute-bound workloads benefit from increasing oversaturation. Memory-bound
-              workloads should generally leave `worker-oversaturation` at 0.
+              Compute-bound workloads benefit from oversaturation. Memory-bound workloads should
+              generally leave `worker-oversaturation` at 0, though 0.25-0.5 could slightly improve
+              performance if ample memory is available.
 
           worker-ttl:
             type:
