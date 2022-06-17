@@ -28,6 +28,7 @@ from distributed.worker_state_machine import (
     ComputeTaskEvent,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
+    GatherDep,
     Instruction,
     RecommendationsConflict,
     RefreshWhoHasEvent,
@@ -824,10 +825,18 @@ async def test_deprecated_worker_attributes(s, a, b):
         assert a.in_flight_tasks == 0
 
 
-@pytest.mark.parametrize("nbytes,n_in_flight", [(1, 3), (2**30, 1)])
-def test_cluster_gather_deps(nbytes, n_in_flight):
+@pytest.mark.parametrize(
+    "nbytes,n_in_flight",
+    [
+        # Note: target_message_size = 50e6 bytes
+        (int(10e6), 3),
+        (int(20e6), 2),
+        (int(30e6), 1),
+    ],
+)
+def test_aggregate_gather_deps(nbytes, n_in_flight):
     ws = WorkerState(address="127.0.0.1:1234", transition_counter_max=10)
-    ws.handle_stimulus(
+    instructions = ws.handle_stimulus(
         AcquireReplicasEvent(
             who_has={
                 "x1": ["127.0.0.1:1235"],
@@ -838,4 +847,6 @@ def test_cluster_gather_deps(nbytes, n_in_flight):
             stimulus_id="test",
         )
     )
+    assert len(instructions) == 1
+    assert isinstance(instructions[0], GatherDep)
     assert len(ws.in_flight_tasks) == n_in_flight
