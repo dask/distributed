@@ -3106,20 +3106,20 @@ class TaskProgress(DashboardComponent):
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@all</span>
                 </div>
                 <div>
+                    <span style="font-size: 14px; font-weight: bold;">Queued:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@queued</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Processing:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@processing</span>
+                </div>
+                <div>
                     <span style="font-size: 14px; font-weight: bold;">Memory:</span>&nbsp;
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@memory</span>
                 </div>
                 <div>
                     <span style="font-size: 14px; font-weight: bold;">Erred:</span>&nbsp;
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@erred</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Ready:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@processing</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Queued:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@queued</span>
                 </div>
                 """,
         )
@@ -3166,9 +3166,10 @@ class TaskProgress(DashboardComponent):
 
         self.root.title.text = (
             "Progress -- total: %(all)s, "
-            "in-memory: %(memory)s, processing: %(processing)s, "
-            "queued: %(queued)s, "
             "waiting: %(waiting)s, "
+            "queued: %(queued)s, "
+            "processing: %(processing)s, "
+            "in-memory: %(memory)s, "
             "erred: %(erred)s" % totals
         )
 
