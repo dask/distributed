@@ -3273,6 +3273,10 @@ class ExceptionsTable(DashboardComponent):
             ),
         ]
 
+        if "sizing_mode" in kwargs:
+            sizing_mode = {"sizing_mode": kwargs["sizing_mode"]}
+        else:
+            sizing_mode = {}
         self.root = DataTable(
             source=self.source,
             columns=columns,
@@ -3280,6 +3284,7 @@ class ExceptionsTable(DashboardComponent):
             sortable=True,
             width=width,
             index_position=None,
+            **sizing_mode,
         )
 
     @without_property_validation
