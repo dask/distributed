@@ -3292,7 +3292,7 @@ class ExceptionsTable(DashboardComponent):
         new_data = {name: [] for name in self.names}
         group_exceptions = self.scheduler.group_exceptions
 
-        for key, ex in group_exceptions.items():
+        for key, ex in reversed(group_exceptions.items()):
             task_group, _ = key
             new_data["Task Group"].append(task_group)
             new_data["Exception"].append(ex["exception"])
