@@ -2339,6 +2339,7 @@ class SchedulerState:
                     }
                 self.group_exceptions[(ts.group_key, ex)]["workers"].add(w or worker)
                 self.group_exceptions[(ts.group_key, ex)]["count"] += 1
+                self.group_exceptions[(ts.group_key, ex)]["last_seen"] = time()
 
             for dts in ts.dependents:
                 dts.exception_blame = failing_ts

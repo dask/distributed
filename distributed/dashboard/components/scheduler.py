@@ -3228,6 +3228,7 @@ class ExceptionsTable(DashboardComponent):
             "Exception",
             "Traceback",
             "Worker(s)",
+            "Last Seen",
             "Count",
         ]
 
@@ -3266,6 +3267,11 @@ class ExceptionsTable(DashboardComponent):
                 width=200,
             ),
             TableColumn(
+                field="Last Seen",
+                title="Last Seen",
+                width=200,
+            ),
+            TableColumn(
                 field="Count",
                 title="Count",
                 formatter=NumberFormatter(format="0,0"),
@@ -3298,6 +3304,9 @@ class ExceptionsTable(DashboardComponent):
             new_data["Exception"].append(ex["exception"])
             new_data["Traceback"].append(ex["traceback"])
             new_data["Worker(s)"].append(",\n".join(ex["workers"]))
+            new_data["Last Seen"].append(
+                datetime.fromtimestamp(ex["last_seen"]).strftime("%H:%M:%S")
+            )
             new_data["Count"].append(ex["count"])
 
         update(self.source, new_data)
