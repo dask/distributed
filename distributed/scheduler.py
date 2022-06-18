@@ -1805,10 +1805,23 @@ class SchedulerState:
 
             if not (ws and tg.last_worker_tasks_left and ws.address in self.workers):
                 # Last-used worker is full or unknown; pick a new worker for the next few tasks
-                ws = min(
-                    (self.idle or self.workers).values(),
-                    key=partial(self.worker_objective, ts),
+
+                # We just pick the worker with the shortest queue (or if queuing is disabled,
+                # the fewest processing tasks). We've already decided dependencies are unimportant,
+                # so we don't care to schedule near them.
+                backlog = operator.attrgetter(
+                    "processing" if math.isinf(self.WORKER_OVERSATURATION) else "queued"
                 )
+                ws = min(
+                    self.workers.values(), key=lambda ws: len(backlog(ws)) / ws.nthreads
+                )
+                if self.validate:
+                    assert ws is not tg.last_worker, (
+                        f"Colocation reused worker {ws} for {tg}, "
+                        f"idle: {list(self.idle.values())}, "
+                        f"workers: {list(self.workers.values())}"
+                    )
+
                 tg.last_worker_tasks_left = math.floor(
                     (len(tg) / self.total_nthreads) * ws.nthreads
                 )
