@@ -41,6 +41,21 @@
             {% end %}
           </table>
         </div>
+        <div class="content">
+          <h2 class="subtitle"> Queued </h2>
+          <table class="table is-striped is-hoverable">
+            <tr>
+                <th> Task </th>
+                <th> Priority </th>
+            </tr>
+            {% for ts in ws.queued.sorted() %}
+            <tr>
+                <td> <a href="../task/{{ url_escape(ts.key) }}.html">{{ts.key}}</a></td>
+                <td> {{ts.priority }} </td>
+            </tr>
+            {% end %}
+          </table>
+        </div>
       </div>
     </div>
 
