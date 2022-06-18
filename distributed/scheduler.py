@@ -1820,7 +1820,7 @@ class SchedulerState:
             tg.last_worker_tasks_left -= 1
 
             # Queue if worker is full to avoid root task overproduction.
-            if worker_saturated(ws, self.WORKER_OVERSATURATION):
+            if task_slots_available(ws, self.WORKER_OVERSATURATION) <= 0:
                 # TODO this should be a transition function instead.
                 # But how do we get the `ws` into it? Recommendations on the scheduler can't take arguments.
 
@@ -2530,7 +2530,7 @@ class SchedulerState:
 
             # TODO other validation that this is still an appropriate worker?
 
-            if not worker_saturated(ws, self.WORKER_OVERSATURATION):
+            if task_slots_available(ws, self.WORKER_OVERSATURATION) > 0:
                 # If more important tasks already got scheduled, remain queued
 
                 ts.queued_on = None
@@ -2938,9 +2938,71 @@ class SchedulerState:
         ordering, so the recommendations are sorted by priority order here.
         """
         ts: TaskState
-        tasks = []
-        # TODO maintain global queue of tasks and reallocate them here
-        # FIXME queued tasks will not be assigned to a new worker at all!!
+        recommendations: dict[str, str] = {}
+
+        # Redistribute the tasks between all worker queues. We bubble tasks off the back of the most-queued
+        # worker onto the front of the least-queued, and repeat this until we've accumulated enough tasks to
+        # put onto the new worker. This maintains the co-assignment of each worker's queue, minimizing the
+        # fragmentation of neighboring tasks.
+        # Note this does not rebalance all workers. It just rebalances the busiest workers, stealing just enough
+        # tasks to fill up the new worker.
+        # NOTE: this is probably going to be pretty slow for lots of queued tasks and/or lots of workers.
+        # Also unclear if this is even a good load-balancing strategy.
+        # TODO this is optimized for the add-worker case. Generalize for remove-worker as well.
+        # That would probably look like rebalancing all workers though.
+        if not math.isinf(self.WORKER_OVERSATURATION):
+            workers_with_queues: list[WorkerState] = sorted(
+                (wss for wss in self.workers.values() if wss.queued and wss is not ws),
+                key=lambda wss: len(wss.queued),
+                reverse=True,
+            )
+            if workers_with_queues:
+                total_queued = sum(len(wss.queued) for wss in workers_with_queues)
+                target_qsize = int(total_queued / len(self.workers))
+                moveable_tasks_so_far = 0
+                last_q_tasks_to_move = 0
+                i = 0
+                # Go through workers with the largest queues until we've found enough workers to steal from
+                for i, wss in enumerate(workers_with_queues):
+                    n_extra_tasks = len(wss.queued) - target_qsize
+                    if n_extra_tasks <= 0:
+                        break
+                    moveable_tasks_so_far += n_extra_tasks
+                    if moveable_tasks_so_far >= target_qsize:
+                        last_q_tasks_to_move = n_extra_tasks - (
+                            moveable_tasks_so_far - target_qsize
+                        )
+                        break
+                if last_q_tasks_to_move:
+                    # Starting from the smallest, bubble tasks off the back of the queue and onto the front of the next-largest.
+                    # At the end, bubble tasks onto the new worker's queue
+                    while i >= 0:
+                        src = workers_with_queues[i]
+                        dest = workers_with_queues[i - 1] if i > 0 else ws
+                        for _ in range(last_q_tasks_to_move):
+                            # NOTE: `popright` is not exactly the highest element, but sorting would be too expensive.
+                            # It's good enough, and in the common case the heap is sorted anyway (because elements are)
+                            # inserted in sorted order by `decide_worker`
+                            ts = src.queued.popright()
+                            ts.queued_on = dest
+                            dest.queued.add(ts)
+
+                        i -= 1
+                        last_q_tasks_to_move = target_qsize
+
+            if (
+                ws.queued
+                and (n := task_slots_available(ws, self.WORKER_OVERSATURATION)) > 0
+            ):
+                # NOTE: reverse priority order, since recommendations are processed in LIFO order
+                for ts in reversed(list(ws.queued.topk(n))):
+                    if self.validate:
+                        assert ts.state == "queued"
+                        assert ts.queued_on is ws, (ts.queued_on, ws)
+                        assert ts.key not in recommendations, recommendations[ts.key]
+                    recommendations[ts.key] = "processing"
+
+        tasks: list[TaskState] = []
         for ts in self.unrunnable:
             valid: set = self.valid_workers(ts)
             if valid is None or ws in valid:
@@ -7357,7 +7419,7 @@ def _remove_from_processing(
     state.release_resources(ts, ws)
 
     # If a slot has opened up for a queued task, schedule it.
-    if ws.queued and not worker_saturated(ws, state.WORKER_OVERSATURATION):
+    if ws.queued and task_slots_available(ws, state.WORKER_OVERSATURATION) > 0:
         # TODO peek or pop?
         # What if multiple tasks complete on a worker in one transition cycle? Is that possible?
         # TODO should we only be scheduling 1 taks? Or N open threads? Is there a possible deadlock
@@ -7753,13 +7815,12 @@ def heartbeat_interval(n: int) -> float:
         return n / 200 + 1
 
 
-def worker_saturated(ws: WorkerState, oversaturation_factor: float) -> bool:
+def task_slots_available(ws: WorkerState, oversaturation_factor: float) -> int:
+    "Number of tasks that can be sent to this worker without oversaturating it"
     if math.isinf(oversaturation_factor):
         return False
     nthreads = ws.nthreads
-    return len(ws.processing) >= max(
-        nthreads + int(oversaturation_factor * nthreads), 1
-    )
+    return max(nthreads + int(oversaturation_factor * nthreads), 1) - len(ws.processing)
 
 
 class KilledWorker(Exception):
