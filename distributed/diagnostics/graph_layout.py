@@ -27,7 +27,6 @@ class GraphLayout(SchedulerPlugin):
         self.new = []
         self.new_edges = []
         self.state_updates = []
-        self.worker_updates = []
         self.visible_updates = []
         self.visible_edge_updates = []
 
@@ -94,18 +93,11 @@ class GraphLayout(SchedulerPlugin):
                 self.new_edges.append(edge)
 
     def transition(self, key, start, finish, *args, **kwargs):
-        task = self.scheduler.tasks[key]
-        idx = self.index[key]
         if finish != "forgotten":
-            self.state_updates.append((idx, finish))
-            ws = (
-                task.queued_on
-                or task.processing_on
-                or (next(iter(task.who_has)) if task.who_has else None)
-            )
-            self.worker_updates.append((idx, int(ws.name) if ws else None))
+            self.state_updates.append((self.index[key], finish))
         else:
-            self.visible_updates.append((idx, "False"))
+            self.visible_updates.append((self.index[key], "False"))
+            task = self.scheduler.tasks[key]
             for dep in task.dependents:
                 edge = (key, dep.key)
                 self.visible_edge_updates.append((self.index_edge.pop(edge), "False"))
@@ -132,7 +124,6 @@ class GraphLayout(SchedulerPlugin):
         self.new_edges = []
         self.visible_updates = []
         self.state_updates = []
-        self.worker_updates = []
         self.visible_edge_updates = []
 
         self.index = {}
