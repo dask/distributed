@@ -2,8 +2,13 @@ name: Debug passwordless `ssh localhost`
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
 jobs:
   test:
+    permissions:
+      contents: none
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
