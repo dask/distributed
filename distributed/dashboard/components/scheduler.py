@@ -2100,13 +2100,6 @@ class TaskGraph(DashboardComponent):
             factors=["waiting", "processing", "memory", "released", "erred"],
             palette=["gray", "green", "red", "blue", "black"],
         )
-        worker_colors = linear_cmap(
-            "worker",
-            Viridis11,  # TODO larger cmap for more workers
-            low=0,
-            high=11,  # TODO actually set this, and update when workers add/leave!!!
-            nan_color="black",
-        )
 
         self.root = figure(title="Task Graph", **kwargs)
         self.subtitle = Title(text=" ", text_font_style="italic")
@@ -2125,7 +2118,6 @@ class TaskGraph(DashboardComponent):
             x="x",
             y="y",
             size=10,
-            line_color=worker_colors,
             color=node_colors,
             source=self.node_source,
             view=node_view,
@@ -2138,7 +2130,7 @@ class TaskGraph(DashboardComponent):
 
         hover = HoverTool(
             point_policy="follow_mouse",
-            tooltips="<b>@name</b>: @state @worker",
+            tooltips="<b>@name</b>: @state",
             renderers=[rect],
         )
         tap = TapTool(callback=OpenURL(url="info/task/@key.html"), renderers=[rect])
@@ -2188,7 +2180,6 @@ class TaskGraph(DashboardComponent):
             node_name = []
             edge_x = []
             edge_y = []
-            worker = []
 
             x = self.layout.x
             y = self.layout.y
@@ -2206,11 +2197,6 @@ class TaskGraph(DashboardComponent):
                 node_y.append(yy)
                 node_state.append(task.state)
                 node_name.append(task.prefix.name)
-                ws = task.processing_on or (
-                    next(iter(task.who_has)) if task.who_has else None
-                )
-                # TODO don't rely on worker name being int-like; use categorical cmap instead
-                worker.append(int(ws.name) if ws else None)
 
             for a, b in new_edges:
                 try:
@@ -2226,7 +2212,6 @@ class TaskGraph(DashboardComponent):
                 "name": node_name,
                 "key": node_key,
                 "visible": ["True"] * len(node_x),
-                "worker": worker,
             }
             edge = {"x": edge_x, "y": edge_y, "visible": ["True"] * len(edge_x)}
 
@@ -2251,12 +2236,6 @@ class TaskGraph(DashboardComponent):
             self.layout.state_updates = []
             updates = [(i, c) for i, c in state_updates if i < n]
             self.node_source.patch({"state": updates})
-
-        if self.layout.worker_updates:
-            worker_updates = self.layout.worker_updates
-            self.layout.worker_updates = []
-            updates = [(i, c) for i, c in worker_updates if i < n]
-            self.node_source.patch({"worker": updates})
 
         if self.layout.visible_updates:
             updates = self.layout.visible_updates
