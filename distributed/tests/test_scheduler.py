@@ -320,6 +320,35 @@ def test_oversaturation_factor(oversaturation, expected_task_counts: tuple[int, 
     _test_oversaturation_factor()
 
 
+@pytest.mark.parametrize(
+    "saturation_factor",
+    [
+        0.0,
+        1.0,
+        pytest.param(
+            float("inf"),
+            marks=pytest.mark.skip("https://github.com/dask/distributed/issues/6597"),
+        ),
+    ],
+)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2), ("", 1)],
+)
+async def test_oversaturation_multiple_task_groups(c, s, a, b, saturation_factor):
+    s.WORKER_OVERSATURATION = saturation_factor
+    xs = [delayed(i, name=f"x-{i}") for i in range(9)]
+    ys = [delayed(i, name=f"y-{i}") for i in range(9)]
+    zs = [x + y for x, y in zip(xs, ys)]
+
+    await c.gather(c.compute(zs))
+
+    assert not a.incoming_transfer_log, [l["keys"] for l in a.incoming_transfer_log]
+    assert not b.incoming_transfer_log, [l["keys"] for l in b.incoming_transfer_log]
+    assert len(a.tasks) == 18
+    assert len(b.tasks) == 9
+
+
 @gen_cluster(
     client=True,
     nthreads=[("", 2)] * 2,
