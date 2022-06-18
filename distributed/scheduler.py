@@ -1820,7 +1820,7 @@ class SchedulerState:
             tg.last_worker_tasks_left -= 1
 
             # Queue if worker is full to avoid root task overproduction.
-            if task_slots_available(ws, self.WORKER_OVERSATURATION) <= 0:
+            if worker_saturated(ws, self.WORKER_OVERSATURATION):
                 # TODO this should be a transition function instead.
                 # But how do we get the `ws` into it? Recommendations on the scheduler can't take arguments.
 
@@ -2530,7 +2530,7 @@ class SchedulerState:
 
             # TODO other validation that this is still an appropriate worker?
 
-            if task_slots_available(ws, self.WORKER_OVERSATURATION) > 0:
+            if not worker_saturated(ws, self.WORKER_OVERSATURATION):
                 # If more important tasks already got scheduled, remain queued
 
                 ts.queued_on = None
@@ -7419,7 +7419,7 @@ def _remove_from_processing(
     state.release_resources(ts, ws)
 
     # If a slot has opened up for a queued task, schedule it.
-    if ws.queued and task_slots_available(ws, state.WORKER_OVERSATURATION) > 0:
+    if ws.queued and not worker_saturated(ws, state.WORKER_OVERSATURATION):
         # TODO peek or pop?
         # What if multiple tasks complete on a worker in one transition cycle? Is that possible?
         # TODO should we only be scheduling 1 taks? Or N open threads? Is there a possible deadlock
@@ -7817,10 +7817,15 @@ def heartbeat_interval(n: int) -> float:
 
 def task_slots_available(ws: WorkerState, oversaturation_factor: float) -> int:
     "Number of tasks that can be sent to this worker without oversaturating it"
-    if math.isinf(oversaturation_factor):
-        return False
+    assert not math.isinf(oversaturation_factor)
     nthreads = ws.nthreads
     return max(nthreads + int(oversaturation_factor * nthreads), 1) - len(ws.processing)
+
+
+def worker_saturated(ws: WorkerState, oversaturation_factor: float) -> bool:
+    if math.isinf(oversaturation_factor):
+        return False
+    return task_slots_available(ws, oversaturation_factor) <= 0
 
 
 class KilledWorker(Exception):
