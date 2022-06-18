@@ -320,6 +320,21 @@ def test_oversaturation_factor(oversaturation, expected_task_counts: tuple[int, 
     _test_oversaturation_factor()
 
 
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)] * 2,
+    timeout=3600,  # TODO remove
+    scheduler_kwargs=dict(  # TODO remove
+        dashboard=True,
+        dashboard_address=":8787",
+    ),
+)
+async def test_queued_tasks_rebalance(c, s, a, b):
+    event = Event()
+    fs = c.map(lambda _: event.wait(), range(100))
+    await c.gather(fs)
+
+
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_move_data_over_break_restrictions(client, s, a, b, c):
     [x] = await client.scatter([1], workers=b.address)

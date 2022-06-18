@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import heapq
+import itertools
 import weakref
 from collections import OrderedDict, UserDict
 from collections.abc import Callable, Hashable, Iterator
@@ -102,6 +103,41 @@ class HeapSet(MutableSet[T]):
                 self._data.discard(value)
                 return value
 
+    def popright(self) -> T:
+        "Remove and return one of the largest elements (not necessarily the largest)!"
+        if not self._data:
+            raise KeyError("popright from an empty set")
+        while True:
+            _, _, vref = self._heap.pop()
+            value = vref()
+            if value is not None and value in self._data:
+                self._data.discard(value)
+                return value
+
+    def topk(self, k: int) -> Iterator[T]:
+        # TODO confirm big-O values here
+        "Iterator over the largest K elements. This is O(k*logn) for k < n // 2, O(n*logn) otherwise."
+        k = min(k, len(self))
+        if k == 1:
+            yield self.peek()
+        elif k >= len(self) // 2:
+            return itertools.islice(self.sorted(), k)
+        else:
+            # FIXME though neat, with all the list mutation this is probably always slower than sorting inplace.
+            elems: list[tuple[Any, int, weakref.ref[T]]] = []
+            try:
+                while len(elems) < k:
+                    elem = heapq.heappop(self._heap)
+                    value = elem[-1]()
+                    if value is not None and value in self._data:
+                        # NOTE: we're in a broken state during iteration, since the value exists
+                        # in the set but not the heap. As with all Python iterators, mutating
+                        # while iterating is undefined.
+                        elems.append(elem)
+                        yield value
+            finally:
+                self._heap = elems + self._heap
+
     def __iter__(self) -> Iterator[T]:
         """Iterate over all elements. This is a O(n) operation which returns the
         elements in pseudo-random order.
@@ -113,7 +149,8 @@ class HeapSet(MutableSet[T]):
         elements in order, from smallest to largest according to the key and insertion
         order.
         """
-        for _, _, vref in sorted(self._heap):
+        self._heap.sort()  # A sorted list maintains the heap invariant
+        for _, _, vref in self._heap:
             value = vref()
             if value in self._data:
                 yield value
