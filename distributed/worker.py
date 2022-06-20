@@ -13,6 +13,7 @@ import sys
 import threading
 import warnings
 import weakref
+from time import sleep
 from collections import defaultdict, deque
 from collections.abc import (
     Callable,
@@ -23,7 +24,7 @@ from collections.abc import (
     MutableMapping,
 )
 from concurrent.futures import Executor
-from contextlib import suppress
+from contextlib import suppress, contextmanager
 from datetime import timedelta
 from inspect import isawaitable
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
@@ -1791,6 +1792,15 @@ class Worker(BaseWorker, ServerNode):
             # Update status and send confirmation to the Scheduler (see status.setter)
             self.status = new_status
 
+    def adjust_resources(self, **resources) -> None:
+        for resource, change in resources.items():
+            if change < 0:
+                while self.available_resources[resource] + change < 0:
+                    sleep(1)
+
+            with self._lock:
+                self.available_resources[resource] += change
+
     ###################
     # Task Management #
     ###################
@@ -2621,6 +2631,47 @@ def secede():
             stimulus_id=f"secede-{time()}",
         ),
     )
+
+
+@contextmanager
+def release_resources(**resources):
+    """
+    Temporarily releases resources of the current worker.
+
+    When a task secedes from the worker's thread pool, the allocated resources
+    are not released, which can cause deadlocks. This method allows temporary
+    and controlled release of resources within a given context.
+
+    Parameters
+    ----------
+    resources: dict
+        Allocated resources to release like ``{'GPU': 2}``
+
+    Examples
+    --------
+    >>> def mytask(x):
+    ...     # do some work using allocated resources (e.g., 2 GPUs)
+    ...     client = get_client()
+    ...     futures = client.map(...)  # queue remote work
+    ...     secede()  # remove ourself from the pool
+    ...     with release_resources(GPU=2): # enable other tasks to use the 2 GPUs
+    ...         results = client.gather(futures)
+    ...     # the context will only be exited when the 2 GPUs will be available
+    ...     # again and reallocated to this task
+    ...     rejoin()
+    ...     # do more work using the resources
+
+    """
+    try:
+        worker = get_worker()
+    except ValueError:  # could not find worker
+        pass
+
+    try:
+        worker.adjust_resources(**resources)
+        yield
+    finally:
+        worker.adjust_resources(**{k: -v for k, v in resources.items()})
 
 
 class Reschedule(Exception):
