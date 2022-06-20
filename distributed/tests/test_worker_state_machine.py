@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 from collections.abc import Iterator
 
 import pytest
+from tlz import first
 
-from distributed import Worker, wait
+from dask.sizeof import sizeof
+
+import distributed.profile as profile
+from distributed import Nanny, Worker, wait
 from distributed.protocol.serialize import Serialize
+from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.utils import recursive_to_dict
 from distributed.utils_test import (
     BlockedGetData,
@@ -15,6 +21,7 @@ from distributed.utils_test import (
     freeze_data_fetching,
     gen_cluster,
     inc,
+    wait_for_state,
 )
 from distributed.worker_state_machine import (
     AcquireReplicasEvent,
@@ -23,21 +30,26 @@ from distributed.worker_state_machine import (
     ExecuteSuccessEvent,
     Instruction,
     RecommendationsConflict,
+    RefreshWhoHasEvent,
     ReleaseWorkerDataMsg,
     RescheduleEvent,
     RescheduleMsg,
     SerializedTask,
     StateMachineEvent,
     TaskState,
-    TaskStateState,
     UpdateDataEvent,
+    WorkerState,
     merge_recs_instructions,
 )
 
 
-async def wait_for_state(key: str, state: TaskStateState, dask_worker: Worker) -> None:
-    while key not in dask_worker.tasks or dask_worker.tasks[key].state != state:
-        await asyncio.sleep(0.005)
+def test_TaskState_tracking(cleanup):
+    gc.collect()
+    x = TaskState("x")
+    assert len(TaskState._instances) == 1
+    assert first(TaskState._instances) == x
+    del x
+    assert len(TaskState._instances) == 0
 
 
 def test_TaskState_get_nbytes():
@@ -48,8 +60,8 @@ def test_TaskState_get_nbytes():
 
 def test_TaskState__to_dict():
     """Tasks that are listed as dependencies or dependents of other tasks are dumped as
-    a short repr and always appear in full directly under Worker.tasks. Uninteresting
-    fields are omitted.
+    a short repr and always appear in full directly under Worker.state.tasks.
+    Uninteresting fields are omitted.
     """
     x = TaskState("x", state="memory", done=True)
     y = TaskState("y", priority=(0,), dependencies={x})
@@ -69,6 +81,77 @@ def test_TaskState__to_dict():
             "priority": [0],
         },
     ]
+
+
+def test_WorkerState__to_dict():
+    ws = WorkerState(address="127.0.0.1:1234", transition_counter_max=10)
+    ws.handle_stimulus(
+        AcquireReplicasEvent(
+            who_has={"x": ["127.0.0.1:1235"]}, nbytes={"x": 123}, stimulus_id="s1"
+        )
+    )
+    ws.handle_stimulus(
+        UpdateDataEvent(data={"y": object()}, report=False, stimulus_id="s2")
+    )
+
+    actual = recursive_to_dict(ws)
+    # Remove timestamps
+    for ev in actual["log"]:
+        del ev[-1]
+    for stim in actual["stimulus_log"]:
+        del stim["handled"]
+
+    expect = {
+        "address": "127.0.0.1:1234",
+        "busy_workers": [],
+        "constrained": [],
+        "data": {"y": None},
+        "data_needed": ["x"],
+        "data_needed_per_worker": {"127.0.0.1:1235": ["x"]},
+        "executing": [],
+        "in_flight_tasks": [],
+        "in_flight_workers": {},
+        "log": [
+            ["x", "ensure-task-exists", "released", "s1"],
+            ["x", "released", "fetch", "fetch", {}, "s1"],
+            ["y", "put-in-memory", "s2"],
+            ["y", "receive-from-scatter", "s2"],
+        ],
+        "long_running": [],
+        "nthreads": 1,
+        "ready": [],
+        "running": True,
+        "stimulus_log": [
+            {
+                "cls": "AcquireReplicasEvent",
+                "stimulus_id": "s1",
+                "who_has": {"x": ["127.0.0.1:1235"]},
+                "nbytes": {"x": 123},
+            },
+            {
+                "cls": "UpdateDataEvent",
+                "data": {"y": None},
+                "report": False,
+                "stimulus_id": "s2",
+            },
+        ],
+        "tasks": {
+            "x": {
+                "key": "x",
+                "nbytes": 123,
+                "priority": [1],
+                "state": "fetch",
+                "who_has": ["127.0.0.1:1235"],
+            },
+            "y": {
+                "key": "y",
+                "nbytes": sizeof(object()),
+                "state": "memory",
+            },
+        },
+        "transition_counter": 1,
+    }
+    assert actual == expect
 
 
 def traverse_subclasses(cls: type) -> Iterator[type]:
@@ -296,7 +379,7 @@ async def test_fetch_to_compute(c, s, a, b):
     await f2
 
     assert_story(
-        b.log,
+        b.state.log,
         # FIXME: This log should be replaced with a StateMachineEvent log
         [
             (f2.key, "compute-task", "released"),
@@ -326,7 +409,7 @@ async def test_fetch_via_amm_to_compute(c, s, a, b):
     await f1
 
     assert_story(
-        b.log,
+        b.state.log,
         # FIXME: This log should be replaced with a StateMachineEvent log
         [
             (f1.key, "ensure-task-exists", "released"),
@@ -372,7 +455,7 @@ async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
             s.request_acquire_replicas(w1.address, ["x"], stimulus_id="test")
 
         await wait_for_state("x", "fetch", w1)
-        assert w1.tasks["x"].who_has == {w2.address, w3.address}
+        assert w1.state.tasks["x"].who_has == {w2.address, w3.address}
 
         assert len(s.tasks["x"].who_has) == 2
         await w2.close()
@@ -384,12 +467,12 @@ async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
         else:
             s.request_acquire_replicas(w1.address, ["x"], stimulus_id="test")
 
-        while w1.tasks["x"].who_has != {w3.address}:
+        while w1.state.tasks["x"].who_has != {w3.address}:
             await asyncio.sleep(0.01)
 
     await wait_for_state("x", "memory", w1)
     assert_story(
-        w1.story("request-dep"),
+        w1.state.story("request-dep"),
         [("request-dep", w3.address, {"x"})],
         # This tests that there has been no attempt to contact w2.
         # If the assumption being tested breaks, this will fail 50% of the times.
@@ -418,7 +501,7 @@ async def test_fetch_to_missing(c, s, a, b):
     # state will flip-flop between fetch and flight every 150ms, which is the retry
     # period for busy workers.
     await wait_for_state("x", "fetch", a)
-    assert b.address in a.busy_workers
+    assert b.address in a.state.busy_workers
 
     # Sever connection between b and s, but not between b and a.
     # If a tries fetching from b after this, b will keep responding {status: busy}.
@@ -428,7 +511,7 @@ async def test_fetch_to_missing(c, s, a, b):
     await wait_for_state("x", "missing", a)
 
     assert_story(
-        a.story("x"),
+        a.state.story("x"),
         [
             ("x", "ensure-task-exists", "released"),
             ("x", "released", "fetch", "fetch", {}),
@@ -470,7 +553,7 @@ async def test_new_replica_while_all_workers_in_flight(c, s, w1, w2):
         await wait([x, y])
         s.request_acquire_replicas(w1.address, ["x"], stimulus_id="test")
         await w3.in_get_data.wait()
-        assert w1.tasks["x"].state == "flight"
+        assert w1.state.tasks["x"].state == "flight"
         s.request_acquire_replicas(w1.address, ["y"], stimulus_id="test")
         # This cannot progress beyond fetch because w3 is already in flight
         await wait_for_state("y", "fetch", w1)
@@ -506,7 +589,7 @@ async def test_cancelled_while_in_flight(c, s, a, b):
     # Let the comm from b to a return the result
     event.set()
     # upon reception, x transitions cancelled->forgotten
-    while a.tasks:
+    while a.state.tasks:
         await asyncio.sleep(0.01)
 
 
@@ -558,7 +641,7 @@ async def test_forget_data_needed(c, s, a, b):
         await wait_for_state("x", "fetch", b)
         x.release()
         y.release()
-        while s.tasks or a.tasks or b.tasks:
+        while s.tasks or a.state.tasks or b.state.tasks:
             await asyncio.sleep(0.01)
 
     x = c.submit(inc, 2, key="x", workers=[a.address])
@@ -578,7 +661,9 @@ async def test_missing_handle_compute_dependency(c, s, w1, w2, w3):
     await wait_for_state(f1.key, "memory", w1)
 
     w3.handle_stimulus(
-        AcquireReplicasEvent(who_has={f1.key: [w2.address]}, stimulus_id="acquire")
+        AcquireReplicasEvent(
+            who_has={f1.key: [w2.address]}, nbytes={f1.key: 1}, stimulus_id="acquire"
+        )
     )
     await wait_for_state(f1.key, "missing", w3)
 
@@ -595,7 +680,9 @@ async def test_missing_to_waiting(c, s, w1, w2, w3):
     await wait_for_state(f1.key, "memory", w1)
 
     w3.handle_stimulus(
-        AcquireReplicasEvent(who_has={f1.key: [w2.address]}, stimulus_id="acquire")
+        AcquireReplicasEvent(
+            who_has={f1.key: [w2.address]}, nbytes={f1.key: 1}, stimulus_id="acquire"
+        )
     )
     await wait_for_state(f1.key, "missing", w3)
 
@@ -603,3 +690,132 @@ async def test_missing_to_waiting(c, s, w1, w2, w3):
     await w1.close()
 
     await f1
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_task_state_instance_are_garbage_collected(c, s, a, b):
+    futs = c.map(inc, range(10))
+    red = c.submit(sum, futs)
+    f1 = c.submit(inc, red, pure=False)
+    f2 = c.submit(inc, red, pure=False)
+
+    async def check(dask_worker):
+        while dask_worker.tasks:
+            await asyncio.sleep(0.01)
+        with profile.lock:
+            gc.collect()
+        assert not TaskState._instances
+
+    await c.gather([f2, f1])
+    del futs, red, f1, f2
+    await c.run(check)
+
+    async def check(dask_scheduler):
+        while dask_scheduler.tasks:
+            await asyncio.sleep(0.01)
+        with profile.lock:
+            gc.collect()
+        assert not SchedulerTaskState._instances
+
+    await c.run_on_scheduler(check)
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+async def test_fetch_to_missing_on_refresh_who_has(c, s, w1, w2, w3):
+    """
+    1. Two tasks, x and y, are only available on a busy worker.
+       The worker sends request-refresh-who-has to the scheduler.
+    2. The scheduler responds that x has become missing, while y has gained an
+       additional replica
+    3. The handler for RefreshWhoHasEvent empties x.who_has and recommends a transition
+       to missing.
+    4. Before the recommendation can be implemented, the same event invokes
+       _ensure_communicating to let y to transition to flight. This in turn pops x from
+       data_needed - but x has an empty who_has, which is an exceptional situation.
+    5. The transition fetch->missing is executed, but x is no longer in
+       data_needed - another exceptional situation.
+    """
+    x = c.submit(inc, 1, key="x", workers=[w1.address])
+    y = c.submit(inc, 2, key="y", workers=[w1.address])
+    await wait([x, y])
+    w1.total_in_connections = 0
+    s.request_acquire_replicas(w3.address, ["x", "y"], stimulus_id="test1")
+
+    # The tasks will now flip-flop between fetch and flight every 150ms
+    # (see Worker.retry_busy_worker_later)
+    await wait_for_state("x", "fetch", w3)
+    await wait_for_state("y", "fetch", w3)
+    assert w1.address in w3.state.busy_workers
+    # w3 sent {op: request-refresh-who-has, keys: [x, y]}
+    # There also may have been enough time for a refresh-who-has message to come back,
+    # which reiterated what w3 already knew:
+    # {op: refresh-who-has, who_has={x: [w1.address], y: [w1.address]}}
+
+    # Let's instead simulate that, while request-refresh-who-has was in transit,
+    # w2 gained a replica of y and w1 closed down.
+    # When request-refresh-who-has lands, the scheduler will respond:
+    # {op: refresh-who-has, who_has={x: [], y: [w2.address]}}
+    w3.handle_stimulus(
+        RefreshWhoHasEvent(who_has={"x": [], "y": [w2.address]}, stimulus_id="test2")
+    )
+    assert w3.state.tasks["x"].state == "missing"
+    assert w3.state.tasks["y"].state == "flight"
+    assert w3.state.tasks["y"].who_has == {w2.address}
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_fetch_to_missing_on_network_failure(c, s, a):
+    """
+    1. Two tasks, x and y, are respectively in flight and fetch state from the same
+       worker, which holds the only replica of both.
+    2. gather_dep for x returns GatherDepNetworkFailureEvent
+    3. The event empties has_what, x.who_has, and y.who_has.
+    4. The same event invokes _ensure_communicating, which pops y from data_needed
+       - but y has an empty who_has, which is an exceptional situation.
+       _ensure_communicating recommends a transition to missing for x.
+    5. The fetch->missing transition is executed, but y is no longer in data_needed -
+       another exceptional situation.
+    """
+    block_get_data = asyncio.Event()
+
+    class BlockedBreakingWorker(Worker):
+        async def get_data(self, comm, *args, **kwargs):
+            await block_get_data.wait()
+            raise OSError("fake error")
+
+    async with BlockedBreakingWorker(s.address) as b:
+        x = c.submit(inc, 1, key="x", workers=[b.address])
+        y = c.submit(inc, 2, key="y", workers=[b.address])
+        await wait([x, y])
+        s.request_acquire_replicas(a.address, ["x"], stimulus_id="test_x")
+        await wait_for_state("x", "flight", a)
+        s.request_acquire_replicas(a.address, ["y"], stimulus_id="test_y")
+        await wait_for_state("y", "fetch", a)
+
+        block_get_data.set()
+
+        await wait_for_state("x", "missing", a)
+        await wait_for_state("y", "missing", a)
+
+
+@gen_cluster()
+async def test_deprecated_worker_attributes(s, a, b):
+    n = a.state.comm_threshold_bytes
+    msg = (
+        "The `Worker.comm_threshold_bytes` attribute has been moved to "
+        "`Worker.state.comm_threshold_bytes`"
+    )
+    with pytest.warns(FutureWarning, match=msg):
+        assert a.comm_threshold_bytes == n
+    with pytest.warns(FutureWarning, match=msg):
+        a.comm_threshold_bytes += 1
+        assert a.comm_threshold_bytes == n + 1
+    assert a.state.comm_threshold_bytes == n + 1
+
+    # Old and new names differ
+    msg = (
+        "The `Worker.in_flight_tasks` attribute has been moved to "
+        "`Worker.state.in_flight_tasks_count`"
+    )
+    with pytest.warns(FutureWarning, match=msg):
+        assert a.in_flight_tasks == 0

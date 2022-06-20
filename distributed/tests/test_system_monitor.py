@@ -1,5 +1,7 @@
 from time import sleep
 
+import dask
+
 from distributed.system_monitor import SystemMonitor
 
 
@@ -51,3 +53,14 @@ def test_range_query():
 
     assert all(len(v) == 4 for v in sm.range_query(10).values())
     assert all(len(v) == 5 for v in sm.range_query(0).values())
+
+
+def test_disk_config():
+    sm = SystemMonitor()
+    a = sm.update()
+    assert "read_bytes_disk" in sm.quantities
+
+    with dask.config.set({"distributed.admin.system-monitor.disk": False}):
+        sm = SystemMonitor()
+        a = sm.update()
+        assert "read_bytes_disk" not in sm.quantities

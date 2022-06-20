@@ -55,7 +55,7 @@ async def block_worker(
     else:
         ev = Event()
         clog = c.submit(lambda ev: ev.wait(), ev, key="block_worker")
-        while "block_worker" not in w.tasks:
+        while "block_worker" not in w.state.tasks:
             await asyncio.sleep(0.01)
 
     yield
@@ -69,10 +69,10 @@ async def block_worker(
 
     if pause:
         assert len(s.unrunnable) == ntasks_on_worker
-        assert not w.tasks
+        assert not w.state.tasks
         w.status = Status.running
     else:
-        while len(w.tasks) < ntasks_on_worker:
+        while len(w.state.tasks) < ntasks_on_worker:
             await asyncio.sleep(0.01)
         await ev.set()
         await clog

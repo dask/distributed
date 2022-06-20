@@ -68,7 +68,7 @@ async def test_cluster_dump_state(c, s, a, b, tmp_path):
     await c.dump_cluster_state(filename, format="msgpack")
 
     scheduler_tasks = list(s.tasks.values())
-    worker_tasks = [t for w in (a, b) for t in w.tasks.values()]
+    worker_tasks = [t for w in (a, b) for t in w.state.tasks.values()]
 
     smem_tasks = [t for t in scheduler_tasks if t.state == "memory"]
     wmem_tasks = [t for t in worker_tasks if t.state == "memory"]
@@ -131,7 +131,7 @@ async def test_cluster_dump_story(c, s, a, b, tmp_path):
     story = dump.worker_story("f1", "f2")
     assert story.keys() == {"f1", "f2"}
     for k, task_story in story.items():
-        assert_story(task_story, a.story(k) + b.story(k))
+        assert_story(task_story, a.state.story(k) + b.state.story(k))
 
 
 @gen_cluster(client=True)

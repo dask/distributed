@@ -16,10 +16,11 @@ async def wait_for_signals(signals: list[signal.Signals]) -> None:
     old_handlers: dict[int, Any] = {}
 
     def handle_signal(signum, frame):
+        # *** Do not log or print anything in here
+        # https://stackoverflow.com/questions/45680378/how-to-explain-the-reentrant-runtimeerror-caused-by-printing-in-signal-handlers
         # Restore old signal handler to allow for quicker exit
         # if the user sends the signal again.
         signal.signal(signum, old_handlers[signum])
-        logger.info("Received signal %s (%d)", signal.Signals(signum).name, signum)
         loop.call_soon_threadsafe(event.set)
 
     for sig in signals:

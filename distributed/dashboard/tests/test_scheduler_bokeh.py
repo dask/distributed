@@ -50,6 +50,7 @@ from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.metrics import time
 from distributed.utils import format_dashboard_link
 from distributed.utils_test import dec, div, gen_cluster, get_cert, inc, slowinc
+from distributed.worker import Worker
 
 # Imported from distributed.dashboard.utils
 scheduler.PROFILING = False  # type: ignore
@@ -120,8 +121,8 @@ async def test_stealing_events(c, s, a, b):
     await wait(futures)
     se.update()
     assert len(first(se.source.data.values()))
-    assert b.tasks
-    assert sum(se.source.data["count"]) >= len(b.tasks)
+    assert b.state.tasks
+    assert sum(se.source.data["count"]) >= len(b.state.tasks)
 
 
 @gen_cluster(client=True)
@@ -132,7 +133,7 @@ async def test_events(c, s, a, b):
         slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
     )
 
-    while not b.tasks:
+    while not b.state.tasks:
         await asyncio.sleep(0.01)
 
     e.update()
@@ -504,22 +505,33 @@ async def test_WorkerNetworkBandwidth(c, s, a, b):
 async def test_WorkerNetworkBandwidth_metrics(c, s, a, b):
     # Disable system monitor periodic callback to allow us to manually control
     # when it is called below
-    a.periodic_callbacks["monitor"].stop()
-    b.periodic_callbacks["monitor"].stop()
+    with dask.config.set({"distributed.admin.system-monitor.disk": False}):
+        async with Worker(s.address) as w:
+            a.periodic_callbacks["monitor"].stop()
+            b.periodic_callbacks["monitor"].stop()
+            w.periodic_callbacks["monitor"].stop()
 
-    # Update worker system monitors and send updated metrics to the scheduler
-    a.monitor.update()
-    b.monitor.update()
-    await asyncio.gather(a.heartbeat(), b.heartbeat())
+            # Update worker system monitors and send updated metrics to the scheduler
+            a.monitor.update()
+            b.monitor.update()
+            w.monitor.update()
+            await asyncio.gather(a.heartbeat(), b.heartbeat())
+            await asyncio.gather(a.heartbeat(), b.heartbeat(), w.heartbeat())
 
-    nb = WorkerNetworkBandwidth(s)
-    nb.update()
+            nb = WorkerNetworkBandwidth(s)
+            nb.update()
 
-    for idx, ws in enumerate(s.workers.values()):
-        assert ws.metrics["read_bytes"] == nb.source.data["x_read"][idx]
-        assert ws.metrics["write_bytes"] == nb.source.data["x_write"][idx]
-        assert ws.metrics["read_bytes_disk"] == nb.source.data["x_read_disk"][idx]
-        assert ws.metrics["write_bytes_disk"] == nb.source.data["x_write_disk"][idx]
+            for idx, ws in enumerate(s.workers.values()):
+                assert ws.metrics["read_bytes"] == nb.source.data["x_read"][idx]
+                assert ws.metrics["write_bytes"] == nb.source.data["x_write"][idx]
+                assert (
+                    ws.metrics.get("read_bytes_disk", 0)
+                    == nb.source.data["x_read_disk"][idx]
+                )
+                assert (
+                    ws.metrics.get("write_bytes_disk", 0)
+                    == nb.source.data["x_write_disk"][idx]
+                )
 
 
 @gen_cluster(client=True)

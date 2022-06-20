@@ -78,7 +78,7 @@ async def test_client_actions(s, a, b, direct_to_workers):
 
         assert counter._address == a.address
 
-        assert isinstance(a.actors[counter.key], Counter)
+        assert isinstance(a.state.actors[counter.key], Counter)
         assert s.tasks[counter.key].actor
 
         await asyncio.gather(counter.increment(), counter.increment())
@@ -186,7 +186,7 @@ async def test_gc(c, s, a, b):
     await wait(actor)
     del actor
 
-    while a.actors or b.actors:
+    while a.state.actors or b.state.actors:
         await asyncio.sleep(0.01)
 
 
@@ -200,7 +200,7 @@ async def test_track_dependencies(c, s, a, b):
 
     await asyncio.sleep(0.3)
 
-    assert a.actors or b.actors
+    assert a.state.actors or b.state.actors
 
 
 @gen_cluster(client=True)
@@ -208,7 +208,7 @@ async def test_future(c, s, a, b):
     counter = c.submit(Counter, actor=True, workers=[a.address])
     assert isinstance(counter, Future)
     await wait(counter)
-    assert isinstance(a.actors[counter.key], Counter)
+    assert isinstance(a.state.actors[counter.key], Counter)
 
     counter = await counter
     assert isinstance(counter, Actor)
@@ -364,7 +364,7 @@ async def test_many_computations(c, s, a, b):
     while not done.done():
         assert (
             len([ws for ws in s.workers.values() if ws.processing])
-            <= a.nthreads + b.nthreads
+            <= a.state.nthreads + b.state.nthreads
         )
         await asyncio.sleep(0.01)
 
@@ -430,7 +430,7 @@ async def test_load_balance_map(c, s, *workers):
     actors = c.map(Foo, range(10), y=b, actor=True)
     await wait(actors)
 
-    assert all(len(w.actors) == 2 for w in workers)
+    assert all(len(w.state.actors) == 2 for w in workers)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4, Worker=Nanny)
@@ -588,7 +588,7 @@ async def test_worker_actor_handle_is_weakref(c, s, a, b):
     del counter
 
     start = time()
-    while a.actors or b.data:
+    while a.state.actors or b.data:
         await asyncio.sleep(0.1)
         assert time() < start + 30
 

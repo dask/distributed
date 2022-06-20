@@ -95,7 +95,7 @@ async def test_client_story(c, s, a):
     # If it's a well formed story, we can sort by the last element which is a
     # timestamp and compare the two lists.
     assert sorted(stripped_story, key=lambda msg: msg[-1]) == sorted(
-        s.story(f.key) + a.story(f.key), key=lambda msg: msg[-1]
+        s.story(f.key) + a.state.story(f.key), key=lambda msg: msg[-1]
     )
 
 
@@ -132,14 +132,13 @@ async def test_worker_story_with_deps(c, s, a, b):
     res = c.submit(inc, dep, workers=[b.address], key="res")
     await res
 
-    story = a.story("res")
+    story = a.state.story("res")
     assert story == []
 
     # Story now includes randomized stimulus_ids and timestamps.
-    story = b.story("res")
+    story = b.state.story("res")
     stimulus_ids = {ev[-2].rsplit("-", 1)[0] for ev in story}
-    assert stimulus_ids == {"compute-task", "task-finished"}
-
+    assert stimulus_ids == {"compute-task", "gather-dep-success", "task-finished"}
     # This is a simple transition log
     expected = [
         ("res", "compute-task", "released"),
@@ -151,9 +150,9 @@ async def test_worker_story_with_deps(c, s, a, b):
     ]
     assert_story(story, expected, strict=True)
 
-    story = b.story("dep")
+    story = b.state.story("dep")
     stimulus_ids = {ev[-2].rsplit("-", 1)[0] for ev in story}
-    assert stimulus_ids == {"compute-task"}
+    assert stimulus_ids == {"compute-task", "gather-dep-success"}
     expected = [
         ("dep", "ensure-task-exists", "released"),
         ("dep", "released", "fetch", "fetch", {}),

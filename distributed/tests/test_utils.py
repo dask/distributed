@@ -2,6 +2,7 @@ import asyncio
 import contextvars
 import functools
 import io
+import multiprocessing
 import os
 import queue
 import socket
@@ -29,6 +30,7 @@ from distributed.utils import (
     ensure_memoryview,
     format_dashboard_link,
     get_ip_interface,
+    get_mp_context,
     get_traceback,
     is_kernel,
     is_valid_xml,
@@ -159,6 +161,18 @@ def test_get_ip_interface():
     assert get_ip_interface(iface) == "127.0.0.1"
     with pytest.raises(ValueError, match=f"'__notexist'.+network interface.+'{iface}'"):
         get_ip_interface("__notexist")
+
+
+@pytest.mark.skipif(
+    WINDOWS, reason="Windows doesn't support different multiprocessing contexts"
+)
+def test_get_mp_context():
+    # this will need updated if the default multiprocessing context changes from spawn.
+    assert get_mp_context() is multiprocessing.get_context("spawn")
+    with dask.config.set({"distributed.worker.multiprocessing-method": "forkserver"}):
+        assert get_mp_context() is multiprocessing.get_context("forkserver")
+    with dask.config.set({"distributed.worker.multiprocessing-method": "fork"}):
+        assert get_mp_context() is multiprocessing.get_context("fork")
 
 
 def test_truncate_exception():

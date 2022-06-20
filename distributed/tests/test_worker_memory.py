@@ -376,12 +376,12 @@ async def test_pause_executor_manual(c, s, a):
 
     # Task that is running on the worker when the worker pauses
     x = c.submit(f, ev_x, key="x")
-    while a.executing_count != 1:
+    while a.state.executing_count != 1:
         await asyncio.sleep(0.01)
 
     # Task that is queued on the worker when the worker pauses
     y = c.submit(inc, 1, key="y")
-    while "y" not in a.tasks:
+    while "y" not in a.state.tasks:
         await asyncio.sleep(0.01)
 
     a.status = Status.paused
@@ -403,10 +403,10 @@ async def test_pause_executor_manual(c, s, a):
     assert await x == 1
     await asyncio.sleep(0.05)
 
-    assert a.executing_count == 0
-    assert len(a.ready) == 1
-    assert a.tasks["y"].state == "ready"
-    assert "z" not in a.tasks
+    assert a.state.executing_count == 0
+    assert len(a.state.ready) == 1
+    assert a.state.tasks["y"].state == "ready"
+    assert "z" not in a.state.tasks
 
     # Unpause. Tasks that were queued on the worker are executed.
     # Tasks that were stuck on the scheduler are sent to the worker and executed.
@@ -440,13 +440,13 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
 
     # Task that is running on the worker when the worker pauses
     x = c.submit(f, ev_x, key="x")
-    while a.executing_count != 1:
+    while a.state.executing_count != 1:
         await asyncio.sleep(0.01)
 
     with captured_logger(logging.getLogger("distributed.worker_memory")) as logger:
         # Task that is queued on the worker when the worker pauses
         y = c.submit(inc, 1, key="y")
-        while "y" not in a.tasks:
+        while "y" not in a.state.tasks:
             await asyncio.sleep(0.01)
 
         # Hog the worker with 900GB unmanaged memory
@@ -470,10 +470,10 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
         assert await x == 1
         await asyncio.sleep(0.05)
 
-        assert a.executing_count == 0
-        assert len(a.ready) == 1
-        assert a.tasks["y"].state == "ready"
-        assert "z" not in a.tasks
+        assert a.state.executing_count == 0
+        assert len(a.state.ready) == 1
+        assert a.state.tasks["y"].state == "ready"
+        assert "z" not in a.state.tasks
 
         # Release the memory. Tasks that were queued on the worker are executed.
         # Tasks that were stuck on the scheduler are sent to the worker and executed.
@@ -527,7 +527,7 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
     # - w and z respectively make x and y go into fetch state.
     #   w has a higher priority than z, therefore w's dependency x has a higher priority
     #   than z's dependency y.
-    #   a.data_needed = ["x", "y"]
+    #   a.state.data_needed = ["x", "y"]
     # - ensure_communicating decides to fetch x but not to fetch y together with it, as
     #   it thinks x is 1TB in size
     # - x fetch->flight; a is added to in_flight_workers
@@ -538,17 +538,17 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
     # - ensure_communicating is triggered again
     # - ensure_communicating refuses to fetch y because the worker is paused
 
-    while "y" not in a.tasks or a.tasks["y"].state != "fetch":
+    while "y" not in a.state.tasks or a.state.tasks["y"].state != "fetch":
         await asyncio.sleep(0.01)
     await asyncio.sleep(0.1)
-    assert a.tasks["y"].state == "fetch"
+    assert a.state.tasks["y"].state == "fetch"
     assert "y" not in a.data
-    assert [ts.key for ts in a.data_needed] == ["y"]
+    assert [ts.key for ts in a.state.data_needed] == ["y"]
 
     # Unpausing kicks off ensure_communicating again
     a.status = Status.running
     assert await z == 3
-    assert a.tasks["y"].state == "memory"
+    assert a.state.tasks["y"].state == "memory"
     assert "y" in a.data
 
 
@@ -710,7 +710,7 @@ async def leak_until_restart(c: Client, s: Scheduler) -> None:
         await future
     assert s.tasks["leak"].suspicious == 1
     assert not any(
-        (await c.run(lambda dask_worker: "leak" in dask_worker.tasks)).values()
+        (await c.run(lambda dask_worker: "leak" in dask_worker.state.tasks)).values()
     )
     future.release()
     while "leak" in s.tasks:
