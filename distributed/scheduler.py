@@ -1803,7 +1803,9 @@ class SchedulerState:
         ):
             ws = tg.last_worker
 
-            if not (ws and tg.last_worker_tasks_left and ws.address in self.workers):
+            if not (
+                ws and tg.last_worker_tasks_left and self.workers.get(ws.address) is ws
+            ):
                 # Last-used worker is full or unknown; pick a new worker for the next few tasks
 
                 # We just pick the worker with the shortest queue (or if queuing is disabled,
