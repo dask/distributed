@@ -5,14 +5,8 @@ import itertools
 import weakref
 from collections import OrderedDict, UserDict
 from collections.abc import Callable, Hashable, Iterator
-from typing import (  # TODO move to collections.abc (requires Python >=3.9)
-    AbstractSet,
-    Any,
-    Iterable,
-    MutableSet,
-    TypeVar,
-    cast,
-)
+from typing import MutableSet  # TODO move to collections.abc (requires Python >=3.9)
+from typing import Any, TypeVar, cast
 
 T = TypeVar("T", bound=Hashable)
 
@@ -158,109 +152,3 @@ class HeapSet(MutableSet[T]):
     def clear(self) -> None:
         self._data.clear()
         self._heap.clear()
-
-
-class OrderedSet(MutableSet[T]):
-    """
-    A insertion-ordered set.
-
-    All operations are O(1) complexity.
-
-    Equality tests between OrderedSet objects are order-sensitive. Equality tests
-    between OrderedSet objects and other AbstractSet objects are order-insensitive like
-    regular sets.
-    """
-
-    __slots__ = ("_data",)
-    _data: dict[T, None]
-
-    def __init__(self, iterable: Iterable[T] | None = None) -> None:
-        if iterable:
-            self._data = dict.fromkeys(iterable)
-        else:
-            self._data = {}
-
-    def add(self, value: T) -> None:
-        self._data[value] = None
-        # NOTE: updating an already-existing item in a dict does not change iteration order
-
-    def discard(self, value: T) -> None:
-        self._data.pop(value, None)
-
-    def clear(self) -> None:
-        self._data.clear()
-
-    def copy(self) -> OrderedSet[T]:
-        new = type(self)()
-        new._data = self._data.copy()
-        return new
-
-    def pop(self) -> T:
-        "Remove and return the last-inserted item"
-        if not self._data:
-            raise KeyError("pop on an empty set")
-        return self._data.popitem()[0]
-
-    def popleft(self) -> T:
-        "Remove and return the first-inserted item"
-        if not self._data:
-            raise KeyError("popleft on an empty set")
-        first = next(iter(self._data))
-        self._data.pop(first)
-        return first
-
-    def peek(self) -> T:
-        if not self._data:
-            raise KeyError("peek into empty set")
-        return next(reversed(self._data))
-
-    def peekleft(self) -> T:
-        if not self._data:
-            raise KeyError("peekleft into empty set")
-        return next(iter(self._data))
-
-    def rotate(self, n=1) -> None:
-        """
-        Rotate the OrderedSet ``n`` steps to the right.
-
-        Note that each rotation is an O(1) operation, so the time-complexity
-        is equivalent to ``n``.
-        """
-        if n == 0:
-            return
-        if n < 0:
-            raise ValueError(f"{type(self).__name__} can only be rotated to the right")
-        n = n % len(self)
-        for _ in range(n):
-            self.add(self.popleft())
-
-    def update(self, iterable: Iterable[T]) -> None:
-        for x in iterable:
-            self._data[x] = None
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}({', '.join(map(str, self))})>"
-
-    def __contains__(self, value: object) -> bool:
-        return value in self._data
-
-    def __len__(self) -> int:
-        return len(self._data)
-
-    def __iter__(self) -> Iterator[T]:
-        """Iterate over all elements in insertion order."""
-        return iter(self._data)
-
-    def __reverse__(self) -> Iterator[T]:
-        """Iterate over all elements in reverse insertion order."""
-        return reversed(self._data)
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, type(self)):
-            return len(other._data) == len(self._data) and all(
-                a == b for a, b in zip(self._data, other._data)
-            )
-        if isinstance(other, AbstractSet):
-            return self._data.keys() == other
-
-        return NotImplemented
