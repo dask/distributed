@@ -11,11 +11,11 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict, deque
-from collections.abc import Container
+from collections.abc import Container, Coroutine
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import Callable, ClassVar, Coroutine, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, TypedDict, TypeVar
 
 import tblib
 from tlz import merge
@@ -45,6 +45,14 @@ from distributed.utils import (
     recursive_to_dict,
     truncate_exception,
 )
+
+if TYPE_CHECKING:
+    from typing_extensions import ParamSpec
+
+    P = ParamSpec("P")
+    R = TypeVar("R")
+    T = TypeVar("T")
+    Coro = Coroutine[Any, Any, T]
 
 
 class Status(Enum):
@@ -141,11 +149,11 @@ class AsyncTaskGroup(_LoopBoundMixin):
 
     def __init__(self) -> None:
         self.closed = False
-        self._ongoing_tasks: set[asyncio.Task] = set()
+        self._ongoing_tasks: set[asyncio.Task[None]] = set()
 
     def call_soon(
-        self, afunc: Callable[..., Coroutine], *args, **kwargs
-    ) -> asyncio.Task:
+        self, afunc: Callable[P, Coro[None]], /, *args: P.args, **kwargs: P.kwargs
+    ) -> None:
         """Schedule a coroutine function to be executed as an `asyncio.Task`.
 
         The coroutine function `afunc` is scheduled with `args` arguments and `kwargs` keyword arguments
@@ -162,7 +170,7 @@ class AsyncTaskGroup(_LoopBoundMixin):
 
         Returns
         -------
-            The scheduled Task object.
+            None
 
         Raises
         ------
@@ -176,11 +184,16 @@ class AsyncTaskGroup(_LoopBoundMixin):
         task = self._get_loop().create_task(afunc(*args, **kwargs))
         task.add_done_callback(self._ongoing_tasks.remove)
         self._ongoing_tasks.add(task)
-        return task
+        return None
 
     def call_later(
-        self, delay: float, afunc: Callable[..., Coroutine], *args, **kwargs
-    ) -> asyncio.Task:
+        self,
+        delay: float,
+        afunc: Callable[P, Coro[None]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> None:
         """Schedule a coroutine function to be executed after `delay` seconds as an `asyncio.Task`.
 
         The coroutine function `afunc` is scheduled with `args` arguments and `kwargs` keyword arguments
@@ -199,14 +212,14 @@ class AsyncTaskGroup(_LoopBoundMixin):
 
         Returns
         -------
-            The scheduled Task object.
+            The None
 
         Raises
         ------
         AsyncTaskGroupClosedError
             If the task group is closed.
         """
-        return self.call_soon(delayed(afunc, delay), *args, **kwargs)
+        self.call_soon(delayed(afunc, delay), *args, **kwargs)
 
     def close(self) -> None:
         """Closes the task group so that no new tasks can be scheduled.
