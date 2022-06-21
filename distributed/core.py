@@ -512,7 +512,6 @@ class Server:
         self._last_tick = time()
         for pc in self.periodic_callbacks.values():
             if not pc.is_running():
-                logger.info(f"Starting periodic callback {pc!r}")
                 pc.start()
 
     def stop(self):
