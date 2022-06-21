@@ -448,14 +448,11 @@ def main(
     signal_fired = False
 
     async def run():
-        loop = IOLoop.current()
-
         nannies = [
             t(
                 scheduler,
                 scheduler_file=scheduler_file,
                 nthreads=nthreads,
-                loop=loop,
                 resources=resources,
                 security=sec,
                 contact_address=contact_address,
