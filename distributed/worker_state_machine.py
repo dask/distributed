@@ -373,7 +373,7 @@ class TaskFinishedMsg(SendMessageToScheduler):
     metadata: dict
     thread: int | None
     startstops: list[StartStop]
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def to_dict(self) -> dict[str, Any]:
         d = super().to_dict()
@@ -392,7 +392,7 @@ class TaskErredMsg(SendMessageToScheduler):
     traceback_text: str
     thread: int | None
     startstops: list[StartStop]
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def to_dict(self) -> dict[str, Any]:
         d = super().to_dict()
@@ -618,7 +618,7 @@ class GatherDepFailureEvent(GatherDepDoneEvent):
     traceback: Serialize | None
     exception_text: str
     traceback_text: str
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def _after_from_dict(self) -> None:
         self.exception = Serialize(Exception())
@@ -656,7 +656,7 @@ class ComputeTaskEvent(StateMachineEvent):
     resource_restrictions: dict[str, float]
     actor: bool
     annotations: dict
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def __post_init__(self):
         # Fixes after msgpack decode
@@ -686,7 +686,7 @@ class ExecuteSuccessEvent(StateMachineEvent):
     stop: float
     nbytes: int
     type: type | None
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
         out = copy(self)
@@ -708,7 +708,7 @@ class ExecuteFailureEvent(StateMachineEvent):
     traceback: Serialize | None
     exception_text: str
     traceback_text: str
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def _after_from_dict(self) -> None:
         self.exception = Serialize(Exception())
@@ -1026,7 +1026,7 @@ class WorkerState:
     #: In production, it should always be set to False.
     transition_counter_max: int | Literal[False]
 
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def __init__(
         self,
