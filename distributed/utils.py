@@ -20,7 +20,7 @@ import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
 from collections import deque
-from collections.abc import Collection, Container, KeysView, ValuesView
+from collections.abc import Callable, Collection, Container, KeysView, ValuesView
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
@@ -32,7 +32,7 @@ from time import sleep
 from types import ModuleType
 from typing import TYPE_CHECKING
 from typing import Any as AnyType
-from typing import Callable, ClassVar, TypeVar, overload
+from typing import ClassVar, TypeVar, overload
 
 import click
 import tblib.pickling_support
@@ -75,7 +75,6 @@ if TYPE_CHECKING:
 
     P = ParamSpec("P")
     T = TypeVar("T")
-
 
 no_default = "__no_default__"
 
