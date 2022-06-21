@@ -999,7 +999,7 @@ def gen_cluster(
         ("127.0.0.1", 1),
         ("127.0.0.1", 2),
     ],
-    scheduler="127.0.0.1",
+    scheduler: str = "127.0.0.1",
     timeout: float = _TEST_TIMEOUT,
     security: Security | dict[str, Any] | None = None,
     Worker: type[ServerNode] = Worker,
@@ -1308,7 +1308,7 @@ def popen(
     capture_output: bool = False,
     terminate_timeout: float = 30,
     kill_timeout: float = 10,
-    **kwargs,
+    **kwargs: Any,
 ) -> Iterator[subprocess.Popen[bytes]]:
     """Start a shell command in a subprocess.
     Yields a subprocess.Popen object.
@@ -1811,7 +1811,7 @@ def term_or_kill_active_children(timeout: float) -> None:
 @contextmanager
 def check_process_leak(
     check: bool = True, check_timeout: float = 40, term_timeout: float = 3
-):
+) -> Iterator[None]:
     """Terminate any currently-running subprocesses at both the beginning and end of this context
 
     Parameters
@@ -2334,7 +2334,7 @@ class BlockedGetData(Worker):
 
 
 @contextmanager
-def freeze_data_fetching(w: Worker, *, jump_start: bool = False):
+def freeze_data_fetching(w: Worker, *, jump_start: bool = False) -> Iterator[None]:
     """Prevent any task from transitioning from fetch to flight on the worker while
     inside the context, simulating a situation where the worker's network comms are
     saturated.

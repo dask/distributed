@@ -8,7 +8,7 @@ import math
 import weakref
 from contextlib import suppress
 from inspect import isawaitable
-from typing import ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from tornado import gen
 
@@ -22,6 +22,10 @@ from distributed.deploy.cluster import Cluster
 from distributed.scheduler import Scheduler
 from distributed.security import Security
 from distributed.utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
+
+if TYPE_CHECKING:
+    # Circular imports
+    from distributed import Nanny, Worker
 
 logger = logging.getLogger(__name__)
 
@@ -570,14 +574,14 @@ class SpecCluster(Cluster):
 
     def adapt(
         self,
-        *args,
-        minimum=0,
-        maximum=math.inf,
-        minimum_cores: int = None,
-        maximum_cores: int = None,
-        minimum_memory: str = None,
-        maximum_memory: str = None,
-        **kwargs,
+        Adaptive: type[Adaptive] = Adaptive,
+        minimum: float = 0,
+        maximum: float = math.inf,
+        minimum_cores: int | None = None,
+        maximum_cores: int | None = None,
+        minimum_memory: str | None = None,
+        maximum_memory: str | None = None,
+        **kwargs: Any,
     ) -> Adaptive:
         """Turn on adaptivity
 
@@ -627,15 +631,17 @@ class SpecCluster(Cluster):
                 math.floor(parse_bytes(maximum_memory) / self._memory_per_worker()),
             )
 
-        return super().adapt(*args, minimum=minimum, maximum=maximum, **kwargs)
+        return super().adapt(
+            Adaptive=Adaptive, minimum=minimum, maximum=maximum, **kwargs
+        )
 
     @classmethod
-    def from_name(cls, name: str):
+    def from_name(cls, name: str) -> ProcessInterface:
         """Create an instance of this class to represent an existing cluster by name."""
         raise NotImplementedError()
 
 
-async def run_spec(spec: dict, *args):
+async def run_spec(spec: dict[str, Any], *args: Any) -> dict[str, Worker | Nanny]:
     workers = {}
     for k, d in spec.items():
         cls = d["cls"]

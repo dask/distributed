@@ -119,7 +119,7 @@ class InvalidTransition(Exception):
         self.finish = finish
         self.story = story
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}: {self.key} :: {self.start}->{self.finish}"
             + "\n"
@@ -158,7 +158,7 @@ class InvalidTaskState(Exception):
         self.state = state
         self.story = story
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}: {self.key} :: {self.state}"
             + "\n"
@@ -268,7 +268,7 @@ class TaskState:
     # Support for weakrefs to a class with __slots__
     __weakref__: Any = field(init=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         TaskState._instances.add(self)
 
     def __repr__(self) -> str:
@@ -496,19 +496,19 @@ class StateMachineEvent:
     # handled: float | None = field(init=False, default=None)
     _classes: ClassVar[dict[str, type[StateMachineEvent]]] = {}
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, *args: Any, **kwargs: Any) -> StateMachineEvent:
         self = object.__new__(cls)
         self.handled = None
         return self
 
-    def __init_subclass__(cls):
+    def __init_subclass__(cls) -> None:
         StateMachineEvent._classes[cls.__name__] = cls
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
         """Produce a variant version of self that is small enough to be stored in memory
         in the medium term and contains meaningful information for debugging
         """
-        self.handled = handled
+        self.handled: float | None = handled
         return self
 
     def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
@@ -658,15 +658,15 @@ class ComputeTaskEvent(StateMachineEvent):
     annotations: dict
     __slots__ = tuple(__annotations__)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # Fixes after msgpack decode
-        if isinstance(self.priority, list):
-            self.priority = tuple(self.priority)
+        if isinstance(self.priority, list):  # type: ignore[unreachable]
+            self.priority = tuple(self.priority)  # type: ignore[unreachable]
 
         if isinstance(self.run_spec, dict):
-            self.run_spec = SerializedTask(**self.run_spec)
+            self.run_spec = SerializedTask(**self.run_spec)  # type: ignore[unreachable]
         elif not isinstance(self.run_spec, SerializedTask):
-            self.run_spec = SerializedTask(task=self.run_spec)
+            self.run_spec = SerializedTask(task=self.run_spec)  # type: ignore[unreachable]
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
         out = copy(self)
@@ -2038,12 +2038,13 @@ class WorkerState:
             ts.state = "cancelled"
             return {}, []
 
-    def _transition_cancelled_memory(self, ts, value, *, stimulus_id):
+    def _transition_cancelled_memory(
+        self, ts: TaskState, value: object, *, stimulus_id: str
+    ) -> RecsInstrs:
         # We only need this because the to-memory signatures require a value but
         # we do not want to store a cancelled result and want to release
         # immediately
         assert ts.done
-
         return self._transition_cancelled_released(ts, stimulus_id=stimulus_id)
 
     def _transition_executing_long_running(
@@ -2165,7 +2166,7 @@ class WorkerState:
         ("waiting", "released"): _transition_generic_released,
     }
 
-    def _notify_plugins(self, method_name, *args, **kwargs):
+    def _notify_plugins(self, method_name: str, *args: Any, **kwargs: Any) -> None:
         for name, plugin in self.plugins.items():
             if hasattr(plugin, method_name):
                 try:

@@ -21,7 +21,7 @@ except ImportError:
 
 from tlz import sliding_window
 from tornado import netutil
-from tornado.iostream import StreamClosedError
+from tornado.iostream import IOStream, StreamClosedError
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
@@ -167,11 +167,14 @@ class TCP(Comm):
     An established communication based on an underlying Tornado IOStream.
     """
 
-    max_shard_size = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
+    max_shard_size: ClassVar[int] = dask.utils.parse_bytes(
+        dask.config.get("distributed.comm.shard")
+    )
+    stream: IOStream | None
 
     def __init__(
         self,
-        stream,
+        stream: IOStream,
         local_addr: str,
         peer_addr: str,
         deserialize: bool = True,
@@ -350,14 +353,14 @@ class TCP(Comm):
                 self._finalizer.detach()
                 stream.close()
 
-    def abort(self):
+    def abort(self) -> None:
         stream, self.stream = self.stream, None
         self._closed = True
         if stream is not None and not stream.closed():
             self._finalizer.detach()
             stream.close()
 
-    def closed(self):
+    def closed(self) -> bool:
         return self._closed
 
     @property

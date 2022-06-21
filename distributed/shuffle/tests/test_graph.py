@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -16,11 +15,8 @@ from dask.utils_test import hlg_layer_topological
 from distributed.shuffle.shuffle_extension import ShuffleWorkerExtension
 from distributed.utils_test import gen_cluster
 
-if TYPE_CHECKING:
-    from distributed import Client, Scheduler, Worker
 
-
-def test_basic(client: Client):
+def test_basic(client):
     df = dd.demo.make_timeseries(freq="15D", partition_freq="30D")
     df["name"] = df["name"].astype("string[python]")
     shuffled = df.shuffle("id", shuffle="p2p")
@@ -34,7 +30,7 @@ def test_basic(client: Client):
 
 
 @gen_cluster([("", 2)] * 4, client=True)
-async def test_basic_state(c: Client, s: Scheduler, *workers: Worker):
+async def test_basic_state(c, s, *workers):
     df = dd.demo.make_timeseries(freq="15D", partition_freq="30D")
     shuffled = df.shuffle("id", shuffle="p2p")
 
@@ -53,7 +49,7 @@ async def test_basic_state(c: Client, s: Scheduler, *workers: Worker):
     assert all(not ext.shuffles for ext in exts)
 
 
-def test_multiple_linear(client: Client):
+def test_multiple_linear(client):
     df = dd.demo.make_timeseries(freq="15D", partition_freq="30D")
     df["name"] = df["name"].astype("string[python]")
     s1 = df.shuffle("id", shuffle="p2p")

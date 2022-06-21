@@ -26,7 +26,7 @@ from concurrent.futures import Executor
 from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeVar, cast
 
 from tlz import first, keymap, pluck
 from tornado.ioloop import IOLoop, PeriodicCallback
@@ -135,10 +135,16 @@ from distributed.worker_state_machine import (
 from distributed.worker_state_machine import logger as wsm_logger
 
 if TYPE_CHECKING:
+    # FIXME import from typing (needs Python >=3.10)
+    from typing_extensions import ParamSpec
+
+    # Circular imports
     from distributed.client import Client
     from distributed.diagnostics.plugin import WorkerPlugin
     from distributed.nanny import Nanny
 
+    P = ParamSpec("P")
+    T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
@@ -160,16 +166,16 @@ WORKER_ANY_RUNNING = {
 }
 
 
-def fail_hard(method):
+def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
     """
     Decorator to close the worker if this method encounters an exception.
     """
     if iscoroutinefunction(method):
 
         @functools.wraps(method)
-        async def wrapper(self, *args, **kwargs):
+        async def wrapper(self, *args: P.args, **kwargs: P.kwargs) -> Any:
             try:
-                return await method(self, *args, **kwargs)
+                return await method(self, *args, **kwargs)  # type: ignore
             except Exception as e:
                 if self.status not in (Status.closed, Status.closing):
                     self.log_event("worker-fail-hard", error_message(e))
@@ -180,7 +186,7 @@ def fail_hard(method):
     else:
 
         @functools.wraps(method)
-        def wrapper(self, *args, **kwargs):
+        def wrapper(self, *args: P.args, **kwargs: P.kwargs) -> T:
             try:
                 return method(self, *args, **kwargs)
             except Exception as e:
@@ -190,7 +196,7 @@ def fail_hard(method):
                 self.loop.add_callback(_force_close, self)
                 raise
 
-    return wrapper
+    return wrapper  # type: ignore
 
 
 async def _force_close(self):
@@ -555,7 +561,9 @@ class Worker(BaseWorker, ServerNode):
         self._setup_logging(logger, wsm_logger)
 
         if local_dir is not None:
-            warnings.warn("The local_dir keyword has moved to local_directory")
+            warnings.warn(  # type: ignore[unreachable]
+                "The local_dir keyword has moved to local_directory"
+            )
             local_directory = local_dir
 
         if not local_directory:

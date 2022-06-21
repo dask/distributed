@@ -454,7 +454,7 @@ class WorkersMemory(DashboardComponent):
 
     @without_property_validation
     @log_errors
-    def update(self) -> None:
+    def update(self):
         def quadlist(i: Iterable[T]) -> list[T]:
             out = []
             for ii in i:

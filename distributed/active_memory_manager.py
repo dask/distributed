@@ -173,7 +173,7 @@ class ActiveMemoryManagerExtension:
 
                 if not isinstance(suggestion, Suggestion):
                     # legacy: accept plain tuples
-                    suggestion = Suggestion(*suggestion)
+                    suggestion = Suggestion(*suggestion)  # type: ignore[unreachable]
 
                 try:
                     pending_repl, pending_drop = self.pending[suggestion.ts]
@@ -468,16 +468,16 @@ class AMMClientProxy:
         """Remotely invoke ActiveMemoryManagerExtension.amm_handler"""
         return self._client.sync(self._client.scheduler.amm_handler, method=method)
 
-    def start(self):
+    def start(self) -> Any:
         return self._run("start")
 
-    def stop(self):
+    def stop(self) -> Any:
         return self._run("stop")
 
-    def run_once(self):
+    def run_once(self) -> Any:
         return self._run("run_once")
 
-    def running(self):
+    def running(self) -> Any:
         return self._run("running")
 
 
