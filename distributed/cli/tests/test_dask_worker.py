@@ -18,6 +18,7 @@ from distributed.cli.dask_worker import _apportion_ports, main
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
+from distributed.utils import open_port
 from distributed.utils_test import gen_cluster, popen, requires_ipv6, wait_for_log_line
 
 
@@ -161,7 +162,9 @@ def test_apportion_ports_bad():
 
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[])
-async def test_nanny_worker_ports(c, s, free_port, free_port2):
+async def test_nanny_worker_ports(c, s):
+    worker_port = open_port()
+    nanny_port = open_port()
     with popen(
         [
             "dask-worker",
@@ -169,17 +172,17 @@ async def test_nanny_worker_ports(c, s, free_port, free_port2):
             "--host",
             "127.0.0.1",
             "--worker-port",
-            free_port,
+            worker_port,
             "--nanny-port",
-            free_port2,
+            nanny_port,
             "--no-dashboard",
         ]
     ):
         await c.wait_for_workers(1)
         d = await c.scheduler.identity()
         assert (
-            d["workers"][f"tcp://127.0.0.1:{free_port}"]["nanny"]
-            == f"tcp://127.0.0.1:{free_port2}"
+            d["workers"][f"tcp://127.0.0.1:{worker_port}"]["nanny"]
+            == f"tcp://127.0.0.1:{nanny_port}"
         )
 
 
@@ -348,8 +351,8 @@ def test_scheduler_file(loop, nanny):
 
 
 @pytest.mark.slow
-def test_scheduler_address_env(loop, monkeypatch, free_port):
-    monkeypatch.setenv("DASK_SCHEDULER_ADDRESS", "tcp://127.0.0.1:{free_port}")
+def test_scheduler_address_env(loop, monkeypatch):
+    monkeypatch.setenv("DASK_SCHEDULER_ADDRESS", f"tcp://127.0.0.1:{open_port()}")
     with popen(["dask-scheduler", "--no-dashboard"]):
         with popen(["dask-worker", "--no-dashboard"]):
             with Client(os.environ["DASK_SCHEDULER_ADDRESS"], loop=loop) as c:
@@ -422,8 +425,9 @@ async def test_worker_cli_nworkers_with_nprocs_is_an_error(s):
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 @pytest.mark.parametrize("listen_address", ["tcp://0.0.0.0:", "tcp://127.0.0.2:"])
 @gen_cluster(client=True, nthreads=[])
-async def test_contact_listen_address(c, s, nanny, listen_address, free_port):
-    listen_address += free_port
+async def test_contact_listen_address(c, s, nanny, listen_address):
+    port = open_port()
+    listen_address += str(port)
     with popen(
         [
             "dask-worker",
@@ -431,14 +435,14 @@ async def test_contact_listen_address(c, s, nanny, listen_address, free_port):
             nanny,
             "--no-dashboard",
             "--contact-address",
-            f"tcp://127.0.0.2:{free_port}",
+            f"tcp://127.0.0.2:{port}",
             "--listen-address",
             listen_address,
         ]
     ):
         await c.wait_for_workers(1)
         info = c.scheduler_info()
-        assert info["workers"].keys() == {f"tcp://127.0.0.2:{free_port}"}
+        assert info["workers"].keys() == {f"tcp://127.0.0.2:{port}"}
 
         # roundtrip works
         assert await c.submit(lambda x: x + 1, 10) == 11
@@ -446,7 +450,7 @@ async def test_contact_listen_address(c, s, nanny, listen_address, free_port):
         def func(dask_worker):
             return dask_worker.listener.listen_address
 
-        assert await c.run(func) == {f"tcp://127.0.0.2:{free_port}": listen_address}
+        assert await c.run(func) == {f"tcp://127.0.0.2:{port}": listen_address}
 
 
 @pytest.mark.slow
@@ -454,8 +458,9 @@ async def test_contact_listen_address(c, s, nanny, listen_address, free_port):
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 @pytest.mark.parametrize("listen_address", ["tcp://:39838", "tcp://[::1]:39838"])
 @gen_cluster(client=True, nthreads=[])
-async def test_listen_address_ipv6(c, s, nanny, listen_address, free_port):
-    listen_address += free_port
+async def test_listen_address_ipv6(c, s, nanny, listen_address):
+    port = open_port()
+    listen_address += port
     with popen(
         [
             "dask-worker",
@@ -470,8 +475,8 @@ async def test_listen_address_ipv6(c, s, nanny, listen_address, free_port):
         # listening only on IPv6.
         bind_all = "[::1]" not in listen_address
         expected_ip = "127.0.0.1" if bind_all else "[::1]"
-        expected_name = f"tcp://{expected_ip}:{free_port}"
-        expected_listen = f"tcp://0.0.0.0:{free_port}" if bind_all else listen_address
+        expected_name = f"tcp://{expected_ip}:{port}"
+        expected_listen = f"tcp://0.0.0.0:{port}" if bind_all else listen_address
 
         await c.wait_for_workers(1)
         info = c.scheduler_info()
@@ -697,9 +702,9 @@ async def test_signal_handling(c, s, nanny, sig):
 
 
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
-def test_error_during_startup(monkeypatch, nanny, free_port):
+def test_error_during_startup(monkeypatch, nanny):
     # see https://github.com/dask/distributed/issues/6320
-    scheduler_port = free_port
+    scheduler_port = open_port()
     scheduler_addr = f"tcp://127.0.0.1:{scheduler_port}"
 
     monkeypatch.setenv("DASK_SCHEDULER_ADDRESS", scheduler_addr)

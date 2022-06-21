@@ -23,7 +23,7 @@ import distributed.cli.dask_scheduler
 from distributed import Client, Scheduler
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.metrics import time
-from distributed.utils import get_ip, get_ip_interface
+from distributed.utils import get_ip, get_ip_interface, open_port
 from distributed.utils_test import (
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_locally_4,
@@ -46,21 +46,18 @@ def test_defaults(loop, requires_default_ports):
 
         with Client(f"127.0.0.1:{Scheduler.default_port}", loop=loop) as c:
             c.sync(f)
-
-        response = requests.get("http://127.0.0.1:8787/status/")
-        response.raise_for_status()
+            assert _get_dashboard_port(c) == 8787
 
 
-def test_hostport(loop, free_port):
-    with popen(
-        ["dask-scheduler", "--no-dashboard", "--host", f"127.0.0.1:{free_port}"]
-    ):
+def test_hostport(loop):
+    port = open_port()
+    with popen(["dask-scheduler", "--no-dashboard", "--host", f"127.0.0.1:{port}"]):
 
         async def f():
             # The scheduler's main port can't be contacted from the outside
-            await assert_can_connect_locally_4(int(free_port), timeout=5.0)
+            await assert_can_connect_locally_4(int(port), timeout=5.0)
 
-        with Client(f"127.0.0.1:{free_port}", loop=loop) as c:
+        with Client(f"127.0.0.1:{port}", loop=loop) as c:
             assert len(c.nthreads()) == 0
             c.sync(f)
 
@@ -72,14 +69,15 @@ def test_no_dashboard(loop, requires_default_ports):
             assert response.status_code == 404
 
 
-def test_dashboard(loop, free_port):
+def test_dashboard(loop):
     pytest.importorskip("bokeh")
+    port = open_port()
 
     with popen(
-        ["dask-scheduler", "--host", f"127.0.0.1:{free_port}"],
-    ) as proc:
+        ["dask-scheduler", "--host", f"127.0.0.1:{port}"],
+    ):
 
-        with Client(f"127.0.0.1:{free_port}", loop=loop) as c:
+        with Client(f"127.0.0.1:{port}", loop=loop) as c:
             dashboard_port = _get_dashboard_port(c)
 
         names = ["localhost", "127.0.0.1", get_ip()]
@@ -104,48 +102,50 @@ def test_dashboard(loop, free_port):
         requests.get(f"http://127.0.0.1:{dashboard_port}/status/")
 
 
-def test_dashboard_non_standard_ports(loop, free_port, free_port2):
+def test_dashboard_non_standard_ports(loop):
     pytest.importorskip("bokeh")
-
+    port1 = open_port()
+    port2 = open_port()
     with popen(
         [
             "dask-scheduler",
             "--port",
-            str(free_port),
+            str(port1),
             "--dashboard-address",
-            f":{free_port2}",
+            f":{port2}",
         ]
     ) as proc:
-        with Client(f"127.0.0.1:{free_port}", loop=loop) as c:
+        with Client(f"127.0.0.1:{port1}", loop=loop) as c:
             pass
 
         start = time()
         while True:
             try:
-                response = requests.get(f"http://localhost:{free_port2}/status/")
+                response = requests.get(f"http://localhost:{port2}/status/")
                 assert response.ok
                 break
             except Exception:
                 sleep(0.1)
                 assert time() < start + 20
     with pytest.raises(Exception):
-        requests.get(f"http://localhost:{free_port2}/status/")
+        requests.get(f"http://localhost:{port2}/status/")
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
-def test_dashboard_allowlist(loop, free_port):
+def test_dashboard_allowlist(loop):
     pytest.importorskip("bokeh")
     with pytest.raises(Exception):
         requests.get("http://localhost:8787/status/").ok
 
+    port = open_port()
     with popen(
         [
             "dask-scheduler",
             "--port",
-            str(free_port),
+            str(port),
         ]
     ) as proc:
-        with Client(f"127.0.0.1:{free_port}", loop=loop) as c:
+        with Client(f"127.0.0.1:{port}", loop=loop) as c:
             pass
 
         start = time()
@@ -161,7 +161,7 @@ def test_dashboard_allowlist(loop, free_port):
                 assert time() < start + 20
 
 
-def test_interface(loop, free_port):
+def test_interface(loop):
     if_names = sorted(psutil.net_if_addrs())
     for if_name in if_names:
         try:
@@ -177,11 +177,12 @@ def test_interface(loop, free_port):
             "Available interfaces are: %s." % (if_names,)
         )
 
+    port = open_port()
     with popen(
         [
             "dask-scheduler",
             "--port",
-            free_port,
+            str(port),
             "--no-dashboard",
             "--interface",
             if_name,
@@ -190,13 +191,13 @@ def test_interface(loop, free_port):
         with popen(
             [
                 "dask-worker",
-                f"127.0.0.1:{free_port}",
+                f"127.0.0.1:{port}",
                 "--no-dashboard",
                 "--interface",
                 if_name,
             ]
         ) as a:
-            with Client(f"tcp://127.0.0.1:{free_port}", loop=loop) as c:
+            with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
                 start = time()
                 while not len(c.nthreads()):
                     sleep(0.1)
@@ -207,7 +208,9 @@ def test_interface(loop, free_port):
 
 
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
-def test_pid_file(loop, free_port):
+def test_pid_file(loop):
+    port = open_port()
+
     def check_pidfile(proc, pidfile):
         start = time()
         while not os.path.exists(pidfile):
@@ -237,7 +240,7 @@ def test_pid_file(loop, free_port):
             with popen(
                 [
                     "dask-worker",
-                    f"127.0.0.1:{free_port}",
+                    f"127.0.0.1:{port}",
                     "--pid-file",
                     w,
                     "--no-dashboard",
@@ -256,18 +259,19 @@ def test_scheduler_port_zero(loop):
                 assert c.scheduler.port != 8786
 
 
-def test_dashboard_port_zero(loop, free_port):
+def test_dashboard_port_zero(loop):
     pytest.importorskip("bokeh")
+    port = open_port()
     with popen(
         [
             "dask-scheduler",
             "--host",
-            f"127.0.0.1:{free_port}",
+            f"127.0.0.1:{port}",
             "--dashboard-address",
             ":0",
         ],
     ):
-        with Client(f"tcp://127.0.0.1:{free_port}", loop=loop) as c:
+        with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
             port = _get_dashboard_port(c)
             assert port > 0
 
@@ -284,70 +288,78 @@ def get_scheduler_address():
 """
 
 
-def test_preload_file(loop):
+def test_preload_file(loop, tmp_path):
     def check_scheduler():
         import scheduler_info
 
         return scheduler_info.get_scheduler_address()
 
-    tmpdir = tempfile.mkdtemp()
-    try:
-        path = os.path.join(tmpdir, "scheduler_info.py")
-        with open(path, "w") as f:
-            f.write(PRELOAD_TEXT)
-        with tmpfile() as fn:
-            with popen(["dask-scheduler", "--scheduler-file", fn, "--preload", path]):
-                with Client(scheduler_file=fn, loop=loop) as c:
-                    assert c.run_on_scheduler(check_scheduler) == c.scheduler.address
-    finally:
-        shutil.rmtree(tmpdir)
+    path = tmp_path / "scheduler_info.py"
+    with open(path, "w") as f:
+        f.write(PRELOAD_TEXT)
+    with tmpfile() as fn:
+        with popen(
+            [
+                "dask-scheduler",
+                "--scheduler-file",
+                fn,
+                "--preload",
+                path,
+                "--port",
+                str(open_port()),
+            ]
+        ):
+            with Client(scheduler_file=fn, loop=loop) as c:
+                assert c.run_on_scheduler(check_scheduler) == c.scheduler.address
 
 
-def test_preload_module(loop):
+def test_preload_module(loop, tmp_path):
     def check_scheduler():
         import scheduler_info
 
         return scheduler_info.get_scheduler_address()
 
-    tmpdir = tempfile.mkdtemp()
-    try:
-        path = os.path.join(tmpdir, "scheduler_info.py")
-        with open(path, "w") as f:
-            f.write(PRELOAD_TEXT)
-        env = os.environ.copy()
-        if "PYTHONPATH" in env:
-            env["PYTHONPATH"] = tmpdir + ":" + env["PYTHONPATH"]
-        else:
-            env["PYTHONPATH"] = tmpdir
-        with tmpfile() as fn:
-            with popen(
-                [
-                    "dask-scheduler",
-                    "--scheduler-file",
-                    fn,
-                    "--preload",
-                    "scheduler_info",
-                ],
-                env=env,
-            ):
-                with Client(scheduler_file=fn, loop=loop) as c:
-                    assert c.run_on_scheduler(check_scheduler) == c.scheduler.address
-    finally:
-        shutil.rmtree(tmpdir)
+    path = tmp_path / "scheduler_info.py"
+    with open(path, "w") as f:
+        f.write(PRELOAD_TEXT)
+    env = os.environ.copy()
+    if "PYTHONPATH" in env:
+        env["PYTHONPATH"] = tmp_path + ":" + env["PYTHONPATH"]
+    else:
+        env["PYTHONPATH"] = tmp_path
+    with tmpfile() as fn:
+        with popen(
+            [
+                "dask-scheduler",
+                "--scheduler-file",
+                fn,
+                "--preload",
+                "scheduler_info",
+                "--port",
+                str(open_port()),
+            ],
+            env=env,
+        ):
+            with Client(scheduler_file=fn, loop=loop) as c:
+                assert c.run_on_scheduler(check_scheduler) == c.scheduler.address
 
 
 def test_preload_remote_module(loop, tmp_path):
     with open(tmp_path / "scheduler_info.py", "w") as f:
         f.write(PRELOAD_TEXT)
-
-    with popen([sys.executable, "-m", "http.server", "9382"], cwd=tmp_path):
+    http_server_port = open_port()
+    with popen(
+        [sys.executable, "-m", "http.server", str(http_server_port)], cwd=tmp_path
+    ):
         with popen(
             [
                 "dask-scheduler",
                 "--scheduler-file",
                 str(tmp_path / "scheduler-file.json"),
                 "--preload",
-                "http://localhost:9382/scheduler_info.py",
+                f"http://localhost:{http_server_port}/scheduler_info.py",
+                "--port",
+                str(open_port()),
             ]
         ) as proc:
             with Client(
@@ -481,18 +493,19 @@ def test_restores_signal_handler():
         signal.signal(signal.SIGINT, original_handler)
 
 
-def test_multiple_workers_2(loop, free_port):
+def test_multiple_workers_2(loop):
     text = """
 def dask_setup(worker):
     worker.foo = 'setup'
 """
+    port = open_port()
     with popen(
-        ["dask-scheduler", "--no-dashboard", "--host", f"127.0.0.1:{free_port}"]
+        ["dask-scheduler", "--no-dashboard", "--host", f"127.0.0.1:{port}"]
     ) as s:
         with popen(
             [
                 "dask-worker",
-                f"localhost:{free_port}",
+                f"localhost:{port}",
                 "--no-dashboard",
                 "--preload",
                 text,
@@ -500,7 +513,7 @@ def dask_setup(worker):
                 text,
             ]
         ) as a:
-            with Client(f"127.0.0.1:{free_port}", loop=loop) as c:
+            with Client(f"127.0.0.1:{port}", loop=loop) as c:
                 c.wait_for_workers(1)
                 [foo] = c.run(lambda dask_worker: dask_worker.foo).values()
                 assert foo == "setup"
@@ -508,8 +521,8 @@ def dask_setup(worker):
                 assert foo == "setup"
 
 
-def test_multiple_workers(loop, free_port):
-    scheduler_address = f"127.0.0.1:{free_port}"
+def test_multiple_workers(loop):
+    scheduler_address = f"127.0.0.1:{open_port()}"
     with popen(["dask-scheduler", "--no-dashboard", "--host", scheduler_address]) as s:
         with popen(["dask-worker", scheduler_address, "--no-dashboard"]) as a:
             with popen(["dask-worker", scheduler_address, "--no-dashboard"]) as b:

@@ -4,6 +4,7 @@ import asyncio
 import concurrent.futures
 import contextlib
 import copy
+import errno
 import functools
 import gc
 import inspect
@@ -68,7 +69,6 @@ from distributed.utils import (
     get_mp_context,
     iscoroutinefunction,
     log_errors,
-    open_port,
     reset_logger_locks,
     sync,
 )
@@ -2431,99 +2431,36 @@ def ws():
     state.validate_state()
 
 
-_ports_in_use = set()
-
-
 @pytest.fixture()
 def name_of_test(request):
     return f"{request.node.nodeid}"
 
 
-try:
-    #     # If we're not running with pytest-xdist we'll need to register this testrun_uid
-    import xdist  # noqa
-except ImportError:
-
-    @pytest.fixture(scope="session")
-    def testrun_uid():
-        return None
-
-
-@pytest.fixture(scope="session", autouse=True)
-def port_lock_filename(testrun_uid, tmpdir_factory):
-    if testrun_uid:
-        tmpdir = tmpdir_factory.mktemp("_distributed_test_port_lock", numbered=False)
-
-        yield tmpdir / testrun_uid
-    else:
-        yield None
-
-
-@pytest.fixture(scope="session")
-def global_port_lock(port_lock_filename):
-    if port_lock_filename:
-        import locket
-
-        lock = locket.lock_file(port_lock_filename)
-        yield lock
-    else:
-        yield contextlib.nullcontext()
-
-
-@contextmanager
-def _get_open_port(global_port_lock):
-    while True:
-        with global_port_lock:
-            port = open_port()
-            if port not in _ports_in_use:
-                _ports_in_use.add(port)
-                break
-    try:
-        yield port
-    finally:
-        _ports_in_use.discard(port)
-
-
 @pytest.fixture()
-def free_port(global_port_lock, name_of_test):
-    with _get_open_port(global_port_lock) as port:
-        print(f"Using free port {port} for test {name_of_test}")
-        yield str(port)
-
-
-@pytest.fixture()
-def free_port2(global_port_lock, name_of_test):
-    with _get_open_port(global_port_lock) as port:
-        print(f"Using second free port {port} for test {name_of_test}")
-        yield str(port)
-
-
-@pytest.fixture()
-def requires_default_ports(name_of_test, global_port_lock):
+def requires_default_ports(name_of_test):
     start = time()
 
     @contextmanager
     def _bind_port(port):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind(("", port))
-        s.listen(1)
         try:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind(("", port))
+            s.listen(1)
             yield s
         finally:
             s.close()
 
-    default_ports = [8786, 8787]
+    default_ports = [8786]
 
-    while time() - start < 5:
+    while time() - start < _TEST_TIMEOUT:
         try:
-            with global_port_lock:
-                with contextlib.ExitStack() as stack:
-                    for port in default_ports:
-                        stack.enter_context(_bind_port(port))
-                    break
+            with contextlib.ExitStack() as stack:
+                for port in default_ports:
+                    stack.enter_context(_bind_port(port=port))
+                break
         except OSError as err:
-            if err.errno == 48:
+            if err.errno == errno.EADDRINUSE:
                 print(
                     f"Address already in use. Waiting before running test {name_of_test}"
                 )
@@ -2531,3 +2468,5 @@ def requires_default_ports(name_of_test, global_port_lock):
                 continue
     else:
         raise TimeoutError(f"Default ports didn't open up in time for {name_of_test}")
+
+    yield
