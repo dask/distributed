@@ -38,7 +38,6 @@ from distributed.metrics import time
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
     NoOpAwaitable,
-    delayed,
     get_traceback,
     has_keyword,
     iscoroutinefunction,
@@ -141,6 +140,16 @@ class AsyncTaskGroupClosedError(RuntimeError):
     pass
 
 
+def _delayed(corofunc: Callable[P, Coro[T]], delay: float) -> Callable[P, Coro[T]]:
+    """Decorator to delay the evaluation of a coroutine function by the given delay in seconds."""
+
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+        await asyncio.sleep(delay)
+        return await corofunc(*args, **kwargs)
+
+    return wrapper
+
+
 class AsyncTaskGroup(_LoopBoundMixin):
     """Collection tracking all currently running asynchronous tasks within a group"""
 
@@ -219,7 +228,7 @@ class AsyncTaskGroup(_LoopBoundMixin):
         AsyncTaskGroupClosedError
             If the task group is closed.
         """
-        self.call_soon(delayed(afunc, delay), *args, **kwargs)
+        self.call_soon(_delayed(afunc, delay), *args, **kwargs)
 
     def close(self) -> None:
         """Closes the task group so that no new tasks can be scheduled.
