@@ -68,13 +68,6 @@ jobs:
         shell: bash -l {0}
         run: conda config --show
 
-      - name: Hack around https://github.com/ipython/ipython/issues/12197
-        # This upstream issue causes an interpreter crash when running
-        # distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-        shell: bash -l {0}
-        if: ${{ matrix.os == 'windows-latest' && matrix.python-version == '3.9' }}
-        run: mamba uninstall ipython
-
       - name: Install
         shell: bash -l {0}
         run: |
