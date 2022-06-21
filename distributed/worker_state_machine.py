@@ -46,7 +46,6 @@ if TYPE_CHECKING:
     from typing_extensions import TypeAlias
 
     # Circular imports
-    from distributed.actor import Actor
     from distributed.diagnostics.plugin import WorkerPlugin
     from distributed.worker import Worker
 
@@ -900,7 +899,7 @@ class WorkerState:
     #: In-memory tasks data. This collection is shared by reference between
     #: :class:`~distributed.worker.Worker`,
     #: :class:`~distributed.worker_memory.WorkerMemoryManager`, and this class.
-    data: MutableMapping[str, Any]
+    data: MutableMapping[str, object]
 
     #: ``{name: worker plugin}``. This collection is shared by reference between
     #: :class:`~distributed.worker.Worker` and this class. The Worker managed adding and
@@ -1002,7 +1001,7 @@ class WorkerState:
     executed_count: int
 
     #: Actor tasks. See :doc:`actors`.
-    actors: dict[str, Actor | None]
+    actors: dict[str, object]
 
     #: Transition log: ``[(..., stimulus_id: str | None, timestamp: float), ...]``
     #: The number of stimuli logged is capped.
@@ -1034,7 +1033,7 @@ class WorkerState:
         *,
         nthreads: int = 1,
         address: str | None = None,
-        data: MutableMapping[str, Any] = None,
+        data: MutableMapping[str, object] = None,
         threads: dict[str, int] | None = None,
         plugins: dict[str, WorkerPlugin] | None = None,
         resources: Mapping[str, float] | None = None,
@@ -1410,15 +1409,12 @@ class WorkerState:
             is individually larger than target * memory_limit, and the task is not an
             actor.
         """
-        from distributed.actor import Actor
-
         if ts.key in self.data:
             ts.state = "memory"
             return {}
 
         recommendations: Recs = {}
         if ts.key in self.actors:
-            assert isinstance(value, Actor)
             self.actors[ts.key] = value
         else:
             start = time()

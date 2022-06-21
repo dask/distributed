@@ -1880,7 +1880,7 @@ class Worker(BaseWorker, ServerNode):
         self,
         start: float,
         stop: float,
-        data: dict[str, Any],
+        data: dict[str, object],
         cause: TaskState,
         worker: str,
     ) -> None:

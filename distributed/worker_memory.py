@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 
 class WorkerMemoryManager:
-    data: MutableMapping[str, Any]  # {task key: task payload}
+    data: MutableMapping[str, object]  # {task key: task payload}
     memory_limit: int | None
     memory_target_fraction: float | Literal[False]
     memory_spill_fraction: float | Literal[False]
