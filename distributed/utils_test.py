@@ -2440,7 +2440,7 @@ def name_of_test(request):
 
 
 try:
-    # If we're not running with pytest-xdist we'll need to register this testrun_uid
+    #     # If we're not running with pytest-xdist we'll need to register this testrun_uid
     import xdist  # noqa
 except ImportError:
 
@@ -2467,12 +2467,7 @@ def global_port_lock(port_lock_filename):
         lock = locket.lock_file(port_lock_filename)
         yield lock
     else:
-
-        @contextmanager
-        def dummy_lock():
-            yield
-
-        yield dummy_lock()
+        yield contextlib.nullcontext()
 
 
 @contextmanager
