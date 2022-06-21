@@ -33,7 +33,8 @@ repos:
     hooks:
       - id: mypy
         # Override default --ignore-missing-imports
-        args: []
+        # Use setup.cfg if possible instead of adding command line parameters here
+        args: [--warn-unused-configs]
         additional_dependencies:
           # Type stubs
           - types-docutils

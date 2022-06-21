@@ -473,7 +473,14 @@ class Worker(BaseWorker, ServerNode):
         memory_limit: str | float = "auto",
         # Allow overriding the dict-like that stores the task outputs.
         # This is meant for power users only. See WorkerMemoryManager for details.
-        data=None,
+        data: (
+            MutableMapping[str, Any]  # pre-initialised
+            | Callable[[], MutableMapping[str, Any]]  # constructor
+            | tuple[
+                Callable[..., MutableMapping[str, Any]], dict[str, Any]
+            ]  # (constructor, kwargs to constructor)
+            | None  # create internally
+        ) = None,
         # Deprecated parameters; please use dask config instead.
         memory_target_fraction: float | Literal[False] | None = None,
         memory_spill_fraction: float | Literal[False] | None = None,
@@ -1119,7 +1126,7 @@ class Worker(BaseWorker, ServerNode):
         self.periodic_callbacks["heartbeat"].start()
         self.loop.add_callback(self.handle_scheduler, comm)
 
-    def _update_latency(self, latency) -> None:
+    def _update_latency(self, latency: float) -> None:
         self.latency = latency * 0.05 + self.latency * 0.95
         if self.digests is not None:
             self.digests["latency"].add(latency)

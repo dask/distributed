@@ -10,7 +10,7 @@ import abc
 import logging
 from collections import defaultdict
 from collections.abc import Generator
-from typing import TYPE_CHECKING, Literal, NamedTuple
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from tornado.ioloop import PeriodicCallback
 
@@ -97,7 +97,7 @@ class ActiveMemoryManagerExtension:
         if start:
             self.start()
 
-    def amm_handler(self, comm, method: str):
+    def amm_handler(self, method: str) -> Any:
         """Scheduler handler, invoked from the Client by
         :class:`~distributed.active_memory_manager.AMMClientProxy`
         """
@@ -464,7 +464,7 @@ class AMMClientProxy:
     def __init__(self, client: Client):
         self._client = client
 
-    def _run(self, method: str):
+    def _run(self, method: str) -> Any:
         """Remotely invoke ActiveMemoryManagerExtension.amm_handler"""
         return self._client.sync(self._client.scheduler.amm_handler, method=method)
 

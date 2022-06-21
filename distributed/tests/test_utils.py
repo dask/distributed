@@ -617,7 +617,7 @@ async def test_offload():
 async def test_offload_preserves_contextvars():
     var = contextvars.ContextVar("var")
 
-    async def set_var(v: str):
+    async def set_var(v: str) -> None:
         var.set(v)
         r = await offload(var.get)
         assert r == v

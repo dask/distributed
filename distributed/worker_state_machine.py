@@ -1386,7 +1386,9 @@ class WorkerState:
             stimulus_id=stimulus_id,
         )
 
-    def _put_key_in_memory(self, ts: TaskState, value, *, stimulus_id: str) -> Recs:
+    def _put_key_in_memory(
+        self, ts: TaskState, value: object, *, stimulus_id: str
+    ) -> Recs:
         """
         Put a key into memory and set data related task state attributes.
         On success, generate recommendations for dependents.
@@ -1408,12 +1410,15 @@ class WorkerState:
             is individually larger than target * memory_limit, and the task is not an
             actor.
         """
+        from distributed.actor import Actor
+
         if ts.key in self.data:
             ts.state = "memory"
             return {}
 
         recommendations: Recs = {}
         if ts.key in self.actors:
+            assert isinstance(value, Actor)
             self.actors[ts.key] = value
         else:
             start = time()
@@ -1907,13 +1912,13 @@ class WorkerState:
         return self._ensure_computing()
 
     def _transition_long_running_memory(
-        self, ts: TaskState, value=NO_VALUE, *, stimulus_id: str
+        self, ts: TaskState, value: object = NO_VALUE, *, stimulus_id: str
     ) -> RecsInstrs:
         self.executed_count += 1
         return self._transition_generic_memory(ts, value=value, stimulus_id=stimulus_id)
 
     def _transition_generic_memory(
-        self, ts: TaskState, value=NO_VALUE, *, stimulus_id: str
+        self, ts: TaskState, value: object = NO_VALUE, *, stimulus_id: str
     ) -> RecsInstrs:
         if value is NO_VALUE and ts.key not in self.data:
             raise RuntimeError(
@@ -1944,7 +1949,7 @@ class WorkerState:
         return recs, instructions
 
     def _transition_executing_memory(
-        self, ts: TaskState, value=NO_VALUE, *, stimulus_id: str
+        self, ts: TaskState, value: object = NO_VALUE, *, stimulus_id: str
     ) -> RecsInstrs:
         if self.validate:
             assert ts.state == "executing" or ts.key in self.long_running
@@ -2061,7 +2066,7 @@ class WorkerState:
         )
 
     def _transition_released_memory(
-        self, ts: TaskState, value, *, stimulus_id: str
+        self, ts: TaskState, value: object, *, stimulus_id: str
     ) -> RecsInstrs:
         try:
             recs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
@@ -2073,7 +2078,7 @@ class WorkerState:
         return recs, [smsg]
 
     def _transition_flight_memory(
-        self, ts: TaskState, value, *, stimulus_id: str
+        self, ts: TaskState, value: object, *, stimulus_id: str
     ) -> RecsInstrs:
         self.in_flight_tasks.discard(ts)
         ts.coming_from = None
@@ -2178,9 +2183,8 @@ class WorkerState:
         self,
         ts: TaskState,
         finish: TaskStateState | tuple,
-        *args,
+        *args: Any,
         stimulus_id: str,
-        **kwargs,
     ) -> RecsInstrs:
         """Transition a key from its current state to the finish state
 
@@ -2212,10 +2216,8 @@ class WorkerState:
             raise TransitionCounterMaxExceeded(ts.key, start, finish, self.story(ts))
 
         if func is not None:
-            recs, instructions = func(
-                self, ts, *args, stimulus_id=stimulus_id, **kwargs
-            )
-            self._notify_plugins("transition", ts.key, start, finish, **kwargs)
+            recs, instructions = func(self, ts, *args, stimulus_id=stimulus_id)
+            self._notify_plugins("transition", ts.key, start, finish)
 
         elif "released" not in (start, finish):
             # start -> "released" -> finish
@@ -3201,13 +3203,13 @@ class DeprecatedWorkerStateAttribute:
             FutureWarning,
         )
 
-    def __get__(self, instance: Worker | None, _):
+    def __get__(self, instance: Worker | None, owner: type[Worker]) -> Any:
         if instance is None:
             # This is triggered by Sphinx
             return None  # pragma: nocover
         self._warn_deprecated()
         return getattr(instance.state, self.target or self.name)
 
-    def __set__(self, instance: Worker, value) -> None:
+    def __set__(self, instance: Worker, value: Any) -> None:
         self._warn_deprecated()
         setattr(instance.state, self.target or self.name, value)
