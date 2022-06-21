@@ -103,7 +103,7 @@ class Queue:
             raise QueueEmpty
         return q.popleft()
 
-    async def get(self):
+    def get(self):
         assert not self._read_future, "Only one reader allowed"
         fut = Future()
         q = self._q
@@ -111,10 +111,7 @@ class Queue:
             fut.set_result(q.popleft())
         else:
             self._read_future = fut
-        try:
-            return await fut
-        finally:
-            self._read_future = None
+        return fut
 
     def put_nowait(self, value):
         q = self._q
