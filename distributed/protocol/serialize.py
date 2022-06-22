@@ -7,6 +7,7 @@ from array import array
 from enum import Enum
 from functools import partial
 from types import ModuleType
+from typing import Any, Literal
 
 import msgpack
 
@@ -206,9 +207,13 @@ def check_dask_serializable(x):
     return False
 
 
-def serialize(
-    x, serializers=None, on_error="message", context=None, iterate_collection=None
-):
+def serialize(  # type: ignore[no-untyped-def]
+    x: object,
+    serializers=None,
+    on_error: Literal["message" | "raise"] = "message",
+    context=None,
+    iterate_collection: bool | None = None,
+) -> tuple[dict[str, Any], list[bytes | memoryview]]:
     r"""
     Convert object to a header and list of bytestrings
 
@@ -266,6 +271,9 @@ def serialize(
             iterate_collection=True,
         )
 
+    # Note: don't use isinstance(), as it would match subclasses
+    # (e.g. namedtuple, defaultdict) which however would revert to the base class on a
+    # round-trip through msgpack
     if iterate_collection is None and type(x) in (list, set, tuple, dict):
         if type(x) is list and "msgpack" in serializers:
             # Note: "msgpack" will always convert lists to tuples
@@ -304,6 +312,7 @@ def serialize(
                 _header["key"] = k
                 headers_frames.append((_header, _frames))
         else:
+            assert isinstance(x, (list, set, tuple))
             headers_frames = [
                 serialize(
                     obj, serializers=serializers, on_error=on_error, context=context
@@ -313,16 +322,15 @@ def serialize(
 
         frames = []
         lengths = []
-        compressions = []
+        compressions: list[str | None] = []
         for _header, _frames in headers_frames:
             frames.extend(_frames)
             length = len(_frames)
             lengths.append(length)
             compressions.extend(_header.get("compression") or [None] * len(_frames))
 
-        headers = [obj[0] for obj in headers_frames]
         headers = {
-            "sub-headers": headers,
+            "sub-headers": [obj[0] for obj in headers_frames],
             "is-collection": True,
             "frame-lengths": lengths,
             "type-serialized": type(x).__name__,
@@ -345,17 +353,19 @@ def serialize(
             tb = traceback.format_exc()
             break
 
-    msg = "Could not serialize object of type %s." % type(x).__name__
+    msg = f"Could not serialize object of type {type(x).__name__}"
     if on_error == "message":
-        frames = [msg]
+        txt_frames = [msg]
         if tb:
-            frames.append(tb[:100000])
+            txt_frames.append(tb[:100000])
 
-        frames = [frame.encode() for frame in frames]
+        frames = [frame.encode() for frame in txt_frames]
 
         return {"serializer": "error"}, frames
     elif on_error == "raise":
         raise TypeError(msg, str(x)[:10000])
+    else:  # pragma: nocover
+        raise ValueError(f"{on_error=}; expected 'message' or 'raise'")
 
 
 def deserialize(header, frames, deserializers=None):

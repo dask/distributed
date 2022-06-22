@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 
 import msgpack
@@ -22,7 +24,7 @@ from distributed.utils import ensure_memoryview
 logger = logging.getLogger(__name__)
 
 
-def dumps(
+def dumps(  # type: ignore[no-untyped-def]
     msg, serializers=None, on_error="message", context=None, frame_split_size=None
 ) -> list:
     """Transform Python message to bytestream suitable for communication
@@ -51,9 +53,8 @@ def dumps(
 
             header["compression"] = tuple(compression)
 
-        def create_serialized_sub_frames(obj) -> list:
-            typ = type(obj)
-            if typ is Serialized:
+        def create_serialized_sub_frames(obj: Serialized | Serialize) -> list:
+            if isinstance(obj, Serialized):
                 sub_header, sub_frames = obj.header, obj.frames
             else:
                 sub_header, sub_frames = serialize_and_split(
@@ -70,9 +71,8 @@ def dumps(
             )
             return [sub_header] + sub_frames
 
-        def create_pickled_sub_frames(obj) -> list:
-            typ = type(obj)
-            if typ is Pickled:
+        def create_pickled_sub_frames(obj: Pickled | ToPickle) -> list:
+            if isinstance(obj, Pickled):
                 sub_header, sub_frames = obj.header, obj.frames
             else:
                 sub_frames = []
@@ -95,12 +95,11 @@ def dumps(
         frames = [None]
 
         def _encode_default(obj):
-            typ = type(obj)
-            if typ is Serialize or typ is Serialized:
+            if isinstance(obj, (Serialize, Serialized)):
                 offset = len(frames)
                 frames.extend(create_serialized_sub_frames(obj))
                 return {"__Serialized__": offset}
-            elif typ is ToPickle or typ is Pickled:
+            elif isinstance(obj, (ToPickle, Pickled)):
                 offset = len(frames)
                 frames.extend(create_pickled_sub_frames(obj))
                 return {"__Pickled__": offset}

@@ -39,7 +39,7 @@ from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps, loads
-from distributed.scheduler import MemoryState, Scheduler
+from distributed.scheduler import MemoryState, Scheduler, WorkerState
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
     BrokenComm,
@@ -691,7 +691,7 @@ class SlowRestartNanny(Nanny):
     Worker=SlowRestartNanny,
     worker_kwargs={"heartbeat_interval": "1ms"},
 )
-async def test_restart_heartbeat_before_closing(c, s: Scheduler, n: SlowRestartNanny):
+async def test_restart_heartbeat_before_closing(c, s, n):
     """
     Ensure that if workers heartbeat in the middle of `Scheduler.restart`, they don't close themselves.
     https://github.com/dask/distributed/issues/6494
@@ -2508,8 +2508,9 @@ def clear_leak():
 
 
 async def assert_memory(
-    scheduler_or_workerstate,
+    scheduler_or_workerstate: Scheduler | WorkerState,
     attr: str,
+    /,
     min_mib: float,
     max_mib: float,
     *,
@@ -3444,7 +3445,7 @@ def _verify_cluster_state(
 
 
 @gen_cluster(nthreads=[("", 1)] * 2)
-async def test_get_cluster_state(s: Scheduler, *workers: Worker):
+async def test_get_cluster_state(s, *workers):
     state = await s.get_cluster_state([])
     _verify_cluster_state(state, workers)
 
@@ -3461,7 +3462,7 @@ async def test_get_cluster_state(s: Scheduler, *workers: Worker):
     nthreads=[("", 1)] * 2,
     config={"distributed.comm.timeouts.connect": "200ms"},
 )
-async def test_get_cluster_state_worker_error(s: Scheduler, a: Worker, b: Worker):
+async def test_get_cluster_state_worker_error(s, a, b):
     a.stop()
     state = await s.get_cluster_state([])
     _verify_cluster_state(state, [a, b], allow_missing=True)
@@ -3472,7 +3473,7 @@ async def test_get_cluster_state_worker_error(s: Scheduler, a: Worker, b: Worker
     assert state["versions"]["workers"].keys() == {b.address}
 
 
-def _verify_cluster_dump(url, format: str, workers: Collection[Worker]) -> dict:
+def _verify_cluster_dump(url: str, format: str, workers: Collection[Worker]) -> dict:
     import fsspec
 
     if format == "msgpack":
@@ -3496,7 +3497,7 @@ def _verify_cluster_dump(url, format: str, workers: Collection[Worker]) -> dict:
 
 @pytest.mark.parametrize("format", ["msgpack", "yaml"])
 @gen_cluster(nthreads=[("", 1)] * 2)
-async def test_dump_cluster_state(s: Scheduler, *workers: Worker, format):
+async def test_dump_cluster_state(s, *workers, format):
     fsspec = pytest.importorskip("fsspec")
     try:
         await s.dump_cluster_state_to_url(

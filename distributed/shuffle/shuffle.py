@@ -34,12 +34,17 @@ def get_ext() -> ShuffleWorkerExtension:
 
 
 def shuffle_transfer(
-    input: pd.DataFrame, id: ShuffleId, npartitions: int = None, column=None
+    input: pd.DataFrame,
+    id: ShuffleId,
+    npartitions: int = None,
+    column: str | None = None,
 ) -> None:
     get_ext().add_partition(input, id, npartitions=npartitions, column=column)
 
 
-def shuffle_unpack(id: ShuffleId, output_partition: int, barrier=None) -> pd.DataFrame:
+def shuffle_unpack(
+    id: ShuffleId, output_partition: int, barrier: object = None
+) -> pd.DataFrame:
     return get_ext().get_output_partition(id, output_partition)
 
 
@@ -51,7 +56,7 @@ def rearrange_by_column_p2p(
     df: DataFrame,
     column: str,
     npartitions: int | None = None,
-):
+) -> DataFrame:
     from dask.dataframe import DataFrame
 
     npartitions = npartitions or df.npartitions
