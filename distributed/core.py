@@ -237,7 +237,7 @@ class AsyncTaskGroup(_LoopBoundMixin):
         """
         self.closed = True
 
-    async def stop(self, timeout=1) -> None:
+    async def stop(self, timeout: float = 1) -> None:
         """Close the group and stop all currently running tasks.
 
         Closes the task group and waits `timeout` seconds for all tasks to gracefully finish.
