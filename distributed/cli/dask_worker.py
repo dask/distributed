@@ -255,7 +255,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     'like "foo.bar" or "/path/to/foo.py"',
 )
 @click.version_option()
-def main(
+def main(  # type: ignore[no-untyped-def]
     scheduler,
     host,
     worker_port: str | None,

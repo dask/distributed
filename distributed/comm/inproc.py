@@ -160,7 +160,7 @@ class InProc(Comm):
 
     _initialized = False
 
-    def __init__(
+    def __init__(  # type: ignore[no-untyped-def]
         self,
         local_addr: str,
         peer_addr: str,

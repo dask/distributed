@@ -678,7 +678,7 @@ def key_split(s):
         return "Other"
 
 
-def key_split_group(x) -> str:
+def key_split_group(x: object) -> str:
     """A more fine-grained version of key_split
 
     >>> key_split_group(('x-2', 1))
@@ -694,10 +694,9 @@ def key_split_group(x) -> str:
     >>> key_split_group('x-1')
     'x'
     """
-    typ = type(x)
-    if typ is tuple:
+    if isinstance(x, tuple):
         return x[0]
-    elif typ is str:
+    elif isinstance(x, str):
         if x[0] == "(":
             return x.split(",", 1)[0].strip("()\"'")
         elif len(x) == 32 and re.match(r"[a-f0-9]{32}", x):
@@ -706,7 +705,7 @@ def key_split_group(x) -> str:
             return x.strip("<>").split()[0].split(".")[-1]
         else:
             return key_split(x)
-    elif typ is bytes:
+    elif isinstance(x, bytes):
         return key_split_group(x.decode())
     else:
         return "Other"
@@ -1067,7 +1066,7 @@ def open_port(host=""):
     return port
 
 
-def import_file(path: str):
+def import_file(path: str) -> list[ModuleType]:
     """Loads modules for a file (.py, .zip, .egg)"""
     directory, filename = os.path.split(path)
     name, ext = os.path.splitext(filename)
@@ -1355,7 +1354,11 @@ class Logs(dict):
         return get_template("logs.html.j2").render(logs=self)
 
 
-def cli_keywords(d: dict, cls=None, cmd=None):
+def cli_keywords(
+    d: dict[str, AnyType],
+    cls: Callable | None = None,
+    cmd: str | ModuleType | None = None,
+) -> list[str]:
     """Convert a kwargs dictionary into a list of CLI keywords
 
     Parameters
@@ -1420,7 +1423,7 @@ _offload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Dask-O
 weakref.finalize(_offload_executor, _offload_executor.shutdown)
 
 
-def import_term(name: str):
+def import_term(name: str) -> AnyType:
     """Return the fully qualified term
 
     Examples

@@ -154,7 +154,7 @@ class ClientState:
     #: Output of :func:`distributed.versions.get_versions` on the client
     versions: dict[str, Any]
 
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def __init__(self, client: str, *, versions: dict[str, Any] | None = None):
         self.client_key = client
@@ -268,7 +268,7 @@ class MemoryState:
     managed_in_memory: int
     managed_spilled: int
 
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def __init__(
         self,
@@ -452,7 +452,7 @@ class WorkerState:
     #: Arbitrary additional metadata to be added to :meth:`~WorkerState.identity`
     extra: dict[str, Any]
 
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def __init__(
         self,
@@ -624,7 +624,7 @@ class Computation:
     code: SortedSet
     id: uuid.UUID
 
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def __init__(self):
         self.start = time()
@@ -691,7 +691,7 @@ class TaskPrefix:
     #: Task groups associated to this prefix
     groups: list[TaskGroup]
 
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def __init__(self, name: str):
         self.name = name
@@ -804,7 +804,7 @@ class TaskGroup:
     stop: float
     all_durations: defaultdict[str, float]
 
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def __init__(self, name: str):
         self.name = name
@@ -1066,7 +1066,7 @@ class TaskState:
 
     # Support for weakrefs to a class with __slots__
     __weakref__: Any = None
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     # Instances not part of slots since class variable
     _instances: ClassVar[weakref.WeakSet[TaskState]] = weakref.WeakSet()
@@ -7022,6 +7022,7 @@ class Scheduler(SchedulerState, ServerNode):
                 await self.remove_worker(address=ws.address, stimulus_id=stimulus_id)
 
     def check_idle(self):
+        assert self.idle_timeout
         if self.status in (Status.closing, Status.closed):
             return
 

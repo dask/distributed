@@ -7,6 +7,7 @@ import gc
 import inspect
 import logging
 import os
+import pathlib
 import pickle
 import random
 import subprocess
@@ -7267,7 +7268,9 @@ def test_print_simple(capsys):
     assert "Hello!:123" in out
 
 
-def _verify_cluster_dump(url, format: str, addresses: set[str]) -> dict:
+def _verify_cluster_dump(
+    url: str | pathlib.PosixPath, format: str, addresses: set[str]
+) -> dict:
     fsspec = pytest.importorskip("fsspec")  # for load_cluster_dump
     url = str(url) + (".msgpack.gz" if format == "msgpack" else ".yaml")
     state = load_cluster_dump(url)
@@ -7280,9 +7283,7 @@ def _verify_cluster_dump(url, format: str, addresses: set[str]) -> dict:
     return state
 
 
-def test_dump_cluster_state_write_from_scheduler(
-    c, s, a, b, tmp_path, monkeypatch: pytest.MonkeyPatch
-):
+def test_dump_cluster_state_write_from_scheduler(c, s, a, b, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     scheduler_dir = tmp_path / "scheduler"

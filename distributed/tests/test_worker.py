@@ -1803,7 +1803,7 @@ async def test_heartbeat_missing_real_cluster(s, a):
     Worker=Nanny,
     worker_kwargs={"heartbeat_interval": "1ms"},
 )
-async def test_heartbeat_missing_restarts(c, s: Scheduler, n: Nanny):
+async def test_heartbeat_missing_restarts(c, s, n):
     old_heartbeat_handler = s.handlers["heartbeat_worker"]
     s.handlers["heartbeat_worker"] = lambda *args, **kwargs: {"status": "missing"}
 
@@ -3375,7 +3375,7 @@ async def test_extension_methods(s):
             self.scheduler = scheduler
             pass
 
-        def heartbeat(self, ws, data: dict):
+        def heartbeat(self, ws, data):
             nonlocal flag
             assert ws in self.scheduler.workers.values()
             assert data == {"data": 123}

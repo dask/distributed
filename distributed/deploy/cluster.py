@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import asyncio
 import datetime
 import logging
 import uuid
 from contextlib import suppress
 from inspect import isawaitable
+from typing import Any
 
 from tornado.ioloop import PeriodicCallback
 
@@ -222,7 +225,7 @@ class Cluster(SyncMethodMixin):
         else:  # pragma: no cover
             raise ValueError("Invalid op", op, msg)
 
-    def adapt(self, Adaptive=Adaptive, **kwargs) -> Adaptive:
+    def adapt(self, Adaptive: type[Adaptive] = Adaptive, **kwargs: Any) -> Adaptive:
         """Turn on adaptivity
 
         For keyword arguments see dask.distributed.Adaptive

@@ -99,7 +99,7 @@ class Nanny(ServerNode):
     _given_worker_port: int | str | Collection[int] | None
     _start_port: int | str | Collection[int] | None
 
-    def __init__(
+    def __init__(  # type: ignore[no-untyped-def]
         self,
         scheduler_ip=None,
         scheduler_port=None,
@@ -732,7 +732,7 @@ class WorkerProcess:
             if self.on_exit is not None:
                 self.on_exit(r)
 
-    async def kill(self, timeout: float = 2, executor_wait: bool = True):
+    async def kill(self, timeout: float = 2, executor_wait: bool = True) -> None:
         """
         Ensure the worker process is stopped, waiting at most
         *timeout* seconds before terminating it abruptly.
