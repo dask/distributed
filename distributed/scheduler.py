@@ -1795,6 +1795,12 @@ class SchedulerState:
             and len(tg.dependencies) < 5
             and sum(map(len, tg.dependencies)) < 5
         ):
+            if math.isinf(self.WORKER_SATURATION):
+                return min(
+                    (self.idle or self.workers).values(),
+                    key=lambda ws: len(ws.processing) / ws.nthreads,
+                )
+
             if not self.idle:
                 # All workers busy? Task gets/stays queued.
                 if self.validate:
@@ -2609,7 +2615,16 @@ class SchedulerState:
 
         They are considered saturated if they both have enough tasks to occupy
         all of their threads, and if the expected runtime of those tasks is
-        large enough. TODO update
+        large enough.
+
+        If ``distributed.scheduler.worker-oversaturation`` is not ``inf``
+        (scheduler-side queuing is enabled), they are considered idle
+        if they have fewer tasks processing than the ``worker-oversaturation``
+        threshold dictates.
+
+        Otherwise, they are considered idle if they have fewer tasks processing
+        than threads, or if their tasks' total expected runtime is less than half
+        the expected runtime of the same number of average tasks.
 
         This is useful for load balancing and adaptivity.
         """
@@ -2624,14 +2639,16 @@ class SchedulerState:
 
         idle = self.idle
         saturated = self.saturated
-        # TODO different metric when `self.WORKER_OVERSATURATION` is `inf`?
-        if not worker_saturated(ws, self.WORKER_OVERSATURATION):
+        if (
+            (p < nc or occ < nc * avg / 2)
+            if math.isinf(self.WORKER_OVERSATURATION)
+            else not worker_saturated(ws, self.WORKER_OVERSATURATION)
+        ):
             idle[ws.address] = ws
             saturated.discard(ws)
         else:
             idle.pop(ws.address, None)
 
-            # TODO do we still want any of this?
             if p > nc:
                 pending: float = occ * (p - nc) / (p * nc)
                 if 0.4 < pending > 1.9 * avg:
