@@ -1,10 +1,14 @@
+from __future__ import annotations
+
 import logging
 import math
 import operator
 import os
 from collections import OrderedDict, defaultdict
+from collections.abc import Iterable
 from datetime import datetime
 from numbers import Number
+from typing import TypeVar
 
 import numpy as np
 from bokeh.core.properties import without_property_validation
@@ -80,6 +84,8 @@ if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
 else:
     ExportTool = None  # type: ignore
+
+T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
@@ -449,7 +455,7 @@ class WorkersMemory(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self):
-        def quadlist(i) -> list:
+        def quadlist(i: Iterable[T]) -> list[T]:
             out = []
             for ii in i:
                 out += [ii, ii, ii, ii]

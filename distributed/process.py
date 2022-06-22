@@ -186,7 +186,7 @@ class AsyncProcess:
         target(*args, **kwargs)
 
     @classmethod
-    def _watch_message_queue(
+    def _watch_message_queue(  # type: ignore[no-untyped-def]
         cls, selfref, process: multiprocessing.Process, loop, state, q, exit_future
     ):
         # As multiprocessing.Process is not thread-safe, we run all

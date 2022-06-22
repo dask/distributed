@@ -46,7 +46,6 @@ if TYPE_CHECKING:
     from typing_extensions import TypeAlias
 
     # Circular imports
-    from distributed.actor import Actor
     from distributed.diagnostics.plugin import WorkerPlugin
     from distributed.worker import Worker
 
@@ -120,7 +119,7 @@ class InvalidTransition(Exception):
         self.finish = finish
         self.story = story
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}: {self.key} :: {self.start}->{self.finish}"
             + "\n"
@@ -159,7 +158,7 @@ class InvalidTaskState(Exception):
         self.state = state
         self.story = story
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}: {self.key} :: {self.state}"
             + "\n"
@@ -269,7 +268,7 @@ class TaskState:
     # Support for weakrefs to a class with __slots__
     __weakref__: Any = field(init=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         TaskState._instances.add(self)
 
     def __repr__(self) -> str:
@@ -368,7 +367,7 @@ class TaskFinishedMsg(SendMessageToScheduler):
     metadata: dict
     thread: int | None
     startstops: list[StartStop]
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def to_dict(self) -> dict[str, Any]:
         d = super().to_dict()
@@ -387,7 +386,7 @@ class TaskErredMsg(SendMessageToScheduler):
     traceback_text: str
     thread: int | None
     startstops: list[StartStop]
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def to_dict(self) -> dict[str, Any]:
         d = super().to_dict()
@@ -491,19 +490,19 @@ class StateMachineEvent:
     # handled: float | None = field(init=False, default=None)
     _classes: ClassVar[dict[str, type[StateMachineEvent]]] = {}
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, *args: Any, **kwargs: Any) -> StateMachineEvent:
         self = object.__new__(cls)
         self.handled = None
         return self
 
-    def __init_subclass__(cls):
+    def __init_subclass__(cls) -> None:
         StateMachineEvent._classes[cls.__name__] = cls
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
         """Produce a variant version of self that is small enough to be stored in memory
         in the medium term and contains meaningful information for debugging
         """
-        self.handled = handled
+        self.handled: float | None = handled
         return self
 
     def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
@@ -613,7 +612,7 @@ class GatherDepFailureEvent(GatherDepDoneEvent):
     traceback: Serialize | None
     exception_text: str
     traceback_text: str
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def _after_from_dict(self) -> None:
         self.exception = Serialize(Exception())
@@ -651,17 +650,17 @@ class ComputeTaskEvent(StateMachineEvent):
     resource_restrictions: dict[str, float]
     actor: bool
     annotations: dict
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # Fixes after msgpack decode
-        if isinstance(self.priority, list):
-            self.priority = tuple(self.priority)
+        if isinstance(self.priority, list):  # type: ignore[unreachable]
+            self.priority = tuple(self.priority)  # type: ignore[unreachable]
 
         if isinstance(self.run_spec, dict):
-            self.run_spec = SerializedTask(**self.run_spec)
+            self.run_spec = SerializedTask(**self.run_spec)  # type: ignore[unreachable]
         elif not isinstance(self.run_spec, SerializedTask):
-            self.run_spec = SerializedTask(task=self.run_spec)
+            self.run_spec = SerializedTask(task=self.run_spec)  # type: ignore[unreachable]
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
         out = copy(self)
@@ -681,7 +680,7 @@ class ExecuteSuccessEvent(StateMachineEvent):
     stop: float
     nbytes: int
     type: type | None
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
         out = copy(self)
@@ -703,7 +702,7 @@ class ExecuteFailureEvent(StateMachineEvent):
     traceback: Serialize | None
     exception_text: str
     traceback_text: str
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def _after_from_dict(self) -> None:
         self.exception = Serialize(Exception())
@@ -894,7 +893,7 @@ class WorkerState:
     #: In-memory tasks data. This collection is shared by reference between
     #: :class:`~distributed.worker.Worker`,
     #: :class:`~distributed.worker_memory.WorkerMemoryManager`, and this class.
-    data: MutableMapping[str, Any]
+    data: MutableMapping[str, object]
 
     #: ``{name: worker plugin}``. This collection is shared by reference between
     #: :class:`~distributed.worker.Worker` and this class. The Worker managed adding and
@@ -996,7 +995,7 @@ class WorkerState:
     executed_count: int
 
     #: Actor tasks. See :doc:`actors`.
-    actors: dict[str, Actor | None]
+    actors: dict[str, object]
 
     #: Transition log: ``[(..., stimulus_id: str | None, timestamp: float), ...]``
     #: The number of stimuli logged is capped.
@@ -1021,14 +1020,14 @@ class WorkerState:
     #: In production, it should always be set to False.
     transition_counter_max: int | Literal[False]
 
-    __slots__ = tuple(__annotations__)  # type: ignore
+    __slots__ = tuple(__annotations__)
 
     def __init__(
         self,
         *,
         nthreads: int = 1,
         address: str | None = None,
-        data: MutableMapping[str, Any] = None,
+        data: MutableMapping[str, object] = None,
         threads: dict[str, int] | None = None,
         plugins: dict[str, WorkerPlugin] | None = None,
         resources: Mapping[str, float] | None = None,
@@ -1380,7 +1379,9 @@ class WorkerState:
             stimulus_id=stimulus_id,
         )
 
-    def _put_key_in_memory(self, ts: TaskState, value, *, stimulus_id: str) -> Recs:
+    def _put_key_in_memory(
+        self, ts: TaskState, value: object, *, stimulus_id: str
+    ) -> Recs:
         """
         Put a key into memory and set data related task state attributes.
         On success, generate recommendations for dependents.
@@ -1895,13 +1896,13 @@ class WorkerState:
         return self._ensure_computing()
 
     def _transition_long_running_memory(
-        self, ts: TaskState, value=NO_VALUE, *, stimulus_id: str
+        self, ts: TaskState, value: object = NO_VALUE, *, stimulus_id: str
     ) -> RecsInstrs:
         self.executed_count += 1
         return self._transition_generic_memory(ts, value=value, stimulus_id=stimulus_id)
 
     def _transition_generic_memory(
-        self, ts: TaskState, value=NO_VALUE, *, stimulus_id: str
+        self, ts: TaskState, value: object = NO_VALUE, *, stimulus_id: str
     ) -> RecsInstrs:
         if value is NO_VALUE and ts.key not in self.data:
             raise RuntimeError(
@@ -1932,7 +1933,7 @@ class WorkerState:
         return recs, instructions
 
     def _transition_executing_memory(
-        self, ts: TaskState, value=NO_VALUE, *, stimulus_id: str
+        self, ts: TaskState, value: object = NO_VALUE, *, stimulus_id: str
     ) -> RecsInstrs:
         if self.validate:
             assert ts.state == "executing" or ts.key in self.long_running
@@ -2025,12 +2026,13 @@ class WorkerState:
             ts.state = "cancelled"
             return {}, []
 
-    def _transition_cancelled_memory(self, ts, value, *, stimulus_id):
+    def _transition_cancelled_memory(
+        self, ts: TaskState, value: object, *, stimulus_id: str
+    ) -> RecsInstrs:
         # We only need this because the to-memory signatures require a value but
         # we do not want to store a cancelled result and want to release
         # immediately
         assert ts.done
-
         return self._transition_cancelled_released(ts, stimulus_id=stimulus_id)
 
     def _transition_executing_long_running(
@@ -2049,7 +2051,7 @@ class WorkerState:
         )
 
     def _transition_released_memory(
-        self, ts: TaskState, value, *, stimulus_id: str
+        self, ts: TaskState, value: object, *, stimulus_id: str
     ) -> RecsInstrs:
         try:
             recs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
@@ -2061,7 +2063,7 @@ class WorkerState:
         return recs, [smsg]
 
     def _transition_flight_memory(
-        self, ts: TaskState, value, *, stimulus_id: str
+        self, ts: TaskState, value: object, *, stimulus_id: str
     ) -> RecsInstrs:
         self.in_flight_tasks.discard(ts)
         ts.coming_from = None
@@ -2152,7 +2154,7 @@ class WorkerState:
         ("waiting", "released"): _transition_generic_released,
     }
 
-    def _notify_plugins(self, method_name, *args, **kwargs):
+    def _notify_plugins(self, method_name: str, *args: Any, **kwargs: Any) -> None:
         for name, plugin in self.plugins.items():
             if hasattr(plugin, method_name):
                 try:
@@ -2166,9 +2168,8 @@ class WorkerState:
         self,
         ts: TaskState,
         finish: TaskStateState | tuple,
-        *args,
+        *args: Any,
         stimulus_id: str,
-        **kwargs,
     ) -> RecsInstrs:
         """Transition a key from its current state to the finish state
 
@@ -2200,10 +2201,8 @@ class WorkerState:
             raise TransitionCounterMaxExceeded(ts.key, start, finish, self.story(ts))
 
         if func is not None:
-            recs, instructions = func(
-                self, ts, *args, stimulus_id=stimulus_id, **kwargs
-            )
-            self._notify_plugins("transition", ts.key, start, finish, **kwargs)
+            recs, instructions = func(self, ts, *args, stimulus_id=stimulus_id)
+            self._notify_plugins("transition", ts.key, start, finish)
 
         elif "released" not in (start, finish):
             # start -> "released" -> finish
@@ -3154,13 +3153,13 @@ class DeprecatedWorkerStateAttribute:
             FutureWarning,
         )
 
-    def __get__(self, instance: Worker | None, _):
+    def __get__(self, instance: Worker | None, owner: type[Worker]) -> Any:
         if instance is None:
             # This is triggered by Sphinx
             return None  # pragma: nocover
         self._warn_deprecated()
         return getattr(instance.state, self.target or self.name)
 
-    def __set__(self, instance: Worker, value) -> None:
+    def __set__(self, instance: Worker, value: Any) -> None:
         self._warn_deprecated()
         setattr(instance.state, self.target or self.name, value)

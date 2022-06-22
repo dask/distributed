@@ -15,7 +15,7 @@ from collections.abc import Container
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import Callable, ClassVar, TypedDict, TypeVar
+from typing import Any, Callable, ClassVar, TypedDict
 
 import tblib
 from tlz import merge
@@ -318,7 +318,7 @@ class Server:
                 return self
             timeout = getattr(self, "death_timeout", None)
 
-            async def _close_on_failure(exc: Exception):
+            async def _close_on_failure(exc: Exception) -> None:
                 await self.close()
                 self.status = Status.failed
                 self.__startup_exc = exc
@@ -719,7 +719,7 @@ def pingpong(comm):
     return b"pong"
 
 
-async def send_recv(
+async def send_recv(  # type: ignore[no-untyped-def]
     comm: Comm,
     *,
     reply: bool = True,
@@ -768,7 +768,8 @@ async def send_recv(
 
     if isinstance(response, dict) and response.get("status") == "uncaught-error":
         if comm.deserialize:
-            typ, exc, tb = clean_exception(**response)
+            _, exc, tb = clean_exception(**response)
+            assert exc
             raise exc.with_traceback(tb)
         else:
             raise Exception(response["exception_text"])
@@ -1298,7 +1299,7 @@ class ErrorMessage(TypedDict):
     traceback_text: str
 
 
-def error_message(e: BaseException, status="error") -> ErrorMessage:
+def error_message(e: BaseException, status: str = "error") -> ErrorMessage:
     """Produce message to send back given an exception has occurred
 
     This does the following:
@@ -1345,25 +1346,27 @@ def error_message(e: BaseException, status="error") -> ErrorMessage:
     }
 
 
-E = TypeVar("E", bound=BaseException)
-
-
 def clean_exception(
-    exception: E, traceback: types.TracebackType | None = None, **kwargs
-) -> tuple[type[E], E, types.TracebackType | None]:
+    exception: BaseException | bytes | bytearray | str | None,
+    traceback: types.TracebackType | bytes | str | None = None,
+    **kwargs: Any,
+) -> tuple[
+    type[BaseException | None], BaseException | None, types.TracebackType | None
+]:
     """Reraise exception and traceback. Deserialize if necessary
 
     See Also
     --------
     error_message : create and serialize errors into message
     """
-    if isinstance(exception, bytes) or isinstance(exception, bytearray):
+    if isinstance(exception, (bytes, bytearray)):
         try:
             exception = protocol.pickle.loads(exception)
         except Exception:
             exception = Exception(exception)
     elif isinstance(exception, str):
         exception = Exception(exception)
+
     if isinstance(traceback, bytes):
         try:
             traceback = protocol.pickle.loads(traceback)
@@ -1371,4 +1374,7 @@ def clean_exception(
             traceback = None
     elif isinstance(traceback, str):
         traceback = None  # happens if the traceback failed serializing
+
+    assert isinstance(exception, BaseException) or exception is None
+    assert isinstance(traceback, types.TracebackType) or traceback is None
     return type(exception), exception, traceback

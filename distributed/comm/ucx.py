@@ -5,13 +5,16 @@ See :ref:`communications` for more.
 
 .. _UCX: https://github.com/openucx/ucx
 """
+from __future__ import annotations
+
 import functools
 import logging
 import os
 import struct
 import warnings
 import weakref
-from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable, Collection
+from typing import TYPE_CHECKING, Any
 
 import dask
 from dask.utils import parse_bytes
@@ -209,7 +212,9 @@ class UCX(Comm):
     4. Read all the data frames.
     """
 
-    def __init__(self, ep, local_addr: str, peer_addr: str, deserialize: bool = True):
+    def __init__(  # type: ignore[no-untyped-def]
+        self, ep, local_addr: str, peer_addr: str, deserialize: bool = True
+    ):
         super().__init__(deserialize=deserialize)
         self._ep = ep
         if local_addr:
@@ -243,9 +248,9 @@ class UCX(Comm):
     async def write(
         self,
         msg: dict,
-        serializers=("cuda", "dask", "pickle", "error"),
+        serializers: Collection[str] | None = None,
         on_error: str = "message",
-    ):
+    ) -> int:
         if self.closed():
             raise CommClosedError("Endpoint is closed -- unable to send message")
         try:
@@ -399,7 +404,9 @@ class UCXConnector(Connector):
     comm_class = UCX
     encrypted = False
 
-    async def connect(self, address: str, deserialize=True, **connection_args) -> UCX:
+    async def connect(
+        self, address: str, deserialize: bool = True, **connection_args: Any
+    ) -> UCX:
         logger.debug("UCXConnector.connect: %s", address)
         ip, port = parse_host_port(address)
         init_once()
@@ -423,10 +430,10 @@ class UCXListener(Listener):
     def __init__(
         self,
         address: str,
-        comm_handler: None,
-        deserialize=False,
-        allow_offload=True,
-        **connection_args,
+        comm_handler: Callable[[UCX], Awaitable[None]] | None = None,
+        deserialize: bool = False,
+        allow_offload: bool = True,
+        **connection_args: Any,
     ):
         if not address.startswith("ucx"):
             address = "ucx://" + address

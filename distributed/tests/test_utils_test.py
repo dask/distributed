@@ -8,6 +8,7 @@ import sys
 import textwrap
 import threading
 from contextlib import contextmanager
+from multiprocessing.synchronize import Barrier
 from time import sleep
 from unittest import mock
 
@@ -587,7 +588,9 @@ else:
     TERM_SIGNALS = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
 
 
-def garbage_process(barrier, ignore_sigterm: bool = False, t: float = 3600) -> None:
+def garbage_process(
+    barrier: Barrier, ignore_sigterm: bool = False, t: float = 3600
+) -> None:
     if ignore_sigterm:
         for signum in TERM_SIGNALS:
             signal.signal(signum, signal.SIG_IGN)
@@ -826,7 +829,7 @@ def test_popen_write_during_terminate_deadlock():
     # `subprocess.TimeoutExpired` if this test breaks.
 
 
-def test_popen_timeout(capsys: pytest.CaptureFixture):
+def test_popen_timeout(capsys):
     with pytest.raises(subprocess.TimeoutExpired):
         with popen(
             [
@@ -867,7 +870,7 @@ def test_popen_timeout(capsys: pytest.CaptureFixture):
     assert "slept" in captured.out
 
 
-def test_popen_always_prints_output(capsys: pytest.CaptureFixture):
+def test_popen_always_prints_output(capsys):
     # We always print stdout even if there was no error, in case some other assertion
     # later in the test fails and the output would be useful.
     with popen([sys.executable, "-c", "print('foo')"], capture_output=True) as proc:

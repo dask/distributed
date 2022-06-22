@@ -683,7 +683,6 @@ async def test_signal_handling(c, s, nanny, sig):
         logs = stdout.decode().lower()
         assert stderr is None
         assert worker.returncode == 0
-        assert sig.name.lower() in logs
         if nanny == "--nanny":
             assert "closing nanny" in logs
             assert "stopping worker" in logs
