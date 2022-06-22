@@ -11,7 +11,6 @@ import re
 import sys
 import threading
 import traceback
-import types
 import uuid
 import warnings
 import weakref
@@ -555,7 +554,7 @@ class FutureState:
         self.status = "pending"
         self._get_event().clear()
 
-    def set_error(self, exception: Exception, traceback: types.TracebackType):
+    def set_error(self, exception, traceback):
         """Sets the error data
 
         Sets the status to 'error'. Sets the exception, the traceback,
@@ -568,9 +567,11 @@ class FutureState:
         traceback: Exception
             The traceback
         """
-        _, self.exception, self.traceback = clean_exception(exception, traceback)
+        _, exception, traceback = clean_exception(exception, traceback)
 
         self.status = "error"
+        self.exception = exception
+        self.traceback = traceback
         self._get_event().set()
 
     def done(self):

@@ -1368,7 +1368,7 @@ def clean_exception(
         exception = Exception(exception)
 
     if isinstance(traceback, bytes):
-        try:  # type: ignore
+        try:
             traceback = protocol.pickle.loads(traceback)
         except (TypeError, AttributeError):
             traceback = None

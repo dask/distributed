@@ -90,6 +90,8 @@ def get_package_info(
     for pkg in pkgs:
         if isinstance(pkg, (tuple, list)):
             modname, ver_f = pkg
+            if ver_f is None:
+                ver_f = version_of_package
         else:
             modname = pkg
             ver_f = version_of_package

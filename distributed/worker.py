@@ -439,7 +439,7 @@ class Worker(BaseWorker, ServerNode):
         scheduler_file: str | None = None,
         nthreads: int | None = None,
         loop: IOLoop | None = None,  # Deprecated
-        local_dir: Any = None,  # Deprecated, use local_directory instead
+        local_dir: None = None,  # Deprecated, use local_directory instead
         local_directory: str | None = None,
         services: dict | None = None,
         name: Any | None = None,
