@@ -2238,24 +2238,7 @@ class SchedulerState:
                     }
                 ]
 
-            ts.state = "released"
-
-            if ts.has_lost_dependencies:
-                recommendations[key] = "forgotten"
-            elif ts.waiters or ts.who_wants:
-                recommendations[key] = "waiting"
-
-            if recommendations.get(key) != "waiting":
-                for dts in ts.dependencies:
-                    if dts.state != "released":
-                        dts.waiters.discard(ts)
-                        if not dts.waiters and not dts.who_wants:
-                            recommendations[dts.key] = "released"
-                ts.waiters.clear()
-
-            if self.validate:
-                assert not ts.processing_on
-
+            _propagage_released(self, ts, recommendations)
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
@@ -2430,22 +2413,7 @@ class SchedulerState:
 
             self.queued.remove(ts)
 
-            # TODO copied from `transition_processing_released`; factor out into helper function
-            ts.state = "released"
-
-            if ts.has_lost_dependencies:
-                recommendations[key] = "forgotten"
-            elif ts.waiters or ts.who_wants:
-                recommendations[key] = "waiting"
-
-            if recommendations.get(key) != "waiting":
-                for dts in ts.dependencies:
-                    if dts.state != "released":
-                        dts.waiters.discard(ts)
-                        if not dts.waiters and not dts.who_wants:
-                            recommendations[dts.key] = "released"
-                ts.waiters.clear()
-
+            _propagage_released(self, ts, recommendations)
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
@@ -7411,6 +7379,32 @@ def _add_to_memory(
             keys=[ts.key],
             recommendations=recommendations,
         )
+
+
+def _propagage_released(
+    state: SchedulerState,
+    ts: TaskState,
+    recommendations: dict[str, str],
+) -> None:
+    ts.state = "released"
+    key = ts.key
+
+    if ts.has_lost_dependencies:
+        recommendations[key] = "forgotten"
+    elif ts.waiters or ts.who_wants:
+        recommendations[key] = "waiting"
+
+    if recommendations.get(key) != "waiting":
+        for dts in ts.dependencies:
+            if dts.state != "released":
+                dts.waiters.discard(ts)
+                if not dts.waiters and not dts.who_wants:
+                    recommendations[dts.key] = "released"
+        ts.waiters.clear()
+
+    if state.validate:
+        assert not ts.processing_on
+        assert ts not in state.queued
 
 
 def _propagate_forgotten(
