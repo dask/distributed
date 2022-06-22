@@ -283,8 +283,7 @@ class TaskState:
         return other is self
 
     def __hash__(self) -> int:
-        # See note in __eq__
-        return id(self)
+        return hash(self.key)
 
     def get_nbytes(self) -> int:
         nbytes = self.nbytes
@@ -3024,25 +3023,18 @@ class WorkerState:
         for worker, tss in self.data_needed.items():
             for ts in tss:
                 assert ts.state == "fetch"
-                assert worker in ts.who_has
-
-        # Test that there aren't multiple TaskState objects with the same key in any
-        # Set[TaskState]. See TaskState.__eq__ and TaskState.__hash__.
-        for tss in (  # type: ignore
-            *self.data_needed.values(),
-            self.missing_dep_flight,
-            self.in_flight_tasks,
-            self.executing,
-        ):
-            for ts in tss:
                 assert self.tasks[ts.key] is ts
-            assert len({ts.key for ts in tss}) == len(tss)
+                assert worker in ts.who_has
 
         for ts in self.tasks.values():
             self.validate_task(ts)
 
         if self.transition_counter_max:
             assert self.transition_counter < self.transition_counter_max
+
+        # Test that there aren't multiple TaskState objects with the same key in data_needed
+        for tss in self.data_needed.values():
+            assert len({ts.key for ts in tss}) == len(tss)
 
 
 class BaseWorker(abc.ABC):
