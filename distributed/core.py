@@ -769,6 +769,7 @@ async def send_recv(  # type: ignore[no-untyped-def]
     if isinstance(response, dict) and response.get("status") == "uncaught-error":
         if comm.deserialize:
             _, exc, tb = clean_exception(**response)
+            assert exc
             raise exc.with_traceback(tb)
         else:
             raise Exception(response["exception_text"])
@@ -1346,10 +1347,12 @@ def error_message(e: BaseException, status: str = "error") -> ErrorMessage:
 
 
 def clean_exception(
-    exception: BaseException | bytes | bytearray | str,
+    exception: BaseException | bytes | bytearray | str | None,
     traceback: types.TracebackType | bytes | str | None = None,
     **kwargs: Any,
-) -> tuple[type[BaseException], BaseException, types.TracebackType | None]:
+) -> tuple[
+    type[BaseException | None], BaseException | None, types.TracebackType | None
+]:
     """Reraise exception and traceback. Deserialize if necessary
 
     See Also
@@ -1372,6 +1375,6 @@ def clean_exception(
     elif isinstance(traceback, str):
         traceback = None  # happens if the traceback failed serializing
 
-    assert isinstance(exception, BaseException)
+    assert isinstance(exception, BaseException) or exception is None
     assert isinstance(traceback, types.TracebackType) or traceback is None
     return type(exception), exception, traceback

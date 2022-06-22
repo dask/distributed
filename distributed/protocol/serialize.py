@@ -271,8 +271,11 @@ def serialize(  # type: ignore[no-untyped-def]
             iterate_collection=True,
         )
 
-    if iterate_collection is None and isinstance(x, (list, set, tuple, dict)):
-        if isinstance(x, list) and "msgpack" in serializers:
+    # Note: don't use isinstance(), as it would match subclasses
+    # (e.g. namedtuple, defaultdict) which however would revert to the base class on a
+    # round-trip through msgpack
+    if iterate_collection is None and type(x) in (list, set, tuple, dict):
+        if type(x) is list and "msgpack" in serializers:
             # Note: "msgpack" will always convert lists to tuples
             #       (see GitHub #3716), so we should iterate
             #       through the list if "msgpack" comes before "pickle"
@@ -285,7 +288,7 @@ def serialize(  # type: ignore[no-untyped-def]
             iterate_collection = check_dask_serializable(x)
 
     # Determine whether keys are safe to be serialized with msgpack
-    if isinstance(x, dict) and iterate_collection:
+    if type(x) is dict and iterate_collection:
         try:
             msgpack.dumps(list(x.keys()))
         except Exception:
@@ -294,9 +297,9 @@ def serialize(  # type: ignore[no-untyped-def]
             dict_safe = True
 
     if (
-        isinstance(x, (list, set, tuple))
+        type(x) in (list, set, tuple)
         and iterate_collection
-        or isinstance(x, dict)
+        or type(x) is dict
         and iterate_collection
         and dict_safe
     ):
@@ -309,6 +312,7 @@ def serialize(  # type: ignore[no-untyped-def]
                 _header["key"] = k
                 headers_frames.append((_header, _frames))
         else:
+            assert isinstance(x, (list, set, tuple))
             headers_frames = [
                 serialize(
                     obj, serializers=serializers, on_error=on_error, context=context

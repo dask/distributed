@@ -975,7 +975,8 @@ def check_worker_fail_hard(s: Scheduler) -> None:
         msg["exception"] = deserialize(msg["exception"].header, msg["exception"].frames)
         msg["traceback"] = deserialize(msg["traceback"].header, msg["traceback"].frames)
         print("Failed worker", worker)
-        typ, exc, tb = clean_exception(**msg)
+        _, exc, tb = clean_exception(**msg)
+        assert exc
         raise exc.with_traceback(tb)
 
 
