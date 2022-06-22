@@ -69,7 +69,6 @@ from distributed.utils import (
     get_mp_context,
     iscoroutinefunction,
     log_errors,
-    open_port,
     reset_logger_locks,
     sync,
 )
@@ -709,7 +708,7 @@ def cluster(
     ws = weakref.WeakSet()
     enable_proctitle_on_children()
 
-    with check_process_leak(check=True), check_instances(), _reconfigure():
+    with check_process_leak(check=True), check_instances(), _reconfigure(config):
         if nanny:
             _run_worker = run_nanny
         else:
@@ -1915,17 +1914,24 @@ def _get_default_config():
 
 
 @pytest.fixture(scope="module")
-def default_dask_config():
-    dashboard_port = open_port()
+def default_dashboard_port():
+    """The default dashboard port that will be set in the dask
+    configuration for the test run when using the cleanup fixture
+    """
+    return ":0"
+
+
+@pytest.fixture(scope="module")
+def default_dask_config(default_dashboard_port):
     config = _get_default_config()
-    config["distributed.scheduler.dashboard.default-port"] = dashboard_port
+    config["distributed.scheduler.dashboard.default-port"] = default_dashboard_port
     return config
 
 
 @contextmanager
-def _reconfigure(config):
+def _reconfigure(config=None):
     reset_config()
-    if config is None:
+    if not config:
         config = _get_default_config()
     with dask.config.set(config):
         # Restore default logging levels
