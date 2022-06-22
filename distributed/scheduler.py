@@ -507,9 +507,7 @@ class WorkerState:
         return self._hash
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, WorkerState):
-            return False
-        return hash(self) == hash(other)
+        return isinstance(other, WorkerState) and other.server_id == self.server_id
 
     @property
     def has_what(self) -> Set[TaskState]:
