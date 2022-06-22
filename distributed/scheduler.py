@@ -1282,7 +1282,7 @@ class SchedulerState:
         "MEMORY_REBALANCE_SENDER_MIN",
         "MEMORY_REBALANCE_RECIPIENT_MAX",
         "MEMORY_REBALANCE_HALF_GAP",
-        "WORKER_OVERSATURATION",
+        "WORKER_SATURATION",
     }
 
     def __init__(
@@ -1353,8 +1353,8 @@ class SchedulerState:
             dask.config.get("distributed.worker.memory.rebalance.sender-recipient-gap")
             / 2.0
         )
-        self.WORKER_OVERSATURATION = dask.config.get(
-            "distributed.scheduler.worker-oversaturation"
+        self.WORKER_SATURATION = dask.config.get(
+            "distributed.scheduler.worker-saturation"
         )
         self.transition_counter = 0
         self._idle_transition_counter = 0
@@ -1815,9 +1815,9 @@ class SchedulerState:
                 self.idle.values(), key=lambda ws: len(ws.processing) / ws.nthreads
             )
             if self.validate:
-                assert not worker_saturated(ws, self.WORKER_OVERSATURATION), (
+                assert not worker_saturated(ws, self.WORKER_SATURATION), (
                     ws,
-                    task_slots_available(ws, self.WORKER_OVERSATURATION),
+                    task_slots_available(ws, self.WORKER_SATURATION),
                 )
             return ws
 
@@ -2617,9 +2617,9 @@ class SchedulerState:
         all of their threads, and if the expected runtime of those tasks is
         large enough.
 
-        If ``distributed.scheduler.worker-oversaturation`` is not ``inf``
+        If ``distributed.scheduler.worker-saturation`` is not ``inf``
         (scheduler-side queuing is enabled), they are considered idle
-        if they have fewer tasks processing than the ``worker-oversaturation``
+        if they have fewer tasks processing than the ``worker-saturation``
         threshold dictates.
 
         Otherwise, they are considered idle if they have fewer tasks processing
@@ -2641,8 +2641,8 @@ class SchedulerState:
         saturated = self.saturated
         if (
             (p < nc or occ < nc * avg / 2)
-            if math.isinf(self.WORKER_OVERSATURATION)
-            else not worker_saturated(ws, self.WORKER_OVERSATURATION)
+            if math.isinf(self.WORKER_SATURATION)
+            else not worker_saturated(ws, self.WORKER_SATURATION)
         ):
             idle[ws.address] = ws
             saturated.discard(ws)
@@ -2846,13 +2846,9 @@ class SchedulerState:
         recommendations: dict[str, str] = {}
 
         # Schedule any queued tasks onto the new worker
-        if not math.isinf(self.WORKER_OVERSATURATION) and self.queued:
+        if not math.isinf(self.WORKER_SATURATION) and self.queued:
             for qts in reversed(
-                list(
-                    self.queued.topk(
-                        task_slots_available(ws, self.WORKER_OVERSATURATION)
-                    )
-                )
+                list(self.queued.topk(task_slots_available(ws, self.WORKER_SATURATION)))
             ):
                 if self.validate:
                     assert qts.state == "queued"
@@ -7277,6 +7273,7 @@ def _add_to_processing(
         assert not ts.processing_on
         assert not ts.has_lost_dependencies
         assert ts not in state.unrunnable
+        assert ts not in state.queued
         assert all(dts.who_has for dts in ts.dependencies)
 
     if ws := state.decide_worker(ts, recommendations):
@@ -7326,7 +7323,7 @@ def _remove_from_processing(
     state.release_resources(ts, ws)
 
     # If a slot has opened up for a queued task, schedule it.
-    if state.queued and not worker_saturated(ws, state.WORKER_OVERSATURATION):
+    if state.queued and not worker_saturated(ws, state.WORKER_SATURATION):
         qts = state.queued.peek()
         if state.validate:
             assert qts.state == "queued"
@@ -7746,17 +7743,17 @@ def heartbeat_interval(n: int) -> float:
         return n / 200 + 1
 
 
-def task_slots_available(ws: WorkerState, oversaturation_factor: float) -> int:
+def task_slots_available(ws: WorkerState, saturation_factor: float) -> int:
     "Number of tasks that can be sent to this worker without oversaturating it"
-    assert not math.isinf(oversaturation_factor)
+    assert not math.isinf(saturation_factor)
     nthreads = ws.nthreads
-    return max(nthreads + int(oversaturation_factor * nthreads), 1) - len(ws.processing)
+    return max(int(saturation_factor * nthreads), 1) - len(ws.processing)
 
 
-def worker_saturated(ws: WorkerState, oversaturation_factor: float) -> bool:
-    if math.isinf(oversaturation_factor):
+def worker_saturated(ws: WorkerState, saturation_factor: float) -> bool:
+    if math.isinf(saturation_factor):
         return False
-    return task_slots_available(ws, oversaturation_factor) <= 0
+    return task_slots_available(ws, saturation_factor) <= 0
 
 
 class KilledWorker(Exception):

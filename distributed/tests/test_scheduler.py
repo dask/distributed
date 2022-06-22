@@ -293,32 +293,34 @@ async def test_root_task_overproduction(c, s, *nannies):
 
 
 @pytest.mark.parametrize(
-    "oversaturation, expected_task_counts",
+    "saturation, expected_task_counts",
     [
-        (1.5, (5, 2)),
-        (1.0, (4, 2)),
-        (0.0, (2, 1)),
+        (2.5, (5, 2)),
+        (2.0, (4, 2)),
+        (1.0, (2, 1)),
         (-1.0, (1, 1)),
         (float("inf"), (7, 3))
         # ^ depends on root task assignment logic; ok if changes, just needs to add up to 10
     ],
 )
-def test_oversaturation_factor(
-    oversaturation: int | float, expected_task_counts: tuple[int, int]
+def test_saturation_factor(
+    saturation: int | float, expected_task_counts: tuple[int, int]
 ) -> None:
     @gen_cluster(
         client=True,
         nthreads=[("", 2), ("", 1)],
         config={
-            "distributed.scheduler.worker-oversaturation": oversaturation,
+            "distributed.scheduler.worker-saturation": saturation,
         },
     )
-    async def _test_oversaturation_factor(c, s, a, b):
+    async def _test_saturation_factor(c, s, a, b):
         event = Event()
-        fs = c.map(lambda _: event.wait(), range(10))
+        fs = c.map(
+            lambda _: event.wait(), range(10), key=[f"wait-{i}" for i in range(10)]
+        )
         while a.state.executing_count < min(
-            a.nthreads, expected_task_counts[0]
-        ) or b.state.executing_count < min(b.nthreads, expected_task_counts[1]):
+            a.state.nthreads, expected_task_counts[0]
+        ) or b.state.executing_count < min(b.state.nthreads, expected_task_counts[1]):
             await asyncio.sleep(0.01)
 
         assert len(a.state.tasks) == expected_task_counts[0]
@@ -327,15 +329,15 @@ def test_oversaturation_factor(
         await event.set()
         await c.gather(fs)
 
-    _test_oversaturation_factor()
+    _test_saturation_factor()
 
 
 @pytest.mark.skip("Current queuing does not support co-assignment")
 @pytest.mark.parametrize(
     "saturation_factor",
     [
-        0.0,
         1.0,
+        2.0,
         pytest.param(
             float("inf"),
             marks=pytest.mark.skip("https://github.com/dask/distributed/issues/6597"),
@@ -347,7 +349,7 @@ def test_oversaturation_factor(
     nthreads=[("", 2), ("", 1)],
 )
 async def test_oversaturation_multiple_task_groups(c, s, a, b, saturation_factor):
-    s.WORKER_OVERSATURATION = saturation_factor
+    s.WORKER_SATURATION = saturation_factor
     xs = [delayed(i, name=f"x-{i}") for i in range(9)]
     ys = [delayed(i, name=f"y-{i}") for i in range(9)]
     zs = [x + y for x, y in zip(xs, ys)]
