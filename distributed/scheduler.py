@@ -1852,38 +1852,11 @@ class SchedulerState:
     def transition_waiting_processing(self, key, stimulus_id):
         try:
             ts: TaskState = self.tasks[key]
-            dts: TaskState
             recommendations: dict = {}
             client_msgs: dict = {}
             worker_msgs: dict = {}
-            if self.validate:
-                assert not ts.waiting_on
-                assert not ts.who_has
-                assert not ts.exception_blame
-                assert not ts.processing_on
-                assert not ts.has_lost_dependencies
-                assert ts not in self.unrunnable
-                assert all(dts.who_has for dts in ts.dependencies)
 
-            ws = self.decide_worker(ts, recommendations)
-            if ws is None:
-                return recommendations, client_msgs, worker_msgs
-            worker = ws.address
-
-            self._set_duration_estimate(ts, ws)
-            ts.processing_on = ws
-            ts.state = "processing"
-            self.consume_resources(ts, ws)
-            self.check_idle_saturated(ws)
-            self.n_tasks += 1
-
-            if ts.actor:
-                ws.actors.add(ts)
-
-            # logger.debug("Send job to worker: %s, %s", worker, key)
-
-            worker_msgs[worker] = [_task_to_msg(self, ts)]
-
+            _add_to_processing(self, ts, recommendations, worker_msgs)
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
@@ -2492,35 +2465,9 @@ class SchedulerState:
             if self.validate:
                 assert not ts.actor, "Actors can't be queued wat"
                 assert ts in self.queued
-                # Copied from `transition_waiting_processing`
-                assert not ts.processing_on
-                assert not ts.waiting_on
-                assert not ts.who_has
-                assert not ts.exception_blame
-                assert not ts.has_lost_dependencies
-                assert ts not in self.unrunnable
-                assert all(dts.who_has for dts in ts.dependencies)
 
-            # NOTE: if all workers are now saturated and this task shouldn't actually run, `ws` is be None.
-            if ws := self.decide_worker(ts, recommendations):
-                self.queued.remove(ts)
-                # TODO Copied from `transition_waiting_processing`; factor out into helper function
-                self._set_duration_estimate(ts, ws)
-                ts.processing_on = ws
-                ts.state = "processing"
-                self.consume_resources(ts, ws)
-                self.check_idle_saturated(ws)
-                self.n_tasks += 1
+            _add_to_processing(self, ts, recommendations, worker_msgs)
 
-                if ts.actor:
-                    ws.actors.add(ts)
-
-                # logger.debug("Send job to worker: %s, %s", worker, key)
-
-                worker_msgs[ws.address] = [_task_to_msg(self, ts)]
-
-            if self.validate:
-                assert not recommendations, recommendations
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
@@ -7333,6 +7280,36 @@ class Scheduler(SchedulerState, ServerNode):
                 "stimulus_id": stimulus_id,
             }
         )
+
+
+def _add_to_processing(
+    state: SchedulerState, ts: TaskState, recommendations: dict, worker_msgs: dict
+) -> WorkerState | None:
+    if state.validate:
+        assert not ts.waiting_on
+        assert not ts.who_has
+        assert not ts.exception_blame
+        assert not ts.processing_on
+        assert not ts.has_lost_dependencies
+        assert ts not in state.unrunnable
+        assert all(dts.who_has for dts in ts.dependencies)
+
+    if ws := state.decide_worker(ts, recommendations):
+        state._set_duration_estimate(ts, ws)
+        ts.processing_on = ws
+        ts.state = "processing"
+        state.queued.discard(ts)
+        state.consume_resources(ts, ws)
+        state.check_idle_saturated(ws)
+        state.n_tasks += 1
+
+        if ts.actor:
+            ws.actors.add(ts)
+
+        # logger.debug("Send job to worker: %s, %s", worker, key)
+
+        worker_msgs[ws.address] = [_task_to_msg(state, ts)]
+    return ws
 
 
 def _remove_from_processing(
