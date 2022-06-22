@@ -26,9 +26,12 @@ from distributed.utils_test import (
 from distributed.worker_state_machine import (
     AcquireReplicasEvent,
     ComputeTaskEvent,
+    EnsureCommunicatingAfterTransitions,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
+    GatherDep,
     Instruction,
+    PauseEvent,
     RecommendationsConflict,
     RefreshWhoHasEvent,
     ReleaseWorkerDataMsg,
@@ -37,6 +40,7 @@ from distributed.worker_state_machine import (
     SerializedTask,
     StateMachineEvent,
     TaskState,
+    UnpauseEvent,
     UpdateDataEvent,
     merge_recs_instructions,
 )
@@ -819,3 +823,98 @@ async def test_deprecated_worker_attributes(s, a, b):
 
     with pytest.warns(FutureWarning, match="attribute has been removed"):
         assert a.data_needed == set()
+
+
+def test_gather_priority(ws):
+    """Test that tasks are fetched in the following order:
+
+    1. by task priority
+    2. in case of tie, from local workers first
+    3. in case of tie, from the worker with the most tasks queued
+    4. in case of tie, from a random worker (which is actually deterministic).
+    """
+    ws.total_out_connections = 4
+
+    instructions = ws.handle_stimulus(
+        PauseEvent(stimulus_id="pause"),
+        # Note: tasks fetched by acquire-replicas always have priority=(1, )
+        AcquireReplicasEvent(
+            who_has={
+                # Remote + local
+                "x1": ["127.0.0.2:1", "127.0.0.1:2"],
+                # Remote. After getting x11 from .1, .2  will have less tasks than .3
+                "x2": ["127.0.0.2:1"],
+                "x3": ["127.0.0.3:1"],
+                "x4": ["127.0.0.3:1"],
+                # It will be a random choice between .2, .4, .5, .6, and .7
+                "x5": ["127.0.0.4:1"],
+                "x6": ["127.0.0.5:1"],
+                "x7": ["127.0.0.6:1"],
+                # This will be fetched first because it's on the same worker as y
+                "x8": ["127.0.0.7:1"],
+            },
+            # Substantial nbytes prevents total_out_connections to be overridden by
+            # comm_threshold_bytes, but it's less than target_message_size
+            nbytes={f"x{i}": 4 * 2**20 for i in range(1, 9)},
+            stimulus_id="compute1",
+        ),
+        # A higher-priority task, even if scheduled later, is fetched first
+        ComputeTaskEvent(
+            key="z",
+            who_has={"y": ["127.0.0.7:1"]},
+            nbytes={"y": 1},
+            priority=(0,),
+            duration=1.0,
+            run_spec=None,
+            resource_restrictions={},
+            actor=False,
+            annotations={},
+            stimulus_id="compute2",
+        ),
+        UnpauseEvent(stimulus_id="unpause"),
+    )
+
+    assert instructions == [
+        EnsureCommunicatingAfterTransitions(stimulus_id="compute1"),
+        EnsureCommunicatingAfterTransitions(stimulus_id="compute1"),
+        EnsureCommunicatingAfterTransitions(stimulus_id="compute1"),
+        EnsureCommunicatingAfterTransitions(stimulus_id="compute1"),
+        EnsureCommunicatingAfterTransitions(stimulus_id="compute1"),
+        EnsureCommunicatingAfterTransitions(stimulus_id="compute1"),
+        EnsureCommunicatingAfterTransitions(stimulus_id="compute1"),
+        EnsureCommunicatingAfterTransitions(stimulus_id="compute1"),
+        EnsureCommunicatingAfterTransitions(stimulus_id="compute2"),
+        # Highest-priority task first. Lower priority tasks from the same worker are
+        # shoved into the same instruction (up to 50MB worth)
+        GatherDep(
+            stimulus_id="unpause",
+            worker="127.0.0.7:1",
+            to_gather={"y", "x8"},
+            total_nbytes=1 + 4 * 2**20,
+        ),
+        # Followed by local workers
+        GatherDep(
+            stimulus_id="unpause",
+            worker="127.0.0.1:2",
+            to_gather={"x1"},
+            total_nbytes=4 * 2**20,
+        ),
+        # Followed by remote workers with the most tasks
+        GatherDep(
+            stimulus_id="unpause",
+            worker="127.0.0.3:1",
+            to_gather={"x3", "x4"},
+            total_nbytes=8 * 2**20,
+        ),
+        # Followed by other remote workers, randomly.
+        # Determinism is guaranteed by a statically-seeded random number generator.
+        # FIXME It would have not been deterministic if we instead of multiple keys we
+        #       had used a single key with multiple workers, because sets
+        #       (like TaskState.who_has) change order at every interpreter restart.
+        GatherDep(
+            stimulus_id="unpause",
+            worker="127.0.0.4:1",
+            to_gather={"x5"},
+            total_nbytes=4 * 2**20,
+        ),
+    ]

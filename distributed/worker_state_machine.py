@@ -1301,6 +1301,10 @@ class WorkerState:
         4. If still tied, by a random element. This is statically seeded to guarantee
            reproducibility.
 
+           FIXME you won't get determinism when a single task is replicated on multiple
+                 workers, because TaskState.who_has changes order at every interpreter
+                 restart.
+
         Omit workers that are either busy or in flight.
         Remove peer workers with no tasks from data_needed.
 
@@ -2507,20 +2511,21 @@ class WorkerState:
 
             if self.validate:
                 assert ev.who_has.keys() == ev.nbytes.keys()
-                assert all(ev.who_has.values())
+                for dep_workers in ev.who_has.values():
+                    assert dep_workers
+                    assert len(dep_workers) == len(set(dep_workers))
 
-            for dep_key, dep_workers in ev.who_has.items():
+            for dep_key, nbytes in ev.nbytes.items():
                 dep_ts = self._ensure_task_exists(
                     key=dep_key,
                     priority=priority,
                     stimulus_id=ev.stimulus_id,
                 )
+                self.tasks[dep_key].nbytes = nbytes
+
                 # link up to child / parents
                 ts.dependencies.add(dep_ts)
                 dep_ts.dependents.add(ts)
-
-            for dep_key, value in ev.nbytes.items():
-                self.tasks[dep_key].nbytes = value
 
             self._update_who_has(ev.who_has)
         else:
