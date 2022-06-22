@@ -39,7 +39,6 @@ from distributed.worker_state_machine import (
     StateMachineEvent,
     TaskState,
     UpdateDataEvent,
-    WorkerState,
     merge_recs_instructions,
 )
 
@@ -84,8 +83,7 @@ def test_TaskState__to_dict():
     ]
 
 
-def test_WorkerState__to_dict():
-    ws = WorkerState(address="127.0.0.1:1234", transition_counter_max=10)
+def test_WorkerState__to_dict(ws):
     ws.handle_stimulus(
         AcquireReplicasEvent(
             who_has={"x": ["127.0.0.1:1235"]}, nbytes={"x": 123}, stimulus_id="s1"
@@ -103,7 +101,7 @@ def test_WorkerState__to_dict():
         del stim["handled"]
 
     expect = {
-        "address": "127.0.0.1:1234",
+        "address": "127.0.0.1:1",
         "busy_workers": [],
         "constrained": [],
         "data": {"y": None},
