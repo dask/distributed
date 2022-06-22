@@ -303,7 +303,12 @@ class TCP(Comm):
                     # See <https://github.com/tornadoweb/tornado/pull/2996>
                     each_frame = ensure_memoryview(each_frame)
                     for i, j in sliding_window(
-                        2, range(0, each_frame_nbytes + OPENSSL_MAX_CHUNKSIZE, OPENSSL_MAX_CHUNKSIZE)
+                        2,
+                        range(
+                            0,
+                            each_frame_nbytes + OPENSSL_MAX_CHUNKSIZE,
+                            OPENSSL_MAX_CHUNKSIZE,
+                        ),
                     ):
                         chunk = each_frame[i:j]
                         chunk_nbytes = chunk.nbytes
