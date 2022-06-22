@@ -407,10 +407,10 @@ async def test_queued_tasks_rebalance(client, s, a, b):
             await d.close()
 
         await client.gather(fs)
-        assert a.tasks
-        assert b.tasks
-        assert c.tasks
-        assert d.tasks
+        assert a.state.tasks
+        assert b.state.tasks
+        assert c.state.tasks
+        assert d.state.tasks
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
