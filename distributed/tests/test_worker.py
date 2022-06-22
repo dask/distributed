@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import gc
 import importlib
 import logging
@@ -91,7 +92,7 @@ pytestmark = pytest.mark.ci1
 @gen_cluster(nthreads=[])
 async def test_worker_nthreads(s):
     async with Worker(s.address) as w:
-        assert w.executor._max_workers == CPU_COUNT
+        assert w.state.nthreads == CPU_COUNT
 
 
 @gen_cluster()
@@ -417,7 +418,7 @@ async def test_plugin_exception():
         def setup(self, worker=None):
             raise ValueError("Setup failed")
 
-    async with Scheduler(port=0) as s:
+    async with Scheduler(port=0, dashboard_address=":0") as s:
         with raises_with_cause(
             RuntimeError, "Worker failed to start", ValueError, "Setup failed"
         ):
@@ -440,7 +441,7 @@ async def test_plugin_multiple_exceptions():
         def setup(self, worker=None):
             raise RuntimeError("MyPlugin2 Error")
 
-    async with Scheduler(port=0) as s:
+    async with Scheduler(port=0, dashboard_address=":0") as s:
         # There's no guarantee on the order of which exception is raised first
         with raises_with_cause(
             RuntimeError,
@@ -2241,7 +2242,7 @@ async def test_process_executor_raise_exception(c, s, a, b):
 async def test_gpu_executor(c, s, w):
     if nvml.device_get_count() > 0:
         e = w.executors["gpu"]
-        assert isinstance(e, distributed.threadpoolexecutor.ThreadPoolExecutor)
+        assert isinstance(e, concurrent.futures.ThreadPoolExecutor)
         assert e._max_workers == 1
     else:
         assert "gpu" not in w.executors
