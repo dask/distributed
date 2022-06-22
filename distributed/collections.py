@@ -99,7 +99,8 @@ class HeapSet(MutableSet[T]):
 
     def topk(self, k: int) -> Iterator[T]:
         "Iterator over the largest K elements. This is O(1) for k == 1, O(n*logn) otherwise."
-        k = min(k, len(self))
+        if k <= 0:
+            return  # empty iterator
         if k == 1:
             yield self.peek()
         else:
