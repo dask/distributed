@@ -521,8 +521,8 @@ def _remove_py_stack(frames):
         yield entry
 
 
-def llprocess(
-    frames: Any,  # FIXME
+def llprocess(  # type: ignore[no-untyped-def]
+    frames,
     child: object | None,
     state: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
