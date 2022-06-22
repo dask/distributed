@@ -704,25 +704,18 @@ def test_error_during_startup(monkeypatch, nanny):
     with popen(
         [
             "dask-scheduler",
-            "--port",
-            scheduler_port,
+            f"--port={scheduler_port}",
+            "--dashboard-address=:0",
         ],
-        capture_output=True,
-    ) as scheduler:
-        start = time()
-        # Wait for the scheduler to be up
-        wait_for_log_line(b"Scheduler at", scheduler.stdout)
-        # Ensure this is not killed by pytest-timeout
-        if time() - start > 5:
-            raise TimeoutError("Scheduler failed to start in time.")
-
-        with popen(
-            [
-                "dask-worker",
-                scheduler_addr,
-                nanny,
-                "--worker-port",
-                scheduler_port,
-            ],
-        ) as worker:
-            assert worker.wait(5) == 1
+    ):
+        with Client(scheduler_addr) as c:
+            with popen(
+                [
+                    "dask-worker",
+                    scheduler_addr,
+                    nanny,
+                    # This should clash due to a port conflict
+                    f"--worker-port={scheduler_port}",
+                ],
+            ) as worker:
+                assert worker.wait(10) == 1
