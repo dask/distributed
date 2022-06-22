@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, BinaryIO
 
 if TYPE_CHECKING:
     import pyarrow as pa
 
 
-def dump_batch(batch, file, schema=None) -> None:
+def dump_batch(batch, file: BinaryIO, schema=None) -> None:  # type: ignore[no-untyped-def]
     """
     Dump a batch to file, if we're the first, also write the schema
 
@@ -21,7 +21,7 @@ def dump_batch(batch, file, schema=None) -> None:
     file.write(batch)
 
 
-def load_arrow(file) -> pa.Table:
+def load_arrow(file: BinaryIO) -> pa.Table:
     """Load batched data written to file back out into a table again
 
     Example

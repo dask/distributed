@@ -102,7 +102,7 @@ def maybe_get_next_page_path(response: requests.Response) -> str | None:
     return next_page_path
 
 
-def get_workflow_listing(repo: str, branch: str, event: str, days: int):
+def get_workflow_listing(repo: str, branch: str, event: str, days: int) -> list[dict]:
     """
     Get a list of workflow runs from GitHub actions.
     """
@@ -149,7 +149,7 @@ def suite_from_name(name: str) -> str:
     return "-".join(name.split("-")[:3])
 
 
-def download_and_parse_artifact(url: str):
+def download_and_parse_artifact(url: str) -> junitparser.JUnitXml | None:
     """
     Download the artifact at the url parse it.
     """

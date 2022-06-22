@@ -412,7 +412,7 @@ class TCP(Comm):
 
     def __init__(
         self,
-        protocol,
+        protocol: DaskCommProtocol,
         local_addr: str,
         peer_addr: str,
         deserialize: bool = True,
@@ -821,7 +821,11 @@ class _ZeroCopyWriter:
         # Initialize the buffer limits
         self.set_write_buffer_limits()
 
-    def set_write_buffer_limits(self, high: int = None, low: int = None):
+    def set_write_buffer_limits(
+        self,
+        high: int | None = None,
+        low: int | None = None,
+    ) -> None:
         """Set the write buffer limits"""
         # Copied almost verbatim from asyncio.transports._FlowControlMixin
         if high is None:

@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from collections.abc import Iterator
 from contextlib import contextmanager
 from time import sleep
-from typing import Literal
+from typing import Any, Literal
 
 import pytest
 
-from distributed import Event, Nanny, Scheduler, Worker, wait
+from distributed import Event, Nanny, wait
 from distributed.active_memory_manager import (
     ActiveMemoryManagerExtension,
     ActiveMemoryManagerPolicy,
@@ -28,7 +29,7 @@ NO_AMM_START = {"distributed.scheduler.active-memory-manager.start": False}
 
 
 @contextmanager
-def assert_amm_log(expect: list[str]):
+def assert_amm_log(expect: list[str]) -> Iterator[None]:
     with captured_logger(
         "distributed.active_memory_manager", level=logging.DEBUG
     ) as logger:
@@ -84,7 +85,7 @@ def demo_config(
     candidates: list[int] | None = None,
     start: bool = False,
     interval: float = 0.1,
-):
+) -> dict[str, Any]:
     """Create a dask config for AMM with DemoPolicy"""
     return {
         "distributed.scheduler.active-memory-manager.start": start,
@@ -913,19 +914,20 @@ async def test_RetireWorker_all_recipients_are_paused(c, s, a, b):
 @gen_cluster(
     client=True,
     config={
-        "distributed.scheduler.active-memory-manager.start": True,  # to avoid one-off AMM instance
+        # Don't use one-off AMM instance
+        "distributed.scheduler.active-memory-manager.start": True,
         "distributed.scheduler.active-memory-manager.policies": [],
     },
     timeout=15,
 )
-async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(
-    c, s: Scheduler, a: Worker, b: Worker
-):
+async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(c, s, a, b):
     """
-    If all keys have been moved off a worker, but then new keys arrive (due to task completion or `gather_dep`)
-    before the worker has actually closed, make sure we still retire it (instead of hanging forever).
+    If all keys have been moved off a worker, but then new keys arrive (due to task
+    completion or `gather_dep`) before the worker has actually closed, make sure we
+    still retire it (instead of hanging forever).
 
-    This test is timing-sensitive. If it runs too slowly, it *should* `pytest.skip` itself.
+    This test is timing-sensitive. If it runs too slowly, it *should* `pytest.skip`
+    itself.
 
     See https://github.com/dask/distributed/issues/6223 for motivation.
     """

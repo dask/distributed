@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 
 class WorkerMemoryManager:
-    data: MutableMapping[str, Any]  # {task key: task payload}
+    data: MutableMapping[str, object]  # {task key: task payload}
     memory_limit: int | None
     memory_target_fraction: float | Literal[False]
     memory_spill_fraction: float | Literal[False]
@@ -382,7 +382,7 @@ class NannyMemoryManager:
 
 
 def parse_memory_limit(
-    memory_limit: str | float, nthreads: int, total_cores: int = CPU_COUNT
+    memory_limit: str | float | None, nthreads: int, total_cores: int = CPU_COUNT
 ) -> int | None:
     if memory_limit is None:
         return None
@@ -435,20 +435,20 @@ class DeprecatedMemoryManagerAttribute:
     def __set_name__(self, owner: type, name: str) -> None:
         self.name = name
 
-    def __get__(self, instance: Nanny | Worker | None, _):
+    def __get__(self, instance: Nanny | Worker | None, owner: type) -> Any:
         if instance is None:
             # This is triggered by Sphinx
             return None  # pragma: nocover
         _warn_deprecated(instance, self.name)
         return getattr(instance.memory_manager, self.name)
 
-    def __set__(self, instance: Nanny | Worker, value) -> None:
+    def __set__(self, instance: Nanny | Worker, value: Any) -> None:
         _warn_deprecated(instance, self.name)
         setattr(instance.memory_manager, self.name, value)
 
 
 class DeprecatedMemoryMonitor:
-    def __get__(self, instance: Nanny | Worker | None, owner):
+    def __get__(self, instance: Nanny | Worker | None, owner: type) -> Any:
         if instance is None:
             # This is triggered by Sphinx
             return None  # pragma: nocover
