@@ -7273,7 +7273,6 @@ def _add_to_processing(
         assert not ts.processing_on
         assert not ts.has_lost_dependencies
         assert ts not in state.unrunnable
-        assert ts not in state.queued
         assert all(dts.who_has for dts in ts.dependencies)
 
     if ws := state.decide_worker(ts, recommendations):
