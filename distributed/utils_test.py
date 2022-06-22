@@ -69,6 +69,7 @@ from distributed.utils import (
     get_mp_context,
     iscoroutinefunction,
     log_errors,
+    open_port,
     reset_logger_locks,
     sync,
 )
@@ -1355,34 +1356,40 @@ def popen(
     kwargs: optional
         optional arguments to subprocess.Popen
     """
-    if capture_output:
-        kwargs["stdout"] = subprocess.PIPE
-        kwargs["stderr"] = subprocess.STDOUT
-    if sys.platform.startswith("win"):
-        # Allow using CTRL_C_EVENT / CTRL_BREAK_EVENT
-        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    with new_config_file(dask.config.config):
+        if capture_output:
+            kwargs["stdout"] = subprocess.PIPE
+            kwargs["stderr"] = subprocess.STDOUT
+        if sys.platform.startswith("win"):
+            # Allow using CTRL_C_EVENT / CTRL_BREAK_EVENT
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
 
-    args = list(args)
-    if sys.platform.startswith("win"):
-        args[0] = os.path.join(sys.prefix, "Scripts", args[0])
-    else:
-        args[0] = os.path.join(
-            os.environ.get("DESTDIR", "") + sys.prefix, "bin", args[0]
-        )
-    with subprocess.Popen(args, **kwargs) as proc:
-        try:
-            yield proc
-        finally:
+        environ = kwargs.pop("env", os.environ.copy())
+        args = list(args)
+        if sys.platform.startswith("win"):
+            args[0] = os.path.join(sys.prefix, "Scripts", args[0])
+        else:
+            args[0] = os.path.join(
+                os.environ.get("DESTDIR", "") + sys.prefix, "bin", args[0]
+            )
+        with subprocess.Popen(args, env=environ, **kwargs) as proc:
             try:
-                _terminate_process(proc, terminate_timeout)
+                yield proc
             finally:
-                out, err = proc.communicate(timeout=kill_timeout)
-                if out:
-                    print(f"------ stdout: returncode {proc.returncode}, {args} ------")
-                    print(out.decode() if isinstance(out, bytes) else out)
-                if err:
-                    print(f"------ stderr: returncode {proc.returncode}, {args} ------")
-                    print(err.decode() if isinstance(err, bytes) else err)
+                try:
+                    _terminate_process(proc, terminate_timeout)
+                finally:
+                    out, err = proc.communicate(timeout=kill_timeout)
+                    if out:
+                        print(
+                            f"------ stdout: returncode {proc.returncode}, {args} ------"
+                        )
+                        print(out.decode() if isinstance(out, bytes) else out)
+                    if err:
+                        print(
+                            f"------ stderr: returncode {proc.returncode}, {args} ------"
+                        )
+                        print(err.decode() if isinstance(err, bytes) else err)
 
 
 def wait_for(predicate, timeout, fail_func=None, period=0.05):
@@ -1897,17 +1904,30 @@ def check_instances():
     DequeHandler.clear_all_instances()
 
 
-@contextmanager
-def _reconfigure():
-    reset_config()
+def _get_default_config():
+    # Define this in case a function calls clean as a ctxmanager only
+    return {
+        "distributed.comm.timeouts.connect": "5s",
+        "distributed.admin.tick.interval": "500 ms",
+        "distributed.worker.profile.enabled": False,
+        "distributed.scheduler.dashboard.default-port": ":0",
+    }
 
-    with dask.config.set(
-        {
-            "distributed.comm.timeouts.connect": "5s",
-            "distributed.admin.tick.interval": "500 ms",
-            "distributed.worker.profile.enabled": False,
-        }
-    ):
+
+@pytest.fixture(scope="module")
+def default_dask_config():
+    dashboard_port = open_port()
+    config = _get_default_config()
+    config["distributed.scheduler.dashboard.default-port"] = dashboard_port
+    return config
+
+
+@contextmanager
+def _reconfigure(config):
+    reset_config()
+    if config is None:
+        config = _get_default_config()
+    with dask.config.set(config):
         # Restore default logging levels
         # XXX use pytest hooks/fixtures instead?
         for name, level in logging_levels.items():
@@ -1917,18 +1937,18 @@ def _reconfigure():
 
 
 @contextmanager
-def clean(threads=True, instances=True, processes=True):
+def clean(threads=True, instances=True, processes=True, config=None):
     asyncio.set_event_loop(None)
     with check_thread_leak() if threads else nullcontext():
         with check_process_leak(check=processes):
             with check_instances() if instances else nullcontext():
-                with _reconfigure():
+                with _reconfigure(config=config):
                     yield
 
 
 @pytest.fixture
-def cleanup():
-    with clean():
+def cleanup(default_dask_config):
+    with clean(config=default_dask_config):
         yield
 
 
