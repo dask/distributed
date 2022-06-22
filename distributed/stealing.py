@@ -378,17 +378,17 @@ class WorkStealing(SchedulerPlugin):
     def balance(self):
         s = self.scheduler
 
-        def combined_occupancy(ws):
+        def combined_occupancy(ws: WorkerState) -> float:
             return ws.occupancy + self.in_flight_occupancy[ws]
 
         def maybe_move_task(
-            level,
-            ts,
-            victim,
-            thief,
+            level: int,
+            ts: TaskState,
+            victim: WorkerState,
+            thief: WorkerState,
             duration: float,
             cost_multiplier: float,
-        ):
+        ) -> None:
             occ_thief = combined_occupancy(thief)
             occ_victim = combined_occupancy(victim)
 

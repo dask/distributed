@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import pytest
@@ -24,7 +25,7 @@ async def block_worker(
     pause: bool,
     ntasks_on_scheduler: int | None = None,
     ntasks_on_worker: int | None = None,
-):
+) -> AsyncIterator[None]:
     """Make sure that no tasks submitted inside this context manager start running on
     the worker until the context manager exits.
     Must be used together with the ``@gen_blockable_cluster`` test decorator.

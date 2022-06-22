@@ -225,7 +225,7 @@ async def test_web_preload_worker():
     reason="The preload argument to the client isn't supported yet", strict=True
 )
 @gen_cluster(nthreads=[])
-async def test_client_preload_text(s: Scheduler):
+async def test_client_preload_text(s):
     text = dedent(
         """\
         def dask_setup(client):

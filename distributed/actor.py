@@ -290,7 +290,7 @@ class EagerActorFuture(BaseActorFuture[_T]):
 
     def __await__(self) -> Generator[object, None, _T]:
         return self._result
-        yield
+        yield  # type: ignore[unreachable]
 
     def result(self, timeout: object = None) -> _T:
         return self._result

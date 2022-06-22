@@ -24,7 +24,7 @@ requires_zict_220 = pytest.mark.skipif(
 )
 
 
-def psize(*objs) -> tuple[int, int]:
+def psize(*objs: object) -> tuple[int, int]:
     return (
         sum(sizeof(o) for o in objs),
         sum(len(frame) for obj in objs for frame in serialize_bytelist(obj)),
