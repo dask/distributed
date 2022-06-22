@@ -267,14 +267,14 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         "distributed.scheduler.work-stealing": False,
     },
 )
-async def test_root_task_overproduction(c, s, *nannies: Nanny):
+async def test_root_task_overproduction(c, s, *nannies):
     """
     Workload that would run out of memory and kill workers if >2 root tasks were
     ever in memory at once on a worker.
     """
     pids = [n.pid for n in nannies]
 
-    @delayed(pure=True)
+    @delayed(pure=True)  # type: ignore
     def big_data(size: int) -> str:
         return "x" * size
 
@@ -303,7 +303,9 @@ async def test_root_task_overproduction(c, s, *nannies: Nanny):
         # ^ depends on root task assignment logic; ok if changes, just needs to add up to 10
     ],
 )
-def test_oversaturation_factor(oversaturation, expected_task_counts: tuple[int, int]):
+def test_oversaturation_factor(
+    oversaturation: int | float, expected_task_counts: tuple[int, int]
+) -> None:
     @gen_cluster(
         client=True,
         nthreads=[("", 2), ("", 1)],
