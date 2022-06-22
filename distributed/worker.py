@@ -1094,6 +1094,7 @@ class Worker(BaseWorker, ServerNode):
                         metrics=await self.get_metrics(),
                         extra=await self.get_startup_information(),
                         stimulus_id=f"worker-connect-{time()}",
+                        server_id=self.id,
                     ),
                     serializers=["msgpack"],
                 )

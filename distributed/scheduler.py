@@ -453,6 +453,9 @@ class WorkerState:
     #: Arbitrary additional metadata to be added to :meth:`~WorkerState.identity`
     extra: dict[str, Any]
 
+    # The unique server ID this WorkerState is referencing
+    server_id: str
+
     __slots__ = tuple(__annotations__)
 
     def __init__(
@@ -466,10 +469,12 @@ class WorkerState:
         memory_limit: int,
         local_directory: str,
         nanny: str,
+        server_id: str,
         services: dict[str, int] | None = None,
         versions: dict[str, Any] | None = None,
         extra: dict[str, Any] | None = None,
     ):
+        self.server_id = server_id
         self.address = address
         self.pid = pid
         self.name = name
@@ -480,7 +485,7 @@ class WorkerState:
         self.versions = versions or {}
         self.nanny = nanny
         self.status = status
-        self._hash = hash((address, pid, name))
+        self._hash = hash(self.server_id)
         self.nbytes = 0
         self.occupancy = 0
         self._memory_unmanaged_old = 0
@@ -548,6 +553,7 @@ class WorkerState:
             services=self.services,
             nanny=self.nanny,
             extra=self.extra,
+            server_id=self.server_id,
         )
         ws.processing = {
             ts.key: cost for ts, cost in self.processing.items()  # type: ignore
@@ -3576,6 +3582,7 @@ class Scheduler(SchedulerState, ServerNode):
         *,
         address: str,
         status: str,
+        server_id: str,
         keys=(),
         nthreads=None,
         name=None,
@@ -3639,6 +3646,7 @@ class Scheduler(SchedulerState, ServerNode):
             versions=versions,
             nanny=nanny,
             extra=extra,
+            server_id=server_id,
         )
         if ws.status == Status.running:
             self.running.add(ws)
