@@ -109,7 +109,7 @@ class HeapSet(MutableSet[T]):
             # with fast C code.
             # If we had a `heappop` that sliced the list instead of popping from it,
             # we could implement an optimized version for small `k`s.
-            return itertools.islice(self.sorted(), k)
+            yield from itertools.islice(self.sorted(), k)
 
     def __iter__(self) -> Iterator[T]:
         """Iterate over all elements. This is a O(n) operation which returns the

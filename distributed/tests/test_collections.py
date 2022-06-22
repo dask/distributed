@@ -32,6 +32,9 @@ def test_heapset():
         def __eq__(self, other):
             return isinstance(other, C) and other.k == self.k
 
+        def __repr__(self):
+            return f"C({self.k}, {self.i})"
+
     heap = HeapSet(key=lambda c: c.i)
 
     cx = C("x", 2)
@@ -122,6 +125,21 @@ def test_heapset():
     assert not heap
     heap.add(cx)
     assert cx in heap
+
+    # Test topk()
+    heap.add(cy)
+    heap.add(cw)
+    heap.add(cz)
+    heap.add(cx)
+    assert list(heap.topk(3)) == [cy, cx, cz]
+    heap.remove(cz)
+    assert list(heap.topk(10)) == [cy, cx, cw]
+    assert list(heap.topk(0)) == []
+    assert list(heap.topk(-1)) == []
+    heap.remove(cy)
+    assert list(heap.topk(1)) == [cx]
+    heap.remove(cw)
+    assert list(heap.topk(1)) == [cx]
 
     # Test resilience to failure in key()
     bad_key = C("bad_key", 0)
