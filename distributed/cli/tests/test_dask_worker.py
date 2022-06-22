@@ -19,7 +19,13 @@ from distributed.compatibility import LINUX, WINDOWS
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils import open_port
-from distributed.utils_test import gen_cluster, popen, requires_ipv6, wait_for_log_line
+from distributed.utils_test import (
+    gen_cluster,
+    inc,
+    popen,
+    requires_ipv6,
+    wait_for_log_line,
+)
 
 
 @pytest.mark.parametrize(
@@ -352,8 +358,10 @@ def test_scheduler_file(loop, nanny):
 
 @pytest.mark.slow
 def test_scheduler_address_env(loop, monkeypatch):
-    monkeypatch.setenv("DASK_SCHEDULER_ADDRESS", f"tcp://127.0.0.1:{open_port()}")
-    with popen(["dask-scheduler", "--no-dashboard"]):
+    port = open_port()
+    monkeypatch.setenv("DASK_SCHEDULER_ADDRESS", f"tcp://127.0.0.1:{port}")
+    # The env var is only picked up by the dask-worker command
+    with popen(["dask-scheduler", "--no-dashboard", "--port", str(port)]):
         with popen(["dask-worker", "--no-dashboard"]):
             with Client(os.environ["DASK_SCHEDULER_ADDRESS"], loop=loop) as c:
                 start = time()
