@@ -134,6 +134,7 @@ async def test_decide_worker_with_restrictions(client, s, a, b, c):
     assert x.key in a.data or x.key in b.data
 
 
+@pytest.mark.skip("Current queuing does not support co-assignment")
 @pytest.mark.parametrize("ndeps", [0, 1, 4])
 @pytest.mark.parametrize(
     "nthreads",
@@ -255,7 +256,6 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
     client=True,
     nthreads=[("", 2)] * 2,
     worker_kwargs={"memory_limit": "1.0GiB"},
-    timeout=3600,  # TODO remove
     Worker=Nanny,
     scheduler_kwargs=dict(  # TODO remove
         dashboard=True,
@@ -328,6 +328,7 @@ def test_oversaturation_factor(oversaturation, expected_task_counts: tuple[int, 
     _test_oversaturation_factor()
 
 
+@pytest.mark.skip("Current queuing does not support co-assignment")
 @pytest.mark.parametrize(
     "saturation_factor",
     [
@@ -357,19 +358,55 @@ async def test_oversaturation_multiple_task_groups(c, s, a, b, saturation_factor
     assert len(b.tasks) == 9
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     nthreads=[("", 2)] * 2,
-    timeout=3600,  # TODO remove
     scheduler_kwargs=dict(  # TODO remove
         dashboard=True,
         dashboard_address=":8787",
     ),
 )
-async def test_queued_tasks_rebalance(c, s, a, b):
-    event = Event()
-    fs = c.map(lambda _: event.wait(), range(100))
-    await c.gather(fs)
+async def test_queued_tasks_rebalance(client, s, a, b):
+    """
+    Test that all queued tasks complete as workers come and go.
+
+    Does not test how well balanced the load was.
+    """
+    roots1 = [delayed(slowinc)(i) for i in range(400)]
+    roots2 = [delayed(slowinc)(i, delay=0.01) for i in range(len(roots1))]
+    combined = [x + y for x, y in zip(roots1, roots2)]
+    agg = [sum(xs) for xs in partition(4, combined)]
+
+    fs = client.compute(agg)
+
+    while len(a.data) + len(b.data) < len(agg) * 0.25:
+        await asyncio.sleep(0.01)
+
+    # Add a new worker
+    async with Worker(s.address, nthreads=2) as c:
+        while not c.data:
+            await asyncio.sleep(0.01)
+
+        # Now add another
+        async with Worker(s.address, nthreads=1) as d:
+            while not d.data:
+                await asyncio.sleep(0.01)
+
+            # Remove an existing worker
+            await a.close()
+
+            while len(b.data) + len(c.data) + len(d.data) < len(agg) * 0.75:
+                await asyncio.sleep(0.01)
+
+            # And a new one
+            await d.close()
+
+        await client.gather(fs)
+        assert a.tasks
+        assert b.tasks
+        assert c.tasks
+        assert d.tasks
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
@@ -448,7 +485,7 @@ async def test_remove_worker_from_scheduler(s, a, b):
     assert a.address in s.stream_comms
     await s.remove_worker(address=a.address, stimulus_id="test")
     assert a.address not in s.workers
-    assert len(s.workers[b.address].processing) == len(dsk)  # b owns everything
+    assert len(s.workers[b.address].processing) + len(s.queued) == len(dsk)
 
 
 @gen_cluster()
@@ -730,12 +767,18 @@ async def test_ready_remove_worker(s, a, b):
         dependencies={"x-%d" % i: [] for i in range(20)},
     )
 
-    assert all(len(w.processing) > w.nthreads for w in s.workers.values())
+    assert all(len(w.processing) == w.nthreads for w in s.workers.values())
+    assert sum(len(w.processing) for w in s.workers.values()) + len(s.queued) == len(
+        s.tasks
+    )
 
     await s.remove_worker(address=a.address, stimulus_id="test")
 
     assert set(s.workers) == {b.address}
-    assert all(len(w.processing) > w.nthreads for w in s.workers.values())
+    assert all(len(w.processing) == w.nthreads for w in s.workers.values())
+    assert sum(len(w.processing) for w in s.workers.values()) + len(s.queued) == len(
+        s.tasks
+    )
 
 
 @gen_cluster(client=True, Worker=Nanny, timeout=60)

@@ -16,7 +16,7 @@ import sys
 import uuid
 import warnings
 import weakref
-from collections import Counter, defaultdict, deque
+from collections import defaultdict, deque
 from collections.abc import (
     Callable,
     Collection,
@@ -1789,31 +1789,22 @@ class SchedulerState:
 
         # Group is larger than cluster with few dependencies?
         # Minimize future data transfers.
-        # TODO update metric to involve families in some way? Most likely not.
         if (
             valid_workers is None
             and len(tg) > self.total_nthreads * 2
             and len(tg.dependencies) < 5
             and sum(map(len, tg.dependencies)) < 5
         ):
-            # TODO what max family size cutoff to use?
-            if ws := family_worker(ts, self.total_nthreads):
-                # Use the worker where the majority of other tasks are already assigned.
-                # Even if that worker is already saturated, we let more tasks run on it,
-                # because all those tasks must be in memory at once anyway to run the
-                # downstream task.
-                return ws
-
-            # First task in this family, or such a huge family it doesn't matter where it runs?
-            # Pick the least busy worker.
             if not self.idle:
-                # If all workers are busy, this family gets queued for later.
+                # All workers busy? Task gets/stays queued.
                 if self.validate:
                     assert ts.key not in recommendations, (ts, recommendations[ts.key])
                 if ts.state != "queued":
                     recommendations[ts.key] = "queued"
                 return None
 
+            # For root tasks, just pick the least busy worker.
+            # NOTE: this will lead to worst-case scheduling with regards to co-assignment.
             ws = min(
                 self.idle.values(), key=lambda ws: len(ws.processing) / ws.nthreads
             )
@@ -2040,16 +2031,6 @@ class SchedulerState:
             if self.validate:
                 assert not ts.processing_on
                 assert not ts.waiting_on
-                # processing_recs = {
-                #     k: r for k, r in recommendations.items() if r == "processing"
-                # }
-                # assert list(processing_recs) == (
-                #     sr := sorted(
-                #         processing_recs,
-                #         key=lambda k: self.tasks[k].priority,
-                #         reverse=True,
-                #     )
-                # ), (list(processing_recs), sr)
 
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
@@ -2441,11 +2422,6 @@ class SchedulerState:
 
             if self.validate:
                 assert ts not in self.queued
-                # Task should have gone straight to processing if its family already had a worker
-                assert family_worker(ts, self.total_nthreads) is None, (
-                    key,
-                    family(ts, self.total_nthreads),
-                )
                 assert not self.idle, (ts, self.idle)
                 # Copied from `transition_waiting_processing`
                 assert not ts.waiting_on
@@ -2733,6 +2709,7 @@ class SchedulerState:
 
         idle = self.idle
         saturated = self.saturated
+        # TODO different metric when `self.WORKER_OVERSATURATION` is `inf`?
         if not worker_saturated(ws, self.WORKER_OVERSATURATION):
             idle[ws.address] = ws
             saturated.discard(ws)
@@ -2936,30 +2913,21 @@ class SchedulerState:
         ts: TaskState
         recommendations: dict[str, str] = {}
 
+        # Schedule any queued tasks onto the new worker
         if not math.isinf(self.WORKER_OVERSATURATION) and self.queued:
-            for qts in self.queued.topk(
-                slots := task_slots_available(ws, self.WORKER_OVERSATURATION)
+            for qts in reversed(
+                list(
+                    self.queued.topk(
+                        task_slots_available(ws, self.WORKER_OVERSATURATION)
+                    )
+                )
             ):
                 if self.validate:
                     assert qts.state == "queued"
+                    assert not qts.processing_on
+                    assert not qts.waiting_on
 
-                # Schedule the entire family
-                for fts in family(qts, self.total_nthreads) or (qts,):
-                    # NOTE: `family` is not priority-ordered, but this is superfluous
-                    # because all tasks in the family will get scheduled anyway
-                    # regardless of order.
-                    if self.validate:
-                        # If any tasks in a family are running or have run, no other tasks
-                        # in that family should have been queued---they'd go straight to `processing`.
-                        assert fts.state in ("waiting", "queued"), (
-                            fts,
-                            family(qts, self.total_nthreads),
-                        )
-                    slots -= 1  # We allocate slots for waiting tasks as well
-                    if fts.state == "queued":
-                        recommendations[fts.key] = "processing"
-                if slots <= 0:
-                    break
+                recommendations[qts.key] = "processing"
 
         now_runnable: list[TaskState] = []
         for ts in self.unrunnable:
@@ -4600,10 +4568,6 @@ class Scheduler(SchedulerState, ServerNode):
         for dts in ts.dependencies:
             assert dts.who_has
             assert ts in dts.waiters
-        assert family_worker(ts, self.total_nthreads) is None, (
-            key,
-            family(ts, self.total_nthreads),
-        )
 
     def validate_processing(self, key):
         ts: TaskState = self.tasks[key]
@@ -7287,7 +7251,7 @@ class Scheduler(SchedulerState, ServerNode):
         )  # TODO: threads per worker
 
         # Avoid a few long tasks from asking for many cores
-        tasks_processing = 0
+        tasks_processing = len(self.queued)
         for ws in self.workers.values():
             tasks_processing += len(ws.processing)
 
@@ -7399,50 +7363,17 @@ def _remove_from_processing(
     state.check_idle_saturated(ws)
     state.release_resources(ts, ws)
 
-    # If a slot has opened up for a queued task, schedule it and its whole family.
-    if (
-        state.queued
-        and task_slots_available(ws, state.WORKER_OVERSATURATION) > 0
-        # TODO: leaving room causes deadlock when `ts` is a downstream, non-rootish task
-        # that just happens to meet the family criteria (and some of the family is waiting
-        # on queued tasks).
-        # But without this, we could have overproduction when some family members have deps
-        # and others don't (since we'll let a new family come in and start on the worker
-        # before the current family is done).
-        # and sum(
-        #     fts.state == "waiting" for fts in family(ts, state.total_nthreads) or ()
-        # )
-        # < slots  # Leave room for other family members that will need to run here.
-    ):
+    # If a slot has opened up for a queued task, schedule it.
+    if state.queued and not worker_saturated(ws, state.WORKER_OVERSATURATION):
         qts = state.queued.peek()
         if state.validate:
             assert qts.state == "queued"
             assert qts.key not in recommendations, recommendations[qts.key]
-            # Task should not have a worker it's intended to run on yet. This is
-            # guaranteed by the fact that `decide_worker` only puts tasks into `queued`
-            # if `family_worker(ts) is None`.
-            # FIXME a scale-up changes the max family size threshold and could
-            # theoretically turn a previous non-family into a family.
-            assert (
-                fws := family_worker(qts, state.total_nthreads)
-            ) is None, f"Family of queued task {qts} already has a worker {fws}"
 
-        # Schedule the entire family.
-        # Note that like `decide_worker`, we allow the family to oversaturate the
-        # worker, since all tasks in the family must be in memory at once anyway to run
-        # the downstream task.
-        # NOTE: we don't ever need to schedule more than one family at once here.
-        # Since this is called each time 1 task completes, multiple tasks must complete
-        # for multiple slots to open up.
+        # NOTE: we don't need to schedule more than one task at once here. Since this is
+        # called each time 1 task completes, multiple tasks must complete for multiple
+        # slots to open up.
         recommendations[qts.key] = "processing"
-        for fts in family(qts, state.total_nthreads) or ():
-            if state.validate:
-                # TODO: remove, would be invalid transition anyway
-                assert fts.state != "released", fts
-
-            if fts.state == "queued":
-                recommendations[fts.key] = "processing"
-        # TODO might be nice to recommend the worker...
 
     return ws.address
 
@@ -7838,54 +7769,6 @@ def worker_saturated(ws: WorkerState, oversaturation_factor: float) -> bool:
     if math.isinf(oversaturation_factor):
         return False
     return task_slots_available(ws, oversaturation_factor) <= 0
-
-
-def family_size(ts: TaskState, maxsize: int) -> int | None:
-    if len(ts.dependents) > maxsize:
-        return None
-    size = 0
-    for dts in ts.dependents:
-        # FIXME don't traverse arbitrarily long linear chains!!
-        while len(dts.dependents) == 1:
-            dts = next(iter(dts.dependents))
-        size += len(dts.dependents)
-        if size > maxsize:
-            return None
-    return size
-
-
-def family(ts: TaskState, maxsize: int) -> set[TaskState] | None:
-    # if family_size(ts, maxsize) is None:
-    #     return None
-    # return {fts for dts in ts.dependents for fts in dts.dependencies}
-    if len(ts.dependents) > maxsize:
-        return None
-    tasks: set[TaskState] = set()
-    for dts in ts.dependents:
-        # FIXME don't traverse arbitrarily long linear chains!!
-        while len(dts.dependents) == 1 and len(dts.dependencies) <= 1:
-            dts = next(iter(dts.dependents))
-        if len(tasks) + len(dts.dependencies) > maxsize:
-            return None
-        tasks.update(dts.dependencies)
-    return tasks
-
-
-def family_worker(ts: TaskState, maxsize: int) -> WorkerState | None:
-    if family_size(ts, maxsize) is None:
-        return None
-    # counts = Counter(
-    #     fts.processing_on
-    #     for dts in ts.dependents
-    #     for fts in dts.dependencies
-    #     if fts.processing_on
-    # ).most_common(1)
-    counts = Counter(
-        fts.processing_on for fts in family(ts, maxsize) or () if fts.processing_on
-    ).most_common(1)
-    if not counts:
-        return None
-    return counts[0][0]
 
 
 class KilledWorker(Exception):
