@@ -1823,18 +1823,36 @@ async def test_idle_timeout(c, s, a, b):
     nthreads=[],
 )
 async def test_idle_timeout_no_workers(c, s):
+    s.idle_timeout = 0.1
     future = c.submit(inc, 1)
+    while not s.tasks:
+        await asyncio.sleep(0.1)
 
-    s.idle_timeout = 0.010
-    pc = PeriodicCallback(s.check_idle, 10)
-    pc.start()
-    s.idle_since = None
+    s.check_idle()
+    assert not s.idle_since
 
     for _ in range(10):
-        await asyncio.sleep(0.10)
+        await asyncio.sleep(0.01)
+        s.check_idle()
         assert not s.idle_since
+        assert s.tasks
 
-    pc.stop()
+    async with Worker(s.address):
+        await future
+    s.check_idle()
+    assert not s.idle_since
+    del future
+
+    while s.tasks:
+        await asyncio.sleep(0.1)
+
+    # We only set idleness once nothing happened between two consecutive
+    # check_idle calls
+    s.check_idle()
+    assert not s.idle_since
+
+    s.check_idle()
+    assert s.idle_since
 
 
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})

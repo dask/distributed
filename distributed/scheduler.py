@@ -7021,6 +7021,7 @@ class Scheduler(SchedulerState, ServerNode):
                 await self.remove_worker(address=ws.address, stimulus_id=stimulus_id)
 
     def check_idle(self):
+        assert self.idle_timeout
         if self.status in (Status.closing, Status.closed):
             return
 
