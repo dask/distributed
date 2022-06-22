@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import contextvars
-import errno
 import functools
 import importlib
 import inspect
@@ -1053,48 +1052,18 @@ def ensure_memoryview(obj):
         return mv
 
 
-def open_port(host="", port=0):
-    """Bind to an ephemeral port, force it into the TIME_WAIT state, and unbind it.
+def open_port(host: str = "") -> int:
+    """Return a probably-open port
 
-    This means that further ephemeral port alloctions won't pick this "reserved" port,
-    but subprocesses can still bind to it explicitly, given that they use SO_REUSEADDR.
-    By default on linux you have a grace period of 60 seconds to reuse this port.
-    To check your own particular value:
-    $ cat /proc/sys/net/ipv4/tcp_fin_timeout
-    60
-
-    By default, the port will be reserved for localhost (aka 127.0.0.1).
-    To reserve a port for a different ip, provide the ip as the first argument.
-    Note that IP 0.0.0.0 is interpreted as localhost.
-
-    vendored from https://github.com/Yelp/ephemeral-port-reserve/commit/403e67e9db1f49466c4bd29a8861004864168f68
-
-    see license (MIT) https://github.com/Yelp/ephemeral-port-reserve/blob/403e67e9db1f49466c4bd29a8861004864168f68/LICENSE
+    There is a chance that this port will be taken by the operating system soon
+    after returning from this function.
     """
-    port = int(port)
-    with contextlib.closing(socket.socket()) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            s.bind((host, port))
-        except OSError as e:
-            # socket.error: EADDRINUSE Address already in use
-
-            if e.errno == errno.EADDRINUSE and port != 0:
-                s.bind((host, 0))
-            else:
-                raise
-
-        # the connect below deadlocks on kernel >= 4.4.0 unless this arg is greater than zero
+    # http://stackoverflow.com/questions/2838244/get-open-tcp-port-in-python
+    with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+        s.bind((host, 0))
         s.listen(1)
-
-        sockname = s.getsockname()
-
-        # these three are necessary just to get the port into a TIME_WAIT state
-        with contextlib.closing(socket.socket()) as s2:
-            s2.connect(sockname)
-            sock, _ = s.accept()
-            with contextlib.closing(sock):
-                return sockname[1]
+        port = s.getsockname()[1]
+        return port
 
 
 def import_file(path: str) -> list[ModuleType]:
