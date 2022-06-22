@@ -1,5 +1,5 @@
 import asyncio
-from time import time
+from time import sleep, time
 
 import pytest
 
@@ -7,9 +7,10 @@ import dask
 from dask import delayed
 from dask.utils import stringify
 
-from distributed import Worker
+from distributed import Worker, get_client, get_worker
 from distributed.client import wait
 from distributed.utils_test import gen_cluster, inc, slowadd, slowinc
+from distributed.worker import release_resources
 
 
 @gen_cluster(
@@ -35,6 +36,64 @@ async def test_resource_submit(c, s, a, b):
     async with Worker(s.address, resources={"C": 10}) as w:
         await wait(z)
         assert z.key in w.data
+
+
+def job_release_resources(arg):
+    a = get_worker()
+    if a.state.available_resources != {"A": 2}:
+        return 1
+    with release_resources(A=3):
+        if a.state.available_resources != {"A": 5}:
+            return 2
+    if a.state.available_resources != {"A": 2}:
+        return 3
+    return 0
+
+
+def job_release_resources_resubmit(arg):
+    a = get_worker()
+    c = get_client()
+    if a.state.available_resources != {"A": 2}:
+        return 1
+    with release_resources(A=3):
+        if a.state.available_resources != {"A": 5}:
+            return 2
+        future = c.submit(slowinc, 1, delay=0.02, resources={"A": 3})
+        sleep(0.01)
+
+        if a.state.available_resources != {"A": 2}:
+            return 3
+        # There are not enough "A" for the context to immediately exit
+
+    if a.state.available_resources != {"A": 2}:
+        return 4
+    return 0
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[
+        ("127.0.0.1", 2, {"resources": {"A": 5}}),
+        ("127.0.0.1", 1, {"resources": {"A": 0}}),
+    ],
+)
+async def test_job_release_resources(c, s, a, b):
+    future = c.submit(job_release_resources, 1, resources={"A": 3})
+    await wait(future)
+    assert a.data[future.key] == 0
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[
+        ("127.0.0.1", 2, {"resources": {"A": 5}}),
+        ("127.0.0.1", 1, {"resources": {"A": 0}}),
+    ],
+)
+async def test_job_release_resources_wait_recapture(c, s, a, b):
+    future = c.submit(job_release_resources_resubmit, 1, resources={"A": 3})
+    await wait(future)
+    assert a.data[future.key] == 0
 
 
 @gen_cluster(

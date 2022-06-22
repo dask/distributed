@@ -13,7 +13,6 @@ import sys
 import threading
 import warnings
 import weakref
-from time import sleep
 from collections import defaultdict, deque
 from collections.abc import (
     Callable,
@@ -24,7 +23,7 @@ from collections.abc import (
     MutableMapping,
 )
 from concurrent.futures import Executor
-from contextlib import suppress, contextmanager
+from contextlib import contextmanager, suppress
 from datetime import timedelta
 from inspect import isawaitable
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeVar, cast
@@ -121,7 +120,9 @@ from distributed.worker_state_machine import (
     GatherDepNetworkFailureEvent,
     GatherDepSuccessEvent,
     PauseEvent,
+    RecaptureResourcesEvent,
     RefreshWhoHasEvent,
+    ReleaseResourcesEvent,
     RemoveReplicasEvent,
     RescheduleEvent,
     RetryBusyWorkerEvent,
@@ -1807,15 +1808,6 @@ class Worker(BaseWorker, ServerNode):
             # Update status and send confirmation to the Scheduler (see status.setter)
             self.status = new_status
 
-    def adjust_resources(self, **resources) -> None:
-        for resource, change in resources.items():
-            if change < 0:
-                while self.available_resources[resource] + change < 0:
-                    sleep(1)
-
-            with self._lock:
-                self.available_resources[resource] += change
-
     ###################
     # Task Management #
     ###################
@@ -2683,10 +2675,20 @@ def release_resources(**resources):
         pass
 
     try:
-        worker.adjust_resources(**resources)
+        worker.handle_stimulus(
+            ReleaseResourcesEvent(
+                resources=resources,
+                stimulus_id="worker-client-release_resources-{time()}",
+            )
+        )
         yield
     finally:
-        worker.adjust_resources(**{k: -v for k, v in resources.items()})
+        worker.handle_stimulus(
+            RecaptureResourcesEvent(
+                resources=resources,
+                stimulus_id="worker-client-recapture_resources-{time()}",
+            )
+        )
 
 
 class Reschedule(Exception):

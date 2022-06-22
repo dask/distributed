@@ -22,6 +22,7 @@ from collections.abc import (
 from copy import copy
 from dataclasses import dataclass, field
 from functools import lru_cache
+from time import sleep
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict, cast
 
 from tlz import peekn, pluck
@@ -830,6 +831,18 @@ class SecedeEvent(StateMachineEvent):
     __slots__ = ("key", "compute_duration")
     key: str
     compute_duration: float
+
+
+@dataclass
+class ReleaseResourcesEvent(StateMachineEvent):
+    __slots__ = "resources"
+    resources: dict[str, int]
+
+
+@dataclass
+class RecaptureResourcesEvent(StateMachineEvent):
+    __slots__ = "resources"
+    resources: dict[str, int]
 
 
 if TYPE_CHECKING:
@@ -2622,6 +2635,22 @@ class WorkerState:
             return {ts: ("long-running", ev.compute_duration)}, []
         else:
             return {}, []
+
+    @_handle_event.register
+    def _handle_release_resources(self, ev: ReleaseResourcesEvent) -> RecsInstrs:
+        for resource, change in ev.resources.items():
+            # We do not check if we release more resources than available in total.
+            # This would complicate resource recapture afterwards.
+            self.available_resources[resource] += change
+        return {}, []
+
+    @_handle_event.register
+    def _handle_recapture_resources(self, ev: RecaptureResourcesEvent) -> RecsInstrs:
+        for resource, change in ev.resources.items():
+            while self.available_resources[resource] - change < 0:
+                sleep(0.1)
+            self.available_resources[resource] -= change
+        return {}, []
 
     @_handle_event.register
     def _handle_steal_request(self, ev: StealRequestEvent) -> RecsInstrs:
