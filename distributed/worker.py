@@ -1841,7 +1841,7 @@ class Worker(BaseWorker, ServerNode):
         super()._handle_stimulus_from_task(task)
 
     @fail_hard
-    def handle_stimulus(self, stim: StateMachineEvent) -> None:
+    def handle_stimulus(self, *stims: StateMachineEvent) -> None:
         """Override BaseWorker method for added validation
 
         See also
@@ -1850,7 +1850,7 @@ class Worker(BaseWorker, ServerNode):
         distributed.worker_state_machine.WorkerState.handle_stimulus
         """
         try:
-            super().handle_stimulus(stim)
+            super().handle_stimulus(*stims)
         except Exception as e:
             if hasattr(e, "to_event"):
                 topic, msg = e.to_event()  # type: ignore

@@ -74,6 +74,7 @@ from distributed.utils import (
 from distributed.worker import WORKER_ANY_RUNNING, Worker
 from distributed.worker_state_machine import InvalidTransition
 from distributed.worker_state_machine import TaskState as WorkerTaskState
+from distributed.worker_state_machine import WorkerState
 
 try:
     import ssl
@@ -2420,3 +2421,10 @@ async def wait_for_state(
         # message as an exception wouldn't work.
         print(msg)
         raise
+
+
+@pytest.fixture
+def ws():
+    state = WorkerState(address="127.0.0.1:1", transition_counter_max=50_000)
+    yield state
+    state.validate_state()

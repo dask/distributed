@@ -1084,18 +1084,22 @@ class WorkerState:
         self.actors = {}
         self.rng = random.Random(0)
 
-    def handle_stimulus(self, stim: StateMachineEvent) -> Instructions:
-        """Process an external event, transition relevant tasks to new states, and
-        return a list of instructions to be executed as a consequence.
+    def handle_stimulus(self, *stims: StateMachineEvent) -> Instructions:
+        """Process one or more external events, transition relevant tasks to new states,
+        and return a list of instructions to be executed as a consequence.
 
         See also
         --------
         BaseWorker.handle_stimulus
         """
-        if not isinstance(stim, FindMissingEvent):
-            self.stimulus_log.append(stim.to_loggable(handled=time()))
-        recs, instructions = self._handle_event(stim)
-        instructions += self._transitions(recs, stimulus_id=stim.stimulus_id)
+        instructions = []
+        handled = time()
+        for stim in stims:
+            if not isinstance(stim, FindMissingEvent):
+                self.stimulus_log.append(stim.to_loggable(handled=handled))
+            recs, instr = self._handle_event(stim)
+            instructions += instr
+            instructions += self._transitions(recs, stimulus_id=stim.stimulus_id)
         return instructions
 
     #############
@@ -3071,9 +3075,9 @@ class BaseWorker(abc.ABC):
         if stim:
             self.handle_stimulus(stim)
 
-    def handle_stimulus(self, stim: StateMachineEvent) -> None:
-        """Forward an external stimulus to :meth:`WorkerState.handle_stimulus` and
-        process the returned instructions, invoking the relevant Worker callbacks
+    def handle_stimulus(self, *stims: StateMachineEvent) -> None:
+        """Forward one or more external stimuli to :meth:`WorkerState.handle_stimulus`
+        and process the returned instructions, invoking the relevant Worker callbacks
         (``@abc.abstractmethod`` methods below).
 
         Spawn asyncio tasks for all asynchronous instructions and start tracking them.
@@ -3082,7 +3086,7 @@ class BaseWorker(abc.ABC):
         --------
         WorkerState.handle_stimulus
         """
-        instructions = self.state.handle_stimulus(stim)
+        instructions = self.state.handle_stimulus(*stims)
 
         while instructions:
             ensure_communicating: EnsureCommunicatingAfterTransitions | None = None
