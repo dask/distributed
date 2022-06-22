@@ -282,7 +282,14 @@ def test_queue_in_task(loop):
     port = open_port()
     # Ensure that we can create a Queue inside a task on a
     # worker in a separate Python process than the client
-    with popen(["dask-scheduler", "--no-dashboard"]):
+    with popen(
+        [
+            "dask-scheduler",
+            "--no-dashboard",
+            "--port",
+            str(port),
+        ]
+    ):
         with popen(["dask-worker", f"127.0.0.1:{port}"]):
             with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
                 c.wait_for_workers(1)

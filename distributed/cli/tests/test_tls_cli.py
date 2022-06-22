@@ -28,7 +28,7 @@ def wait_for_cores(c, nthreads=1):
         assert time() < start + 10
 
 
-def test_basic(loop, requires_default_port):
+def test_basic(loop, requires_default_ports):
     with popen(["dask-scheduler", "--no-dashboard"] + tls_args) as s:
         with popen(
             ["dask-worker", "--no-dashboard", "tls://127.0.0.1:8786"] + tls_args

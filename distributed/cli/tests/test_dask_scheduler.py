@@ -324,9 +324,9 @@ def test_preload_module(loop, tmp_path):
         f.write(PRELOAD_TEXT)
     env = os.environ.copy()
     if "PYTHONPATH" in env:
-        env["PYTHONPATH"] = tmp_path + ":" + env["PYTHONPATH"]
+        env["PYTHONPATH"] = str(tmp_path) + ":" + env["PYTHONPATH"]
     else:
-        env["PYTHONPATH"] = tmp_path
+        env["PYTHONPATH"] = str(tmp_path)
     with tmpfile() as fn:
         with popen(
             [
