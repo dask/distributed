@@ -88,8 +88,8 @@ def test_serialize_bytestrings():
         assert bb == b
 
 
-@pytest.mark.parametrize("a", [array("I"), memoryview(bytearray())])
-def test_serialize_empty_objs(a):
+def test_serialize_empty_array():
+    a = array("I")
 
     # serialize array
     header, frames = serialize(a)
@@ -99,10 +99,7 @@ def test_serialize_empty_objs(a):
     # deserialize with no frames
     a2 = deserialize(header, frames)
     assert type(a2) == type(a)
-
-    # memoryviews have no typecode
-    if getattr(a2, "typecode", False):
-        assert a2.typecode == a.typecode
+    assert a2.typecode == a.typecode
     assert a2 == a
 
 
@@ -591,6 +588,19 @@ def test_ser_memoryview_object():
     data_in = memoryview(np.array(["hello"], dtype=object))
     with pytest.raises(TypeError):
         serialize(data_in, on_error="raise")
+
+
+def test_ser_empty_memoryview():
+    mv = memoryview(b"")
+
+    # serialize empty `memoryview`
+    header, frames = serialize(mv)
+    assert frames[0] == mv
+    # deserialize empty `memoryview`
+    mv2 = deserialize(header, frames)
+    assert type(mv2) == type(mv)
+    assert mv2.format == mv.format
+    assert mv2 == mv
 
 
 @gen_cluster(client=True, Worker=Nanny)
