@@ -177,10 +177,8 @@ async def test_nanny_worker_ports(c, s):
             s.address,
             "--host",
             "127.0.0.1",
-            "--worker-port",
-            str(worker_port),
-            "--nanny-port",
-            str(nanny_port),
+            f"--worker-port={worker_port}",
+            f"--nanny-port={nanny_port}",
             "--no-dashboard",
         ]
     ):

@@ -109,10 +109,8 @@ def test_dashboard_non_standard_ports(loop):
     with popen(
         [
             "dask-scheduler",
-            "--port",
-            str(port1),
-            "--dashboard-address",
-            f":{port2}",
+            f"--port={port1}",
+            f"--dashboard-address=:{port2}",
         ]
     ) as proc:
         with Client(f"127.0.0.1:{port1}", loop=loop) as c:
@@ -141,8 +139,7 @@ def test_dashboard_allowlist(loop):
     with popen(
         [
             "dask-scheduler",
-            "--port",
-            str(port),
+            f"--port={port}",
         ]
     ) as proc:
         with Client(f"127.0.0.1:{port}", loop=loop) as c:
@@ -181,8 +178,7 @@ def test_interface(loop):
     with popen(
         [
             "dask-scheduler",
-            "--port",
-            str(port),
+            f"--port={port}",
             "--no-dashboard",
             "--interface",
             if_name,
@@ -305,8 +301,7 @@ def test_preload_file(loop, tmp_path):
                 fn,
                 "--preload",
                 path,
-                "--port",
-                str(open_port()),
+                f"--port={open_port()}",
             ]
         ):
             with Client(scheduler_file=fn, loop=loop) as c:
@@ -335,8 +330,7 @@ def test_preload_module(loop, tmp_path):
                 fn,
                 "--preload",
                 "scheduler_info",
-                "--port",
-                str(open_port()),
+                f"--port={open_port()}",
             ],
             env=env,
         ):
@@ -358,8 +352,7 @@ def test_preload_remote_module(loop, tmp_path):
                 str(tmp_path / "scheduler-file.json"),
                 "--preload",
                 f"http://localhost:{http_server_port}/scheduler_info.py",
-                "--port",
-                str(open_port()),
+                f"--port={open_port()}",
             ]
         ) as proc:
             with Client(

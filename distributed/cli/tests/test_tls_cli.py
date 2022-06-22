@@ -45,8 +45,7 @@ def test_nanny(loop):
         [
             "dask-scheduler",
             "--no-dashboard",
-            "--port",
-            str(port),
+            f"--port={port}",
         ]
         + tls_args
     ) as s:
@@ -66,8 +65,7 @@ def test_separate_key_cert(loop):
         [
             "dask-scheduler",
             "--no-dashboard",
-            "--port",
-            str(port),
+            f"--port={port}",
         ]
         + tls_args_2
     ) as s:

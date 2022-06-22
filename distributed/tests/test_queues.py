@@ -286,8 +286,7 @@ def test_queue_in_task(loop):
         [
             "dask-scheduler",
             "--no-dashboard",
-            "--port",
-            str(port),
+            f"--port={port}",
         ]
     ):
         with popen(["dask-worker", f"127.0.0.1:{port}"]):

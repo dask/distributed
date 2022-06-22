@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import contextvars
 import functools
 import importlib
@@ -1059,7 +1058,7 @@ def open_port(host: str = "") -> int:
     after returning from this function.
     """
     # http://stackoverflow.com/questions/2838244/get-open-tcp-port-in-python
-    with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((host, 0))
         s.listen(1)
         port = s.getsockname()[1]
