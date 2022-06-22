@@ -353,6 +353,7 @@ class Server:
         self._address = None
         self._listen_address = None
         self._port = None
+        self._host = None
         self._comms = {}
         self.deserialize = deserialize
         self.monitor = SystemMonitor()
@@ -604,6 +605,18 @@ class Server:
         return self._listen_address
 
     @property
+    def host(self):
+        """
+        The host this Server is running on.
+
+        This will raise ValueError if the Server is listening on a
+        non-IP based protocol.
+        """
+        if not self._host:
+            self._host, self._port = get_address_host_port(self.address)
+        return self._host
+
+    @property
     def port(self):
         """
         The port number this Server is listening on.
@@ -612,7 +625,7 @@ class Server:
         non-IP based protocol.
         """
         if not self._port:
-            _, self._port = get_address_host_port(self.address)
+            self._host, self._port = get_address_host_port(self.address)
         return self._port
 
     def identity(self) -> dict[str, str]:
