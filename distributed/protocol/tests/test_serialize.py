@@ -590,7 +590,7 @@ def test_ser_memoryview_object():
         serialize(data_in, on_error="raise")
 
 
-def test_ser_empty_memoryview():
+def test_ser_empty_1d_memoryview():
     mv = memoryview(b"")
 
     # serialize empty `memoryview`
@@ -601,6 +601,14 @@ def test_ser_empty_memoryview():
     assert type(mv2) == type(mv)
     assert mv2.format == mv.format
     assert mv2 == mv
+
+
+def test_ser_empty_nd_memoryview():
+    mv = memoryview(b"12").cast("B", (1, 2))[:0]
+
+    # serialize empty `memoryview`
+    with pytest.raises(TypeError):
+        serialize(mv, on_error="raise")
 
 
 @gen_cluster(client=True, Worker=Nanny)
