@@ -1360,6 +1360,7 @@ class WorkerState:
             if to_gather and total_nbytes + ts.get_nbytes() > self.target_message_size:
                 break
             for worker in ts.who_has:
+                # This also effectively pops from available
                 self.data_needed[worker].remove(ts)
             to_gather.append(ts)
             total_nbytes += ts.get_nbytes()
