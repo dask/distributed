@@ -1033,7 +1033,7 @@ class WorkerState:
         *,
         nthreads: int = 1,
         address: str | None = None,
-        data: MutableMapping[str, object] = None,
+        data: MutableMapping[str, object] | None = None,
         threads: dict[str, int] | None = None,
         plugins: dict[str, WorkerPlugin] | None = None,
         resources: Mapping[str, float] | None = None,
