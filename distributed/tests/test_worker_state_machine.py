@@ -832,8 +832,7 @@ async def test_deprecated_worker_attributes(s, a, b):
         (int(30e6), 1),
     ],
 )
-def test_aggregate_gather_deps(nbytes, n_in_flight):
-    ws = WorkerState(address="127.0.0.1:1234", transition_counter_max=10)
+def test_aggregate_gather_deps(ws, nbytes, n_in_flight):
     instructions = ws.handle_stimulus(
         AcquireReplicasEvent(
             who_has={
