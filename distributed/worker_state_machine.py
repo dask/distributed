@@ -1022,6 +1022,10 @@ class WorkerState:
     #: In production, it should always be set to False.
     transition_counter_max: int | Literal[False]
 
+    #: Statically-seeded random state, used to guarantee determinism whenever a
+    #: pseudo-random choice is required
+    rng: random.Random
+
     __slots__ = tuple(__annotations__)
 
     def __init__(
@@ -1078,6 +1082,7 @@ class WorkerState:
         self.transition_counter = 0
         self.transition_counter_max = transition_counter_max
         self.actors = {}
+        self.rng = random.Random(0)
 
     def handle_stimulus(self, stim: StateMachineEvent) -> Instructions:
         """Process an external event, transition relevant tasks to new states, and
@@ -1284,10 +1289,13 @@ class WorkerState:
 
         Yield the peer workers and tasks in data_needed, sorted by:
 
-        1. first local, then remote
-        2. if tied, by highest-priority task available
-        3. if tied, by number of tasks available to be fetched (see note below)
-        4. if tied, by a random element
+        1. By highest-priority task available across all workers
+        2. If tied, first by local peer workers, then remote. Note that, if a task is
+           replicated across multiple host, it may go in a tie with itself.
+        3. If still tied, by number of tasks available to be fetched from the host
+           (see note below)
+        4. If still tied, by a random element. This is statically seeded to guarantee
+           reproducibility.
 
         Omit workers that are either busy or in flight.
         Remove peer workers with no tasks from data_needed.
@@ -1308,10 +1316,10 @@ class WorkerState:
                 continue
             heap.append(
                 (
-                    get_address_host(worker) != host,  # False < True
                     tasks.peek().priority,
+                    get_address_host(worker) != host,  # False < True
                     -len(tasks),
-                    random.random(),
+                    self.rng.random(),
                     worker,
                     tasks,
                 )
@@ -1319,7 +1327,7 @@ class WorkerState:
 
         heapq.heapify(heap)
         while heap:
-            is_remote, _, ntasks_neg, rnd, worker, tasks = heapq.heappop(heap)
+            _, is_remote, ntasks_neg, rnd, worker, tasks = heapq.heappop(heap)
             # The number of tasks and possibly the top priority task may have changed
             # since the last sort, since _select_keys_for_gather may have removed tasks
             # that are also replicated on a higher-priority worker.
@@ -1328,7 +1336,7 @@ class WorkerState:
             elif -ntasks_neg != len(tasks):
                 heapq.heappush(
                     heap,
-                    (is_remote, tasks.peek().priority, -len(tasks), rnd, worker, tasks),
+                    (tasks.peek().priority, is_remote, -len(tasks), rnd, worker, tasks),
                 )
             else:
                 yield worker, tasks
