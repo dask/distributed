@@ -6,7 +6,6 @@
         <th> Memory </th>
         <th> Memory use </th>
         <th> Occupancy </th>
-        <th> Queued </th>
         <th> Processing </th>
         <th> In-memory </th>
         <th> Services</th>
@@ -21,7 +20,6 @@
         <td> {{ format_bytes(ws.memory_limit) if ws.memory_limit is not None else "" }} </td>
         <td> <progress class="progress" value="{{ ws.metrics['memory'] }}" max="{{ ws.memory_limit }}"></progress> </td>
         <td> {{ format_time(ws.occupancy) }} </td>
-        <td> {{ len(ws.queued) }} </td>
         <td> {{ len(ws.processing) }} </td>
         <td> {{ len(ws.has_what) }} </td>
         {% if 'dashboard' in ws.services %}

@@ -147,6 +147,10 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         client=True,
         nthreads=nthreads,
         config={"distributed.scheduler.work-stealing": False},
+        scheduler_kwargs=dict(  # TODO remove
+            dashboard=True,
+            dashboard_address=":8787",
+        ),
     )
     async def test_decide_worker_coschedule_order_neighbors_(c, s, *workers):
         r"""
@@ -263,11 +267,12 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         "distributed.scheduler.work-stealing": False,
     },
 )
-async def test_root_task_overproduction(c, s, *nannies):
+async def test_root_task_overproduction(c, s, *nannies: Nanny):
     """
     Workload that would run out of memory and kill workers if >2 root tasks were
     ever in memory at once on a worker.
     """
+    pids = [n.pid for n in nannies]
 
     @delayed(pure=True)
     def big_data(size: int) -> str:
@@ -282,6 +287,9 @@ async def test_root_task_overproduction(c, s, *nannies):
     final = sum(reduction)
 
     await c.compute(final)
+
+    # No restarts
+    assert pids == [n.pid for n in nannies]
 
 
 @pytest.mark.parametrize(
