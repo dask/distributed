@@ -791,6 +791,7 @@ def _deserialize_memoryview(header, frames):
         out = out.cast(header["format"], header["shape"])
     else:
         out = out.cast(header["format"])
+        assert out.shape == header["shape"]
 
     return out
 
