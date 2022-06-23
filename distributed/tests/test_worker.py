@@ -417,7 +417,7 @@ async def test_plugin_exception():
         def setup(self, worker=None):
             raise ValueError("Setup failed")
 
-    async with Scheduler(port=0) as s:
+    async with Scheduler(port=0, dashboard_address=":0") as s:
         with raises_with_cause(
             RuntimeError, "Worker failed to start", ValueError, "Setup failed"
         ):
@@ -440,7 +440,7 @@ async def test_plugin_multiple_exceptions():
         def setup(self, worker=None):
             raise RuntimeError("MyPlugin2 Error")
 
-    async with Scheduler(port=0) as s:
+    async with Scheduler(port=0, dashboard_address=":0") as s:
         # There's no guarantee on the order of which exception is raised first
         with raises_with_cause(
             RuntimeError,

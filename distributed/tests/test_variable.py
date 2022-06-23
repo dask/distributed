@@ -9,6 +9,7 @@ import pytest
 from distributed import Client, Nanny, TimeoutError, Variable, wait, worker_client
 from distributed.compatibility import WINDOWS
 from distributed.metrics import monotonic, time
+from distributed.utils import open_port
 from distributed.utils_test import captured_logger, div, gen_cluster, inc, popen
 
 
@@ -38,11 +39,12 @@ async def test_variable(c, s, a, b):
 
 
 def test_variable_in_task(loop):
+    port = open_port()
     # Ensure that we can create a Variable inside a task on a
     # worker in a separate Python process than the client
-    with popen(["dask-scheduler", "--no-dashboard"]):
-        with popen(["dask-worker", "127.0.0.1:8786"]):
-            with Client("tcp://127.0.0.1:8786", loop=loop) as c:
+    with popen(["dask-scheduler", "--no-dashboard", "--port", str(port)]):
+        with popen(["dask-worker", f"127.0.0.1:{port}"]):
+            with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
                 c.wait_for_workers(1)
 
                 x = Variable("x")
