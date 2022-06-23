@@ -332,7 +332,6 @@ class Server:
                 stacklevel=2,
             )
 
-        self.__close_lock = asyncio.Lock()
         self._status = Status.init
         self.handlers = {
             "identity": self.identity,
@@ -867,27 +866,26 @@ class Server:
 
     async def close(self, timeout=None):
         try:
-            async with self.__close_lock:
-                for pc in self.periodic_callbacks.values():
-                    pc.stop()
+            for pc in self.periodic_callbacks.values():
+                pc.stop()
 
-                if not self.__stopped:
-                    self.__stopped = True
-                    _stops = set()
-                    for listener in self.listeners:
-                        future = listener.stop()
-                        if inspect.isawaitable(future):
-                            _stops.add(future)
-                    await asyncio.gather(*_stops)
+            if not self.__stopped:
+                self.__stopped = True
+                _stops = set()
+                for listener in self.listeners:
+                    future = listener.stop()
+                    if inspect.isawaitable(future):
+                        _stops.add(future)
+                await asyncio.gather(*_stops)
 
-                # TODO: Deal with exceptions
-                await self._ongoing_background_tasks.stop(timeout=1)
+            # TODO: Deal with exceptions
+            await self._ongoing_background_tasks.stop(timeout=1)
 
-                # TODO: Deal with exceptions
-                await self._ongoing_comm_handlers.stop(timeout=1)
+            # TODO: Deal with exceptions
+            await self._ongoing_comm_handlers.stop(timeout=1)
 
-                await self.rpc.close()
-                await asyncio.gather(*[comm.close() for comm in list(self._comms)])
+            await self.rpc.close()
+            await asyncio.gather(*[comm.close() for comm in list(self._comms)])
         finally:
             self._event_finished.set()
 
