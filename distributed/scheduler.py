@@ -1527,7 +1527,7 @@ class SchedulerState:
                     "Transitioned %r %s->%s (actual: %s).  Consequence: %s",
                     key,
                     start,
-                    finish2,
+                    finish,
                     ts.state,
                     dict(recommendations),
                 )
