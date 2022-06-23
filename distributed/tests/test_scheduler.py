@@ -134,7 +134,6 @@ async def test_decide_worker_with_restrictions(client, s, a, b, c):
     assert x.key in a.data or x.key in b.data
 
 
-# @pytest.mark.skip("Current queuing does not support co-assignment")
 @pytest.mark.parametrize("ndeps", [0, 1, 4])
 @pytest.mark.parametrize(
     "nthreads",
@@ -151,10 +150,6 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
             "distributed.scheduler.work-stealing": False,
             "distributed.scheduler.worker-saturation": float("inf"),
         },
-        scheduler_kwargs=dict(  # TODO remove
-            dashboard=True,
-            dashboard_address=":8787",
-        ),
     )
     async def test_decide_worker_coschedule_order_neighbors_(c, s, *workers):
         r"""
@@ -252,6 +247,24 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         assert len(unexpected_transfers) <= 3, unexpected_transfers
 
     test_decide_worker_coschedule_order_neighbors_()
+
+
+@pytest.mark.parametrize("ngroups", [1, 2, 3, 5])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1), ("", 1)],
+    config={
+        "distributed.scheduler.worker-saturation": float("inf"),
+    },
+)
+async def test_decide_worker_coschedule_order_binary_op(c, s, a, b, ngroups):
+    roots = [[delayed(i, name=f"x-{n}-{i}") for i in range(8)] for n in range(ngroups)]
+    zs = [sum(rs) for rs in zip(*roots)]
+
+    await c.gather(c.compute(zs))
+
+    assert not a.incoming_transfer_log, [l["keys"] for l in a.incoming_transfer_log]
+    assert not b.incoming_transfer_log, [l["keys"] for l in b.incoming_transfer_log]
 
 
 @pytest.mark.slow
@@ -381,17 +394,7 @@ def test_saturation_factor(
 
 
 @pytest.mark.skip("Current queuing does not support co-assignment")
-@pytest.mark.parametrize(
-    "saturation_factor",
-    [
-        1.0,
-        2.0,
-        pytest.param(
-            float("inf"),
-            marks=pytest.mark.skip("https://github.com/dask/distributed/issues/6597"),
-        ),
-    ],
-)
+@pytest.mark.parametrize("saturation_factor", [1.0, 2.0, float("inf")])
 @gen_cluster(
     client=True,
     nthreads=[("", 2), ("", 1)],
@@ -406,8 +409,8 @@ async def test_oversaturation_multiple_task_groups(c, s, a, b, saturation_factor
 
     assert not a.incoming_transfer_log, [l["keys"] for l in a.incoming_transfer_log]
     assert not b.incoming_transfer_log, [l["keys"] for l in b.incoming_transfer_log]
-    assert len(a.tasks) == 18
-    assert len(b.tasks) == 9
+    assert len(a.state.tasks) == 18
+    assert len(b.state.tasks) == 9
 
 
 @pytest.mark.slow
