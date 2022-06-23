@@ -3,6 +3,7 @@ import contextlib
 import os
 import socket
 import threading
+import time as timemod
 import weakref
 
 import pytest
@@ -12,6 +13,8 @@ import dask
 
 from distributed.comm.core import CommClosedError
 from distributed.core import (
+    AsyncTaskGroup,
+    AsyncTaskGroupClosedError,
     ConnectionPool,
     Server,
     Status,
@@ -71,6 +74,161 @@ def echo_serialize(comm, x):
 
 def echo_no_serialize(comm, x):
     return {"result": x}
+
+
+def test_async_task_group_initialization():
+    group = AsyncTaskGroup()
+    assert not group.closed
+    assert len(group) == 0
+
+
+async def _wait_for_n_loop_cycles(n):
+    for i in range(n):
+        await asyncio.sleep(0)
+
+
+@gen_test()
+async def test_async_task_group_call_soon_executes_task_in_background():
+    group = AsyncTaskGroup()
+    ev = asyncio.Event()
+    flag = False
+
+    async def set_flag():
+        nonlocal flag
+        await ev.wait()
+        flag = True
+
+    assert group.call_soon(set_flag) is None
+    assert len(group) == 1
+    ev.set()
+    await _wait_for_n_loop_cycles(2)
+    assert len(group) == 0
+    assert flag
+
+
+@gen_test()
+async def test_async_task_group_call_later_executes_delayed_task_in_background():
+    group = AsyncTaskGroup()
+    flag = False
+
+    async def set_flag():
+        nonlocal flag
+        flag = True
+
+    start = timemod.monotonic()
+    assert group.call_later(1, set_flag) is None
+    assert len(group) == 1
+    # the task must complete in exactly 1 event loop cycle
+    await asyncio.sleep(1)
+    await _wait_for_n_loop_cycles(2)
+    end = timemod.monotonic()
+    assert len(group) == 0
+    assert flag
+    assert end - start > 1 - timemod.get_clock_info("monotonic").resolution
+
+
+def test_async_task_group_close_closes():
+    group = AsyncTaskGroup()
+    group.close()
+    assert group.closed
+
+    # Test idempotency
+    group.close()
+    assert group.closed
+
+
+@gen_test()
+async def test_async_task_group_close_does_not_cancel_existing_tasks():
+    group = AsyncTaskGroup()
+
+    ev = asyncio.Event()
+    flag = False
+
+    async def set_flag():
+        nonlocal flag
+        await ev.wait()
+        flag = True
+        return None
+
+    assert group.call_soon(set_flag) is None
+
+    group.close()
+
+    assert len(group) == 1
+
+    ev.set()
+    await _wait_for_n_loop_cycles(2)
+    assert len(group) == 0
+
+
+@gen_test()
+async def test_async_task_group_close_prohibits_new_tasks():
+    group = AsyncTaskGroup()
+    group.close()
+
+    ev = asyncio.Event()
+    flag = False
+
+    async def set_flag():
+        nonlocal flag
+        await ev.wait()
+        flag = True
+        return True
+
+    with pytest.raises(AsyncTaskGroupClosedError):
+        group.call_soon(set_flag)
+    assert len(group) == 0
+
+    with pytest.raises(AsyncTaskGroupClosedError):
+        group.call_later(1, set_flag)
+    assert len(group) == 0
+
+    await asyncio.sleep(0.01)
+    assert not flag
+
+
+@gen_test()
+async def test_async_task_group_stop_allows_shutdown():
+    group = AsyncTaskGroup()
+
+    task = None
+
+    async def set_flag():
+        nonlocal task
+        while not group.closed:
+            await asyncio.sleep(0.01)
+        task = asyncio.current_task()
+        return None
+
+    assert group.call_soon(set_flag) is None
+    assert len(group) == 1
+    # when given a grace period of 1 second tasks are allowed to poll group.stop
+    # before awaiting other async functions
+    await group.stop(timeout=1)
+    assert task.done()
+    assert not task.cancelled()
+
+
+@gen_test()
+async def test_async_task_group_stop_cancels_long_running():
+    group = AsyncTaskGroup()
+
+    task = None
+    flag = False
+
+    async def set_flag():
+        nonlocal task
+        task = asyncio.current_task()
+        await asyncio.sleep(10)
+        nonlocal flag
+        flag = True
+        return True
+
+    assert group.call_soon(set_flag) is None
+    assert len(group) == 1
+    await group.stop(timeout=1)
+    assert not flag
+    assert task.cancelled()
 
 
 @gen_test()
@@ -928,7 +1086,7 @@ async def test_close_properly():
         comm = await remote.live_comm()
         await comm.write({"op": "sleep"})
 
-        await async_wait_for(lambda: not server._ongoing_coroutines, 10)
+        await async_wait_for(lambda: not server._ongoing_comm_handlers, 10)
 
         listeners = server.listeners
         assert len(listeners) == len(ports)
@@ -942,7 +1100,7 @@ async def test_close_properly():
             await assert_cannot_connect(f"tcp://{ip}:{port}")
 
         # weakref set/dict should be cleaned up
-        assert not len(server._ongoing_coroutines)
+        assert not len(server._ongoing_comm_handlers)
 
 
 @gen_test()

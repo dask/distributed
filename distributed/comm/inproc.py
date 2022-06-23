@@ -88,6 +88,13 @@ class QueueEmpty(Exception):
     pass
 
 
+def _set_result_unless_cancelled(fut, result):
+    """Helper setting the result only if the future was not cancelled."""
+    if fut.cancelled():
+        return
+    fut.set_result(result)
+
+
 class Queue:
     """
     A single-reader, single-writer, non-threadsafe, peekable queue.
@@ -119,7 +126,7 @@ class Queue:
         if fut is not None:
             assert len(q) == 0
             self._read_future = None
-            fut.set_result(value)
+            _set_result_unless_cancelled(fut, value)
         else:
             q.append(value)
 

@@ -148,7 +148,7 @@ class WorkStealing(SchedulerPlugin):
     def add_worker(self, scheduler=None, worker=None):
         self.stealable[worker] = tuple(set() for _ in range(15))
 
-    def remove_worker(self, scheduler=None, worker=None):
+    def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
         del self.stealable[worker]
 
     def teardown(self):
@@ -310,7 +310,6 @@ class WorkStealing(SchedulerPlugin):
 
         thief = d["thief"]
         victim = d["victim"]
-
         logger.debug("Confirm move %s, %s -> %s.  State: %s", key, victim, thief, state)
 
         self.in_flight_occupancy[thief] -= d["thief_duration"]
@@ -331,8 +330,9 @@ class WorkStealing(SchedulerPlugin):
                 self.scheduler._reevaluate_occupancy_worker(victim)
             elif (
                 state in _WORKER_STATE_UNDEFINED
+                # If our steal information is somehow stale we need to reschedule
                 or state in _WORKER_STATE_CONFIRM
-                and thief.address not in self.scheduler.workers
+                and thief != self.scheduler.workers.get(thief.address)
             ):
                 self.log(
                     (

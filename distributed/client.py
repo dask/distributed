@@ -4057,7 +4057,7 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self.scheduler.log_event, topic=topic, msg=msg)
 
-    def get_events(self, topic: str = None):
+    def get_events(self, topic: str | None = None):
         """Retrieve structured topic logs
 
         Parameters

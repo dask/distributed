@@ -590,6 +590,27 @@ def test_ser_memoryview_object():
         serialize(data_in, on_error="raise")
 
 
+def test_ser_empty_1d_memoryview():
+    mv = memoryview(b"")
+
+    # serialize empty `memoryview`
+    header, frames = serialize(mv)
+    assert frames[0] == mv
+    # deserialize empty `memoryview`
+    mv2 = deserialize(header, frames)
+    assert type(mv2) == type(mv)
+    assert mv2.format == mv.format
+    assert mv2 == mv
+
+
+def test_ser_empty_nd_memoryview():
+    mv = memoryview(b"12").cast("B", (1, 2))[:0]
+
+    # serialize empty `memoryview`
+    with pytest.raises(TypeError):
+        serialize(mv, on_error="raise")
+
+
 @gen_cluster(client=True, Worker=Nanny)
 async def test_large_pickled_object(c, s, a, b):
     np = pytest.importorskip("numpy")
