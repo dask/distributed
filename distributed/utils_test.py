@@ -4,6 +4,7 @@ import asyncio
 import concurrent.futures
 import contextlib
 import copy
+import errno
 import functools
 import gc
 import inspect
@@ -74,6 +75,7 @@ from distributed.utils import (
 from distributed.worker import WORKER_ANY_RUNNING, Worker
 from distributed.worker_state_machine import InvalidTransition
 from distributed.worker_state_machine import TaskState as WorkerTaskState
+from distributed.worker_state_machine import WorkerState
 
 try:
     import ssl
@@ -2420,3 +2422,48 @@ async def wait_for_state(
         # message as an exception wouldn't work.
         print(msg)
         raise
+
+
+@pytest.fixture
+def ws():
+    state = WorkerState(address="127.0.0.1:1", transition_counter_max=50_000)
+    yield state
+    state.validate_state()
+
+
+@pytest.fixture()
+def name_of_test(request):
+    return f"{request.node.nodeid}"
+
+
+@pytest.fixture()
+def requires_default_ports(name_of_test):
+    start = time()
+
+    @contextmanager
+    def _bind_port(port):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind(("", port))
+            s.listen(1)
+            yield s
+
+    default_ports = [8786]
+
+    while time() - start < _TEST_TIMEOUT:
+        try:
+            with contextlib.ExitStack() as stack:
+                for port in default_ports:
+                    stack.enter_context(_bind_port(port=port))
+                break
+        except OSError as err:
+            if err.errno == errno.EADDRINUSE:
+                print(
+                    f"Address already in use. Waiting before running test {name_of_test}"
+                )
+                sleep(1)
+                continue
+    else:
+        raise TimeoutError(f"Default ports didn't open up in time for {name_of_test}")
+
+    yield

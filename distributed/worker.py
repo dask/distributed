@@ -1094,6 +1094,7 @@ class Worker(BaseWorker, ServerNode):
                         metrics=await self.get_metrics(),
                         extra=await self.get_startup_information(),
                         stimulus_id=f"worker-connect-{time()}",
+                        server_id=self.id,
                     ),
                     serializers=["msgpack"],
                 )
@@ -1608,7 +1609,7 @@ class Worker(BaseWorker, ServerNode):
 
                 bcomm.start(comm)
 
-            self.loop.add_callback(batched_send_connect)
+            self._ongoing_background_tasks.call_soon(batched_send_connect)
 
         self.stream_comms[address].send(msg)
 
@@ -1833,7 +1834,7 @@ class Worker(BaseWorker, ServerNode):
         super()._handle_stimulus_from_task(task)
 
     @fail_hard
-    def handle_stimulus(self, stim: StateMachineEvent) -> None:
+    def handle_stimulus(self, *stims: StateMachineEvent) -> None:
         """Override BaseWorker method for added validation
 
         See also
@@ -1842,7 +1843,7 @@ class Worker(BaseWorker, ServerNode):
         distributed.worker_state_machine.WorkerState.handle_stimulus
         """
         try:
-            super().handle_stimulus(stim)
+            super().handle_stimulus(*stims)
         except Exception as e:
             if hasattr(e, "to_event"):
                 topic, msg = e.to_event()  # type: ignore
@@ -3043,7 +3044,7 @@ async def run(server, comm, function, args=(), kwargs=None, wait=True):
             if wait:
                 result = await function(*args, **kwargs)
             else:
-                server.loop.add_callback(function, *args, **kwargs)
+                server._ongoing_background_tasks.call_soon(function, *args, **kwargs)
                 result = None
 
     except Exception as e:

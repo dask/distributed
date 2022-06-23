@@ -1051,19 +1051,18 @@ def ensure_memoryview(obj):
         return mv
 
 
-def open_port(host=""):
+def open_port(host: str = "") -> int:
     """Return a probably-open port
 
     There is a chance that this port will be taken by the operating system soon
     after returning from this function.
     """
     # http://stackoverflow.com/questions/2838244/get-open-tcp-port-in-python
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind((host, 0))
-    s.listen(1)
-    port = s.getsockname()[1]
-    s.close()
-    return port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((host, 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+        return port
 
 
 def import_file(path: str) -> list[ModuleType]:
