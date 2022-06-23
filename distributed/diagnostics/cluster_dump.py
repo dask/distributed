@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Collection, Dict, Literal
+from typing import Any, Collection, Literal
 
 from distributed.cluster_dump import (
     DEFAULT_CLUSTER_DUMP_EXCLUDE,

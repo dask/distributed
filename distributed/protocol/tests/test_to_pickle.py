@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Dict
-
 import dask.config
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 
