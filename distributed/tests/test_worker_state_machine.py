@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import pickle
 from collections.abc import Iterator
 
 import pytest
@@ -150,6 +151,27 @@ def test_WorkerState__to_dict(ws):
         "transition_counter": 1,
     }
     assert actual == expect
+
+
+def test_WorkerState_pickle(ws):
+    """Test pickle round-trip.
+
+    Big caveat
+    ----------
+    WorkerState, on its own, can be serialized with pickle; it doesn't need cloudpickle.
+    A WorkerState extracted from a Worker might, as data contents may only be
+    serializable with cloudpickle. Some objects created externally - namely, the
+    SpillBuffer - may not be serializable at all.
+    """
+    ws.handle_stimulus(
+        AcquireReplicasEvent(
+            who_has={"x": ["127.0.0.1:1235"]}, nbytes={"x": 123}, stimulus_id="s1"
+        )
+    )
+    ws.handle_stimulus(UpdateDataEvent(data={"y": 123}, report=False, stimulus_id="s"))
+    ws2 = pickle.loads(pickle.dumps(ws))
+    assert ws2.tasks.keys() == {"x", "y"}
+    assert ws2.data == {"y": 123}
 
 
 def traverse_subclasses(cls: type) -> Iterator[type]:
