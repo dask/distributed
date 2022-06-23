@@ -36,7 +36,7 @@ def get_ext() -> ShuffleWorkerExtension:
 def shuffle_transfer(
     input: pd.DataFrame,
     id: ShuffleId,
-    npartitions: int = None,
+    npartitions: int | None = None,
     column: str | None = None,
 ) -> None:
     get_ext().add_partition(input, id, npartitions=npartitions, column=column)

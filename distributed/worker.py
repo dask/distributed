@@ -1715,7 +1715,7 @@ class Worker(BaseWorker, ServerNode):
         self,
         data: dict[str, object],
         report: bool = True,
-        stimulus_id: str = None,
+        stimulus_id: str | None = None,
     ) -> dict[str, Any]:
         self.handle_stimulus(
             UpdateDataEvent(
