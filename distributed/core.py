@@ -11,15 +11,14 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict, deque
-from collections.abc import Container
+from collections.abc import Container, Coroutine
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, ClassVar, TypedDict
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, TypedDict, TypeVar
 
 import tblib
 from tlz import merge
-from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
@@ -38,12 +37,21 @@ from distributed.comm import (
 from distributed.metrics import time
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
+    NoOpAwaitable,
     get_traceback,
     has_keyword,
-    is_coroutine_function,
+    iscoroutinefunction,
     recursive_to_dict,
     truncate_exception,
 )
+
+if TYPE_CHECKING:
+    from typing_extensions import ParamSpec
+
+    P = ParamSpec("P")
+    R = TypeVar("R")
+    T = TypeVar("T")
+    Coro = Coroutine[Any, Any, T]
 
 
 class Status(Enum):
@@ -107,6 +115,161 @@ def _expects_comm(func: Callable) -> bool:
         )
         return True
     return False
+
+
+class _LoopBoundMixin:
+    """Backport of the private asyncio.mixins._LoopBoundMixin from 3.11"""
+
+    _global_lock = threading.Lock()
+
+    _loop = None
+
+    def _get_loop(self):
+        loop = asyncio.get_running_loop()
+
+        if self._loop is None:
+            with self._global_lock:
+                if self._loop is None:
+                    self._loop = loop
+        if loop is not self._loop:
+            raise RuntimeError(f"{self!r} is bound to a different event loop")
+        return loop
+
+
+class AsyncTaskGroupClosedError(RuntimeError):
+    pass
+
+
+def _delayed(corofunc: Callable[P, Coro[T]], delay: float) -> Callable[P, Coro[T]]:
+    """Decorator to delay the evaluation of a coroutine function by the given delay in seconds."""
+
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+        await asyncio.sleep(delay)
+        return await corofunc(*args, **kwargs)
+
+    return wrapper
+
+
+class AsyncTaskGroup(_LoopBoundMixin):
+    """Collection tracking all currently running asynchronous tasks within a group"""
+
+    #: If True, the group is closed and does not allow adding new tasks.
+    closed: bool
+
+    def __init__(self) -> None:
+        self.closed = False
+        self._ongoing_tasks: set[asyncio.Task[None]] = set()
+
+    def call_soon(
+        self, afunc: Callable[P, Coro[None]], /, *args: P.args, **kwargs: P.kwargs
+    ) -> None:
+        """Schedule a coroutine function to be executed as an `asyncio.Task`.
+
+        The coroutine function `afunc` is scheduled with `args` arguments and `kwargs` keyword arguments
+        as an `asyncio.Task`.
+
+        Parameters
+        ----------
+        afunc
+            Coroutine function to schedule.
+        *args
+            Arguments to be passed to `afunc`.
+        **kwargs
+            Keyword arguments to be passed to `afunc`
+
+        Returns
+        -------
+            None
+
+        Raises
+        ------
+        AsyncTaskGroupClosedError
+            If the task group is closed.
+        """
+        if self.closed:  # Avoid creating a coroutine
+            raise AsyncTaskGroupClosedError(
+                "Cannot schedule a new coroutine function as the group is already closed."
+            )
+        task = self._get_loop().create_task(afunc(*args, **kwargs))
+        task.add_done_callback(self._ongoing_tasks.remove)
+        self._ongoing_tasks.add(task)
+        return None
+
+    def call_later(
+        self,
+        delay: float,
+        afunc: Callable[P, Coro[None]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> None:
+        """Schedule a coroutine function to be executed after `delay` seconds as an `asyncio.Task`.
+
+        The coroutine function `afunc` is scheduled with `args` arguments and `kwargs` keyword arguments
+        as an `asyncio.Task` that is executed after `delay` seconds.
+
+        Parameters
+        ----------
+        delay
+            Delay in seconds.
+        afunc
+            Coroutine function to schedule.
+        *args
+            Arguments to be passed to `afunc`.
+        **kwargs
+            Keyword arguments to be passed to `afunc`
+
+        Returns
+        -------
+            The None
+
+        Raises
+        ------
+        AsyncTaskGroupClosedError
+            If the task group is closed.
+        """
+        self.call_soon(_delayed(afunc, delay), *args, **kwargs)
+
+    def close(self) -> None:
+        """Closes the task group so that no new tasks can be scheduled.
+
+        Existing tasks continue to run.
+        """
+        self.closed = True
+
+    async def stop(self, timeout: float = 1) -> None:
+        """Close the group and stop all currently running tasks.
+
+        Closes the task group and waits `timeout` seconds for all tasks to gracefully finish.
+        After the timeout, all remaining tasks are cancelled.
+        """
+        self.close()
+
+        current_task = asyncio.current_task(self._get_loop())
+        tasks_to_stop = [t for t in self._ongoing_tasks if t is not current_task]
+
+        if tasks_to_stop:
+            # Wrap gather in task to avoid Python3.8 issue,
+            # see https://github.com/dask/distributed/pull/6478#discussion_r885696827
+            async def gather():
+                return await asyncio.gather(*tasks_to_stop, return_exceptions=True)
+
+            try:
+                await asyncio.wait_for(
+                    gather(),
+                    timeout,
+                )
+            except asyncio.TimeoutError:
+                # The timeout on gather has cancelled the tasks, so this will not hang indefinitely
+                await asyncio.gather(*tasks_to_stop, return_exceptions=True)
+
+            if [t for t in self._ongoing_tasks if t is not current_task]:
+                raise RuntimeError(
+                    f"Expected all ongoing tasks to be cancelled and removed, found {self._ongoing_tasks}."
+                )
+
+    def __len__(self):
+        return len(self._ongoing_tasks)
 
 
 class Server:
@@ -195,7 +358,8 @@ class Server:
         self.monitor = SystemMonitor()
         self.counters = None
         self.digests = None
-        self._ongoing_coroutines = set()
+        self._ongoing_background_tasks = AsyncTaskGroup()
+        self._ongoing_comm_handlers = AsyncTaskGroup()
         self._event_finished = asyncio.Event()
 
         self.listeners = []
@@ -228,7 +392,7 @@ class Server:
 
         self.counters = defaultdict(partial(Counter, loop=self.io_loop))
 
-        self.periodic_callbacks = dict()
+        self.periodic_callbacks = {}
 
         pc = PeriodicCallback(
             self.monitor.update,
@@ -349,29 +513,29 @@ class Server:
         """Start Periodic Callbacks consistently
 
         This starts all PeriodicCallbacks stored in self.periodic_callbacks if
-        they are not yet running.  It does this safely on the IOLoop.
+        they are not yet running. It does this safely by checking that it is using the
+        correct event loop.
         """
+        if self.io_loop.asyncio_loop is not asyncio.get_running_loop():
+            raise RuntimeError(f"{self!r} is bound to a different event loop")
+
         self._last_tick = time()
-
-        def start_pcs():
-            for pc in self.periodic_callbacks.values():
-                if not pc.is_running():
-                    pc.start()
-
-        self.io_loop.add_callback(start_pcs)
+        for pc in self.periodic_callbacks.values():
+            if not pc.is_running():
+                pc.start()
 
     def stop(self):
         if not self.__stopped:
             self.__stopped = True
+
             for listener in self.listeners:
-                # Delay closing the server socket until the next IO loop tick.
-                # Otherwise race conditions can appear if an event handler
-                # for an accept() call is already scheduled by the IO loop,
-                # raising EBADF.
-                # The demonstrator for this is Worker.terminate(), which
-                # closes the server socket in response to an incoming message.
-                # See https://github.com/tornadoweb/tornado/issues/2069
-                self.io_loop.add_callback(listener.stop)
+
+                async def stop_listener(listener):
+                    v = listener.stop()
+                    if inspect.isawaitable(v):
+                        await v
+
+                self._ongoing_background_tasks.call_soon(stop_listener, listener)
 
     @property
     def listener(self):
@@ -508,7 +672,15 @@ class Server:
         )
         self.listeners.append(listener)
 
-    async def handle_comm(self, comm):
+    def handle_comm(self, comm):
+        """Start a background task that dispatches new communications to coroutine-handlers"""
+        try:
+            self._ongoing_background_tasks.call_soon(self._handle_comm, comm)
+        except AsyncTaskGroupClosedError:
+            comm.abort()
+        return NoOpAwaitable()
+
+    async def _handle_comm(self, comm):
         """Dispatch new communications to coroutine-handlers
 
         Handlers is a dictionary mapping operation names to functions or
@@ -602,11 +774,6 @@ class Server:
                         else:
                             result = handler(**msg)
                         if inspect.iscoroutine(result):
-                            result = asyncio.create_task(
-                                result, name=f"handle-comm-{address}-{op}"
-                            )
-                            self._ongoing_coroutines.add(result)
-                            result.add_done_callback(self._ongoing_coroutines.remove)
                             result = await result
                         elif inspect.isawaitable(result):
                             raise RuntimeError(
@@ -673,9 +840,11 @@ class Server:
                                 closed = True
                                 break
                             handler = self.stream_handlers[op]
-                            if is_coroutine_function(handler):
-                                self.loop.add_callback(handler, **merge(extra, msg))
-                                await gen.sleep(0)
+                            if iscoroutinefunction(handler):
+                                self._ongoing_background_tasks.call_soon(
+                                    handler, **merge(extra, msg)
+                                )
+                                await asyncio.sleep(0)
                             else:
                                 handler(**merge(extra, msg))
                         else:
@@ -696,36 +865,29 @@ class Server:
             assert comm.closed()
 
     async def close(self, timeout=None):
-        for pc in self.periodic_callbacks.values():
-            pc.stop()
-
-        if not self.__stopped:
-            self.__stopped = True
-            _stops = set()
-            for listener in self.listeners:
-                future = listener.stop()
-                if inspect.isawaitable(future):
-                    _stops.add(future)
-            await asyncio.gather(*_stops)
-
-        def _ongoing_tasks():
-            return (
-                t for t in self._ongoing_coroutines if t is not asyncio.current_task()
-            )
-
-        # TODO: Deal with exceptions
         try:
-            # Give the handlers a bit of time to finish gracefully
-            await asyncio.wait_for(
-                asyncio.gather(*_ongoing_tasks(), return_exceptions=True), 1
-            )
-        except asyncio.TimeoutError:
-            # the timeout on gather should've cancelled all the tasks
-            await asyncio.gather(*_ongoing_tasks(), return_exceptions=True)
+            for pc in self.periodic_callbacks.values():
+                pc.stop()
 
-        await self.rpc.close()
-        await asyncio.gather(*[comm.close() for comm in list(self._comms)])
-        self._event_finished.set()
+            if not self.__stopped:
+                self.__stopped = True
+                _stops = set()
+                for listener in self.listeners:
+                    future = listener.stop()
+                    if inspect.isawaitable(future):
+                        _stops.add(future)
+                await asyncio.gather(*_stops)
+
+            # TODO: Deal with exceptions
+            await self._ongoing_background_tasks.stop(timeout=1)
+
+            # TODO: Deal with exceptions
+            await self._ongoing_comm_handlers.stop(timeout=1)
+
+            await self.rpc.close()
+            await asyncio.gather(*[comm.close() for comm in list(self._comms)])
+        finally:
+            self._event_finished.set()
 
 
 def pingpong(comm):
@@ -892,12 +1054,10 @@ class rpc:
         tasks = []
         for comm in list(self.comms):
             if comm and not comm.closed():
-                # IOLoop.current().add_callback(_close_comm, comm)
                 task = asyncio.ensure_future(_close_comm(comm))
                 tasks.append(task)
         for comm in list(self._created):
             if comm and not comm.closed():
-                # IOLoop.current().add_callback(_close_comm, comm)
                 task = asyncio.ensure_future(_close_comm(comm))
                 tasks.append(task)
 

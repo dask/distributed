@@ -225,7 +225,11 @@ async def test_adapt_quickly():
 
         await cluster
 
-        while len(cluster.scheduler.workers) > 1 or len(cluster.worker_spec) > 1:
+        while (
+            len(cluster.scheduler.workers) > 1
+            or len(cluster.worker_spec) > 1
+            or len(cluster.workers) > 1
+        ):
             await asyncio.sleep(0.01)
 
         # Don't scale up for large sequential computations

@@ -1609,7 +1609,7 @@ class Worker(BaseWorker, ServerNode):
 
                 bcomm.start(comm)
 
-            self.loop.add_callback(batched_send_connect)
+            self._ongoing_background_tasks.call_soon(batched_send_connect)
 
         self.stream_comms[address].send(msg)
 
@@ -3044,7 +3044,7 @@ async def run(server, comm, function, args=(), kwargs=None, wait=True):
             if wait:
                 result = await function(*args, **kwargs)
             else:
-                server.loop.add_callback(function, *args, **kwargs)
+                server._ongoing_background_tasks.call_soon(function, *args, **kwargs)
                 result = None
 
     except Exception as e:

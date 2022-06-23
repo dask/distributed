@@ -577,7 +577,7 @@ async def test_scheduler_crash_doesnt_restart(s, a):
     bcomm.abort()
     await s.close()
 
-    while a.status != Status.closing_gracefully:
+    while a.status not in {Status.closing_gracefully, Status.closed}:
         await asyncio.sleep(0.01)
 
     await a.finished()

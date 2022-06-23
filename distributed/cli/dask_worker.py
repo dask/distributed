@@ -14,7 +14,7 @@ from typing import Any
 
 import click
 from tlz import valmap
-from tornado.ioloop import IOLoop, TimeoutError
+from tornado.ioloop import TimeoutError
 
 import dask
 from dask.system import CPU_COUNT
@@ -448,14 +448,11 @@ def main(  # type: ignore[no-untyped-def]
     signal_fired = False
 
     async def run():
-        loop = IOLoop.current()
-
         nannies = [
             t(
                 scheduler,
                 scheduler_file=scheduler_file,
                 nthreads=nthreads,
-                loop=loop,
                 resources=resources,
                 security=sec,
                 contact_address=contact_address,
