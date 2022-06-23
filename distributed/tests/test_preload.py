@@ -12,6 +12,7 @@ import pytest
 import dask
 
 from distributed import Client, Nanny, Scheduler, Worker
+from distributed.utils import open_port
 from distributed.utils_test import captured_logger, cluster, gen_cluster, gen_test
 
 PRELOAD_TEXT = """
@@ -204,15 +205,18 @@ dask.config.set(scheduler_address="{s.address}")
 
 @gen_test()
 async def test_web_preload_worker():
+    port = open_port()
+    data = dedent(
+        f"""\
+        import dask
+        dask.config.set(scheduler_address="tcp://127.0.0.1:{port}")
+        """
+    ).encode()
     with mock.patch(
         "urllib3.PoolManager.request",
-        **{
-            "return_value.data": b"import dask"
-            b'\ndask.config.set(scheduler_address="tcp://127.0.0.1:8786")'
-            b"\n"
-        },
+        **{"return_value.data": data},
     ) as request:
-        async with Scheduler(port=8786, host="localhost") as s:
+        async with Scheduler(port=port, host="localhost") as s:
             async with Nanny(preload_nanny=["http://example.com/preload"]) as nanny:
                 assert nanny.scheduler_addr == s.address
     assert request.mock_calls == [
