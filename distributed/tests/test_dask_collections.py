@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pytest
 from packaging.version import parse as parse_version
 
