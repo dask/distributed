@@ -1783,7 +1783,11 @@ class SchedulerState:
             and not valid_workers
             and not ts.loose_restrictions
         ):
-            recommendations[ts.key] = "no-worker"
+            # FIXME when all workers are paused, root tasks in 'waiting' that could
+            # be queued would instead go to 'no-worker'.
+            if ts.state != "queued":
+                self.unrunnable.add(ts)
+                ts.state = "no-worker"
             return None
 
         # Group is larger than cluster with few dependencies?
@@ -1795,12 +1799,10 @@ class SchedulerState:
             and sum(map(len, tg.dependencies)) < 5
         ):
             if math.isinf(self.WORKER_SATURATION):
-                pool = self.idle.values() if self.idle else self.running
-                if not pool:
-                    recommendations[ts.key] = "no-worker"
-                    return None
-
-                return min(pool, key=lambda ws: len(ws.processing) / ws.nthreads)
+                return min(
+                    (self.idle or self.workers).values(),
+                    key=lambda ws: len(ws.processing) / ws.nthreads,
+                )
 
             if not self.idle:
                 # All workers busy? Task gets/stays queued.
@@ -1820,20 +1822,12 @@ class SchedulerState:
                     ws,
                     task_slots_available(ws, self.WORKER_SATURATION),
                 )
-                assert ws in self.running, (ws, self.running)
             return ws
-
-        if valid_workers is None and len(self.running) < len(self.workers):
-            if not self.running:
-                recommendations[ts.key] = "no-worker"
-                return None
-
-            valid_workers = self.running
 
         if ts.dependencies or valid_workers is not None:
             ws = decide_worker(
                 ts,
-                self.running,
+                self.workers.values(),
                 valid_workers,
                 partial(self.worker_objective, ts),
             )
@@ -1861,7 +1855,6 @@ class SchedulerState:
 
         if self.validate and ws is not None:
             assert ws.address in self.workers
-            assert ws in self.running, (ws, self.running)
 
         return ws
 
@@ -2416,32 +2409,6 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_waiting_no_worker(self, key, stimulus_id):
-        try:
-            ts: TaskState = self.tasks[key]
-            recommendations: dict = {}
-            client_msgs: dict = {}
-            worker_msgs: dict = {}
-
-            if self.validate:
-                assert ts not in self.queued
-                assert not ts.who_has
-                assert not ts.exception_blame
-                assert not ts.processing_on
-                assert ts not in self.unrunnable
-
-            ts.state = "no-worker"
-            self.unrunnable.add(ts)
-
-            return recommendations, client_msgs, worker_msgs
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
-
     def transition_queued_released(self, key, stimulus_id):
         try:
             ts: TaskState = self.tasks[key]
@@ -2592,7 +2559,6 @@ class SchedulerState:
         ("released", "waiting"): transition_released_waiting,
         ("waiting", "released"): transition_waiting_released,
         ("waiting", "processing"): transition_waiting_processing,
-        ("waiting", "no-worker"): transition_waiting_no_worker,
         ("waiting", "queued"): transition_waiting_queued,
         ("waiting", "memory"): transition_waiting_memory,
         ("queued", "released"): transition_queued_released,
@@ -2681,8 +2647,7 @@ class SchedulerState:
             if math.isinf(self.WORKER_SATURATION)
             else not worker_saturated(ws, self.WORKER_SATURATION)
         ):
-            if ws.status == Status.running:
-                idle[ws.address] = ws
+            idle[ws.address] = ws
             saturated.discard(ws)
         else:
             idle.pop(ws.address, None)
@@ -2729,8 +2694,7 @@ class SchedulerState:
     def valid_workers(self, ts: TaskState) -> set:  # set[WorkerState] | None
         """Return set of currently valid workers for key
 
-        If all workers are valid then this returns ``None``, in which case
-        any running worker can be used.
+        If all workers are valid then this returns ``None``.
         This checks tracks the following state:
 
         *  worker_restrictions
@@ -2779,7 +2743,10 @@ class SchedulerState:
             else:
                 s &= ww
 
-        if s:
+        if s is None:
+            if len(self.running) < len(self.workers):
+                return self.running.copy()
+        else:
             s = {self.workers[addr] for addr in s}
             if len(self.running) < len(self.workers):
                 s &= self.running
@@ -4611,17 +4578,13 @@ class Scheduler(SchedulerState, ServerNode):
         if not (set(self.workers) == set(self.stream_comms)):
             raise ValueError("Workers not the same in all collections")
 
-        assert self.running.issuperset(self.idle.values())
         for w, ws in self.workers.items():
             assert isinstance(w, str), (type(w), w)
             assert isinstance(ws, WorkerState), (type(ws), ws)
             assert ws.address == w
-            if ws.status != Status.running:
-                assert ws.address not in self.idle
             if not ws.processing:
                 assert not ws.occupancy
-                if ws.status == Status.running:
-                    assert ws.address in self.idle
+                assert ws.address in self.idle
             assert (ws.status == Status.running) == (ws in self.running)
 
         for ws in self.running:
@@ -4907,7 +4870,6 @@ class Scheduler(SchedulerState, ServerNode):
 
         if ws.status == Status.running:
             self.running.add(ws)
-            self.check_idle_saturated(ws)
             recs = self.bulk_schedule_after_adding_worker(ws)
             if recs:
                 client_msgs: dict = {}
@@ -4916,7 +4878,6 @@ class Scheduler(SchedulerState, ServerNode):
                 self.send_all(client_msgs, worker_msgs)
         else:
             self.running.discard(ws)
-            self.idle.pop(ws.address, None)
 
     async def handle_request_refresh_who_has(
         self, keys: Iterable[str], worker: str, stimulus_id: str
