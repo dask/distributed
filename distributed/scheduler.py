@@ -1382,7 +1382,7 @@ class SchedulerState:
         }
 
     def new_task(
-        self, key: str, spec: object, state: str, computation: Computation = None
+        self, key: str, spec: object, state: str, computation: Computation | None = None
     ) -> TaskState:
         """Create a new task, and associated states"""
         ts = TaskState(key, spec)
@@ -1709,7 +1709,7 @@ class SchedulerState:
         stimulus_id,
         nbytes=None,
         type=None,
-        typename: str = None,
+        typename: str | None = None,
         worker=None,
     ):
         try:
@@ -1886,7 +1886,7 @@ class SchedulerState:
         stimulus_id,
         nbytes=None,
         type=None,
-        typename: str = None,
+        typename: str | None = None,
         worker=None,
         **kwargs,
     ):
@@ -1933,7 +1933,7 @@ class SchedulerState:
         stimulus_id,
         nbytes=None,
         type=None,
-        typename: str = None,
+        typename: str | None = None,
         worker=None,
         startstops=None,
         **kwargs,
@@ -2278,12 +2278,12 @@ class SchedulerState:
         self,
         key: str,
         stimulus_id: str,
-        cause: str = None,
+        cause: str | None = None,
         exception=None,
         traceback=None,
-        exception_text: str = None,
-        traceback_text: str = None,
-        worker: str = None,
+        exception_text: str | None = None,
+        traceback_text: str | None = None,
+        worker: str | None = None,
         **kwargs,
     ):
         ws: WorkerState
@@ -3462,12 +3462,12 @@ class Scheduler(SchedulerState, ServerNode):
         *,
         address,
         resolve_address: bool = True,
-        now: float = None,
+        now: float | None = None,
         resources: dict[str, float] | None = None,
-        host_info: dict = None,
+        host_info: dict | None = None,
         metrics: dict,
         executing: dict[str, float] | None = None,
-        extensions: dict = None,
+        extensions: dict | None = None,
     ) -> dict[str, Any]:
         address = self.coerce_address(address, resolve_address)
         address = normalize_address(address)
@@ -4435,7 +4435,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert ts.exception_blame
         assert not ts.who_has
 
-    def validate_key(self, key, ts: TaskState = None):
+    def validate_key(self, key, ts: TaskState | None = None):
         try:
             if ts is None:
                 ts = self.tasks.get(key)
@@ -4524,7 +4524,7 @@ class Scheduler(SchedulerState, ServerNode):
     # Manage Messages #
     ###################
 
-    def report(self, msg: dict, ts: TaskState = None, client: str = None):
+    def report(self, msg: dict, ts: TaskState | None = None, client: str | None = None):
         """
         Publish updates to all listening Queues and Comms
 
@@ -4614,7 +4614,7 @@ class Scheduler(SchedulerState, ServerNode):
             except TypeError:  # comm becomes None during GC
                 pass
 
-    def remove_client(self, client: str, stimulus_id: str = None) -> None:
+    def remove_client(self, client: str, stimulus_id: str | None = None) -> None:
         """Remove client from network"""
         stimulus_id = stimulus_id or f"remove-client-{time()}"
         if self.status == Status.running:
@@ -5319,9 +5319,9 @@ class Scheduler(SchedulerState, ServerNode):
     async def rebalance(
         self,
         comm=None,
-        keys: "Iterable[Hashable]" = None,
-        workers: "Iterable[str]" = None,
-        stimulus_id: str = None,
+        keys: "Iterable[Hashable]" | None = None,
+        workers: "Iterable[str]" | None = None,
+        stimulus_id: str | None = None,
     ) -> dict:
         """Rebalance keys so that each worker ends up with roughly the same process
         memory (managed+unmanaged).
@@ -5924,7 +5924,7 @@ class Scheduler(SchedulerState, ServerNode):
         names: "list | None" = None,
         close_workers: bool = False,
         remove: bool = True,
-        stimulus_id: str = None,
+        stimulus_id: str | None = None,
         **kwargs,
     ) -> dict:
         """Gracefully retire workers from cluster
@@ -6158,7 +6158,12 @@ class Scheduler(SchedulerState, ServerNode):
         if client:
             self.client_desires_keys(keys=list(who_has), client=client)
 
-    def report_on_key(self, key: str = None, ts: TaskState = None, client: str = None):
+    def report_on_key(
+        self,
+        key: str | None = None,
+        ts: TaskState | None = None,
+        client: str | None = None,
+    ):
         if ts is None:
             ts = self.tasks.get(key)
         elif key is None:
@@ -7190,7 +7195,7 @@ def _add_to_memory(
     recommendations: dict[str, str],
     client_msgs: dict[str, list[dict[str, str]]],
     type=None,
-    typename: str = None,
+    typename: str | None = None,
 ) -> None:
     """Add ts to the set of in-memory tasks"""
     if state.validate:
