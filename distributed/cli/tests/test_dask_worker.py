@@ -456,11 +456,11 @@ async def test_contact_listen_address(c, s, nanny, listen_address):
 @pytest.mark.slow
 @requires_ipv6
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
-@pytest.mark.parametrize("listen_address", ["tcp://:39838", "tcp://[::1]:39838"])
+@pytest.mark.parametrize("listen_address", ["tcp://:", "tcp://[::1]:"])
 @gen_cluster(client=True, nthreads=[])
 async def test_listen_address_ipv6(c, s, nanny, listen_address):
     port = open_port()
-    listen_address += port
+    listen_address += str(port)
     with popen(
         [
             "dask-worker",
