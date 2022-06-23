@@ -134,7 +134,7 @@ async def test_decide_worker_with_restrictions(client, s, a, b, c):
     assert x.key in a.data or x.key in b.data
 
 
-@pytest.mark.skip("Current queuing does not support co-assignment")
+# @pytest.mark.skip("Current queuing does not support co-assignment")
 @pytest.mark.parametrize("ndeps", [0, 1, 4])
 @pytest.mark.parametrize(
     "nthreads",
@@ -147,7 +147,10 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
     @gen_cluster(
         client=True,
         nthreads=nthreads,
-        config={"distributed.scheduler.work-stealing": False},
+        config={
+            "distributed.scheduler.work-stealing": False,
+            "distributed.scheduler.worker-saturation": float("inf"),
+        },
         scheduler_kwargs=dict(  # TODO remove
             dashboard=True,
             dashboard_address=":8787",
