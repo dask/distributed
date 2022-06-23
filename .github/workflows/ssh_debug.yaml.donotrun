@@ -9,7 +9,7 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-latest
+          - ubuntu-22.04
           - macos-latest
           # - windows-latest  # FIXME https://github.com/dask/distributed/issues/4509
 

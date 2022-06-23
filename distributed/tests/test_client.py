@@ -3708,7 +3708,7 @@ async def test_reconnect_timeout(c, s):
     assert "Failed to reconnect" in text
 
 
-@pytest.mark.avoid_ci(reason="hangs on github actions ubuntu-latest CI")
+@pytest.mark.avoid_ci(reason="hangs on github actions ubuntu-22.04 CI")
 @pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @pytest.mark.parametrize("worker,count,repeat", [(Worker, 100, 5), (Nanny, 10, 20)])

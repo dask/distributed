@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-22.04, windows-latest, macos-latest]
         python-version: ["3.8", "3.9", "3.10"]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
@@ -102,7 +102,7 @@ jobs:
         env:
           PYTHONFAULTHANDLER: 1
         run: |
-          if [[ "${{ matrix.os }}" = "ubuntu-latest" ]]; then
+          if [[ "${{ matrix.os }}" = "ubuntu-22.04" ]]; then
               # FIXME ipv6-related failures on Ubuntu github actions CI
               # https://github.com/dask/distributed/issues/4514
               export DISABLE_IPV6=1
@@ -163,7 +163,7 @@ jobs:
     # Do not run the schedule job on forks
     if: github.repository == 'dask/distributed' || github.event_name != 'schedule'
     name: "Event File"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Upload
         uses: actions/upload-artifact@v2
