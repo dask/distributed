@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+# isort: off
+from distributed import config  # load distributed configuration first
+from distributed import widgets  # load distributed widgets second
+
+# isort: on
+
 import atexit
 
 import dask
@@ -54,12 +60,6 @@ from distributed.worker import (
     warn,
 )
 from distributed.worker_client import local_client, worker_client
-
-from distributed import config  # isort:skip; load distributed configuration first
-from distributed import widgets  # isort:skip; load distributed widgets second
-
-
-
 
 
 def __getattr__(name):
