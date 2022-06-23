@@ -272,24 +272,36 @@ async def test_root_task_overproduction(c, s, *nannies):
     Workload that would run out of memory and kill workers if >2 root tasks were
     ever in memory at once on a worker.
     """
-    pids = [n.pid for n in nannies]
+    # Add a single paused worker just to throw off `valid_workers`
+    with dask.config.set({"distributed.worker.memory.pause": 0.0}):
+        async with Worker(s.address, nthreads=1) as paused:
+            while len(s.workers) != 3:
+                await asyncio.sleep(0.01)
 
-    @delayed(pure=True)  # type: ignore
-    def big_data(size: int) -> str:
-        return "x" * size
+            while s.workers[paused.address].status != Status.paused:
+                await asyncio.sleep(0.01)
+            assert len(s.running) == 2
 
-    roots = [
-        big_data(parse_bytes("350 MiB"), dask_key_name=f"root-{i}") for i in range(16)
-    ]
-    passthrough = [delayed(slowidentity)(x) for x in roots]
-    memory_consumed = [delayed(len)(x) for x in passthrough]
-    reduction = [sum(sizes) for sizes in partition(4, memory_consumed)]
-    final = sum(reduction)
+            pids = [n.pid for n in nannies]
 
-    await c.compute(final)
+            @delayed(pure=True)  # type: ignore
+            def big_data(size: int) -> str:
+                return "x" * size
 
-    # No restarts
-    assert pids == [n.pid for n in nannies]
+            roots = [
+                big_data(parse_bytes("350 MiB"), dask_key_name=f"root-{i}")
+                for i in range(16)
+            ]
+            passthrough = [delayed(slowidentity)(x) for x in roots]
+            memory_consumed = [delayed(len)(x) for x in passthrough]
+            reduction = [sum(sizes) for sizes in partition(4, memory_consumed)]
+            final = sum(reduction)
+
+            await c.compute(final)
+
+            # No restarts
+            assert pids == [n.pid for n in nannies]
+            assert not paused.state.tasks
 
 
 @pytest.mark.parametrize("withhold", [True, False])

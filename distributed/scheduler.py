@@ -1793,18 +1793,27 @@ class SchedulerState:
         # Group is larger than cluster with few dependencies?
         # Minimize future data transfers.
         if (
-            valid_workers is None
+            not (
+                ts.worker_restrictions
+                or ts.host_restrictions
+                or ts.resource_restrictions
+            )
             and len(tg) > self.total_nthreads * 2
             and len(tg.dependencies) < 5
             and sum(map(len, tg.dependencies)) < 5
         ):
             if math.isinf(self.WORKER_SATURATION):
                 return min(
-                    (self.idle or self.workers).values(),
+                    valid_workers or (self.idle or self.workers).values(),
                     key=lambda ws: len(ws.processing) / ws.nthreads,
                 )
 
-            if not self.idle:
+            pool = (
+                self.idle.values()
+                if valid_workers is None
+                else valid_workers.intersection(self.idle.values())
+            )
+            if not pool:
                 # All workers busy? Task gets/stays queued.
                 if self.validate:
                     assert ts.key not in recommendations, (ts, recommendations[ts.key])
@@ -1814,9 +1823,7 @@ class SchedulerState:
 
             # For root tasks, just pick the least busy worker.
             # NOTE: this will lead to worst-case scheduling with regards to co-assignment.
-            ws = min(
-                self.idle.values(), key=lambda ws: len(ws.processing) / ws.nthreads
-            )
+            ws = min(pool, key=lambda ws: len(ws.processing) / ws.nthreads)
             if self.validate:
                 assert not worker_saturated(ws, self.WORKER_SATURATION), (
                     ws,
@@ -2387,7 +2394,9 @@ class SchedulerState:
 
             if self.validate:
                 assert ts not in self.queued
-                assert not self.idle, (ts, self.idle)
+                assert not (
+                    candidates := self.running.intersection(self.idle.values())
+                ), (ts, candidates)
                 # Copied from `transition_waiting_processing`
                 assert not ts.waiting_on
                 assert not ts.who_has
