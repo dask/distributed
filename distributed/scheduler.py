@@ -1385,18 +1385,17 @@ class SchedulerState:
         self, key: str, spec: object, state: str, computation: Computation = None
     ) -> TaskState:
         """Create a new task, and associated states"""
-        ts: TaskState = TaskState(key, spec)
+        ts = TaskState(key, spec)
         ts._state = state
 
-        tp: TaskPrefix
         prefix_key = key_split(key)
-        tp = self.task_prefixes.get(prefix_key)  # type: ignore
+        tp = self.task_prefixes.get(prefix_key)
         if tp is None:
             self.task_prefixes[prefix_key] = tp = TaskPrefix(prefix_key)
         ts.prefix = tp
 
         group_key = ts.group_key
-        tg: TaskGroup = self.task_groups.get(group_key)  # type: ignore
+        tg = self.task_groups.get(group_key)
         if tg is None:
             self.task_groups[group_key] = tg = TaskGroup(group_key)
             if computation:
@@ -1432,7 +1431,7 @@ class SchedulerState:
         Scheduler.transitions : transitive version of this function
         """
         try:
-            ts: TaskState = self.tasks.get(key)  # type: ignore
+            ts = self.tasks.get(key)
             if ts is None:
                 return {}, {}, {}
             start = ts._state
@@ -1574,12 +1573,7 @@ class SchedulerState:
         """
         keys: set = set()
         recommendations = recommendations.copy()
-        msgs: list
-        new_msgs: list
-        new: tuple
-        new_recs: dict
-        new_cmsgs: dict
-        new_wmsgs: dict
+
         while recommendations:
             key, finish = recommendations.popitem()
             keys.add(key)
@@ -1589,13 +1583,13 @@ class SchedulerState:
 
             recommendations.update(new_recs)
             for c, new_msgs in new_cmsgs.items():
-                msgs = client_msgs.get(c)  # type: ignore
+                msgs = client_msgs.get(c)
                 if msgs is not None:
                     msgs.extend(new_msgs)
                 else:
                     client_msgs[c] = new_msgs
             for w, new_msgs in new_wmsgs.items():
-                msgs = worker_msgs.get(w)  # type: ignore
+                msgs = worker_msgs.get(w)
                 if msgs is not None:
                     msgs.extend(new_msgs)
                 else:
@@ -1795,6 +1789,7 @@ class SchedulerState:
                     (self.idle or self.workers).values(),
                     key=partial(self.worker_objective, ts),
                 )
+                assert ws
                 tg.last_worker_tasks_left = math.floor(
                     (len(tg) / self.total_nthreads) * ws.nthreads
                 )
@@ -1820,6 +1815,7 @@ class SchedulerState:
             n_workers: int = len(wp_vals)
             if n_workers < 20:  # smart but linear in small case
                 ws = min(wp_vals, key=operator.attrgetter("occupancy"))
+                assert ws
                 if ws.occupancy == 0:
                     # special case to use round-robin; linear search
                     # for next worker with zero occupancy (or just
@@ -1942,13 +1938,11 @@ class SchedulerState:
         startstops=None,
         **kwargs,
     ):
-        ws: WorkerState
-        wws: WorkerState
         recommendations: dict = {}
         client_msgs: dict = {}
         worker_msgs: dict = {}
         try:
-            ts: TaskState = self.tasks[key]
+            ts = self.tasks[key]
 
             assert worker
             assert isinstance(worker, str)
@@ -2615,13 +2609,13 @@ class SchedulerState:
         if duration >= 0:
             return duration
 
-        s: set = self.unknown_durations.get(ts.prefix.name)  # type: ignore
+        s = self.unknown_durations.get(ts.prefix.name)
         if s is None:
             self.unknown_durations[ts.prefix.name] = s = set()
         s.add(ts)
         return self.UNKNOWN_TASK_DURATION
 
-    def valid_workers(self, ts: TaskState) -> set:  # set[WorkerState] | None
+    def valid_workers(self, ts: TaskState) -> set[WorkerState] | None:
         """Return set of currently valid workers for key
 
         If all workers are valid then this returns ``None``.
@@ -2631,7 +2625,7 @@ class SchedulerState:
         *  host_restrictions
         *  resource_restrictions
         """
-        s: set = None  # type: ignore
+        s: set | None = None
 
         if ts.worker_restrictions:
             s = {addr for addr in ts.worker_restrictions if addr in self.workers}
@@ -2643,7 +2637,7 @@ class SchedulerState:
             # XXX need HostState?
             sl: list = []
             for h in hr:
-                dh: dict = self.host_info.get(h)  # type: ignore
+                dh = self.host_info.get(h)
                 if dh is not None:
                     sl.append(dh["addresses"])
 
@@ -2654,9 +2648,9 @@ class SchedulerState:
                 s |= ss
 
         if ts.resource_restrictions:
-            dw: dict = {}
+            dw = {}
             for resource, required in ts.resource_restrictions.items():
-                dr: dict = self.resources.get(resource)  # type: ignore
+                dr = self.resources.get(resource)
                 if dr is None:
                     self.resources[resource] = dr = {}
 
@@ -2775,10 +2769,9 @@ class SchedulerState:
         immediately, without waiting for the batch to end, we can't rely on worker-side
         ordering, so the recommendations are sorted by priority order here.
         """
-        ts: TaskState
         tasks = []
         for ts in self.unrunnable:
-            valid: set = self.valid_workers(ts)
+            valid = self.valid_workers(ts)
             if valid is None or ws in valid:
                 tasks.append(ts)
         # These recommendations will generate {"op": "compute-task"} messages
@@ -3648,11 +3641,11 @@ class Scheduler(SchedulerState, ServerNode):
         if ws.status == Status.running:
             self.running.add(ws)
 
-        dh: dict = self.host_info.get(host)  # type: ignore
+        dh = self.host_info.get(host)
         if dh is None:
             self.host_info[host] = dh = {}
 
-        dh_addresses: set = dh.get("addresses")  # type: ignore
+        dh_addresses = dh.get("addresses")
         if dh_addresses is None:
             dh["addresses"] = dh_addresses = set()
             dh["nthreads"] = 0
@@ -5794,7 +5787,7 @@ class Scheduler(SchedulerState, ServerNode):
         comm=None,
         memory_ratio: int | float | None = None,
         n: int | None = None,
-        key: Callable[[WorkerState], Hashable] | None = None,
+        key: Callable[[WorkerState], Hashable] | bytes | None = None,
         minimum: int | None = None,
         target: int | None = None,
         attribute: str = "address",
@@ -6148,7 +6141,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.debug("Update data %s", who_has)
 
         for key, workers in who_has.items():
-            ts: TaskState = self.tasks.get(key)  # type: ignore
+            ts = self.tasks.get(key)
             if ts is None:
                 ts = self.new_task(key, None, "memory")
             ts.state = "memory"
@@ -6157,7 +6150,7 @@ class Scheduler(SchedulerState, ServerNode):
                 ts.set_nbytes(ts_nbytes)
 
             for w in workers:
-                ws: WorkerState = self.workers[w]
+                ws = self.workers[w]
                 if ws not in ts.who_has:
                     self.add_replica(ts, ws)
             self.report({"op": "key-in-memory", "key": key, "workers": list(workers)})
@@ -6172,7 +6165,6 @@ class Scheduler(SchedulerState, ServerNode):
             key = ts.key
         else:
             assert False, (key, ts)
-            return
 
         if ts is not None:
             report_msg = _task_to_report_msg(ts)
@@ -6602,7 +6594,7 @@ class Scheduler(SchedulerState, ServerNode):
         ws.used_resources = {}
         for resource, quantity in ws.resources.items():
             ws.used_resources[resource] = 0
-            dr: dict = self.resources.get(resource, None)
+            dr = self.resources.get(resource, None)
             if dr is None:
                 self.resources[resource] = dr = {}
             dr[worker] = quantity
