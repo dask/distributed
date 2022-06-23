@@ -4493,6 +4493,9 @@ class Scheduler(SchedulerState, ServerNode):
         assert not ts.waiting_on
         assert not ts.who_has
         assert not ts.processing_on
+        assert not (
+            ts.worker_restrictions or ts.host_restrictions or ts.resource_restrictions
+        )
         for dts in ts.dependencies:
             assert dts.who_has
             assert ts in dts.waiters
@@ -4860,6 +4863,7 @@ class Scheduler(SchedulerState, ServerNode):
                 "status": status,
             },
         )
+        logger.debug(f"Worker status {prev_status.name} -> {status} - {ws}")
 
         if ws.status == Status.running:
             self.running.add(ws)
@@ -7325,7 +7329,7 @@ def _remove_from_processing(
     if state.queued and not worker_saturated(ws, state.WORKER_SATURATION):
         qts = state.queued.peek()
         if state.validate:
-            assert qts.state == "queued"
+            assert qts.state == "queued", qts.state
             assert qts.key not in recommendations, recommendations[qts.key]
 
         # NOTE: we don't need to schedule more than one task at once here. Since this is

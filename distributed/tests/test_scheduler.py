@@ -292,6 +292,51 @@ async def test_root_task_overproduction(c, s, *nannies):
     assert pids == [n.pid for n in nannies]
 
 
+@pytest.mark.parametrize("withhold", [True, False])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)] * 2,
+    worker_kwargs={"memory_limit": "1.0 GiB"},
+    Worker=Nanny,
+    scheduler_kwargs=dict(  # TODO remove
+        dashboard=True,
+        dashboard_address=":8787",
+    ),
+    config={
+        # With typical overhead, 1 task can be in memory but the second will trigger a pause
+        "distributed.worker.memory.pause": 0.4,
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": False,
+        "distributed.scheduler.work-stealing": False,
+    },
+)
+async def test_queued_paused_released(c, s, a, b, withhold):
+    if not withhold:
+        s.WORKER_SATURATION = float("inf")
+
+    @delayed(pure=True)  # type: ignore
+    def big_data(size: int) -> str:
+        return "x" * size
+
+    roots = [
+        big_data(parse_bytes("200 MiB"), dask_key_name=f"root-{i}") for i in range(16)
+    ]
+    memory_consumed = [delayed(len)(x) for x in roots]
+    f = c.compute(sum(memory_consumed))
+
+    while s.running:  # wait for both workers pausing to hit the scheduler
+        await asyncio.sleep(0.01)
+
+    async with Worker(s.address, nthreads=2) as w:
+        # Tasks are successfully scheduled onto a new worker
+        while not w.state.data:
+            await asyncio.sleep(0.01)
+
+        f.release()
+        while s.tasks:
+            await asyncio.sleep(0.01)
+
+
 @pytest.mark.parametrize(
     "saturation, expected_task_counts",
     [
