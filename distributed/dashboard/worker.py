@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from tornado.ioloop import IOLoop
 
 from distributed.dashboard.components.worker import (

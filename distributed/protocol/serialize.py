@@ -749,7 +749,7 @@ def _deserialize_bytes(header, frames):
     if len(frames) == 1 and isinstance(frames[0], bytes):
         return frames[0]
     else:
-        return bytes().join(frames)
+        return b"".join(frames)
 
 
 @dask_deserialize.register(bytearray)
@@ -782,6 +782,8 @@ def _deserialize_array(header, frames):
 def _serialize_memoryview(obj):
     if obj.format == "O":
         raise ValueError("Cannot serialize `memoryview` containing Python objects")
+    if not obj and obj.ndim > 1:
+        raise ValueError("Cannot serialize empty non-1-D `memoryview`")
     header = {"format": obj.format, "shape": obj.shape}
     frames = [obj]
     return header, frames
@@ -793,7 +795,14 @@ def _deserialize_memoryview(header, frames):
         out = ensure_memoryview(frames[0])
     else:
         out = memoryview(b"".join(frames))
-    out = out.cast(header["format"], header["shape"])
+
+    # handle empty `memoryview`s
+    if out:
+        out = out.cast(header["format"], header["shape"])
+    else:
+        out = out.cast(header["format"])
+        assert out.shape == header["shape"]
+
     return out
 
 
