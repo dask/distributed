@@ -652,7 +652,10 @@ class ComputeTaskEvent(StateMachineEvent):
     nbytes: dict[str, int]
     priority: tuple[int, ...]
     duration: float
-    run_spec: SerializedTask
+    run_spec: SerializedTask | None
+    function: bytes | None
+    args: bytes | tuple | list | None | None
+    kwargs: bytes | dict[str, Any] | None
     resource_restrictions: dict[str, float]
     actor: bool
     annotations: dict
@@ -663,19 +666,32 @@ class ComputeTaskEvent(StateMachineEvent):
         if isinstance(self.priority, list):  # type: ignore[unreachable]
             self.priority = tuple(self.priority)  # type: ignore[unreachable]
 
-        if isinstance(self.run_spec, dict):
-            self.run_spec = SerializedTask(**self.run_spec)  # type: ignore[unreachable]
+        if self.function is not None:
+            assert self.run_spec is None
+            self.run_spec = SerializedTask(
+                function=self.function, args=self.args, kwargs=self.kwargs
+            )
         elif not isinstance(self.run_spec, SerializedTask):
-            self.run_spec = SerializedTask(task=self.run_spec)  # type: ignore[unreachable]
+            self.run_spec = SerializedTask(task=self.run_spec)
+
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
+        return StateMachineEvent._to_dict(self._clean(), exclude=exclude)
+
+    def _clean(self) -> StateMachineEvent:
+        out = copy(self)
+        out.function = None
+        out.kwargs = None
+        out.args = None
+        out.run_spec = SerializedTask(task=None, function=None, args=None, kwargs=None)
+        return out
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
-        out = copy(self)
+        out = self._clean()
         out.handled = handled
-        out.run_spec = SerializedTask(task=None)
         return out
 
     def _after_from_dict(self) -> None:
-        self.run_spec = SerializedTask(task=None)
+        self.run_spec = SerializedTask(task=None, function=None, args=None, kwargs=None)
 
 
 @dataclass
