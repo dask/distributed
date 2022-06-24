@@ -8,8 +8,9 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-async def wait_for_signals(signals: list[signal.Signals]) -> None:
-    """Wait for the passed signals by setting global signal handlers"""
+async def wait_for_signals() -> None:
+    """Wait for sigint or sigterm by setting global signal handlers"""
+    signals = (signal.SIGINT, signal.SIGTERM)
     loop = asyncio.get_running_loop()
     event = asyncio.Event()
 
