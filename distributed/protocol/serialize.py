@@ -749,7 +749,7 @@ def _deserialize_bytes(header, frames):
     if len(frames) == 1 and isinstance(frames[0], bytes):
         return frames[0]
     else:
-        return bytes().join(frames)
+        return b"".join(frames)
 
 
 @dask_deserialize.register(bytearray)

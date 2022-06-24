@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pytest
 
 from distributed.counter import Counter

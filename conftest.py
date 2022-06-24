@@ -1,4 +1,6 @@
 # https://pytest.org/latest/example/simple.html#control-skipping-of-tests-according-to-command-line-option
+from __future__ import annotations
+
 import pytest
 
 # Uncomment to enable more logging and checks

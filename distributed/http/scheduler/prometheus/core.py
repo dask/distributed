@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import toolz
 
 from distributed.http.prometheus import PrometheusCollector

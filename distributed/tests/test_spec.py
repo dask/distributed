@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from distributed.deploy.spec import ProcessInterface
 from distributed.utils_test import gen_test
 
