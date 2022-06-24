@@ -3,6 +3,8 @@
 Code heavily borrowed from Lib/tests/make_ssl_certs.py in CPython.
 """
 
+from __future__ import annotations
+
 import os
 import shutil
 import subprocess

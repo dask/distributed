@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import subprocess
 import sys
@@ -16,7 +18,7 @@ from distributed.compatibility import LINUX
 from distributed.core import Status
 from distributed.metrics import time
 from distributed.system import MEMORY_LIMIT
-from distributed.utils import TimeoutError, sync
+from distributed.utils import TimeoutError, open_port, sync
 from distributed.utils_test import (
     assert_can_connect_from_everywhere_4,
     assert_can_connect_from_everywhere_4_6,
@@ -153,16 +155,17 @@ def test_transports_tcp():
 
 
 def test_transports_tcp_port():
+    port = open_port()
     # Scheduler port specified => need TCP
     with LocalCluster(
         n_workers=1,
         processes=False,
-        scheduler_port=8786,
+        scheduler_port=port,
         silence_logs=False,
         dashboard_address=":0",
     ) as c:
 
-        assert c.scheduler_address == "tcp://127.0.0.1:8786"
+        assert c.scheduler_address == f"tcp://127.0.0.1:{port}"
         assert c.workers[0].address.startswith("tcp://")
         with Client(c.scheduler.address) as e:
             assert e.submit(inc, 4).result() == 5
@@ -756,6 +759,7 @@ def test_adapt_then_manual(loop):
 
 @pytest.mark.parametrize("temporary", [True, False])
 def test_local_tls(loop, temporary):
+    port = open_port()
     if temporary:
         xfail_ssl_issue5601()
         pytest.importorskip("cryptography")
@@ -764,7 +768,7 @@ def test_local_tls(loop, temporary):
         security = tls_only_security()
     with LocalCluster(
         n_workers=0,
-        scheduler_port=8786,
+        scheduler_port=port,
         silence_logs=False,
         security=security,
         dashboard_address=":0",
@@ -833,7 +837,7 @@ def test_local_tls_restart(loop):
     security = tls_only_security()
     with LocalCluster(
         n_workers=1,
-        scheduler_port=8786,
+        scheduler_port=open_port(),
         silence_logs=False,
         security=security,
         dashboard_address=":0",

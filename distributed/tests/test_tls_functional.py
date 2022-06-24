@@ -2,6 +2,8 @@
 Various functional tests for TLS networking.
 Most are taken from other test files and adapted.
 """
+from __future__ import annotations
+
 import asyncio
 
 from distributed import Client, Nanny, Queue, Scheduler, Worker, wait, worker_client

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import itertools
@@ -21,6 +23,7 @@ from distributed.scheduler import key_split
 from distributed.system import MEMORY_LIMIT
 from distributed.utils_test import (
     captured_logger,
+    freeze_batched_send,
     gen_cluster,
     inc,
     nodebug_setup_module,
@@ -1127,6 +1130,76 @@ async def test_get_story(c, s, a, b):
     assert msgs
     assert msgs == msgs_ts
     assert all(isinstance(m, tuple) for m in msgs)
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.scheduler.work-stealing-interval": 1_000_000,
+    },
+)
+async def test_steal_worker_dies_same_ip(c, s, w0, w1):
+    # https://github.com/dask/distributed/issues/5370
+    steal = s.extensions["stealing"]
+    ev = Event()
+    futs1 = c.map(
+        lambda _, ev: ev.wait(),
+        range(10),
+        ev=ev,
+        key=[f"f1-{ix}" for ix in range(10)],
+        workers=[w0.address],
+        allow_other_workers=True,
+    )
+    while not w0.active_keys:
+        await asyncio.sleep(0.01)
+
+    victim_key = list(w0.state.ready)[-1][1]
+
+    victim_ts = s.tasks[victim_key]
+
+    wsA = victim_ts.processing_on
+    assert wsA.address == w0.address
+    wsB = s.workers[w1.address]
+
+    steal.move_task_request(victim_ts, wsA, wsB)
+    len_before = len(s.events["stealing"])
+    with freeze_batched_send(w0.batched_stream):
+        while not any(
+            isinstance(event, StealRequestEvent) for event in w0.state.stimulus_log
+        ):
+            await asyncio.sleep(0.1)
+        async with contextlib.AsyncExitStack() as stack:
+            # Block batched stream of w0 to ensure the steal-confirmation doesn't
+            # arrive at the scheduler before we want it to
+            await w1.close()
+            # Kill worker wsB
+            # Restart new worker with same IP, name, etc.
+            while w1.address in s.workers:
+                await asyncio.sleep(0.1)
+
+            w_new = await stack.enter_async_context(
+                Worker(
+                    s.address,
+                    host=w1.host,
+                    port=w1.port,
+                    name=w1.name,
+                )
+            )
+            wsB2 = s.workers[w_new.address]
+            assert wsB2.address == wsB.address
+            assert wsB2 is not wsB
+            assert wsB2 != wsB
+            assert hash(wsB2) != hash(wsB)
+
+    # Wait for the steal response to arrive
+    while len_before == len(s.events["stealing"]):
+        await asyncio.sleep(0.1)
+
+    assert victim_ts.processing_on != wsB
+
+    await w_new.close(executor_wait=False)
+    await ev.set()
+    await c.gather(futs1)
 
 
 @gen_cluster(

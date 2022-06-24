@@ -1,5 +1,7 @@
 """This file contains custom objects.
 These are mostly regular objects with more useful _repr_ and _repr_html_ methods."""
+from __future__ import annotations
+
 from urllib.parse import urlparse
 
 from dask.widgets import get_environment, get_template

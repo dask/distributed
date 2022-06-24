@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from distributed.comm.addressing import (
     get_address_host,
     get_address_host_port,

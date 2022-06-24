@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from zlib import crc32
 
 import pytest
