@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import asyncio
 import atexit
 import gc
 import logging
 import os
 import re
-import signal
 import sys
 import warnings
 
@@ -205,7 +206,7 @@ def main(
 
         async def wait_for_signals_and_close():
             """Wait for SIGINT or SIGTERM and close the scheduler upon receiving one of those signals"""
-            await wait_for_signals([signal.SIGINT, signal.SIGTERM])
+            await wait_for_signals()
             await scheduler.close()
 
         wait_for_signals_and_close_task = asyncio.create_task(

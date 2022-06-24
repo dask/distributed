@@ -235,12 +235,14 @@ def test_computetask_to_dict():
         nbytes={"y": 123},
         priority=(0,),
         duration=123.45,
-        # Automatically converted to SerializedTask on init
-        run_spec={"function": b"blob", "args": b"blob"},
+        run_spec=None,
         resource_restrictions={},
         actor=False,
         annotations={},
         stimulus_id="test",
+        function=b"blob",
+        args=b"blob",
+        kwargs=None,
     )
     assert ev.run_spec == SerializedTask(function=b"blob", args=b"blob")
     ev2 = ev.to_loggable(handled=11.22)
@@ -261,6 +263,9 @@ def test_computetask_to_dict():
         "annotations": {},
         "stimulus_id": "test",
         "handled": 11.22,
+        "function": None,
+        "args": None,
+        "kwargs": None,
     }
     ev3 = StateMachineEvent.from_dict(d)
     assert isinstance(ev3, ComputeTaskEvent)

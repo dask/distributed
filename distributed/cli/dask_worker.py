@@ -5,7 +5,6 @@ import atexit
 import gc
 import logging
 import os
-import signal
 import sys
 import warnings
 from collections.abc import Iterator
@@ -14,7 +13,7 @@ from typing import Any
 
 import click
 from tlz import valmap
-from tornado.ioloop import IOLoop, TimeoutError
+from tornado.ioloop import TimeoutError
 
 import dask
 from dask.system import CPU_COUNT
@@ -448,14 +447,11 @@ def main(  # type: ignore[no-untyped-def]
     signal_fired = False
 
     async def run():
-        loop = IOLoop.current()
-
         nannies = [
             t(
                 scheduler,
                 scheduler_file=scheduler_file,
                 nthreads=nthreads,
-                loop=loop,
                 resources=resources,
                 security=sec,
                 contact_address=contact_address,
@@ -479,7 +475,7 @@ def main(  # type: ignore[no-untyped-def]
         async def wait_for_signals_and_close():
             """Wait for SIGINT or SIGTERM and close all nannies upon receiving one of those signals"""
             nonlocal signal_fired
-            await wait_for_signals([signal.SIGINT, signal.SIGTERM])
+            await wait_for_signals()
 
             signal_fired = True
             if nanny:
