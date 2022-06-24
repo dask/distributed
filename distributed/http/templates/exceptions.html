@@ -1,0 +1,32 @@
+<div style="max-width: 1200px">
+    {% if len(erred_tasks) %}
+    <h2 class="title is-4">Erred Tasks</h2>
+    {% for ts in erred_tasks %}
+    <div class="box">
+        <div style="display: inline-block;">
+            <p>
+                <span>Task:</span>
+                <code> {{ str(ts.key) }} </code>
+            </p>
+            <p>
+                <span>Exception:</span>
+                <code> {{ ts.exception_text }} </code>
+            </p>
+            <p>
+                <span>Worker(s):</span>
+                {% for w in list(ts.erred_on) + list(ts.erred_on) %}
+                <span style="margin-right: 1em;">
+                    <a href="../worker/{{ url_escape(w) }}.html">{{w}}</a>
+                </span>
+            {% end %}
+        </div>
+        <details style="border: 1px solid black; border-radius: 4px; padding: 1em;">
+            <summary style="font-weight: bold">Traceback</summary>
+            <pre><code>{{ ts.traceback_text }} </code></pre>
+        </details>
+        <div>
+        </div>
+    </div>
+    {% end %}
+    {% end %}
+</div>

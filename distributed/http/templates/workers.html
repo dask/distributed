@@ -5,7 +5,10 @@
 
   <a class="button is-primary" href="logs.html">Logs</a>
   <a class="button is-primary" href="../../status">Bokeh</a>
+  <h2 class="title is-4">Workers</h2>
   {% set worker_list = sorted(workers.values(), key=lambda ws: str(ws.name)) %}
+  {% set erred_tasks = [ts for ts in tasks.values() if ts.exception_text] %}
   {% include "worker-table.html" %}
+  {% include "exceptions.html %}
 
 {% end %}
