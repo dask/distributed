@@ -1061,7 +1061,7 @@ class WorkerState:
         self.has_what = defaultdict(set)
         self.data_needed = HeapSet(key=operator.attrgetter("priority"))
         self.data_needed_per_worker = defaultdict(
-            cast(Callable, partial(HeapSet, key=operator.attrgetter("priority")))
+            partial(HeapSet[TaskState], key=operator.attrgetter("priority"))
         )
         self.in_flight_workers = {}
         self.busy_workers = set()
