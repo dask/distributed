@@ -166,7 +166,7 @@ def test_heapset_pickle():
     """
     heap = HeapSet(key=operator.attrgetter("i"))
 
-    # Test edge case with broken weakrefs
+    # The heap contains broken weakrefs
     for i in range(200):
         c = C(f"y{i}", random.random())
         heap.add(c)
