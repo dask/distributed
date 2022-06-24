@@ -1,3 +1,6 @@
+{% extends main.html %}
+{% block content %}
+
 <style>
 .workerlist {
   display: inline;
@@ -16,9 +19,10 @@
 }
 </style>
 
+{% set erred_tasks = [ts for ts in tasks.values() if ts.exception_text] %}
+
 <div style="max-width: 1200px">
-    {% if len(erred_tasks) %}
-    <h2 class="title is-4">Erred Tasks</h2>
+    <h2 class="title is-3">Exceptions</h2>
     {% for ts in erred_tasks %}
     <div class="box">
         <div style="display: inline-block;">
@@ -47,5 +51,6 @@
         </div>
     </div>
     {% end %}
-    {% end %}
 </div>
+
+{% end %}
