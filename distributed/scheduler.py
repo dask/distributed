@@ -7321,16 +7321,21 @@ def _task_to_msg(
             dts.key: [ws.address for ws in dts.who_has] for dts in ts.dependencies
         },
         "nbytes": {dts.key: dts.nbytes for dts in ts.dependencies},
-        "run_spec": ts.run_spec,
+        "run_spec": None,
+        "function": None,
+        "args": None,
+        "kwargs": None,
         "resource_restrictions": ts.resource_restrictions,
         "actor": ts.actor,
         "annotations": ts.annotations,
     }
     if state.validate:
         assert all(msg["who_has"].values())
-        if isinstance(msg["run_spec"], dict):
-            assert set(msg["run_spec"]).issubset({"function", "args", "kwargs"})
-            assert msg["run_spec"].get("function")
+
+    if isinstance(ts.run_spec, dict):
+        msg.update(ts.run_spec)
+    else:
+        msg["run_spec"] = ts.run_spec
 
     return msg
 

@@ -3641,3 +3641,18 @@ async def test_worker_state_unique_regardless_of_address(s, w):
 async def test_scheduler_close_fast_deprecated(s, w):
     with pytest.warns(FutureWarning):
         await s.close(fast=True)
+
+
+def test_runspec_regression_sync():
+    # https://github.com/dask/distributed/issues/6624
+
+    da = pytest.importorskip("dask.array")
+    np = pytest.importorskip("numpy")
+    with Client():
+        v = da.random.random((20, 20), chunks=(5, 5))
+
+        overlapped = da.map_overlap(np.sum, v, depth=2, boundary="reflect")
+        # This computation is somehow broken but we want to avoid catching any
+        # serialization errors that result in KilledWorker
+        with pytest.raises(IndexError):
+            overlapped.compute()
