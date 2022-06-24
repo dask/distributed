@@ -1064,15 +1064,40 @@ def gen_cluster(
     def _(func):
         if not iscoroutinefunction(func):
             raise RuntimeError("gen_cluster only works for coroutine functions.")
+        # Patch the signature so pytest can inject fixtures
+        orig_sig = inspect.signature(func)
+        args = [None] * (1 + len(nthreads))  # scheduler, *workers
+        if client:
+            args.insert(0, None)
+
+        bound = orig_sig.bind_partial(*args)
+        new_parameters = [
+            p for name, p in orig_sig.parameters.items() if name not in bound.arguments
+        ]
+        requires_tmpdir_factory_fixture = True
+        if "tmp_path_factory" not in orig_sig.parameters:
+            requires_tmpdir_factory_fixture = False
+            new_parameters.append(
+                inspect.Parameter("tmp_path_factory", inspect.Parameter.KEYWORD_ONLY)
+            )
 
         @functools.wraps(func)
         @clean(**clean_kwargs)
         def test_func(*outer_args, **kwargs):
             async def async_fn():
-                result = None
-                with tempfile.TemporaryDirectory() as tmpdir:
+                with contextlib.ExitStack() as exitstack:
+                    tmp_path_factory = kwargs.get("tmp_path_factory")
+                    if tmp_path_factory is None:
+                        # For usage as plain ctxmanager for non-pytest functions
+                        tmpdir = str(exitstack.enter_context(_SafeTemporaryDirectory()))
+                    else:
+                        if not requires_tmpdir_factory_fixture:
+                            del kwargs["tmp_path_factory"]
+                        tmpdir = tmp_path_factory.mktemp(func.__name__)
+                    result = None
                     config2 = merge({"temporary-directory": tmpdir}, config)
                     with dask.config.set(config2):
+
                         workers = []
                         s = False
 
@@ -1217,20 +1242,7 @@ def gen_cluster(
 
             return _run_and_close_tornado(async_fn_outer)
 
-        # Patch the signature so pytest can inject fixtures
-        orig_sig = inspect.signature(func)
-        args = [None] * (1 + len(nthreads))  # scheduler, *workers
-        if client:
-            args.insert(0, None)
-
-        bound = orig_sig.bind_partial(*args)
-        test_func.__signature__ = orig_sig.replace(
-            parameters=[
-                p
-                for name, p in orig_sig.parameters.items()
-                if name not in bound.arguments
-            ]
-        )
+        test_func.__signature__ = orig_sig.replace(parameters=new_parameters)
 
         return test_func
 

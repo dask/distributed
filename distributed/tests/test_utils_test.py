@@ -88,6 +88,15 @@ async def test_gen_cluster_pytest_fixture(c, s, a, b, tmp_path):
         assert isinstance(w, Worker)
 
 
+@gen_cluster(client=True)
+async def test_gen_cluster_pytest_fixture_tmpdir_factory(c, s, a, b, tmpdir_factory):
+    assert isinstance(tmpdir_factory, pytest.TempdirFactory)
+    assert isinstance(c, Client)
+    assert isinstance(s, Scheduler)
+    for w in [a, b]:
+        assert isinstance(w, Worker)
+
+
 @pytest.mark.parametrize("foo", [True])
 @gen_cluster(client=True)
 async def test_gen_cluster_parametrized(c, s, a, b, foo):
