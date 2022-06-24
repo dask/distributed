@@ -24,7 +24,7 @@
         <div style="display: inline-block;">
             <p>
                 <span>Task:</span>
-                <code> {{ str(ts.key) }} </code>
+                <code> <a href="../task/{{ url_escape(ts.key) }}.html">{{ts.key}}</a> </code>
             </p>
             <p>
                 <span>Exception:</span>
