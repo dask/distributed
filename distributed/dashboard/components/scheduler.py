@@ -3237,15 +3237,6 @@ class ExceptionsTable(DashboardComponent):
         code_formatter = HTMLTemplateFormatter(
             template='<code title="<%- value %>"><%= value %></code>'
         )
-        end_code_formatter = HTMLTemplateFormatter(
-            template=(
-                """
-                <p style="direction: rtl; text-align: left; margin: 0 8px 0 8px; overflow: hidden; text-overflow: ellipsis">
-                <code title="<%- value %>"><%= value %></code>
-                </p>'
-                """
-            )
-        )
         columns = [
             TableColumn(field="Task Group", title="Task Group", width=150),
             TableColumn(
@@ -3257,7 +3248,7 @@ class ExceptionsTable(DashboardComponent):
             TableColumn(
                 field="Traceback",
                 title="Traceback",
-                formatter=end_code_formatter,
+                formatter=code_formatter,
                 width=300,
             ),
             TableColumn(
