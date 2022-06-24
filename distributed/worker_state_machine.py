@@ -666,17 +666,28 @@ class ComputeTaskEvent(StateMachineEvent):
         if isinstance(self.priority, list):  # type: ignore[unreachable]
             self.priority = tuple(self.priority)  # type: ignore[unreachable]
 
-        if self.run_spec is None:
+        if self.function is not None:
+            assert self.run_spec is None
             self.run_spec = SerializedTask(
                 function=self.function, args=self.args, kwargs=self.kwargs
             )
         elif not isinstance(self.run_spec, SerializedTask):
-            self.run_spec = SerializedTask(task=self.run_spec)  # type: ignore[unreachable]
+            self.run_spec = SerializedTask(task=self.run_spec)
+
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
+        return StateMachineEvent._to_dict(self._clean(), exclude=exclude)
+
+    def _clean(self) -> StateMachineEvent:
+        out = copy(self)
+        out.function = None
+        out.kwargs = None
+        out.args = None
+        out.run_spec = SerializedTask(task=None, function=None, args=None, kwargs=None)
+        return out
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
-        out = copy(self)
+        out = self._clean()
         out.handled = handled
-        out.run_spec = SerializedTask(task=None, function=None, args=None, kwargs=None)
         return out
 
     def _after_from_dict(self) -> None:
