@@ -160,8 +160,8 @@ def test_WorkerState_pickle(ws):
     ----------
     WorkerState, on its own, can be serialized with pickle; it doesn't need cloudpickle.
     A WorkerState extracted from a Worker might, as data contents may only be
-    serializable with cloudpickle. Some objects created externally - namely, the
-    SpillBuffer - may not be serializable at all.
+    serializable with cloudpickle. Some objects created externally and not designed
+    for network transfer - namely, the SpillBuffer - may not be serializable at all.
     """
     ws.handle_stimulus(
         AcquireReplicasEvent(
