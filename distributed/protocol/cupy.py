@@ -1,6 +1,8 @@
 """
 Efficient serialization GPU arrays.
 """
+from __future__ import annotations
+
 import copyreg
 
 import cupy
