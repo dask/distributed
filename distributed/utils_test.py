@@ -1070,7 +1070,7 @@ def gen_cluster(
         def test_func(*outer_args, **kwargs):
             async def async_fn():
                 result = None
-                with tempfile.TemporaryDirectory() as tmpdir:
+                with _SafeTemporaryDirectory() as tmpdir:
                     config2 = merge({"temporary-directory": tmpdir}, config)
                     with dask.config.set(config2):
                         workers = []
