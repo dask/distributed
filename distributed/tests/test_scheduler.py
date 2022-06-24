@@ -148,7 +148,6 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         nthreads=nthreads,
         config={
             "distributed.scheduler.work-stealing": False,
-            "distributed.scheduler.worker-saturation": float("inf"),
         },
     )
     async def test_decide_worker_coschedule_order_neighbors_(c, s, *workers):
@@ -253,9 +252,6 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
 @gen_cluster(
     client=True,
     nthreads=[("", 1), ("", 1)],
-    config={
-        "distributed.scheduler.worker-saturation": float("inf"),
-    },
 )
 async def test_decide_worker_coschedule_order_binary_op(c, s, a, b, ngroups):
     roots = [[delayed(i, name=f"x-{n}-{i}") for i in range(8)] for n in range(ngroups)]
@@ -278,6 +274,7 @@ async def test_decide_worker_coschedule_order_binary_op(c, s, a, b, ngroups):
         dashboard_address=":8787",
     ),
     config={
+        "distributed.scheduler.worker-saturation": 1.0,
         "distributed.worker.memory.target": False,
         "distributed.worker.memory.spill": False,
         "distributed.scheduler.work-stealing": False,
@@ -319,6 +316,7 @@ async def test_root_task_overproduction(c, s, *nannies):
         dashboard_address=":8787",
     ),
     config={
+        "distributed.scheduler.worker-saturation": 1.0,
         # With typical overhead, 1 task can be in memory but the second will trigger a pause
         "distributed.worker.memory.pause": 0.4,
         "distributed.worker.memory.target": False,
@@ -398,6 +396,7 @@ def test_saturation_factor(
 @gen_cluster(
     client=True,
     nthreads=[("", 2), ("", 1)],
+    config={"distributed.scheduler.worker-saturation": 1.0},
 )
 async def test_oversaturation_multiple_task_groups(c, s, a, b, saturation_factor):
     s.WORKER_SATURATION = saturation_factor
@@ -421,6 +420,7 @@ async def test_oversaturation_multiple_task_groups(c, s, a, b, saturation_factor
         dashboard=True,
         dashboard_address=":8787",
     ),
+    config={"distributed.scheduler.worker-saturation": 1.0},
 )
 async def test_queued_tasks_rebalance(client, s, a, b):
     """
