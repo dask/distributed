@@ -19,8 +19,6 @@
 }
 </style>
 
-{% set erred_tasks = [ts for ts in tasks.values() if ts.exception_text] %}
-
 <div style="max-width: 1200px">
     <h2 class="title is-3">Exceptions</h2>
     {% for ts in erred_tasks %}

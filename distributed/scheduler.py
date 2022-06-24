@@ -1255,6 +1255,7 @@ class SchedulerState:
         "bandwidth",
         "clients",
         "computations",
+        "erred_tasks",
         "extensions",
         "host_info",
         "group_exceptions",
@@ -1319,6 +1320,7 @@ class SchedulerState:
         self.computations: deque[Computation] = deque(
             maxlen=dask.config.get("distributed.diagnostics.computations.max-history")
         )
+        self.erred_tasks: deque[TaskState] = deque(maxlen=100)
         self.task_groups: dict[str, TaskGroup] = {}
         self.task_prefixes: dict[str, TaskPrefix] = {}
         self.task_metadata = {}  # type: ignore
@@ -1376,6 +1378,7 @@ class SchedulerState:
             "task_prefixes": self.task_prefixes,
             "total_nthreads": self.total_nthreads,
             "total_occupancy": self.total_occupancy,
+            "erred_tasks": self.erred_tasks,
             "extensions": self.extensions,
             "clients": self.clients,
             "workers": self.workers,
@@ -2324,6 +2327,7 @@ class SchedulerState:
                 failing_ts = ts.exception_blame  # type: ignore
 
             if exception_text and traceback_text:
+                self.erred_tasks.appendleft(ts)
                 ex = exception_text.split("(", 1)[0]
                 # Hash based on group name and exception type name, so that
                 # will be considered the unit of deduplication.
