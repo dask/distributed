@@ -1,3 +1,21 @@
+<style>
+.workerlist {
+  display: inline;
+  list-style: none;
+}
+
+.workerlist li {
+  display: inline;
+}
+
+.workerlist li:after {
+  content: ", ";
+}
+.workerlist li:last-child:after {
+  content: "";
+}
+</style>
+
 <div style="max-width: 1200px">
     {% if len(erred_tasks) %}
     <h2 class="title is-4">Erred Tasks</h2>
@@ -12,13 +30,14 @@
                 <span>Exception:</span>
                 <code> {{ ts.exception_text }} </code>
             </p>
-            <p>
+            <div>
                 <span>Worker(s):</span>
-                {% for w in list(ts.erred_on) + list(ts.erred_on) %}
-                <span style="margin-right: 1em;">
-                    <a href="../worker/{{ url_escape(w) }}.html">{{w}}</a>
-                </span>
-            {% end %}
+                <ul class="workerlist">
+                    {% for w in ts.erred_on %}
+                    <li><a href="../worker/{{ url_escape(w) }}.html">{{w}}</a></li>
+                    {% end %}
+                </ul>
+            </div>
         </div>
         <details style="border: 1px solid black; border-radius: 4px; padding: 1em;">
             <summary style="font-weight: bold">Traceback</summary>
