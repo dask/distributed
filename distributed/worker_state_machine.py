@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import abc
 import asyncio
-import functools
 import heapq
 import logging
 import operator
@@ -21,7 +20,7 @@ from collections.abc import (
 )
 from copy import copy
 from dataclasses import dataclass, field
-from functools import lru_cache
+from functools import lru_cache, partial, singledispatchmethod
 from itertools import chain
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict, cast
 
@@ -1086,7 +1085,7 @@ class WorkerState:
         self.has_what = defaultdict(set)
         self.data_needed = HeapSet(key=operator.attrgetter("priority"))
         self.data_needed_per_worker = defaultdict(
-            lambda: HeapSet(key=operator.attrgetter("priority"))
+            partial(HeapSet[TaskState], key=operator.attrgetter("priority"))
         )
         self.in_flight_workers = {}
         self.busy_workers = set()
@@ -2324,7 +2323,7 @@ class WorkerState:
     # Events #
     ##########
 
-    @functools.singledispatchmethod
+    @singledispatchmethod
     def _handle_event(self, ev: StateMachineEvent) -> RecsInstrs:
         raise TypeError(ev)  # pragma: nocover
 
