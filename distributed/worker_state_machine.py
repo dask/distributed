@@ -1301,8 +1301,8 @@ class WorkerState:
                 )
             )
 
-            self.comm_nbytes += total_nbytes
             self.in_flight_workers[worker] = to_gather_keys
+            self.comm_nbytes += total_nbytes
             if (
                 len(self.in_flight_workers) >= self.total_out_connections
                 and self.comm_nbytes >= self.comm_threshold_bytes
@@ -1324,7 +1324,8 @@ class WorkerState:
         4. If still tied, by a random element. This is statically seeded to guarantee
            reproducibility.
 
-           FIXME you won't get determinism when a single task is replicated on multiple
+           FIXME https://github.com/dask/distributed/issues/6620
+                 You won't get determinism when a single task is replicated on multiple
                  workers, because TaskState.who_has changes order at every interpreter
                  restart.
 
