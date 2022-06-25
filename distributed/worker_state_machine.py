@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import abc
 import asyncio
-import functools
 import heapq
 import logging
 import operator
@@ -21,7 +20,8 @@ from collections.abc import (
 )
 from copy import copy
 from dataclasses import dataclass, field
-from functools import lru_cache
+from functools import lru_cache, partial, singledispatchmethod
+from itertools import chain
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict, cast
 
 from tlz import peekn, pluck
@@ -274,15 +274,22 @@ class TaskState:
     def __repr__(self) -> str:
         return f"<TaskState {self.key!r} {self.state}>"
 
-    def __eq__(self, other: object) -> bool:
-        # A task may be forgotten and a new TaskState object with the same key may be
-        # created in its place later on. In the Worker state, you should never have
-        # multiple TaskState objects with the same key. We can't assert it here however,
-        # as this comparison is also used in WeakSets for instance tracking purposes.
-        return other is self
-
     def __hash__(self) -> int:
-        return hash(self.key)
+        """Override dataclass __hash__, reverting to the default behaviour
+        hash(o) == id(o).
+
+        Note that we also defined @dataclass(eq=False), which reverts to the default
+        behaviour (a == b) == (a is b).
+
+        On first thought, it would make sense to use TaskState.key for equality and
+        hashing. However, a task may be forgotten and a new TaskState object with the
+        same key may be created in its place later on. In the Worker state, you should
+        never have multiple TaskState objects with the same key; see
+        WorkerState.validate_state for relevant checks. We can't assert the same thing
+        in __eq__ though, as multiple objects with the same key may appear in
+        TaskState._instances for a brief period of time.
+        """
+        return id(self)
 
     def get_nbytes(self) -> int:
         nbytes = self.nbytes
@@ -1077,7 +1084,7 @@ class WorkerState:
         self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)
         self.data_needed = defaultdict(
-            lambda: HeapSet(key=operator.attrgetter("priority"))
+            partial(HeapSet[TaskState], key=operator.attrgetter("priority"))
         )
         self.in_flight_workers = {}
         self.busy_workers = set()
@@ -2350,7 +2357,7 @@ class WorkerState:
     # Events #
     ##########
 
-    @functools.singledispatchmethod
+    @singledispatchmethod
     def _handle_event(self, ev: StateMachineEvent) -> RecsInstrs:
         raise TypeError(ev)  # pragma: nocover
 
@@ -3056,8 +3063,17 @@ class WorkerState:
         for worker, tss in self.data_needed.items():
             for ts in tss:
                 assert ts.state == "fetch"
-                assert self.tasks[ts.key] is ts
                 assert worker in ts.who_has
+
+        # Test that there aren't multiple TaskState objects with the same key in any
+        # Set[TaskState]. See note in TaskState.__hash__.
+        for ts in chain(
+            *self.data_needed.values(),
+            self.missing_dep_flight,
+            self.in_flight_tasks,
+            self.executing,
+        ):
+            assert self.tasks[ts.key] is ts
 
         for ts in self.tasks.values():
             self.validate_task(ts)
