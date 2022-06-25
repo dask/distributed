@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import pickle
 from collections.abc import Iterator
 
 import pytest
@@ -56,6 +57,17 @@ def test_TaskState_get_nbytes():
     assert TaskState("x", nbytes=123).get_nbytes() == 123
     # Default to distributed.scheduler.default-data-size
     assert TaskState("y").get_nbytes() == 1024
+
+
+def test_TaskState_eq():
+    """Test that TaskState objects are hashable and that two identical objects compare
+    as different. See comment in TaskState.__hash__ for why.
+    """
+    a = TaskState("x")
+    b = TaskState("x")
+    assert a != b
+    s = {a, b}
+    assert len(s) == 2
 
 
 def test_TaskState__to_dict():
@@ -154,6 +166,27 @@ def test_WorkerState__to_dict(ws):
         "transition_counter": 2,
     }
     assert actual == expect
+
+
+def test_WorkerState_pickle(ws):
+    """Test pickle round-trip.
+
+    Big caveat
+    ----------
+    WorkerState, on its own, can be serialized with pickle; it doesn't need cloudpickle.
+    A WorkerState extracted from a Worker might, as data contents may only be
+    serializable with cloudpickle. Some objects created externally and not designed
+    for network transfer - namely, the SpillBuffer - may not be serializable at all.
+    """
+    ws.handle_stimulus(
+        AcquireReplicasEvent(
+            who_has={"x": ["127.0.0.1:1235"]}, nbytes={"x": 123}, stimulus_id="s1"
+        )
+    )
+    ws.handle_stimulus(UpdateDataEvent(data={"y": 123}, report=False, stimulus_id="s"))
+    ws2 = pickle.loads(pickle.dumps(ws))
+    assert ws2.tasks.keys() == {"x", "y"}
+    assert ws2.data == {"y": 123}
 
 
 def traverse_subclasses(cls: type) -> Iterator[type]:

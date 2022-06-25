@@ -53,6 +53,22 @@ class HeapSet(MutableSet[T]):
     def __repr__(self) -> str:
         return f"<{type(self).__name__}: {len(self)} items>"
 
+    def __reduce__(self) -> tuple[Callable, tuple]:
+        heap = [(k, i, v) for k, i, vref in self._heap if (v := vref()) in self._data]
+        return HeapSet._unpickle, (self.key, self._inc, heap)
+
+    @staticmethod
+    def _unpickle(
+        key: Callable[[T], Any], inc: int, heap: list[tuple[Any, int, T]]
+    ) -> HeapSet[T]:
+        self = object.__new__(HeapSet)
+        self.key = key  # type: ignore
+        self._data = {v for _, _, v in heap}
+        self._inc = inc
+        self._heap = [(k, i, weakref.ref(v)) for k, i, v in heap]
+        heapq.heapify(self._heap)
+        return self
+
     def __contains__(self, value: object) -> bool:
         return value in self._data
 
