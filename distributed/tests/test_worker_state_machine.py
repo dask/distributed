@@ -58,6 +58,17 @@ def test_TaskState_get_nbytes():
     assert TaskState("y").get_nbytes() == 1024
 
 
+def test_TaskState_eq():
+    """Test that TaskState objects are hashable and that two identical objects compare
+    as different. See comment in TaskState.__hash__ for why.
+    """
+    a = TaskState("x")
+    b = TaskState("x")
+    assert a != b
+    s = {a, b}
+    assert len(s) == 2
+
+
 def test_TaskState__to_dict():
     """Tasks that are listed as dependencies or dependents of other tasks are dumped as
     a short repr and always appear in full directly under Worker.state.tasks.
