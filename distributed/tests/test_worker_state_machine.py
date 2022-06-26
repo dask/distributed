@@ -27,7 +27,6 @@ from distributed.utils_test import (
 from distributed.worker_state_machine import (
     AcquireReplicasEvent,
     ComputeTaskEvent,
-    EnsureCommunicatingAfterTransitions,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     GatherDep,
@@ -120,7 +119,7 @@ def test_WorkerState__to_dict(ws):
         "busy_workers": [],
         "constrained": [],
         "data": {"y": None},
-        "data_needed": {"127.0.0.1:1235": ["x"]},
+        "data_needed": {},
         "executing": [],
         "in_flight_tasks": ["x"],
         "in_flight_workers": {"127.0.0.1:1235": ["x"]},
@@ -862,6 +861,9 @@ async def test_deprecated_worker_attributes(s, a, b):
     with pytest.warns(FutureWarning, match=msg):
         assert a.in_flight_tasks == 0
 
+    with pytest.warns(FutureWarning, match="attribute has been removed"):
+        assert a.data_needed == set()
+
 
 @pytest.mark.parametrize(
     "nbytes,n_in_flight",
@@ -887,9 +889,6 @@ def test_aggregate_gather_deps(ws, nbytes, n_in_flight):
     assert len(instructions) == 1
     assert isinstance(instructions[0], GatherDep)
     assert len(ws.in_flight_tasks) == n_in_flight
-
-    with pytest.warns(FutureWarning, match="attribute has been removed"):
-        assert a.data_needed == set()
 
 
 def test_gather_priority(ws):
@@ -933,6 +932,9 @@ def test_gather_priority(ws):
             priority=(0,),
             duration=1.0,
             run_spec=None,
+            function=None,
+            args=None,
+            kwargs=None,
             resource_restrictions={},
             actor=False,
             annotations={},
@@ -942,15 +944,6 @@ def test_gather_priority(ws):
     )
 
     assert instructions == [
-        EnsureCommunicatingAfterTransitions(stimulus_id="compute1"),
-        EnsureCommunicatingAfterTransitions(stimulus_id="compute1"),
-        EnsureCommunicatingAfterTransitions(stimulus_id="compute1"),
-        EnsureCommunicatingAfterTransitions(stimulus_id="compute1"),
-        EnsureCommunicatingAfterTransitions(stimulus_id="compute1"),
-        EnsureCommunicatingAfterTransitions(stimulus_id="compute1"),
-        EnsureCommunicatingAfterTransitions(stimulus_id="compute1"),
-        EnsureCommunicatingAfterTransitions(stimulus_id="compute1"),
-        EnsureCommunicatingAfterTransitions(stimulus_id="compute2"),
         # Highest-priority task first. Lower priority tasks from the same worker are
         # shoved into the same instruction (up to 50MB worth)
         GatherDep(
