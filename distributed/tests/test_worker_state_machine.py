@@ -122,11 +122,13 @@ def test_WorkerState__to_dict(ws):
         "data": {"y": None},
         "data_needed": {"127.0.0.1:1235": ["x"]},
         "executing": [],
-        "in_flight_tasks": [],
-        "in_flight_workers": {},
+        "in_flight_tasks": ["x"],
+        "in_flight_workers": {"127.0.0.1:1235": ["x"]},
         "log": [
             ["x", "ensure-task-exists", "released", "s1"],
             ["x", "released", "fetch", "fetch", {}, "s1"],
+            ["gather-dependencies", "127.0.0.1:1235", ["x"], "s1"],
+            ["x", "fetch", "flight", "flight", {}, "s1"],
             ["y", "put-in-memory", "s2"],
             ["y", "receive-from-scatter", "s2"],
         ],
@@ -150,10 +152,11 @@ def test_WorkerState__to_dict(ws):
         ],
         "tasks": {
             "x": {
+                "coming_from": "127.0.0.1:1235",
                 "key": "x",
                 "nbytes": 123,
                 "priority": [1],
-                "state": "fetch",
+                "state": "flight",
                 "who_has": ["127.0.0.1:1235"],
             },
             "y": {
@@ -162,7 +165,7 @@ def test_WorkerState__to_dict(ws):
                 "state": "memory",
             },
         },
-        "transition_counter": 1,
+        "transition_counter": 2,
     }
     assert actual == expect
 
@@ -858,6 +861,32 @@ async def test_deprecated_worker_attributes(s, a, b):
     )
     with pytest.warns(FutureWarning, match=msg):
         assert a.in_flight_tasks == 0
+
+
+@pytest.mark.parametrize(
+    "nbytes,n_in_flight",
+    [
+        # Note: target_message_size = 50e6 bytes
+        (int(10e6), 3),
+        (int(20e6), 2),
+        (int(30e6), 1),
+    ],
+)
+def test_aggregate_gather_deps(ws, nbytes, n_in_flight):
+    instructions = ws.handle_stimulus(
+        AcquireReplicasEvent(
+            who_has={
+                "x1": ["127.0.0.1:1235"],
+                "x2": ["127.0.0.1:1235"],
+                "x3": ["127.0.0.1:1235"],
+            },
+            nbytes={"x1": nbytes, "x2": nbytes, "x3": nbytes},
+            stimulus_id="test",
+        )
+    )
+    assert len(instructions) == 1
+    assert isinstance(instructions[0], GatherDep)
+    assert len(ws.in_flight_tasks) == n_in_flight
 
     with pytest.warns(FutureWarning, match="attribute has been removed"):
         assert a.data_needed == set()
