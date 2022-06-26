@@ -527,7 +527,7 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
     # - w and z respectively make x and y go into fetch state.
     #   w has a higher priority than z, therefore w's dependency x has a higher priority
     #   than z's dependency y.
-    #   a.state.data_needed = ["x", "y"]
+    #   a.state.data_needed[b.address] = ["x", "y"]
     # - ensure_communicating decides to fetch x but not to fetch y together with it, as
     #   it thinks x is 1TB in size
     # - x fetch->flight; a is added to in_flight_workers
@@ -543,7 +543,7 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
     await asyncio.sleep(0.1)
     assert a.state.tasks["y"].state == "fetch"
     assert "y" not in a.data
-    assert [ts.key for ts in a.state.data_needed] == ["y"]
+    assert [ts.key for ts in a.state.data_needed[b.address]] == ["y"]
 
     # Unpausing kicks off ensure_communicating again
     a.status = Status.running

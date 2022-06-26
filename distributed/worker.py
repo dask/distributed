@@ -859,8 +859,7 @@ class Worker(BaseWorker, ServerNode):
     comm_nbytes = DeprecatedWorkerStateAttribute()
     comm_threshold_bytes = DeprecatedWorkerStateAttribute()
     constrained = DeprecatedWorkerStateAttribute()
-    data_needed = DeprecatedWorkerStateAttribute()
-    data_needed_per_worker = DeprecatedWorkerStateAttribute()
+    data_needed_per_worker = DeprecatedWorkerStateAttribute(target="data_needed")
     executed_count = DeprecatedWorkerStateAttribute()
     executing_count = DeprecatedWorkerStateAttribute()
     generation = DeprecatedWorkerStateAttribute()
@@ -882,6 +881,15 @@ class Worker(BaseWorker, ServerNode):
     validate = DeprecatedWorkerStateAttribute()
     validate_task = DeprecatedWorkerStateAttribute()
     waiting_for_data_count = DeprecatedWorkerStateAttribute()
+
+    @property
+    def data_needed(self) -> set[TaskState]:
+        warnings.warn(
+            "The `Worker.data_needed` attribute has been removed; "
+            "use `Worker.state.data_needed[address]`",
+            FutureWarning,
+        )
+        return {ts for tss in self.state.data_needed.values() for ts in tss}
 
     ##################
     # Administrative #
