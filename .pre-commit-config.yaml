@@ -37,6 +37,7 @@ repos:
         args: [--warn-unused-configs]
         additional_dependencies:
           # Type stubs
+          - pandas-stubs
           - types-docutils
           - types-requests
           - types-paramiko
