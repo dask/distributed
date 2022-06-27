@@ -3224,11 +3224,10 @@ class ExceptionsTable(DashboardComponent):
         self.scheduler = scheduler
 
         self.names = [
-            "Task Group",
+            "Task",
             "Exception",
             "Traceback",
             "Worker(s)",
-            "Last Seen",
             "Count",
         ]
 
@@ -3238,7 +3237,12 @@ class ExceptionsTable(DashboardComponent):
             template='<code title="<%- value %>"><%= value %></code>'
         )
         columns = [
-            TableColumn(field="Task Group", title="Task Group", width=150),
+            TableColumn(
+                field="Task",
+                title="Task",
+                formatter=code_formatter,
+                width=150,
+            ),
             TableColumn(
                 field="Exception",
                 title="Exception",
@@ -3255,11 +3259,6 @@ class ExceptionsTable(DashboardComponent):
                 field="Worker(s)",
                 title="Worker(s)",
                 formatter=code_formatter,
-                width=200,
-            ),
-            TableColumn(
-                field="Last Seen",
-                title="Last Seen",
                 width=200,
             ),
             TableColumn(
@@ -3287,18 +3286,14 @@ class ExceptionsTable(DashboardComponent):
     @without_property_validation
     def update(self):
         new_data = {name: [] for name in self.names}
-        group_exceptions = self.scheduler.group_exceptions
+        erred_tasks = self.scheduler.erred_tasks
 
-        for key, ex in reversed(group_exceptions.items()):
-            task_group, _ = key
-            new_data["Task Group"].append(task_group)
-            new_data["Exception"].append(ex["exception"])
-            new_data["Traceback"].append(ex["traceback"])
-            new_data["Worker(s)"].append(",\n".join(ex["workers"]))
-            new_data["Last Seen"].append(
-                datetime.fromtimestamp(ex["last_seen"]).strftime("%H:%M:%S")
-            )
-            new_data["Count"].append(ex["count"])
+        for ts in erred_tasks:
+            new_data["Task"].append(ts.key)
+            new_data["Exception"].append(ts.exception_text)
+            new_data["Traceback"].append(ts.traceback_text)
+            new_data["Worker(s)"].append(",\n".join(ts.erred_on))
+            new_data["Count"].append(len(ts.erred_on))
 
         update(self.source, new_data)
 

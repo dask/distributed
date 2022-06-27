@@ -16,7 +16,7 @@ import sys
 import uuid
 import warnings
 import weakref
-from collections import OrderedDict, defaultdict, deque
+from collections import defaultdict, deque
 from collections.abc import (
     Callable,
     Collection,
@@ -1258,7 +1258,6 @@ class SchedulerState:
         "erred_tasks",
         "extensions",
         "host_info",
-        "group_exceptions",
         "idle",
         "n_tasks",
         "resources",
@@ -1308,7 +1307,6 @@ class SchedulerState:
         self.clients["fire-and-forget"] = ClientState("fire-and-forget")
         self.extensions = {}  # type: ignore
         self.host_info = host_info
-        self.group_exceptions: OrderedDict[tuple[str, str], dict] = OrderedDict()
         self.idle = SortedDict()
         self.n_tasks = 0
         self.resources = resources
@@ -2328,22 +2326,6 @@ class SchedulerState:
 
             if exception_text and traceback_text:
                 self.erred_tasks.appendleft(ts)
-                ex = exception_text.split("(", 1)[0]
-                # Hash based on group name and exception type name, so that
-                # will be considered the unit of deduplication.
-                if (ts.group_key, ex) not in self.group_exceptions:
-                    # Cap the number of unique exception types we are tracking
-                    if len(self.group_exceptions) > 100:
-                        self.group_exceptions.popitem(last=False)
-                    self.group_exceptions[(ts.group_key, ex)] = {
-                        "exception": exception_text,
-                        "traceback": traceback_text,
-                        "workers": set(),
-                        "count": 0,
-                    }
-                self.group_exceptions[(ts.group_key, ex)]["workers"].add(w or worker)
-                self.group_exceptions[(ts.group_key, ex)]["count"] += 1
-                self.group_exceptions[(ts.group_key, ex)]["last_seen"] = time()
 
             for dts in ts.dependents:
                 dts.exception_blame = failing_ts
@@ -5163,7 +5145,6 @@ class Scheduler(SchedulerState, ServerNode):
                 c.cancel()
 
         self.erred_tasks.clear()
-        self.group_exceptions.clear()
         self.computations.clear()
 
         self.log_event([client, "all"], {"action": "restart", "client": client})
