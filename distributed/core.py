@@ -512,17 +512,22 @@ class Server:
                 pc.start()
 
     def stop(self):
-        if not self.__stopped:
-            self.__stopped = True
+        if self.__stopped:
+            return
 
-            for listener in self.listeners:
+        self.__stopped = True
+        _stops = set()
+        for listener in self.listeners:
+            future = listener.stop()
+            if inspect.isawaitable(future):
+                _stops.add(future)
 
-                async def stop_listener(listener):
-                    v = listener.stop()
-                    if inspect.isawaitable(v):
-                        await v
+        if _stops:
 
-                self._ongoing_background_tasks.call_soon(stop_listener, listener)
+            async def background_stops():
+                await asyncio.gather(*_stops)
+
+            self._ongoing_background_tasks.call_soon(background_stops)
 
     @property
     def listener(self):
@@ -863,7 +868,8 @@ class Server:
                     future = listener.stop()
                     if inspect.isawaitable(future):
                         _stops.add(future)
-                await asyncio.gather(*_stops)
+                if _stops:
+                    await asyncio.gather(*_stops)
 
             # TODO: Deal with exceptions
             await self._ongoing_background_tasks.stop()
