@@ -427,7 +427,6 @@ class Server:
         self.io_loop.add_callback(set_thread_ident)
         self._startup_lock = asyncio.Lock()
         self.__startup_exc: Exception | None = None
-        self.__started = asyncio.Event()
 
         self.rpc = ConnectionPool(
             limit=connection_limit,
@@ -475,35 +474,30 @@ class Server:
         return self
 
     async def start(self):
-        try:
-            async with self._startup_lock:
-                if self.status == Status.failed:
-                    assert self.__startup_exc is not None
-                    raise self.__startup_exc
-                elif self.status != Status.init:
-                    return self
-                timeout = getattr(self, "death_timeout", None)
+        async with self._startup_lock:
+            if self.status == Status.failed:
+                assert self.__startup_exc is not None
+                raise self.__startup_exc
+            elif self.status != Status.init:
+                return self
+            timeout = getattr(self, "death_timeout", None)
 
-                async def _close_on_failure(exc: Exception) -> None:
-                    await self.close()
-                    self.status = Status.failed
-                    self.__startup_exc = exc
+            async def _close_on_failure(exc: Exception) -> None:
+                await self.close()
+                self.status = Status.failed
+                self.__startup_exc = exc
 
-                try:
-                    await asyncio.wait_for(self.start_unsafe(), timeout=timeout)
-                except asyncio.TimeoutError as exc:
-                    await _close_on_failure(exc)
-                    raise asyncio.TimeoutError(
-                        f"{type(self).__name__} start timed out after {timeout}s."
-                    ) from exc
-                except Exception as exc:
-                    await _close_on_failure(exc)
-                    raise RuntimeError(
-                        f"{type(self).__name__} failed to start."
-                    ) from exc
-                self.status = Status.running
-        finally:
-            self.__started.set()
+            try:
+                await asyncio.wait_for(self.start_unsafe(), timeout=timeout)
+            except asyncio.TimeoutError as exc:
+                await _close_on_failure(exc)
+                raise asyncio.TimeoutError(
+                    f"{type(self).__name__} start timed out after {timeout}s."
+                ) from exc
+            except Exception as exc:
+                await _close_on_failure(exc)
+                raise RuntimeError(f"{type(self).__name__} failed to start.") from exc
+            self.status = Status.running
         return self
 
     async def __aenter__(self):
@@ -704,7 +698,7 @@ class Server:
         logger.debug("Connection from %r to %s", address, type(self).__name__)
         self._comms[comm] = op
 
-        await self.__started.wait()
+        await self
         try:
             while not self.__stopped:
                 try:
