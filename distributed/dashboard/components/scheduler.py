@@ -8,7 +8,7 @@ from collections import OrderedDict, defaultdict
 from collections.abc import Iterable
 from datetime import datetime
 from numbers import Number
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import numpy as np
 from bokeh.core.properties import without_property_validation
@@ -3220,7 +3220,7 @@ class ExceptionsTable(DashboardComponent):
 
     scheduler: Scheduler
 
-    def __init__(self, scheduler: Scheduler, width: int = 1000, **kwargs):
+    def __init__(self, scheduler: Scheduler, width: int = 1000, **kwargs: Any):
         self.scheduler = scheduler
 
         self.names = [
