@@ -28,10 +28,6 @@
                 <span>Task:</span>
                 <code> <a href="../task/{{ url_escape(ts.key) }}.html">{{ts.key}}</a> </code>
             </p>
-            <p>
-                <span>Exception:</span>
-                <code> {{ ts.exception_text }} </code>
-            </p>
             <div>
                 <span>Worker(s):</span>
                 <ul class="workerlist">
@@ -40,8 +36,12 @@
                     {% end %}
                 </ul>
             </div>
+            <p>
+                <span>Exception:</span>
+                <code> {{ ts.exception_text }} </code>
+            </p>
         </div>
-        <details style="border: 1px solid black; border-radius: 4px; padding: 1em;">
+        <details style="border: 1px solid black; border-radius: 4px; padding: 1em; margin-top: 4px;">
             <summary style="font-weight: bold">Traceback</summary>
             <pre><code>{{ ts.traceback_text }} </code></pre>
         </details>
