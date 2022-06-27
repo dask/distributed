@@ -252,6 +252,8 @@ distributed:
         - cuml
         - prefect
         - xgboost
+    erred-tasks:
+      max-history: 100
 
   ###################
   # Bokeh dashboard #

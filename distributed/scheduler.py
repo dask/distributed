@@ -1318,7 +1318,9 @@ class SchedulerState:
         self.computations: deque[Computation] = deque(
             maxlen=dask.config.get("distributed.diagnostics.computations.max-history")
         )
-        self.erred_tasks: deque[TaskState] = deque(maxlen=100)
+        self.erred_tasks: deque[TaskState] = deque(
+            maxlen=dask.config.get("distributed.diagnostics.erred-tasks.max-history")
+        )
         self.task_groups: dict[str, TaskGroup] = {}
         self.task_prefixes: dict[str, TaskPrefix] = {}
         self.task_metadata = {}  # type: ignore
