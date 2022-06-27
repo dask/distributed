@@ -40,7 +40,6 @@ from distributed.utils_test import (
     assert_can_connect_locally_4,
     assert_can_connect_locally_6,
     assert_cannot_connect,
-    async_wait_for,
     captured_logger,
     gen_cluster,
     gen_test,
@@ -1065,9 +1064,12 @@ async def test_close_properly():
     GH4704
     """
 
+    sleep_started = asyncio.Event()
+
     async def sleep(comm=None):
         # We want to ensure this is actually canceled therefore don't give it a
         # chance to actually complete
+        sleep_started.set()
         await asyncio.sleep(2000000)
 
     server = await Server({"sleep": sleep})
@@ -1087,8 +1089,7 @@ async def test_close_properly():
 
         comm = await remote.live_comm()
         await comm.write({"op": "sleep"})
-
-        await async_wait_for(lambda: not server._ongoing_comm_handlers, 10)
+        await sleep_started.wait()
 
         listeners = server.listeners
         assert len(listeners) == len(ports)
@@ -1102,7 +1103,7 @@ async def test_close_properly():
             await assert_cannot_connect(f"tcp://{ip}:{port}")
 
         # weakref set/dict should be cleaned up
-        assert not len(server._ongoing_comm_handlers)
+        assert not len(server._ongoing_background_tasks)
 
 
 @gen_test()

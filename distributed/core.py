@@ -359,7 +359,6 @@ class Server:
         self.counters = None
         self.digests = None
         self._ongoing_background_tasks = AsyncTaskGroup()
-        self._ongoing_comm_handlers = AsyncTaskGroup()
         self._event_finished = asyncio.Event()
 
         self.listeners = []
@@ -878,9 +877,6 @@ class Server:
 
             # TODO: Deal with exceptions
             await self._ongoing_background_tasks.stop(timeout=1)
-
-            # TODO: Deal with exceptions
-            await self._ongoing_comm_handlers.stop(timeout=1)
 
             await self.rpc.close()
             await asyncio.gather(*[comm.close() for comm in list(self._comms)])
