@@ -5162,6 +5162,10 @@ class Scheduler(SchedulerState, ServerNode):
             for c in self._worker_coroutines:
                 c.cancel()
 
+        self.erred_tasks.clear()
+        self.group_exceptions.clear()
+        self.computations.clear()
+
         self.log_event([client, "all"], {"action": "restart", "client": client})
         start = time()
         while time() < start + 10 and len(self.workers) < n_workers:
