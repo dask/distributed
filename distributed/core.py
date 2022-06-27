@@ -237,36 +237,26 @@ class AsyncTaskGroup(_LoopBoundMixin):
         """
         self.closed = True
 
-    async def stop(self, timeout: float = 1) -> None:
+    async def stop(self) -> None:
         """Close the group and stop all currently running tasks.
 
-        Closes the task group and waits `timeout` seconds for all tasks to gracefully finish.
-        After the timeout, all remaining tasks are cancelled.
+        Closes the task group and cancels all tasks. All tasks are cancelled
+        an additional time for each time this task is cancelled.
         """
         self.close()
 
         current_task = asyncio.current_task(self._get_loop())
-        tasks_to_stop = [t for t in self._ongoing_tasks if t is not current_task]
-
-        if tasks_to_stop:
-            # Wrap gather in task to avoid Python3.8 issue,
-            # see https://github.com/dask/distributed/pull/6478#discussion_r885696827
-            async def gather():
-                return await asyncio.gather(*tasks_to_stop, return_exceptions=True)
-
+        err = None
+        while tasks_to_stop := (self._ongoing_tasks - {current_task}):
+            for task in tasks_to_stop:
+                task.cancel()
             try:
-                await asyncio.wait_for(
-                    gather(),
-                    timeout,
-                )
-            except asyncio.TimeoutError:
-                # The timeout on gather has cancelled the tasks, so this will not hang indefinitely
-                await asyncio.gather(*tasks_to_stop, return_exceptions=True)
+                await asyncio.wait(tasks_to_stop)
+            except asyncio.CancelledError as e:
+                err = e
 
-            if [t for t in self._ongoing_tasks if t is not current_task]:
-                raise RuntimeError(
-                    f"Expected all ongoing tasks to be cancelled and removed, found {self._ongoing_tasks}."
-                )
+        if err is not None:
+            raise err
 
     def __len__(self):
         return len(self._ongoing_tasks)
@@ -876,7 +866,7 @@ class Server:
                 await asyncio.gather(*_stops)
 
             # TODO: Deal with exceptions
-            await self._ongoing_background_tasks.stop(timeout=1)
+            await self._ongoing_background_tasks.stop()
 
             await self.rpc.close()
             await asyncio.gather(*[comm.close() for comm in list(self._comms)])

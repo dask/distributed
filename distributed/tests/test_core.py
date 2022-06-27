@@ -189,25 +189,21 @@ async def test_async_task_group_close_prohibits_new_tasks():
 
 
 @gen_test()
-async def test_async_task_group_stop_allows_shutdown():
+async def test_async_task_group_stop_disallows_shutdown():
     group = AsyncTaskGroup()
 
     task = None
 
     async def set_flag():
         nonlocal task
-        while not group.closed:
-            await asyncio.sleep(0.01)
         task = asyncio.current_task()
-        return None
 
     assert group.call_soon(set_flag) is None
     assert len(group) == 1
-    # when given a grace period of 1 second tasks are allowed to poll group.stop
-    # before awaiting other async functions
-    await group.stop(timeout=1)
-    assert task.done()
-    assert not task.cancelled()
+    # tasks are not given a grace period, and are not even allowed to start
+    # if the group is closed immediately
+    await group.stop()
+    assert task is None
 
 
 @gen_test()
@@ -216,10 +212,12 @@ async def test_async_task_group_stop_cancels_long_running():
 
     task = None
     flag = False
+    started = asyncio.Event()
 
     async def set_flag():
         nonlocal task
         task = asyncio.current_task()
+        started.set()
         await asyncio.sleep(10)
         nonlocal flag
         flag = True
@@ -227,9 +225,11 @@ async def test_async_task_group_stop_cancels_long_running():
 
     assert group.call_soon(set_flag) is None
     assert len(group) == 1
-    await group.stop(timeout=1)
-    assert not flag
+    await started.wait()
+    await group.stop()
+    assert task
     assert task.cancelled()
+    assert not flag
 
 
 @gen_test()
