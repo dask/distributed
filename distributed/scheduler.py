@@ -5083,11 +5083,15 @@ class Scheduler(SchedulerState, ServerNode):
         for collection in self._task_state_collections:
             collection.clear()
 
+    def _get_worker_ids(self) -> set[str]:
+        return set({ws.server_id for ws in self.workers.values()})
+
     @log_errors
     async def restart(self, client=None, timeout=30):
         """Restart all workers. Reset local state."""
         stimulus_id = f"restart-{time()}"
-        n_workers = len(self.workers)
+        initial_workers = self._get_worker_ids()
+        n_workers = len(initial_workers)
 
         logger.info("Send lost future signal to clients")
         for cs in self.clients.values():
@@ -5161,7 +5165,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.log_event([client, "all"], {"action": "restart", "client": client})
         start = time()
-        while time() < start + 10 and len(self.workers) < n_workers:
+        while time() < start + 10 and (
+            len(self.workers) < n_workers or initial_workers & self._get_worker_ids()
+        ):
             await asyncio.sleep(0.01)
 
         self.report({"op": "restart"})
