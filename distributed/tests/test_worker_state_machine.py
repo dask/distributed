@@ -582,32 +582,34 @@ def test_new_replica_while_all_workers_in_flight(ws):
     Test that, when this happens, the task is immediately acquired from the new worker,
     without waiting for the original replica holders to get out of flight.
     """
+    ws2 = "127.0.0.1:2"
+    ws3 = "127.0.0.1:3"
     instructions = ws.handle_stimulus(
         AcquireReplicasEvent(
-            who_has={"x": ["127.0.0.1:2"]},
+            who_has={"x": [ws2]},
             nbytes={"x": 1},
             stimulus_id="s1",
         ),
         AcquireReplicasEvent(
-            who_has={"y": ["127.0.0.1:2"]},
+            who_has={"y": [ws2]},
             nbytes={"y": 1},
             stimulus_id="s2",
         ),
         AcquireReplicasEvent(
-            who_has={"y": ["127.0.0.1:2", "127.0.0.1:3"]},
+            who_has={"y": [ws2, ws3]},
             nbytes={"y": 1},
             stimulus_id="s3",
         ),
     )
     assert instructions == [
         GatherDep(
-            worker="127.0.0.1:2",
+            worker=ws2,
             to_gather={"x"},
             total_nbytes=1,
             stimulus_id="s1",
         ),
         GatherDep(
-            worker="127.0.0.1:3",
+            worker=ws3,
             to_gather={"y"},
             total_nbytes=1,
             stimulus_id="s3",
