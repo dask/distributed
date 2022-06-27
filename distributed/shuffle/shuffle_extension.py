@@ -505,7 +505,8 @@ def split_by_worker(
     import pyarrow as pa
 
     df = df.merge(
-        right=worker_for.cat.codes.rename("_worker"),
+        # FIXME https://github.com/pandas-dev/pandas-stubs/issues/43
+        right=worker_for.cat.codes.rename("_worker"),  # type: ignore
         left_on=column,
         right_index=True,
         how="inner",
@@ -530,7 +531,8 @@ def split_by_worker(
 
     unique_codes = codes[splits]
     out = {
-        worker_for.cat.categories[code]: shard
+        # FIXME https://github.com/pandas-dev/pandas-stubs/issues/43
+        worker_for.cat.categories[code]: shard  # type: ignore
         for code, shard in zip(unique_codes, shards)
     }
     assert sum(map(len, out.values())) == nrows

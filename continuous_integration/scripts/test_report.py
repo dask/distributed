@@ -258,7 +258,9 @@ def download_and_parse_artifacts(
     ndownloaded = 0
     print(f"Downloading and parsing {nartifacts} artifacts...")
 
-    with shelve.open("test_report") as cache:
+    cache: shelve.Shelf[pandas.DataFrame | None]
+    # FIXME https://github.com/python/typeshed/pull/8190
+    with shelve.open("test_report") as cache:  # type: ignore[assignment]
         for w in workflows:
             w["dfs"] = []
             for a in w["artifacts"]:
@@ -314,7 +316,8 @@ def main(argv: list[str] | None = None) -> None:
 
     total = pandas.concat(dfs, axis=0)
     grouped = (
-        total.groupby(total.index)
+        # FIXME https://github.com/pandas-dev/pandas-stubs/issues/42
+        total.groupby(total.index)  # type: ignore
         .filter(lambda g: (g.status == "x").sum() >= args.nfails)
         .reset_index()
         .assign(test=lambda df: df.file + "." + df.test)

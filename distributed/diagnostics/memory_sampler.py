@@ -151,7 +151,8 @@ class MemorySampler:
             # Forward-fill NaNs in the middle of a series created either by overlapping
             # sampling time range or by align=True. Do not ffill series beyond their
             # last sample.
-            df = df.ffill().where(~pd.isna(df.bfill()))
+            # FIXME https://github.com/pandas-dev/pandas-stubs/issues/44
+            df = df.ffill().where(~pd.isna(df.bfill()))  # type: ignore
 
         return df
 
