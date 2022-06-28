@@ -1556,6 +1556,11 @@ class Worker(BaseWorker, ServerNode):
             try:
                 await to_thread(_close)
             except RuntimeError:  # Are we shutting down the process?
+                logger.error(
+                    "Could not close executor %r by dispatching to thread. Trying synchronously.",
+                    executor,
+                    exc_info=True,
+                )
                 _close()  # Just run it directly
 
         self.stop()
