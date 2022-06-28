@@ -109,6 +109,15 @@ bytes rather than obscure Python functions.
 *Note: we actually call some combination of pickle and cloudpickle, depending
 on the situation.  This is for performance reasons.*
 
+CloudPickle can serialize objects by both reference (referring to them by
+their module and name) or by value (serializing the actual code for the object).
+By default, it serializes by reference if it can, but starting with CloudPickle 2.0
+you can register a module to be serialized by value. This can be useful if you
+want to send an object in a module that doesn't exist on the receiving end::
+
+   import mymodule
+   cloudpickle.register_pickle_by_value(mymodule)
+
 Cross Language Specialization
 -----------------------------
 
