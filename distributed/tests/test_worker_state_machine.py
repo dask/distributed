@@ -521,7 +521,7 @@ async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_fetch_to_missing(c, s, a, b):
+async def test_fetch_to_missing_on_busy(c, s, a, b):
     """
     1. task x is a dependency of y
     2. scheduler calls handle_compute("y", who_has={"x": [b]}) on a
@@ -531,7 +531,12 @@ async def test_fetch_to_missing(c, s, a, b):
     6. the scheduler responds {"x": []}, because w1 in the meantime has lost the key.
     7. x is transitioned fetch -> missing
     """
-    x = await c.scatter({"x": 1}, workers=[b.address])
+    # Note: submit and scatter are different. If you lose all workers holding the
+    # replicas of a scattered key, the scheduler forgets the task, which in turn would
+    # trigger a free-keys response to request-refresh-who-has.
+    x = c.submit(inc, 1, key="x", workers=[b.address])
+    await x
+
     b.total_in_connections = 0
     # Crucially, unlike with `c.submit(inc, x, workers=[a.address])`, the scheduler
     # doesn't keep track of acquire-replicas requests, so it won't proactively inform a
