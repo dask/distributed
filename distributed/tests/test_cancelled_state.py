@@ -16,6 +16,13 @@ from distributed.utils_test import (
     slowinc,
     wait_for_state,
 )
+from distributed.worker_state_machine import (
+    ComputeTaskEvent,
+    Execute,
+    FreeKeysEvent,
+    GatherDep,
+    GatherDepNetworkFailureEvent,
+)
 
 
 async def wait_for_cancelled(key, dask_worker):
@@ -375,60 +382,29 @@ async def test_cancelled_error_with_resources(c, s, a):
     assert await fut2 == 2
 
 
-@gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_cancelled_resumed_after_flight_with_dependencies(c, s, w2, w3):
-    # See https://github.com/dask/distributed/pull/6327#discussion_r872231090
-    block_get_data_1 = asyncio.Lock()
-    enter_get_data_1 = asyncio.Event()
-    await block_get_data_1.acquire()
-
-    class BlockGetDataWorker(Worker):
-        def __init__(self, *args, get_data_event, get_data_lock, **kwargs):
-            self._get_data_event = get_data_event
-            self._get_data_lock = get_data_lock
-            super().__init__(*args, **kwargs)
-
-        async def get_data(self, comm, *args, **kwargs):
-            self._get_data_event.set()
-            async with self._get_data_lock:
-                return await super().get_data(comm, *args, **kwargs)
-
-    async with await BlockGetDataWorker(
-        s.address,
-        get_data_event=enter_get_data_1,
-        get_data_lock=block_get_data_1,
-        name="w1",
-    ) as w1:
-
-        f1 = c.submit(inc, 1, key="f1", workers=[w1.address])
-        f2 = c.submit(inc, 2, key="f2", workers=[w1.address])
-        f3 = c.submit(sum, [f1, f2], key="f3", workers=[w1.address])
-
-        await wait(f3)
-        f4 = c.submit(inc, f3, key="f4", workers=[w2.address])
-
-        await enter_get_data_1.wait()
-        s.set_restrictions(
-            {
-                f1.key: {w3.address},
-                f2.key: {w3.address},
-                f3.key: {w2.address},
-            }
-        )
-        await s.remove_worker(w1.address, stimulus_id="stim-id")
-
-        await wait_for_state(f3.key, "resumed", w2)
-        assert_story(
-            w2.state.log,
-            [
-                (f3.key, "flight", "released", "cancelled", {}),
-                # ...
-                (f3.key, "cancelled", "waiting", "resumed", {}),
-            ],
-        )
-    # w1 closed
-
-    assert await f4 == 6
+def test_cancelled_resumed_after_flight_with_dependencies(ws):
+    """See https://github.com/dask/distributed/pull/6327#discussion_r872231090"""
+    ws2 = "127.0.0.1:2"
+    instructions = ws.handle_stimulus(
+        # Create task x and put it in flight from ws2
+        ComputeTaskEvent.dummy(key="y", who_has={"x": [ws2]}, stimulus_id="s1"),
+        # The scheduler realises that ws2 is unresponsive, although ws doesn't know yet.
+        # Having lost the last surviving replica of x, the scheduler cancels all of its
+        # dependents. This also cancels x.
+        FreeKeysEvent(keys=["y"], stimulus_id="s2"),
+        # The scheduler reschedules x on another worker, which just happens to be one
+        # that was previously fetching it. This does not generate an Execute
+        # instruction, because the GatherDep instruction isn't complete yet.
+        ComputeTaskEvent.dummy(key="x", stimulus_id="s3"),
+        # After ~30s, the TCP socket with ws2 finally times out and collapses.
+        # This triggers the Execute instruction.
+        GatherDepNetworkFailureEvent(worker=ws2, total_nbytes=1, stimulus_id="s4"),
+    )
+    assert instructions == [
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        Execute(key="x", stimulus_id="s4"),  # Note the stimulus_id!
+    ]
+    assert ws.tasks["x"].state == "executing"
 
 
 @pytest.mark.parametrize("wait_for_processing", [True, False])
