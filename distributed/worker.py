@@ -1302,11 +1302,7 @@ class Worker(BaseWorker, ServerNode):
         try:
             await self.handle_stream(comm)
         finally:
-            if self.status not in {
-                Status.closed,
-                Status.closing,
-                Status.closing_gracefully,
-            }:
+            if self.status not in WORKER_ANY_RUNNING:
                 logger.error(
                     "Connection to scheduler broken. Closing without reporting. ID: %s Address %s Status: %s",
                     self.id,
