@@ -157,7 +157,7 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
 
         # Close in scheduler to ensure we transition and reschedule task properly
         await s.close_worker(worker=a.address, stimulus_id="test")
-        await wait_for_state(fut1.key, "resumed", b)
+        await wait_for_state(fut1.key, "resumed", b, interval=0)
 
         block_get_data.release()
         await block_compute.release()
@@ -417,7 +417,7 @@ async def test_cancelled_resumed_after_flight_with_dependencies(c, s, w2, w3):
         )
         await s.remove_worker(w1.address, stimulus_id="stim-id")
 
-        await wait_for_state(f3.key, "resumed", w2)
+        await wait_for_state(f3.key, "resumed", w2, interval=0)
         assert_story(
             w2.state.log,
             [
