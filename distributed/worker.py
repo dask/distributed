@@ -84,6 +84,7 @@ from distributed.utils import (
     has_arg,
     import_file,
     in_async_call,
+    is_python_shutting_down,
     iscoroutinefunction,
     json_load_robust,
     key_split,
@@ -1542,26 +1543,31 @@ class Worker(BaseWorker, ServerNode):
             if executor is utils._offload_executor:
                 continue  # Never shutdown the offload executor
 
-            def _close():
+            def _close(wait):
                 if isinstance(executor, ThreadPoolExecutor):
                     executor._work_queue.queue.clear()
-                    executor.shutdown(wait=executor_wait, timeout=timeout)
+                    executor.shutdown(wait=wait, timeout=timeout)
                 else:
-                    executor.shutdown(wait=executor_wait)
+                    executor.shutdown(wait=wait)
 
             # Waiting for the shutdown can block the event loop causing
             # weird deadlocks particularly if the task that is executing in
             # the thread is waiting for a server reply, e.g. when using
             # worker clients, semaphores, etc.
-            try:
-                await to_thread(_close)
-            except RuntimeError:  # Are we shutting down the process?
-                logger.error(
-                    "Could not close executor %r by dispatching to thread. Trying synchronously.",
-                    executor,
-                    exc_info=True,
-                )
-                _close()  # Just run it directly
+            if is_python_shutting_down():
+                # If we're shutting down there is no need to wait for daemon
+                # threads to finish
+                _close(wait=False)
+            else:
+                try:
+                    await to_thread(_close, wait=executor_wait)
+                except RuntimeError:  # Are we shutting down the process?
+                    logger.error(
+                        "Could not close executor %r by dispatching to thread. Trying synchronously.",
+                        executor,
+                        exc_info=True,
+                    )
+                    _close(wait=executor_wait)  # Just run it directly
 
         self.stop()
         await self.rpc.close()
