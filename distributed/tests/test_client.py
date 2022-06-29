@@ -7516,6 +7516,7 @@ if __name__ == "__main__":
 """
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("processes", [True, False])
 def test_quiet_close_process(processes, tmp_path):
     with open(tmp_path / "script.py", mode="w") as f:
