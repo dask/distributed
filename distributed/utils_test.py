@@ -73,7 +73,7 @@ from distributed.utils import (
     sync,
 )
 from distributed.worker import WORKER_ANY_RUNNING, Worker
-from distributed.worker_state_machine import InvalidTransition
+from distributed.worker_state_machine import InvalidTransition, StateMachineEvent
 from distributed.worker_state_machine import TaskState as WorkerTaskState
 from distributed.worker_state_machine import WorkerState
 
@@ -2400,6 +2400,9 @@ def freeze_batched_send(bcomm: BatchedSend) -> Iterator[LockedComm]:
 async def wait_for_state(
     key: str, state: str, dask_worker: Worker | Scheduler, *, interval: float = 0.01
 ) -> None:
+    """Wait for a task to appear on a Worker or on the Scheduler and to be in a specific
+    state.
+    """
     if isinstance(dask_worker, Worker):
         tasks = dask_worker.state.tasks
     elif isinstance(dask_worker, Scheduler):
@@ -2422,6 +2425,23 @@ async def wait_for_state(
         # message as an exception wouldn't work.
         print(msg)
         raise
+
+
+async def wait_for_stimulus(
+    ws: WorkerState,
+    type_: type[StateMachineEvent] | tuple[type[StateMachineEvent], ...],
+    *,
+    interval: float = 0.01,
+    **matches: Any,
+) -> StateMachineEvent:
+    """Wait for a specific stimulus to appear in the log of the WorkerState."""
+    while True:
+        for ev in ws.stimulus_log:
+            if not isinstance(ev, type_):
+                continue
+            if not matches or all(getattr(ev, k) == v for k, v in matches.items()):
+                return ev
+        await asyncio.sleep(interval)
 
 
 @pytest.fixture

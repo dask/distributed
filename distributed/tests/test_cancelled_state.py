@@ -15,6 +15,7 @@ from distributed.utils_test import (
     inc,
     slowinc,
     wait_for_state,
+    wait_for_stimulus,
 )
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
@@ -382,8 +383,38 @@ async def test_cancelled_error_with_resources(c, s, a):
     assert await fut2 == 2
 
 
-def test_cancelled_resumed_after_flight_with_dependencies(ws):
-    """See https://github.com/dask/distributed/pull/6327#discussion_r872231090"""
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_cancelled_resumed_after_flight_with_dependencies(c, s, a):
+    """A task is in flight from b to a.
+    While a is waiting, b dies. The scheduler notices before a and reschedules the
+    task on a itself (as the only surviving replica was just lost).
+    Test that the worker eventually computes the task.
+
+    See https://github.com/dask/distributed/pull/6327#discussion_r872231090
+    See test_cancelled_resumed_after_flight_with_dependencies_workerstate below.
+    """
+    async with await BlockedGetData(s.address) as b:
+        x = c.submit(inc, 1, key="x", workers=[b.address], allow_other_workers=True)
+        y = c.submit(inc, x, key="y", workers=[a.address])
+        await b.in_get_data.wait()
+
+        # Make b dead to s, but not to a
+        await s.remove_worker(b.address, stimulus_id="stim-id")
+
+        # Wait for the scheduler to reschedule x on a.
+        # We want the comms from the scheduler to reach a before b closes the RPC
+        # channel, causing a.gather_dep() to raise OSError.
+        await wait_for_stimulus(a.state, ComputeTaskEvent, key="x")
+
+    # b closed; a.gather_dep() fails. Note that, in the current implementation, x won't
+    # be recomputed on a until this happens.
+    assert await y == 3
+
+
+def test_cancelled_resumed_after_flight_with_dependencies_workerstate(ws):
+    """Same as test_cancelled_resumed_after_flight_with_dependencies, but testing the
+    WorkerState in isolation
+    """
     ws2 = "127.0.0.1:2"
     instructions = ws.handle_stimulus(
         # Create task x and put it in flight from ws2
