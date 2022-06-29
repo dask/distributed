@@ -307,6 +307,29 @@ def test_computetask_to_dict():
     assert ev3.priority == (0,)  # List is automatically converted back to tuple
 
 
+def test_computetask_dummy():
+    ev = ComputeTaskEvent.dummy(key="x", stimulus_id="s")
+    assert ev == ComputeTaskEvent(
+        key="x",
+        who_has={},
+        nbytes={},
+        priority=(0,),
+        duration=1.0,
+        run_spec=None,
+        resource_restrictions={},
+        actor=False,
+        annotations={},
+        stimulus_id="s",
+        function=None,
+        args=None,
+        kwargs=None,
+    )
+
+    # nbytes is generated from who_has if omitted
+    ev2 = ComputeTaskEvent.dummy(key="x", who_has={"y": "127.0.0.1:2"}, stimulus_id="s")
+    assert ev2.nbytes == {"y": 1}
+
+
 def test_updatedata_to_dict():
     """The potentially very large UpdateDataEvent.data is not stored in the log"""
     ev = UpdateDataEvent(
@@ -933,19 +956,10 @@ def test_gather_priority(ws):
             stimulus_id="compute1",
         ),
         # A higher-priority task, even if scheduled later, is fetched first
-        ComputeTaskEvent(
+        ComputeTaskEvent.dummy(
             key="z",
             who_has={"y": ["127.0.0.7:1"]},
-            nbytes={"y": 1},
             priority=(0,),
-            duration=1.0,
-            run_spec=None,
-            function=None,
-            args=None,
-            kwargs=None,
-            resource_restrictions={},
-            actor=False,
-            annotations={},
             stimulus_id="compute2",
         ),
         UnpauseEvent(stimulus_id="unpause"),

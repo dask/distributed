@@ -694,6 +694,38 @@ class ComputeTaskEvent(StateMachineEvent):
     def _after_from_dict(self) -> None:
         self.run_spec = SerializedTask(task=None, function=None, args=None, kwargs=None)
 
+    @staticmethod
+    def dummy(
+        *,
+        key: str,
+        who_has: dict[str, Collection[str]] | None = None,
+        nbytes: dict[str, int] | None = None,
+        priority: tuple[int, ...] = (0,),
+        duration: float = 1.0,
+        resource_restrictions: dict[str, float] | None = None,
+        actor: bool = False,
+        annotations: dict | None = None,
+        stimulus_id: str,
+    ) -> ComputeTaskEvent:
+        """Build a dummy event, with most attributes set to a reasonable default.
+        This is a convenience method to be used in unit testing only.
+        """
+        return ComputeTaskEvent(
+            key=key,
+            who_has=who_has or {},
+            nbytes=nbytes or {k: 1 for k in who_has or ()},
+            priority=priority,
+            duration=duration,
+            run_spec=None,
+            function=None,
+            args=None,
+            kwargs=None,
+            resource_restrictions=resource_restrictions or {},
+            actor=actor,
+            annotations=annotations or {},
+            stimulus_id=stimulus_id,
+        )
+
 
 @dataclass
 class ExecuteSuccessEvent(StateMachineEvent):
