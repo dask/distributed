@@ -574,7 +574,7 @@ class Worker(BaseWorker, ServerNode):
 
         with warn_on_duration(
             "1s",
-            "Creating scratch directories is taking a surprisingly long time. "
+            "Creating scratch directories is taking a surprisingly long time. ({duration:.2f}s) "
             "This is often due to running workers on a network file system. "
             "Consider specifying a local-directory to point workers to write "
             "scratch data to a local disk.",
