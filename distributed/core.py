@@ -441,14 +441,14 @@ class Server:
         self.__stopped = False
 
     @property
-    def status(self):
+    def status(self) -> Status:
         try:
             return self._status
         except AttributeError:
             return Status.undefined
 
     @status.setter
-    def status(self, new_status):
+    def status(self, new_status: Status) -> None:
         if not isinstance(new_status, Status):
             raise TypeError(f"Expected Status; got {new_status!r}")
         self._status = new_status
