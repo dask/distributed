@@ -2428,18 +2428,19 @@ async def wait_for_state(
 
 
 async def wait_for_stimulus(
-    ws: WorkerState,
     type_: type[StateMachineEvent] | tuple[type[StateMachineEvent], ...],
+    dask_worker: Worker,
     *,
     interval: float = 0.01,
     **matches: Any,
 ) -> StateMachineEvent:
     """Wait for a specific stimulus to appear in the log of the WorkerState."""
+    log = dask_worker.state.stimulus_log
     last_ev = None
     while True:
-        if ws.stimulus_log and ws.stimulus_log[-1] is not last_ev:
-            last_ev = ws.stimulus_log[-1]
-            for ev in ws.stimulus_log:
+        if log and log[-1] is not last_ev:
+            last_ev = log[-1]
+            for ev in log:
                 if not isinstance(ev, type_):
                     continue
                 if not matches or all(getattr(ev, k) == v for k, v in matches.items()):

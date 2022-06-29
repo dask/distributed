@@ -404,7 +404,7 @@ async def test_cancelled_resumed_after_flight_with_dependencies(c, s, a):
         # Wait for the scheduler to reschedule x on a.
         # We want the comms from the scheduler to reach a before b closes the RPC
         # channel, causing a.gather_dep() to raise OSError.
-        await wait_for_stimulus(a.state, ComputeTaskEvent, key="x")
+        await wait_for_stimulus(ComputeTaskEvent, a, key="x")
 
     # b closed; a.gather_dep() fails. Note that, in the current implementation, x won't
     # be recomputed on a until this happens.

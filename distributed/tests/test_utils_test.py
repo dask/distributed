@@ -953,15 +953,17 @@ async def test_wait_for_state(c, s, a, capsys):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_wait_for_stimulus(c, s, a):
-    t1 = asyncio.create_task(wait_for_stimulus(a.state, ComputeTaskEvent))
-    t2 = asyncio.create_task(wait_for_stimulus(a.state, ComputeTaskEvent, key="y"))
+    t1 = asyncio.create_task(wait_for_stimulus(ComputeTaskEvent, a))
+    t2 = asyncio.create_task(wait_for_stimulus(ComputeTaskEvent, a, key="y"))
     await asyncio.sleep(0.05)
     assert not t1.done()
     assert not t2.done()
 
     x = c.submit(inc, 1, key="x")
     await t1
-    await wait_for_stimulus(a.state, ComputeTaskEvent, key="x")
+    await wait_for_stimulus(ComputeTaskEvent, a, key="x")
+    await c.run(wait_for_stimulus, ComputeTaskEvent, key="x")
     assert not t2.done()
+
     y = c.submit(inc, 1, key="y")
     await t2
