@@ -960,7 +960,8 @@ async def test_wait_for_stimulus(c, s, a):
     assert not t2.done()
 
     x = c.submit(inc, 1, key="x")
-    await t1
+    ev = await t1
+    assert isinstance(ev, ComputeTaskEvent)
     await wait_for_stimulus(ComputeTaskEvent, a, key="x")
     await c.run(wait_for_stimulus, ComputeTaskEvent, key="x")
     assert not t2.done()
