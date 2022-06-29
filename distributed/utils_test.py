@@ -2435,12 +2435,15 @@ async def wait_for_stimulus(
     **matches: Any,
 ) -> StateMachineEvent:
     """Wait for a specific stimulus to appear in the log of the WorkerState."""
+    last_ev = None
     while True:
-        for ev in ws.stimulus_log:
-            if not isinstance(ev, type_):
-                continue
-            if not matches or all(getattr(ev, k) == v for k, v in matches.items()):
-                return ev
+        if ws.stimulus_log and ws.stimulus_log[-1] is not last_ev:
+            last_ev = ws.stimulus_log[-1]
+            for ev in ws.stimulus_log:
+                if not isinstance(ev, type_):
+                    continue
+                if not matches or all(getattr(ev, k) == v for k, v in matches.items()):
+                    return ev
         await asyncio.sleep(interval)
 
 
