@@ -4775,13 +4775,30 @@ class Scheduler(SchedulerState, ServerNode):
         who_has for some keys. Not to be confused with scheduler.who_has, which is a
         synchronous RPC request from a Client.
         """
-        self.stream_comms[worker].send(
-            {
-                "op": "refresh-who-has",
-                "who_has": self.get_who_has(keys),
-                "stimulus_id": stimulus_id,
-            },
-        )
+        who_has = {}
+        free_keys = []
+        for key in keys:
+            if key in self.tasks:
+                who_has[key] = [ws.address for ws in self.tasks[key].who_has]
+            else:
+                free_keys.append(key)
+
+        if who_has:
+            self.stream_comms[worker].send(
+                {
+                    "op": "refresh-who-has",
+                    "who_has": who_has,
+                    "stimulus_id": stimulus_id,
+                }
+            )
+        if free_keys:
+            self.stream_comms[worker].send(
+                {
+                    "op": "free-keys",
+                    "keys": free_keys,
+                    "stimulus_id": stimulus_id,
+                }
+            )
 
     async def handle_worker(self, comm=None, worker=None, stimulus_id=None):
         """
