@@ -2443,7 +2443,7 @@ async def wait_for_stimulus(
             for ev in log:
                 if not isinstance(ev, type_):
                     continue
-                if not matches or all(getattr(ev, k) == v for k, v in matches.items()):
+                if all(getattr(ev, k) == v for k, v in matches.items()):
                     return ev
         await asyncio.sleep(interval)
 
