@@ -156,7 +156,7 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
         await block_compute.acquire()
 
         # Close in scheduler to ensure we transition and reschedule task properly
-        await s.close_worker(worker=a.address, stimulus_id="test")
+        await s.remove_worker(a.address, stimulus_id="test")
         await wait_for_state(fut1.key, "resumed", b)
 
         block_get_data.release()
