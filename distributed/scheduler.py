@@ -5970,8 +5970,16 @@ class Scheduler(SchedulerState, ServerNode):
             worker.
         remove: bool (defaults to True)
             Whether or not to remove the worker metadata immediately or else
-            wait for the worker to contact us. If close_workers=False and remove=False,
-            this method just makes sure
+            wait for the worker to contact us.
+
+            If close_workers=False and remove=False, this method just flushes the tasks
+            in memory out of the workers and then returns.
+            If close_workers=True and remove=False, this method will return while the
+            workers are still in the cluster, although they won't accept new tasks.
+            If close_workers=False or for whatever reason a worker doesn't accept the
+            close command, it will be left permanently unable to accept new tasks and
+            it is expected to be closed in some other way.
+
         **kwargs: dict
             Extra options to pass to workers_to_close to determine which
             workers we should drop
