@@ -1982,7 +1982,7 @@ class WorkerState:
         # See https://github.com/dask/distributed/pull/5046#discussion_r685093940
         ts.state = "cancelled"
         ts.done = False
-        return self._ensure_computing()
+        return {}, []
 
     def _transition_long_running_memory(
         self, ts: TaskState, value: object = NO_VALUE, *, stimulus_id: str
@@ -2196,6 +2196,7 @@ class WorkerState:
         ("cancelled", "missing"): _transition_cancelled_released,
         ("cancelled", "waiting"): _transition_cancelled_waiting,
         ("cancelled", "forgotten"): _transition_cancelled_forgotten,
+        ("cancelled", "rescheduled"): _transition_cancelled_released,
         ("cancelled", "memory"): _transition_cancelled_memory,
         ("cancelled", "error"): _transition_cancelled_error,
         ("resumed", "memory"): _transition_generic_memory,
@@ -2816,6 +2817,8 @@ class WorkerState:
         # without going through cancelled
         ts = self.tasks.get(ev.key)
         assert ts, self.story(ev.key)
+
+        ts.done = True
         return {ts: "rescheduled"}, []
 
     @_handle_event.register

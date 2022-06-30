@@ -79,8 +79,10 @@ from distributed.worker import (
 from distributed.worker_state_machine import (
     AcquireReplicasEvent,
     ComputeTaskEvent,
+    Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
+    FreeKeysEvent,
     RemoveReplicasEvent,
     RescheduleEvent,
     SerializedTask,
@@ -1204,6 +1206,40 @@ async def test_reschedule(c, s, a, b, long_running):
     await wait(futures)
     assert any(isinstance(ev, RescheduleEvent) for ev in a.state.stimulus_log)
     assert all(f.key in b.data for f in futures)
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_reschedule_released(c, s, a):
+    """A task raises Reschedule(), but the client previously released it"""
+    ev1 = Event()
+    ev2 = Event()
+
+    def f(ev1, ev2):
+        ev1.set()
+        ev2.wait()
+        raise Reschedule()
+
+    x = c.submit(f, ev1, ev2, key="x")
+    await ev1.wait()
+    x.release()
+    while "x" in s.tasks:
+        await asyncio.sleep(0.01)
+
+    await ev2.set()
+    while "x" in a.state.tasks:
+        await asyncio.sleep(0.01)
+
+
+def test_reschedule_released_worker_state(ws):
+    """Same as test_reschedule_released"""
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy(key="x", stimulus_id="s1"),
+        FreeKeysEvent(keys=["x"], stimulus_id="s2"),
+        RescheduleEvent(key="x", stimulus_id="s3"),
+    )
+    # There's no RescheduleMsg
+    assert instructions == [Execute(key="x", stimulus_id="s1")]
+    assert not ws.tasks
 
 
 @gen_cluster(nthreads=[])
