@@ -531,7 +531,6 @@ async def test_drop_with_paused_workers_with_running_tasks_3_4(c, s, a, b, pause
     assert {ws.address for ws in s.tasks["x"].who_has} == {a.address}
 
 
-# @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)] * 3, config=demo_config("drop"))
 async def test_drop_with_paused_workers_with_running_tasks_5(c, s, w1, w2, w3):
     """If there is exactly 1 worker that holds a replica of a task that isn't paused or
