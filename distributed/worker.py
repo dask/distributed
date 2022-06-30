@@ -940,7 +940,7 @@ class Worker(BaseWorker, ServerNode):
         if prev_status == value:
             return
 
-        ServerNode.status.__set__(self, value)
+        ServerNode.status.__set__(self, value)  # type: ignore
         stimulus_id = f"worker-status-change-{time()}"
         self._send_worker_status_change(stimulus_id)
 
