@@ -1531,10 +1531,15 @@ async def test_reschedule(c, s, a, b):
     while len(a.state.tasks) != 150:
         await asyncio.sleep(0.01)
 
+    # Reschedule the 50 xs that are processing on a
     for x in xs:
         if s.tasks[x.key].processing_on is s.workers[a.address]:
             s.reschedule(x.key, stimulus_id="test")
 
+    # Wait for at least some of the 50 xs that had been scheduled on a to move to b.
+    # This happens because you have 100 ys processing on a and 50 xs processing on b,
+    # so the scheduler will prefer b for the reschduled tasks to obtain more equal
+    # balancing.
     while len(a.state.tasks) == 150 or len(b.state.tasks) <= 50:
         await asyncio.sleep(0.01)
 
