@@ -1339,23 +1339,6 @@ async def test_scheduler_file():
         await s.close()
 
 
-@pytest.mark.xfail()
-@gen_cluster(client=True, nthreads=[])
-async def test_non_existent_worker(c, s):
-    with dask.config.set({"distributed.comm.timeouts.connect": "100ms"}):
-        await s.add_worker(
-            address="127.0.0.1:5738",
-            status="running",
-            nthreads=2,
-            nbytes={},
-            host_info={},
-        )
-        futures = c.map(inc, range(10))
-        await asyncio.sleep(0.300)
-        assert not s.workers
-        assert all(ts.state == "no-worker" for ts in s.tasks.values())
-
-
 @pytest.mark.parametrize(
     "host", ["tcp://0.0.0.0", "tcp://127.0.0.1", "tcp://127.0.0.1:38275"]
 )
