@@ -14,6 +14,8 @@ from tornado.ioloop import IOLoop
 import dask
 
 from distributed.comm.core import CommClosedError
+from distributed.comm.registry import backends
+from distributed.comm.tcp import TCPBackend, TCPListener
 from distributed.core import (
     AsyncTaskGroup,
     AsyncTaskGroupClosedError,
@@ -1234,3 +1236,22 @@ def test_expects_comm():
     assert not _expects_comm(instance.comm_not_leading_position)
 
     assert not _expects_comm(instance.stream_not_leading_position)
+
+
+class AsyncStopTCPListener(TCPListener):
+    async def stop(self):
+        await asyncio.sleep(0)
+        super().stop()
+
+
+class TCPAsyncListenerBackend(TCPBackend):
+    _listener_class = AsyncStopTCPListener
+
+
+@gen_test()
+async def test_async_listener_stop(monkeypatch):
+    monkeypatch.setitem(backends, "tcp", TCPAsyncListenerBackend())
+    with pytest.warns(PendingDeprecationWarning):
+        async with Server({}) as s:
+            await s.listen(0)
+            assert s.listeners

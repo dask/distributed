@@ -867,6 +867,11 @@ class Server:
                 for listener in self.listeners:
                     future = listener.stop()
                     if inspect.isawaitable(future):
+                        warnings.warn(
+                            f"{type(listener)} is using an asynchronous `stop` method. "
+                            "Support for asynchronous `Listener.stop` will be removed in a future version",
+                            PendingDeprecationWarning,
+                        )
                         _stops.add(future)
                 if _stops:
                     await asyncio.gather(*_stops)
