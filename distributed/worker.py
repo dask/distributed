@@ -932,10 +932,10 @@ class Worker(BaseWorker, ServerNode):
         ServerNode.status.__set__(self, value)
         stimulus_id = f"worker-status-change-{time()}"
         self._send_worker_status_change(stimulus_id)
-        if prev_status == Status.running:
-            self.handle_stimulus(PauseEvent(stimulus_id=stimulus_id))
-        elif value == Status.running:
+        if value == Status.running:
             self.handle_stimulus(UnpauseEvent(stimulus_id=stimulus_id))
+        elif prev_status == Status.running:
+            self.handle_stimulus(PauseEvent(stimulus_id=stimulus_id))
 
     def _send_worker_status_change(self, stimulus_id: str) -> None:
         self.batched_send(
