@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import pytest
-from packaging.version import parse as parse_version
 
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
+
+from pandas.testing import assert_frame_equal, assert_index_equal, assert_series_equal
 
 import dask
 import dask.bag as db
@@ -12,15 +13,6 @@ import dask.dataframe as dd
 
 from distributed.client import wait
 from distributed.utils_test import gen_cluster
-
-PANDAS_VERSION = parse_version(pd.__version__)
-PANDAS_GT_100 = PANDAS_VERSION >= parse_version("1.0.0")
-
-if PANDAS_GT_100:
-    import pandas.testing as tm  # noqa: F401
-else:
-    import pandas.util.testing as tm  # noqa: F401
-
 
 dfs = [
     pd.DataFrame({"x": [1, 2, 3]}, index=[0, 10, 20]),
@@ -32,11 +24,11 @@ dfs = [
 def assert_equal(a, b):
     assert type(a) == type(b)
     if isinstance(a, pd.DataFrame):
-        tm.assert_frame_equal(a, b)
+        assert_frame_equal(a, b)
     elif isinstance(a, pd.Series):
-        tm.assert_series_equal(a, b)
+        assert_series_equal(a, b)
     elif isinstance(a, pd.Index):
-        tm.assert_index_equal(a, b)
+        assert_index_equal(a, b)
     else:
         assert a == b
 
@@ -55,7 +47,7 @@ async def test_dataframes(c, s, a, b):
     remote = c.compute(rdf)
     result = await remote
 
-    tm.assert_frame_equal(result, ldf.compute(scheduler="sync"))
+    assert_frame_equal(result, ldf.compute(scheduler="sync"))
 
     exprs = [
         lambda df: df.x.mean(),

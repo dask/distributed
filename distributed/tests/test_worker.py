@@ -32,7 +32,6 @@ from distributed import (
     Client,
     Event,
     Nanny,
-    Reschedule,
     default_client,
     get_client,
     get_worker,
@@ -57,6 +56,7 @@ from distributed.utils_test import (
     dec,
     div,
     freeze_batched_send,
+    freeze_data_fetching,
     gen_cluster,
     gen_test,
     inc,
@@ -1178,23 +1178,6 @@ async def test_get_current_task(c, s, a, b):
 
     result = await c.submit(some_name)
     assert result.startswith("some_name")
-
-
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
-async def test_reschedule(c, s, a, b):
-    await s.extensions["stealing"].stop()
-    a_address = a.address
-
-    def f(x):
-        sleep(0.1)
-        if get_worker().address == a_address:
-            raise Reschedule()
-
-    futures = c.map(f, range(4))
-    futures2 = c.map(slowinc, range(10), delay=0.1, workers=a.address)
-    await wait(futures)
-
-    assert all(f.key in b.data for f in futures)
 
 
 @gen_cluster(nthreads=[])
@@ -2785,6 +2768,35 @@ async def test_acquire_replicas_already_in_flight(c, s, a):
         )
 
 
+@pytest.mark.slow
+@gen_cluster(client=True)
+async def test_forget_acquire_replicas(c, s, a, b):
+    """
+    1. The scheduler sends acquire-replicas to the worker
+    2. Before the task can reach the worker, the task is forgotten on the scheduler
+       and on the peer workers holding the replicas.
+       This is unlike in a compute-task command, where the workers that are fetching
+       the key are tracked on the scheduler side and receive a release-key command too.
+    3. The task eventually transitions to missing
+    4. At the next run of find_missing, the worker sends a request-refresh-who-has
+       message to the scheduler
+    5. The scheduler responds with free-keys
+    6. The task is forgotten everywhere.
+    """
+    x = c.submit(inc, 2, key="x", workers=[a.address])
+    await x
+    with freeze_data_fetching(b, jump_start=True):
+        s.request_acquire_replicas(b.address, ["x"], stimulus_id="test")
+        await wait_for_state("x", "fetch", b)
+        x.release()
+        while "x" in s.tasks or "x" in a.state.tasks:
+            await asyncio.sleep(0.01)
+
+    while "x" in b.state.tasks:
+        await asyncio.sleep(0.01)
+    assert "x" not in s.tasks
+
+
 @gen_cluster(client=True)
 async def test_remove_replicas_simple(c, s, a, b):
     futs = c.map(inc, range(10), workers=[a.address])
@@ -2992,7 +3004,7 @@ async def test_acquire_replicas_large_data(c, s, a):
         )
         await b.in_gather_dep.wait()
         assert len(b.state.in_flight_tasks) == 5
-        assert len(b.state.data_needed) == 5
+        assert len(b.state.data_needed[a.address]) == 5
         b.block_gather_dep.set()
         while len(b.data) < 10:
             await asyncio.sleep(0.01)
@@ -3348,7 +3360,6 @@ async def test_Worker__to_dict(c, s, a):
         "transition_counter",
         "tasks",
         "data_needed",
-        "data_needed_per_worker",
     }
     assert d["tasks"]["x"]["key"] == "x"
     assert d["data"] == {"x": None}

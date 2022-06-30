@@ -2223,21 +2223,19 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_processing_released(self, key, stimulus_id):
+    def transition_processing_released(self, key: str, stimulus_id: str):
         try:
-            ts: TaskState = self.tasks[key]
-            dts: TaskState
-            recommendations: dict = {}
-            client_msgs: dict = {}
-            worker_msgs: dict = {}
+            ts = self.tasks[key]
+            recommendations = {}
+            worker_msgs = {}
 
             if self.validate:
                 assert ts.processing_on
                 assert not ts.who_has
                 assert not ts.waiting_on
-                assert self.tasks[key].state == "processing"
+                assert ts.state == "processing"
 
-            w: str = _remove_from_processing(self, ts)
+            w = _remove_from_processing(self, ts)
             if w:
                 worker_msgs[w] = [
                     {
@@ -2265,7 +2263,7 @@ class SchedulerState:
             if self.validate:
                 assert not ts.processing_on
 
-            return recommendations, client_msgs, worker_msgs
+            return recommendations, {}, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -3439,19 +3437,6 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle("dask-scheduler [closed]")
         disable_gc_diagnosis()
 
-    @log_errors
-    async def close_worker(self, worker: str, stimulus_id: str, safe: bool = False):
-        """Remove a worker from the cluster
-
-        This both removes the worker from our local state and also sends a
-        signal to the worker to shut down.  This works regardless of whether or
-        not the worker has a nanny process restarting it
-        """
-        logger.info("Closing worker %s", worker)
-        self.log_event(worker, {"action": "close-worker"})
-        self.worker_send(worker, {"op": "close"})  # TODO redundant with `remove_worker`
-        await self.remove_worker(address=worker, safe=safe, stimulus_id=stimulus_id)
-
     ###########
     # Stimuli #
     ###########
@@ -4170,16 +4155,38 @@ class Scheduler(SchedulerState, ServerNode):
 
         return tuple(seen)
 
+    def close_worker(self, worker: str) -> None:
+        """Ask a worker to shut itself down. Do not wait for it to take effect.
+        Note that there is no guarantee that the worker will actually accept the
+        command.
+
+        Note that :meth:`remove_worker` sends the same command internally if close=True.
+
+        See also
+        --------
+        retire_workers
+        remove_worker
+        """
+        if worker not in self.workers:
+            return
+
+        logger.info("Closing worker %s", worker)
+        self.log_event(worker, {"action": "close-worker"})
+        self.worker_send(worker, {"op": "close"})
+
     @log_errors
     async def remove_worker(
         self, address: str, *, stimulus_id: str, safe: bool = False, close: bool = True
     ) -> Literal["OK", "already-removed"]:
-        """
-        Remove worker from cluster
+        """Remove worker from cluster.
 
-        We do this when a worker reports that it plans to leave or when it
-        appears to be unresponsive.  This may send its tasks back to a released
-        state.
+        We do this when a worker reports that it plans to leave or when it appears to be
+        unresponsive. This may send its tasks back to a released state.
+
+        See also
+        --------
+        retire_workers
+        close_worker
         """
         if self.status == Status.closed:
             return "already-removed"
@@ -4775,13 +4782,30 @@ class Scheduler(SchedulerState, ServerNode):
         who_has for some keys. Not to be confused with scheduler.who_has, which is a
         synchronous RPC request from a Client.
         """
-        self.stream_comms[worker].send(
-            {
-                "op": "refresh-who-has",
-                "who_has": self.get_who_has(keys),
-                "stimulus_id": stimulus_id,
-            },
-        )
+        who_has = {}
+        free_keys = []
+        for key in keys:
+            if key in self.tasks:
+                who_has[key] = [ws.address for ws in self.tasks[key].who_has]
+            else:
+                free_keys.append(key)
+
+        if who_has:
+            self.stream_comms[worker].send(
+                {
+                    "op": "refresh-who-has",
+                    "who_has": who_has,
+                    "stimulus_id": stimulus_id,
+                }
+            )
+        if free_keys:
+            self.stream_comms[worker].send(
+                {
+                    "op": "free-keys",
+                    "keys": free_keys,
+                    "stimulus_id": stimulus_id,
+                }
+            )
 
     async def handle_worker(self, comm=None, worker=None, stimulus_id=None):
         """
@@ -5918,16 +5942,16 @@ class Scheduler(SchedulerState, ServerNode):
     @log_errors
     async def retire_workers(
         self,
-        comm=None,
+        workers: list[str] | None = None,
         *,
-        workers: "list[str] | None" = None,
-        names: "list | None" = None,
+        names: list | None = None,
         close_workers: bool = False,
         remove: bool = True,
         stimulus_id: str | None = None,
-        **kwargs,
-    ) -> dict:
-        """Gracefully retire workers from cluster
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Gracefully retire workers from cluster. Any key that is in memory exclusively
+        on the retired workers is replicated somewhere else.
 
         Parameters
         ----------
@@ -5944,7 +5968,16 @@ class Scheduler(SchedulerState, ServerNode):
             worker.
         remove: bool (defaults to True)
             Whether or not to remove the worker metadata immediately or else
-            wait for the worker to contact us
+            wait for the worker to contact us.
+
+            If close_workers=False and remove=False, this method just flushes the tasks
+            in memory out of the workers and then returns.
+            If close_workers=True and remove=False, this method will return while the
+            workers are still in the cluster, although they won't accept new tasks.
+            If close_workers=False or for whatever reason a worker doesn't accept the
+            close command, it will be left permanently unable to accept new tasks and
+            it is expected to be closed in some other way.
+
         **kwargs: dict
             Extra options to pass to workers_to_close to determine which
             workers we should drop
@@ -5953,6 +5986,11 @@ class Scheduler(SchedulerState, ServerNode):
         -------
         Dictionary mapping worker ID/address to dictionary of information about
         that worker for each retired worker.
+
+        If there are keys that exist in memory only on the workers being retired and it
+        was impossible to replicate them somewhere else (e.g. because there aren't
+        any other running workers), the workers holding such keys won't be retired and
+        won't appear in the returned dict.
 
         See Also
         --------
@@ -6023,7 +6061,7 @@ class Scheduler(SchedulerState, ServerNode):
                             ws,
                             policy,
                             prev_status=prev_status,
-                            close_workers=close_workers,
+                            close=close_workers,
                             remove=remove,
                             stimulus_id=stimulus_id,
                         )
@@ -6050,7 +6088,7 @@ class Scheduler(SchedulerState, ServerNode):
         ws: WorkerState,
         policy: RetireWorker,
         prev_status: Status,
-        close_workers: bool,
+        close: bool,
         remove: bool,
         stimulus_id: str,
     ) -> tuple:  # tuple[str | None, dict]
@@ -6077,14 +6115,12 @@ class Scheduler(SchedulerState, ServerNode):
             "All unique keys on worker %s have been replicated elsewhere", ws.address
         )
 
-        if close_workers and ws.address in self.workers:
-            await self.close_worker(
-                worker=ws.address, safe=True, stimulus_id=stimulus_id
-            )
         if remove:
             await self.remove_worker(
-                address=ws.address, safe=True, stimulus_id=stimulus_id
+                ws.address, safe=True, close=close, stimulus_id=stimulus_id
             )
+        elif close:
+            self.close_worker(ws.address)
 
         logger.info("Retired worker %s", ws.address)
         return ws.address, ws.identity()
@@ -6568,7 +6604,9 @@ class Scheduler(SchedulerState, ServerNode):
 
     transition_story = story
 
-    def reschedule(self, key=None, worker=None):
+    def reschedule(
+        self, key: str, worker: str | None = None, *, stimulus_id: str
+    ) -> None:
         """Reschedule a task
 
         Things may have shifted and this task may now be better suited to run
@@ -6578,15 +6616,17 @@ class Scheduler(SchedulerState, ServerNode):
             ts = self.tasks[key]
         except KeyError:
             logger.warning(
-                "Attempting to reschedule task {}, which was not "
-                "found on the scheduler. Aborting reschedule.".format(key)
+                f"Attempting to reschedule task {key}, which was not "
+                "found on the scheduler. Aborting reschedule."
             )
             return
         if ts.state != "processing":
             return
         if worker and ts.processing_on.address != worker:
             return
-        self.transitions({key: "released"}, f"reschedule-{time()}")
+        # transition_processing_released will immediately suggest an additional
+        # transition to waiting if the task has any waiters or clients holding a future.
+        self.transitions({key: "released"}, stimulus_id=stimulus_id)
 
     #####################
     # Utility functions #

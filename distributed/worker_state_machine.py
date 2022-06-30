@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import abc
 import asyncio
-import functools
 import heapq
 import logging
 import operator
@@ -21,7 +20,8 @@ from collections.abc import (
 )
 from copy import copy
 from dataclasses import dataclass, field
-from functools import lru_cache
+from functools import lru_cache, partial, singledispatchmethod
+from itertools import chain
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict, cast
 
 from tlz import peekn, pluck
@@ -274,15 +274,22 @@ class TaskState:
     def __repr__(self) -> str:
         return f"<TaskState {self.key!r} {self.state}>"
 
-    def __eq__(self, other: object) -> bool:
-        # A task may be forgotten and a new TaskState object with the same key may be
-        # created in its place later on. In the Worker state, you should never have
-        # multiple TaskState objects with the same key. We can't assert it here however,
-        # as this comparison is also used in WeakSets for instance tracking purposes.
-        return other is self
-
     def __hash__(self) -> int:
-        return hash(self.key)
+        """Override dataclass __hash__, reverting to the default behaviour
+        hash(o) == id(o).
+
+        Note that we also defined @dataclass(eq=False), which reverts to the default
+        behaviour (a == b) == (a is b).
+
+        On first thought, it would make sense to use TaskState.key for equality and
+        hashing. However, a task may be forgotten and a new TaskState object with the
+        same key may be created in its place later on. In the Worker state, you should
+        never have multiple TaskState objects with the same key; see
+        WorkerState.validate_state for relevant checks. We can't assert the same thing
+        in __eq__ though, as multiple objects with the same key may appear in
+        TaskState._instances for a brief period of time.
+        """
+        return id(self)
 
     def get_nbytes(self) -> int:
         nbytes = self.nbytes
@@ -343,12 +350,6 @@ class RetryBusyWorkerLater(Instruction):
     worker: str
 
 
-@dataclass
-class EnsureCommunicatingAfterTransitions(Instruction):
-    __slots__ = ()
-
-
-@dataclass
 class SendMessageToScheduler(Instruction):
     #: Matches a key in Scheduler.stream_handlers
     op: ClassVar[str]
@@ -693,6 +694,38 @@ class ComputeTaskEvent(StateMachineEvent):
     def _after_from_dict(self) -> None:
         self.run_spec = SerializedTask(task=None, function=None, args=None, kwargs=None)
 
+    @staticmethod
+    def dummy(
+        *,
+        key: str,
+        who_has: dict[str, Collection[str]] | None = None,
+        nbytes: dict[str, int] | None = None,
+        priority: tuple[int, ...] = (0,),
+        duration: float = 1.0,
+        resource_restrictions: dict[str, float] | None = None,
+        actor: bool = False,
+        annotations: dict | None = None,
+        stimulus_id: str,
+    ) -> ComputeTaskEvent:
+        """Build a dummy event, with most attributes set to a reasonable default.
+        This is a convenience method to be used in unit testing only.
+        """
+        return ComputeTaskEvent(
+            key=key,
+            who_has=who_has or {},
+            nbytes=nbytes or {k: 1 for k in who_has or ()},
+            priority=priority,
+            duration=duration,
+            run_spec=None,
+            function=None,
+            args=None,
+            kwargs=None,
+            resource_restrictions=resource_restrictions or {},
+            actor=actor,
+            annotations=annotations or {},
+            stimulus_id=stimulus_id,
+        )
+
 
 @dataclass
 class ExecuteSuccessEvent(StateMachineEvent):
@@ -948,14 +981,10 @@ class WorkerState:
     has_what: defaultdict[str, set[str]]
 
     #: The tasks which still require data in order to execute and are in memory on at
-    #: least another worker, prioritized as a heap. All and only tasks with
-    #: ``TaskState.state == 'fetch'`` are in this collection.
-    data_needed: HeapSet[TaskState]
-
-    #: Same as :attr:`data_needed`, individually for every peer worker. A
-    #: :class:`TaskState` with multiple entries in :attr:`~TaskState.who_has` will
-    #: appear multiple times here.
-    data_needed_per_worker: defaultdict[str, HeapSet[TaskState]]
+    #: least another worker, prioritized as per-worker heaps. All and only tasks with
+    #: ``TaskState.state == 'fetch'`` are in this collection. A :class:`TaskState` with
+    #: multiple entries in :attr:`~TaskState.who_has` will appear multiple times here.
+    data_needed: defaultdict[str, HeapSet[TaskState]]
 
     #: Number of bytes to fetch from the same worker in a single call to
     #: :meth:`BaseWorker.gather_dep`. Multiple small tasks that can be fetched from the
@@ -1042,6 +1071,10 @@ class WorkerState:
     #: In production, it should always be set to False.
     transition_counter_max: int | Literal[False]
 
+    #: Statically-seeded random state, used to guarantee determinism whenever a
+    #: pseudo-random choice is required
+    rng: random.Random
+
     __slots__ = tuple(__annotations__)
 
     def __init__(
@@ -1076,9 +1109,8 @@ class WorkerState:
         self.running = True
         self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)
-        self.data_needed = HeapSet(key=operator.attrgetter("priority"))
-        self.data_needed_per_worker = defaultdict(
-            lambda: HeapSet(key=operator.attrgetter("priority"))
+        self.data_needed = defaultdict(
+            partial(HeapSet[TaskState], key=operator.attrgetter("priority"))
         )
         self.in_flight_workers = {}
         self.busy_workers = set()
@@ -1099,6 +1131,7 @@ class WorkerState:
         self.transition_counter = 0
         self.transition_counter_max = transition_counter_max
         self.actors = {}
+        self.rng = random.Random(0)
 
     def handle_stimulus(self, *stims: StateMachineEvent) -> Instructions:
         """Process one or more external events, transition relevant tasks to new states,
@@ -1195,12 +1228,12 @@ class WorkerState:
             for worker in ts.who_has - workers:
                 self.has_what[worker].remove(key)
                 if ts.state == "fetch":
-                    self.data_needed_per_worker[worker].remove(ts)
+                    self.data_needed[worker].remove(ts)
 
             for worker in workers - ts.who_has:
                 self.has_what[worker].add(key)
                 if ts.state == "fetch":
-                    self.data_needed_per_worker[worker].add(ts)
+                    self.data_needed[worker].add(ts)
 
             ts.who_has = workers
 
@@ -1217,9 +1250,8 @@ class WorkerState:
 
         for worker in ts.who_has:
             self.has_what[worker].discard(ts.key)
-            self.data_needed_per_worker[worker].discard(ts)
+            self.data_needed[worker].discard(ts)
         ts.who_has.clear()
-        self.data_needed.discard(ts)
 
         self.threads.pop(key, None)
 
@@ -1237,66 +1269,49 @@ class WorkerState:
         self.in_flight_tasks.discard(ts)
 
     def _ensure_communicating(self, *, stimulus_id: str) -> RecsInstrs:
-        if not self.running:
+        """Transition tasks from fetch to flight, until there are no more tasks in fetch
+        state or a threshold has been reached.
+        """
+        if not self.running or not self.data_needed:
             return {}, []
-
-        skipped_worker_in_flight_or_busy = []
+        if (
+            len(self.in_flight_workers) >= self.total_out_connections
+            and self.comm_nbytes >= self.comm_threshold_bytes
+        ):
+            return {}, []
 
         recommendations: Recs = {}
         instructions: Instructions = []
 
-        while self.data_needed and (
-            len(self.in_flight_workers) < self.total_out_connections
-            or self.comm_nbytes < self.comm_threshold_bytes
-        ):
+        for worker, available_tasks in self._select_workers_for_gather():
+            assert worker != self.address
+            to_gather_tasks, total_nbytes = self._select_keys_for_gather(
+                available_tasks
+            )
+            assert to_gather_tasks
+            to_gather_keys = {ts.key for ts in to_gather_tasks}
+
             logger.debug(
-                "Ensure communicating. Pending: %d. Connections: %d/%d. Busy: %d",
+                "Gathering %d tasks from %s; %d more remain. "
+                "Pending workers: %d; connections: %d/%d; busy: %d",
+                len(to_gather_tasks),
+                worker,
+                len(available_tasks),
                 len(self.data_needed),
                 len(self.in_flight_workers),
                 self.total_out_connections,
                 len(self.busy_workers),
             )
-
-            ts = self.data_needed.pop()
-
-            if self.validate:
-                assert ts.state == "fetch"
-                assert self.address not in ts.who_has
-
-            if not ts.who_has:
-                recommendations[ts] = "missing"
-                continue
-
-            workers = [
-                w
-                for w in ts.who_has
-                if w not in self.in_flight_workers and w not in self.busy_workers
-            ]
-            if not workers:
-                skipped_worker_in_flight_or_busy.append(ts)
-                continue
-
-            for w in ts.who_has:
-                self.data_needed_per_worker[w].remove(ts)
-
-            host = get_address_host(self.address)
-            local = [w for w in workers if get_address_host(w) == host]
-            worker = random.choice(local or workers)
-
-            to_gather_tasks, total_nbytes = self._select_keys_for_gather(worker, ts)
-            to_gather_keys = {ts.key for ts in to_gather_tasks}
-
             self.log.append(
                 ("gather-dependencies", worker, to_gather_keys, stimulus_id, time())
             )
 
-            self.comm_nbytes += total_nbytes
-            self.in_flight_workers[worker] = to_gather_keys
-            for d_ts in to_gather_tasks:
+            for ts in to_gather_tasks:
                 if self.validate:
-                    assert d_ts.state == "fetch"
-                    assert d_ts not in recommendations
-                recommendations[d_ts] = ("flight", worker)
+                    assert ts.state == "fetch"
+                    assert worker in ts.who_has
+                    assert ts not in recommendations
+                recommendations[ts] = ("flight", worker)
 
             # A single invocation of _ensure_communicating may generate up to one
             # GatherDep instruction per worker. Multiple tasks from the same worker may
@@ -1312,10 +1327,103 @@ class WorkerState:
                 )
             )
 
-        for ts in skipped_worker_in_flight_or_busy:
-            self.data_needed.add(ts)
+            self.in_flight_workers[worker] = to_gather_keys
+            self.comm_nbytes += total_nbytes
+            if (
+                len(self.in_flight_workers) >= self.total_out_connections
+                and self.comm_nbytes >= self.comm_threshold_bytes
+            ):
+                break
 
         return recommendations, instructions
+
+    def _select_workers_for_gather(self) -> Iterator[tuple[str, HeapSet[TaskState]]]:
+        """Helper of _ensure_communicating.
+
+        Yield the peer workers and tasks in data_needed, sorted by:
+
+        1. By highest-priority task available across all workers
+        2. If tied, first by local peer workers, then remote. Note that, if a task is
+           replicated across multiple host, it may go in a tie with itself.
+        3. If still tied, by number of tasks available to be fetched from the host
+           (see note below)
+        4. If still tied, by a random element. This is statically seeded to guarantee
+           reproducibility.
+
+           FIXME https://github.com/dask/distributed/issues/6620
+                 You won't get determinism when a single task is replicated on multiple
+                 workers, because TaskState.who_has changes order at every interpreter
+                 restart.
+
+        Omit workers that are either busy or in flight.
+        Remove peer workers with no tasks from data_needed.
+
+        Note
+        ----
+        Instead of number of tasks, we could've measured total nbytes and/or number of
+        tasks that only exist on the worker. Raw number of tasks is cruder but simpler.
+        """
+        host = get_address_host(self.address)
+        heap = []
+
+        for worker, tasks in list(self.data_needed.items()):
+            if not tasks:
+                del self.data_needed[worker]
+                continue
+            if worker in self.in_flight_workers or worker in self.busy_workers:
+                continue
+            heap.append(
+                (
+                    tasks.peek().priority,
+                    get_address_host(worker) != host,  # False < True
+                    -len(tasks),
+                    self.rng.random(),
+                    worker,
+                    tasks,
+                )
+            )
+
+        heapq.heapify(heap)
+        while heap:
+            _, is_remote, ntasks_neg, rnd, worker, tasks = heapq.heappop(heap)
+            # The number of tasks and possibly the top priority task may have changed
+            # since the last sort, since _select_keys_for_gather may have removed tasks
+            # that are also replicated on a higher-priority worker.
+            if not tasks:
+                del self.data_needed[worker]
+            elif -ntasks_neg != len(tasks):
+                heapq.heappush(
+                    heap,
+                    (tasks.peek().priority, is_remote, -len(tasks), rnd, worker, tasks),
+                )
+            else:
+                yield worker, tasks
+                if not tasks:  # _select_keys_for_gather just emptied it
+                    del self.data_needed[worker]
+
+    def _select_keys_for_gather(
+        self, available: HeapSet[TaskState]
+    ) -> tuple[list[TaskState], int]:
+        """Helper of _ensure_communicating.
+
+        Fetch all tasks that are replicated on the target worker within a single
+        message, up to target_message_size.
+        """
+        to_gather: list[TaskState] = []
+        total_nbytes = 0
+
+        while available:
+            ts = available.peek()
+            # The top-priority task is fetched regardless of its size
+            if to_gather and total_nbytes + ts.get_nbytes() > self.target_message_size:
+                break
+            for worker in ts.who_has:
+                # This also effectively pops from available
+                self.data_needed[worker].remove(ts)
+            to_gather.append(ts)
+            total_nbytes += ts.get_nbytes()
+
+        return to_gather, total_nbytes
 
     def _ensure_computing(self) -> RecsInstrs:
         if not self.running:
@@ -1460,37 +1568,6 @@ class WorkerState:
         self.log.append((ts.key, "put-in-memory", stimulus_id, time()))
         return recommendations
 
-    def _select_keys_for_gather(
-        self, worker: str, ts: TaskState
-    ) -> tuple[set[TaskState], int]:
-        """``_ensure_communicating`` decided to fetch a single task from a worker,
-        following priority. In order to minimise overhead, request fetching other tasks
-        from the same worker within the message, following priority for the single
-        worker but ignoring higher priority tasks from other workers, up to
-        ``target_message_size``.
-        """
-        tss = {ts}
-        total_bytes = ts.get_nbytes()
-        tasks = self.data_needed_per_worker[worker]
-
-        while tasks:
-            ts = tasks.peek()
-            if self.validate:
-                assert ts.state == "fetch"
-                assert worker in ts.who_has
-            if total_bytes + ts.get_nbytes() > self.target_message_size:
-                break
-            tasks.pop()
-            self.data_needed.remove(ts)
-            for other_worker in ts.who_has:
-                if other_worker != worker:
-                    self.data_needed_per_worker[other_worker].remove(ts)
-
-            tss.add(ts)
-            total_bytes += ts.get_nbytes()
-
-        return tss, total_bytes
-
     ###############
     # Transitions #
     ###############
@@ -1502,16 +1579,9 @@ class WorkerState:
         ts.state = "fetch"
         ts.done = False
         assert ts.priority
-        self.data_needed.add(ts)
         for w in ts.who_has:
-            self.data_needed_per_worker[w].add(ts)
-
-        # This is the same as `return self._ensure_communicating()`, except that when
-        # many tasks transition to fetch at the same time, e.g. from a single
-        # compute-task or acquire-replicas command from the scheduler, it allows
-        # clustering the transfers into less GatherDep instructions; see
-        # _select_keys_for_gather().
-        return {}, [EnsureCommunicatingAfterTransitions(stimulus_id=stimulus_id)]
+            self.data_needed[w].add(ts)
+        return {}, []
 
     def _transition_missing_waiting(
         self, ts: TaskState, *, stimulus_id: str
@@ -1618,22 +1688,14 @@ class WorkerState:
             assert ts.state == "fetch"
             assert ts.who_has
             # The task has already been removed by _ensure_communicating
-            assert ts not in self.data_needed
             for w in ts.who_has:
-                assert ts not in self.data_needed_per_worker[w]
+                assert ts not in self.data_needed[w]
 
         ts.done = False
         ts.state = "flight"
         ts.coming_from = worker
         self.in_flight_tasks.add(ts)
         return {}, []
-
-    def _transition_fetch_missing(
-        self, ts: TaskState, *, stimulus_id: str
-    ) -> RecsInstrs:
-        # _ensure_communicating could have just popped this task out of data_needed
-        self.data_needed.discard(ts)
-        return self._transition_generic_missing(ts, stimulus_id=stimulus_id)
 
     def _transition_memory_released(
         self, ts: TaskState, *, stimulus_id: str
@@ -1663,9 +1725,7 @@ class WorkerState:
     def _transition_long_running_rescheduled(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
-        recs: Recs = {ts: "released"}
-        smsg = RescheduleMsg(key=ts.key, stimulus_id=stimulus_id)
-        return recs, [smsg]
+        return {ts: "released"}, [RescheduleMsg(key=ts.key, stimulus_id=stimulus_id)]
 
     def _transition_executing_rescheduled(
         self, ts: TaskState, *, stimulus_id: str
@@ -1675,10 +1735,7 @@ class WorkerState:
         self.executing.discard(ts)
 
         return merge_recs_instructions(
-            (
-                {ts: "released"},
-                [RescheduleMsg(key=ts.key, stimulus_id=stimulus_id)],
-            ),
+            ({ts: "released"}, [RescheduleMsg(key=ts.key, stimulus_id=stimulus_id)]),
             self._ensure_computing(),
         )
 
@@ -1925,7 +1982,7 @@ class WorkerState:
         # See https://github.com/dask/distributed/pull/5046#discussion_r685093940
         ts.state = "cancelled"
         ts.done = False
-        return self._ensure_computing()
+        return {}, []
 
     def _transition_long_running_memory(
         self, ts: TaskState, value: object = NO_VALUE, *, stimulus_id: str
@@ -2139,6 +2196,7 @@ class WorkerState:
         ("cancelled", "missing"): _transition_cancelled_released,
         ("cancelled", "waiting"): _transition_cancelled_waiting,
         ("cancelled", "forgotten"): _transition_cancelled_forgotten,
+        ("cancelled", "rescheduled"): _transition_cancelled_released,
         ("cancelled", "memory"): _transition_cancelled_memory,
         ("cancelled", "error"): _transition_cancelled_error,
         ("resumed", "memory"): _transition_generic_memory,
@@ -2156,7 +2214,7 @@ class WorkerState:
         ("executing", "released"): _transition_executing_released,
         ("executing", "rescheduled"): _transition_executing_rescheduled,
         ("fetch", "flight"): _transition_fetch_flight,
-        ("fetch", "missing"): _transition_fetch_missing,
+        ("fetch", "missing"): _transition_generic_missing,
         ("fetch", "released"): _transition_generic_released,
         ("flight", "error"): _transition_flight_error,
         ("flight", "fetch"): _transition_flight_fetch,
@@ -2292,18 +2350,30 @@ class WorkerState:
         reach a steady state
         """
         instructions = []
-
-        remaining_recs = recommendations.copy()
         tasks = set()
-        while remaining_recs:
-            ts, finish = remaining_recs.popitem()
-            tasks.add(ts)
-            a_recs, a_instructions = self._transition(
-                ts, finish, stimulus_id=stimulus_id
-            )
 
-            remaining_recs.update(a_recs)
-            instructions += a_instructions
+        def process_recs(recs: Recs) -> None:
+            while recs:
+                ts, finish = recs.popitem()
+                tasks.add(ts)
+                a_recs, a_instructions = self._transition(
+                    ts, finish, stimulus_id=stimulus_id
+                )
+                recs.update(a_recs)
+                instructions.extend(a_instructions)
+
+        process_recs(recommendations.copy())
+
+        # We could call _ensure_communicating after we change something that could
+        # trigger a new call to gather_dep (e.g. on transitions to fetch,
+        # GatherDepDoneEvent, or RetryBusyWorkerEvent). However, doing so we'd
+        # potentially call it too early, before all tasks have transitioned to fetch.
+        # This in turn would hurt aggregation of multiple tasks into a single GatherDep
+        # instruction.
+        # Read: https://github.com/dask/distributed/issues/6497
+        a_recs, a_instructions = self._ensure_communicating(stimulus_id=stimulus_id)
+        instructions += a_instructions
+        process_recs(a_recs)
 
         if self.validate:
             # Full state validation is very expensive
@@ -2316,7 +2386,7 @@ class WorkerState:
     # Events #
     ##########
 
-    @functools.singledispatchmethod
+    @singledispatchmethod
     def _handle_event(self, ev: StateMachineEvent) -> RecsInstrs:
         raise TypeError(ev)  # pragma: nocover
 
@@ -2493,20 +2563,21 @@ class WorkerState:
 
             if self.validate:
                 assert ev.who_has.keys() == ev.nbytes.keys()
-                assert all(ev.who_has.values())
+                for dep_workers in ev.who_has.values():
+                    assert dep_workers
+                    assert len(dep_workers) == len(set(dep_workers))
 
-            for dep_key, dep_workers in ev.who_has.items():
+            for dep_key, nbytes in ev.nbytes.items():
                 dep_ts = self._ensure_task_exists(
                     key=dep_key,
                     priority=priority,
                     stimulus_id=ev.stimulus_id,
                 )
+                self.tasks[dep_key].nbytes = nbytes
+
                 # link up to child / parents
                 ts.dependencies.add(dep_ts)
                 dep_ts.dependents.add(ts)
-
-            for dep_key, value in ev.nbytes.items():
-                self.tasks[dep_key].nbytes = value
 
             self._update_who_has(ev.who_has)
         else:
@@ -2542,15 +2613,12 @@ class WorkerState:
                 self.log.append((ts.key, "missing-dep", ev.stimulus_id, time()))
                 if self.validate:
                     assert ts.state != "fetch"
-                    assert ts not in self.data_needed_per_worker[ev.worker]
+                    assert ts not in self.data_needed[ev.worker]
                 ts.who_has.discard(ev.worker)
                 self.has_what[ev.worker].discard(ts.key)
                 recommendations[ts] = "fetch"
 
-        return merge_recs_instructions(
-            (recommendations, []),
-            self._ensure_communicating(stimulus_id=ev.stimulus_id),
-        )
+        return recommendations, []
 
     @_handle_event.register
     def _handle_gather_dep_busy(self, ev: GatherDepBusyEvent) -> RecsInstrs:
@@ -2579,10 +2647,7 @@ class WorkerState:
                 )
             )
 
-        return merge_recs_instructions(
-            (recommendations, instructions),
-            self._ensure_communicating(stimulus_id=ev.stimulus_id),
-        )
+        return recommendations, instructions
 
     @_handle_event.register
     def _handle_gather_dep_network_failure(
@@ -2599,20 +2664,25 @@ class WorkerState:
         either retry a different worker, or ask the scheduler to inform us of a new
         worker if no other worker is available.
         """
-        self.data_needed_per_worker.pop(ev.worker)
-        for key in self.has_what.pop(ev.worker):
-            ts = self.tasks[key]
-            ts.who_has.discard(ev.worker)
-
         recommendations: Recs = {}
+
         for ts in self._gather_dep_done_common(ev):
             self.log.append((ts.key, "missing-dep", ev.stimulus_id, time()))
             recommendations[ts] = "fetch"
 
-        return merge_recs_instructions(
-            (recommendations, []),
-            self._ensure_communicating(stimulus_id=ev.stimulus_id),
-        )
+        for ts in self.data_needed.pop(ev.worker, ()):
+            if self.validate:
+                assert ts.state == "fetch"
+                assert ev.worker in ts.who_has
+            if ts.who_has == {ev.worker}:
+                # This can override a recommendation from the previous for loop
+                recommendations[ts] = "missing"
+
+        for key in self.has_what.pop(ev.worker):
+            ts = self.tasks[key]
+            ts.who_has.remove(ev.worker)
+
+        return recommendations, []
 
     @_handle_event.register
     def _handle_gather_dep_failure(self, ev: GatherDepFailureEvent) -> RecsInstrs:
@@ -2630,10 +2700,7 @@ class WorkerState:
             for ts in self._gather_dep_done_common(ev)
         }
 
-        return merge_recs_instructions(
-            (recommendations, []),
-            self._ensure_communicating(stimulus_id=ev.stimulus_id),
-        )
+        return recommendations, []
 
     @_handle_event.register
     def _handle_secede(self, ev: SecedeEvent) -> RecsInstrs:
@@ -2673,15 +2740,12 @@ class WorkerState:
     def _handle_unpause(self, ev: UnpauseEvent) -> RecsInstrs:
         """Emerge from paused status"""
         self.running = True
-        return merge_recs_instructions(
-            self._ensure_computing(),
-            self._ensure_communicating(stimulus_id=ev.stimulus_id),
-        )
+        return self._ensure_computing()
 
     @_handle_event.register
     def _handle_retry_busy_worker(self, ev: RetryBusyWorkerEvent) -> RecsInstrs:
         self.busy_workers.discard(ev.worker)
-        return self._ensure_communicating(stimulus_id=ev.stimulus_id)
+        return {}, []
 
     @_handle_event.register
     def _handle_cancel_compute(self, ev: CancelComputeEvent) -> RecsInstrs:
@@ -2753,6 +2817,8 @@ class WorkerState:
         # without going through cancelled
         ts = self.tasks.get(ev.key)
         assert ts, self.story(ev.key)
+
+        ts.done = True
         return {ts: "rescheduled"}, []
 
     @_handle_event.register
@@ -2783,17 +2849,13 @@ class WorkerState:
 
             if ts.who_has and ts.state == "missing":
                 recommendations[ts] = "fetch"
-            elif ts.who_has and ts.state == "fetch":
-                # We potentially just acquired new replicas whereas all previously known
-                # workers are in flight or busy. We're deliberately not testing the
-                # minute use cases here for the sake of simplicity; instead we rely on
-                # _ensure_communicating to be a no-op when there's nothing to do.
-                recommendations, instructions = merge_recs_instructions(
-                    (recommendations, instructions),
-                    self._ensure_communicating(stimulus_id=ev.stimulus_id),
-                )
             elif not ts.who_has and ts.state == "fetch":
                 recommendations[ts] = "missing"
+            # Note: if ts.who_has and ts.state == "fetch", we may have just acquired new
+            # replicas whereas all previously known workers are in flight or busy. We
+            # rely on _transitions to call _ensure_communicating every time, even in
+            # absence of recommendations, to potentially kick off a new call to
+            # gather_dep.
 
         return recommendations, instructions
 
@@ -2833,10 +2895,9 @@ class WorkerState:
             "ready": self.ready,
             "constrained": self.constrained,
             "data": dict.fromkeys(self.data),
-            "data_needed": [ts.key for ts in self.data_needed.sorted()],
-            "data_needed_per_worker": {
+            "data_needed": {
                 w: [ts.key for ts in tss.sorted()]
-                for w, tss in self.data_needed_per_worker.items()
+                for w, tss in self.data_needed.items()
             },
             "executing": {ts.key for ts in self.executing},
             "long_running": self.long_running,
@@ -2900,11 +2961,10 @@ class WorkerState:
         assert ts.key not in self.data
         assert self.address not in ts.who_has
         assert not ts.done
-        assert ts in self.data_needed
-        # Note: ts.who_has may be empty; see GatherDepNetworkFailureEvent
+        assert ts.who_has
         for w in ts.who_has:
             assert ts.key in self.has_what[w]
-            assert ts in self.data_needed_per_worker[w]
+            assert ts in self.data_needed[w]
 
     def _validate_task_missing(self, ts: TaskState) -> None:
         assert ts.key not in self.data
@@ -2928,8 +2988,7 @@ class WorkerState:
         assert ts.key not in self.data
         assert not ts._next
         assert not ts._previous
-        assert ts not in self.data_needed
-        for tss in self.data_needed_per_worker.values():
+        for tss in self.data_needed.values():
             assert ts not in tss
         assert ts not in self.executing
         assert ts not in self.in_flight_tasks
@@ -3013,15 +3072,20 @@ class WorkerState:
                 assert k in self.tasks, self.story(k)
                 assert worker in self.tasks[k].who_has
 
-        for ts in self.data_needed:
-            assert ts.state == "fetch", self.story(ts)
-            assert self.tasks[ts.key] is ts
-        for worker, tss in self.data_needed_per_worker.items():
+        for worker, tss in self.data_needed.items():
             for ts in tss:
                 assert ts.state == "fetch"
-                assert self.tasks[ts.key] is ts
-                assert ts in self.data_needed
                 assert worker in ts.who_has
+
+        # Test that there aren't multiple TaskState objects with the same key in any
+        # Set[TaskState]. See note in TaskState.__hash__.
+        for ts in chain(
+            *self.data_needed.values(),
+            self.missing_dep_flight,
+            self.in_flight_tasks,
+            self.executing,
+        ):
+            assert self.tasks[ts.key] is ts
 
         for ts in self.tasks.values():
             self.validate_task(ts)
@@ -3030,8 +3094,7 @@ class WorkerState:
             assert self.transition_counter < self.transition_counter_max
 
         # Test that there aren't multiple TaskState objects with the same key in data_needed
-        assert len({ts.key for ts in self.data_needed}) == len(self.data_needed)
-        for tss in self.data_needed_per_worker.values():
+        for tss in self.data_needed.values():
             assert len({ts.key for ts in tss}) == len(tss)
 
 
@@ -3074,73 +3137,45 @@ class BaseWorker(abc.ABC):
         """
         instructions = self.state.handle_stimulus(*stims)
 
-        while instructions:
-            ensure_communicating: EnsureCommunicatingAfterTransitions | None = None
-            for inst in instructions:
-                task: asyncio.Task | None = None
+        for inst in instructions:
+            task: asyncio.Task | None = None
 
-                if isinstance(inst, SendMessageToScheduler):
-                    self.batched_send(inst.to_dict())
+            if isinstance(inst, SendMessageToScheduler):
+                self.batched_send(inst.to_dict())
 
-                elif isinstance(inst, EnsureCommunicatingAfterTransitions):
-                    # A single compute-task or acquire-replicas command may cause
-                    # multiple tasks to transition to fetch; this in turn means that we
-                    # will receive multiple instances of this instruction.
-                    # _ensure_communicating is a no-op if it runs twice in a row; we're
-                    # not calling it inside the for loop to avoid a O(n^2) condition
-                    # when
-                    # 1. there are many fetches queued because all workers are in flight
-                    # 2. a single compute-task or acquire-replicas command just sent
-                    #    many dependencies to fetch at once.
-                    ensure_communicating = inst
-
-                elif isinstance(inst, GatherDep):
-                    assert inst.to_gather
-                    keys_str = ", ".join(peekn(27, inst.to_gather)[0])
-                    if len(keys_str) > 80:
-                        keys_str = keys_str[:77] + "..."
-                    task = asyncio.create_task(
-                        self.gather_dep(
-                            inst.worker,
-                            inst.to_gather,
-                            total_nbytes=inst.total_nbytes,
-                            stimulus_id=inst.stimulus_id,
-                        ),
-                        name=f"gather_dep({inst.worker}, {{{keys_str}}})",
-                    )
-
-                elif isinstance(inst, Execute):
-                    task = asyncio.create_task(
-                        self.execute(inst.key, stimulus_id=inst.stimulus_id),
-                        name=f"execute({inst.key})",
-                    )
-
-                elif isinstance(inst, RetryBusyWorkerLater):
-                    task = asyncio.create_task(
-                        self.retry_busy_worker_later(inst.worker),
-                        name=f"retry_busy_worker_later({inst.worker})",
-                    )
-
-                else:
-                    raise TypeError(inst)  # pragma: nocover
-
-                if task is not None:
-                    self._async_instructions.add(task)
-                    task.add_done_callback(self._handle_stimulus_from_task)
-
-            if ensure_communicating:
-                # Potentially re-fill instructions, causing a second iteration of `while
-                # instructions` at the top of this method
-                # FIXME access to private methods
-                #       https://github.com/dask/distributed/issues/6497
-                recs, instructions = self.state._ensure_communicating(
-                    stimulus_id=ensure_communicating.stimulus_id
+            elif isinstance(inst, GatherDep):
+                assert inst.to_gather
+                keys_str = ", ".join(peekn(27, inst.to_gather)[0])
+                if len(keys_str) > 80:
+                    keys_str = keys_str[:77] + "..."
+                task = asyncio.create_task(
+                    self.gather_dep(
+                        inst.worker,
+                        inst.to_gather,
+                        total_nbytes=inst.total_nbytes,
+                        stimulus_id=inst.stimulus_id,
+                    ),
+                    name=f"gather_dep({inst.worker}, {{{keys_str}}})",
                 )
-                instructions += self.state._transitions(
-                    recs, stimulus_id=ensure_communicating.stimulus_id
+
+            elif isinstance(inst, Execute):
+                task = asyncio.create_task(
+                    self.execute(inst.key, stimulus_id=inst.stimulus_id),
+                    name=f"execute({inst.key})",
                 )
+
+            elif isinstance(inst, RetryBusyWorkerLater):
+                task = asyncio.create_task(
+                    self.retry_busy_worker_later(inst.worker),
+                    name=f"retry_busy_worker_later({inst.worker})",
+                )
+
             else:
-                return
+                raise TypeError(inst)  # pragma: nocover
+
+            if task is not None:
+                self._async_instructions.add(task)
+                task.add_done_callback(self._handle_stimulus_from_task)
 
     async def close(self, timeout: float = 30) -> None:
         """Cancel all asynchronous instructions"""

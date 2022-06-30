@@ -84,6 +84,7 @@ from distributed.utils import (
     has_arg,
     import_file,
     in_async_call,
+    is_python_shutting_down,
     iscoroutinefunction,
     json_load_robust,
     key_split,
@@ -574,7 +575,7 @@ class Worker(BaseWorker, ServerNode):
 
         with warn_on_duration(
             "1s",
-            "Creating scratch directories is taking a surprisingly long time. "
+            "Creating scratch directories is taking a surprisingly long time. ({duration:.2f}s) "
             "This is often due to running workers on a network file system. "
             "Consider specifying a local-directory to point workers to write "
             "scratch data to a local disk.",
@@ -859,8 +860,7 @@ class Worker(BaseWorker, ServerNode):
     comm_nbytes = DeprecatedWorkerStateAttribute()
     comm_threshold_bytes = DeprecatedWorkerStateAttribute()
     constrained = DeprecatedWorkerStateAttribute()
-    data_needed = DeprecatedWorkerStateAttribute()
-    data_needed_per_worker = DeprecatedWorkerStateAttribute()
+    data_needed_per_worker = DeprecatedWorkerStateAttribute(target="data_needed")
     executed_count = DeprecatedWorkerStateAttribute()
     executing_count = DeprecatedWorkerStateAttribute()
     generation = DeprecatedWorkerStateAttribute()
@@ -882,6 +882,15 @@ class Worker(BaseWorker, ServerNode):
     validate = DeprecatedWorkerStateAttribute()
     validate_task = DeprecatedWorkerStateAttribute()
     waiting_for_data_count = DeprecatedWorkerStateAttribute()
+
+    @property
+    def data_needed(self) -> set[TaskState]:
+        warnings.warn(
+            "The `Worker.data_needed` attribute has been removed; "
+            "use `Worker.state.data_needed[address]`",
+            FutureWarning,
+        )
+        return {ts for tss in self.state.data_needed.values() for ts in tss}
 
     ##################
     # Administrative #
@@ -924,15 +933,22 @@ class Worker(BaseWorker, ServerNode):
         return self.executors["default"]
 
     @ServerNode.status.setter  # type: ignore
-    def status(self, value):
+    def status(self, value: Status) -> None:
         """Override Server.status to notify the Scheduler of status changes.
         Also handles pausing/unpausing.
         """
         prev_status = self.status
-        ServerNode.status.__set__(self, value)
+        if prev_status == value:
+            return
+
+        ServerNode.status.__set__(self, value)  # type: ignore
         stimulus_id = f"worker-status-change-{time()}"
         self._send_worker_status_change(stimulus_id)
-        if value == Status.running:
+
+        if value == Status.running and prev_status in (
+            Status.paused,
+            Status.closing_gracefully,
+        ):
             self.handle_stimulus(UnpauseEvent(stimulus_id=stimulus_id))
         elif prev_status == Status.running:
             self.handle_stimulus(PauseEvent(stimulus_id=stimulus_id))
@@ -1534,21 +1550,31 @@ class Worker(BaseWorker, ServerNode):
             if executor is utils._offload_executor:
                 continue  # Never shutdown the offload executor
 
-            def _close():
+            def _close(wait):
                 if isinstance(executor, ThreadPoolExecutor):
                     executor._work_queue.queue.clear()
-                    executor.shutdown(wait=executor_wait, timeout=timeout)
+                    executor.shutdown(wait=wait, timeout=timeout)
                 else:
-                    executor.shutdown(wait=executor_wait)
+                    executor.shutdown(wait=wait)
 
             # Waiting for the shutdown can block the event loop causing
             # weird deadlocks particularly if the task that is executing in
             # the thread is waiting for a server reply, e.g. when using
             # worker clients, semaphores, etc.
-            try:
-                await to_thread(_close)
-            except RuntimeError:  # Are we shutting down the process?
-                _close()  # Just run it directly
+            if is_python_shutting_down():
+                # If we're shutting down there is no need to wait for daemon
+                # threads to finish
+                _close(wait=False)
+            else:
+                try:
+                    await to_thread(_close, wait=executor_wait)
+                except RuntimeError:  # Are we shutting down the process?
+                    logger.error(
+                        "Could not close executor %r by dispatching to thread. Trying synchronously.",
+                        executor,
+                        exc_info=True,
+                    )
+                    _close(wait=executor_wait)  # Just run it directly
 
         self.stop()
         await self.rpc.close()
@@ -2210,7 +2236,7 @@ class Worker(BaseWorker, ServerNode):
                 )
 
             if isinstance(result["actual-exception"], Reschedule):
-                return RescheduleEvent(key=ts.key, stimulus_id=stimulus_id)
+                return RescheduleEvent(key=ts.key, stimulus_id=f"reschedule-{time()}")
 
             logger.warning(
                 "Compute Failed\n"
