@@ -10,6 +10,7 @@ import os
 import pathlib
 import random
 import sys
+import tempfile
 import threading
 import warnings
 import weakref
@@ -568,7 +569,9 @@ class Worker(BaseWorker, ServerNode):
             local_directory = local_dir
 
         if not local_directory:
-            local_directory = dask.config.get("temporary-directory") or os.getcwd()
+            local_directory = (
+                dask.config.get("temporary-directory") or tempfile.gettempdir()
+            )
 
         os.makedirs(local_directory, exist_ok=True)
         local_directory = os.path.join(local_directory, "dask-worker-space")
