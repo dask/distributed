@@ -2236,7 +2236,7 @@ class Worker(BaseWorker, ServerNode):
                 )
 
             if isinstance(result["actual-exception"], Reschedule):
-                return RescheduleEvent(key=ts.key, stimulus_id=stimulus_id)
+                return RescheduleEvent(key=ts.key, stimulus_id=f"reschedule-{time()}")
 
             logger.warning(
                 "Compute Failed\n"

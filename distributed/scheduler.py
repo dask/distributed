@@ -2223,21 +2223,19 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_processing_released(self, key, stimulus_id):
+    def transition_processing_released(self, key: str, stimulus_id: str):
         try:
-            ts: TaskState = self.tasks[key]
-            dts: TaskState
-            recommendations: dict = {}
-            client_msgs: dict = {}
-            worker_msgs: dict = {}
+            ts = self.tasks[key]
+            recommendations = {}
+            worker_msgs = {}
 
             if self.validate:
                 assert ts.processing_on
                 assert not ts.who_has
                 assert not ts.waiting_on
-                assert self.tasks[key].state == "processing"
+                assert ts.state == "processing"
 
-            w: str = _remove_from_processing(self, ts)
+            w = _remove_from_processing(self, ts)
             if w:
                 worker_msgs[w] = [
                     {
@@ -2265,7 +2263,7 @@ class SchedulerState:
             if self.validate:
                 assert not ts.processing_on
 
-            return recommendations, client_msgs, worker_msgs
+            return recommendations, {}, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -6606,7 +6604,9 @@ class Scheduler(SchedulerState, ServerNode):
 
     transition_story = story
 
-    def reschedule(self, key=None, worker=None):
+    def reschedule(
+        self, key: str, worker: str | None = None, *, stimulus_id: str
+    ) -> None:
         """Reschedule a task
 
         Things may have shifted and this task may now be better suited to run
@@ -6616,15 +6616,17 @@ class Scheduler(SchedulerState, ServerNode):
             ts = self.tasks[key]
         except KeyError:
             logger.warning(
-                "Attempting to reschedule task {}, which was not "
-                "found on the scheduler. Aborting reschedule.".format(key)
+                f"Attempting to reschedule task {key}, which was not "
+                "found on the scheduler. Aborting reschedule."
             )
             return
         if ts.state != "processing":
             return
         if worker and ts.processing_on.address != worker:
             return
-        self.transitions({key: "released"}, f"reschedule-{time()}")
+        # transition_processing_released will immediately suggest an additional
+        # transition to waiting if the task has any waiters or clients holding a future.
+        self.transitions({key: "released"}, stimulus_id=stimulus_id)
 
     #####################
     # Utility functions #
