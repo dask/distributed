@@ -6606,7 +6606,9 @@ class Scheduler(SchedulerState, ServerNode):
 
     transition_story = story
 
-    def reschedule(self, key=None, worker=None):
+    def reschedule(
+        self, key: str, worker: str | None = None, *, stimulus_id: str
+    ) -> None:
         """Reschedule a task
 
         Things may have shifted and this task may now be better suited to run
@@ -6616,15 +6618,15 @@ class Scheduler(SchedulerState, ServerNode):
             ts = self.tasks[key]
         except KeyError:
             logger.warning(
-                "Attempting to reschedule task {}, which was not "
-                "found on the scheduler. Aborting reschedule.".format(key)
+                f"Attempting to reschedule task {key}, which was not "
+                "found on the scheduler. Aborting reschedule."
             )
             return
         if ts.state != "processing":
             return
         if worker and ts.processing_on.address != worker:
             return
-        self.transitions({key: "released"}, f"reschedule-{time()}")
+        self.transitions({key: "released"}, stimulus_id=stimulus_id)
 
     #####################
     # Utility functions #

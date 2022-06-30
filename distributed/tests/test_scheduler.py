@@ -1132,9 +1132,12 @@ async def test_balance_many_workers(c, s, *workers):
 
 
 @nodebug
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 30)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 30,
+    config={"distributed.scheduler.work-stealing": False},
+)
 async def test_balance_many_workers_2(c, s, *workers):
-    await s.extensions["stealing"].stop()
     futures = c.map(slowinc, range(90), delay=0.2)
     await wait(futures)
     assert {len(w.has_what) for w in s.workers.values()} == {3}
@@ -1513,30 +1516,33 @@ async def test_log_tasks_during_restart(c, s, a, b):
     assert "exit" in str(s.events)
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.work-stealing": False},
+)
 async def test_reschedule(c, s, a, b):
-    await c.submit(slowinc, -1, delay=0.1)  # learn cost
-    x = c.map(slowinc, range(4), delay=0.1)
+    xs = c.map(slowinc, range(100), key="x", delay=0.1)
+    while not a.state.tasks or not b.state.tasks:
+        await asyncio.sleep(0.01)
+    assert len(a.state.tasks) == len(b.state.tasks) == 50
 
-    # add much more work onto worker a
-    futures = c.map(slowinc, range(10, 20), delay=0.1, workers=a.address)
+    ys = c.map(slowinc, range(100), key="y", delay=0.1, workers=[a.address])
+    while len(a.state.tasks) != 150:
+        await asyncio.sleep(0.01)
 
-    while len(s.tasks) < len(x) + len(futures):
-        await asyncio.sleep(0.001)
+    for x in xs:
+        if s.tasks[x.key].processing_on is s.workers[a.address]:
+            s.reschedule(x.key, stimulus_id="test")
 
-    for future in x:
-        s.reschedule(key=future.key)
-
-    # Worker b gets more of the original tasks
-    await wait(x)
-    assert sum(future.key in b.data for future in x) >= 3
-    assert sum(future.key in a.data for future in x) <= 1
+    while len(a.state.tasks) == 150 or len(b.state.tasks) <= 50:
+        await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
-async def test_reschedule_warns(c, s, a, b):
-    with captured_logger(logging.getLogger("distributed.scheduler")) as sched:
-        s.reschedule(key="__this-key-does-not-exist__")
+@gen_cluster()
+async def test_reschedule_warns(s, a, b):
+    with captured_logger("distributed.scheduler") as sched:
+        s.reschedule(key="__this-key-does-not-exist__", stimulus_id="test")
 
     assert "not found on the scheduler" in sched.getvalue()
     assert "Aborting reschedule" in sched.getvalue()
@@ -3342,12 +3348,11 @@ async def test_worker_heartbeat_after_cancel(c, s, *workers):
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_set_restrictions(c, s, a, b):
-
-    f = c.submit(inc, 1, workers=[b.address])
+    f = c.submit(inc, 1, key="f", workers=[b.address])
     await f
     s.set_restrictions(worker={f.key: a.address})
     assert s.tasks[f.key].worker_restrictions == {a.address}
-    s.reschedule(f)
+    await b.close()
     await f
 
 

@@ -1725,9 +1725,7 @@ class WorkerState:
     def _transition_long_running_rescheduled(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
-        recs: Recs = {ts: "released"}
-        smsg = RescheduleMsg(key=ts.key, stimulus_id=stimulus_id)
-        return recs, [smsg]
+        return {ts: "released"}, [RescheduleMsg(key=ts.key, stimulus_id=stimulus_id)]
 
     def _transition_executing_rescheduled(
         self, ts: TaskState, *, stimulus_id: str
@@ -1737,10 +1735,7 @@ class WorkerState:
         self.executing.discard(ts)
 
         return merge_recs_instructions(
-            (
-                {ts: "released"},
-                [RescheduleMsg(key=ts.key, stimulus_id=stimulus_id)],
-            ),
+            ({ts: "released"}, [RescheduleMsg(key=ts.key, stimulus_id=stimulus_id)]),
             self._ensure_computing(),
         )
 

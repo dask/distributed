@@ -82,6 +82,7 @@ from distributed.worker_state_machine import (
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     RemoveReplicasEvent,
+    RescheduleEvent,
     SerializedTask,
     StealRequestEvent,
 )
@@ -1181,20 +1182,27 @@ async def test_get_current_task(c, s, a, b):
     assert result.startswith("some_name")
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
-async def test_reschedule(c, s, a, b):
-    await s.extensions["stealing"].stop()
+@pytest.mark.slow
+@pytest.mark.parametrize("long_running", [False, True])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.work-stealing": False},
+)
+async def test_reschedule(c, s, a, b, long_running):
     a_address = a.address
 
     def f(x):
+        if long_running:
+            distributed.secede()
         sleep(0.1)
         if get_worker().address == a_address:
             raise Reschedule()
 
-    futures = c.map(f, range(4))
-    futures2 = c.map(slowinc, range(10), delay=0.1, workers=a.address)
+    futures = c.map(f, range(4), key=["x1", "x2", "x3", "x4"])
+    futures2 = c.map(slowinc, range(10), delay=0.1, key="clog", workers=[a.address])
     await wait(futures)
-
+    assert any(isinstance(ev, RescheduleEvent) for ev in a.state.stimulus_log)
     assert all(f.key in b.data for f in futures)
 
 
