@@ -441,17 +441,17 @@ class Server:
         self.__stopped = False
 
     @property
-    def status(self):
+    def status(self) -> Status:
         try:
             return self._status
         except AttributeError:
             return Status.undefined
 
     @status.setter
-    def status(self, new_status):
-        if not isinstance(new_status, Status):
-            raise TypeError(f"Expected Status; got {new_status!r}")
-        self._status = new_status
+    def status(self, value: Status) -> None:
+        if not isinstance(value, Status):
+            raise TypeError(f"Expected Status; got {value!r}")
+        self._status = value
 
     async def finished(self):
         """Wait until the server has finished"""
