@@ -1243,29 +1243,28 @@ async def test_run_on_scheduler_disabled(c, s, a, b):
         await c._run_on_scheduler(f)
 
 
-@gen_cluster(client=True)
-async def test_close_worker(c, s, a, b):
+@gen_cluster()
+async def test_close_worker(s, a, b):
     assert len(s.workers) == 2
 
-    await s.close_worker(worker=a.address, stimulus_id="test")
-
-    assert len(s.workers) == 1
+    s.close_worker(a.address)
+    while len(s.workers) != 1:
+        await asyncio.sleep(0.01)
     assert a.address not in s.workers
 
-    await asyncio.sleep(0.5)
-
+    await asyncio.sleep(0.2)
     assert len(s.workers) == 1
 
 
-@pytest.mark.slow
-@gen_cluster(client=True, Worker=Nanny)
-async def test_close_nanny(c, s, a, b):
+# @pytest.mark.slow
+@gen_cluster(Worker=Nanny)
+async def test_close_nanny(s, a, b):
     assert len(s.workers) == 2
 
     assert a.process.is_alive()
     a_worker_address = a.worker_address
-    start = time()
-    await s.close_worker(worker=a_worker_address, stimulus_id="test")
+
+    await s.remove_worker(a_worker_address, stimulus_id="test")
 
     assert len(s.workers) == 1
     assert a_worker_address not in s.workers
