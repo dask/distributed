@@ -42,7 +42,7 @@ async def test_scheduler_reschedule(c, s, a, b):
 
     # Wait for at least some of the 50 xs that had been scheduled on a to move to b.
     # This happens because you have 100 ys processing on a and 50 xs processing on b,
-    # so the scheduler will prefer b for the reschduled tasks to obtain more equal
+    # so the scheduler will prefer b for the rescheduled tasks to obtain more equal
     # balancing.
     while len(a.state.tasks) == 150 or len(b.state.tasks) <= 50:
         await asyncio.sleep(0.01)
