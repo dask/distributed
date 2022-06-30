@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 import pytest
 
-from distributed import Event, Nanny, wait
+from distributed import Event, Lock, Nanny, wait
 from distributed.active_memory_manager import (
     ActiveMemoryManagerExtension,
     ActiveMemoryManagerPolicy,
@@ -22,6 +22,7 @@ from distributed.utils_test import (
     captured_logger,
     gen_cluster,
     inc,
+    lock_inc,
     slowinc,
 )
 
@@ -446,7 +447,6 @@ async def test_drop_prefers_paused_workers(c, s, *workers):
     assert ws not in ts.who_has
 
 
-@pytest.mark.slow
 @gen_cluster(client=True, config=demo_config("drop"))
 async def test_drop_with_paused_workers_with_running_tasks_1(c, s, a, b):
     """If there is exactly 1 worker that holds a replica of a task that isn't paused or
@@ -457,17 +457,19 @@ async def test_drop_with_paused_workers_with_running_tasks_1(c, s, a, b):
     a is paused and with dependent tasks executing on it
     b is running and has no dependent tasks
     """
-    x = (await c.scatter({"x": 1}, broadcast=True))["x"]
-    y = c.submit(slowinc, x, delay=2.5, key="y", workers=[a.address])
+    lock = Lock()
+    async with lock:
+        x = (await c.scatter({"x": 1}, broadcast=True))["x"]
+        y = c.submit(lock_inc, x, lock=lock, key="y", workers=[a.address])
 
-    while "y" not in a.state.tasks or a.state.tasks["y"].state != "executing":
-        await asyncio.sleep(0.01)
-    a.status = Status.paused
-    while s.workers[a.address].status != Status.paused:
-        await asyncio.sleep(0.01)
-    assert a.state.tasks["y"].state == "executing"
+        while "y" not in a.state.tasks or a.state.tasks["y"].state != "executing":
+            await asyncio.sleep(0.01)
+        a.status = Status.paused
+        while s.workers[a.address].status != Status.paused:
+            await asyncio.sleep(0.01)
+        assert a.state.tasks["y"].state == "executing"
 
-    s.extensions["amm"].run_once()
+        s.extensions["amm"].run_once()
     await y
     assert len(s.tasks["x"].who_has) == 2
 
@@ -508,26 +510,28 @@ async def test_drop_with_paused_workers_with_running_tasks_3_4(c, s, a, b, pause
     a is running and with dependent tasks executing on it
     b is running and has no dependent tasks
     """
-    x = (await c.scatter({"x": 1}, broadcast=True))["x"]
-    y = c.submit(slowinc, x, delay=2.5, key="y", workers=[a.address])
-    while "y" not in a.state.tasks or a.state.tasks["y"].state != "executing":
-        await asyncio.sleep(0.01)
-
-    if pause:
-        a.status = Status.paused
-        b.status = Status.paused
-        while any(ws.status != Status.paused for ws in s.workers.values()):
+    lock = Lock()
+    async with lock:
+        x = (await c.scatter({"x": 1}, broadcast=True))["x"]
+        y = c.submit(lock_inc, x, lock_inc, key="y", workers=[a.address])
+        while "y" not in a.state.tasks or a.state.tasks["y"].state != "executing":
             await asyncio.sleep(0.01)
 
-    assert s.tasks["y"].state == "processing"
-    assert a.state.tasks["y"].state == "executing"
+        if pause:
+            a.status = Status.paused
+            b.status = Status.paused
+            while any(ws.status != Status.paused for ws in s.workers.values()):
+                await asyncio.sleep(0.01)
 
-    s.extensions["amm"].run_once()
+        assert s.tasks["y"].state == "processing"
+        assert a.state.tasks["y"].state == "executing"
+
+        s.extensions["amm"].run_once()
     await y
     assert {ws.address for ws in s.tasks["x"].who_has} == {a.address}
 
 
-@pytest.mark.slow
+# @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)] * 3, config=demo_config("drop"))
 async def test_drop_with_paused_workers_with_running_tasks_5(c, s, w1, w2, w3):
     """If there is exactly 1 worker that holds a replica of a task that isn't paused or
@@ -539,29 +543,31 @@ async def test_drop_with_paused_workers_with_running_tasks_5(c, s, w1, w2, w3):
     w2 is running and has no dependent tasks
     w3 is running and with dependent tasks executing on it
     """
-    x = (await c.scatter({"x": 1}, broadcast=True))["x"]
-    y1 = c.submit(slowinc, x, delay=2.5, key="y1", workers=[w1.address])
-    y2 = c.submit(slowinc, x, delay=2.5, key="y2", workers=[w3.address])
+    lock = Lock()
+    async with lock:
+        x = (await c.scatter({"x": 1}, broadcast=True))["x"]
+        y1 = c.submit(lock_inc, x, lock=lock, key="y1", workers=[w1.address])
+        y2 = c.submit(lock_inc, x, lock=lock, key="y2", workers=[w3.address])
 
-    def executing() -> bool:
-        return (
-            "y1" in w1.state.tasks
-            and w1.state.tasks["y1"].state == "executing"
-            and "y2" in w3.state.tasks
-            and w3.state.tasks["y2"].state == "executing"
-        )
+        def executing() -> bool:
+            return (
+                "y1" in w1.state.tasks
+                and w1.state.tasks["y1"].state == "executing"
+                and "y2" in w3.state.tasks
+                and w3.state.tasks["y2"].state == "executing"
+            )
 
-    while not executing():
-        await asyncio.sleep(0.01)
-    w1.status = Status.paused
-    while s.workers[w1.address].status != Status.paused:
-        await asyncio.sleep(0.01)
-    assert executing()
+        while not executing():
+            await asyncio.sleep(0.01)
+        w1.status = Status.paused
+        while s.workers[w1.address].status != Status.paused:
+            await asyncio.sleep(0.01)
+        assert executing()
 
-    s.extensions["amm"].run_once()
-    while {ws.address for ws in s.tasks["x"].who_has} != {w1.address, w3.address}:
-        await asyncio.sleep(0.01)
-    assert executing()
+        s.extensions["amm"].run_once()
+        while {ws.address for ws in s.tasks["x"].who_has} != {w1.address, w3.address}:
+            await asyncio.sleep(0.01)
+        assert executing()
 
 
 @gen_cluster(nthreads=[("", 1)] * 4, client=True, config=demo_config("replicate", n=2))

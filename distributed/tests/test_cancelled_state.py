@@ -13,7 +13,7 @@ from distributed.utils_test import (
     assert_story,
     gen_cluster,
     inc,
-    slowinc,
+    lock_inc,
     wait_for_state,
     wait_for_stimulus,
 )
@@ -36,31 +36,37 @@ async def wait_for_cancelled(key, dask_worker):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_release(c, s, a):
-    fut = c.submit(slowinc, 1, delay=1)
-    await wait_for_state(fut.key, "executing", a)
-    fut.release()
-    await wait_for_cancelled(fut.key, a)
+    lock = Lock()
+    async with lock:
+        fut = c.submit(lock_inc, 1, lock=lock)
+        await wait_for_state(fut.key, "executing", a)
+        fut.release()
+        await wait_for_cancelled(fut.key, a)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_reschedule(c, s, a):
-    fut = c.submit(slowinc, 1, delay=1)
-    await wait_for_state(fut.key, "executing", a)
-    fut.release()
-    await wait_for_cancelled(fut.key, a)
-    fut = c.submit(slowinc, 1, delay=0.1)
+    lock = Lock()
+    async with lock:
+        fut = c.submit(lock_inc, 1, lock=lock)
+        await wait_for_state(fut.key, "executing", a)
+        fut.release()
+        await wait_for_cancelled(fut.key, a)
+        fut = c.submit(lock_inc, 1, lock=lock)
     await fut
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_add_as_dependency(c, s, a):
-    fut = c.submit(slowinc, 1, delay=1)
-    await wait_for_state(fut.key, "executing", a)
-    fut.release()
-    await wait_for_cancelled(fut.key, a)
+    lock = Lock()
+    async with lock:
+        fut = c.submit(lock_inc, 1, lock=lock)
+        await wait_for_state(fut.key, "executing", a)
+        fut.release()
+        await wait_for_cancelled(fut.key, a)
 
-    fut = c.submit(slowinc, 1, delay=1)
-    fut = c.submit(slowinc, fut, delay=1)
+        fut = c.submit(lock_inc, 1, lock=lock)
+        fut = c.submit(inc, fut)
     await fut
 
 
