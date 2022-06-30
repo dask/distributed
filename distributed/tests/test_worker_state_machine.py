@@ -307,6 +307,29 @@ def test_computetask_to_dict():
     assert ev3.priority == (0,)  # List is automatically converted back to tuple
 
 
+def test_computetask_dummy():
+    ev = ComputeTaskEvent.dummy(key="x", stimulus_id="s")
+    assert ev == ComputeTaskEvent(
+        key="x",
+        who_has={},
+        nbytes={},
+        priority=(0,),
+        duration=1.0,
+        run_spec=None,
+        resource_restrictions={},
+        actor=False,
+        annotations={},
+        stimulus_id="s",
+        function=None,
+        args=None,
+        kwargs=None,
+    )
+
+    # nbytes is generated from who_has if omitted
+    ev2 = ComputeTaskEvent.dummy(key="x", who_has={"y": "127.0.0.1:2"}, stimulus_id="s")
+    assert ev2.nbytes == {"y": 1}
+
+
 def test_updatedata_to_dict():
     """The potentially very large UpdateDataEvent.data is not stored in the log"""
     ev = UpdateDataEvent(
@@ -521,7 +544,7 @@ async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_fetch_to_missing(c, s, a, b):
+async def test_fetch_to_missing_on_busy(c, s, a, b):
     """
     1. task x is a dependency of y
     2. scheduler calls handle_compute("y", who_has={"x": [b]}) on a
@@ -531,7 +554,12 @@ async def test_fetch_to_missing(c, s, a, b):
     6. the scheduler responds {"x": []}, because w1 in the meantime has lost the key.
     7. x is transitioned fetch -> missing
     """
-    x = await c.scatter({"x": 1}, workers=[b.address])
+    # Note: submit and scatter are different. If you lose all workers holding the
+    # replicas of a scattered key, the scheduler forgets the task, which in turn would
+    # trigger a free-keys response to request-refresh-who-has.
+    x = c.submit(inc, 1, key="x", workers=[b.address])
+    await x
+
     b.total_in_connections = 0
     # Crucially, unlike with `c.submit(inc, x, workers=[a.address])`, the scheduler
     # doesn't keep track of acquire-replicas requests, so it won't proactively inform a
@@ -928,19 +956,10 @@ def test_gather_priority(ws):
             stimulus_id="compute1",
         ),
         # A higher-priority task, even if scheduled later, is fetched first
-        ComputeTaskEvent(
+        ComputeTaskEvent.dummy(
             key="z",
             who_has={"y": ["127.0.0.7:1"]},
-            nbytes={"y": 1},
             priority=(0,),
-            duration=1.0,
-            run_spec=None,
-            function=None,
-            args=None,
-            kwargs=None,
-            resource_restrictions={},
-            actor=False,
-            annotations={},
             stimulus_id="compute2",
         ),
         UnpauseEvent(stimulus_id="unpause"),
