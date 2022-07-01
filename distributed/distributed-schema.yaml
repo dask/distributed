@@ -754,8 +754,14 @@ properties:
             properties:
               connect:
                 type: string
+                description: |
+                  Timeout after which to error when estabilishing a connection.
+                  For example, when creating a connection between client and worker,
+                  client and scheduler, etc.
               tcp:
                 type: string
+                description: |
+                  Timeout after which to error when creating a TCP/Socket connection
 
           require-encryption:
             type:
