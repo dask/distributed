@@ -8,8 +8,10 @@ from tornado import web
 
 
 def _descend_routes(router, routers=None, out=None):
-    routers = routers or set()
-    out = out or set()
+    if routers is None:
+        routers = set()
+    if out is None:
+        out = set()
     if router in routers:
         return
     routers.add(router)
