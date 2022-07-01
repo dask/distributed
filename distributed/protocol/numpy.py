@@ -25,7 +25,10 @@ def serialize_numpy_ndarray(x, context=None):
     if x.dtype.hasobject or (x.dtype.flags & np.core.multiarray.LIST_PICKLE):
         header = {"pickle": True}
         frames = [None]
-        buffer_callback = lambda f: frames.append(memoryview(f))
+
+        def buffer_callback(f):
+            frames.append(memoryview(f))
+
         frames[0] = pickle.dumps(
             x,
             buffer_callback=buffer_callback,

@@ -582,7 +582,9 @@ def test_dumps_task():
     d = dumps_task((inc, 1))
     assert set(d) == {"function", "args"}
 
-    f = lambda x, y=2: x + y
+    def f(x, y=2):
+        return x + y
+
     d = dumps_task((apply, f, (1,), {"y": 10}))
     assert cloudpickle.loads(d["function"])(1, 2) == 3
     assert cloudpickle.loads(d["args"]) == (1,)
