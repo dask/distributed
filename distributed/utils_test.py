@@ -688,12 +688,16 @@ def _close_queue(q):
 def cluster(
     nworkers=2,
     nanny=False,
-    worker_kwargs={},
+    worker_kwargs=None,
     active_rpc_timeout=10,
     disconnect_timeout=20,
-    scheduler_kwargs={},
-    config={},
+    scheduler_kwargs=None,
+    config=None,
 ):
+    worker_kwargs = worker_kwargs or {}
+    scheduler_kwargs = scheduler_kwargs or {}
+    config = config or {}
+
     ws = weakref.WeakSet()
     enable_proctitle_on_children()
 
@@ -830,7 +834,7 @@ async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
 
 def gen_test(
     timeout: float = _TEST_TIMEOUT,
-    clean_kwargs: dict[str, Any] = {},
+    clean_kwargs: dict[str, Any] | None = None,
 ) -> Callable[[Callable], Callable]:
     """Coroutine test
 
@@ -844,6 +848,7 @@ def gen_test(
     async def test_foo():
         await ...  # use tornado coroutines
     """
+    clean_kwargs = clean_kwargs or {}
     assert timeout, (
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"
@@ -878,9 +883,12 @@ async def start_cluster(
     scheduler_addr: str,
     security: Security | dict[str, Any] | None = None,
     Worker: type[ServerNode] = Worker,
-    scheduler_kwargs: dict[str, Any] = {},
-    worker_kwargs: dict[str, Any] = {},
+    scheduler_kwargs: dict[str, Any] | None = None,
+    worker_kwargs: dict[str, Any] | None = None,
 ) -> tuple[Scheduler, list[ServerNode]]:
+    scheduler_kwargs = scheduler_kwargs or {}
+    worker_kwargs = worker_kwargs or {}
+
     s = await Scheduler(
         validate=True,
         security=security,
@@ -983,21 +991,18 @@ async def end_cluster(s, workers):
 
 
 def gen_cluster(
-    nthreads: list[tuple[str, int] | tuple[str, int, dict]] = [
-        ("127.0.0.1", 1),
-        ("127.0.0.1", 2),
-    ],
+    nthreads: list[tuple[str, int] | tuple[str, int, dict]] | None = None,
     scheduler: str = "127.0.0.1",
     timeout: float = _TEST_TIMEOUT,
     security: Security | dict[str, Any] | None = None,
     Worker: type[ServerNode] = Worker,
     client: bool = False,
-    scheduler_kwargs: dict[str, Any] = {},
-    worker_kwargs: dict[str, Any] = {},
-    client_kwargs: dict[str, Any] = {},
+    scheduler_kwargs: dict[str, Any] | None = None,
+    worker_kwargs: dict[str, Any] | None = None,
+    client_kwargs: dict[str, Any] | None = None,
     active_rpc_timeout: float = 1,
-    config: dict[str, Any] = {},
-    clean_kwargs: dict[str, Any] = {},
+    config: dict[str, Any] | None = None,
+    clean_kwargs: dict[str, Any] | None = None,
     allow_unclosed: bool = False,
     cluster_dump_directory: str | Literal[False] = "test_cluster_dump",
 ) -> Callable[[Callable], Callable]:
@@ -1022,6 +1027,17 @@ def gen_cluster(
         start
         end
     """
+    if nthreads is None:
+        nthreads = [
+            ("127.0.0.1", 1),
+            ("127.0.0.1", 2),
+        ]
+    scheduler_kwargs = scheduler_kwargs or {}
+    worker_kwargs = worker_kwargs or {}
+    client_kwargs = client_kwargs or {}
+    config = config or {}
+    clean_kwargs = clean_kwargs or {}
+
     assert timeout, (
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"

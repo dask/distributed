@@ -4220,15 +4220,15 @@ class Client(SyncMethodMixin):
             key = (key,)
         return self.sync(self.scheduler.set_metadata, keys=key, value=value)
 
-    def get_versions(self, check=False, packages=[]):
+    def get_versions(self, check: bool = False, packages: list[str] | None = None):
         """Return version info for the scheduler, all workers and myself
 
         Parameters
         ----------
-        check : boolean, default False
+        check
             raise ValueError if all required & optional packages
             do not match
-        packages : List[str]
+        packages
             Extra package names to check
 
         Examples
@@ -4237,9 +4237,10 @@ class Client(SyncMethodMixin):
 
         >>> c.get_versions(packages=['sklearn', 'geopandas'])  # doctest: +SKIP
         """
-        return self.sync(self._get_versions, check=check, packages=packages)
+        return self.sync(self._get_versions, check=check, packages=packages or [])
 
-    async def _get_versions(self, check=False, packages=[]):
+    async def _get_versions(self, check=False, packages=None):
+        packages = packages or []
         client = version_module.get_versions(packages=packages)
         scheduler = await self.scheduler.versions(packages=packages)
         workers = await self.scheduler.broadcast(
