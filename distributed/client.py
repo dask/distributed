@@ -23,7 +23,7 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, Sequence
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
@@ -4220,7 +4220,7 @@ class Client(SyncMethodMixin):
             key = (key,)
         return self.sync(self.scheduler.set_metadata, keys=key, value=value)
 
-    def get_versions(self, check: bool = False, packages: list[str] | None = None):
+    def get_versions(self, check: bool = False, packages: Sequence[str] | None = None):
         """Return version info for the scheduler, all workers and myself
 
         Parameters
@@ -4239,7 +4239,9 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self._get_versions, check=check, packages=packages or [])
 
-    async def _get_versions(self, check=False, packages=None):
+    async def _get_versions(
+        self, check: bool = False, packages: Sequence[str] | None = None
+    ):
         packages = packages or []
         client = version_module.get_versions(packages=packages)
         scheduler = await self.scheduler.versions(packages=packages)
