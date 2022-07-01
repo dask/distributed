@@ -14,6 +14,8 @@ from tornado.ioloop import IOLoop
 import dask
 
 from distributed.comm.core import CommClosedError
+from distributed.comm.registry import backends
+from distributed.comm.tcp import TCPBackend, TCPListener
 from distributed.core import (
     AsyncTaskGroup,
     AsyncTaskGroupClosedError,
@@ -40,7 +42,6 @@ from distributed.utils_test import (
     assert_can_connect_locally_4,
     assert_can_connect_locally_6,
     assert_cannot_connect,
-    async_wait_for,
     captured_logger,
     gen_cluster,
     gen_test,
@@ -190,25 +191,21 @@ async def test_async_task_group_close_prohibits_new_tasks():
 
 
 @gen_test()
-async def test_async_task_group_stop_allows_shutdown():
+async def test_async_task_group_stop_disallows_shutdown():
     group = AsyncTaskGroup()
 
     task = None
 
     async def set_flag():
         nonlocal task
-        while not group.closed:
-            await asyncio.sleep(0.01)
         task = asyncio.current_task()
-        return None
 
     assert group.call_soon(set_flag) is None
     assert len(group) == 1
-    # when given a grace period of 1 second tasks are allowed to poll group.stop
-    # before awaiting other async functions
-    await group.stop(timeout=1)
-    assert task.done()
-    assert not task.cancelled()
+    # tasks are not given a grace period, and are not even allowed to start
+    # if the group is closed immediately
+    await group.stop()
+    assert task is None
 
 
 @gen_test()
@@ -217,10 +214,12 @@ async def test_async_task_group_stop_cancels_long_running():
 
     task = None
     flag = False
+    started = asyncio.Event()
 
     async def set_flag():
         nonlocal task
         task = asyncio.current_task()
+        started.set()
         await asyncio.sleep(10)
         nonlocal flag
         flag = True
@@ -228,9 +227,11 @@ async def test_async_task_group_stop_cancels_long_running():
 
     assert group.call_soon(set_flag) is None
     assert len(group) == 1
-    await group.stop(timeout=1)
-    assert not flag
+    await started.wait()
+    await group.stop()
+    assert task
     assert task.cancelled()
+    assert not flag
 
 
 @gen_test()
@@ -1065,9 +1066,12 @@ async def test_close_properly():
     GH4704
     """
 
+    sleep_started = asyncio.Event()
+
     async def sleep(comm=None):
         # We want to ensure this is actually canceled therefore don't give it a
         # chance to actually complete
+        sleep_started.set()
         await asyncio.sleep(2000000)
 
     server = await Server({"sleep": sleep})
@@ -1087,8 +1091,7 @@ async def test_close_properly():
 
         comm = await remote.live_comm()
         await comm.write({"op": "sleep"})
-
-        await async_wait_for(lambda: not server._ongoing_comm_handlers, 10)
+        await sleep_started.wait()
 
         listeners = server.listeners
         assert len(listeners) == len(ports)
@@ -1102,7 +1105,7 @@ async def test_close_properly():
             await assert_cannot_connect(f"tcp://{ip}:{port}")
 
         # weakref set/dict should be cleaned up
-        assert not len(server._ongoing_comm_handlers)
+        assert not len(server._ongoing_background_tasks)
 
 
 @gen_test()
@@ -1233,3 +1236,22 @@ def test_expects_comm():
     assert not _expects_comm(instance.comm_not_leading_position)
 
     assert not _expects_comm(instance.stream_not_leading_position)
+
+
+class AsyncStopTCPListener(TCPListener):
+    async def stop(self):
+        await asyncio.sleep(0)
+        super().stop()
+
+
+class TCPAsyncListenerBackend(TCPBackend):
+    _listener_class = AsyncStopTCPListener
+
+
+@gen_test()
+async def test_async_listener_stop(monkeypatch):
+    monkeypatch.setitem(backends, "tcp", TCPAsyncListenerBackend())
+    with pytest.warns(PendingDeprecationWarning):
+        async with Server({}) as s:
+            await s.listen(0)
+            assert s.listeners

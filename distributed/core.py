@@ -237,36 +237,26 @@ class AsyncTaskGroup(_LoopBoundMixin):
         """
         self.closed = True
 
-    async def stop(self, timeout: float = 1) -> None:
+    async def stop(self) -> None:
         """Close the group and stop all currently running tasks.
 
-        Closes the task group and waits `timeout` seconds for all tasks to gracefully finish.
-        After the timeout, all remaining tasks are cancelled.
+        Closes the task group and cancels all tasks. All tasks are cancelled
+        an additional time for each time this task is cancelled.
         """
         self.close()
 
         current_task = asyncio.current_task(self._get_loop())
-        tasks_to_stop = [t for t in self._ongoing_tasks if t is not current_task]
-
-        if tasks_to_stop:
-            # Wrap gather in task to avoid Python3.8 issue,
-            # see https://github.com/dask/distributed/pull/6478#discussion_r885696827
-            async def gather():
-                return await asyncio.gather(*tasks_to_stop, return_exceptions=True)
-
+        err = None
+        while tasks_to_stop := (self._ongoing_tasks - {current_task}):
+            for task in tasks_to_stop:
+                task.cancel()
             try:
-                await asyncio.wait_for(
-                    gather(),
-                    timeout,
-                )
-            except asyncio.TimeoutError:
-                # The timeout on gather has cancelled the tasks, so this will not hang indefinitely
-                await asyncio.gather(*tasks_to_stop, return_exceptions=True)
+                await asyncio.wait(tasks_to_stop)
+            except asyncio.CancelledError as e:
+                err = e
 
-            if [t for t in self._ongoing_tasks if t is not current_task]:
-                raise RuntimeError(
-                    f"Expected all ongoing tasks to be cancelled and removed, found {self._ongoing_tasks}."
-                )
+        if err is not None:
+            raise err
 
     def __len__(self):
         return len(self._ongoing_tasks)
@@ -359,7 +349,6 @@ class Server:
         self.counters = None
         self.digests = None
         self._ongoing_background_tasks = AsyncTaskGroup()
-        self._ongoing_comm_handlers = AsyncTaskGroup()
         self._event_finished = asyncio.Event()
 
         self.listeners = []
@@ -523,17 +512,22 @@ class Server:
                 pc.start()
 
     def stop(self):
-        if not self.__stopped:
-            self.__stopped = True
+        if self.__stopped:
+            return
 
-            for listener in self.listeners:
+        self.__stopped = True
+        _stops = set()
+        for listener in self.listeners:
+            future = listener.stop()
+            if inspect.isawaitable(future):
+                _stops.add(future)
 
-                async def stop_listener(listener):
-                    v = listener.stop()
-                    if inspect.isawaitable(v):
-                        await v
+        if _stops:
 
-                self._ongoing_background_tasks.call_soon(stop_listener, listener)
+            async def background_stops():
+                await asyncio.gather(*_stops)
+
+            self._ongoing_background_tasks.call_soon(background_stops)
 
     @property
     def listener(self):
@@ -873,14 +867,17 @@ class Server:
                 for listener in self.listeners:
                     future = listener.stop()
                     if inspect.isawaitable(future):
+                        warnings.warn(
+                            f"{type(listener)} is using an asynchronous `stop` method. "
+                            "Support for asynchronous `Listener.stop` will be removed in a future version",
+                            PendingDeprecationWarning,
+                        )
                         _stops.add(future)
-                await asyncio.gather(*_stops)
+                if _stops:
+                    await asyncio.gather(*_stops)
 
             # TODO: Deal with exceptions
-            await self._ongoing_background_tasks.stop(timeout=1)
-
-            # TODO: Deal with exceptions
-            await self._ongoing_comm_handlers.stop(timeout=1)
+            await self._ongoing_background_tasks.stop()
 
             await self.rpc.close()
             await asyncio.gather(*[comm.close() for comm in list(self._comms)])
