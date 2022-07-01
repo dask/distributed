@@ -4299,11 +4299,12 @@ async def test_retire_many_workers(c, s, *workers):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 3)] * 2,
-    config={"distributed.scheduler.default-task-durations": {"f": "10ms"}},
+    config={
+        "distributed.scheduler.work-stealing": False,
+        "distributed.scheduler.default-task-durations": {"f": "10ms"},
+    },
 )
 async def test_weight_occupancy_against_data_movement(c, s, a, b):
-    await s.extensions["stealing"].stop()
-
     def f(x, y=0, z=0):
         sleep(0.01)
         return x
@@ -4322,11 +4323,12 @@ async def test_weight_occupancy_against_data_movement(c, s, a, b):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1), ("127.0.0.1", 10)],
-    config={"distributed.scheduler.default-task-durations": {"f": "10ms"}},
+    config={
+        "distributed.scheduler.work-stealing": False,
+        "distributed.scheduler.default-task-durations": {"f": "10ms"},
+    },
 )
 async def test_distribute_tasks_by_nthreads(c, s, a, b):
-    await s.extensions["stealing"].stop()
-
     def f(x, y=0):
         sleep(0.01)
         return x

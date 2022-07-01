@@ -2223,21 +2223,19 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_processing_released(self, key, stimulus_id):
+    def transition_processing_released(self, key: str, stimulus_id: str):
         try:
-            ts: TaskState = self.tasks[key]
-            dts: TaskState
-            recommendations: dict = {}
-            client_msgs: dict = {}
-            worker_msgs: dict = {}
+            ts = self.tasks[key]
+            recommendations = {}
+            worker_msgs = {}
 
             if self.validate:
                 assert ts.processing_on
                 assert not ts.who_has
                 assert not ts.waiting_on
-                assert self.tasks[key].state == "processing"
+                assert ts.state == "processing"
 
-            w: str = _remove_from_processing(self, ts)
+            w = _remove_from_processing(self, ts)
             if w:
                 worker_msgs[w] = [
                     {
@@ -2265,7 +2263,7 @@ class SchedulerState:
             if self.validate:
                 assert not ts.processing_on
 
-            return recommendations, client_msgs, worker_msgs
+            return recommendations, {}, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -3555,7 +3553,7 @@ class Scheduler(SchedulerState, ServerNode):
     @log_errors
     async def add_worker(
         self,
-        comm=None,
+        comm: Comm,
         *,
         address: str,
         status: str,
@@ -3577,8 +3575,8 @@ class Scheduler(SchedulerState, ServerNode):
         versions: dict[str, Any] | None = None,
         nanny=None,
         extra=None,
-        stimulus_id=None,
-    ):
+        stimulus_id: str,
+    ) -> None:
         """Add a new worker to the cluster"""
         address = self.coerce_address(address, resolve_address)
         address = normalize_address(address)
@@ -3593,8 +3591,7 @@ class Scheduler(SchedulerState, ServerNode):
                 f"Keys: {list(nbytes)}"
             )
             logger.error(err)
-            if comm:
-                await comm.write({"status": "error", "message": err, "time": time()})
+            await comm.write({"status": "error", "message": err, "time": time()})
             return
 
         if name in self.aliases:
@@ -3604,8 +3601,7 @@ class Scheduler(SchedulerState, ServerNode):
                 "message": "name taken, %s" % name,
                 "time": time(),
             }
-            if comm:
-                await comm.write(msg)
+            await comm.write(msg)
             return
 
         self.log_event(address, {"action": "add-worker"})
@@ -3684,7 +3680,6 @@ class Scheduler(SchedulerState, ServerNode):
             "worker-plugins": self.worker_plugins,
         }
 
-        cs: ClientState
         version_warning = version_module.error_message(
             version_module.get_versions(),
             merge(
@@ -3696,12 +3691,11 @@ class Scheduler(SchedulerState, ServerNode):
         )
         msg.update(version_warning)
 
-        if comm:
-            await comm.write(msg)
+        await comm.write(msg)
+        # This will keep running until the worker is removed
+        await self.handle_worker(comm, address)
 
-        await self.handle_worker(comm=comm, worker=address, stimulus_id=stimulus_id)
-
-    async def add_nanny(self, comm):
+    async def add_nanny(self) -> dict[str, Any]:
         msg = {
             "status": "OK",
             "nanny-plugins": self.nanny_plugins,
@@ -4809,7 +4803,7 @@ class Scheduler(SchedulerState, ServerNode):
                 }
             )
 
-    async def handle_worker(self, comm=None, worker=None, stimulus_id=None):
+    async def handle_worker(self, comm: Comm, worker: str) -> None:
         """
         Listen to responses from a single worker
 
@@ -4819,7 +4813,6 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Scheduler.handle_client: Equivalent coroutine for clients
         """
-        assert stimulus_id
         comm.name = "Scheduler connection to worker"
         worker_comm = self.stream_comms[worker]
         worker_comm.start(comm)
@@ -4829,7 +4822,9 @@ class Scheduler(SchedulerState, ServerNode):
         finally:
             if worker in self.stream_comms:
                 worker_comm.abort()
-                await self.remove_worker(address=worker, stimulus_id=stimulus_id)
+                await self.remove_worker(
+                    worker, stimulus_id=f"handle-worker-cleanup-{time()}"
+                )
 
     def add_plugin(
         self,
@@ -6606,7 +6601,9 @@ class Scheduler(SchedulerState, ServerNode):
 
     transition_story = story
 
-    def reschedule(self, key=None, worker=None):
+    def reschedule(
+        self, key: str, worker: str | None = None, *, stimulus_id: str
+    ) -> None:
         """Reschedule a task
 
         Things may have shifted and this task may now be better suited to run
@@ -6616,15 +6613,17 @@ class Scheduler(SchedulerState, ServerNode):
             ts = self.tasks[key]
         except KeyError:
             logger.warning(
-                "Attempting to reschedule task {}, which was not "
-                "found on the scheduler. Aborting reschedule.".format(key)
+                f"Attempting to reschedule task {key}, which was not "
+                "found on the scheduler. Aborting reschedule."
             )
             return
         if ts.state != "processing":
             return
         if worker and ts.processing_on.address != worker:
             return
-        self.transitions({key: "released"}, f"reschedule-{time()}")
+        # transition_processing_released will immediately suggest an additional
+        # transition to waiting if the task has any waiters or clients holding a future.
+        self.transitions({key: "released"}, stimulus_id=stimulus_id)
 
     #####################
     # Utility functions #

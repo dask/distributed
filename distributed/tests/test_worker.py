@@ -32,7 +32,6 @@ from distributed import (
     Client,
     Event,
     Nanny,
-    Reschedule,
     default_client,
     get_client,
     get_worker,
@@ -1179,23 +1178,6 @@ async def test_get_current_task(c, s, a, b):
 
     result = await c.submit(some_name)
     assert result.startswith("some_name")
-
-
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
-async def test_reschedule(c, s, a, b):
-    await s.extensions["stealing"].stop()
-    a_address = a.address
-
-    def f(x):
-        sleep(0.1)
-        if get_worker().address == a_address:
-            raise Reschedule()
-
-    futures = c.map(f, range(4))
-    futures2 = c.map(slowinc, range(10), delay=0.1, workers=a.address)
-    await wait(futures)
-
-    assert all(f.key in b.data for f in futures)
 
 
 @gen_cluster(nthreads=[])

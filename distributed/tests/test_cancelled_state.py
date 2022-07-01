@@ -164,14 +164,15 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
             allow_other_workers=True,
             key="fut1",
         )
+        await wait(fut1)
+        await block_compute.acquire()
         fut2 = c.submit(inc, fut1, workers=[b.address], key="fut2")
 
         await enter_get_data.wait()
-        await block_compute.acquire()
 
         # Close in scheduler to ensure we transition and reschedule task properly
-        await s.remove_worker(a.address, stimulus_id="test")
-        await wait_for_state(fut1.key, "resumed", b)
+        await s.remove_worker(a.address, stimulus_id="test", close=False)
+        await wait_for_stimulus(ComputeTaskEvent, b, key=fut1.key)
 
         block_get_data.release()
         await block_compute.release()

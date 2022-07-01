@@ -1000,3 +1000,10 @@ def test_gather_priority(ws):
             total_nbytes=4 * 2**20,
         ),
     ]
+
+
+@gen_cluster()
+async def test_clean_log(s, a, b):
+    """Test that brand new workers start with a clean log"""
+    assert not a.state.log
+    assert not a.state.stimulus_log

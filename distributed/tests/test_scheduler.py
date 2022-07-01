@@ -1132,9 +1132,12 @@ async def test_balance_many_workers(c, s, *workers):
 
 
 @nodebug
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 30)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 30,
+    config={"distributed.scheduler.work-stealing": False},
+)
 async def test_balance_many_workers_2(c, s, *workers):
-    await s.extensions["stealing"].stop()
     futures = c.map(slowinc, range(90), delay=0.2)
     await wait(futures)
     assert {len(w.has_what) for w in s.workers.values()} == {3}
@@ -1336,23 +1339,6 @@ async def test_scheduler_file():
         await s.close()
 
 
-@pytest.mark.xfail()
-@gen_cluster(client=True, nthreads=[])
-async def test_non_existent_worker(c, s):
-    with dask.config.set({"distributed.comm.timeouts.connect": "100ms"}):
-        await s.add_worker(
-            address="127.0.0.1:5738",
-            status="running",
-            nthreads=2,
-            nbytes={},
-            host_info={},
-        )
-        futures = c.map(inc, range(10))
-        await asyncio.sleep(0.300)
-        assert not s.workers
-        assert all(ts.state == "no-worker" for ts in s.tasks.values())
-
-
 @pytest.mark.parametrize(
     "host", ["tcp://0.0.0.0", "tcp://127.0.0.1", "tcp://127.0.0.1:38275"]
 )
@@ -1511,35 +1497,6 @@ async def test_log_tasks_during_restart(c, s, a, b):
     future = c.submit(sys.exit, 0)
     await wait(future)
     assert "exit" in str(s.events)
-
-
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
-async def test_reschedule(c, s, a, b):
-    await c.submit(slowinc, -1, delay=0.1)  # learn cost
-    x = c.map(slowinc, range(4), delay=0.1)
-
-    # add much more work onto worker a
-    futures = c.map(slowinc, range(10, 20), delay=0.1, workers=a.address)
-
-    while len(s.tasks) < len(x) + len(futures):
-        await asyncio.sleep(0.001)
-
-    for future in x:
-        s.reschedule(key=future.key)
-
-    # Worker b gets more of the original tasks
-    await wait(x)
-    assert sum(future.key in b.data for future in x) >= 3
-    assert sum(future.key in a.data for future in x) <= 1
-
-
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
-async def test_reschedule_warns(c, s, a, b):
-    with captured_logger(logging.getLogger("distributed.scheduler")) as sched:
-        s.reschedule(key="__this-key-does-not-exist__")
-
-    assert "not found on the scheduler" in sched.getvalue()
-    assert "Aborting reschedule" in sched.getvalue()
 
 
 @gen_cluster(client=True)
@@ -3342,12 +3299,11 @@ async def test_worker_heartbeat_after_cancel(c, s, *workers):
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_set_restrictions(c, s, a, b):
-
-    f = c.submit(inc, 1, workers=[b.address])
+    f = c.submit(inc, 1, key="f", workers=[b.address])
     await f
     s.set_restrictions(worker={f.key: a.address})
     assert s.tasks[f.key].worker_restrictions == {a.address}
-    s.reschedule(f)
+    await b.close()
     await f
 
 

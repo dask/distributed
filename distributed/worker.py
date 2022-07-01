@@ -933,17 +933,24 @@ class Worker(BaseWorker, ServerNode):
         return self.executors["default"]
 
     @ServerNode.status.setter  # type: ignore
-    def status(self, value):
+    def status(self, value: Status) -> None:
         """Override Server.status to notify the Scheduler of status changes.
         Also handles pausing/unpausing.
         """
         prev_status = self.status
-        ServerNode.status.__set__(self, value)
+        if prev_status == value:
+            return
+
+        ServerNode.status.__set__(self, value)  # type: ignore
         stimulus_id = f"worker-status-change-{time()}"
         self._send_worker_status_change(stimulus_id)
+
         if prev_status == Status.running:
             self.handle_stimulus(PauseEvent(stimulus_id=stimulus_id))
-        elif value == Status.running:
+        elif value == Status.running and prev_status in (
+            Status.paused,
+            Status.closing_gracefully,
+        ):
             self.handle_stimulus(UnpauseEvent(stimulus_id=stimulus_id))
 
     def _send_worker_status_change(self, stimulus_id: str) -> None:
@@ -2229,7 +2236,7 @@ class Worker(BaseWorker, ServerNode):
                 )
 
             if isinstance(result["actual-exception"], Reschedule):
-                return RescheduleEvent(key=ts.key, stimulus_id=stimulus_id)
+                return RescheduleEvent(key=ts.key, stimulus_id=f"reschedule-{time()}")
 
             logger.warning(
                 "Compute Failed\n"
