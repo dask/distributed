@@ -24,6 +24,7 @@ from distributed.utils_test import (
     inc,
     lock_inc,
     slowinc,
+    wait_for_state,
 )
 
 NO_AMM_START = {"distributed.scheduler.active-memory-manager.start": False}
@@ -461,9 +462,8 @@ async def test_drop_with_paused_workers_with_running_tasks_1(c, s, a, b):
     async with lock:
         x = (await c.scatter({"x": 1}, broadcast=True))["x"]
         y = c.submit(lock_inc, x, lock=lock, key="y", workers=[a.address])
+        await wait_for_state("y", "executing", a)
 
-        while "y" not in a.state.tasks or a.state.tasks["y"].state != "executing":
-            await asyncio.sleep(0.01)
         a.status = Status.paused
         while s.workers[a.address].status != Status.paused:
             await asyncio.sleep(0.01)
@@ -494,7 +494,6 @@ async def test_drop_with_paused_workers_with_running_tasks_2(c, s, a, b):
     assert {ws.address for ws in s.tasks["x"].who_has} == {b.address}
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize("pause", [True, False])
 @gen_cluster(client=True, config=demo_config("drop"))
 async def test_drop_with_paused_workers_with_running_tasks_3_4(c, s, a, b, pause):
@@ -513,9 +512,8 @@ async def test_drop_with_paused_workers_with_running_tasks_3_4(c, s, a, b, pause
     lock = Lock()
     async with lock:
         x = (await c.scatter({"x": 1}, broadcast=True))["x"]
-        y = c.submit(lock_inc, x, lock_inc, key="y", workers=[a.address])
-        while "y" not in a.state.tasks or a.state.tasks["y"].state != "executing":
-            await asyncio.sleep(0.01)
+        y = c.submit(lock_inc, x, lock, key="y", workers=[a.address])
+        await wait_for_state("y", "executing", a)
 
         if pause:
             a.status = Status.paused
@@ -952,11 +950,7 @@ async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(c, s, a, b
         allow_other_workers=True,
         key="extra",
     )
-
-    while (
-        extra.key not in a.state.tasks or a.state.tasks[extra.key].state != "executing"
-    ):
-        await asyncio.sleep(0.01)
+    await wait_for_state(extra.key, "executing", a)
 
     t = asyncio.create_task(c.retire_workers([a.address]))
 
