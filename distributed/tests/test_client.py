@@ -4436,7 +4436,7 @@ async def test_auto_normalize_collection(c, s, a, b):
     assert len(x.dask) == 2
 
     with dask.config.set(optimizations=[c._optimize_insert_futures]):
-        y = x.map_blocks(slowinc, delay=1, dtype=x.dtype)
+        y = x.map_blocks(inc, dtype=x.dtype)
         yy = c.persist(y)
 
         await wait(yy)
@@ -4459,7 +4459,7 @@ def test_auto_normalize_collection_sync(c):
     da = pytest.importorskip("dask.array")
     x = da.ones(10, chunks=5)
 
-    y = x.map_blocks(slowinc, delay=1, dtype=x.dtype)
+    y = x.map_blocks(inc, dtype=x.dtype)
     yy = c.persist(y)
 
     wait(yy)

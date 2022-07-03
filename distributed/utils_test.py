@@ -352,6 +352,11 @@ def slowidentity(*args, **kwargs):
         return args
 
 
+def lock_inc(x, lock):
+    with lock:
+        return x + 1
+
+
 class _UnhashableCallable:
     # FIXME https://github.com/python/mypy/issues/4266
     __hash__ = None  # type: ignore
