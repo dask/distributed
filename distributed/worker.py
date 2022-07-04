@@ -943,7 +943,7 @@ class Worker(BaseWorker, ServerNode):
         stimulus_id = f"worker-status-change-{time()}"
         self._send_worker_status_change(stimulus_id)
 
-        if prev_status == Status.running != value:
+        if prev_status == Status.running and value != Status.running:
             self.handle_stimulus(PauseEvent(stimulus_id=stimulus_id))
         elif value == Status.running and prev_status in (
             Status.paused,
