@@ -2476,3 +2476,33 @@ def requires_default_ports(name_of_test):
         raise TimeoutError(f"Default ports didn't open up in time for {name_of_test}")
 
     yield
+
+
+_default_signals = None
+
+
+def _set_default_signals():
+    global _default_signals
+    default_signals = {}
+    for sig in signal.Signals:
+        try:
+            default_signals[sig] = signal.getsignal(sig)
+        except ValueError:
+            break
+
+
+def assert_default_signal_handlers():
+    if not _default_signals:
+        _set_default_signals()
+    assert _default_signals
+    for sig, default_handler in _default_signals.items():
+        assert (
+            signal.getsignal(sig) is default_handler
+        ), f"Non-default handler installed for signal {sig}: {signal.getsignal(sig)}"
+
+
+@pytest.fixture(autouse=True)
+def ensure_default_signalhandlers_active():
+    assert_default_signal_handlers()
+    yield
+    assert_default_signal_handlers()
