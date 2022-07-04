@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import warnings
 import weakref
@@ -77,15 +79,16 @@ class ServerNode(Server):
     def service_ports(self):
         return {k: v.port for k, v in self.services.items()}
 
-    def _setup_logging(self, logger):
+    def _setup_logging(self, *loggers):
         self._deque_handler = DequeHandler(
             n=dask.config.get("distributed.admin.log-length")
         )
         self._deque_handler.setFormatter(
             logging.Formatter(dask.config.get("distributed.admin.log-format"))
         )
-        logger.addHandler(self._deque_handler)
-        weakref.finalize(self, logger.removeHandler, self._deque_handler)
+        for logger in loggers:
+            logger.addHandler(self._deque_handler)
+            weakref.finalize(self, logger.removeHandler, self._deque_handler)
 
     def get_logs(self, start=0, n=None, timestamps=False):
         """

@@ -6,6 +6,7 @@ import threading
 import time
 import weakref
 from collections import defaultdict
+from collections.abc import Iterator
 from typing import Awaitable, Callable, Sequence
 
 from dask.utils import parse_bytes
@@ -63,7 +64,7 @@ class MultiComm:
     def __init__(
         self,
         send: Callable[[str, list[bytes]], Awaitable[None]],
-        loop=None,
+        loop: asyncio.AbstractEventLoop | None = None,
     ):
         self.send = send
         self.shards: dict[str, list[bytes]] = defaultdict(list)
@@ -90,7 +91,7 @@ class MultiComm:
             MultiComm._queues[self._loop] = queue
             return queue
 
-    def put(self, data: dict[str, Sequence[bytes]]):
+    def put(self, data: dict[str, Sequence[bytes]]) -> None:
         """
         Put a dict of shards into our buffers
 
@@ -166,7 +167,7 @@ class MultiComm:
                 del shards
                 self._futures.add(task)
 
-    async def process(self, address: str, shards: list, size: int):
+    async def process(self, address: str, shards: list, size: int) -> None:
         """Send one message off to a neighboring worker"""
         with log_errors():
 
@@ -218,7 +219,7 @@ class MultiComm:
         await self._communicate_task
 
     @contextlib.contextmanager
-    def time(self, name: str):
+    def time(self, name: str) -> Iterator[None]:
         start = time.time()
         yield
         stop = time.time()

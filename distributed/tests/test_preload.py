@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import os
 import re
@@ -12,6 +14,7 @@ import pytest
 import dask
 
 from distributed import Client, Nanny, Scheduler, Worker
+from distributed.utils import open_port
 from distributed.utils_test import captured_logger, cluster, gen_cluster, gen_test
 
 PRELOAD_TEXT = """
@@ -171,7 +174,7 @@ async def test_web_preload():
         assert (
             re.match(
                 r"(?s).*Downloading preload at http://example.com/preload\n"
-                r".*Run preload setup function: http://example.com/preload\n"
+                r".*Run preload setup: http://example.com/preload\n"
                 r".*",
                 log.getvalue(),
             )
@@ -204,15 +207,18 @@ dask.config.set(scheduler_address="{s.address}")
 
 @gen_test()
 async def test_web_preload_worker():
+    port = open_port()
+    data = dedent(
+        f"""\
+        import dask
+        dask.config.set(scheduler_address="tcp://127.0.0.1:{port}")
+        """
+    ).encode()
     with mock.patch(
         "urllib3.PoolManager.request",
-        **{
-            "return_value.data": b"import dask"
-            b'\ndask.config.set(scheduler_address="tcp://127.0.0.1:8786")'
-            b"\n"
-        },
+        **{"return_value.data": data},
     ) as request:
-        async with Scheduler(port=8786, host="localhost") as s:
+        async with Scheduler(port=port, host="localhost") as s:
             async with Nanny(preload_nanny=["http://example.com/preload"]) as nanny:
                 assert nanny.scheduler_addr == s.address
     assert request.mock_calls == [
@@ -225,7 +231,7 @@ async def test_web_preload_worker():
     reason="The preload argument to the client isn't supported yet", strict=True
 )
 @gen_cluster(nthreads=[])
-async def test_client_preload_text(s: Scheduler):
+async def test_client_preload_text(s):
     text = dedent(
         """\
         def dask_setup(client):
@@ -283,10 +289,13 @@ async def test_client_preload_click(s):
 
 
 @gen_test()
-async def test_teardown_failure_doesnt_crash_scheduler():
+async def test_failure_doesnt_crash():
     text = """
-def dask_teardown(worker):
+def dask_setup(worker):
     raise Exception(123)
+
+def dask_teardown(worker):
+    raise Exception(456)
 """
 
     with captured_logger(logging.getLogger("distributed.scheduler")) as s_logger:
@@ -297,6 +306,8 @@ def dask_teardown(worker):
 
     assert "123" in s_logger.getvalue()
     assert "123" in w_logger.getvalue()
+    assert "456" in s_logger.getvalue()
+    assert "456" in w_logger.getvalue()
 
 
 @gen_cluster(nthreads=[])

@@ -21,7 +21,7 @@ except ImportError:
 
 from tlz import sliding_window
 from tornado import netutil
-from tornado.iostream import StreamClosedError
+from tornado.iostream import IOStream, StreamClosedError
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
@@ -167,11 +167,14 @@ class TCP(Comm):
     An established communication based on an underlying Tornado IOStream.
     """
 
-    max_shard_size = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
+    max_shard_size: ClassVar[int] = dask.utils.parse_bytes(
+        dask.config.get("distributed.comm.shard")
+    )
+    stream: IOStream | None
 
     def __init__(
         self,
-        stream,
+        stream: IOStream,
         local_addr: str,
         peer_addr: str,
         deserialize: bool = True,
@@ -232,7 +235,7 @@ class TCP(Comm):
                 range(0, frames_nbytes + OPENSSL_MAX_CHUNKSIZE, OPENSSL_MAX_CHUNKSIZE),
             ):
                 chunk = frames[i:j]
-                chunk_nbytes = len(chunk)
+                chunk_nbytes = chunk.nbytes
                 n = await stream.read_into(chunk)
                 assert n == chunk_nbytes, (n, chunk_nbytes)
         except StreamClosedError as e:
@@ -240,11 +243,12 @@ class TCP(Comm):
             self._closed = True
             if not sys.is_finalizing():
                 convert_stream_closed_error(self, e)
-        except Exception:
-            # Some OSError or a another "low-level" exception. We do not really know what
-            # was already read from the underlying socket, so it is not even safe to retry
-            # here using the same stream. The only safe thing to do is to abort.
-            # (See also GitHub #4133).
+        except BaseException:
+            # Some OSError, CancelledError or a another "low-level" exception.
+            # We do not really know what was already read from the underlying
+            # socket, so it is not even safe to retry here using the same stream.
+            # The only safe thing to do is to abort.
+            # (See also GitHub #4133, #6548).
             self.abort()
             raise
         else:
@@ -299,16 +303,25 @@ class TCP(Comm):
             # trick to enque all frames for writing beforehand
             for each_frame_nbytes, each_frame in zip(frames_nbytes, frames):
                 if each_frame_nbytes:
-                    if stream._write_buffer is None:
-                        raise StreamClosedError()
+                    # Make sure that `len(data) == data.nbytes`
+                    # See <https://github.com/tornadoweb/tornado/pull/2996>
+                    each_frame = ensure_memoryview(each_frame)
+                    for i, j in sliding_window(
+                        2,
+                        range(
+                            0,
+                            each_frame_nbytes + OPENSSL_MAX_CHUNKSIZE,
+                            OPENSSL_MAX_CHUNKSIZE,
+                        ),
+                    ):
+                        chunk = each_frame[i:j]
+                        chunk_nbytes = chunk.nbytes
 
-                    if isinstance(each_frame, memoryview):
-                        # Make sure that `len(data) == data.nbytes`
-                        # See <https://github.com/tornadoweb/tornado/pull/2996>
-                        each_frame = ensure_memoryview(each_frame)
+                        if stream._write_buffer is None:
+                            raise StreamClosedError()
 
-                    stream._write_buffer.append(each_frame)
-                    stream._total_write_index += each_frame_nbytes
+                        stream._write_buffer.append(chunk)
+                        stream._total_write_index += chunk_nbytes
 
             # start writing frames
             stream.write(b"")
@@ -317,11 +330,14 @@ class TCP(Comm):
             self._closed = True
             if not sys.is_finalizing():
                 convert_stream_closed_error(self, e)
-        except Exception:
+        except BaseException:
             # Some OSError or a another "low-level" exception. We do not really know
             # what was already written to the underlying socket, so it is not even safe
             # to retry here using the same stream. The only safe thing to do is to
             # abort. (See also GitHub #4133).
+            # In case of, for instance, KeyboardInterrupts or other
+            # BaseExceptions that could be handled further upstream, we equally
+            # want to discard this comm
             self.abort()
             raise
 
@@ -346,14 +362,14 @@ class TCP(Comm):
                 self._finalizer.detach()
                 stream.close()
 
-    def abort(self):
+    def abort(self) -> None:
         stream, self.stream = self.stream, None
         self._closed = True
         if stream is not None and not stream.closed():
             self._finalizer.detach()
             stream.close()
 
-    def closed(self):
+    def closed(self) -> bool:
         return self._closed
 
     @property

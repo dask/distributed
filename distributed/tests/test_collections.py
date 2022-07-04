@@ -1,3 +1,9 @@
+from __future__ import annotations
+
+import operator
+import pickle
+import random
+
 import pytest
 
 from distributed.collections import LRU, HeapSet
@@ -20,19 +26,20 @@ def test_lru():
     assert list(l.keys()) == ["c", "a", "d"]
 
 
+class C:
+    def __init__(self, k, i):
+        self.k = k
+        self.i = i
+
+    def __hash__(self):
+        return hash(self.k)
+
+    def __eq__(self, other):
+        return isinstance(other, C) and other.k == self.k
+
+
 def test_heapset():
-    class C:
-        def __init__(self, k, i):
-            self.k = k
-            self.i = i
-
-        def __hash__(self):
-            return hash(self.k)
-
-        def __eq__(self, other):
-            return isinstance(other, C) and other.k == self.k
-
-    heap = HeapSet(key=lambda c: c.i)
+    heap = HeapSet(key=operator.attrgetter("i"))
 
     cx = C("x", 2)
     cy = C("y", 1)
@@ -148,3 +155,29 @@ def test_heapset():
         heap.add(C("unsortable_key", None))
     assert len(heap) == 1
     assert set(heap) == {cx}
+
+
+def test_heapset_pickle():
+    """Test pickle roundtrip for a HeapSet.
+
+    Note
+    ----
+    To make this test work with plain pickle and not need cloudpickle, we had to avoid
+    lambdas and local classes in our test. Here we're testing that HeapSet doesn't add
+    lambdas etc. of its own.
+    """
+    heap = HeapSet(key=operator.attrgetter("i"))
+
+    # The heap contains broken weakrefs
+    for i in range(200):
+        c = C(f"y{i}", random.random())
+        heap.add(c)
+        if random.random() > 0.7:
+            heap.remove(c)
+
+    heap2 = pickle.loads(pickle.dumps(heap))
+    assert len(heap) == len(heap2)
+    # Test that the heap has been re-heapified upon unpickle
+    assert len(heap2._heap) < len(heap._heap)
+    while heap:
+        assert heap.pop() == heap2.pop()

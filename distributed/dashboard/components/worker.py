@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import math
 import os
@@ -17,6 +19,7 @@ from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.palettes import RdBu
 from bokeh.plotting import figure
 from bokeh.themes import Theme
+from jinja2 import Environment, FileSystemLoader
 from tlz import merge, partition_all
 
 from dask.utils import format_bytes, format_time
@@ -33,9 +36,6 @@ from distributed.metrics import time
 from distributed.utils import log_errors
 
 logger = logging.getLogger(__name__)
-
-from jinja2 import Environment, FileSystemLoader
-
 env = Environment(
     loader=FileSystemLoader(
         os.path.join(os.path.dirname(__file__), "..", "..", "http", "templates")
@@ -88,10 +88,10 @@ class StateTable(DashboardComponent):
         w = self.worker
         d = {
             "Stored": [len(w.data)],
-            "Executing": ["%d / %d" % (w.executing_count, w.nthreads)],
-            "Ready": [len(w.ready)],
-            "Waiting": [w.waiting_for_data_count],
-            "Connections": [len(w.in_flight_workers)],
+            "Executing": ["%d / %d" % (w.state.executing_count, w.state.nthreads)],
+            "Ready": [len(w.state.ready)],
+            "Waiting": [w.state.waiting_for_data_count],
+            "Connections": [len(w.state.in_flight_workers)],
             "Serving": [len(w._comms)],
         }
         update(self.source, d)
@@ -225,7 +225,7 @@ class CommunicatingTimeSeries(DashboardComponent):
         fig = figure(
             title="Communication History",
             x_axis_type="datetime",
-            y_range=[-0.1, worker.total_out_connections + 0.5],
+            y_range=[-0.1, worker.state.total_out_connections + 0.5],
             height=150,
             tools="",
             x_range=x_range,
@@ -247,7 +247,7 @@ class CommunicatingTimeSeries(DashboardComponent):
             {
                 "x": [time() * 1000],
                 "out": [len(self.worker._comms)],
-                "in": [len(self.worker.in_flight_workers)],
+                "in": [len(self.worker.state.in_flight_workers)],
             },
             10000,
         )
@@ -263,7 +263,7 @@ class ExecutingTimeSeries(DashboardComponent):
         fig = figure(
             title="Executing History",
             x_axis_type="datetime",
-            y_range=[-0.1, worker.nthreads + 0.1],
+            y_range=[-0.1, worker.state.nthreads + 0.1],
             height=150,
             tools="",
             x_range=x_range,
@@ -281,7 +281,7 @@ class ExecutingTimeSeries(DashboardComponent):
     @log_errors
     def update(self):
         self.source.stream(
-            {"x": [time() * 1000], "y": [self.worker.executing_count]}, 1000
+            {"x": [time() * 1000], "y": [self.worker.state.executing_count]}, 1000
         )
 
 

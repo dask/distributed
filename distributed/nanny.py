@@ -27,6 +27,7 @@ from distributed import preloading
 from distributed.comm import get_address_host
 from distributed.comm.addressing import address_from_user_args
 from distributed.core import (
+    AsyncTaskGroupClosedError,
     CommClosedError,
     RPCClosed,
     Status,
@@ -43,9 +44,9 @@ from distributed.security import Security
 from distributed.utils import (
     TimeoutError,
     get_ip,
+    get_mp_context,
     json_load_robust,
     log_errors,
-    mp_context,
     parse_ports,
     silence_logging,
 )
@@ -99,7 +100,7 @@ class Nanny(ServerNode):
     _given_worker_port: int | str | Collection[int] | None
     _start_port: int | str | Collection[int] | None
 
-    def __init__(
+    def __init__(  # type: ignore[no-untyped-def]
         self,
         scheduler_ip=None,
         scheduler_port=None,
@@ -498,7 +499,10 @@ class Nanny(ServerNode):
         return run(self, comm, *args, **kwargs)
 
     def _on_exit_sync(self, exitcode):
-        self.loop.add_callback(self._on_exit, exitcode)
+        try:
+            self._ongoing_background_tasks.call_soon(self._on_exit, exitcode)
+        except AsyncTaskGroupClosedError:  # Async task group has already been closed, so the nanny is already clos(ed|ing).
+            pass
 
     @log_errors
     async def _on_exit(self, exitcode):
@@ -595,7 +599,7 @@ class Nanny(ServerNode):
         )
 
     def log_event(self, topic, msg):
-        self.loop.add_callback(self._log_event, topic, msg)
+        self._ongoing_background_tasks.call_soon(self._log_event, topic, msg)
 
 
 class WorkerProcess:
@@ -638,8 +642,8 @@ class WorkerProcess:
             await self.running.wait()
             return self.status
 
-        self.init_result_q = init_q = mp_context.Queue()
-        self.child_stop_q = mp_context.Queue()
+        self.init_result_q = init_q = get_mp_context().Queue()
+        self.child_stop_q = get_mp_context().Queue()
         uid = uuid.uuid4().hex
 
         self.process = AsyncProcess(
@@ -732,7 +736,7 @@ class WorkerProcess:
             if self.on_exit is not None:
                 self.on_exit(r)
 
-    async def kill(self, timeout: float = 2, executor_wait: bool = True):
+    async def kill(self, timeout: float = 2, executor_wait: bool = True) -> None:
         """
         Ensure the worker process is stopped, waiting at most
         *timeout* seconds before terminating it abruptly.
@@ -809,12 +813,10 @@ class WorkerProcess:
         try:
             os.environ.update(env)
             dask.config.set(config)
-            try:
-                from dask.multiprocessing import initialize_worker_process
-            except ImportError:  # old Dask version
-                pass
-            else:
-                initialize_worker_process()
+
+            from dask.multiprocessing import default_initializer
+
+            default_initializer()
 
             if silence_logs:
                 logger.setLevel(silence_logs)

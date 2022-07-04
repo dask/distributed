@@ -10,7 +10,7 @@ import abc
 import logging
 from collections import defaultdict
 from collections.abc import Generator
-from typing import TYPE_CHECKING, Literal, NamedTuple
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from tornado.ioloop import PeriodicCallback
 
@@ -97,7 +97,7 @@ class ActiveMemoryManagerExtension:
         if start:
             self.start()
 
-    def amm_handler(self, comm, method: str):
+    def amm_handler(self, method: str) -> Any:
         """Scheduler handler, invoked from the Client by
         :class:`~distributed.active_memory_manager.AMMClientProxy`
         """
@@ -173,7 +173,7 @@ class ActiveMemoryManagerExtension:
 
                 if not isinstance(suggestion, Suggestion):
                     # legacy: accept plain tuples
-                    suggestion = Suggestion(*suggestion)
+                    suggestion = Suggestion(*suggestion)  # type: ignore[unreachable]
 
                 try:
                     pending_repl, pending_drop = self.pending[suggestion.ts]
@@ -416,8 +416,9 @@ class ActiveMemoryManagerPolicy(abc.ABC):
     ) -> SuggestionGenerator:
         """This method is invoked by the ActiveMemoryManager every few seconds, or
         whenever the user invokes ``client.amm.run_once``.
+
         It is an iterator that must emit
-        :class:`~distributed.active_memory_manager.Suggestion`s:
+        :class:`~distributed.active_memory_manager.Suggestion` objects:
 
         - ``Suggestion("replicate", <TaskState>)``
         - ``Suggestion("replicate", <TaskState>, {subset of potential workers to replicate to})``
@@ -463,20 +464,20 @@ class AMMClientProxy:
     def __init__(self, client: Client):
         self._client = client
 
-    def _run(self, method: str):
+    def _run(self, method: str) -> Any:
         """Remotely invoke ActiveMemoryManagerExtension.amm_handler"""
         return self._client.sync(self._client.scheduler.amm_handler, method=method)
 
-    def start(self):
+    def start(self) -> Any:
         return self._run("start")
 
-    def stop(self):
+    def stop(self) -> Any:
         return self._run("stop")
 
-    def run_once(self):
+    def run_once(self) -> Any:
         return self._run("run_once")
 
-    def running(self):
+    def running(self) -> Any:
         return self._run("running")
 
 

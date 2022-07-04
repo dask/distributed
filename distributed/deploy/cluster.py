@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 import asyncio
 import datetime
 import logging
 import uuid
+import warnings
 from contextlib import suppress
 from inspect import isawaitable
+from typing import Any
 
 from tornado.ioloop import PeriodicCallback
 
@@ -190,10 +194,13 @@ class Cluster(SyncMethodMixin):
         with suppress(RuntimeError):  # loop closed during process shutdown
             return self.sync(self._close, callback_timeout=timeout)
 
-    def __del__(self):
+    def __del__(self, _warn=warnings.warn):
         if getattr(self, "status", Status.closed) != Status.closed:
-            with suppress(AttributeError, RuntimeError):  # during closing
-                self.loop.add_callback(self.close)
+            try:
+                self_r = repr(self)
+            except Exception:
+                self_r = f"with a broken __repr__ {object.__repr__(self)}"
+            _warn(f"unclosed cluster {self_r}", ResourceWarning, source=self)
 
     async def _watch_worker_status(self, comm):
         """Listen to scheduler for updates on adding and removing workers"""
@@ -219,7 +226,7 @@ class Cluster(SyncMethodMixin):
         else:  # pragma: no cover
             raise ValueError("Invalid op", op, msg)
 
-    def adapt(self, Adaptive=Adaptive, **kwargs) -> Adaptive:
+    def adapt(self, Adaptive: type[Adaptive] = Adaptive, **kwargs: Any) -> Adaptive:
         """Turn on adaptivity
 
         For keyword arguments see dask.distributed.Adaptive
@@ -464,6 +471,10 @@ class Cluster(SyncMethodMixin):
 
     def __exit__(self, exc_type, exc_value, traceback):
         return self.sync(self.__aexit__, exc_type, exc_value, traceback)
+
+    def __await__(self):
+        return self
+        yield
 
     async def __aenter__(self):
         await self

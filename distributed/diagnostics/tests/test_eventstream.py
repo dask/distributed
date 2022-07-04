@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import collections
 
@@ -30,14 +32,13 @@ async def test_eventstream(c, s, *workers):
         name: collections.deque(maxlen=100)
         for name in "start duration key name color worker worker_thread y alpha".split()
     }
-    workers = dict()
+    workers = {}
     for msg in es.buffer:
         task_stream_append(lists, msg, workers)
 
-    assert len([n for n in lists["name"] if n.startswith("transfer")]) == 2
+    assert sum(n == "transfer-sum" for n in lists["name"]) == 2
     for name, color in zip(lists["name"], lists["color"]):
-        if name == "transfer":
-            assert color == "red"
+        assert (name == "transfer-sum") == (color == "red")
 
     assert any(c == "black" for c in lists["color"])
 
