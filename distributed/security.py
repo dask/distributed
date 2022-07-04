@@ -2,19 +2,10 @@ from __future__ import annotations
 
 import datetime
 import os
+import ssl
 import sys
 import tempfile
 import warnings
-
-try:
-    import ssl
-except ImportError:
-    ssl = None  # type: ignore
-
-try:
-    from ssl import OPENSSL_VERSION_INFO as _OPENSSL_VERSION_INFO
-except ImportError:
-    _OPENSSL_VERSION_INFO = (0, 0, 0, 0, 0)
 
 import dask
 from dask.widgets import get_template
@@ -22,7 +13,7 @@ from dask.widgets import get_template
 __all__ = ("Security",)
 
 
-if sys.version_info >= (3, 10) or _OPENSSL_VERSION_INFO >= (1, 1, 0, 7):
+if sys.version_info >= (3, 10) or ssl.OPENSSL_VERSION_INFO >= (1, 1, 0, 7):
     # The OP_NO_SSL* and OP_NO_TLS* become deprecated in favor of
     # 'SSLContext.minimum_version' from Python 3.7 onwards, however
     # this attribute is not available unless the ssl module is compiled
@@ -121,7 +112,7 @@ class Security:
     )
 
     def __init__(self, require_encryption=None, **kwargs):
-        if _OPENSSL_VERSION_INFO < (1, 1, 1):
+        if ssl.OPENSSL_VERSION_INFO < (1, 1, 1):
             warnings.warn(
                 f"support for {ssl.OPENSSL_VERSION} is deprecated,"
                 " and will be removed in a future release",

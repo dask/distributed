@@ -6,21 +6,15 @@ import errno
 import functools
 import logging
 import socket
+import ssl
 import struct
 import sys
 import weakref
 from ssl import SSLCertVerificationError, SSLError
 from typing import Any, ClassVar
 
-from tornado import gen
-
-try:
-    import ssl
-except ImportError:
-    ssl = None  # type: ignore
-
 from tlz import sliding_window
-from tornado import netutil
+from tornado import gen, netutil
 from tornado.iostream import IOStream, StreamClosedError
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
