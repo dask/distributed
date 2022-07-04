@@ -73,7 +73,13 @@ from distributed.core import Server, Status
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
 from distributed.sizeof import sizeof
-from distributed.utils import get_mp_context, is_valid_xml, sync, tmp_text
+from distributed.utils import (
+    NoOpAwaitable,
+    get_mp_context,
+    is_valid_xml,
+    sync,
+    tmp_text,
+)
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _UnhashableCallable,
@@ -5530,10 +5536,15 @@ async def test_future_auto_inform(c, s, a, b):
 
 
 def test_client_async_before_loop_starts(cleanup):
+    async def close():
+        async with client:
+            pass
+
     with pristine_loop() as loop:
         client = Client(asynchronous=True, loop=loop)
         assert client.asynchronous
-        client.close()
+        assert isinstance(client.close(), NoOpAwaitable)
+        loop.run_sync(close)  # TODO: client.close() does not unset global client
 
 
 @pytest.mark.slow
