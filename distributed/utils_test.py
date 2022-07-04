@@ -2480,10 +2480,16 @@ def requires_default_ports(name_of_test):
 
 _default_signals = {sig: signal.getsignal(sig) for sig in signal.valid_signals()}
 
+_allowed_overrides = {
+    signal.SIGSTOP,  # pytest-timeout
+}
+
 
 def assert_default_signal_handlers():
     assert _default_signals
     for sig, default_handler in _default_signals.items():
+        if sig in _allowed_overrides:
+            continue
         assert (
             signal.getsignal(sig) is default_handler
         ), f"Non-default handler installed for signal {sig}: {signal.getsignal(sig)}"
