@@ -938,20 +938,18 @@ class Worker(BaseWorker, ServerNode):
         Also handles pausing/unpausing.
         """
         prev_status = self.status
-        if prev_status == value:
-            return
 
         ServerNode.status.__set__(self, value)  # type: ignore
         stimulus_id = f"worker-status-change-{time()}"
         self._send_worker_status_change(stimulus_id)
 
-        if value == Status.running and prev_status in (
+        if prev_status == Status.running != value:
+            self.handle_stimulus(PauseEvent(stimulus_id=stimulus_id))
+        elif value == Status.running and prev_status in (
             Status.paused,
             Status.closing_gracefully,
         ):
             self.handle_stimulus(UnpauseEvent(stimulus_id=stimulus_id))
-        elif prev_status == Status.running:
-            self.handle_stimulus(PauseEvent(stimulus_id=stimulus_id))
 
     def _send_worker_status_change(self, stimulus_id: str) -> None:
         self.batched_send(
