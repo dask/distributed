@@ -1232,7 +1232,8 @@ async def test_get_releases_data(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-def test_current(s, a, b, loop):
+def test_current(s, a, b, loop_in_thread):
+    loop = loop_in_thread
     with Client(s["address"], loop=loop) as c:
         assert Client.current() is c
     with pytest.raises(
@@ -3292,7 +3293,8 @@ async def test_cancel_clears_processing(c, s, *workers):
     s.validate_state()
 
 
-def test_default_get(loop):
+def test_default_get(loop_in_thread):
+    loop = loop_in_thread
     with cluster() as (s, [a, b]):
         pre_get = dask.base.get_scheduler()
         pytest.raises(KeyError, dask.config.get, "shuffle")

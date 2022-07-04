@@ -81,7 +81,8 @@ def test_close_twice(loop):
         assert not log
 
 
-def test_procs(loop):
+def test_procs(loop_in_thread):
+    loop = loop_in_thread
     with LocalCluster(
         n_workers=2,
         processes=False,
@@ -436,7 +437,8 @@ def test_cleanup(loop):
     c2.close()
 
 
-def test_repeated(loop):
+def test_repeated(loop_in_thread):
+    loop = loop_in_thread
     with LocalCluster(
         n_workers=0,
         scheduler_port=8448,
