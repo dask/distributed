@@ -1722,20 +1722,28 @@ class WorkerState:
         self.constrained.append(ts.key)
         return self._ensure_computing()
 
-    def _transition_long_running_rescheduled(
-        self, ts: TaskState, *, stimulus_id: str
-    ) -> RecsInstrs:
-        return {ts: "released"}, [RescheduleMsg(key=ts.key, stimulus_id=stimulus_id)]
-
     def _transition_executing_rescheduled(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
+        """Note: this transition is triggered exclusively by a task raising the
+        Reschedule() Exception; it is not involved in work stealing.
+        The task is always done.
+        """
+        if self.validate:
+            # Notably, we're missing the third state in which a task can raise
+            # Reschedule(), which is "cancelled"
+            assert ts.state in ("executing", "long-running"), ts
+
         for resource, quantity in ts.resource_restrictions.items():
             self.available_resources[resource] += quantity
         self.executing.discard(ts)
 
         return merge_recs_instructions(
-            ({ts: "released"}, [RescheduleMsg(key=ts.key, stimulus_id=stimulus_id)]),
+            ({}, [RescheduleMsg(key=ts.key, stimulus_id=stimulus_id)]),
+            # Note: this is not the same as recommending {ts: "released"} on the
+            # previous line, as it would instead transition the task to cancelled - but
+            # a task that raised the Reschedule() exception is finished!
+            self._transition_generic_released(ts, stimulus_id=stimulus_id),
             self._ensure_computing(),
         )
 
@@ -1944,7 +1952,7 @@ class WorkerState:
     ) -> RecsInstrs:
         if ts.done:
             return {ts: "released"}, []
-        elif ts._previous == "executing":
+        elif ts._previous in ("executing", "long-running"):
             ts.state = ts._previous
             return {}, []
         else:
@@ -2812,7 +2820,11 @@ class WorkerState:
 
     @_handle_event.register
     def _handle_reschedule(self, ev: RescheduleEvent) -> RecsInstrs:
-        """Task raised Reschedule exception while it was running"""
+        """Task raised Reschedule() exception while it was running.
+
+        Note: this has nothing to do with work stealing, which instead causes a
+        FreeKeysEvent.
+        """
         # key *must* be still in tasks. Releasing it directly is forbidden
         # without going through cancelled
         ts = self.tasks.get(ev.key)

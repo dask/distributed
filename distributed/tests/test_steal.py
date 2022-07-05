@@ -32,7 +32,11 @@ from distributed.utils_test import (
     slowidentity,
     slowinc,
 )
-from distributed.worker_state_machine import StealRequestEvent
+from distributed.worker_state_machine import (
+    ExecuteSuccessEvent,
+    FreeKeysEvent,
+    StealRequestEvent,
+)
 
 pytestmark = pytest.mark.ci1
 
@@ -1317,3 +1321,27 @@ async def test_steal_stimulus_id_unique(c, s, a, b):
         stimulus_ids = {dct["stimulus_id"] for dct in steal.in_flight.values()}
         assert len(stimulus_ids) == num_futs
         await c.cancel(futures)
+
+
+def test_steal_worker_state(ws_with_running_task):
+    ws = ws_with_running_task
+
+    ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
+    assert ws.available_resources == {"R": 0}
+    assert ws.tasks["x"].state == "cancelled"
+
+    instructions = ws.handle_stimulus(
+        ExecuteSuccessEvent(
+            key="x",
+            value=None,
+            start=0.0,
+            stop=1.0,
+            nbytes=8,
+            type=None,
+            stimulus_id="s2",
+        ),
+    )
+    assert not instructions
+    assert "x" not in ws.tasks
+    assert "x" not in ws.data
+    assert ws.available_resources == {"R": 1}

@@ -73,7 +73,13 @@ from distributed.utils import (
     sync,
 )
 from distributed.worker import WORKER_ANY_RUNNING, Worker
-from distributed.worker_state_machine import InvalidTransition, StateMachineEvent
+from distributed.worker_state_machine import (
+    ComputeTaskEvent,
+    Execute,
+    InvalidTransition,
+    SecedeEvent,
+    StateMachineEvent,
+)
 from distributed.worker_state_machine import TaskState as WorkerTaskState
 from distributed.worker_state_machine import WorkerState
 
@@ -2435,9 +2441,32 @@ async def wait_for_stimulus(
 
 @pytest.fixture
 def ws():
+    """An empty WorkerState"""
     state = WorkerState(address="127.0.0.1:1", transition_counter_max=50_000)
     yield state
     state.validate_state()
+
+
+@pytest.fixture(params=["executing", "long-running"])
+def ws_with_running_task(ws, request):
+    """A WorkerState running a single task 'x' with resources {R: 1}.
+
+    The task may or may not raise secede(); the tests using this fixture runs twice.
+    """
+    ws.available_resources = {"R": 1}
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            key="x", resource_restrictions={"R": 1}, stimulus_id="compute"
+        )
+    )
+    assert instructions == [Execute(key="x", stimulus_id="compute")]
+    if request.param == "long-running":
+        ws.handle_stimulus(
+            SecedeEvent(key="x", compute_duration=1.0, stimulus_id="secede")
+        )
+    assert ws.tasks["x"].state == request.param
+    assert ws.available_resources == {"R": 0}
+    yield ws
 
 
 @pytest.fixture()
