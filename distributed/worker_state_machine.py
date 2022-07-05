@@ -93,7 +93,7 @@ WAITING_FOR_DATA: set[TaskStateState] = {
     "resumed",
     "waiting",
 }
-
+RUNNING: set[TaskStateState] = {"executing", "long-running", "cancelled", "resumed"}
 NO_VALUE = "--no-value-sentinel--"
 
 
@@ -3201,6 +3201,24 @@ class WorkerState:
         # Test that there aren't multiple TaskState objects with the same key in data_needed
         for tss in self.data_needed.values():
             assert len({ts.key for ts in tss}) == len(tss)
+
+        # Test that resources are consumed and released correctly
+        for resource, total in self.total_resources.items():
+            available = self.available_resources[resource]
+            assert available >= 0
+            allocated = 0.0
+            for ts in self.tasks.values():
+                if ts.resource_restrictions and ts.state in RUNNING:
+                    allocated += ts.resource_restrictions.get(resource, 0)
+            assert available + allocated == total
+
+    def set_resources(self, resources: dict[str, float]) -> None:
+        for r, quantity in resources.items():
+            if r in self.total_resources:
+                self.available_resources[r] += quantity - self.total_resources[r]
+            else:
+                self.available_resources[r] = quantity
+            self.total_resources[r] = quantity
 
 
 class BaseWorker(abc.ABC):
