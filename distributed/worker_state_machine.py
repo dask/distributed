@@ -1961,6 +1961,9 @@ class WorkerState:
             assert next_state in {"waiting", "fetch"}, next_state
             assert ts._previous in {"executing", "long-running", "flight"}, ts._previous
 
+            if ts._previous == "executing":
+                self._release_resources(ts)
+
             if next_state != finish:
                 recs, instructions = self._transition_generic_released(
                     ts, stimulus_id=stimulus_id
