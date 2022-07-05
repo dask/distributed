@@ -19,7 +19,7 @@ from distributed import (
 )
 from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.metrics import time
-from distributed.utils_test import async_wait_for, clean, gen_test, slowinc
+from distributed.utils_test import async_wait_for, gen_test, slowinc
 
 
 def test_adaptive_local_cluster(loop):
@@ -289,18 +289,19 @@ async def test_no_more_workers_than_tasks():
                 assert len(cluster.scheduler.workers) <= 1
 
 
-def test_basic_no_loop(loop):
-    with clean(threads=False):
-        try:
-            with LocalCluster(
-                n_workers=0, silence_logs=False, dashboard_address=":0"
-            ) as cluster:
-                with Client(cluster) as client:
-                    cluster.adapt()
-                    future = client.submit(lambda x: x + 1, 1)
-                    assert future.result() == 2
-                loop = cluster.loop
-        finally:
+def test_basic_no_loop(cleanup):
+    loop = None
+    try:
+        with LocalCluster(
+            n_workers=0, silence_logs=False, dashboard_address=":0"
+        ) as cluster:
+            with Client(cluster) as client:
+                cluster.adapt()
+                future = client.submit(lambda x: x + 1, 1)
+                assert future.result() == 2
+            loop = cluster.loop
+    finally:
+        if loop is not None:
             loop.add_callback(loop.stop)
 
 

@@ -633,21 +633,21 @@ def test_worker_actor_handle_is_weakref_from_compute_sync(client):
         assert time() < start + 30
 
 
-def test_one_thread_deadlock():
+def test_one_thread_deadlock(loop):
     class UsesCounter:
         # An actor whose method argument is another actor
 
         def do_inc(self, ac):
             return ac.increment().result()
 
-    with cluster(nworkers=1) as (cl, _), Client(cl["address"]) as client:
+    with cluster(nworkers=1) as (cl, _), Client(cl["address"], loop=loop) as client:
         ac = client.submit(Counter, actor=True).result()
         ac2 = client.submit(UsesCounter, actor=True).result()
 
         assert ac2.do_inc(ac).result() == 1
 
 
-def test_one_thread_deadlock_timeout():
+def test_one_thread_deadlock_timeout(loop):
     class UsesCounter:
         # An actor whose method argument is another actor
 
@@ -656,21 +656,21 @@ def test_one_thread_deadlock_timeout():
             # cannot expire
             return ac.increment().result(timeout=0.001)
 
-    with cluster(nworkers=1) as (cl, _), Client(cl["address"]) as client:
+    with cluster(nworkers=1) as (cl, _), Client(cl["address"], loop=loop) as client:
         ac = client.submit(Counter, actor=True).result()
         ac2 = client.submit(UsesCounter, actor=True).result()
 
         assert ac2.do_inc(ac).result() == 1
 
 
-def test_one_thread_deadlock_sync_client():
+def test_one_thread_deadlock_sync_client(loop):
     class UsesCounter:
         # An actor whose method argument is another actor
 
         def do_inc(self, ac):
             return get_client().sync(ac.increment)
 
-    with cluster(nworkers=1) as (cl, _), Client(cl["address"]) as client:
+    with cluster(nworkers=1) as (cl, _), Client(cl["address"], loop=loop) as client:
         ac = client.submit(Counter, actor=True).result()
         ac2 = client.submit(UsesCounter, actor=True).result()
 
@@ -691,7 +691,7 @@ async def test_async_deadlock(client, s, a):
     assert (await ac2.ado_inc(ac)) == 1
 
 
-def test_exception():
+def test_exception(loop):
     class MyException(Exception):
         pass
 
@@ -703,7 +703,7 @@ def test_exception():
         def prop(self):
             raise MyException
 
-    with cluster(nworkers=2) as (cl, w), Client(cl["address"]) as client:
+    with cluster(nworkers=2) as (cl, w), Client(cl["address"], loop=loop) as client:
         ac = client.submit(Broken, actor=True).result()
         acfut = ac.method()
         with pytest.raises(MyException):
