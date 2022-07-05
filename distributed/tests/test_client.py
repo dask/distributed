@@ -6854,6 +6854,7 @@ async def test_get_client_functions_spawn_clusters(c, s, a):
             processes=False,
             dashboard_address=":0",
             worker_dashboard_address=":0",
+            loop=None,
         ) as cluster2:
             with Client(cluster2) as c1:
                 c2 = get_client()

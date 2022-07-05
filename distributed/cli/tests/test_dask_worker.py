@@ -703,7 +703,7 @@ async def test_signal_handling(c, s, nanny, sig):
 
 
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
-def test_error_during_startup(monkeypatch, nanny):
+def test_error_during_startup(monkeypatch, nanny, loop):
     # see https://github.com/dask/distributed/issues/6320
     scheduler_port = open_port()
     scheduler_addr = f"tcp://127.0.0.1:{scheduler_port}"
@@ -716,7 +716,7 @@ def test_error_during_startup(monkeypatch, nanny):
             "--dashboard-address=:0",
         ],
     ):
-        with Client(scheduler_addr) as c:
+        with Client(scheduler_addr, loop=loop) as c:
             with popen(
                 [
                     "dask-worker",

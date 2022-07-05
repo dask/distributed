@@ -3600,12 +3600,12 @@ async def test_scheduler_close_fast_deprecated(s, w):
         await s.close(fast=True)
 
 
-def test_runspec_regression_sync():
+def test_runspec_regression_sync(loop):
     # https://github.com/dask/distributed/issues/6624
 
     da = pytest.importorskip("dask.array")
     np = pytest.importorskip("numpy")
-    with Client():
+    with Client(loop=loop):
         v = da.random.random((20, 20), chunks=(5, 5))
 
         overlapped = da.map_overlap(np.sum, v, depth=2, boundary="reflect")

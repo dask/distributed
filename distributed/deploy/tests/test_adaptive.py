@@ -293,7 +293,7 @@ def test_basic_no_loop(cleanup):
     loop = None
     try:
         with LocalCluster(
-            n_workers=0, silence_logs=False, dashboard_address=":0"
+            n_workers=0, silence_logs=False, dashboard_address=":0", loop=None
         ) as cluster:
             with Client(cluster) as client:
                 cluster.adapt()
