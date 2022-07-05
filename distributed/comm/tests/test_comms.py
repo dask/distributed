@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import os
 import sys
@@ -6,7 +8,6 @@ from functools import partial
 
 import pytest
 from tornado import ioloop
-from tornado.concurrent import Future
 
 import dask
 
@@ -24,9 +25,10 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.registry import backends, get_backend
+from distributed.compatibility import to_thread
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
-from distributed.utils import get_ip, get_ipv6, mp_context
+from distributed.utils import get_ip, get_ipv6, get_mp_context
 from distributed.utils_test import (
     gen_test,
     get_cert,
@@ -423,28 +425,16 @@ async def check_inproc_specific(run_client):
         assert listener.contact_address not in client_addresses
 
 
-def run_coro(func, *args, **kwargs):
-    return func(*args, **kwargs)
+async def run_coro(func, *args, **kwargs):
+    return await func(*args, **kwargs)
 
 
-def run_coro_in_thread(func, *args, **kwargs):
-    fut = Future()
-    main_loop = ioloop.IOLoop.current()
+async def run_coro_in_thread(func, *args, **kwargs):
+    async def run_with_timeout():
+        t = asyncio.create_task(func(*args, **kwargs))
+        return await asyncio.wait_for(t, timeout=10)
 
-    def run():
-        thread_loop = ioloop.IOLoop()  # need fresh IO loop for run_sync()
-        try:
-            res = thread_loop.run_sync(partial(func, *args, **kwargs), timeout=10)
-        except Exception:
-            main_loop.add_callback(fut.set_exc_info, sys.exc_info())
-        else:
-            main_loop.add_callback(fut.set_result, res)
-        finally:
-            thread_loop.close()
-
-    t = threading.Thread(target=run)
-    t.start()
-    return fut
+    return await to_thread(asyncio.run, run_with_timeout())
 
 
 @gen_test()
@@ -575,7 +565,7 @@ async def check_client_server(
 
 @pytest.mark.gpu
 @gen_test()
-async def test_ucx_client_server():
+async def test_ucx_client_server(ucx_loop):
     pytest.importorskip("distributed.comm.ucx")
     ucp = pytest.importorskip("ucp")
 
@@ -869,8 +859,15 @@ async def test_inproc_comm_closed_explicit_2():
     await comm.close()
 
 
+class CustomBase(BaseException):
+    # We don't want to interfere with KeyboardInterrupts or CancelledErrors for
+    # this test
+    ...
+
+
+@pytest.mark.parametrize("exc_type", [BufferError, CustomBase])
 @gen_test()
-async def test_comm_closed_on_buffer_error(tcp):
+async def test_comm_closed_on_write_error(tcp, exc_type):
     # Internal errors from comm.stream.write, such as
     # BufferError should lead to the stream being closed
     # and not re-used. See GitHub #4133
@@ -880,12 +877,29 @@ async def test_comm_closed_on_buffer_error(tcp):
     reader, writer = await get_tcp_comm_pair()
 
     def _write(data):
-        raise BufferError
+        raise exc_type()
 
     writer.stream.write = _write
-    with pytest.raises(BufferError):
+    with pytest.raises(exc_type):
         await writer.write("x")
-    assert writer.stream is None
+
+    assert writer.closed()
+
+    await reader.close()
+    await writer.close()
+
+
+@gen_test()
+async def test_comm_closed_on_read_error(tcp):
+    if tcp is asyncio_tcp:
+        pytest.skip("Not applicable for asyncio")
+
+    reader, writer = await get_tcp_comm_pair()
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(reader.read(), 0.01)
+
+    assert reader.closed()
 
     await reader.close()
     await writer.close()
@@ -1340,6 +1354,6 @@ def test_register_backend_entrypoint(tmp_path):
     (dist_info / "entry_points.txt").write_bytes(
         b"[distributed.comm.backends]\nudp = dask_udp:udp_backend\n"
     )
-    with mp_context.Pool(1) as pool:
+    with get_mp_context().Pool(1) as pool:
         assert pool.apply(_get_backend_on_path, args=(tmp_path,)) == 1
     pool.join()

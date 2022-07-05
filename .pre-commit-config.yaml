@@ -10,9 +10,7 @@ repos:
       - id: isort
         language_version: python3
   - repo: https://github.com/asottile/pyupgrade
-    # Do not upgrade: there's a bug in Cython that causes sum(... for ...) to fail;
-    # it needs sum([... for ...])
-    rev: v2.13.0
+    rev: v2.34.0
     hooks:
       - id: pyupgrade
         args:
@@ -25,19 +23,21 @@ repos:
         exclude: versioneer.py
         args:
           - --target-version=py38
-  - repo: https://gitlab.com/pycqa/flake8
+  - repo: https://github.com/pycqa/flake8
     rev: 4.0.1
     hooks:
       - id: flake8
         language_version: python3
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v0.942
+    rev: v0.961
     hooks:
       - id: mypy
         # Override default --ignore-missing-imports
-        args: []
+        # Use setup.cfg if possible instead of adding command line parameters here
+        args: [--warn-unused-configs]
         additional_dependencies:
           # Type stubs
+          - pandas-stubs
           - types-docutils
           - types-requests
           - types-paramiko
@@ -45,7 +45,10 @@ repos:
           - types-psutil
           - types-setuptools
           # Typed libraries
-          - numpy
+          - click
           - dask
+          - numpy
+          - pytest
           - tornado
           - zict
+          - pyarrow

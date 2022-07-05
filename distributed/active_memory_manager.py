@@ -10,7 +10,7 @@ import abc
 import logging
 from collections import defaultdict
 from collections.abc import Generator
-from typing import TYPE_CHECKING, Literal, NamedTuple
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from tornado.ioloop import PeriodicCallback
 
@@ -97,7 +97,7 @@ class ActiveMemoryManagerExtension:
         if start:
             self.start()
 
-    def amm_handler(self, comm, method: str):
+    def amm_handler(self, method: str) -> Any:
         """Scheduler handler, invoked from the Client by
         :class:`~distributed.active_memory_manager.AMMClientProxy`
         """
@@ -130,32 +130,30 @@ class ActiveMemoryManagerExtension:
         self.policies.add(policy)
         policy.manager = self
 
+    @log_errors
     def run_once(self) -> None:
         """Run all policies once and asynchronously (fire and forget) enact their
         recommendations to replicate/drop tasks
         """
-        with log_errors():
-            ts_start = time()
-            # This should never fail since this is a synchronous method
-            assert not hasattr(self, "pending")
+        ts_start = time()
+        # This should never fail since this is a synchronous method
+        assert not hasattr(self, "pending")
 
-            self.pending = {}
-            self.workers_memory = {
-                w: w.memory.optimistic for w in self.scheduler.workers.values()
-            }
-            try:
-                # populate self.pending
-                self._run_policies()
+        self.pending = {}
+        self.workers_memory = {
+            w: w.memory.optimistic for w in self.scheduler.workers.values()
+        }
+        try:
+            # populate self.pending
+            self._run_policies()
 
-                if self.pending:
-                    self._enact_suggestions()
-            finally:
-                del self.workers_memory
-                del self.pending
-            ts_stop = time()
-            logger.debug(
-                "Active Memory Manager run in %.0fms", (ts_stop - ts_start) * 1000
-            )
+            if self.pending:
+                self._enact_suggestions()
+        finally:
+            del self.workers_memory
+            del self.pending
+        ts_stop = time()
+        logger.debug("Active Memory Manager run in %.0fms", (ts_stop - ts_start) * 1000)
 
     def _run_policies(self) -> None:
         """Sequentially run ActiveMemoryManagerPolicy.run() for all registered policies,
@@ -175,7 +173,7 @@ class ActiveMemoryManagerExtension:
 
                 if not isinstance(suggestion, Suggestion):
                     # legacy: accept plain tuples
-                    suggestion = Suggestion(*suggestion)
+                    suggestion = Suggestion(*suggestion)  # type: ignore[unreachable]
 
                 try:
                     pending_repl, pending_drop = self.pending[suggestion.ts]
@@ -418,8 +416,9 @@ class ActiveMemoryManagerPolicy(abc.ABC):
     ) -> SuggestionGenerator:
         """This method is invoked by the ActiveMemoryManager every few seconds, or
         whenever the user invokes ``client.amm.run_once``.
+
         It is an iterator that must emit
-        :class:`~distributed.active_memory_manager.Suggestion`s:
+        :class:`~distributed.active_memory_manager.Suggestion` objects:
 
         - ``Suggestion("replicate", <TaskState>)``
         - ``Suggestion("replicate", <TaskState>, {subset of potential workers to replicate to})``
@@ -465,20 +464,20 @@ class AMMClientProxy:
     def __init__(self, client: Client):
         self._client = client
 
-    def _run(self, method: str):
+    def _run(self, method: str) -> Any:
         """Remotely invoke ActiveMemoryManagerExtension.amm_handler"""
         return self._client.sync(self._client.scheduler.amm_handler, method=method)
 
-    def start(self):
+    def start(self) -> Any:
         return self._run("start")
 
-    def stop(self):
+    def stop(self) -> Any:
         return self._run("stop")
 
-    def run_once(self):
+    def run_once(self) -> Any:
         return self._run("run_once")
 
-    def running(self):
+    def running(self) -> Any:
         return self._run("running")
 
 
@@ -663,6 +662,12 @@ class RetireWorker(ActiveMemoryManagerPolicy):
 
     def done(self) -> bool:
         """Return True if it is safe to close the worker down; False otherwise"""
+        if self not in self.manager.policies:
+            # Either the no_recipients flag has been raised, or there were no unique replicas
+            # as of the latest AMM run. Note that due to tasks transitioning from running to
+            # memory there may be some now; it's OK to lose them and just recompute them
+            # somewhere else.
+            return True
         ws = self.manager.scheduler.workers.get(self.address)
         if ws is None:
             return True

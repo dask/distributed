@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import gc
 import os
@@ -11,13 +13,14 @@ from time import sleep
 import psutil
 import pytest
 from tornado import gen
+from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
 from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.process import AsyncProcess
-from distributed.utils import mp_context
-from distributed.utils_test import gen_test, nodebug, pristine_loop
+from distributed.utils import get_mp_context
+from distributed.utils_test import gen_test, nodebug
 
 
 def feed(in_q, out_q):
@@ -53,8 +56,8 @@ def threads_info(q):
 @nodebug
 @gen_test()
 async def test_simple():
-    to_child = mp_context.Queue()
-    from_child = mp_context.Queue()
+    to_child = get_mp_context().Queue()
+    from_child = get_mp_context().Queue()
 
     proc = AsyncProcess(target=feed, args=(to_child, from_child))
     assert not proc.is_alive()
@@ -144,7 +147,7 @@ async def test_simple():
 
 @gen_test()
 async def test_exitcode():
-    q = mp_context.Queue()
+    q = get_mp_context().Queue()
 
     proc = AsyncProcess(target=exit, kwargs={"q": q})
     proc.daemon = True
@@ -192,7 +195,7 @@ async def test_terminate():
     await proc.start()
     await proc.terminate()
 
-    await proc.join(timeout=30)
+    await proc.join()
     assert not proc.is_alive()
     assert proc.exitcode in (-signal.SIGTERM, 255)
 
@@ -221,8 +224,8 @@ async def test_close():
 
 @gen_test()
 async def test_exit_callback():
-    to_child = mp_context.Queue()
-    from_child = mp_context.Queue()
+    to_child = get_mp_context().Queue()
+    from_child = get_mp_context().Queue()
     evt = Event()
 
     # FIXME: this breaks if changed to async def...
@@ -269,7 +272,7 @@ async def test_child_main_thread():
     """
     The main thread in the child should be called "MainThread".
     """
-    q = mp_context.Queue()
+    q = get_mp_context().Queue()
     proc = AsyncProcess(target=threads_info, args=(q,))
     await proc.start()
     await proc.join()
@@ -311,6 +314,26 @@ async def test_terminate_after_stop():
     await proc.start()
     await asyncio.sleep(0.1)
     await proc.terminate()
+    await proc.join()
+
+
+def kill_target(ev):
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    ev.set()
+    sleep(300)
+
+
+@pytest.mark.skipif(WINDOWS, reason="Needs SIGKILL")
+@gen_test()
+async def test_kill():
+    ev = get_mp_context().Event()
+    proc = AsyncProcess(target=kill_target, args=(ev,))
+    await proc.start()
+    ev.wait()
+    await proc.kill()
+    await proc.join()
+    assert not proc.is_alive()
+    assert proc.exitcode in (-signal.SIGKILL, 255)
 
 
 def _worker_process(worker_ready, child_pipe):
@@ -340,7 +363,8 @@ def _parent_process(child_pipe):
     be used to determine if it exited correctly."""
 
     async def parent_process_coroutine():
-        worker_ready = mp_context.Event()
+        IOLoop.current()
+        worker_ready = get_mp_context().Event()
 
         worker = AsyncProcess(target=_worker_process, args=(worker_ready, child_pipe))
 
@@ -354,13 +378,12 @@ def _parent_process(child_pipe):
         # worker_process to also exit.
         os._exit(255)
 
-    with pristine_loop() as loop:
-        try:
-            loop.run_sync(parent_process_coroutine, timeout=10)
-        finally:
-            loop.stop()
+    async def run_with_timeout():
+        t = asyncio.create_task(parent_process_coroutine())
+        return await asyncio.wait_for(t, timeout=10)
 
-            raise RuntimeError("this should be unreachable due to os._exit")
+    asyncio.run(run_with_timeout())
+    raise RuntimeError("this should be unreachable due to os._exit")
 
 
 def test_asyncprocess_child_teardown_on_parent_exit():
@@ -378,10 +401,10 @@ def test_asyncprocess_child_teardown_on_parent_exit():
                   \________ <--   child_pipe   <-- ________/
     """
     # When child_pipe is closed, the children_alive pipe unblocks.
-    children_alive, child_pipe = mp_context.Pipe(duplex=False)
+    children_alive, child_pipe = get_mp_context().Pipe(duplex=False)
 
     try:
-        parent = mp_context.Process(target=_parent_process, args=(child_pipe,))
+        parent = get_mp_context().Process(target=_parent_process, args=(child_pipe,))
         parent.start()
 
         # Close our reference to child_pipe so that the child has the only one.

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from urllib.parse import urljoin
 
 from tornado import web
@@ -37,6 +39,7 @@ from distributed.dashboard.components.scheduler import (
     individual_profile_server_doc,
     profile_doc,
     profile_server_doc,
+    shuffling_doc,
     status_doc,
     stealing_doc,
     systemmonitor_doc,
@@ -49,6 +52,7 @@ from distributed.dashboard.worker import counters_doc
 
 applications = {
     "/system": systemmonitor_doc,
+    "/shuffle": shuffling_doc,
     "/stealing": stealing_doc,
     "/workers": workers_doc,
     "/events": events_doc,

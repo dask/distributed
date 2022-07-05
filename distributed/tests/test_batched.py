@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import random
 
@@ -33,7 +35,7 @@ class EchoServer:
         await self.listen()
         return self
 
-    async def __aexit__(self, exc, typ, tb):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         self.stop()
 
 

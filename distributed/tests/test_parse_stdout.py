@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import re
 import sys
@@ -28,8 +30,9 @@ distributed/tests/test1.py::test_flaky [33mRERUN[0m[31m                      
 distributed/tests/test1.py::test_flaky [32mPASSED[0m[31m                            [ 70%][0m
 distributed/tests/test1.py::test_leaking [32mPASSED[0m[31m                          [ 72%][0m
 distributed/tests/test1.py::test_leaking [32mLEAKED[0m[31m                          [ 72%][0m
-distributed/tests/test1.py::test_pass [32mPASSED[0m[31m                             [ 80%][0m
+distributed/tests/test1.py::test_pass [32mPASSED[0m[31m                             [ 75%][0m
 distributed/tests/test1.py::test_params[a a] [32mPASSED[0m[31m                      [ 78%][0m
+distributed/tests/test1.py::test_escape_chars[<lambda>] [32mPASSED[0m[31m           [ 80%][0m
 distributed/tests/test1.py::MyTest::test_unittest [32mPASSED[0m[31m                 [ 86%][0m
 distributed/tests/test1.py::test_timeout 
 """
@@ -57,6 +60,7 @@ def test_parse_rows():
         ("distributed.tests.test1", "test_leaking", {"PASSED"}),
         ("distributed.tests.test1", "test_pass", {"PASSED"}),
         ("distributed.tests.test1", "test_params[a a]", {"PASSED"}),
+        ("distributed.tests.test1", "test_escape_chars[<lambda>]", {"PASSED"}),
         ("distributed.tests.test1.MyTest", "test_unittest", {"PASSED"}),
         ("distributed.tests.test1", "test_timeout", {None}),
     ]
@@ -74,7 +78,7 @@ def test_build_xml(capsys):
     expect = """
 <?xml version="1.0" encoding="utf-8"?>
 <testsuites>
-<testsuite name="distributed" errors="3" failures="3" skipped="2" tests="14" time="0.0" timestamp="snip" hostname="">
+<testsuite name="distributed" errors="3" failures="3" skipped="2" tests="15" time="0.0" timestamp="snip" hostname="">
 <testcase classname="distributed.tests.test1" name="test_fail" time="0.0"><failure message=""></failure></testcase>
 <testcase classname="distributed.tests.test1" name="test_error_in_setup" time="0.0"><error message="failed on setup"></error></testcase>
 <testcase classname="distributed.tests.test1" name="test_pass_and_then_error_in_teardown" time="0.0"><error message="failed on teardown"></error></testcase>
@@ -86,6 +90,7 @@ def test_build_xml(capsys):
 <testcase classname="distributed.tests.test1" name="test_leaking" time="0.0" />
 <testcase classname="distributed.tests.test1" name="test_pass" time="0.0" />
 <testcase classname="distributed.tests.test1" name="test_params[a a]" time="0.0" />
+<testcase classname="distributed.tests.test1" name="test_escape_chars[&lt;lambda&gt;]" time="0.0" />
 <testcase classname="distributed.tests.test1.MyTest" name="test_unittest" time="0.0" />
 <testcase classname="distributed.tests.test1" name="test_timeout" time="0.0"><failure message="pytest-timeout exceeded"></failure></testcase>
 </testsuite>

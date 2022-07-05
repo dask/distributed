@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import gc
 import logging
 import threading
@@ -171,7 +173,7 @@ class GCDiagnosis:
         self.enable()
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_value, traceback):
         self.disable()
 
     def _gc_callback(self, phase, info):

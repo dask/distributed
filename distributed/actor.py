@@ -205,8 +205,9 @@ class Actor(WrappedKey):
                         if self._future and not self._future.done():
                             await self._future
                             return await run_actor_function_on_worker()
-                        else:  # pragma: no cover
-                            raise OSError("Unable to contact Actor's worker")
+                        else:
+                            exc = OSError("Unable to contact Actor's worker")
+                            return _Error(exc)
                     if result["status"] == "OK":
                         return _OK(result["result"])
                     return _Error(result["exception"])
@@ -289,7 +290,7 @@ class EagerActorFuture(BaseActorFuture[_T]):
 
     def __await__(self) -> Generator[object, None, _T]:
         return self._result
-        yield
+        yield  # type: ignore[unreachable]
 
     def result(self, timeout: object = None) -> _T:
         return self._result

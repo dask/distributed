@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+from __future__ import annotations
+
 import os
 
 from setuptools import find_packages, setup
@@ -36,7 +38,7 @@ setup(
     license="BSD",
     package_data={
         "": ["templates/index.html", "template.html"],
-        "distributed": ["http/templates/*.html"],
+        "distributed": ["http/templates/*.html", "py.typed"],
     },
     include_package_data=True,
     install_requires=install_requires,

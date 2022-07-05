@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import warnings
 
@@ -19,6 +21,8 @@ from distributed.utils_test import (
     inc,
     xfail_ssl_issue5601,
 )
+
+pytestmark = pytest.mark.flaky(reruns=2)
 
 
 def test_registered():

@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 import asyncio
 import datetime
 import logging
 import uuid
+import warnings
 from contextlib import suppress
 from inspect import isawaitable
+from typing import Any
 
 from tornado.ioloop import PeriodicCallback
 
@@ -193,10 +197,13 @@ class Cluster(SyncMethodMixin):
         with suppress(RuntimeError):  # loop closed during process shutdown
             return self.sync(self._close, callback_timeout=timeout)
 
-    def __del__(self):
+    def __del__(self, _warn=warnings.warn):
         if getattr(self, "status", Status.closed) != Status.closed:
-            with suppress(AttributeError, RuntimeError):  # during closing
-                self.loop.add_callback(self.close)
+            try:
+                self_r = repr(self)
+            except Exception:
+                self_r = f"with a broken __repr__ {object.__repr__(self)}"
+            _warn(f"unclosed cluster {self_r}", ResourceWarning, source=self)
 
     async def _watch_worker_status(self, comm):
         """Listen to scheduler for updates on adding and removing workers"""
@@ -222,7 +229,7 @@ class Cluster(SyncMethodMixin):
         else:  # pragma: no cover
             raise ValueError("Invalid op", op, msg)
 
-    def adapt(self, Adaptive=Adaptive, **kwargs) -> Adaptive:
+    def adapt(self, Adaptive: type[Adaptive] = Adaptive, **kwargs: Any) -> Adaptive:
         """Turn on adaptivity
 
         For keyword arguments see dask.distributed.Adaptive
@@ -399,13 +406,13 @@ class Cluster(SyncMethodMixin):
 
             adapt.on_click(adapt_cb)
 
+            @log_errors
             def scale_cb(b):
-                with log_errors():
-                    n = request.value
-                    with suppress(AttributeError):
-                        self._adaptive.stop()
-                    self.scale(n)
-                    update()
+                n = request.value
+                with suppress(AttributeError):
+                    self._adaptive.stop()
+                self.scale(n)
+                update()
 
             scale.on_click(scale_cb)
         else:  # pragma: no cover
@@ -427,10 +434,13 @@ class Cluster(SyncMethodMixin):
         cluster_repr_interval = parse_timedelta(
             dask.config.get("distributed.deploy.cluster-repr-interval", default="ms")
         )
-        pc = PeriodicCallback(update, cluster_repr_interval * 1000)
-        self.periodic_callbacks["cluster-repr"] = pc
-        pc.start()
 
+        def install():
+            pc = PeriodicCallback(update, cluster_repr_interval * 1000)
+            self.periodic_callbacks["cluster-repr"] = pc
+            pc.start()
+
+        self.loop.add_callback(install)
         return tab
 
     def _repr_html_(self, cluster_status=None):
@@ -462,14 +472,18 @@ class Cluster(SyncMethodMixin):
     def __enter__(self):
         return self.sync(self.__aenter__)
 
-    def __exit__(self, typ, value, traceback):
-        return self.sync(self.__aexit__, typ, value, traceback)
+    def __exit__(self, exc_type, exc_value, traceback):
+        return self.sync(self.__aexit__, exc_type, exc_value, traceback)
+
+    def __await__(self):
+        return self
+        yield
 
     async def __aenter__(self):
         await self
         return self
 
-    async def __aexit__(self, typ, value, traceback):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         f = self.close()
         if isawaitable(f):
             await f

@@ -1,6 +1,10 @@
+from __future__ import annotations
+
 from collections import deque
 
 import psutil
+
+import dask
 
 from distributed.compatibility import WINDOWS
 from distributed.metrics import time
@@ -40,7 +44,9 @@ class SystemMonitor:
         except Exception:
             self._collect_disk_io_counters = False
         else:
-            if disk_ioc is None:  # diskless machine
+            if disk_ioc is None or not dask.config.get(  # diskless machine
+                "distributed.admin.system-monitor.disk"
+            ):
                 self._collect_disk_io_counters = False
             else:
                 self.last_time_disk = time()

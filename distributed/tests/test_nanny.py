@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import gc
 import logging
@@ -19,15 +21,19 @@ from tornado.ioloop import IOLoop
 import dask
 from dask.utils import tmpfile
 
-from distributed import Nanny, Scheduler, Worker, rpc, wait, worker
+from distributed import Nanny, Scheduler, Worker, profile, rpc, wait, worker
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
-from distributed.profile import wait_profiler
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, parse_ports
-from distributed.utils_test import captured_logger, gen_cluster, gen_test
+from distributed.utils_test import (
+    captured_logger,
+    gen_cluster,
+    gen_test,
+    raises_with_cause,
+)
 
 pytestmark = pytest.mark.ci1
 
@@ -79,7 +85,7 @@ async def test_nanny_process_failure(c, s):
 @gen_cluster(nthreads=[])
 async def test_run(s):
     async with Nanny(s.address, nthreads=2) as n:
-        with rpc(n.address) as nn:
+        async with rpc(n.address) as nn:
             response = await nn.run(function=dumps(lambda: 1))
             assert response["status"] == "OK"
             assert response["result"] == 1
@@ -139,7 +145,7 @@ async def test_nanny_death_timeout(s):
     with pytest.raises(TimeoutError):
         await w
 
-    assert w.status == Status.closed
+    assert w.status == Status.failed
 
 
 @gen_cluster(client=True, Worker=Nanny)
@@ -165,8 +171,8 @@ async def test_num_fds(s):
     # Warm up
     async with Nanny(s.address):
         pass
-    wait_profiler()
-    gc.collect()
+    with profile.lock:
+        gc.collect()
 
     before = proc.num_fds()
 
@@ -271,8 +277,8 @@ async def test_wait_for_scheduler():
 
 @gen_cluster(nthreads=[], client=True)
 async def test_environment_variable(c, s):
-    a = Nanny(s.address, loop=s.loop, memory_limit=0, env={"FOO": "123"})
-    b = Nanny(s.address, loop=s.loop, memory_limit=0, env={"FOO": "456"})
+    a = Nanny(s.address, memory_limit=0, env={"FOO": "123"})
+    b = Nanny(s.address, memory_limit=0, env={"FOO": "456"})
     await asyncio.gather(a, b)
     results = await c.run(lambda: os.environ["FOO"])
     assert results == {a.worker_address: "123", b.worker_address: "456"}
@@ -284,7 +290,7 @@ async def test_environment_variable_by_config(c, s, monkeypatch):
 
     with dask.config.set({"distributed.nanny.environ": "456"}):
         with pytest.raises(TypeError, match="configuration must be of type dict"):
-            Nanny(s.address, loop=s.loop, memory_limit=0)
+            Nanny(s.address, memory_limit=0)
 
     with dask.config.set({"distributed.nanny.environ": {"FOO": "456"}}):
 
@@ -292,10 +298,10 @@ async def test_environment_variable_by_config(c, s, monkeypatch):
         # kwargs > env var > config
 
         with mock.patch.dict(os.environ, {"FOO": "BAR"}, clear=True):
-            a = Nanny(s.address, loop=s.loop, memory_limit=0, env={"FOO": "123"})
-            x = Nanny(s.address, loop=s.loop, memory_limit=0)
+            a = Nanny(s.address, memory_limit=0, env={"FOO": "123"})
+            x = Nanny(s.address, memory_limit=0)
 
-        b = Nanny(s.address, loop=s.loop, memory_limit=0)
+        b = Nanny(s.address, memory_limit=0)
 
         await asyncio.gather(a, b, x)
         results = await c.run(lambda: os.environ["FOO"])
@@ -399,9 +405,9 @@ async def test_lifetime(s):
 
 
 @gen_cluster(client=True, nthreads=[])
-async def test_nanny_closes_cleanly_2(c, s):
+async def test_nanny_closes_cleanly_if_worker_is_terminated(c, s):
     async with Nanny(s.address) as n:
-        with c.rpc(n.worker_address) as w:
+        async with c.rpc(n.worker_address) as w:
             IOLoop.current().add_callback(w.terminate)
             start = time()
             while n.status != Status.closed:
@@ -426,8 +432,11 @@ async def test_nanny_port_range(c, s):
         assert n1.port == 9867  # Selects first port in range
         async with Nanny(s.address, port=nanny_port, worker_port=worker_port) as n2:
             assert n2.port == 9868  # Selects next port in range
-            with pytest.raises(
-                ValueError, match="Could not start Nanny"
+            with raises_with_cause(
+                RuntimeError,
+                "Nanny failed to start.",
+                ValueError,
+                "with port 9867:9868",
             ):  # No more ports left
                 async with Nanny(s.address, port=nanny_port, worker_port=worker_port):
                     pass
@@ -452,7 +461,7 @@ class KeyboardInterruptWorker(worker.Worker):
 
 @pytest.mark.parametrize("protocol", ["tcp", "ucx"])
 @gen_test()
-async def test_nanny_closed_by_keyboard_interrupt(protocol):
+async def test_nanny_closed_by_keyboard_interrupt(ucx_loop, protocol):
     if protocol == "ucx":  # Skip if UCX isn't available
         pytest.importorskip("ucp")
 
@@ -477,7 +486,7 @@ class BrokenWorker(worker.Worker):
 @gen_cluster(nthreads=[])
 async def test_worker_start_exception(s):
     # make sure this raises the right Exception:
-    with pytest.raises(StartException):
+    with raises_with_cause(RuntimeError, None, StartException, None):
         async with Nanny(s.address, worker_class=BrokenWorker) as n:
             pass
 
@@ -559,3 +568,19 @@ async def test_restart_memory(c, s, n):
 
     while not s.workers:
         await asyncio.sleep(0.1)
+
+
+@gen_cluster(Worker=Nanny, nthreads=[("", 1)])
+async def test_scheduler_crash_doesnt_restart(s, a):
+    # Simulate a scheduler crash by disconnecting it first
+    # (`s.close()` would tell workers to cleanly shut down)
+    bcomm = next(iter(s.stream_comms.values()))
+    bcomm.abort()
+    await s.close()
+
+    while a.status not in {Status.closing_gracefully, Status.closed}:
+        await asyncio.sleep(0.01)
+
+    await a.finished()
+    assert a.status == Status.closed
+    assert a.process is None

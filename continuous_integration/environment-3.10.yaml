@@ -10,19 +10,21 @@ dependencies:
   - bokeh
   - click
   - cloudpickle
-  - coverage<6.3  # https://github.com/nedbat/coveragepy/issues/1310
+  - coverage
   - dask  # overridden by git tip below
   - filesystem-spec  # overridden by git tip below
   - h5py
   - ipykernel
   - ipywidgets
   - jinja2
+  - locket >=1.0
   - msgpack-python
   - netcdf4
   - paramiko
   - pre-commit
   - prometheus_client
   - psutil
+  - pyarrow=7
   - pytest
   - pytest-cov
   - pytest-faulthandler
@@ -36,9 +38,9 @@ dependencies:
   - sortedcollections
   - tblib
   - toolz
-  - tornado
+  - tornado<6.2
   - zict  # overridden by git tip below
-  - zstandard
+  - zstandard >=0.9.0
   - pip:
       - git+https://github.com/dask/dask
       - git+https://github.com/dask/s3fs

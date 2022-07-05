@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import uuid
@@ -105,21 +107,21 @@ class VariableExtension:
             self.waiting[key, name].add(token)
         return record
 
+    @log_errors
     async def delete(self, name=None, client=None):
-        with log_errors():
-            try:
-                old = self.variables[name]
-            except KeyError:
-                pass
-            else:
-                if old["type"] == "Future":
-                    await self.release(old["value"], name)
-            with suppress(KeyError):
-                del self.waiting_conditions[name]
-            with suppress(KeyError):
-                del self.variables[name]
+        try:
+            old = self.variables[name]
+        except KeyError:
+            pass
+        else:
+            if old["type"] == "Future":
+                await self.release(old["value"], name)
+        with suppress(KeyError):
+            del self.waiting_conditions[name]
+        with suppress(KeyError):
+            del self.variables[name]
 
-            self.scheduler.remove_client("variable-%s" % name)
+        self.scheduler.remove_client("variable-%s" % name)
 
 
 class Variable:

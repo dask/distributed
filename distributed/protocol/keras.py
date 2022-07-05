@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import keras
 
 from distributed.protocol.serialize import (

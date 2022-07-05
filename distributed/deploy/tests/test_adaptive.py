@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import math
 from time import sleep
@@ -225,7 +227,11 @@ async def test_adapt_quickly():
 
         await cluster
 
-        while len(cluster.scheduler.workers) > 1 or len(cluster.worker_spec) > 1:
+        while (
+            len(cluster.scheduler.workers) > 1
+            or len(cluster.worker_spec) > 1
+            or len(cluster.workers) > 1
+        ):
             await asyncio.sleep(0.01)
 
         # Don't scale up for large sequential computations
@@ -380,15 +386,19 @@ async def test_adapt_cores_memory():
         assert adapt.maximum == 5
 
 
-def test_adaptive_config():
+@gen_test()
+async def test_adaptive_config():
     with dask.config.set(
         {"distributed.adaptive.minimum": 10, "distributed.adaptive.wait-count": 8}
     ):
-        adapt = Adaptive(interval="5s")
-        assert adapt.minimum == 10
-        assert adapt.maximum == math.inf
-        assert adapt.interval == 5
-        assert adapt.wait_count == 8
+        try:
+            adapt = Adaptive(interval="5s")
+            assert adapt.minimum == 10
+            assert adapt.maximum == math.inf
+            assert adapt.interval == 5
+            assert adapt.wait_count == 8
+        finally:
+            adapt.stop()
 
 
 @gen_test()

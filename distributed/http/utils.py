@@ -28,7 +28,7 @@ def redirect(path):
     return Redirect
 
 
-def get_handlers(server, modules: list[str], prefix="/"):
+def get_handlers(server, modules: list[str], prefix="/"):  # type: ignore[no-untyped-def]
     prefix = prefix or ""
     prefix = "/" + prefix.strip("/")
 
@@ -38,7 +38,7 @@ def get_handlers(server, modules: list[str], prefix="/"):
     _routes = []
     for module_name in modules:
         module = importlib.import_module(module_name)
-        _routes.extend(module.routes)  # type: ignore
+        _routes.extend(module.routes)
 
     routes = []
 

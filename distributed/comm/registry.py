@@ -15,7 +15,7 @@ class _EntryPoints(Protocol):
 if sys.version_info >= (3, 10):
     # py3.10 importlib.metadata type annotations are not in mypy yet
     # https://github.com/python/typeshed/pull/7331
-    _entry_points: _EntryPoints = importlib.metadata.entry_points  # type: ignore[assignment]
+    _entry_points: _EntryPoints = importlib.metadata.entry_points
 else:
 
     def _entry_points(

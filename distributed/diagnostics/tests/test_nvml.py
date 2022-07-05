@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import multiprocessing as mp
 import os
 
@@ -38,7 +40,23 @@ def test_enable_disable_nvml():
 
     with dask.config.set({"distributed.diagnostics.nvml": True}):
         nvml.init_once()
-        assert nvml.nvmlInitialized is True
+        assert (
+            nvml.nvmlInitialized
+            ^ nvml.nvmlLibraryNotFound
+            ^ nvml.nvmlWslInsufficientDriver
+        )
+
+
+def test_wsl_monitoring_enabled():
+    try:
+        pynvml.nvmlShutdown()
+    except pynvml.NVMLError_Uninitialized:
+        pass
+    else:
+        nvml.nvmlInitialized = False
+
+    nvml.init_once()
+    assert nvml.nvmlWslInsufficientDriver is False
 
 
 def run_has_cuda_context(queue):
