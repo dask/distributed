@@ -81,7 +81,6 @@ PROCESSING: set[TaskStateState] = {
     "resumed",
 }
 READY: set[TaskStateState] = {"ready", "constrained"}
-RUNNING: set[TaskStateState] = {"executing", "long-running", "cancelled", "resumed"}
 
 NO_VALUE = "--no-value-sentinel--"
 
