@@ -81,7 +81,7 @@ PROCESSING: set[TaskStateState] = {
     "resumed",
 }
 READY: set[TaskStateState] = {"ready", "constrained"}
-
+RUNNING: set[TaskStateState] = {"executing", "long-running", "cancelled", "resumed"}
 
 NO_VALUE = "--no-value-sentinel--"
 
@@ -1027,8 +1027,12 @@ class WorkerState:
     #: determining a last-in-first-out order between them.
     generation: int
 
+    #: ``{resource name: amount}``. Total resources available for task execution.
+    #: See :doc: `resources`.
+    total_resources: dict[str, float]
+
     #: ``{resource name: amount}``. Current resources that aren't being currently
-    #: consumed by task execution. Always less or equal to ``Worker.total_resources``.
+    #: consumed by task execution. Always less or equal to :attr:`total_resources`.
     #: See :doc:`resources`.
     available_resources: dict[str, float]
 
@@ -1102,7 +1106,8 @@ class WorkerState:
         self.data = data if data is not None else {}
         self.threads = threads if threads is not None else {}
         self.plugins = plugins if plugins is not None else {}
-        self.available_resources = dict(resources) if resources is not None else {}
+        self.total_resources = dict(resources) if resources is not None else {}
+        self.available_resources = self.total_resources.copy()
 
         self.validate = validate
         self.tasks = {}
@@ -3108,6 +3113,24 @@ class WorkerState:
         # Test that there aren't multiple TaskState objects with the same key in data_needed
         for tss in self.data_needed.values():
             assert len({ts.key for ts in tss}) == len(tss)
+
+        # Test that resources are consumed and released correctly
+        for resource, total in self.total_resources.items():
+            available = self.available_resources[resource]
+            assert available >= 0
+            allocated = 0.0
+            for ts in self.tasks.values():
+                if ts.resource_restrictions and ts.state in RUNNING:
+                    allocated += ts.resource_restrictions.get(resource, 0)
+            assert available + allocated == total
+
+    def set_resources(self, resources: dict[str, float]) -> None:
+        for r, quantity in resources.items():
+            if r in self.total_resources:
+                self.available_resources[r] += quantity - self.total_resources[r]
+            else:
+                self.available_resources[r] = quantity
+            self.total_resources[r] = quantity
 
 
 class BaseWorker(abc.ABC):
