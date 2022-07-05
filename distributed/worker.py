@@ -1751,8 +1751,8 @@ class Worker(BaseWorker, ServerNode):
         )
         return {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
 
-    async def set_resources(self, **resources) -> None:
-        self.state.set_resources(resources)
+    async def set_resources(self, **resources: float) -> None:
+        self.state.set_resources(**resources)
 
         await retry_operation(
             self.scheduler.set_resources,
