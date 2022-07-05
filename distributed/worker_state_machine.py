@@ -3212,7 +3212,7 @@ class WorkerState:
                     allocated += ts.resource_restrictions.get(resource, 0)
             assert available + allocated == total
 
-    def set_resources(self, resources: dict[str, float]) -> None:
+    def set_resources(self, **resources: float) -> None:
         for r, quantity in resources.items():
             if r in self.total_resources:
                 self.available_resources[r] += quantity - self.total_resources[r]
