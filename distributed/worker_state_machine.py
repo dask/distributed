@@ -1745,8 +1745,6 @@ class WorkerState:
 
         if ts.waiting_for_data:
             self.waiting_for_data_count += 1
-        elif ts.resource_restrictions:
-            recommendations[ts] = "constrained"
         else:
             recommendations[ts] = "ready"
 
@@ -1829,6 +1827,9 @@ class WorkerState:
             for dep in ts.dependencies:
                 assert dep.key in self.data or dep.key in self.actors
                 assert dep.state == "memory"
+
+        if ts.resource_restrictions:
+            return {ts: "constrained"}, []
 
         ts.state = "ready"
         assert ts.priority is not None
