@@ -1450,15 +1450,11 @@ class WorkerState:
             if ts in recs:
                 continue
 
-            if any(
-                self.available_resources[resource] < needed
-                for resource, needed in ts.resource_restrictions.items()
-            ):
+            if not self._resource_restrictions_satisfied(ts):
                 break
 
             self.constrained.popleft()
-            for resource, needed in ts.resource_restrictions.items():
-                self.available_resources[resource] -= needed
+            self._consume_resources(ts)
 
             recs[ts] = "executing"
             self.executing.add(ts)
@@ -1739,8 +1735,7 @@ class WorkerState:
             # Reschedule(), which is "cancelled"
             assert ts.state in ("executing", "long-running"), ts
 
-        for resource, quantity in ts.resource_restrictions.items():
-            self.available_resources[resource] += quantity
+        self._release_resources(ts)
         self.executing.discard(ts)
 
         return merge_recs_instructions(
@@ -1836,8 +1831,7 @@ class WorkerState:
         *,
         stimulus_id: str,
     ) -> RecsInstrs:
-        for resource, quantity in ts.resource_restrictions.items():
-            self.available_resources[resource] += quantity
+        self._release_resources(ts)
         self.executing.discard(ts)
 
         return merge_recs_instructions(
@@ -1982,9 +1976,7 @@ class WorkerState:
         self.executing.discard(ts)
         self.in_flight_tasks.discard(ts)
 
-        for resource, quantity in ts.resource_restrictions.items():
-            self.available_resources[resource] += quantity
-
+        self._release_resources(ts)
         return self._transition_generic_released(ts, stimulus_id=stimulus_id)
 
     def _transition_executing_released(
@@ -2011,10 +2003,7 @@ class WorkerState:
                 f"Tried to transition task {ts} to `memory` without data available"
             )
 
-        if ts.resource_restrictions is not None:
-            for resource, quantity in ts.resource_restrictions.items():
-                self.available_resources[resource] += quantity
-
+        self._release_resources(ts)
         self.executing.discard(ts)
         self.in_flight_tasks.discard(ts)
         ts.coming_from = None
@@ -2355,6 +2344,20 @@ class WorkerState:
             )
         )
         return recs, instructions
+
+    def _resource_restrictions_satisfied(self, ts: TaskState) -> bool:
+        return all(
+            self.available_resources[resource] < needed
+            for resource, needed in ts.resource_restrictions.items()
+        )
+
+    def _consume_resources(self, ts: TaskState) -> None:
+        for resource, needed in ts.resource_restrictions.items():
+            self.available_resources[resource] -= needed
+
+    def _release_resources(self, ts: TaskState) -> None:
+        for resource, quantity in ts.resource_restrictions.items():
+            self.available_resources[resource] += quantity
 
     def _transitions(self, recommendations: Recs, *, stimulus_id: str) -> Instructions:
         """Process transitions until none are left
