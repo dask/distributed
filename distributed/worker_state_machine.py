@@ -1453,7 +1453,7 @@ class WorkerState:
                 break
 
             self.constrained.popleft()
-            self._consume_resources(ts)
+            self._acquire_resources(ts)
 
             recs[ts] = "executing"
             self.executing.add(ts)
@@ -2350,7 +2350,7 @@ class WorkerState:
             for resource, needed in ts.resource_restrictions.items()
         )
 
-    def _consume_resources(self, ts: TaskState) -> None:
+    def _acquire_resources(self, ts: TaskState) -> None:
         for resource, needed in ts.resource_restrictions.items():
             self.available_resources[resource] -= needed
 
