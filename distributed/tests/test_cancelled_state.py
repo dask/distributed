@@ -542,3 +542,24 @@ async def test_resumed_cancelled_handle_compute(
                 (f3.key, "resumed", "error", "error", {}),
             ],
         )
+
+
+def test_resume_executing_worker_state(ws_with_running_task):
+    """Test state loops:
+
+    - executing -> cancelled -> resumed -> executing
+    - executing -> long-running -> cancelled -> resumed -> long-running
+    """
+    ws = ws_with_running_task
+    ts = ws.tasks["x"]
+    prev_state = ts.state
+
+    instructions = ws.handle_stimulus(
+        FreeKeysEvent(keys=["x"], stimulus_id="s1"),
+        ComputeTaskEvent.dummy(
+            key="x", resource_restrictions={"R": 1}, stimulus_id="s2"
+        ),
+    )
+    assert not instructions
+    assert ws.tasks["x"] is ts
+    assert ts.state == prev_state
