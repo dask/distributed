@@ -83,7 +83,8 @@ async def test_raise_reschedule(c, s, a, b, state):
 @pytest.mark.parametrize("state", ["executing", "long-running"])
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_cancelled_reschedule(c, s, a, state):
-    """A task raises Reschedule(), but the future was released by the client"""
+    """A task raises Reschedule(), but the future was released by the client.
+    Same as test_cancelled_reschedule_worker_state"""
     ev1 = Event()
     ev2 = Event()
 
