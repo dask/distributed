@@ -2346,7 +2346,7 @@ class WorkerState:
 
     def _resource_restrictions_satisfied(self, ts: TaskState) -> bool:
         return all(
-            self.available_resources[resource] < needed
+            self.available_resources[resource] >= needed
             for resource, needed in ts.resource_restrictions.items()
         )
 
