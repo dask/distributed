@@ -16,6 +16,7 @@ import os
 import re
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -76,11 +77,6 @@ from distributed.worker import WORKER_ANY_RUNNING, Worker
 from distributed.worker_state_machine import InvalidTransition, StateMachineEvent
 from distributed.worker_state_machine import TaskState as WorkerTaskState
 from distributed.worker_state_machine import WorkerState
-
-try:
-    import ssl
-except ImportError:
-    ssl = None  # type: ignore
 
 try:
     import dask.array  # register config

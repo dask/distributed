@@ -6,21 +6,15 @@ import errno
 import functools
 import logging
 import socket
+import ssl
 import struct
 import sys
 import weakref
 from ssl import SSLCertVerificationError, SSLError
 from typing import Any, ClassVar
 
-from tornado import gen
-
-try:
-    import ssl
-except ImportError:
-    ssl = None  # type: ignore
-
 from tlz import sliding_window
-from tornado import netutil
+from tornado import gen, netutil
 from tornado.iostream import IOStream, StreamClosedError
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
@@ -142,7 +136,7 @@ def convert_stream_closed_error(obj, exc):
     if exc.real_error is not None:
         # The stream was closed because of an underlying OS error
         exc = exc.real_error
-        if ssl and isinstance(exc, ssl.SSLError):
+        if isinstance(exc, ssl.SSLError):
             if "UNKNOWN_CA" in exc.reason:
                 raise FatalCommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}")
         raise CommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}") from exc
