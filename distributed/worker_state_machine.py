@@ -93,7 +93,6 @@ WAITING_FOR_DATA: set[TaskStateState] = {
     "resumed",
     "waiting",
 }
-RUNNING: set[TaskStateState] = {"executing", "long-running", "cancelled", "resumed"}
 NO_VALUE = "--no-value-sentinel--"
 
 
