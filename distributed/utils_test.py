@@ -2449,7 +2449,7 @@ def ws_with_running_task(ws, request):
 
     The task may or may not raise secede(); the tests using this fixture runs twice.
     """
-    ws.available_resources = {"R": 1}
+    ws.set_resources(R=1)
     instructions = ws.handle_stimulus(
         ComputeTaskEvent.dummy(
             key="x", resource_restrictions={"R": 1}, stimulus_id="compute"
