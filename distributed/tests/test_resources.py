@@ -70,8 +70,8 @@ async def test_submit_many_non_overlapping_2(c, s, a, b):
         assert b.state.executing_count <= 1
 
     await wait(futures)
-    assert a.total_resources == a.state.available_resources
-    assert b.total_resources == b.state.available_resources
+    assert a.state.total_resources == a.state.available_resources
+    assert b.state.total_resources == b.state.available_resources
 
 
 @gen_cluster(
@@ -232,7 +232,7 @@ async def test_minimum_resource(c, s, a):
         assert a.state.executing_count <= 1
 
     await wait(futures)
-    assert a.total_resources == a.state.available_resources
+    assert a.state.total_resources == a.state.available_resources
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 2, {"resources": {"A": 1}})])
@@ -271,7 +271,7 @@ async def test_balance_resources(c, s, a, b):
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 2)])
 async def test_set_resources(c, s, a):
     await a.set_resources(A=2)
-    assert a.total_resources["A"] == 2
+    assert a.state.total_resources["A"] == 2
     assert a.state.available_resources["A"] == 2
     assert s.workers[a.address].resources == {"A": 2}
     lock = Lock()
@@ -281,7 +281,7 @@ async def test_set_resources(c, s, a):
             await asyncio.sleep(0.01)
 
     await a.set_resources(A=3)
-    assert a.total_resources["A"] == 3
+    assert a.state.total_resources["A"] == 3
     assert a.state.available_resources["A"] == 2
     assert s.workers[a.address].resources == {"A": 3}
 
