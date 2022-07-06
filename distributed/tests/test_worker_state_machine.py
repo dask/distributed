@@ -26,6 +26,7 @@ from distributed.utils_test import (
 from distributed.worker_state_machine import (
     AcquireReplicasEvent,
     ComputeTaskEvent,
+    Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     FreeKeysEvent,
@@ -1051,6 +1052,27 @@ def test_gather_priority(ws):
             total_nbytes=4 * 2**20,
         ),
     ]
+
+
+def test_resource_restricted_task_transitions_to_constrained(ws):
+    ws.set_resources(R=1)
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            key="x", resource_restrictions={"R": 1}, stimulus_id="compute"
+        )
+    )
+    assert instructions == [Execute(key="x", stimulus_id="compute")]
+    assert_story(
+        ws.story("x"),
+        [
+            ("x", "compute-task", "released"),
+            ("x", "released", "waiting", "waiting", {"x": "ready"}),
+            ("x", "waiting", "ready", "waiting", {"x": "constrained"}),
+            ("x", "waiting", "constrained", "constrained", {"x": "executing"}),
+            ("x", "constrained", "executing", "executing", {}),
+        ],
+        strict=True,
+    )
 
 
 @gen_cluster()
