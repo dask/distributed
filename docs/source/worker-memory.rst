@@ -22,7 +22,8 @@ types like NumPy arrays and Pandas dataframes. The sum of the ``sizeof`` of all 
 tracked by Dask is called :ref:`managed memory <memtypes>`.
 
 When the managed memory exceeds 60% of the memory limit (*target threshold*), the worker
-will begin to dump the least recently used data to disk. You can control this location
+will begin to dump the least recently used data to disk. By default, it writes to the
+OS's temporary directory (``/tmp`` in Linux); you can control this location
 with the ``--local-directory`` keyword::
 
    $ dask-worker tcp://scheduler:port --memory-limit="4 GiB" --local-directory /scratch
