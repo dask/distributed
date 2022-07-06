@@ -3211,7 +3211,12 @@ class WorkerState:
             assert available >= 0
             allocated = 0.0
             for ts in self.tasks.values():
-                if ts.resource_restrictions and ts.state in RUNNING:
+                if not ts.resource_restrictions:
+                    continue
+                if ts.state in {"executing", "long-running", "cancelled"} or (
+                    ts.state == "resumed"
+                    and ts._previous in {"executing", "long-running"}
+                ):
                     allocated += ts.resource_restrictions.get(resource, 0)
             assert available + allocated == total
 
