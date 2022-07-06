@@ -13,7 +13,7 @@ class APIHandler(RequestHandler):
 
 class RetireWorkersHandler(RequestHandler):
     async def post(self):
-        self.set_header("Content-Type", "text/json")
+        self.set_header("Content-Type", "application/json")
         scheduler = self.server
         try:
             params = json.loads(self.request.body)
@@ -32,7 +32,7 @@ class RetireWorkersHandler(RequestHandler):
 
 class GetWorkersHandler(RequestHandler):
     def get(self):
-        self.set_header("Content-Type", "text/json")
+        self.set_header("Content-Type", "application/json")
         scheduler = self.server
         try:
             response = {
@@ -50,7 +50,7 @@ class GetWorkersHandler(RequestHandler):
 
 class AdaptiveTargetHandler(RequestHandler):
     def get(self):
-        self.set_header("Content-Type", "text/json")
+        self.set_header("Content-Type", "application/json")
         scheduler = self.server
         try:
             desired_workers = scheduler.adaptive_target()

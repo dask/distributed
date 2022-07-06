@@ -1,10 +1,14 @@
+from __future__ import annotations
+
 import logging
 import math
 import operator
 import os
 from collections import OrderedDict, defaultdict
+from collections.abc import Iterable
 from datetime import datetime
 from numbers import Number
+from typing import TypeVar
 
 import numpy as np
 from bokeh.core.properties import without_property_validation
@@ -44,6 +48,7 @@ from bokeh.palettes import Viridis11
 from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap, stack
+from jinja2 import Environment, FileSystemLoader
 from tlz import curry, pipe, valmap
 from tlz.curried import concat, groupby, map
 from tornado import escape
@@ -81,9 +86,9 @@ if dask.config.get("distributed.dashboard.export-tool"):
 else:
     ExportTool = None  # type: ignore
 
-logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
-from jinja2 import Environment, FileSystemLoader
+logger = logging.getLogger(__name__)
 
 env = Environment(
     loader=FileSystemLoader(
@@ -449,7 +454,7 @@ class WorkersMemory(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self):
-        def quadlist(i) -> list:
+        def quadlist(i: Iterable[T]) -> list[T]:
             out = []
             for ii in i:
                 out += [ii, ii, ii, ii]
@@ -984,8 +989,8 @@ class WorkerNetworkBandwidth(DashboardComponent):
         for ws in workers:
             x_read.append(ws.metrics["read_bytes"])
             x_write.append(ws.metrics["write_bytes"])
-            x_read_disk.append(ws.metrics["read_bytes_disk"])
-            x_write_disk.append(ws.metrics["write_bytes_disk"])
+            x_read_disk.append(ws.metrics.get("read_bytes_disk", 0))
+            x_write_disk.append(ws.metrics.get("write_bytes_disk", 0))
 
         if self.scheduler.workers:
             self.bandwidth.x_range.end = max(
@@ -1173,8 +1178,8 @@ class SystemTimeseries(DashboardComponent):
             write_bytes += ws.metrics["write_bytes"]
             cpu += ws.metrics["cpu"]
             memory += ws.metrics["memory"]
-            read_bytes_disk += ws.metrics["read_bytes_disk"]
-            write_bytes_disk += ws.metrics["write_bytes_disk"]
+            read_bytes_disk += ws.metrics.get("read_bytes_disk", 0)
+            write_bytes_disk += ws.metrics.get("write_bytes_disk", 0)
             time += ws.metrics["time"]
 
         result = {

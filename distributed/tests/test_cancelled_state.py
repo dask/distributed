@@ -1,24 +1,34 @@
+from __future__ import annotations
+
 import asyncio
+
+import pytest
 
 import distributed
 from distributed import Event, Lock, Worker
+from distributed.client import wait
 from distributed.utils_test import (
+    BlockedGetData,
     _LockedCommPool,
     assert_story,
     gen_cluster,
     inc,
-    slowinc,
+    lock_inc,
+    wait_for_state,
+    wait_for_stimulus,
+)
+from distributed.worker_state_machine import (
+    ComputeTaskEvent,
+    Execute,
+    FreeKeysEvent,
+    GatherDep,
+    GatherDepNetworkFailureEvent,
 )
 
 
-async def wait_for_state(key, state, dask_worker):
-    while key not in dask_worker.tasks or dask_worker.tasks[key].state != state:
-        await asyncio.sleep(0.005)
-
-
 async def wait_for_cancelled(key, dask_worker):
-    while key in dask_worker.tasks:
-        if dask_worker.tasks[key].state == "cancelled":
+    while key in dask_worker.state.tasks:
+        if dask_worker.state.tasks[key].state == "cancelled":
             return
         await asyncio.sleep(0.005)
     assert False
@@ -26,31 +36,37 @@ async def wait_for_cancelled(key, dask_worker):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_release(c, s, a):
-    fut = c.submit(slowinc, 1, delay=1)
-    await wait_for_state(fut.key, "executing", a)
-    fut.release()
-    await wait_for_cancelled(fut.key, a)
+    lock = Lock()
+    async with lock:
+        fut = c.submit(lock_inc, 1, lock=lock)
+        await wait_for_state(fut.key, "executing", a)
+        fut.release()
+        await wait_for_cancelled(fut.key, a)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_reschedule(c, s, a):
-    fut = c.submit(slowinc, 1, delay=1)
-    await wait_for_state(fut.key, "executing", a)
-    fut.release()
-    await wait_for_cancelled(fut.key, a)
-    fut = c.submit(slowinc, 1, delay=0.1)
+    lock = Lock()
+    async with lock:
+        fut = c.submit(lock_inc, 1, lock=lock)
+        await wait_for_state(fut.key, "executing", a)
+        fut.release()
+        await wait_for_cancelled(fut.key, a)
+        fut = c.submit(lock_inc, 1, lock=lock)
     await fut
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_add_as_dependency(c, s, a):
-    fut = c.submit(slowinc, 1, delay=1)
-    await wait_for_state(fut.key, "executing", a)
-    fut.release()
-    await wait_for_cancelled(fut.key, a)
+    lock = Lock()
+    async with lock:
+        fut = c.submit(lock_inc, 1, lock=lock)
+        await wait_for_state(fut.key, "executing", a)
+        fut.release()
+        await wait_for_cancelled(fut.key, a)
 
-    fut = c.submit(slowinc, 1, delay=1)
-    fut = c.submit(slowinc, fut, delay=1)
+        fut = c.submit(lock_inc, 1, lock=lock)
+        fut = c.submit(inc, fut)
     await fut
 
 
@@ -77,11 +93,11 @@ async def test_abort_execution_to_fetch(c, s, a, b):
     await ev.set()
     assert await fut == 124  # It would be 3 if the result was copied from b
     del fut
-    while "f1" in a.tasks:
+    while "f1" in a.state.tasks:
         await asyncio.sleep(0.01)
 
     assert_story(
-        a.story("f1"),
+        a.state.story("f1"),
         [
             ("f1", "compute-task", "released"),
             ("f1", "released", "waiting", "waiting", {"f1": "ready"}),
@@ -96,19 +112,6 @@ async def test_abort_execution_to_fetch(c, s, a, b):
             ("f1", "released", "forgotten", "forgotten", {}),
         ],
     )
-
-
-@gen_cluster(client=True)
-async def test_worker_find_missing(c, s, a, b):
-    fut = c.submit(inc, 1, workers=[a.address])
-    await fut
-    # We do not want to use proper API since it would ensure that the cluster is
-    # informed properly
-    del a.data[fut.key]
-    del a.tasks[fut.key]
-
-    # Actually no worker has the data; the scheduler is supposed to reschedule
-    assert await c.submit(inc, fut, workers=[b.address]) == 3
 
 
 @gen_cluster(client=True)
@@ -130,7 +133,7 @@ async def test_worker_stream_died_during_comm(c, s, a, b):
     write_event.set()
 
     await res
-    assert any("receive-dep-failed" in msg for msg in b.log)
+    assert any("receive-dep-failed" in msg for msg in b.state.log)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -161,20 +164,21 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
             allow_other_workers=True,
             key="fut1",
         )
+        await wait(fut1)
+        await block_compute.acquire()
         fut2 = c.submit(inc, fut1, workers=[b.address], key="fut2")
 
         await enter_get_data.wait()
-        await block_compute.acquire()
 
         # Close in scheduler to ensure we transition and reschedule task properly
-        await s.close_worker(worker=a.address, stimulus_id="test")
-        await wait_for_state(fut1.key, "resumed", b)
+        await s.remove_worker(a.address, stimulus_id="test", close=False)
+        await wait_for_stimulus(ComputeTaskEvent, b, key=fut1.key)
 
         block_get_data.release()
         await block_compute.release()
         assert await fut2 == 3
 
-        b_story = b.story(fut1.key)
+        b_story = b.state.story(fut1.key)
         assert any("receive-dep-failed" in msg for msg in b_story)
         assert any("cancelled" in msg for msg in b_story)
         assert any("resumed" in msg for msg in b_story)
@@ -206,7 +210,7 @@ async def test_executing_cancelled_error(c, s, w):
     # itself would raise a cancelled exception. At this point we're concerned
     # about the worker. The task should transition over error to be eventually
     # forgotten since we no longer hold a ref.
-    while fut.key in w.tasks:
+    while fut.key in w.state.tasks:
         await asyncio.sleep(0.01)
 
     assert await fut2 == 2
@@ -216,7 +220,7 @@ async def test_executing_cancelled_error(c, s, w):
     # Everything above this line should be generically true, regardless of
     # refactoring. Below verifies some implementation specific test assumptions
 
-    story = w.story(fut.key)
+    story = w.state.story(fut.key)
     start_finish = [(msg[1], msg[2], msg[3]) for msg in story if len(msg) == 7]
     assert ("executing", "released", "cancelled") in start_finish
     assert ("cancelled", "error", "error") in start_finish
@@ -252,7 +256,7 @@ async def test_flight_cancelled_error(c, s, b):
         # future itself would raise a cancelled exception. At this point we're
         # concerned about the worker. The task should transition over error to
         # be eventually forgotten since we no longer hold a ref.
-        while fut1.key in b.tasks:
+        while fut1.key in b.state.tasks:
             await asyncio.sleep(0.01)
         a.block_get_data = False
         # Everything should still be executing as usual after this
@@ -261,67 +265,55 @@ async def test_flight_cancelled_error(c, s, b):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_in_flight_lost_after_resumed(c, s, b):
-    block_get_data = asyncio.Lock()
-    in_get_data = asyncio.Event()
-
     lock_executing = Lock()
 
     def block_execution(lock):
-        with lock:
-            return
+        lock.acquire()
+        return 1
 
-    class BlockedGetData(Worker):
-        async def get_data(self, comm, *args, **kwargs):
-            in_get_data.set()
-            async with block_get_data:
-                return await super().get_data(comm, *args, **kwargs)
-
-    async with BlockedGetData(s.address, name="blocked-get-dataworker") as a:
+    async with BlockedGetData(s.address) as a:
         fut1 = c.submit(
             block_execution,
             lock_executing,
             workers=[a.address],
-            allow_other_workers=True,
             key="fut1",
         )
         # Ensure fut1 is in memory but block any further execution afterwards to
         # ensure we control when the recomputation happens
-        await fut1
-        await lock_executing.acquire()
-        in_get_data.clear()
-        await block_get_data.acquire()
+        await wait(fut1)
         fut2 = c.submit(inc, fut1, workers=[b.address], key="fut2")
 
         # This ensures that B already fetches the task, i.e. after this the task
         # is guaranteed to be in flight
-        await in_get_data.wait()
-        assert fut1.key in b.tasks
-        assert b.tasks[fut1.key].state == "flight"
+        await a.in_get_data.wait()
+        assert fut1.key in b.state.tasks
+        assert b.state.tasks[fut1.key].state == "flight"
 
+        s.set_restrictions({fut1.key: [a.address, b.address]})
         # It is removed, i.e. get_data is guaranteed to fail and f1 is scheduled
         # to be recomputed on B
-        await s.remove_worker(a.address, "foo", close=False, safe=True)
+        await s.remove_worker(a.address, stimulus_id="foo", close=False, safe=True)
 
-        while not b.tasks[fut1.key].state == "resumed":
+        while not b.state.tasks[fut1.key].state == "resumed":
             await asyncio.sleep(0.01)
 
         fut1.release()
         fut2.release()
 
-        while not b.tasks[fut1.key].state == "cancelled":
+        while not b.state.tasks[fut1.key].state == "cancelled":
             await asyncio.sleep(0.01)
 
-        block_get_data.release()
-        while b.tasks:
+        a.block_get_data.set()
+        while b.state.tasks:
             await asyncio.sleep(0.01)
 
     assert_story(
-        b.story(fut1.key),
+        b.state.story(fut1.key),
         expect=[
             # The initial free-keys is rejected
             ("free-keys", (fut1.key,)),
             (fut1.key, "resumed", "released", "cancelled", {}),
-            # After gather_dep receives the data, it tries to transition to memory but the task will release instead
+            # After gather_dep receives the data, the task is forgotten
             (fut1.key, "cancelled", "memory", "released", {fut1.key: "forgotten"}),
         ],
     )
@@ -348,16 +340,16 @@ async def test_cancelled_error(c, s, a, b):
     )
 
     await executing.wait()
-    assert b.tasks[fut1.key].state == "executing"
+    assert b.state.tasks[fut1.key].state == "executing"
     fut1.release()
-    while b.tasks[fut1.key].state == "executing":
+    while b.state.tasks[fut1.key].state == "executing":
         await asyncio.sleep(0.01)
     await lock_executing.release()
-    while b.tasks:
+    while b.state.tasks:
         await asyncio.sleep(0.01)
 
     assert_story(
-        b.story(fut1.key),
+        b.state.story(fut1.key),
         [
             (fut1.key, "executing", "released", "cancelled", {}),
             (fut1.key, "cancelled", "error", "error", {fut1.key: "released"}),
@@ -366,7 +358,7 @@ async def test_cancelled_error(c, s, a, b):
 
 
 @gen_cluster(client=True, nthreads=[("", 1, {"resources": {"A": 1}})])
-async def test_cancelled_error_with_ressources(c, s, a):
+async def test_cancelled_error_with_resources(c, s, a):
     executing = Event()
     lock_executing = Lock()
     await lock_executing.acquire()
@@ -387,12 +379,187 @@ async def test_cancelled_error_with_ressources(c, s, a):
     await executing.wait()
     fut2 = c.submit(inc, 1, resources={"A": 1}, key="fut2")
 
-    while fut2.key not in a.tasks:
+    while fut2.key not in a.state.tasks:
         await asyncio.sleep(0.01)
 
     fut1.release()
-    while a.tasks[fut1.key].state == "executing":
+    while a.state.tasks[fut1.key].state == "executing":
         await asyncio.sleep(0.01)
     await lock_executing.release()
 
     assert await fut2 == 2
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_cancelled_resumed_after_flight_with_dependencies(c, s, a):
+    """A task is in flight from b to a.
+    While a is waiting, b dies. The scheduler notices before a and reschedules the
+    task on a itself (as the only surviving replica was just lost).
+    Test that the worker eventually computes the task.
+
+    See https://github.com/dask/distributed/pull/6327#discussion_r872231090
+    See test_cancelled_resumed_after_flight_with_dependencies_workerstate below.
+    """
+    async with await BlockedGetData(s.address) as b:
+        x = c.submit(inc, 1, key="x", workers=[b.address], allow_other_workers=True)
+        y = c.submit(inc, x, key="y", workers=[a.address])
+        await b.in_get_data.wait()
+
+        # Make b dead to s, but not to a
+        await s.remove_worker(b.address, stimulus_id="stim-id")
+
+        # Wait for the scheduler to reschedule x on a.
+        # We want the comms from the scheduler to reach a before b closes the RPC
+        # channel, causing a.gather_dep() to raise OSError.
+        await wait_for_stimulus(ComputeTaskEvent, a, key="x")
+
+    # b closed; a.gather_dep() fails. Note that, in the current implementation, x won't
+    # be recomputed on a until this happens.
+    assert await y == 3
+
+
+def test_cancelled_resumed_after_flight_with_dependencies_workerstate(ws):
+    """Same as test_cancelled_resumed_after_flight_with_dependencies, but testing the
+    WorkerState in isolation
+    """
+    ws2 = "127.0.0.1:2"
+    instructions = ws.handle_stimulus(
+        # Create task x and put it in flight from ws2
+        ComputeTaskEvent.dummy(key="y", who_has={"x": [ws2]}, stimulus_id="s1"),
+        # The scheduler realises that ws2 is unresponsive, although ws doesn't know yet.
+        # Having lost the last surviving replica of x, the scheduler cancels all of its
+        # dependents. This also cancels x.
+        FreeKeysEvent(keys=["y"], stimulus_id="s2"),
+        # The scheduler reschedules x on another worker, which just happens to be one
+        # that was previously fetching it. This does not generate an Execute
+        # instruction, because the GatherDep instruction isn't complete yet.
+        ComputeTaskEvent.dummy(key="x", stimulus_id="s3"),
+        # After ~30s, the TCP socket with ws2 finally times out and collapses.
+        # This triggers the Execute instruction.
+        GatherDepNetworkFailureEvent(worker=ws2, total_nbytes=1, stimulus_id="s4"),
+    )
+    assert instructions == [
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        Execute(key="x", stimulus_id="s4"),  # Note the stimulus_id!
+    ]
+    assert ws.tasks["x"].state == "executing"
+
+
+@pytest.mark.parametrize("wait_for_processing", [True, False])
+@pytest.mark.parametrize("raise_error", [True, False])
+@gen_cluster(client=True)
+async def test_resumed_cancelled_handle_compute(
+    c, s, a, b, raise_error, wait_for_processing
+):
+    """
+    Given the history of a task
+    Executing -> Cancelled -> Fetch -> Resumed
+
+    A handle_compute should properly restore executing
+    """
+    # This test is heavily using set_restrictions to simulate certain scheduler
+    # decisions of placing keys
+
+    lock_compute = Lock()
+    await lock_compute.acquire()
+    enter_compute = Event()
+
+    def block(x, lock, enter_event):
+        enter_event.set()
+        with lock:
+            if raise_error:
+                raise RuntimeError("test error")
+            else:
+                return x + 1
+
+    f1 = c.submit(inc, 1, key="f1", workers=[a.address])
+    f2 = c.submit(inc, f1, key="f2", workers=[a.address])
+    f3 = c.submit(
+        block,
+        f2,
+        lock=lock_compute,
+        enter_event=enter_compute,
+        key="f3",
+        workers=[b.address],
+    )
+
+    f4 = c.submit(sum, [f1, f3], workers=[b.address])
+
+    await enter_compute.wait()
+
+    async def release_all_futures():
+        futs = [f1, f2, f3, f4]
+        for fut in futs:
+            fut.release()
+
+        while any(fut.key in s.tasks for fut in futs):
+            await asyncio.sleep(0.05)
+
+    await release_all_futures()
+    await wait_for_state(f3.key, "cancelled", b)
+
+    f1 = c.submit(inc, 1, key="f1", workers=[a.address])
+    f2 = c.submit(inc, f1, key="f2", workers=[a.address])
+    f3 = c.submit(inc, f2, key="f3", workers=[a.address])
+    f4 = c.submit(sum, [f1, f3], workers=[b.address])
+
+    await wait_for_state(f3.key, "resumed", b)
+    await release_all_futures()
+
+    f1 = c.submit(inc, 1, key="f1", workers=[a.address])
+    f2 = c.submit(inc, f1, key="f2", workers=[a.address])
+    f3 = c.submit(inc, f2, key="f3", workers=[b.address])
+    f4 = c.submit(sum, [f1, f3], workers=[b.address])
+
+    if wait_for_processing:
+        await wait_for_state(f3.key, "processing", s)
+
+    await lock_compute.release()
+
+    if not raise_error:
+        assert await f4 == 4 + 2
+
+        assert_story(
+            b.state.story(f3.key),
+            expect=[
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "released", "cancelled", {}),
+                (f3.key, "cancelled", "fetch", "resumed", {}),
+                (f3.key, "resumed", "memory", "memory", {}),
+            ],
+        )
+
+    else:
+        with pytest.raises(RuntimeError, match="test error"):
+            await f3
+
+        assert_story(
+            b.state.story(f3.key),
+            expect=[
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "released", "cancelled", {}),
+                (f3.key, "cancelled", "fetch", "resumed", {}),
+                (f3.key, "resumed", "error", "error", {}),
+            ],
+        )
+
+
+def test_resume_executing_worker_state(ws_with_running_task):
+    """Test state loops:
+
+    - executing -> cancelled -> resumed -> executing
+    - executing -> long-running -> cancelled -> resumed -> long-running
+    """
+    ws = ws_with_running_task
+    ts = ws.tasks["x"]
+    prev_state = ts.state
+
+    instructions = ws.handle_stimulus(
+        FreeKeysEvent(keys=["x"], stimulus_id="s1"),
+        ComputeTaskEvent.dummy(
+            key="x", resource_restrictions={"R": 1}, stimulus_id="s2"
+        ),
+    )
+    assert not instructions
+    assert ws.tasks["x"] is ts
+    assert ts.state == prev_state

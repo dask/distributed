@@ -82,7 +82,7 @@ def version_of_package(pkg: ModuleType) -> str | None:
 
 
 def get_package_info(
-    pkgs: Iterable[str | tuple[str, Callable[[ModuleType], str | None]]]
+    pkgs: Iterable[str | tuple[str, Callable[[ModuleType], str | None] | None]]
 ) -> dict[str, str | None]:
     """get package versions for the passed required & optional packages"""
 

@@ -1,9 +1,7 @@
-from contextlib import contextmanager
+from __future__ import annotations
 
-try:
-    import ssl
-except ImportError:
-    ssl = None  # type: ignore
+import ssl
+from contextlib import contextmanager
 
 import pytest
 
@@ -108,6 +106,14 @@ def test_min_max_version_config_errors(field):
     with dask.config.set({f"distributed.comm.tls.{field}": "bad"}):
         with pytest.raises(ValueError, match="'bad' is not supported, expected one of"):
             sec = Security()
+
+
+def test_invalid_min_version_from_config_errors():
+    with dask.config.set({"distributed.comm.tls.min-version": None}):
+        with pytest.raises(
+            ValueError, match=r"tls_min_version=.* is not supported, expected one of .*"
+        ):
+            Security(tls_min_version=ssl.TLSVersion.MINIMUM_SUPPORTED)
 
 
 def test_kwargs():

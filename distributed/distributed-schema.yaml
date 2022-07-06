@@ -405,6 +405,10 @@ properties:
               This data gets collected into statistical profiling information,
               which is then periodically bundled together and sent along to the scheduler.
             properties:
+              enabled:
+                type: boolean
+                description: |
+                  Whether or not to enable profiling
               interval:
                 type: string
                 description: |
@@ -1035,6 +1039,9 @@ properties:
               interval:
                 type: string
                 description: Polling time to query cpu/memory statistics default 500ms
+              disk:
+                type: boolean
+                description: Should we include disk metrics?  (they can cause issues in some systems)
 
       rmm:
         type: object

@@ -100,7 +100,6 @@ Worker HTTP
 
 - ``/status``:
 - ``/counters``:
-- ``/crossfilter``:
 - ``/sitemap.json``: list of available endpoints
 - ``/system``:
 - ``/health``: check server is alive

@@ -5,7 +5,6 @@ import atexit
 import gc
 import logging
 import os
-import signal
 import sys
 import warnings
 from collections.abc import Iterator
@@ -14,13 +13,13 @@ from typing import Any
 
 import click
 from tlz import valmap
-from tornado.ioloop import IOLoop, TimeoutError
+from tornado.ioloop import TimeoutError
 
 import dask
 from dask.system import CPU_COUNT
 
 from distributed import Nanny
-from distributed.cli.utils import wait_for_signals
+from distributed._signals import wait_for_signals
 from distributed.comm import get_address_host_port
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.preloading import validate_preload_argv
@@ -170,8 +169,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 )
 @click.option(
     "--reconnect/--no-reconnect",
-    default=True,
-    help="Reconnect to scheduler if disconnected [default: --reconnect]",
+    default=None,
+    help="Deprecated, has no effect. Passing --reconnect is an error. [default: --no-reconnect]",
 )
 @click.option(
     "--nanny/--no-nanny",
@@ -255,7 +254,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     'like "foo.bar" or "/path/to/foo.py"',
 )
 @click.version_option()
-def main(
+def main(  # type: ignore[no-untyped-def]
     scheduler,
     host,
     worker_port: str | None,
@@ -280,6 +279,7 @@ def main(
     dashboard_address,
     worker_class,
     preload_nanny,
+    reconnect,
     **kwargs,
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
@@ -299,6 +299,20 @@ def main(
             "The --bokeh/--no-bokeh flag has been renamed to --dashboard/--no-dashboard. "
         )
         dashboard = bokeh
+    if reconnect is not None:
+        if reconnect:
+            logger.error(
+                "The `--reconnect` option has been removed. "
+                "To improve cluster stability, workers now always shut down in the face of network disconnects. "
+                "For details, or if this is an issue for you, see https://github.com/dask/distributed/issues/6350."
+            )
+            sys.exit(1)
+        else:
+            logger.warning(
+                "The `--no-reconnect/--reconnect` flag is deprecated, and will be removed in a future release. "
+                "Worker reconnection is now always disabled, so `--no-reconnect` is unnecessary. "
+                "See https://github.com/dask/distributed/issues/6350 for details.",
+            )
 
     sec = {
         k: v
@@ -433,14 +447,11 @@ def main(
     signal_fired = False
 
     async def run():
-        loop = IOLoop.current()
-
         nannies = [
             t(
                 scheduler,
                 scheduler_file=scheduler_file,
                 nthreads=nthreads,
-                loop=loop,
                 resources=resources,
                 security=sec,
                 contact_address=contact_address,
@@ -464,7 +475,7 @@ def main(
         async def wait_for_signals_and_close():
             """Wait for SIGINT or SIGTERM and close all nannies upon receiving one of those signals"""
             nonlocal signal_fired
-            await wait_for_signals([signal.SIGINT, signal.SIGTERM])
+            await wait_for_signals()
 
             signal_fired = True
             if nanny:

@@ -5,18 +5,18 @@ import glob
 import logging
 import os
 import signal
-import sys
 import threading
 from collections import Counter, UserDict
 from time import sleep
 
+import psutil
 import pytest
 
 import dask.config
 
 import distributed.system
 from distributed import Client, Event, KilledWorker, Nanny, Scheduler, Worker, wait
-from distributed.compatibility import MACOS
+from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.metrics import monotonic
 from distributed.spill import has_zict_210
@@ -376,12 +376,12 @@ async def test_pause_executor_manual(c, s, a):
 
     # Task that is running on the worker when the worker pauses
     x = c.submit(f, ev_x, key="x")
-    while a.executing_count != 1:
+    while a.state.executing_count != 1:
         await asyncio.sleep(0.01)
 
     # Task that is queued on the worker when the worker pauses
     y = c.submit(inc, 1, key="y")
-    while "y" not in a.tasks:
+    while "y" not in a.state.tasks:
         await asyncio.sleep(0.01)
 
     a.status = Status.paused
@@ -403,10 +403,10 @@ async def test_pause_executor_manual(c, s, a):
     assert await x == 1
     await asyncio.sleep(0.05)
 
-    assert a.executing_count == 0
-    assert len(a.ready) == 1
-    assert a.tasks["y"].state == "ready"
-    assert "z" not in a.tasks
+    assert a.state.executing_count == 0
+    assert len(a.state.ready) == 1
+    assert a.state.tasks["y"].state == "ready"
+    assert "z" not in a.state.tasks
 
     # Unpause. Tasks that were queued on the worker are executed.
     # Tasks that were stuck on the scheduler are sent to the worker and executed.
@@ -440,13 +440,13 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
 
     # Task that is running on the worker when the worker pauses
     x = c.submit(f, ev_x, key="x")
-    while a.executing_count != 1:
+    while a.state.executing_count != 1:
         await asyncio.sleep(0.01)
 
     with captured_logger(logging.getLogger("distributed.worker_memory")) as logger:
         # Task that is queued on the worker when the worker pauses
         y = c.submit(inc, 1, key="y")
-        while "y" not in a.tasks:
+        while "y" not in a.state.tasks:
             await asyncio.sleep(0.01)
 
         # Hog the worker with 900GB unmanaged memory
@@ -470,10 +470,10 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
         assert await x == 1
         await asyncio.sleep(0.05)
 
-        assert a.executing_count == 0
-        assert len(a.ready) == 1
-        assert a.tasks["y"].state == "ready"
-        assert "z" not in a.tasks
+        assert a.state.executing_count == 0
+        assert len(a.state.ready) == 1
+        assert a.state.tasks["y"].state == "ready"
+        assert "z" not in a.state.tasks
 
         # Release the memory. Tasks that were queued on the worker are executed.
         # Tasks that were stuck on the scheduler are sent to the worker and executed.
@@ -527,7 +527,7 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
     # - w and z respectively make x and y go into fetch state.
     #   w has a higher priority than z, therefore w's dependency x has a higher priority
     #   than z's dependency y.
-    #   a.data_needed = ["x", "y"]
+    #   a.state.data_needed[b.address] = ["x", "y"]
     # - ensure_communicating decides to fetch x but not to fetch y together with it, as
     #   it thinks x is 1TB in size
     # - x fetch->flight; a is added to in_flight_workers
@@ -538,17 +538,17 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
     # - ensure_communicating is triggered again
     # - ensure_communicating refuses to fetch y because the worker is paused
 
-    while "y" not in a.tasks or a.tasks["y"].state != "fetch":
+    while "y" not in a.state.tasks or a.state.tasks["y"].state != "fetch":
         await asyncio.sleep(0.01)
     await asyncio.sleep(0.1)
-    assert a.tasks["y"].state == "fetch"
+    assert a.state.tasks["y"].state == "fetch"
     assert "y" not in a.data
-    assert [ts.key for ts in a.data_needed] == ["y"]
+    assert [ts.key for ts in a.state.data_needed[b.address]] == ["y"]
 
     # Unpausing kicks off ensure_communicating again
     a.status = Status.running
     assert await z == 3
-    assert a.tasks["y"].state == "memory"
+    assert a.state.tasks["y"].state == "memory"
     assert "y" in a.data
 
 
@@ -684,7 +684,7 @@ async def test_manual_evict_proto(c, s, a):
         await asyncio.sleep(0.01)
 
 
-async def leak_until_restart(c: Client, s: Scheduler, a: Nanny) -> None:
+async def leak_until_restart(c: Client, s: Scheduler) -> None:
     s.allowed_failures = 0
 
     def leak():
@@ -693,32 +693,25 @@ async def leak_until_restart(c: Client, s: Scheduler, a: Nanny) -> None:
             L.append(b"0" * 5_000_000)
             sleep(0.01)
 
-    assert a.process
-    assert a.process.process
-    pid = a.process.pid
-    addr = a.worker_address
-    with captured_logger(logging.getLogger("distributed.worker_memory")) as logger:
-        future = c.submit(leak, key="leak")
-        while (
-            not a.process
-            or not a.process.process
-            or a.process.pid == pid
-            or a.worker_address == addr
-        ):
-            await asyncio.sleep(0.01)
+    (addr,) = s.workers
+    pid = (await c.run(os.getpid))[addr]
 
-    # Test that the restarting message happened only once;
-    # see test_slow_terminate below.
-    assert logger.getvalue() == (
-        f"Worker {addr} (pid={pid}) exceeded 95% memory budget. Restarting...\n"
-    )
+    future = c.submit(leak, key="leak")
+
+    # Wait until the worker is restarted
+    while len(s.workers) != 1 or set(s.workers) == {addr}:
+        await asyncio.sleep(0.01)
+
+    # Test that the process has been properly waited for and not just left there
+    with pytest.raises(psutil.NoSuchProcess):
+        psutil.Process(pid)
 
     with pytest.raises(KilledWorker):
         await future
     assert s.tasks["leak"].suspicious == 1
-    assert await c.run(lambda dask_worker: "leak" in dask_worker.tasks) == {
-        a.worker_address: False
-    }
+    assert not any(
+        (await c.run(lambda dask_worker: "leak" in dask_worker.state.tasks)).values()
+    )
     future.release()
     while "leak" in s.tasks:
         await asyncio.sleep(0.01)
@@ -733,10 +726,17 @@ async def leak_until_restart(c: Client, s: Scheduler, a: Nanny) -> None:
     config={"distributed.worker.memory.monitor-interval": "10ms"},
 )
 async def test_nanny_terminate(c, s, a):
-    await leak_until_restart(c, s, a)
+    await leak_until_restart(c, s)
 
 
 @pytest.mark.slow
+@pytest.mark.parametrize(
+    "ignore_sigterm",
+    [
+        False,
+        pytest.param(True, marks=pytest.mark.skipif(WINDOWS, reason="Needs SIGKILL")),
+    ],
+)
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
@@ -744,50 +744,36 @@ async def test_nanny_terminate(c, s, a):
     worker_kwargs={"memory_limit": "400 MiB"},
     config={"distributed.worker.memory.monitor-interval": "10ms"},
 )
-async def test_disk_cleanup_on_terminate(c, s, a):
-    """Test that the spilled data on disk is cleaned up when the nanny kills the worker"""
+async def test_disk_cleanup_on_terminate(c, s, a, ignore_sigterm):
+    """Test that the spilled data on disk is cleaned up when the nanny kills the worker.
+
+    Unlike in a regular worker shutdown, where the worker deletes its own spill
+    directory, the cleanup in case of termination from the monitor is performed by the
+    nanny.
+
+    The worker may be slow to accept SIGTERM, for whatever reason.
+    At the next iteration of the memory manager, if the process is still alive, the
+    nanny sends SIGKILL.
+    """
+
+    def do_ignore_sigterm():
+        # ignore the return value of signal.signal:  it may not be serializable
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+    if ignore_sigterm:
+        await c.run(do_ignore_sigterm)
+
     fut = c.submit(inc, 1, key="myspill")
     await wait(fut)
     await c.run(lambda dask_worker: dask_worker.data.evict())
-
     glob_out = await c.run(
         lambda dask_worker: glob.glob(dask_worker.local_directory + "/**/myspill")
     )
-    spill_file = glob_out[a.worker_address][0]
-    assert os.path.exists(spill_file)
-    await leak_until_restart(c, s, a)
-    assert not os.path.exists(spill_file)
+    spill_fname = next(iter(glob_out.values()))[0]
+    assert os.path.exists(spill_fname)
 
-
-@pytest.mark.slow
-@gen_cluster(
-    client=True,
-    Worker=Nanny,
-    nthreads=[("", 1)],
-    worker_kwargs={"memory_limit": "400 MiB"},
-    config={"distributed.worker.memory.monitor-interval": "10ms"},
-)
-async def test_slow_terminate(c, s, a):
-    """A worker is slow to accept SIGTERM, e.g. because the
-    distributed.diskutils.WorkDir teardown is deleting tens of GB worth of spilled data.
-    """
-
-    def install_slow_sigterm_handler():
-        def cb(signo, frame):
-            # If something sends SIGTERM while the previous SIGTERM handler is running,
-            # you will eventually get RecursionError.
-            print(f"Received signal {signo}")
-            sleep(0.2)  # Longer than monitor-interval
-            print("Leaving handler")
-            sys.exit(0)
-
-        signal.signal(signal.SIGTERM, cb)
-
-    await c.run(install_slow_sigterm_handler)
-    # Test that SIGTERM is only sent once
-    await leak_until_restart(c, s, a)
-    # Test that SIGTERM can be sent again after the worker restarts
-    await leak_until_restart(c, s, a)
+    await leak_until_restart(c, s)
+    assert not os.path.exists(spill_fname)
 
 
 @gen_cluster(
