@@ -1064,6 +1064,7 @@ def test_restricted_task(ws, state):
         )
     )
 
+    # Ensure that x transitions through the ``constrained`` state
     expected_story = [
         ("x", "compute-task", "released"),
         ("x", "released", "waiting", "waiting", {"x": "ready"}),
@@ -1123,6 +1124,7 @@ def test_resource_restricted_task_with_dependencies(ws, state):
         GatherDepSuccessEvent("gather-dep-done", "127.0.0.1:1235", 8, {"x": 1.0})
     )
 
+    # Ensure that y transitions through the ``constrained`` state
     expected_story = [
         ("y", "compute-task", "released"),
         ("y", "released", "waiting", "waiting", {"x": "fetch"}),
@@ -1154,11 +1156,75 @@ def test_resource_restricted_task_with_dependencies(ws, state):
             stop=1.0,
             nbytes=8,
             type=None,
-            stimulus_id="s2",
+            stimulus_id="success",
         ),
     )
 
     assert ws.tasks["y"].state == "memory"
+    assert ws.available_resources == {"R": 1}
+
+
+def test_resumed_executing_task_releases_resources_when_done(ws_with_running_task):
+    ws = ws_with_running_task
+
+    ws.handle_stimulus(FreeKeysEvent("cancel", ["x"]))
+    assert ws.tasks["x"].state == "cancelled"
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            key="y",
+            who_has={"x": ["127.0.0.1:1235"]},
+            nbytes={"x": 8},
+            stimulus_id="compute",
+        )
+    )
+    ws.handle_stimulus(
+        ExecuteSuccessEvent(
+            key="x",
+            value=None,
+            start=0.0,
+            stop=1.0,
+            nbytes=8,
+            type=None,
+            stimulus_id="s2",
+        ),
+    )
+    assert ws.tasks["x"].state == "memory"
+    assert ws.available_resources == {"R": 1}
+
+
+def test_resumed_executing_task_releases_resources_on_error(ws_with_running_task):
+    ws = ws_with_running_task
+
+    ws.handle_stimulus(FreeKeysEvent("cancel", ["x"]))
+    assert ws.tasks["x"].state == "cancelled"
+    assert ws.available_resources == {"R": 0}
+
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            key="y",
+            who_has={"x": ["127.0.0.1:1235"]},
+            nbytes={"x": 8},
+            stimulus_id="compute",
+        )
+    )
+    assert ws.tasks["x"].state == "resumed"
+    assert not instructions
+
+    ws.handle_stimulus(
+        ExecuteFailureEvent(
+            key="x",
+            start=0.0,
+            stop=1.0,
+            exception=Serialize(ValueError("x")),
+            traceback=Serialize("Fetch me instead"),
+            exception_text="exc text",
+            traceback_text="tb text",
+            stimulus_id="failure",
+        ),
+    )
+    assert ws.tasks["x"].state == "error"
     assert ws.available_resources == {"R": 1}
 
 
