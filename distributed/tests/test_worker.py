@@ -3514,9 +3514,7 @@ async def test_worker_makes_own_thread():
             worker = get_worker()
         except ValueError:
             async with Client(scheduler, asynchronous=True) as client:
-                await client.register_worker_plugin(
-                    InitWorkerNewThread(scheduler)
-                )
+                await client.register_worker_plugin(InitWorkerNewThread(scheduler))
 
     class InitWorkerNewThread(WorkerPlugin):
         name: str
