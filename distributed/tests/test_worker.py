@@ -3510,7 +3510,7 @@ async def test_reconnect_argument_deprecated(s):
 @gen_test()
 async def test_worker_makes_own_thread():
     class InitWorkerNewThread(WorkerPlugin):
-        name: name
+        name: str
         thread: threading.Thread
 
         def __init__(self, scheduler):
