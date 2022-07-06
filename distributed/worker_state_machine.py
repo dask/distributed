@@ -2355,8 +2355,8 @@ class WorkerState:
             self.available_resources[resource] -= needed
 
     def _release_resources(self, ts: TaskState) -> None:
-        for resource, quantity in ts.resource_restrictions.items():
-            self.available_resources[resource] += quantity
+        for resource, needed in ts.resource_restrictions.items():
+            self.available_resources[resource] += needed
 
     def _transitions(self, recommendations: Recs, *, stimulus_id: str) -> Instructions:
         """Process transitions until none are left
