@@ -1059,12 +1059,12 @@ def test_gather_priority(ws):
 def test_constrained_task_handles_resources_on_success(ws, state):
     ws.available_resources = {"R": 1}
     ws.total_resources = {"R": 1}
+
     ws.handle_stimulus(
         ComputeTaskEvent.dummy(
             key="x", resource_restrictions={"R": 1}, stimulus_id="compute"
         )
     )
-
     # Ensure that x transitions through the ``constrained`` state
     expected_story = [
         ("x", "compute-task", "released"),
@@ -1099,7 +1099,6 @@ def test_constrained_task_handles_resources_on_success(ws, state):
             stimulus_id="success",
         ),
     )
-
     assert ws.tasks["x"].state == "memory"
     assert ws.available_resources == {"R": 1}
 
@@ -1108,12 +1107,12 @@ def test_constrained_task_handles_resources_on_success(ws, state):
 def test_constrained_task_handles_resources_on_failure(ws, state):
     ws.available_resources = {"R": 1}
     ws.total_resources = {"R": 1}
+
     ws.handle_stimulus(
         ComputeTaskEvent.dummy(
             key="x", resource_restrictions={"R": 1}, stimulus_id="compute"
         )
     )
-
     # Ensure that x transitions through the ``constrained`` state
     expected_story = [
         ("x", "compute-task", "released"),
@@ -1149,7 +1148,6 @@ def test_constrained_task_handles_resources_on_failure(ws, state):
             stimulus_id="failure",
         ),
     )
-
     assert ws.tasks["x"].state == "error"
     assert ws.available_resources == {"R": 1}
 
@@ -1158,6 +1156,7 @@ def test_constrained_task_handles_resources_on_failure(ws, state):
 def test_resource_restricted_task_with_dependencies(ws, state):
     ws.available_resources = {"R": 1}
     ws.total_resources = {"R": 1}
+
     instructions = ws.handle_stimulus(
         ComputeTaskEvent.dummy(
             key="y",
@@ -1167,7 +1166,6 @@ def test_resource_restricted_task_with_dependencies(ws, state):
             stimulus_id="compute",
         )
     )
-
     assert ws.tasks["x"].state == "flight"
     assert ws.tasks["y"].state == "waiting"
     assert ws.available_resources == {"R": 1}
@@ -1175,7 +1173,6 @@ def test_resource_restricted_task_with_dependencies(ws, state):
     ws.handle_stimulus(
         GatherDepSuccessEvent("gather-dep-done", "127.0.0.1:1235", 8, {"x": 1.0})
     )
-
     # Ensure that y transitions through the ``constrained`` state
     expected_story = [
         ("y", "compute-task", "released"),
@@ -1211,7 +1208,6 @@ def test_resource_restricted_task_with_dependencies(ws, state):
             stimulus_id="success",
         ),
     )
-
     assert ws.tasks["y"].state == "memory"
     assert ws.available_resources == {"R": 1}
 
