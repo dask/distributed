@@ -47,7 +47,6 @@ from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
-from distributed.utils import open_port
 from distributed.utils_test import (
     BlockedGatherDep,
     BlockedGetData,
@@ -64,7 +63,6 @@ from distributed.utils_test import (
     inc,
     mul,
     nodebug,
-    popen,
     raises_with_cause,
     slowinc,
     slowsum,
@@ -3507,41 +3505,19 @@ async def test_reconnect_argument_deprecated(s):
             pass
 
 
-@gen_test()
-async def test_worker_makes_own_thread():
-    async def init_app(scheduler):
-        try:
-            worker = get_worker()
-        except ValueError:
-            async with Client(scheduler, asynchronous=True) as client:
-                await client.register_worker_plugin(InitWorkerNewThread(scheduler))
-
+@gen_cluster(client=True, nthreads=[])
+async def test_worker_running_before_running_plugins(c, s, caplog):
     class InitWorkerNewThread(WorkerPlugin):
-        name: str
-        thread: threading.Thread
-
-        def __init__(self, scheduler):
-            super().__init__()
-            self.scheduler = scheduler
+        name: str = "init_worker_new_thread"
+        setup_status: Status | None = None
 
         def setup(self, worker):
-            self.loop = asyncio.new_event_loop()
-            self.thread = threading.Thread(target=self.loop.run_forever)
-            self.thread.start()
-            future = asyncio.run_coroutine_threadsafe(
-                init_app(self.scheduler), self.loop
-            )
-            future.result()
+            self.setup_status = worker.status
 
         def teardown(self, worker):
-            self.loop.call_soon_threadsafe(self.loop.stop)
-            self.thread.join(timeout=10)
+            pass
 
-    port = open_port()
-    address = f"127.0.0.1:{port}"
-    with popen(["dask-scheduler", "--host", address]) as s:
-        with popen(["dask-worker", address]) as w:
-            async with Client(address, asynchronous=True) as c:
-                await init_app(address)
-                await c.restart()
-                assert await c.submit(lambda x: x + 1, 1) == 2
+    await c.register_worker_plugin(InitWorkerNewThread())
+    async with Worker(s.address) as worker:
+        assert await c.submit(inc, 1) == 2
+        assert worker.plugins[InitWorkerNewThread.name].setup_status is Status.running
