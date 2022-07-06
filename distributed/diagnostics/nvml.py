@@ -101,9 +101,12 @@ def init_once():
             NVML_STATE = NVMLState.DISABLED_WSL_INSUFFICIENT_DRIVER
             return
         else:
+            from distributed.worker import add_gpu_metrics
+
             # initialization was successful
             NVML_STATE = NVMLState.INITIALIZED
             NVML_OWNER_PID = os.getpid()
+            add_gpu_metrics()
     else:
         raise RuntimeError(
             f"Unhandled initialisation state ({NVML_STATE=}, {NVML_OWNER_PID=})"
