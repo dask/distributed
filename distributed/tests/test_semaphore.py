@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import pickle
+import signal
 from datetime import timedelta
 from time import sleep
 
@@ -146,7 +147,7 @@ def test_worker_dies(loop):
                     if worker.address == kill_address:
                         import os
 
-                        os.kill(os.getpid(), 15)
+                        os.kill(os.getpid(), signal.SIGTERM)
                     return x
 
             futures = client.map(
