@@ -3116,14 +3116,6 @@ class WorkerState:
         for tss in self.data_needed.values():
             assert len({ts.key for ts in tss}) == len(tss)
 
-    def set_resources(self, **resources: float) -> None:
-        for r, quantity in resources.items():
-            if r in self.total_resources:
-                self.available_resources[r] += quantity - self.total_resources[r]
-            else:
-                self.available_resources[r] = quantity
-            self.total_resources[r] = quantity
-
 
 class BaseWorker(abc.ABC):
     """Wrapper around the :class:`WorkerState` that implements instructions handling.
