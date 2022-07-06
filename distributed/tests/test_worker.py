@@ -32,6 +32,7 @@ from distributed import (
     Client,
     Event,
     Nanny,
+    WorkerPlugin,
     default_client,
     get_client,
     get_worker,
@@ -62,6 +63,7 @@ from distributed.utils_test import (
     inc,
     mul,
     nodebug,
+    popen,
     raises_with_cause,
     slowinc,
     slowsum,
@@ -3502,3 +3504,42 @@ async def test_reconnect_argument_deprecated(s):
         warnings.simplefilter("error")
         async with Worker(s.address):
             pass
+
+
+@gen_test()
+async def test_worker_makes_own_thread():
+    class InitWorkerNewThread(WorkerPlugin):
+        name: name
+        thread: threading.Thread
+
+        def __init__(self, scheduler):
+            super().__init__()
+            self.scheduler = scheduler
+
+        def setup(self, worker):
+            self.loop = asyncio.new_event_loop()
+            self.thread = threading.Thread(target=self.loop.run_forever)
+            self.thread.start()
+            future = asyncio.run_coroutine_threadsafe(self.func(), self.loop)
+            future.result()
+
+        def teardown(self, worker):
+            self.loop.call_soon_threadsafe(self.loop.stop)
+            self.thread.join(timeout=10)
+
+        async def func(self):
+            client = await Client(self.scheduler, asynchronous=True)
+            try:
+                get_worker()
+            except ValueError:
+                await client.register_worker_plugin(InitWorkerNewThread(self.scheduler))
+
+    address = "tcp://192.168.0.8:8786"
+    with popen(["dask-scheduler"]) as s:
+        with popen(["dask-worker", address]) as w:
+            async with Client(address, asynchronous=True) as c:
+                await c.register_worker_plugin(InitWorkerNewThread(address))
+                await c.restart()
+                result = c.submit(lambda x: x + 1, 1)
+                assert await result == 2
+                await c.close()
