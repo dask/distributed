@@ -1860,7 +1860,7 @@ class SchedulerState:
             self._set_duration_estimate(ts, ws)
             ts.processing_on = ws
             ts.state = "processing"
-            self.consume_resources(ts, ws)
+            self.acquire_resources(ts, ws)
             self.check_idle_saturated(ws)
             self.n_tasks += 1
 
@@ -2675,7 +2675,7 @@ class SchedulerState:
 
         return s
 
-    def consume_resources(self, ts: TaskState, ws: WorkerState):
+    def acquire_resources(self, ts: TaskState, ws: WorkerState):
         for r, required in ts.resource_restrictions.items():
             ws.used_resources[r] += required
 
@@ -3553,7 +3553,7 @@ class Scheduler(SchedulerState, ServerNode):
     @log_errors
     async def add_worker(
         self,
-        comm=None,
+        comm: Comm,
         *,
         address: str,
         status: str,
@@ -3575,8 +3575,8 @@ class Scheduler(SchedulerState, ServerNode):
         versions: dict[str, Any] | None = None,
         nanny=None,
         extra=None,
-        stimulus_id=None,
-    ):
+        stimulus_id: str,
+    ) -> None:
         """Add a new worker to the cluster"""
         address = self.coerce_address(address, resolve_address)
         address = normalize_address(address)
@@ -3591,8 +3591,7 @@ class Scheduler(SchedulerState, ServerNode):
                 f"Keys: {list(nbytes)}"
             )
             logger.error(err)
-            if comm:
-                await comm.write({"status": "error", "message": err, "time": time()})
+            await comm.write({"status": "error", "message": err, "time": time()})
             return
 
         if name in self.aliases:
@@ -3602,8 +3601,7 @@ class Scheduler(SchedulerState, ServerNode):
                 "message": "name taken, %s" % name,
                 "time": time(),
             }
-            if comm:
-                await comm.write(msg)
+            await comm.write(msg)
             return
 
         self.log_event(address, {"action": "add-worker"})
@@ -3682,7 +3680,6 @@ class Scheduler(SchedulerState, ServerNode):
             "worker-plugins": self.worker_plugins,
         }
 
-        cs: ClientState
         version_warning = version_module.error_message(
             version_module.get_versions(),
             merge(
@@ -3694,12 +3691,11 @@ class Scheduler(SchedulerState, ServerNode):
         )
         msg.update(version_warning)
 
-        if comm:
-            await comm.write(msg)
+        await comm.write(msg)
+        # This will keep running until the worker is removed
+        await self.handle_worker(comm, address)
 
-        await self.handle_worker(comm=comm, worker=address, stimulus_id=stimulus_id)
-
-    async def add_nanny(self, comm):
+    async def add_nanny(self) -> dict[str, Any]:
         msg = {
             "status": "OK",
             "nanny-plugins": self.nanny_plugins,
@@ -4807,7 +4803,7 @@ class Scheduler(SchedulerState, ServerNode):
                 }
             )
 
-    async def handle_worker(self, comm=None, worker=None, stimulus_id=None):
+    async def handle_worker(self, comm: Comm, worker: str) -> None:
         """
         Listen to responses from a single worker
 
@@ -4817,7 +4813,6 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Scheduler.handle_client: Equivalent coroutine for clients
         """
-        assert stimulus_id
         comm.name = "Scheduler connection to worker"
         worker_comm = self.stream_comms[worker]
         worker_comm.start(comm)
@@ -4827,7 +4822,9 @@ class Scheduler(SchedulerState, ServerNode):
         finally:
             if worker in self.stream_comms:
                 worker_comm.abort()
-                await self.remove_worker(address=worker, stimulus_id=stimulus_id)
+                await self.remove_worker(
+                    worker, stimulus_id=f"handle-worker-cleanup-{time()}"
+                )
 
     def add_plugin(
         self,

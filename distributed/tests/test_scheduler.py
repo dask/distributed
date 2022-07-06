@@ -582,7 +582,9 @@ def test_dumps_task():
     d = dumps_task((inc, 1))
     assert set(d) == {"function", "args"}
 
-    f = lambda x, y=2: x + y
+    def f(x, y=2):
+        return x + y
+
     d = dumps_task((apply, f, (1,), {"y": 10}))
     assert cloudpickle.loads(d["function"])(1, 2) == 3
     assert cloudpickle.loads(d["args"]) == (1,)
@@ -1337,23 +1339,6 @@ async def test_scheduler_file():
         c = await Client(scheduler_file=fn, loop=s.loop, asynchronous=True)
         await c.close()
         await s.close()
-
-
-@pytest.mark.xfail()
-@gen_cluster(client=True, nthreads=[])
-async def test_non_existent_worker(c, s):
-    with dask.config.set({"distributed.comm.timeouts.connect": "100ms"}):
-        await s.add_worker(
-            address="127.0.0.1:5738",
-            status="running",
-            nthreads=2,
-            nbytes={},
-            host_info={},
-        )
-        futures = c.map(inc, range(10))
-        await asyncio.sleep(0.300)
-        assert not s.workers
-        assert all(ts.state == "no-worker" for ts in s.tasks.values())
 
 
 @pytest.mark.parametrize(
@@ -3615,12 +3600,12 @@ async def test_scheduler_close_fast_deprecated(s, w):
         await s.close(fast=True)
 
 
-def test_runspec_regression_sync():
+def test_runspec_regression_sync(loop):
     # https://github.com/dask/distributed/issues/6624
 
     da = pytest.importorskip("dask.array")
     np = pytest.importorskip("numpy")
-    with Client():
+    with Client(loop=loop):
         v = da.random.random((20, 20), chunks=(5, 5))
 
         overlapped = da.map_overlap(np.sum, v, depth=2, boundary="reflect")

@@ -578,6 +578,15 @@ async def test_run_dask_worker(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_run_dask_worker_kwonlyarg(c, s, a, b):
+    def f(*, dask_worker=None):
+        return dask_worker.id
+
+    response = await c._run(f)
+    assert response == {a.address: a.id, b.address: b.id}
+
+
+@gen_cluster(client=True)
 async def test_run_coroutine_dask_worker(c, s, a, b):
     async def f(dask_worker=None):
         await asyncio.sleep(0.001)

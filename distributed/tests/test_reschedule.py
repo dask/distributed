@@ -13,10 +13,9 @@ import pytest
 from distributed import Event, Reschedule, get_worker, secede, wait
 from distributed.utils_test import captured_logger, gen_cluster, slowinc
 from distributed.worker_state_machine import (
-    ComputeTaskEvent,
     FreeKeysEvent,
     RescheduleEvent,
-    SecedeEvent,
+    RescheduleMsg,
 )
 
 
@@ -57,18 +56,18 @@ async def test_scheduler_reschedule_warns(s, a, b):
     assert "Aborting reschedule" in sched.getvalue()
 
 
-@pytest.mark.parametrize("long_running", [False, True])
+@pytest.mark.parametrize("state", ["executing", "long-running"])
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 2,
     config={"distributed.scheduler.work-stealing": False},
 )
-async def test_raise_reschedule(c, s, a, b, long_running):
+async def test_raise_reschedule(c, s, a, b, state):
     """A task raises Reschedule()"""
     a_address = a.address
 
     def f(x):
-        if long_running:
+        if state == "long-running":
             secede()
         sleep(0.1)
         if get_worker().address == a_address:
@@ -81,15 +80,16 @@ async def test_raise_reschedule(c, s, a, b, long_running):
     assert all(f.key in b.data for f in futures)
 
 
-@pytest.mark.parametrize("long_running", [False, True])
+@pytest.mark.parametrize("state", ["executing", "long-running"])
 @gen_cluster(client=True, nthreads=[("", 1)])
-async def test_cancelled_reschedule(c, s, a, long_running):
-    """A task raises Reschedule(), but the future was released by the client"""
+async def test_cancelled_reschedule(c, s, a, state):
+    """A task raises Reschedule(), but the future was released by the client.
+    Same as test_cancelled_reschedule_worker_state"""
     ev1 = Event()
     ev2 = Event()
 
     def f(ev1, ev2):
-        if long_running:
+        if state == "long-running":
             secede()
         ev1.set()
         ev2.wait()
@@ -106,18 +106,25 @@ async def test_cancelled_reschedule(c, s, a, long_running):
         await asyncio.sleep(0.01)
 
 
-@pytest.mark.parametrize("long_running", [False, True])
-def test_cancelled_reschedule_worker_state(ws, long_running):
+def test_cancelled_reschedule_worker_state(ws_with_running_task):
     """Same as test_cancelled_reschedule"""
+    ws = ws_with_running_task
 
-    ws.handle_stimulus(ComputeTaskEvent.dummy(key="x", stimulus_id="s1"))
-    if long_running:
-        ws.handle_stimulus(SecedeEvent(key="x", compute_duration=1.0, stimulus_id="s2"))
-
-    instructions = ws.handle_stimulus(
-        FreeKeysEvent(keys=["x"], stimulus_id="s3"),
-        RescheduleEvent(key="x", stimulus_id="s4"),
-    )
-    # There's no RescheduleMsg and the task has been forgotten
+    instructions = ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
     assert not instructions
-    assert not ws.tasks
+    assert ws.tasks["x"].state == "cancelled"
+    assert ws.available_resources == {"R": 0}
+
+    instructions = ws.handle_stimulus(RescheduleEvent(key="x", stimulus_id="s2"))
+    assert not instructions  # There's no RescheduleMsg
+    assert not ws.tasks  # The task has been forgotten
+    assert ws.available_resources == {"R": 1}
+
+
+def test_reschedule_releases(ws_with_running_task):
+    ws = ws_with_running_task
+
+    instructions = ws.handle_stimulus(RescheduleEvent(key="x", stimulus_id="s1"))
+    assert instructions == [RescheduleMsg(stimulus_id="s1", key="x")]
+    assert ws.available_resources == {"R": 1}
+    assert "x" not in ws.tasks

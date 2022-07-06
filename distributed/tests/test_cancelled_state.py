@@ -13,7 +13,7 @@ from distributed.utils_test import (
     assert_story,
     gen_cluster,
     inc,
-    slowinc,
+    lock_inc,
     wait_for_state,
     wait_for_stimulus,
 )
@@ -36,31 +36,37 @@ async def wait_for_cancelled(key, dask_worker):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_release(c, s, a):
-    fut = c.submit(slowinc, 1, delay=1)
-    await wait_for_state(fut.key, "executing", a)
-    fut.release()
-    await wait_for_cancelled(fut.key, a)
+    lock = Lock()
+    async with lock:
+        fut = c.submit(lock_inc, 1, lock=lock)
+        await wait_for_state(fut.key, "executing", a)
+        fut.release()
+        await wait_for_cancelled(fut.key, a)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_reschedule(c, s, a):
-    fut = c.submit(slowinc, 1, delay=1)
-    await wait_for_state(fut.key, "executing", a)
-    fut.release()
-    await wait_for_cancelled(fut.key, a)
-    fut = c.submit(slowinc, 1, delay=0.1)
+    lock = Lock()
+    async with lock:
+        fut = c.submit(lock_inc, 1, lock=lock)
+        await wait_for_state(fut.key, "executing", a)
+        fut.release()
+        await wait_for_cancelled(fut.key, a)
+        fut = c.submit(lock_inc, 1, lock=lock)
     await fut
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_add_as_dependency(c, s, a):
-    fut = c.submit(slowinc, 1, delay=1)
-    await wait_for_state(fut.key, "executing", a)
-    fut.release()
-    await wait_for_cancelled(fut.key, a)
+    lock = Lock()
+    async with lock:
+        fut = c.submit(lock_inc, 1, lock=lock)
+        await wait_for_state(fut.key, "executing", a)
+        fut.release()
+        await wait_for_cancelled(fut.key, a)
 
-    fut = c.submit(slowinc, 1, delay=1)
-    fut = c.submit(slowinc, fut, delay=1)
+        fut = c.submit(lock_inc, 1, lock=lock)
+        fut = c.submit(inc, fut)
     await fut
 
 
@@ -158,14 +164,15 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
             allow_other_workers=True,
             key="fut1",
         )
+        await wait(fut1)
+        await block_compute.acquire()
         fut2 = c.submit(inc, fut1, workers=[b.address], key="fut2")
 
         await enter_get_data.wait()
-        await block_compute.acquire()
 
         # Close in scheduler to ensure we transition and reschedule task properly
-        await s.remove_worker(a.address, stimulus_id="test")
-        await wait_for_state(fut1.key, "resumed", b)
+        await s.remove_worker(a.address, stimulus_id="test", close=False)
+        await wait_for_stimulus(ComputeTaskEvent, b, key=fut1.key)
 
         block_get_data.release()
         await block_compute.release()
@@ -535,3 +542,24 @@ async def test_resumed_cancelled_handle_compute(
                 (f3.key, "resumed", "error", "error", {}),
             ],
         )
+
+
+def test_resume_executing_worker_state(ws_with_running_task):
+    """Test state loops:
+
+    - executing -> cancelled -> resumed -> executing
+    - executing -> long-running -> cancelled -> resumed -> long-running
+    """
+    ws = ws_with_running_task
+    ts = ws.tasks["x"]
+    prev_state = ts.state
+
+    instructions = ws.handle_stimulus(
+        FreeKeysEvent(keys=["x"], stimulus_id="s1"),
+        ComputeTaskEvent.dummy(
+            key="x", resource_restrictions={"R": 1}, stimulus_id="s2"
+        ),
+    )
+    assert not instructions
+    assert ws.tasks["x"] is ts
+    assert ts.state == prev_state

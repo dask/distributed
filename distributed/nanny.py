@@ -27,6 +27,7 @@ from distributed import preloading
 from distributed.comm import get_address_host
 from distributed.comm.addressing import address_from_user_args
 from distributed.core import (
+    AsyncTaskGroupClosedError,
     CommClosedError,
     RPCClosed,
     Status,
@@ -498,7 +499,10 @@ class Nanny(ServerNode):
         return run(self, comm, *args, **kwargs)
 
     def _on_exit_sync(self, exitcode):
-        self._ongoing_background_tasks.call_soon(self._on_exit, exitcode)
+        try:
+            self._ongoing_background_tasks.call_soon(self._on_exit, exitcode)
+        except AsyncTaskGroupClosedError:  # Async task group has already been closed, so the nanny is already clos(ed|ing).
+            pass
 
     @log_errors
     async def _on_exit(self, exitcode):

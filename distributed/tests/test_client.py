@@ -73,7 +73,13 @@ from distributed.core import Server, Status
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
 from distributed.sizeof import sizeof
-from distributed.utils import get_mp_context, is_valid_xml, sync, tmp_text
+from distributed.utils import (
+    NoOpAwaitable,
+    get_mp_context,
+    is_valid_xml,
+    sync,
+    tmp_text,
+)
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _UnhashableCallable,
@@ -1226,18 +1232,31 @@ async def test_get_releases_data(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-def test_current(s, a, b):
-    with Client(s["address"]) as c:
+def test_current(s, a, b, loop_in_thread):
+    loop = loop_in_thread
+    with Client(s["address"], loop=loop) as c:
         assert Client.current() is c
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError,
+        match=r"No clients found"
+        r"\nStart a client and point it to the scheduler address"
+        r"\n  from distributed import Client"
+        r"\n  client = Client\('ip-addr-of-scheduler:8786'\)",
+    ):
         Client.current()
-    with Client(s["address"]) as c:
+    with Client(s["address"], loop=loop) as c:
         assert Client.current() is c
 
 
 def test_global_clients(loop):
     assert _get_global_client() is None
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError,
+        match=r"No clients found"
+        r"\nStart a client and point it to the scheduler address"
+        r"\n  from distributed import Client"
+        r"\n  client = Client\('ip-addr-of-scheduler:8786'\)",
+    ):
         default_client()
     with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -1893,20 +1912,18 @@ async def test_allow_restrictions(c, s, a, b):
         c.map(inc, [20], workers="127.0.0.1", allow_other_workers="Hello!")
 
 
-def test_bad_address():
+def test_bad_address(loop):
     with pytest.raises(OSError, match="connect"):
-        Client("123.123.123.123:1234", timeout=0.1)
+        Client("123.123.123.123:1234", timeout=0.1, loop=loop)
     with pytest.raises(OSError, match="connect"):
-        Client("127.0.0.1:1234", timeout=0.1)
+        Client("127.0.0.1:1234", timeout=0.1, loop=loop)
 
 
 def test_informative_error_on_cluster_type():
-    with pytest.raises(TypeError) as exc_info:
+    with pytest.raises(
+        TypeError, match=r"Scheduler address must be a string or a Cluster instance"
+    ):
         Client(LocalCluster)
-
-    assert "Scheduler address must be a string or a Cluster instance" in str(
-        exc_info.value
-    )
 
 
 @gen_cluster(client=True)
@@ -2861,12 +2878,12 @@ def test_startup_close_startup_sync(loop):
     with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
             sleep(0.1)
-        with Client(s["address"]) as c:
+        with Client(s["address"], loop=None) as c:
             pass
-        with Client(s["address"]) as c:
+        with Client(s["address"], loop=None) as c:
             pass
         sleep(0.1)
-        with Client(s["address"]) as c:
+        with Client(s["address"], loop=None) as c:
             pass
 
 
@@ -2928,9 +2945,11 @@ async def test_rebalance_workers_and_keys(client, s, a, b, c):
         await client.rebalance(workers=["notexist"])
 
 
-def test_rebalance_sync():
+def test_rebalance_sync(loop):
     with dask.config.set(REBALANCE_MANAGED_CONFIG):
-        with Client(n_workers=2, processes=False, dashboard_address=":0") as c:
+        with Client(
+            n_workers=2, processes=False, dashboard_address=":0", loop=loop
+        ) as c:
             s = c.cluster.scheduler
             a = c.cluster.workers[0]
             b = c.cluster.workers[1]
@@ -3274,39 +3293,40 @@ async def test_cancel_clears_processing(c, s, *workers):
     s.validate_state()
 
 
-def test_default_get():
+def test_default_get(loop_in_thread):
+    loop = loop_in_thread
     with cluster() as (s, [a, b]):
         pre_get = dask.base.get_scheduler()
         pytest.raises(KeyError, dask.config.get, "shuffle")
-        with Client(s["address"], set_as_default=True) as c:
+        with Client(s["address"], set_as_default=True, loop=loop) as c:
             assert dask.base.get_scheduler() == c.get
             assert dask.config.get("shuffle") == "tasks"
 
         assert dask.base.get_scheduler() == pre_get
         pytest.raises(KeyError, dask.config.get, "shuffle")
 
-        c = Client(s["address"], set_as_default=False)
+        c = Client(s["address"], set_as_default=False, loop=loop)
         assert dask.base.get_scheduler() == pre_get
         pytest.raises(KeyError, dask.config.get, "shuffle")
         c.close()
 
-        c = Client(s["address"], set_as_default=True)
+        c = Client(s["address"], set_as_default=True, loop=loop)
         assert dask.config.get("shuffle") == "tasks"
         assert dask.base.get_scheduler() == c.get
         c.close()
         assert dask.base.get_scheduler() == pre_get
         pytest.raises(KeyError, dask.config.get, "shuffle")
 
-        with Client(s["address"]) as c:
+        with Client(s["address"], loop=loop) as c:
             assert dask.base.get_scheduler() == c.get
 
-        with Client(s["address"], set_as_default=False) as c:
+        with Client(s["address"], set_as_default=False, loop=loop) as c:
             assert dask.base.get_scheduler() != c.get
         assert dask.base.get_scheduler() != c.get
 
-        with Client(s["address"], set_as_default=True) as c1:
+        with Client(s["address"], set_as_default=True, loop=loop) as c1:
             assert dask.base.get_scheduler() == c1.get
-            with Client(s["address"], set_as_default=True) as c2:
+            with Client(s["address"], set_as_default=True, loop=loop) as c2:
                 assert dask.base.get_scheduler() == c2.get
             assert dask.base.get_scheduler() == c1.get
         assert dask.base.get_scheduler() == pre_get
@@ -3831,11 +3851,11 @@ def test_scheduler_info(c):
     assert isinstance(info["started"], float)
 
 
-def test_write_scheduler_file(c):
+def test_write_scheduler_file(c, loop):
     info = c.scheduler_info()
     with tmpfile("json") as scheduler_file:
         c.write_scheduler_file(scheduler_file)
-        with Client(scheduler_file=scheduler_file) as c2:
+        with Client(scheduler_file=scheduler_file, loop=loop) as c2:
             info2 = c2.scheduler_info()
             assert c.scheduler.address == c2.scheduler.address
 
@@ -4436,7 +4456,7 @@ async def test_auto_normalize_collection(c, s, a, b):
     assert len(x.dask) == 2
 
     with dask.config.set(optimizations=[c._optimize_insert_futures]):
-        y = x.map_blocks(slowinc, delay=1, dtype=x.dtype)
+        y = x.map_blocks(inc, dtype=x.dtype)
         yy = c.persist(y)
 
         await wait(yy)
@@ -4459,7 +4479,7 @@ def test_auto_normalize_collection_sync(c):
     da = pytest.importorskip("dask.array")
     x = da.ones(10, chunks=5)
 
-    y = x.map_blocks(slowinc, delay=1, dtype=x.dtype)
+    y = x.map_blocks(inc, dtype=x.dtype)
     yy = c.persist(y)
 
     wait(yy)
@@ -5517,11 +5537,16 @@ async def test_future_auto_inform(c, s, a, b):
     await client.close()
 
 
-def test_client_async_before_loop_starts():
+def test_client_async_before_loop_starts(cleanup):
+    async def close():
+        async with client:
+            pass
+
     with pristine_loop() as loop:
         client = Client(asynchronous=True, loop=loop)
         assert client.asynchronous
-        client.close()
+        assert isinstance(client.close(), NoOpAwaitable)
+        loop.run_sync(close)  # TODO: client.close() does not unset global client
 
 
 @pytest.mark.slow
@@ -6829,6 +6854,7 @@ async def test_get_client_functions_spawn_clusters(c, s, a):
             processes=False,
             dashboard_address=":0",
             worker_dashboard_address=":0",
+            loop=None,
         ) as cluster2:
             with Client(cluster2) as c1:
                 c2 = get_client()

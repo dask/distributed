@@ -407,7 +407,6 @@ class Worker(BaseWorker, ServerNode):
     _dashboard_address: str | None
     _dashboard: bool
     _http_prefix: str
-    total_resources: dict[str, float]
     death_timeout: float | None
     lifetime: float | None
     lifetime_stagger: float | None
@@ -631,7 +630,6 @@ class Worker(BaseWorker, ServerNode):
         if resources is None:
             resources = dask.config.get("distributed.worker.resources")
             assert isinstance(resources, dict)
-        self.total_resources = resources.copy()
 
         self.death_timeout = parse_timedelta(death_timeout)
 
@@ -757,7 +755,7 @@ class Worker(BaseWorker, ServerNode):
             data=self.memory_manager.data,
             threads=self.threads,
             plugins=self.plugins,
-            resources=self.total_resources,
+            resources=resources,
             total_out_connections=total_out_connections,
             validate=validate,
             transition_counter_max=transition_counter_max,
@@ -880,6 +878,7 @@ class Worker(BaseWorker, ServerNode):
     tasks = DeprecatedWorkerStateAttribute()
     target_message_size = DeprecatedWorkerStateAttribute()
     total_out_connections = DeprecatedWorkerStateAttribute()
+    total_resources = DeprecatedWorkerStateAttribute()
     transition_counter = DeprecatedWorkerStateAttribute()
     transition_counter_max = DeprecatedWorkerStateAttribute()
     validate = DeprecatedWorkerStateAttribute()
@@ -1103,7 +1102,7 @@ class Worker(BaseWorker, ServerNode):
                         },
                         types={k: typename(v) for k, v in self.data.items()},
                         now=time(),
-                        resources=self.total_resources,
+                        resources=self.state.total_resources,
                         memory_limit=self.memory_manager.memory_limit,
                         local_directory=self.local_directory,
                         services=self.service_ports,
@@ -1755,17 +1754,19 @@ class Worker(BaseWorker, ServerNode):
         )
         return {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
 
-    async def set_resources(self, **resources) -> None:
+    async def set_resources(self, **resources: float) -> None:
         for r, quantity in resources.items():
-            if r in self.total_resources:
-                self.state.available_resources[r] += quantity - self.total_resources[r]
+            if r in self.state.total_resources:
+                self.state.available_resources[r] += (
+                    quantity - self.state.total_resources[r]
+                )
             else:
                 self.state.available_resources[r] = quantity
-            self.total_resources[r] = quantity
+            self.state.total_resources[r] = quantity
 
         await retry_operation(
             self.scheduler.set_resources,
-            resources=self.total_resources,
+            resources=self.state.total_resources,
             worker=self.contact_address,
         )
 
