@@ -26,11 +26,11 @@ from distributed.utils_test import (
 from distributed.worker_state_machine import (
     AcquireReplicasEvent,
     ComputeTaskEvent,
-    Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     FreeKeysEvent,
     GatherDep,
+    GatherDepSuccessEvent,
     Instruction,
     PauseEvent,
     RecommendationsConflict,
@@ -38,6 +38,7 @@ from distributed.worker_state_machine import (
     ReleaseWorkerDataMsg,
     RescheduleEvent,
     RescheduleMsg,
+    SecedeEvent,
     SerializedTask,
     StateMachineEvent,
     TaskState,
@@ -1054,25 +1055,111 @@ def test_gather_priority(ws):
     ]
 
 
-def test_resource_restricted_task_transitions_to_constrained(ws):
+@pytest.mark.parametrize("state", ["executing", "long-running"])
+def test_restricted_task(ws, state):
     ws.set_resources(R=1)
-    instructions = ws.handle_stimulus(
+    ws.handle_stimulus(
         ComputeTaskEvent.dummy(
             key="x", resource_restrictions={"R": 1}, stimulus_id="compute"
         )
     )
-    assert instructions == [Execute(key="x", stimulus_id="compute")]
+
+    expected_story = [
+        ("x", "compute-task", "released"),
+        ("x", "released", "waiting", "waiting", {"x": "ready"}),
+        ("x", "waiting", "ready", "waiting", {"x": "constrained"}),
+        ("x", "waiting", "constrained", "constrained", {"x": "executing"}),
+        ("x", "constrained", "executing", "executing", {}),
+    ]
+
+    if state == "long-running":
+        ws.handle_stimulus(
+            SecedeEvent(key="x", compute_duration=1.0, stimulus_id="secede")
+        )
+        expected_story.append(("x", "executing", "long-running", "long-running", {}))
+
+    assert ws.tasks["x"].state == state
+    assert ws.available_resources == {"R": 0}
     assert_story(
         ws.story("x"),
-        [
-            ("x", "compute-task", "released"),
-            ("x", "released", "waiting", "waiting", {"x": "ready"}),
-            ("x", "waiting", "ready", "waiting", {"x": "constrained"}),
-            ("x", "waiting", "constrained", "constrained", {"x": "executing"}),
-            ("x", "constrained", "executing", "executing", {}),
-        ],
+        expected_story,
         strict=True,
     )
+
+    ws.handle_stimulus(
+        ExecuteSuccessEvent(
+            key="x",
+            value=None,
+            start=0.0,
+            stop=1.0,
+            nbytes=8,
+            type=None,
+            stimulus_id="success",
+        ),
+    )
+
+    assert ws.tasks["x"].state == "memory"
+    assert ws.available_resources == {"R": 1}
+
+
+@pytest.mark.parametrize("state", ["executing", "long-running"])
+def test_resource_restricted_task_with_dependencies(ws, state):
+    ws.set_resources(R=1)
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            key="y",
+            who_has={"x": ["127.0.0.1:1235"]},
+            nbytes={"x": 8},
+            resource_restrictions={"R": 1},
+            stimulus_id="compute",
+        )
+    )
+
+    assert ws.tasks["x"].state == "flight"
+    assert ws.tasks["y"].state == "waiting"
+    assert ws.available_resources == {"R": 1}
+
+    ws.handle_stimulus(
+        GatherDepSuccessEvent("gather-dep-done", "127.0.0.1:1235", 8, {"x": 1.0})
+    )
+
+    expected_story = [
+        ("y", "compute-task", "released"),
+        ("y", "released", "waiting", "waiting", {"x": "fetch"}),
+        ("y", "waiting", "ready", "waiting", {"y": "constrained"}),
+        ("y", "waiting", "constrained", "constrained", {"y": "executing"}),
+        ("y", "constrained", "executing", "executing", {}),
+    ]
+
+    if state == "long-running":
+        ws.handle_stimulus(
+            SecedeEvent(key="y", compute_duration=1.0, stimulus_id="secede")
+        )
+        expected_story.append(("y", "executing", "long-running", "long-running", {}))
+
+    assert ws.tasks["x"].state == "memory"
+    assert ws.tasks["y"].state == state
+    assert ws.available_resources == {"R": 0}
+    assert_story(
+        ws.story("y"),
+        expected_story,
+        strict=True,
+    )
+
+    ws.handle_stimulus(
+        ExecuteSuccessEvent(
+            key="y",
+            value=None,
+            start=0.0,
+            stop=1.0,
+            nbytes=8,
+            type=None,
+            stimulus_id="s2",
+        ),
+    )
+
+    assert ws.tasks["y"].state == "memory"
+    assert ws.available_resources == {"R": 1}
 
 
 @gen_cluster()
