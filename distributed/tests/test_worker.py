@@ -3544,4 +3544,3 @@ async def test_worker_makes_own_thread():
                 await c.restart()
                 result = c.submit(lambda x: x + 1, 1)
                 assert await result == 2
-                await c.close()
