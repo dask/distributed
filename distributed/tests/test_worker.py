@@ -47,6 +47,7 @@ from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
+from distributed.utils import open_port
 from distributed.utils_test import (
     BlockedGatherDep,
     BlockedGetData,
@@ -3534,8 +3535,9 @@ async def test_worker_makes_own_thread():
             except ValueError:
                 await client.register_worker_plugin(InitWorkerNewThread(self.scheduler))
 
-    address = "tcp://192.168.0.8:8786"
-    with popen(["dask-scheduler"]) as s:
+    port = open_port()
+    address = f"127.0.0.1:{port}"
+    with popen(["dask-scheduler", "--host", address]) as s:
         with popen(["dask-worker", address]) as w:
             async with Client(address, asynchronous=True) as c:
                 await c.register_worker_plugin(InitWorkerNewThread(address))
