@@ -1860,7 +1860,7 @@ class SchedulerState:
             self._set_duration_estimate(ts, ws)
             ts.processing_on = ws
             ts.state = "processing"
-            self.consume_resources(ts, ws)
+            self.acquire_resources(ts, ws)
             self.check_idle_saturated(ws)
             self.n_tasks += 1
 
@@ -2675,7 +2675,7 @@ class SchedulerState:
 
         return s
 
-    def consume_resources(self, ts: TaskState, ws: WorkerState):
+    def acquire_resources(self, ts: TaskState, ws: WorkerState):
         for r, required in ts.resource_restrictions.items():
             ws.used_resources[r] += required
 
