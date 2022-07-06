@@ -1055,37 +1055,20 @@ def test_gather_priority(ws):
     ]
 
 
-@pytest.mark.parametrize("state", ["executing", "long-running"])
-def test_constrained_task_handles_resources_on_success(ws, state):
-    ws.available_resources = {"R": 1}
-    ws.total_resources = {"R": 1}
-
-    ws.handle_stimulus(
-        ComputeTaskEvent.dummy(
-            key="x", resource_restrictions={"R": 1}, stimulus_id="compute"
-        )
-    )
-    # Ensure that x transitions through the ``constrained`` state
-    expected_story = [
-        ("x", "compute-task", "released"),
-        ("x", "released", "waiting", "waiting", {"x": "ready"}),
-        ("x", "waiting", "ready", "waiting", {"x": "constrained"}),
-        ("x", "waiting", "constrained", "constrained", {"x": "executing"}),
-        ("x", "constrained", "executing", "executing", {}),
-    ]
-
-    if state == "long-running":
-        ws.handle_stimulus(
-            SecedeEvent(key="x", compute_duration=1.0, stimulus_id="secede")
-        )
-        expected_story.append(("x", "executing", "long-running", "long-running", {}))
-
-    assert ws.tasks["x"].state == state
+def test_constrained_task_handles_resources_on_success(ws_with_running_task):
+    ws = ws_with_running_task
     assert ws.available_resources == {"R": 0}
+    # Ensure that x transitions through the ``constrained`` state
     assert_story(
         ws.story("x"),
-        expected_story,
-        strict=True,
+        [
+            ("x", "compute-task", "released"),
+            ("x", "released", "waiting", "waiting", {"x": "ready"}),
+            ("x", "waiting", "ready", "waiting", {"x": "constrained"}),
+            ("x", "waiting", "constrained", "constrained", {"x": "executing"}),
+            ("x", "constrained", "executing", "executing", {}),
+        ],
+        strict=False,
     )
 
     ws.handle_stimulus(
@@ -1103,37 +1086,20 @@ def test_constrained_task_handles_resources_on_success(ws, state):
     assert ws.available_resources == {"R": 1}
 
 
-@pytest.mark.parametrize("state", ["executing", "long-running"])
-def test_constrained_task_handles_resources_on_failure(ws, state):
-    ws.available_resources = {"R": 1}
-    ws.total_resources = {"R": 1}
-
-    ws.handle_stimulus(
-        ComputeTaskEvent.dummy(
-            key="x", resource_restrictions={"R": 1}, stimulus_id="compute"
-        )
-    )
-    # Ensure that x transitions through the ``constrained`` state
-    expected_story = [
-        ("x", "compute-task", "released"),
-        ("x", "released", "waiting", "waiting", {"x": "ready"}),
-        ("x", "waiting", "ready", "waiting", {"x": "constrained"}),
-        ("x", "waiting", "constrained", "constrained", {"x": "executing"}),
-        ("x", "constrained", "executing", "executing", {}),
-    ]
-
-    if state == "long-running":
-        ws.handle_stimulus(
-            SecedeEvent(key="x", compute_duration=1.0, stimulus_id="secede")
-        )
-        expected_story.append(("x", "executing", "long-running", "long-running", {}))
-
-    assert ws.tasks["x"].state == state
+def test_constrained_task_handles_resources_on_failure(ws_with_running_task):
+    ws = ws_with_running_task
     assert ws.available_resources == {"R": 0}
+    # Ensure that x transitions through the ``constrained`` state
     assert_story(
         ws.story("x"),
-        expected_story,
-        strict=True,
+        [
+            ("x", "compute-task", "released"),
+            ("x", "released", "waiting", "waiting", {"x": "ready"}),
+            ("x", "waiting", "ready", "waiting", {"x": "constrained"}),
+            ("x", "waiting", "constrained", "constrained", {"x": "executing"}),
+            ("x", "constrained", "executing", "executing", {}),
+        ],
+        strict=False,
     )
 
     ws.handle_stimulus(
