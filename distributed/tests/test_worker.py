@@ -3529,11 +3529,11 @@ async def test_worker_makes_own_thread():
             self.thread.join(timeout=10)
 
         async def func(self):
-            client = await Client(self.scheduler, asynchronous=True)
             try:
-                get_worker()
+                worker = get_worker()
             except ValueError:
-                await client.register_worker_plugin(InitWorkerNewThread(self.scheduler))
+                async with Client(self.scheduler, asynchronous=True) as client:
+                    await client.register_worker_plugin(InitWorkerNewThread(self.scheduler))
 
     port = open_port()
     address = f"127.0.0.1:{port}"
