@@ -1086,6 +1086,7 @@ def test_constrained_task_handles_resources_on_success(ws_with_running_task):
     assert ws.available_resources == {"R": 1}
 
 
+@pytest.mark.xfail(reason="distributed#6565")
 def test_constrained_task_handles_resources_on_failure(ws_with_running_task):
     ws = ws_with_running_task
     assert ws.available_resources == {"R": 0}
@@ -1208,6 +1209,7 @@ def test_resumed_executing_task_releases_resources_when_done(ws_with_running_tas
     assert ws.available_resources == {"R": 1}
 
 
+@pytest.mark.xfail(reason="distributed#6682")
 def test_resumed_executing_task_releases_resources_on_error(ws_with_running_task):
     ws = ws_with_running_task
 
