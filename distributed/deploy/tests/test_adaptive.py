@@ -289,6 +289,7 @@ async def test_no_more_workers_than_tasks():
                 assert len(cluster.scheduler.workers) <= 1
 
 
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
 def test_basic_no_loop(cleanup):
     loop = None
     try:

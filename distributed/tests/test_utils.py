@@ -404,6 +404,7 @@ _implicit_loop_is_not_running_warning = functools.partial(
 )
 
 
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
 def test_loop_runner(loop_in_thread):
     # Implicit loop
     loop = IOLoop()
@@ -486,6 +487,7 @@ def test_loop_runner(loop_in_thread):
         assert_not_running(runner.loop)
 
 
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
 def test_two_loop_runners(loop_in_thread):
     # Loop runners tied to the same loop should cooperate
 
