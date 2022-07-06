@@ -3509,6 +3509,15 @@ async def test_reconnect_argument_deprecated(s):
 
 @gen_test()
 async def test_worker_makes_own_thread():
+    async def func(scheduler):
+        try:
+            worker = get_worker()
+        except ValueError:
+            async with Client(scheduler, asynchronous=True) as client:
+                await client.register_worker_plugin(
+                    InitWorkerNewThread(scheduler)
+                )
+
     class InitWorkerNewThread(WorkerPlugin):
         name: str
         thread: threading.Thread
@@ -3521,21 +3530,12 @@ async def test_worker_makes_own_thread():
             self.loop = asyncio.new_event_loop()
             self.thread = threading.Thread(target=self.loop.run_forever)
             self.thread.start()
-            future = asyncio.run_coroutine_threadsafe(self.func(), self.loop)
+            future = asyncio.run_coroutine_threadsafe(func(self.scheduler), self.loop)
             future.result()
 
         def teardown(self, worker):
             self.loop.call_soon_threadsafe(self.loop.stop)
             self.thread.join(timeout=10)
-
-        async def func(self):
-            try:
-                worker = get_worker()
-            except ValueError:
-                async with Client(self.scheduler, asynchronous=True) as client:
-                    await client.register_worker_plugin(
-                        InitWorkerNewThread(self.scheduler)
-                    )
 
     port = open_port()
     address = f"127.0.0.1:{port}"
