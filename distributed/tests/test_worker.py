@@ -3542,5 +3542,4 @@ async def test_worker_makes_own_thread():
             async with Client(address, asynchronous=True) as c:
                 await c.register_worker_plugin(InitWorkerNewThread(address))
                 await c.restart()
-                result = c.submit(lambda x: x + 1, 1)
-                assert await result == 2
+                assert await c.submit(lambda x: x + 1, 1) == 2
