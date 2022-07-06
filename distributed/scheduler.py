@@ -1541,6 +1541,10 @@ class SchedulerState:
                     except Exception:
                         logger.info("Plugin failed with exception", exc_info=True)
                 if ts.state == "forgotten":
+                    # self.erred_tasks might hang on to task states for a bit longer
+                    # before they are garbage-collected. Wipe the run_spec as it might
+                    # be large, and is unneeded for erred_task reporting.
+                    del self.tasks[ts.key].run_spec
                     del self.tasks[ts.key]
 
             tg: TaskGroup = ts.group
