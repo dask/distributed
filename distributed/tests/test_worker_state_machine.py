@@ -1056,8 +1056,9 @@ def test_gather_priority(ws):
 
 
 @pytest.mark.parametrize("state", ["executing", "long-running"])
-def test_restricted_task(ws, state):
-    ws.set_resources(R=1)
+def test_constrained_task_handles_resources_on_success(ws, state):
+    ws.available_resources = {"R": 1}
+    ws.total_resources = {"R": 1}
     ws.handle_stimulus(
         ComputeTaskEvent.dummy(
             key="x", resource_restrictions={"R": 1}, stimulus_id="compute"
@@ -1104,8 +1105,59 @@ def test_restricted_task(ws, state):
 
 
 @pytest.mark.parametrize("state", ["executing", "long-running"])
+def test_constrained_task_handles_resources_on_failure(ws, state):
+    ws.available_resources = {"R": 1}
+    ws.total_resources = {"R": 1}
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            key="x", resource_restrictions={"R": 1}, stimulus_id="compute"
+        )
+    )
+
+    # Ensure that x transitions through the ``constrained`` state
+    expected_story = [
+        ("x", "compute-task", "released"),
+        ("x", "released", "waiting", "waiting", {"x": "ready"}),
+        ("x", "waiting", "ready", "waiting", {"x": "constrained"}),
+        ("x", "waiting", "constrained", "constrained", {"x": "executing"}),
+        ("x", "constrained", "executing", "executing", {}),
+    ]
+
+    if state == "long-running":
+        ws.handle_stimulus(
+            SecedeEvent(key="x", compute_duration=1.0, stimulus_id="secede")
+        )
+        expected_story.append(("x", "executing", "long-running", "long-running", {}))
+
+    assert ws.tasks["x"].state == state
+    assert ws.available_resources == {"R": 0}
+    assert_story(
+        ws.story("x"),
+        expected_story,
+        strict=True,
+    )
+
+    ws.handle_stimulus(
+        ExecuteFailureEvent(
+            key="x",
+            start=0.0,
+            stop=1.0,
+            exception=Serialize(ValueError("x")),
+            traceback=Serialize("Now, release resources"),
+            exception_text="exc text",
+            traceback_text="tb text",
+            stimulus_id="failure",
+        ),
+    )
+
+    assert ws.tasks["x"].state == "error"
+    assert ws.available_resources == {"R": 1}
+
+
+@pytest.mark.parametrize("state", ["executing", "long-running"])
 def test_resource_restricted_task_with_dependencies(ws, state):
-    ws.set_resources(R=1)
+    ws.available_resources = {"R": 1}
+    ws.total_resources = {"R": 1}
     instructions = ws.handle_stimulus(
         ComputeTaskEvent.dummy(
             key="y",
