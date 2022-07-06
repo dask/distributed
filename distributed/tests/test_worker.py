@@ -3509,7 +3509,7 @@ async def test_reconnect_argument_deprecated(s):
 
 @gen_test()
 async def test_worker_makes_own_thread():
-    async def func(scheduler):
+    async def init_app(scheduler):
         try:
             worker = get_worker()
         except ValueError:
@@ -3528,7 +3528,9 @@ async def test_worker_makes_own_thread():
             self.loop = asyncio.new_event_loop()
             self.thread = threading.Thread(target=self.loop.run_forever)
             self.thread.start()
-            future = asyncio.run_coroutine_threadsafe(func(self.scheduler), self.loop)
+            future = asyncio.run_coroutine_threadsafe(
+                init_app(self.scheduler), self.loop
+            )
             future.result()
 
         def teardown(self, worker):
@@ -3540,6 +3542,6 @@ async def test_worker_makes_own_thread():
     with popen(["dask-scheduler", "--host", address]) as s:
         with popen(["dask-worker", address]) as w:
             async with Client(address, asynchronous=True) as c:
-                await c.register_worker_plugin(InitWorkerNewThread(address))
+                await init_app(address)
                 await c.restart()
                 assert await c.submit(lambda x: x + 1, 1) == 2
