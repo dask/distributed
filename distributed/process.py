@@ -232,9 +232,11 @@ class AsyncProcess:
     def _watch_process(cls, selfref, process, state, q):
         r = repr(selfref())
         process.join()
-        exitcode = process.exitcode
-        assert exitcode is not None
-        logger.debug("[%s] process %r exited with code %r", r, state.pid, exitcode)
+        exitcode = original_exit_code = process.exitcode
+        if exitcode is None:
+            # The child process is already reaped
+            # (may happen if waitpid() is called elsewhere).
+            exitcode = 255
         state.is_alive = False
         state.exitcode = exitcode
         # Make sure the process is removed from the global list
@@ -246,6 +248,16 @@ class AsyncProcess:
                 _loop_add_callback(self._loop, self._on_exit, exitcode)
         finally:
             self = None  # lose reference
+
+        # logging may fail - defer calls to after the callback is added
+        if original_exit_code is None:
+            logger.warning(
+                "[%s] process %r exit status was already read will report exitcode 255",
+                r,
+                state.pid,
+            )
+        else:
+            logger.debug("[%s] process %r exited with code %r", r, state.pid, exitcode)
 
     def start(self):
         """
