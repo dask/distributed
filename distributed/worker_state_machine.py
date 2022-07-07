@@ -70,8 +70,6 @@ if TYPE_CHECKING:
 else:
     TaskStateState = str
 
-Type = type
-
 # TaskState.state subsets
 PROCESSING: set[TaskStateState] = {
     "waiting",
@@ -697,8 +695,8 @@ class ComputeTaskEvent(StateMachineEvent):
 
     @staticmethod
     def dummy(
-        *,
         key: str,
+        *,
         who_has: dict[str, Collection[str]] | None = None,
         nbytes: dict[str, int] | None = None,
         priority: tuple[int, ...] = (0,),
@@ -735,7 +733,7 @@ class ExecuteSuccessEvent(StateMachineEvent):
     start: float
     stop: float
     nbytes: int
-    type: Type | None
+    type: type | None
     __slots__ = tuple(__annotations__)
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
@@ -750,13 +748,10 @@ class ExecuteSuccessEvent(StateMachineEvent):
 
     @staticmethod
     def dummy(
-        *,
         key: str,
         value: object = None,
-        start: float = 0.0,
-        stop: float = 1.0,
-        nbytes: int = 8,
-        type: Type | None = None,
+        *,
+        nbytes: int = 1,
         stimulus_id: str,
     ) -> ExecuteSuccessEvent:
         """Build a dummy event, with most attributes set to a reasonable default.
@@ -765,10 +760,10 @@ class ExecuteSuccessEvent(StateMachineEvent):
         return ExecuteSuccessEvent(
             key=key,
             value=value,
-            start=start,
-            stop=stop,
+            start=0.0,
+            stop=1.0,
             nbytes=nbytes,
-            type=type,
+            type=None,
             stimulus_id=stimulus_id,
         )
 
@@ -816,14 +811,8 @@ class ExecuteFailureEvent(StateMachineEvent):
 
     @staticmethod
     def dummy(
-        *,
         key: str,
-        start: float | None = None,
-        stop: float | None = None,
-        exception: Serialize | None = None,
-        traceback: Serialize | None = None,
-        exception_text: str = "",
-        traceback_text: str = "",
+        *,
         stimulus_id: str,
     ) -> ExecuteFailureEvent:
         """Build a dummy event, with most attributes set to a reasonable default.
@@ -831,12 +820,12 @@ class ExecuteFailureEvent(StateMachineEvent):
         """
         return ExecuteFailureEvent(
             key=key,
-            start=start,
-            stop=stop,
-            exception=exception if exception is not None else Serialize(None),
-            traceback=traceback,
-            exception_text=exception_text,
-            traceback_text=traceback_text,
+            start=None,
+            stop=None,
+            exception=Serialize(None),
+            traceback=None,
+            exception_text="",
+            traceback_text="",
             stimulus_id=stimulus_id,
         )
 
