@@ -81,6 +81,18 @@ PROCESSING: set[TaskStateState] = {
     "resumed",
 }
 READY: set[TaskStateState] = {"ready", "constrained"}
+# Valid states for a task that is found in TaskState.waiting_for_data
+WAITING_FOR_DATA: set[TaskStateState] = {
+    "constrained",
+    "executing",
+    "fetch",
+    "flight",
+    "long-running",
+    "missing",
+    "ready",
+    "resumed",
+    "waiting",
+}
 
 NO_VALUE = "--no-value-sentinel--"
 
@@ -3069,7 +3081,7 @@ class WorkerState:
     def validate_task(self, ts: TaskState) -> None:
         try:
             if ts.key in self.tasks:
-                assert self.tasks[ts.key] == ts
+                assert self.tasks[ts.key] is ts
             if ts.state == "memory":
                 self._validate_task_memory(ts)
             elif ts.state == "waiting":
@@ -3097,10 +3109,7 @@ class WorkerState:
             ) from e
 
     def validate_state(self) -> None:
-        assert len(self.executing) >= 0
-        waiting_for_data_count = 0
         for ts in self.tasks.values():
-            assert ts.state is not None
             # check that worker has task
             for worker in ts.who_has:
                 assert worker != self.address
@@ -3113,19 +3122,18 @@ class WorkerState:
                 # so we may have popped the key out of `self.tasks` but the
                 # dependency can still be in `memory` before GC grabs it...?
                 # Might need better bookkeeping
-                assert dep.state is not None
+                assert self.tasks[dep.key] is dep
                 assert ts in dep.dependents, ts
-            if ts.waiting_for_data:
-                waiting_for_data_count += 1
+
             for ts_wait in ts.waiting_for_data:
-                assert ts_wait.key in self.tasks
-                assert (
-                    ts_wait.state in READY | {"executing", "flight", "fetch", "missing"}
-                    or ts_wait in self.missing_dep_flight
-                    or ts_wait.who_has.issubset(self.in_flight_workers)
-                ), (ts, ts_wait, self.story(ts), self.story(ts_wait))
+                assert self.tasks[ts_wait.key] is ts_wait
+                assert ts_wait.state in WAITING_FOR_DATA, ts_wait
+
         # FIXME https://github.com/dask/distributed/issues/6319
-        # assert self.waiting_for_data_count == waiting_for_data_count
+        # assert self.waiting_for_data_count == sum(
+        #     bool(ts.waiting_for_data) for ts in self.tasks.values()
+        # )
+
         for worker, keys in self.has_what.items():
             assert worker != self.address
             for k in keys:
