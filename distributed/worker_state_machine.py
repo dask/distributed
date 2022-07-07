@@ -3206,12 +3206,12 @@ class WorkerState:
             assert len({ts.key for ts in tss}) == len(tss)
 
         self._validate_resources()
-    
+
     @property
     def all_running_tasks(self) -> set[TaskState]:
         """All tasks that are currently running.
         These are:
-        
+
         - ``ts.status`` == ``executing``, ``long-running``, or ``cancelled``
         - ``ts.status` == ``resumed`` and ``ts._previous`` == ``executing`` or ``long-running``
         """
@@ -3226,11 +3226,12 @@ class WorkerState:
             assert v > -1e-9, self.available_resources
             total[k] -= v
         for ts in self.all_running_tasks:
-            for k, v in ts.required_resources.items():
-                assert v >= 0, (ts, ts.required_resources)
+            for k, v in ts.resource_restrictions.items():
+                assert v >= 0, (ts, ts.resource_restrictions)
                 total[k] -= v
 
-         assert all(abs(v) < 1e-9) for v in total.values()), total
+        assert all((abs(v) < 1e-9) for v in total.values()), total
+
 
 class BaseWorker(abc.ABC):
     """Wrapper around the :class:`WorkerState` that implements instructions handling.
