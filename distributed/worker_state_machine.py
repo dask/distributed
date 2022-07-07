@@ -70,6 +70,8 @@ if TYPE_CHECKING:
 else:
     TaskStateState = str
 
+Type = type
+
 # TaskState.state subsets
 PROCESSING: set[TaskStateState] = {
     "waiting",
@@ -733,7 +735,7 @@ class ExecuteSuccessEvent(StateMachineEvent):
     start: float
     stop: float
     nbytes: int
-    type: type | None
+    type: Type | None
     __slots__ = tuple(__annotations__)
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
@@ -745,6 +747,30 @@ class ExecuteSuccessEvent(StateMachineEvent):
     def _after_from_dict(self) -> None:
         self.value = None
         self.type = None
+
+    @staticmethod
+    def dummy(
+        *,
+        key: str,
+        value: object = None,
+        start: float = 0.0,
+        stop: float = 1.0,
+        nbytes: int = 8,
+        type_: Type | None = None,
+        stimulus_id: str,
+    ) -> ExecuteSuccessEvent:
+        """Build a dummy event, with most attributes set to a reasonable default.
+        This is a convenience method to be used in unit testing only.
+        """
+        return ExecuteSuccessEvent(
+            key=key,
+            value=value,
+            start=start,
+            stop=stop,
+            nbytes=nbytes,
+            type=type_,
+            stimulus_id=stimulus_id,
+        )
 
 
 @dataclass
@@ -785,6 +811,32 @@ class ExecuteFailureEvent(StateMachineEvent):
             traceback=msg["traceback"],
             exception_text=msg["exception_text"],
             traceback_text=msg["traceback_text"],
+            stimulus_id=stimulus_id,
+        )
+
+    @staticmethod
+    def dummy(
+        *,
+        key: str,
+        start: float | None = None,
+        stop: float | None = None,
+        exception: Serialize | None = None,
+        traceback: Serialize | None = None,
+        exception_text: str = "",
+        traceback_text: str = "",
+        stimulus_id: str,
+    ) -> ExecuteFailureEvent:
+        """Build a dummy event, with most attributes set to a reasonable default.
+        This is a convenience method to be used in unit testing only.
+        """
+        return ExecuteFailureEvent(
+            key=key,
+            start=start,
+            stop=stop,
+            exception=exception if exception is not None else Serialize(None),
+            traceback=traceback,
+            exception_text=exception_text,
+            traceback_text=traceback_text,
             stimulus_id=stimulus_id,
         )
 

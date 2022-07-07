@@ -391,6 +391,19 @@ def test_executesuccess_to_dict():
     assert ev3.type is None
 
 
+def test_executesuccess_dummy():
+    ev = ExecuteSuccessEvent.dummy(key="x", stimulus_id="s")
+    assert ev == ExecuteSuccessEvent(
+        key="x",
+        value=None,
+        start=0.0,
+        stop=1.0,
+        nbytes=8,
+        type=None,
+        stimulus_id="s",
+    )
+
+
 def test_executefailure_to_dict():
     ev = ExecuteFailureEvent(
         stimulus_id="test",
@@ -429,6 +442,20 @@ def test_executefailure_to_dict():
     assert ev3.traceback is None
     assert ev3.exception_text == "exc text"
     assert ev3.traceback_text == "tb text"
+
+
+def test_executefailure_dummy():
+    ev = ExecuteFailureEvent.dummy(key="x", stimulus_id="s")
+    assert ev == ExecuteFailureEvent(
+        key="x",
+        start=None,
+        stop=None,
+        exception=Serialize(None),
+        traceback=None,
+        exception_text="",
+        traceback_text="",
+        stimulus_id="s",
+    )
 
 
 @gen_cluster(client=True)

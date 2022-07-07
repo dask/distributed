@@ -1331,13 +1331,8 @@ def test_steal_worker_state(ws_with_running_task):
     assert ws.tasks["x"].state == "cancelled"
 
     instructions = ws.handle_stimulus(
-        ExecuteSuccessEvent(
+        ExecuteSuccessEvent.dummy(
             key="x",
-            value=None,
-            start=0.0,
-            stop=1.0,
-            nbytes=8,
-            type=None,
             stimulus_id="s2",
         ),
     )
