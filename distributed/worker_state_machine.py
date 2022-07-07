@@ -695,8 +695,8 @@ class ComputeTaskEvent(StateMachineEvent):
 
     @staticmethod
     def dummy(
-        *,
         key: str,
+        *,
         who_has: dict[str, Collection[str]] | None = None,
         nbytes: dict[str, int] | None = None,
         priority: tuple[int, ...] = (0,),
@@ -746,6 +746,27 @@ class ExecuteSuccessEvent(StateMachineEvent):
         self.value = None
         self.type = None
 
+    @staticmethod
+    def dummy(
+        key: str,
+        value: object = None,
+        *,
+        nbytes: int = 1,
+        stimulus_id: str,
+    ) -> ExecuteSuccessEvent:
+        """Build a dummy event, with most attributes set to a reasonable default.
+        This is a convenience method to be used in unit testing only.
+        """
+        return ExecuteSuccessEvent(
+            key=key,
+            value=value,
+            start=0.0,
+            stop=1.0,
+            nbytes=nbytes,
+            type=None,
+            stimulus_id=stimulus_id,
+        )
+
 
 @dataclass
 class ExecuteFailureEvent(StateMachineEvent):
@@ -785,6 +806,26 @@ class ExecuteFailureEvent(StateMachineEvent):
             traceback=msg["traceback"],
             exception_text=msg["exception_text"],
             traceback_text=msg["traceback_text"],
+            stimulus_id=stimulus_id,
+        )
+
+    @staticmethod
+    def dummy(
+        key: str,
+        *,
+        stimulus_id: str,
+    ) -> ExecuteFailureEvent:
+        """Build a dummy event, with most attributes set to a reasonable default.
+        This is a convenience method to be used in unit testing only.
+        """
+        return ExecuteFailureEvent(
+            key=key,
+            start=None,
+            stop=None,
+            exception=Serialize(None),
+            traceback=None,
+            exception_text="",
+            traceback_text="",
             stimulus_id=stimulus_id,
         )
 

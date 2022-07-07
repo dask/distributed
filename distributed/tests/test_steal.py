@@ -1330,17 +1330,7 @@ def test_steal_worker_state(ws_with_running_task):
     assert ws.available_resources == {"R": 0}
     assert ws.tasks["x"].state == "cancelled"
 
-    instructions = ws.handle_stimulus(
-        ExecuteSuccessEvent(
-            key="x",
-            value=None,
-            start=0.0,
-            stop=1.0,
-            nbytes=8,
-            type=None,
-            stimulus_id="s2",
-        ),
-    )
+    instructions = ws.handle_stimulus(ExecuteSuccessEvent.dummy("x", stimulus_id="s2"))
     assert not instructions
     assert "x" not in ws.tasks
     assert "x" not in ws.data

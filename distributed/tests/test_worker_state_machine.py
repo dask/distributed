@@ -308,7 +308,7 @@ def test_computetask_to_dict():
 
 
 def test_computetask_dummy():
-    ev = ComputeTaskEvent.dummy(key="x", stimulus_id="s")
+    ev = ComputeTaskEvent.dummy("x", stimulus_id="s")
     assert ev == ComputeTaskEvent(
         key="x",
         who_has={},
@@ -326,7 +326,7 @@ def test_computetask_dummy():
     )
 
     # nbytes is generated from who_has if omitted
-    ev2 = ComputeTaskEvent.dummy(key="x", who_has={"y": "127.0.0.1:2"}, stimulus_id="s")
+    ev2 = ComputeTaskEvent.dummy("x", who_has={"y": "127.0.0.1:2"}, stimulus_id="s")
     assert ev2.nbytes == {"y": 1}
 
 
@@ -391,6 +391,22 @@ def test_executesuccess_to_dict():
     assert ev3.type is None
 
 
+def test_executesuccess_dummy():
+    ev = ExecuteSuccessEvent.dummy("x", stimulus_id="s")
+    assert ev == ExecuteSuccessEvent(
+        key="x",
+        value=None,
+        start=0.0,
+        stop=1.0,
+        nbytes=1,
+        type=None,
+        stimulus_id="s",
+    )
+
+    ev2 = ExecuteSuccessEvent.dummy("x", 123, stimulus_id="s")
+    assert ev2.value == 123
+
+
 def test_executefailure_to_dict():
     ev = ExecuteFailureEvent(
         stimulus_id="test",
@@ -429,6 +445,20 @@ def test_executefailure_to_dict():
     assert ev3.traceback is None
     assert ev3.exception_text == "exc text"
     assert ev3.traceback_text == "tb text"
+
+
+def test_executefailure_dummy():
+    ev = ExecuteFailureEvent.dummy("x", stimulus_id="s")
+    assert ev == ExecuteFailureEvent(
+        key="x",
+        start=None,
+        stop=None,
+        exception=Serialize(None),
+        traceback=None,
+        exception_text="",
+        traceback_text="",
+        stimulus_id="s",
+    )
 
 
 @gen_cluster(client=True)
