@@ -37,7 +37,7 @@ repos:
         args: [--warn-unused-configs]
         additional_dependencies:
           # Type stubs
-          - pandas-stubs
+          - pandas-stubs >=1.4.3.220704
           - types-docutils
           - types-requests
           - types-paramiko
@@ -49,6 +49,6 @@ repos:
           - dask
           - numpy
           - pytest
-          - tornado
+          - tornado >=6.2
           - zict
           - pyarrow
