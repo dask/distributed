@@ -81,10 +81,8 @@ def init_once():
         NVML_STATE = NVMLState.DISABLED_CONFIG
         return
     elif (
-        NVML_STATE == NVMLState.INITIALIZED
-        and NVML_OWNER_PID != os.getpid()
-        or NVML_STATE == NVMLState.UNINITIALIZED
-    ):
+        NVML_STATE == NVMLState.INITIALIZED and NVML_OWNER_PID != os.getpid()
+    ) or NVML_STATE == NVMLState.UNINITIALIZED:
         try:
             pynvml.nvmlInit()
         except (
@@ -142,8 +140,7 @@ def _pynvml_handles():
     else:
         try:
             gpu_idx = next(
-                int(idx)
-                for idx in os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
+                map(int, os.environ.get("CUDA_VISIBLE_DEVICES", "").split(","))
             )
         except ValueError:
             # CUDA_VISIBLE_DEVICES is not set, take first device
