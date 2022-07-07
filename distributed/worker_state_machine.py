@@ -1981,7 +1981,7 @@ class WorkerState:
             ts.state = ts._previous
             return {}, []
         else:
-            assert ts._previous == "executing"
+            assert ts._previous in {"executing", "long-running"}
             ts.state = "resumed"
             ts._next = "fetch"
             return {}, []
@@ -3123,6 +3123,10 @@ class WorkerState:
                     ts_wait.state in READY | {"executing", "flight", "fetch", "missing"}
                     or ts_wait in self.missing_dep_flight
                     or ts_wait.who_has.issubset(self.in_flight_workers)
+                    or (
+                        ts_wait.state == "resumed"
+                        and ts_wait._previous in {"executing", "long-running"}
+                    )
                 ), (ts, ts_wait, self.story(ts), self.story(ts_wait))
         # FIXME https://github.com/dask/distributed/issues/6319
         # assert self.waiting_for_data_count == waiting_for_data_count
@@ -3156,6 +3160,16 @@ class WorkerState:
         # Test that there aren't multiple TaskState objects with the same key in data_needed
         for tss in self.data_needed.values():
             assert len({ts.key for ts in tss}) == len(tss)
+
+    @property
+    def all_running_tasks(self) -> set[TaskState]:
+        """All tasks that are currently running.
+        These are:
+        - ``ts.status`` == ``executing``, ``long-running``, or ``cancelled``
+        - ``ts.status` == ``resumed`` and ``ts._previous`` == ``executing`` or ``long-running``
+        """
+        # Note: tasks in "cancelled" and "resumed" state are still in either of these sets
+        return self.executing | {self.tasks[key] for key in self.long_running}
 
 
 class BaseWorker(abc.ABC):
