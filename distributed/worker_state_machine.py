@@ -3205,21 +3205,32 @@ class WorkerState:
         for tss in self.data_needed.values():
             assert len({ts.key for ts in tss}) == len(tss)
 
-        # Test that resources are consumed and released correctly
-        for resource, total in self.total_resources.items():
-            available = self.available_resources[resource]
-            assert available >= 0
-            allocated = 0.0
-            for ts in self.tasks.values():
-                if not ts.resource_restrictions:
-                    continue
-                if ts.state in {"executing", "long-running", "cancelled"} or (
-                    ts.state == "resumed"
-                    and ts._previous in {"executing", "long-running"}
-                ):
-                    allocated += ts.resource_restrictions.get(resource, 0)
-            assert available + allocated == total
+        self._validate_resources()
+    
+    @property
+    def all_running_tasks(self) -> set[TaskState]:
+        """All tasks that are currently running.
+        These are:
+        
+        - ``ts.status`` == ``executing``, ``long-running``, or ``cancelled``
+        - ``ts.status` == ``resumed`` and ``ts._previous`` == ``executing`` or ``long-running``
+        """
+        # Note: tasks in "cancelled" and "resumed" state are still in either of these sets
+        return self.executing | {self.tasks[key] for key in self.long_running}
 
+    def _validate_resources(self) -> None:
+        """Assert that available_resources + resources held by tasks = total_resources"""
+        assert self.total_resources.keys() == self.available_resources.keys()
+        total = self.total_resources.copy()
+        for k, v in self.available_resources.items():
+            assert v > -1e-9, self.available_resources
+            total[k] -= v
+        for ts in self.all_running_tasks:
+            for k, v in ts.required_resources.items():
+                assert v >= 0, (ts, ts.required_resources)
+                total[k] -= v
+
+         assert all(abs(v) < 1e-9) for v in total.values()), total
 
 class BaseWorker(abc.ABC):
     """Wrapper around the :class:`WorkerState` that implements instructions handling.
