@@ -17,7 +17,6 @@ except ImportError:
 class NVMLState(IntEnum):
     UNINITIALIZED = auto()
     """No attempt yet made to initialize PyNVML"""
-    # No attempt has been made to initialize
     INITIALIZED = auto()
     """PyNVML was successfully initialized"""
     DISABLED_PYNVML_NOT_AVAILABLE = auto()
