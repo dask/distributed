@@ -31,6 +31,7 @@ import psutil
 import pytest
 import yaml
 from tlz import concat, first, identity, isdistinct, merge, pluck, valmap
+from tornado.ioloop import IOLoop
 
 import dask
 import dask.bag as db
@@ -7562,3 +7563,21 @@ def test_quiet_close_process(processes, tmp_path):
 
     assert not out
     assert not err
+
+
+@gen_cluster(client=False, nthreads=[])
+async def test_deprecated_loop_properties(s):
+    class ExampleClient(Client):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.loop = self.io_loop = IOLoop.current()
+
+    with pytest.warns(DeprecationWarning) as warninfo:
+        async with ExampleClient(s.address, asynchronous=True, loop=IOLoop.current()):
+            pass
+
+    assert [(w.category, *w.message.args) for w in warninfo] == [
+        (DeprecationWarning, "setting the loop property is deprecated"),
+        (DeprecationWarning, "The io_loop property is deprecated"),
+        (DeprecationWarning, "setting the loop property is deprecated"),
+    ]
