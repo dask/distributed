@@ -767,8 +767,7 @@ class Worker(BaseWorker, ServerNode):
         }
 
         self.heartbeat_interval = parse_timedelta(heartbeat_interval, default="ms")
-        # FIXME https://github.com/tornadoweb/tornado/issues/3117
-        pc = PeriodicCallback(self.heartbeat, self.heartbeat_interval * 1000)  # type: ignore
+        pc = PeriodicCallback(self.heartbeat, self.heartbeat_interval * 1000)
         self.periodic_callbacks["heartbeat"] = pc
 
         pc = PeriodicCallback(lambda: self.batched_send({"op": "keep-alive"}), 60000)

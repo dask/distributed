@@ -316,8 +316,7 @@ def main(argv: list[str] | None = None) -> None:
 
     total = pandas.concat(dfs, axis=0)
     grouped = (
-        # FIXME https://github.com/pandas-dev/pandas-stubs/issues/42
-        total.groupby(total.index)  # type: ignore
+        total.groupby(total.index)
         .filter(lambda g: (g.status == "x").sum() >= args.nfails)
         .reset_index()
         .assign(test=lambda df: df.file + "." + df.test)
