@@ -20,9 +20,13 @@ from distributed.utils_test import (
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
     Execute,
+    ExecuteFailureEvent,
+    ExecuteSuccessEvent,
     FreeKeysEvent,
     GatherDep,
     GatherDepNetworkFailureEvent,
+    GatherDepSuccessEvent,
+    TaskFinishedMsg,
 )
 
 
@@ -544,11 +548,13 @@ async def test_resumed_cancelled_handle_compute(
         )
 
 
-def test_resume_executing_worker_state(ws_with_running_task):
+def test_worker_state_executing_to_executing(ws_with_running_task):
     """Test state loops:
 
-    - executing -> cancelled -> resumed -> executing
-    - executing -> long-running -> cancelled -> resumed -> long-running
+    - executing -> cancelled -> executing
+    - executing -> long-running -> cancelled -> long-running
+
+    Test that the task immediately reverts to its original state.
     """
     ws = ws_with_running_task
     ts = ws.tasks["x"]
@@ -561,3 +567,127 @@ def test_resume_executing_worker_state(ws_with_running_task):
     assert not instructions
     assert ws.tasks["x"] is ts
     assert ts.state == prev_state
+
+
+def test_worker_state_flight_to_flight(ws):
+    """Test state loop:
+
+    flight -> cancelled -> fetch
+
+    Test that the task immediately reverts to its original state.
+    """
+    ws2 = "127.0.0.1:2"
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
+        FreeKeysEvent(keys=["y", "x"], stimulus_id="s2"),
+        ComputeTaskEvent.dummy("z", who_has={"x": [ws2]}, stimulus_id="s3"),
+    )
+    assert instructions == [
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1")
+    ]
+    assert ws.tasks["x"].state == "flight"
+
+
+def test_worker_state_executing_success_to_fetch(ws_with_running_task):
+    """Test state loops:
+
+    - executing -> cancelled -> resumed -> fetch
+    - executing -> long-running -> cancelled -> resumed -> fetch
+
+    The task execution later terminates successfully.
+    Test that the task is never fetched and that dependents are unblocked.
+
+    See also: test_worker_state_executing_failure_to_fetch
+    """
+    ws = ws_with_running_task
+    ws2 = "127.0.0.1:2"
+    instructions = ws.handle_stimulus(
+        FreeKeysEvent(keys=["x"], stimulus_id="s1"),
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2"),
+        ExecuteSuccessEvent.dummy("x", 123, stimulus_id="s3"),
+    )
+    assert len(instructions) == 2
+    assert isinstance(instructions[0], TaskFinishedMsg)
+    assert instructions[0].key == "x"
+    assert instructions[0].stimulus_id == "s3"
+    assert instructions[1] == Execute(key="y", stimulus_id="s3")
+    assert ws.tasks["x"].state == "memory"
+    assert ws.data["x"] == 123
+
+
+def test_worker_state_executing_failure_to_fetch(ws_with_running_task):
+    """Test state loops:
+
+    - executing -> cancelled -> resumed -> fetch
+    - executing -> long-running -> cancelled -> resumed -> fetch
+
+    The task execution later terminates with a failure.
+    This is an edge case where a task is rescheduled on another worker and that same
+    task does not deterministically succeed or fail when run on different  workers.
+
+    Test that the task is fetched from the other worker; this is to avoid having to
+    deal with cancelling the dependent.
+
+    See also: test_worker_state_executing_success_to_fetch
+    """
+    ws = ws_with_running_task
+    ws2 = "127.0.0.1:2"
+    instructions = ws.handle_stimulus(
+        FreeKeysEvent(keys=["x"], stimulus_id="s1"),
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2"),
+        ExecuteFailureEvent.dummy("x", stimulus_id="s3"),
+    )
+    assert instructions == [
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s3")
+    ]
+    assert ws.tasks["x"].state == "flight"
+
+
+def test_worker_state_flight_success_to_executing(ws):
+    """Test state loop
+
+    flight -> cancelled -> resumed -> waiting
+
+    gather_dep later terminates successfully.
+    Test that the task is not executed and is in memory.
+    """
+    ws2 = "127.0.0.1:2"
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
+        FreeKeysEvent(keys=["y", "x"], stimulus_id="s2"),
+        ComputeTaskEvent.dummy("x", stimulus_id="s3"),
+        GatherDepSuccessEvent(
+            worker=ws2, total_nbytes=1, data={"x": 123}, stimulus_id="s4"
+        ),
+    )
+    assert len(instructions) == 2
+    assert instructions[0] == GatherDep(
+        worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"
+    )
+    assert isinstance(instructions[1], TaskFinishedMsg)
+    assert instructions[1].stimulus_id == "s4"
+    assert ws.tasks["x"].state == "memory"
+    assert ws.data["x"] == 123
+
+
+def test_worker_state_flight_failure_to_executing(ws):
+    """Test state loop
+
+    flight -> cancelled -> resumed -> waiting
+
+    gather_dep later terminates with a failure.
+    Test that the task is executed.
+    """
+    ws2 = "127.0.0.1:2"
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
+        FreeKeysEvent(keys=["y", "x"], stimulus_id="s2"),
+        ComputeTaskEvent.dummy("x", stimulus_id="s3"),
+        # Peer worker does not have the data
+        GatherDepSuccessEvent(worker=ws2, total_nbytes=1, data={}, stimulus_id="s4"),
+    )
+    assert instructions == [
+        GatherDep(stimulus_id="s1", worker=ws2, to_gather={"x"}, total_nbytes=1),
+        Execute(stimulus_id="s4", key="x"),
+    ]
+    assert ws.tasks["x"].state == "executing"

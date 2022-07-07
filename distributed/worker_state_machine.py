@@ -1981,7 +1981,7 @@ class WorkerState:
             ts.state = ts._previous
             return {}, []
         else:
-            assert ts._previous == "executing"
+            assert ts._previous in {"executing", "long-running"}
             ts.state = "resumed"
             ts._next = "fetch"
             return {}, []
