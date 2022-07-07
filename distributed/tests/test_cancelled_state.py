@@ -425,7 +425,7 @@ def test_cancelled_resumed_after_flight_with_dependencies_workerstate(ws):
     ws2 = "127.0.0.1:2"
     instructions = ws.handle_stimulus(
         # Create task x and put it in flight from ws2
-        ComputeTaskEvent.dummy(key="y", who_has={"x": [ws2]}, stimulus_id="s1"),
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
         # The scheduler realises that ws2 is unresponsive, although ws doesn't know yet.
         # Having lost the last surviving replica of x, the scheduler cancels all of its
         # dependents. This also cancels x.
@@ -433,7 +433,7 @@ def test_cancelled_resumed_after_flight_with_dependencies_workerstate(ws):
         # The scheduler reschedules x on another worker, which just happens to be one
         # that was previously fetching it. This does not generate an Execute
         # instruction, because the GatherDep instruction isn't complete yet.
-        ComputeTaskEvent.dummy(key="x", stimulus_id="s3"),
+        ComputeTaskEvent.dummy("x", stimulus_id="s3"),
         # After ~30s, the TCP socket with ws2 finally times out and collapses.
         # This triggers the Execute instruction.
         GatherDepNetworkFailureEvent(worker=ws2, total_nbytes=1, stimulus_id="s4"),
@@ -556,9 +556,7 @@ def test_resume_executing_worker_state(ws_with_running_task):
 
     instructions = ws.handle_stimulus(
         FreeKeysEvent(keys=["x"], stimulus_id="s1"),
-        ComputeTaskEvent.dummy(
-            key="x", resource_restrictions={"R": 1}, stimulus_id="s2"
-        ),
+        ComputeTaskEvent.dummy("x", resource_restrictions={"R": 1}, stimulus_id="s2"),
     )
     assert not instructions
     assert ws.tasks["x"] is ts
