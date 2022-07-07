@@ -756,7 +756,7 @@ class ExecuteSuccessEvent(StateMachineEvent):
         start: float = 0.0,
         stop: float = 1.0,
         nbytes: int = 8,
-        type_: Type | None = None,
+        type: Type | None = None,
         stimulus_id: str,
     ) -> ExecuteSuccessEvent:
         """Build a dummy event, with most attributes set to a reasonable default.
@@ -768,7 +768,7 @@ class ExecuteSuccessEvent(StateMachineEvent):
             start=start,
             stop=stop,
             nbytes=nbytes,
-            type=type_,
+            type=type,
             stimulus_id=stimulus_id,
         )
 
