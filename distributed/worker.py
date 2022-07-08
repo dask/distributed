@@ -10,6 +10,7 @@ import os
 import pathlib
 import random
 import sys
+import tempfile
 import threading
 import warnings
 import weakref
@@ -439,7 +440,6 @@ class Worker(BaseWorker, ServerNode):
         scheduler_file: str | None = None,
         nthreads: int | None = None,
         loop: IOLoop | None = None,  # Deprecated
-        local_dir: None = None,  # Deprecated, use local_directory instead
         local_directory: str | None = None,
         services: dict | None = None,
         name: Any | None = None,
@@ -560,14 +560,10 @@ class Worker(BaseWorker, ServerNode):
 
         self._setup_logging(logger, wsm_logger)
 
-        if local_dir is not None:
-            warnings.warn(  # type: ignore[unreachable]
-                "The local_dir keyword has moved to local_directory"
-            )
-            local_directory = local_dir
-
         if not local_directory:
-            local_directory = dask.config.get("temporary-directory") or os.getcwd()
+            local_directory = (
+                dask.config.get("temporary-directory") or tempfile.gettempdir()
+            )
 
         os.makedirs(local_directory, exist_ok=True)
         local_directory = os.path.join(local_directory, "dask-worker-space")
