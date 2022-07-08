@@ -615,6 +615,7 @@ def test_workerstate_executing_success_to_fetch(ws_with_running_task):
     assert ws.data["x"] == 123
 
 
+@pytest.mark.xfail(reason="distributed#6565, distributed#6689")
 def test_workerstate_executing_failure_to_fetch(ws_with_running_task):
     """Test state loops:
 
@@ -622,11 +623,12 @@ def test_workerstate_executing_failure_to_fetch(ws_with_running_task):
     - executing -> long-running -> cancelled -> resumed (fetch)
 
     The task execution later terminates with a failure.
-    This is an edge case where a task is rescheduled on another worker and that same
-    task does not deterministically succeed or fail when run on different  workers.
+    This is an edge case interaction between work stealing and a task that does not
+    deterministically succeed or fail when run multiple times or on different workers.
 
-    Test that the task is fetched from the other worker; this is to avoid having to
-    deal with cancelling the dependent.
+    Test that the task is fetched from the other worker. This is to avoid having to deal
+    with cancelling the dependent, which would require interaction with the scheduler
+    and increase the complexity of the use case.
 
     See also: test_workerstate_executing_success_to_fetch
     """
