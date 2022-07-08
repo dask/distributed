@@ -3120,13 +3120,7 @@ class WorkerState:
             for ts_wait in ts.waiting_for_data:
                 assert ts_wait.key in self.tasks
                 assert (
-                    ts_wait.state in READY | {"executing", "flight", "fetch", "missing"}
-                    or ts_wait in self.missing_dep_flight
-                    or ts_wait.who_has.issubset(self.in_flight_workers)
-                    or (
-                        ts_wait.state == "resumed"
-                        and ts_wait._previous in {"executing", "long-running"}
-                    )
+                    ts_wait.state in READY | {"executing", "long-running", "resumed", "flight", "fetch", "missing"}
                 ), (ts, ts_wait, self.story(ts), self.story(ts_wait))
         # FIXME https://github.com/dask/distributed/issues/6319
         # assert self.waiting_for_data_count == waiting_for_data_count

@@ -1035,42 +1035,30 @@ def test_gather_priority(ws):
 
 def test_running_task_in_all_running_tasks(ws_with_running_task):
     ws = ws_with_running_task
-    task = ws.tasks["x"]
-    assert task
-    assert task in ws.all_running_tasks
-
-
-def test_cancelled_running_task_in_all_running_tasks(ws_with_running_task):
-    ws = ws_with_running_task
+    ts = ws.tasks["x"]
+    assert ts in ws.all_running_tasks
 
     ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="cancel"))
-    task = ws.tasks["x"]
-    assert task
-    assert task.state == "cancelled"
-    assert task in ws.all_running_tasks
-
-
-def test_resumed_running_task_in_all_running_tasks(ws_with_running_task):
-    ws = ws_with_running_task
+    assert ts.state == "cancelled"
+    assert ts in ws.all_running_tasks
 
     ws.handle_stimulus(
-        FreeKeysEvent(keys=["x"], stimulus_id="cancel"),
         ComputeTaskEvent.dummy(
             key="y",
             who_has={"x": ["127.0.0.1:1235"]},
-            nbytes={"x": 8},
             stimulus_id="compute-y",
         ),
     )
-    task = ws.tasks["x"]
-    assert task
-    assert task.state == "resumed"
-    assert task in ws.all_running_tasks
+    assert ts.state == "resumed"
+    assert ts in ws.all_running_tasks
 
 
 @pytest.mark.xfail(reason="distributed#6565")
-def test_successful_running_task_not_in_all_running_tasks(ws_with_running_task):
+def test_successful_task_not_in_all_running_tasks(ws_with_running_task):
     ws = ws_with_running_task
+    ts = ws.tasks["x"]
+    assert ts in ws.all_running_tasks
+
     ws.handle_stimulus(
         ExecuteSuccessEvent(
             key="x",
@@ -1082,15 +1070,16 @@ def test_successful_running_task_not_in_all_running_tasks(ws_with_running_task):
             stimulus_id="success",
         )
     )
-    task = ws.tasks["x"]
-    assert task
-    assert task.state == "memory"
-    assert task not in ws.all_running_tasks
+    assert ts.state == "memory"
+    assert ts not in ws.all_running_tasks
 
 
 @pytest.mark.xfail(reason="distributed#6565")
-def test_erroneous_running_task_not_in_all_running_tasks(ws_with_running_task):
+def test_erred_task_not_in_all_running_tasks(ws_with_running_task):
     ws = ws_with_running_task
+    ts = ws.tasks["x"]
+    assert ts in ws.all_running_tasks
+
 
     ws.handle_stimulus(
         ExecuteFailureEvent(
@@ -1104,10 +1093,8 @@ def test_erroneous_running_task_not_in_all_running_tasks(ws_with_running_task):
             stimulus_id="error",
         )
     )
-    task = ws.tasks["x"]
-    assert task
-    assert task.state == "error"
-    assert task not in ws.all_running_tasks
+    assert ts.state == "error"
+    assert ts not in ws.all_running_tasks
 
 
 @pytest.mark.xfail(reason="distributed#6565")
@@ -1119,7 +1106,6 @@ def test_successful_resumed_running_task_not_in_all_running_tasks(ws_with_runnin
         ComputeTaskEvent.dummy(
             key="y",
             who_has={"x": ["127.0.0.1:1235"]},
-            nbytes={"x": 8},
             stimulus_id="compute-y",
         ),
         ExecuteSuccessEvent(
@@ -1132,9 +1118,9 @@ def test_successful_resumed_running_task_not_in_all_running_tasks(ws_with_runnin
             stimulus_id="success",
         ),
     )
-    task = ws.tasks["x"]
-    assert task.state == "memory"
-    assert task not in ws.all_running_tasks
+    ts = ws.tasks["x"]
+    assert ts.state == "memory"
+    assert ts not in ws.all_running_tasks
 
 
 @pytest.mark.xfail(reason="distributed#6565")
@@ -1146,7 +1132,6 @@ def test_erroneous_resumed_running_task_not_in_all_running_tasks(ws_with_running
         ComputeTaskEvent.dummy(
             key="y",
             who_has={"x": ["127.0.0.1:1235"]},
-            nbytes={"x": 8},
             stimulus_id="compute-y",
         ),
         ExecuteFailureEvent(
@@ -1160,9 +1145,9 @@ def test_erroneous_resumed_running_task_not_in_all_running_tasks(ws_with_running
             stimulus_id="error",
         ),
     )
-    task = ws.tasks["x"]
-    assert task.state == "error"
-    assert task not in ws.all_running_tasks
+    ts = ws.tasks["x"]
+    assert ts.state == "error"
+    assert ts not in ws.all_running_tasks
 
 
 @gen_cluster()
