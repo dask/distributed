@@ -615,7 +615,7 @@ def test_workerstate_executing_skips_fetch_on_success(ws_with_running_task):
     assert ws.data["x"] == 123
 
 
-@pytest.mark.xfail(reason="distributed#6565, distributed#6689")
+@pytest.mark.xfail(reason="distributed#6689")
 def test_workerstate_executing_failure_to_fetch(ws_with_running_task):
     """Test state loops:
 
