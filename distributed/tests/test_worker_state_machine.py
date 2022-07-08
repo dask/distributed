@@ -1054,51 +1054,41 @@ def test_running_task_in_all_running_tasks(ws_with_running_task):
 
 
 @pytest.mark.xfail(reason="distributed#6565")
-def test_successful_task_not_in_all_running_tasks(ws_with_running_task):
+@pytest.mark.parametrize(
+    "done_ev_cls,done_status",
+    [
+        (ExecuteSuccessEvent, "memory"),
+        (ExecuteFailureEvent, "error"),
+    ],
+)
+def test_done_task_not_in_all_running_tasks(
+    ws_with_running_task, done_ev_cls, done_status
+):
     ws = ws_with_running_task
     ts = ws.tasks["x"]
     assert ts in ws.all_running_tasks
 
     ws.handle_stimulus(
-        ExecuteSuccessEvent(
+        done_ev_cls.dummy(
             key="x",
-            value=None,
-            start=0.0,
-            stop=1.0,
-            nbytes=8,
-            type=None,
             stimulus_id="success",
         )
     )
-    assert ts.state == "memory"
+    assert ts.state == done_status
     assert ts not in ws.all_running_tasks
 
 
-@pytest.mark.xfail(reason="distributed#6565")
-def test_erred_task_not_in_all_running_tasks(ws_with_running_task):
-    ws = ws_with_running_task
-    ts = ws.tasks["x"]
-    assert ts in ws.all_running_tasks
-
-
-    ws.handle_stimulus(
-        ExecuteFailureEvent(
-            key="x",
-            start=0.0,
-            stop=0.0,
-            exception=Serialize(RuntimeError()),
-            traceback="failed",
-            exception_text="exc text",
-            traceback_text="trc text",
-            stimulus_id="error",
-        )
-    )
-    assert ts.state == "error"
-    assert ts not in ws.all_running_tasks
-
-
-@pytest.mark.xfail(reason="distributed#6565")
-def test_successful_resumed_running_task_not_in_all_running_tasks(ws_with_running_task):
+# @pytest.mark.xfail(reason="distributed#6565")
+@pytest.mark.parametrize(
+    "done_ev_cls,done_status",
+    [
+        (ExecuteSuccessEvent, "memory"),
+        (ExecuteFailureEvent, "error"),
+    ],
+)
+def test_done_resumed_running_task_not_in_all_running_tasks(
+    ws_with_running_task, done_ev_cls, done_status
+):
     ws = ws_with_running_task
 
     ws.handle_stimulus(
@@ -1108,45 +1098,13 @@ def test_successful_resumed_running_task_not_in_all_running_tasks(ws_with_runnin
             who_has={"x": ["127.0.0.1:1235"]},
             stimulus_id="compute-y",
         ),
-        ExecuteSuccessEvent(
+        done_ev_cls(
             key="x",
-            value=None,
-            start=0.0,
-            stop=1.0,
-            nbytes=8,
-            type=None,
             stimulus_id="success",
         ),
     )
     ts = ws.tasks["x"]
-    assert ts.state == "memory"
-    assert ts not in ws.all_running_tasks
-
-
-@pytest.mark.xfail(reason="distributed#6565")
-def test_erroneous_resumed_running_task_not_in_all_running_tasks(ws_with_running_task):
-    ws = ws_with_running_task
-
-    ws.handle_stimulus(
-        FreeKeysEvent(keys=["x"], stimulus_id="cancel"),
-        ComputeTaskEvent.dummy(
-            key="y",
-            who_has={"x": ["127.0.0.1:1235"]},
-            stimulus_id="compute-y",
-        ),
-        ExecuteFailureEvent(
-            key="x",
-            start=0.0,
-            stop=0.0,
-            exception=Serialize(RuntimeError()),
-            traceback="failed",
-            exception_text="exc text",
-            traceback_text="trc text",
-            stimulus_id="error",
-        ),
-    )
-    ts = ws.tasks["x"]
-    assert ts.state == "error"
+    assert ts.state == done_status
     assert ts not in ws.all_running_tasks
 
 

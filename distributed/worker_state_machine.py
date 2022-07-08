@@ -3119,9 +3119,14 @@ class WorkerState:
                 waiting_for_data_count += 1
             for ts_wait in ts.waiting_for_data:
                 assert ts_wait.key in self.tasks
-                assert (
-                    ts_wait.state in READY | {"executing", "long-running", "resumed", "flight", "fetch", "missing"}
-                ), (ts, ts_wait, self.story(ts), self.story(ts_wait))
+                assert ts_wait.state in READY | {
+                    "executing",
+                    "long-running",
+                    "resumed",
+                    "flight",
+                    "fetch",
+                    "missing",
+                }, (ts, ts_wait, self.story(ts), self.story(ts_wait))
         # FIXME https://github.com/dask/distributed/issues/6319
         # assert self.waiting_for_data_count == waiting_for_data_count
         for worker, keys in self.has_what.items():
