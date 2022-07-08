@@ -1058,18 +1058,6 @@ def test_gather_priority(ws):
 def test_constrained_task_handles_resources_on_success(ws_with_running_task):
     ws = ws_with_running_task
     assert ws.available_resources == {"R": 0}
-    # Ensure that x transitions through the ``constrained`` state
-    assert_story(
-        ws.story("x"),
-        [
-            ("x", "compute-task", "released"),
-            ("x", "released", "waiting", "waiting", {"x": "ready"}),
-            ("x", "waiting", "ready", "waiting", {"x": "constrained"}),
-            ("x", "waiting", "constrained", "constrained", {"x": "executing"}),
-            ("x", "constrained", "executing", "executing", {}),
-        ],
-        strict=False,
-    )
 
     ws.handle_stimulus(
         ExecuteSuccessEvent(
@@ -1090,18 +1078,6 @@ def test_constrained_task_handles_resources_on_success(ws_with_running_task):
 def test_constrained_task_handles_resources_on_failure(ws_with_running_task):
     ws = ws_with_running_task
     assert ws.available_resources == {"R": 0}
-    # Ensure that x transitions through the ``constrained`` state
-    assert_story(
-        ws.story("x"),
-        [
-            ("x", "compute-task", "released"),
-            ("x", "released", "waiting", "waiting", {"x": "ready"}),
-            ("x", "waiting", "ready", "waiting", {"x": "constrained"}),
-            ("x", "waiting", "constrained", "constrained", {"x": "executing"}),
-            ("x", "constrained", "executing", "executing", {}),
-        ],
-        strict=False,
-    )
 
     ws.handle_stimulus(
         ExecuteFailureEvent(
@@ -1192,9 +1168,7 @@ def test_resumed_executing_task_releases_resources_when_done(ws_with_running_tas
             who_has={"x": ["127.0.0.1:1235"]},
             nbytes={"x": 8},
             stimulus_id="compute",
-        )
-    )
-    ws.handle_stimulus(
+        ),
         ExecuteSuccessEvent(
             key="x",
             value=None,
