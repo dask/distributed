@@ -1215,6 +1215,7 @@ class WorkerState:
     @property
     def executing_count(self) -> int:
         """Count of tasks currently executing on this worker.
+        Does not include long running (a.k.a. seceded) and cancelled tasks.
 
         See also
         --------
@@ -1223,6 +1224,17 @@ class WorkerState:
         WorkerState.nthreads
         """
         return len(self.executing)
+
+    @property
+    def all_running_tasks(self) -> set[TaskState]:
+        """All tasks that are currently occupying a thread.
+        These are:
+
+        - ``ts.status in ("executing", "long-running", "cancelled")``
+        - ``ts.status == "resumed" and ts._previous in ("executing", "long-running")``
+        """
+        # Note: cancelled and resumed tasks are still in either of these sets
+        return self.executing | {self.tasks[key] for key in self.long_running}
 
     @property
     def in_flight_tasks_count(self) -> int:
