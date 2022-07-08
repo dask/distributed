@@ -591,8 +591,8 @@ def test_workerstate_flight_to_flight(ws):
 def test_workerstate_executing_skips_fetch_on_success(ws_with_running_task):
     """Test state loops:
 
-    - executing -> cancelled -> resumed (fetch)
-    - executing -> long-running -> cancelled -> resumed (fetch)
+    - executing -> cancelled -> resumed (fetch) -> memory
+    - executing -> long-running -> cancelled -> resumed (fetch) -> memory
 
     The task execution later terminates successfully.
     Test that the task is never fetched and that dependents are unblocked.
