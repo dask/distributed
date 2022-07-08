@@ -3013,6 +3013,7 @@ class WorkerState:
             assert ts not in self.long_running
         else:
             assert ts.state == "long-running"
+            assert ts not in self.executing
             assert ts in self.long_running
 
         assert ts.run_spec is not None
