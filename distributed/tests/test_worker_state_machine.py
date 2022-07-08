@@ -1033,33 +1033,34 @@ def test_gather_priority(ws):
     ]
 
 
+@gen_cluster()
+async def test_clean_log(s, a, b):
+    """Test that brand new workers start with a clean log"""
+    assert not a.state.log
+    assert not a.state.stimulus_log
+
+
 def test_running_task_in_all_running_tasks(ws_with_running_task):
     ws = ws_with_running_task
+    ws2 = "127.0.0.1:2"
     ts = ws.tasks["x"]
     assert ts in ws.all_running_tasks
 
-    ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="cancel"))
+    ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
     assert ts.state == "cancelled"
     assert ts in ws.all_running_tasks
 
     ws.handle_stimulus(
-        ComputeTaskEvent.dummy(
-            key="y",
-            who_has={"x": ["127.0.0.1:1235"]},
-            stimulus_id="compute-y",
-        ),
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2")
     )
     assert ts.state == "resumed"
     assert ts in ws.all_running_tasks
 
 
-@pytest.mark.xfail(reason="distributed#6565")
+@pytest.mark.xfail(reason="distributed#6565, distributed#6692")
 @pytest.mark.parametrize(
     "done_ev_cls,done_status",
-    [
-        (ExecuteSuccessEvent, "memory"),
-        (ExecuteFailureEvent, "error"),
-    ],
+    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "error")],
 )
 def test_done_task_not_in_all_running_tasks(
     ws_with_running_task, done_ev_cls, done_status
@@ -1068,48 +1069,27 @@ def test_done_task_not_in_all_running_tasks(
     ts = ws.tasks["x"]
     assert ts in ws.all_running_tasks
 
-    ws.handle_stimulus(
-        done_ev_cls.dummy(
-            key="x",
-            stimulus_id="success",
-        )
-    )
+    ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="s1"))
     assert ts.state == done_status
     assert ts not in ws.all_running_tasks
 
 
-# @pytest.mark.xfail(reason="distributed#6565")
+@pytest.mark.xfail(reason="distributed#6565, distributed#6689, distributed#6692")
 @pytest.mark.parametrize(
     "done_ev_cls,done_status",
-    [
-        (ExecuteSuccessEvent, "memory"),
-        (ExecuteFailureEvent, "error"),
-    ],
+    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "error")],
 )
-def test_done_resumed_running_task_not_in_all_running_tasks(
+def test_done_resumed_task_not_in_all_running_tasks(
     ws_with_running_task, done_ev_cls, done_status
 ):
     ws = ws_with_running_task
+    ws2 = "127.0.0.1:2"
 
     ws.handle_stimulus(
-        FreeKeysEvent(keys=["x"], stimulus_id="cancel"),
-        ComputeTaskEvent.dummy(
-            key="y",
-            who_has={"x": ["127.0.0.1:1235"]},
-            stimulus_id="compute-y",
-        ),
-        done_ev_cls(
-            key="x",
-            stimulus_id="success",
-        ),
+        FreeKeysEvent(keys=["x"], stimulus_id="s1"),
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2"),
+        done_ev_cls.dummy("x", stimulus_id="s3"),
     )
     ts = ws.tasks["x"]
     assert ts.state == done_status
     assert ts not in ws.all_running_tasks
-
-
-@gen_cluster()
-async def test_clean_log(s, a, b):
-    """Test that brand new workers start with a clean log"""
-    assert not a.state.log
-    assert not a.state.stimulus_log

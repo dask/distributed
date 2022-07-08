@@ -1203,6 +1203,7 @@ class WorkerState:
     @property
     def executing_count(self) -> int:
         """Count of tasks currently executing on this worker.
+        Does not include long running (a.k.a. seceded) and cancelled tasks.
 
         See also
         --------
@@ -1211,6 +1212,17 @@ class WorkerState:
         WorkerState.nthreads
         """
         return len(self.executing)
+
+    @property
+    def all_running_tasks(self) -> set[TaskState]:
+        """All tasks that are currently occupying a thread.
+        These are:
+
+        - ``ts.status in ("executing", "long-running", "cancelled")``
+        - ``ts.status == "resumed" and ts._previous in ("executing", "long-running")``
+        """
+        # Note: cancelled and resumed tasks are still in either of these sets
+        return self.executing | {self.tasks[key] for key in self.long_running}
 
     @property
     def in_flight_tasks_count(self) -> int:
@@ -3159,16 +3171,6 @@ class WorkerState:
         # Test that there aren't multiple TaskState objects with the same key in data_needed
         for tss in self.data_needed.values():
             assert len({ts.key for ts in tss}) == len(tss)
-
-    @property
-    def all_running_tasks(self) -> set[TaskState]:
-        """All tasks that are currently running.
-        These are:
-        - ``ts.status`` == ``executing``, ``long-running``, or ``cancelled``
-        - ``ts.status` == ``resumed`` and ``ts._previous`` == ``executing`` or ``long-running``
-        """
-        # Note: tasks in "cancelled" and "resumed" state are still in either of these sets
-        return self.executing | {self.tasks[key] for key in self.long_running}
 
 
 class BaseWorker(abc.ABC):
