@@ -1961,7 +1961,7 @@ class WorkerState:
             assert next_state in {"waiting", "fetch"}, next_state
             assert ts._previous in {"executing", "long-running", "flight"}, ts._previous
 
-            if ts._previous == "executing":
+            if ts._previous in ("executing", "long-running"):
                 self._release_resources(ts)
 
             if next_state != finish:
