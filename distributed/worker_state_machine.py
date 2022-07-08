@@ -1203,6 +1203,7 @@ class WorkerState:
     @property
     def executing_count(self) -> int:
         """Count of tasks currently executing on this worker.
+        Does not include long running (a.k.a. seceded) and cancelled tasks.
 
         See also
         --------
@@ -1211,6 +1212,17 @@ class WorkerState:
         WorkerState.nthreads
         """
         return len(self.executing)
+
+    @property
+    def all_running_tasks(self) -> set[TaskState]:
+        """All tasks that are currently occupying a thread.
+        These are:
+
+        - ``ts.status in ("executing", "long-running", "cancelled")``
+        - ``ts.status == "resumed" and ts._previous in ("executing", "long-running")``
+        """
+        # Note: cancelled and resumed tasks are still in either of these sets
+        return self.executing | {self.tasks[key] for key in self.long_running}
 
     @property
     def in_flight_tasks_count(self) -> int:
@@ -1981,7 +1993,7 @@ class WorkerState:
             ts.state = ts._previous
             return {}, []
         else:
-            assert ts._previous == "executing"
+            assert ts._previous in {"executing", "long-running"}
             ts.state = "resumed"
             ts._next = "fetch"
             return {}, []
@@ -3119,11 +3131,14 @@ class WorkerState:
                 waiting_for_data_count += 1
             for ts_wait in ts.waiting_for_data:
                 assert ts_wait.key in self.tasks
-                assert (
-                    ts_wait.state in READY | {"executing", "flight", "fetch", "missing"}
-                    or ts_wait in self.missing_dep_flight
-                    or ts_wait.who_has.issubset(self.in_flight_workers)
-                ), (ts, ts_wait, self.story(ts), self.story(ts_wait))
+                assert ts_wait.state in READY | {
+                    "executing",
+                    "long-running",
+                    "resumed",
+                    "flight",
+                    "fetch",
+                    "missing",
+                }, (ts, ts_wait, self.story(ts), self.story(ts_wait))
         # FIXME https://github.com/dask/distributed/issues/6319
         # assert self.waiting_for_data_count == waiting_for_data_count
         for worker, keys in self.has_what.items():
