@@ -548,7 +548,7 @@ async def test_resumed_cancelled_handle_compute(
         )
 
 
-def test_worker_state_executing_to_executing(ws_with_running_task):
+def test_workerstate_executing_to_executing(ws_with_running_task):
     """Test state loops:
 
     - executing -> cancelled -> executing
@@ -569,7 +569,7 @@ def test_worker_state_executing_to_executing(ws_with_running_task):
     assert ts.state == prev_state
 
 
-def test_worker_state_flight_to_flight(ws):
+def test_workerstate_flight_to_flight(ws):
     """Test state loop:
 
     flight -> cancelled -> fetch
@@ -588,7 +588,7 @@ def test_worker_state_flight_to_flight(ws):
     assert ws.tasks["x"].state == "flight"
 
 
-def test_worker_state_executing_success_to_fetch(ws_with_running_task):
+def test_workerstate_executing_success_to_fetch(ws_with_running_task):
     """Test state loops:
 
     - executing -> cancelled -> resumed (fetch)
@@ -597,7 +597,7 @@ def test_worker_state_executing_success_to_fetch(ws_with_running_task):
     The task execution later terminates successfully.
     Test that the task is never fetched and that dependents are unblocked.
 
-    See also: test_worker_state_executing_failure_to_fetch
+    See also: test_workerstate_executing_failure_to_fetch
     """
     ws = ws_with_running_task
     ws2 = "127.0.0.1:2"
@@ -615,7 +615,7 @@ def test_worker_state_executing_success_to_fetch(ws_with_running_task):
     assert ws.data["x"] == 123
 
 
-def test_worker_state_executing_failure_to_fetch(ws_with_running_task):
+def test_workerstate_executing_failure_to_fetch(ws_with_running_task):
     """Test state loops:
 
     - executing -> cancelled -> resumed (fetch)
@@ -628,7 +628,7 @@ def test_worker_state_executing_failure_to_fetch(ws_with_running_task):
     Test that the task is fetched from the other worker; this is to avoid having to
     deal with cancelling the dependent.
 
-    See also: test_worker_state_executing_success_to_fetch
+    See also: test_workerstate_executing_success_to_fetch
     """
     ws = ws_with_running_task
     ws2 = "127.0.0.1:2"
@@ -643,7 +643,7 @@ def test_worker_state_executing_failure_to_fetch(ws_with_running_task):
     assert ws.tasks["x"].state == "flight"
 
 
-def test_worker_state_flight_success_to_executing(ws):
+def test_workerstate_flight_success_to_executing(ws):
     """Test state loop
 
     flight -> cancelled -> resumed (waiting)
@@ -670,7 +670,7 @@ def test_worker_state_flight_success_to_executing(ws):
     assert ws.data["x"] == 123
 
 
-def test_worker_state_flight_failure_to_executing(ws):
+def test_workerstate_flight_failure_to_executing(ws):
     """Test state loop
 
     flight -> cancelled -> resumed (waiting)
