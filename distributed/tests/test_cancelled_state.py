@@ -646,7 +646,7 @@ def test_worker_state_executing_failure_to_fetch(ws_with_running_task):
 def test_worker_state_flight_success_to_executing(ws):
     """Test state loop
 
-    flight -> cancelled -> resumed -> waiting
+    flight -> cancelled -> resumed (waiting)
 
     gather_dep later terminates successfully.
     Test that the task is not executed and is in memory.
@@ -673,7 +673,7 @@ def test_worker_state_flight_success_to_executing(ws):
 def test_worker_state_flight_failure_to_executing(ws):
     """Test state loop
 
-    flight -> cancelled -> resumed -> waiting
+    flight -> cancelled -> resumed (waiting)
 
     gather_dep later terminates with a failure.
     Test that the task is executed.
