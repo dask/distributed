@@ -247,7 +247,10 @@ def test_merge_recs_instructions():
         merge_recs_instructions(({x: "memory"}, []), ({x: "released"}, []))
 
 
-def test_event_to_dict():
+def test_event_to_dict_with_annotations():
+    """Test recursive_to_dict(ev), where ev is a subclass of StateMachineEvent that
+    defines its own annotations
+    """
     ev = RescheduleEvent(stimulus_id="test", key="x")
     ev2 = ev.to_loggable(handled=11.22)
     assert ev2 == ev
@@ -257,6 +260,23 @@ def test_event_to_dict():
         "stimulus_id": "test",
         "handled": 11.22,
         "key": "x",
+    }
+    ev3 = StateMachineEvent.from_dict(d)
+    assert ev3 == ev
+
+
+def test_event_to_dict_without_annotations():
+    """Test recursive_to_dict(ev), where ev is a subclass of StateMachineEvent that
+    does not define its own annotations
+    """
+    ev = PauseEvent(stimulus_id="test")
+    ev2 = ev.to_loggable(handled=11.22)
+    assert ev2 == ev
+    d = recursive_to_dict(ev2)
+    assert d == {
+        "cls": "PauseEvent",
+        "stimulus_id": "test",
+        "handled": 11.22,
     }
     ev3 = StateMachineEvent.from_dict(d)
     assert ev3 == ev

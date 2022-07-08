@@ -523,7 +523,14 @@ class StateMachineEvent:
             "stimulus_id": self.stimulus_id,
             "handled": self.handled,
         }
-        info.update({k: getattr(self, k) for k in self.__annotations__})
+        info.update(
+            {
+                k: getattr(self, k)
+                for k in self.__annotations__
+                # Necessary for subclasses that don't define their own annotations
+                if k != "_classes"
+            }
+        )
         info = {k: v for k, v in info.items() if k not in exclude}
         return recursive_to_dict(info, exclude=exclude)
 
