@@ -591,8 +591,8 @@ def test_worker_state_flight_to_flight(ws):
 def test_worker_state_executing_success_to_fetch(ws_with_running_task):
     """Test state loops:
 
-    - executing -> cancelled -> resumed -> fetch
-    - executing -> long-running -> cancelled -> resumed -> fetch
+    - executing -> cancelled -> resumed (fetch)
+    - executing -> long-running -> cancelled -> resumed (fetch)
 
     The task execution later terminates successfully.
     Test that the task is never fetched and that dependents are unblocked.
@@ -618,8 +618,8 @@ def test_worker_state_executing_success_to_fetch(ws_with_running_task):
 def test_worker_state_executing_failure_to_fetch(ws_with_running_task):
     """Test state loops:
 
-    - executing -> cancelled -> resumed -> fetch
-    - executing -> long-running -> cancelled -> resumed -> fetch
+    - executing -> cancelled -> resumed (fetch)
+    - executing -> long-running -> cancelled -> resumed (fetch)
 
     The task execution later terminates with a failure.
     This is an edge case where a task is rescheduled on another worker and that same
