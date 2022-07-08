@@ -26,6 +26,7 @@ from distributed.utils_test import (
 from distributed.worker_state_machine import (
     AcquireReplicasEvent,
     ComputeTaskEvent,
+    Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     FreeKeysEvent,
@@ -1055,56 +1056,48 @@ def test_gather_priority(ws):
     ]
 
 
-def test_constrained_task_handles_resources_on_success(ws_with_running_task):
-    ws = ws_with_running_task
-    assert ws.available_resources == {"R": 0}
-
-    ws.handle_stimulus(
-        ExecuteSuccessEvent(
-            key="x",
-            value=None,
-            start=0.0,
-            stop=1.0,
-            nbytes=8,
-            type=None,
-            stimulus_id="success",
-        ),
-    )
-    assert ws.tasks["x"].state == "memory"
-    assert ws.available_resources == {"R": 1}
-
-
-@pytest.mark.xfail(reason="distributed#6565")
-def test_constrained_task_handles_resources_on_failure(ws_with_running_task):
-    ws = ws_with_running_task
-    assert ws.available_resources == {"R": 0}
-
-    ws.handle_stimulus(
-        ExecuteFailureEvent(
-            key="x",
-            start=0.0,
-            stop=1.0,
-            exception=Serialize(ValueError("x")),
-            traceback=Serialize("Now, release resources"),
-            exception_text="exc text",
-            traceback_text="tb text",
-            stimulus_id="failure",
-        ),
-    )
-    assert ws.tasks["x"].state == "error"
-    assert ws.available_resources == {"R": 1}
-
-
 @pytest.mark.parametrize("state", ["executing", "long-running"])
-def test_resource_restricted_task_with_dependencies(ws, state):
+def test_running_constrained_task_acquires_resources(state, ws):
     ws.available_resources = {"R": 1}
     ws.total_resources = {"R": 1}
 
-    instructions = ws.handle_stimulus(
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            key="x", resource_restrictions={"R": 1}, stimulus_id="compute"
+        )
+    )
+    if state == "long-running":
+        ws.handle_stimulus(
+            SecedeEvent(key="x", compute_duration=1.0, stimulus_id="secede")
+        )
+    assert ws.tasks["x"].state == state
+    assert ws.available_resources == {"R": 0}
+
+
+@pytest.mark.xfail(reason="distributed#6565")
+@pytest.mark.parametrize(
+    "done_ev_cls,done_status",
+    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "error")],
+)
+def test_done_constrained_task_releases_resources(
+    ws_with_running_task, done_ev_cls, done_status
+):
+    ws = ws_with_running_task
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="success"))
+    assert ws.tasks["x"].state == done_status
+    assert ws.available_resources == {"R": 1}
+
+
+def test_constrained_task_with_dependencies_acquires_resources_on_execution(ws):
+    ws.available_resources = {"R": 1}
+    ws.total_resources = {"R": 1}
+
+    ws.handle_stimulus(
         ComputeTaskEvent.dummy(
             key="y",
             who_has={"x": ["127.0.0.1:1235"]},
-            nbytes={"x": 8},
             resource_restrictions={"R": 1},
             stimulus_id="compute",
         )
@@ -1113,49 +1106,22 @@ def test_resource_restricted_task_with_dependencies(ws, state):
     assert ws.tasks["y"].state == "waiting"
     assert ws.available_resources == {"R": 1}
 
-    ws.handle_stimulus(
+    instructions = ws.handle_stimulus(
         GatherDepSuccessEvent("gather-dep-done", "127.0.0.1:1235", 8, {"x": 1.0})
     )
-    # Ensure that y transitions through the ``constrained`` state
-    expected_story = [
-        ("y", "compute-task", "released"),
-        ("y", "released", "waiting", "waiting", {"x": "fetch"}),
-        ("y", "waiting", "ready", "waiting", {"y": "constrained"}),
-        ("y", "waiting", "constrained", "constrained", {"y": "executing"}),
-        ("y", "constrained", "executing", "executing", {}),
-    ]
-
-    if state == "long-running":
-        ws.handle_stimulus(
-            SecedeEvent(key="y", compute_duration=1.0, stimulus_id="secede")
-        )
-        expected_story.append(("y", "executing", "long-running", "long-running", {}))
-
-    assert ws.tasks["x"].state == "memory"
-    assert ws.tasks["y"].state == state
+    assert Execute(stimulus_id="gather-dep-done", key="y") in instructions
+    assert ws.tasks["y"].state == "executing"
     assert ws.available_resources == {"R": 0}
-    assert_story(
-        ws.story("y"),
-        expected_story,
-        strict=True,
-    )
-
-    ws.handle_stimulus(
-        ExecuteSuccessEvent(
-            key="y",
-            value=None,
-            start=0.0,
-            stop=1.0,
-            nbytes=8,
-            type=None,
-            stimulus_id="success",
-        ),
-    )
-    assert ws.tasks["y"].state == "memory"
-    assert ws.available_resources == {"R": 1}
 
 
-def test_resumed_executing_task_releases_resources_when_done(ws_with_running_task):
+@pytest.mark.xfail(reason="distributed#6565, distributed#6682")
+@pytest.mark.parametrize(
+    "done_ev_cls,done_status",
+    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "error")],
+)
+def test_resumed_running_task_only_holds_resources_during_execution(
+    ws_with_running_task, done_ev_cls, done_status
+):
     ws = ws_with_running_task
 
     ws.handle_stimulus(FreeKeysEvent("cancel", ["x"]))
@@ -1164,57 +1130,21 @@ def test_resumed_executing_task_releases_resources_when_done(ws_with_running_tas
 
     ws.handle_stimulus(
         ComputeTaskEvent.dummy(
-            key="y",
+            "y",
             who_has={"x": ["127.0.0.1:1235"]},
-            nbytes={"x": 8},
-            stimulus_id="compute",
-        ),
-        ExecuteSuccessEvent(
-            key="x",
-            value=None,
-            start=0.0,
-            stop=1.0,
-            nbytes=8,
-            type=None,
-            stimulus_id="s2",
-        ),
-    )
-    assert ws.tasks["x"].state == "memory"
-    assert ws.available_resources == {"R": 1}
-
-
-@pytest.mark.xfail(reason="distributed#6682")
-def test_resumed_executing_task_releases_resources_on_error(ws_with_running_task):
-    ws = ws_with_running_task
-
-    ws.handle_stimulus(FreeKeysEvent("cancel", ["x"]))
-    assert ws.tasks["x"].state == "cancelled"
-    assert ws.available_resources == {"R": 0}
-
-    instructions = ws.handle_stimulus(
-        ComputeTaskEvent.dummy(
-            key="y",
-            who_has={"x": ["127.0.0.1:1235"]},
-            nbytes={"x": 8},
             stimulus_id="compute",
         )
     )
     assert ws.tasks["x"].state == "resumed"
-    assert not instructions
+    assert ws.available_resources == {"R": 0}
 
     ws.handle_stimulus(
-        ExecuteFailureEvent(
-            key="x",
-            start=0.0,
-            stop=1.0,
-            exception=Serialize(ValueError("x")),
-            traceback=Serialize("Fetch me instead"),
-            exception_text="exc text",
-            traceback_text="tb text",
-            stimulus_id="failure",
-        ),
+        done_ev_cls.dummy(
+            "x",
+            stimulus_id="s2",
+        )
     )
-    assert ws.tasks["x"].state == "error"
+    assert ws.tasks["x"].state == done_status
     assert ws.available_resources == {"R": 1}
 
 
