@@ -645,7 +645,7 @@ def test_workerstate_executing_failure_to_fetch(ws_with_running_task):
     assert ws.tasks["x"].state == "flight"
 
 
-def test_workerstate_flight_success_to_executing(ws):
+def test_workerstate_flight_skips_executing_on_success(ws):
     """Test state loop
 
     flight -> cancelled -> resumed (waiting)
