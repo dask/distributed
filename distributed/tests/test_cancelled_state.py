@@ -572,7 +572,7 @@ def test_workerstate_executing_to_executing(ws_with_running_task):
 def test_workerstate_flight_to_flight(ws):
     """Test state loop:
 
-    flight -> cancelled -> fetch
+    flight -> cancelled -> flight
 
     Test that the task immediately reverts to its original state.
     """
