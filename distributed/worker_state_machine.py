@@ -3207,17 +3207,6 @@ class WorkerState:
 
         self._validate_resources()
 
-    @property
-    def all_running_tasks(self) -> set[TaskState]:
-        """All tasks that are currently running.
-        These are:
-
-        - ``ts.status`` == ``executing``, ``long-running``, or ``cancelled``
-        - ``ts.status` == ``resumed`` and ``ts._previous`` == ``executing`` or ``long-running``
-        """
-        # Note: tasks in "cancelled" and "resumed" state are still in either of these sets
-        return self.executing | {self.tasks[key] for key in self.long_running}
-
     def _validate_resources(self) -> None:
         """Assert that available_resources + resources held by tasks = total_resources"""
         assert self.total_resources.keys() == self.available_resources.keys()
