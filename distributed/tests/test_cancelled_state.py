@@ -588,7 +588,7 @@ def test_workerstate_flight_to_flight(ws):
     assert ws.tasks["x"].state == "flight"
 
 
-def test_workerstate_executing_success_to_fetch(ws_with_running_task):
+def test_workerstate_executing_skips_fetch_on_success(ws_with_running_task):
     """Test state loops:
 
     - executing -> cancelled -> resumed (fetch)
