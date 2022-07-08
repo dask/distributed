@@ -648,7 +648,7 @@ def test_workerstate_executing_failure_to_fetch(ws_with_running_task):
 def test_workerstate_flight_skips_executing_on_success(ws):
     """Test state loop
 
-    flight -> cancelled -> resumed (waiting)
+    flight -> cancelled -> resumed (waiting) -> memory
 
     gather_dep later terminates successfully.
     Test that the task is not executed and is in memory.
