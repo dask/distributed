@@ -3010,6 +3010,7 @@ class WorkerState:
     def _validate_task_executing(self, ts: TaskState) -> None:
         if ts.state == "executing":
             assert ts in self.executing
+            assert ts not in self.long_running
         else:
             assert ts.state == "long-running"
             assert ts in self.long_running
