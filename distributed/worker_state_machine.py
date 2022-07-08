@@ -1952,7 +1952,7 @@ class WorkerState:
             assert finish != "memory"
             next_state = ts._next
             assert next_state in {"waiting", "fetch"}, next_state
-            assert ts._previous in {"executing", "flight"}, ts._previous
+            assert ts._previous in {"executing", "long-running", "flight"}, ts._previous
 
             if next_state != finish:
                 recs, instructions = self._transition_generic_released(
@@ -2008,7 +2008,7 @@ class WorkerState:
             ts.state = ts._previous
             return {}, []
         else:
-            assert ts._previous in {"executing", "long-running"}
+            assert ts._previous in ("executing", "long-running")
             ts.state = "resumed"
             ts._next = "fetch"
             return {}, []
