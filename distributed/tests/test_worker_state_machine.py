@@ -1057,7 +1057,6 @@ def test_running_task_in_all_running_tasks(ws_with_running_task):
     assert ts in ws.all_running_tasks
 
 
-@pytest.mark.xfail(reason="distributed#6565, distributed#6692")
 @pytest.mark.parametrize(
     "done_ev_cls,done_status",
     [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "error")],
@@ -1074,10 +1073,16 @@ def test_done_task_not_in_all_running_tasks(
     assert ts not in ws.all_running_tasks
 
 
-@pytest.mark.xfail(reason="distributed#6565, distributed#6689, distributed#6692")
 @pytest.mark.parametrize(
     "done_ev_cls,done_status",
-    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "error")],
+    [
+        (ExecuteSuccessEvent, "memory"),
+        pytest.param(
+            ExecuteFailureEvent,
+            "error",
+            marks=pytest.mark.xfail(reason="distributed#6689"),
+        ),
+    ],
 )
 def test_done_resumed_task_not_in_all_running_tasks(
     ws_with_running_task, done_ev_cls, done_status
