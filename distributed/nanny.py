@@ -5,6 +5,7 @@ import errno
 import logging
 import os
 import shutil
+import tempfile
 import threading
 import uuid
 import warnings
@@ -27,6 +28,7 @@ from distributed import preloading
 from distributed.comm import get_address_host
 from distributed.comm.addressing import address_from_user_args
 from distributed.core import (
+    AsyncTaskGroupClosedError,
     CommClosedError,
     RPCClosed,
     Status,
@@ -86,6 +88,19 @@ class Nanny(ServerNode):
             2. Existing environment variables
             3. Dask configuration
 
+        Note
+        ----
+        Some environment variables, like ``OMP_NUM_THREADS``, must be set before
+        importing numpy to have effect. Others, like ``MALLOC_TRIM_THRESHOLD_`` (see
+        :ref:`memtrim`), must be set before starting the Linux process. So we need to
+        set them before spawning the subprocess, even if this means poisoning the
+        process running the Nanny.
+
+        For the same reason, be warned that changing
+        ``distributed.worker.multiprocessing-method`` from ``spawn`` to ``fork`` or
+        ``forkserver`` may inhibit some environment variables; if you do, you should
+        set the variables yourself in the shell before you start ``dask-worker``.
+
     See Also
     --------
     Worker
@@ -107,7 +122,6 @@ class Nanny(ServerNode):
         worker_port: int | str | Collection[int] | None = 0,
         nthreads=None,
         loop=None,
-        local_dir=None,
         local_directory=None,
         services=None,
         name=None,
@@ -151,12 +165,10 @@ class Nanny(ServerNode):
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
 
-        if local_dir is not None:
-            warnings.warn("The local_dir keyword has moved to local_directory")
-            local_directory = local_dir
-
         if local_directory is None:
-            local_directory = dask.config.get("temporary-directory") or os.getcwd()
+            local_directory = (
+                dask.config.get("temporary-directory") or tempfile.gettempdir()
+            )
             self._original_local_dir = local_directory
             local_directory = os.path.join(local_directory, "dask-worker-space")
         else:
@@ -305,12 +317,6 @@ class Nanny(ServerNode):
     @property
     def worker_dir(self):
         return None if self.process is None else self.process.worker_dir
-
-    @property
-    def local_dir(self):
-        """For API compatibility with Nanny"""
-        warnings.warn("The local_dir attribute has moved to local_directory")
-        return self.local_directory
 
     async def start_unsafe(self):
         """Start nanny, start local process, start watching"""
@@ -498,7 +504,10 @@ class Nanny(ServerNode):
         return run(self, comm, *args, **kwargs)
 
     def _on_exit_sync(self, exitcode):
-        self._ongoing_background_tasks.call_soon(self._on_exit, exitcode)
+        try:
+            self._ongoing_background_tasks.call_soon(self._on_exit, exitcode)
+        except AsyncTaskGroupClosedError:  # Async task group has already been closed, so the nanny is already clos(ed|ing).
+            pass
 
     @log_errors
     async def _on_exit(self, exitcode):
@@ -662,6 +671,10 @@ class WorkerProcess:
         self.stopped = asyncio.Event()
         self.status = Status.starting
 
+        # Must set env variables before spawning the subprocess.
+        # See note in Nanny docstring.
+        os.environ.update(self.env)
+
         try:
             await self.process.start()
         except OSError:
@@ -807,6 +820,9 @@ class WorkerProcess:
         Worker,
     ):  # pragma: no cover
         try:
+            # Set the environment variables again. This is to avoid race conditions
+            # where different nannies in the same process set different environment
+            # variables.
             os.environ.update(env)
             dask.config.set(config)
 

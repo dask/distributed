@@ -134,7 +134,8 @@ def init_once():
     try:
         import rmm
 
-        device_array = lambda n: rmm.DeviceBuffer(size=n)
+        def device_array(n):
+            return rmm.DeviceBuffer(size=n)
 
         if pool_size_str is not None:
             pool_size = parse_bytes(pool_size_str)

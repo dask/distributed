@@ -25,10 +25,14 @@ from distributed.utils_test import (
 )
 from distributed.worker_state_machine import (
     AcquireReplicasEvent,
+    AddKeysMsg,
     ComputeTaskEvent,
+    Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
+    FreeKeysEvent,
     GatherDep,
+    GatherDepSuccessEvent,
     Instruction,
     PauseEvent,
     RecommendationsConflict,
@@ -36,6 +40,7 @@ from distributed.worker_state_machine import (
     ReleaseWorkerDataMsg,
     RescheduleEvent,
     RescheduleMsg,
+    SecedeEvent,
     SerializedTask,
     StateMachineEvent,
     TaskState,
@@ -246,7 +251,10 @@ def test_merge_recs_instructions():
         merge_recs_instructions(({x: "memory"}, []), ({x: "released"}, []))
 
 
-def test_event_to_dict():
+def test_event_to_dict_with_annotations():
+    """Test recursive_to_dict(ev), where ev is a subclass of StateMachineEvent that
+    defines its own annotations
+    """
     ev = RescheduleEvent(stimulus_id="test", key="x")
     ev2 = ev.to_loggable(handled=11.22)
     assert ev2 == ev
@@ -256,6 +264,23 @@ def test_event_to_dict():
         "stimulus_id": "test",
         "handled": 11.22,
         "key": "x",
+    }
+    ev3 = StateMachineEvent.from_dict(d)
+    assert ev3 == ev
+
+
+def test_event_to_dict_without_annotations():
+    """Test recursive_to_dict(ev), where ev is a subclass of StateMachineEvent that
+    does not define its own annotations
+    """
+    ev = PauseEvent(stimulus_id="test")
+    ev2 = ev.to_loggable(handled=11.22)
+    assert ev2 == ev
+    d = recursive_to_dict(ev2)
+    assert d == {
+        "cls": "PauseEvent",
+        "stimulus_id": "test",
+        "handled": 11.22,
     }
     ev3 = StateMachineEvent.from_dict(d)
     assert ev3 == ev
@@ -305,6 +330,29 @@ def test_computetask_to_dict():
     assert isinstance(ev3, ComputeTaskEvent)
     assert ev3.run_spec == SerializedTask(task=None)
     assert ev3.priority == (0,)  # List is automatically converted back to tuple
+
+
+def test_computetask_dummy():
+    ev = ComputeTaskEvent.dummy("x", stimulus_id="s")
+    assert ev == ComputeTaskEvent(
+        key="x",
+        who_has={},
+        nbytes={},
+        priority=(0,),
+        duration=1.0,
+        run_spec=None,
+        resource_restrictions={},
+        actor=False,
+        annotations={},
+        stimulus_id="s",
+        function=None,
+        args=None,
+        kwargs=None,
+    )
+
+    # nbytes is generated from who_has if omitted
+    ev2 = ComputeTaskEvent.dummy("x", who_has={"y": "127.0.0.1:2"}, stimulus_id="s")
+    assert ev2.nbytes == {"y": 1}
 
 
 def test_updatedata_to_dict():
@@ -368,6 +416,22 @@ def test_executesuccess_to_dict():
     assert ev3.type is None
 
 
+def test_executesuccess_dummy():
+    ev = ExecuteSuccessEvent.dummy("x", stimulus_id="s")
+    assert ev == ExecuteSuccessEvent(
+        key="x",
+        value=None,
+        start=0.0,
+        stop=1.0,
+        nbytes=1,
+        type=None,
+        stimulus_id="s",
+    )
+
+    ev2 = ExecuteSuccessEvent.dummy("x", 123, stimulus_id="s")
+    assert ev2.value == 123
+
+
 def test_executefailure_to_dict():
     ev = ExecuteFailureEvent(
         stimulus_id="test",
@@ -406,6 +470,20 @@ def test_executefailure_to_dict():
     assert ev3.traceback is None
     assert ev3.exception_text == "exc text"
     assert ev3.traceback_text == "tb text"
+
+
+def test_executefailure_dummy():
+    ev = ExecuteFailureEvent.dummy("x", stimulus_id="s")
+    assert ev == ExecuteFailureEvent(
+        key="x",
+        start=None,
+        stop=None,
+        exception=Serialize(None),
+        traceback=None,
+        exception_text="",
+        traceback_text="",
+        stimulus_id="s",
+    )
 
 
 @gen_cluster(client=True)
@@ -933,19 +1011,10 @@ def test_gather_priority(ws):
             stimulus_id="compute1",
         ),
         # A higher-priority task, even if scheduled later, is fetched first
-        ComputeTaskEvent(
+        ComputeTaskEvent.dummy(
             key="z",
             who_has={"y": ["127.0.0.7:1"]},
-            nbytes={"y": 1},
             priority=(0,),
-            duration=1.0,
-            run_spec=None,
-            function=None,
-            args=None,
-            kwargs=None,
-            resource_restrictions={},
-            actor=False,
-            annotations={},
             stimulus_id="compute2",
         ),
         UnpauseEvent(stimulus_id="unpause"),
@@ -986,3 +1055,163 @@ def test_gather_priority(ws):
             total_nbytes=4 * 2**20,
         ),
     ]
+
+
+@pytest.mark.parametrize("state", ["executing", "long-running"])
+def test_task_acquires_resources(ws, state):
+    ws.available_resources = {"R": 1}
+    ws.total_resources = {"R": 1}
+
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            key="x", resource_restrictions={"R": 1}, stimulus_id="compute"
+        )
+    )
+    if state == "long-running":
+        ws.handle_stimulus(
+            SecedeEvent(key="x", compute_duration=1.0, stimulus_id="secede")
+        )
+    assert ws.tasks["x"].state == state
+    assert ws.available_resources == {"R": 0}
+
+
+@pytest.mark.parametrize(
+    "done_ev_cls,done_status",
+    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "error")],
+)
+def test_task_releases_resources(ws_with_running_task, done_ev_cls, done_status):
+    ws = ws_with_running_task
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="success"))
+    assert ws.tasks["x"].state == done_status
+    assert ws.available_resources == {"R": 1}
+
+
+def test_task_with_dependencies_acquires_resources(ws):
+    ws.available_resources = {"R": 1}
+    ws.total_resources = {"R": 1}
+    ws2 = "127.0.0.1:2"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "y", who_has={"x": [ws2]}, resource_restrictions={"R": 1}, stimulus_id="s1"
+        )
+    )
+    assert ws.tasks["x"].state == "flight"
+    assert ws.tasks["y"].state == "waiting"
+    assert ws.available_resources == {"R": 1}
+
+    instructions = ws.handle_stimulus(
+        GatherDepSuccessEvent(
+            worker=ws2, data={"x": 123}, total_nbytes=8, stimulus_id="s2"
+        )
+    )
+    assert instructions == [
+        AddKeysMsg(keys=["x"], stimulus_id="s2"),
+        Execute(key="y", stimulus_id="s2"),
+    ]
+    assert ws.tasks["y"].state == "executing"
+    assert ws.available_resources == {"R": 0}
+
+
+@pytest.mark.parametrize(
+    "done_ev_cls,done_status",
+    [
+        (ExecuteSuccessEvent, "memory"),
+        pytest.param(
+            ExecuteFailureEvent,
+            "error",
+            marks=pytest.mark.xfail(
+                reason="distributed#6682,distributed#6689,distributed#6693"
+            ),
+        ),
+    ],
+)
+def test_resumed_task_releases_resources(
+    ws_with_running_task, done_ev_cls, done_status
+):
+    ws = ws_with_running_task
+    assert ws.available_resources == {"R": 0}
+    ws2 = "127.0.0.1:2"
+
+    ws.handle_stimulus(FreeKeysEvent("cancel", ["x"]))
+    assert ws.tasks["x"].state == "cancelled"
+    assert ws.available_resources == {"R": 0}
+
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="compute")
+    )
+    assert not instructions
+    assert ws.tasks["x"].state == "resumed"
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="s2"))
+    assert ws.tasks["x"].state == done_status
+    assert ws.available_resources == {"R": 1}
+
+
+@gen_cluster()
+async def test_clean_log(s, a, b):
+    """Test that brand new workers start with a clean log"""
+    assert not a.state.log
+    assert not a.state.stimulus_log
+
+
+def test_running_task_in_all_running_tasks(ws_with_running_task):
+    ws = ws_with_running_task
+    ws2 = "127.0.0.1:2"
+    ts = ws.tasks["x"]
+    assert ts in ws.all_running_tasks
+
+    ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
+    assert ts.state == "cancelled"
+    assert ts in ws.all_running_tasks
+
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2")
+    )
+    assert ts.state == "resumed"
+    assert ts in ws.all_running_tasks
+
+
+@pytest.mark.parametrize(
+    "done_ev_cls,done_status",
+    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "error")],
+)
+def test_done_task_not_in_all_running_tasks(
+    ws_with_running_task, done_ev_cls, done_status
+):
+    ws = ws_with_running_task
+    ts = ws.tasks["x"]
+    assert ts in ws.all_running_tasks
+
+    ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="s1"))
+    assert ts.state == done_status
+    assert ts not in ws.all_running_tasks
+
+
+@pytest.mark.parametrize(
+    "done_ev_cls,done_status",
+    [
+        (ExecuteSuccessEvent, "memory"),
+        pytest.param(
+            ExecuteFailureEvent,
+            "error",
+            marks=pytest.mark.xfail(reason="distributed#6689"),
+        ),
+    ],
+)
+def test_done_resumed_task_not_in_all_running_tasks(
+    ws_with_running_task, done_ev_cls, done_status
+):
+    ws = ws_with_running_task
+    ws2 = "127.0.0.1:2"
+
+    ws.handle_stimulus(
+        FreeKeysEvent(keys=["x"], stimulus_id="s1"),
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2"),
+        done_ev_cls.dummy("x", stimulus_id="s3"),
+    )
+    ts = ws.tasks["x"]
+    assert ts.state == done_status
+    assert ts not in ws.all_running_tasks

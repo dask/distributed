@@ -552,7 +552,16 @@ def test_warn_on_duration():
             sleep(0.100)
 
     assert record
-    assert any("foo" in str(rec.message) for rec in record)
+
+    with pytest.warns(UserWarning) as record:
+        with warn_on_duration("1ms", "{duration:.4f}"):
+            start = time()
+            sleep(0.100)
+            measured = time() - start
+
+    assert record
+    assert len(record) == 1
+    assert float(str(record[0].message)) >= float(str(f"{measured:.4f}"))
 
 
 def test_logs():

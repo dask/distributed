@@ -10,6 +10,7 @@ import os
 import pathlib
 import random
 import sys
+import tempfile
 import threading
 import warnings
 import weakref
@@ -84,6 +85,7 @@ from distributed.utils import (
     has_arg,
     import_file,
     in_async_call,
+    is_python_shutting_down,
     iscoroutinefunction,
     json_load_robust,
     key_split,
@@ -405,7 +407,6 @@ class Worker(BaseWorker, ServerNode):
     _dashboard_address: str | None
     _dashboard: bool
     _http_prefix: str
-    total_resources: dict[str, float]
     death_timeout: float | None
     lifetime: float | None
     lifetime_stagger: float | None
@@ -439,7 +440,6 @@ class Worker(BaseWorker, ServerNode):
         scheduler_file: str | None = None,
         nthreads: int | None = None,
         loop: IOLoop | None = None,  # Deprecated
-        local_dir: None = None,  # Deprecated, use local_directory instead
         local_directory: str | None = None,
         services: dict | None = None,
         name: Any | None = None,
@@ -560,21 +560,17 @@ class Worker(BaseWorker, ServerNode):
 
         self._setup_logging(logger, wsm_logger)
 
-        if local_dir is not None:
-            warnings.warn(  # type: ignore[unreachable]
-                "The local_dir keyword has moved to local_directory"
-            )
-            local_directory = local_dir
-
         if not local_directory:
-            local_directory = dask.config.get("temporary-directory") or os.getcwd()
+            local_directory = (
+                dask.config.get("temporary-directory") or tempfile.gettempdir()
+            )
 
         os.makedirs(local_directory, exist_ok=True)
         local_directory = os.path.join(local_directory, "dask-worker-space")
 
         with warn_on_duration(
             "1s",
-            "Creating scratch directories is taking a surprisingly long time. "
+            "Creating scratch directories is taking a surprisingly long time. ({duration:.2f}s) "
             "This is often due to running workers on a network file system. "
             "Consider specifying a local-directory to point workers to write "
             "scratch data to a local disk.",
@@ -627,7 +623,6 @@ class Worker(BaseWorker, ServerNode):
         if resources is None:
             resources = dask.config.get("distributed.worker.resources")
             assert isinstance(resources, dict)
-        self.total_resources = resources.copy()
 
         self.death_timeout = parse_timedelta(death_timeout)
 
@@ -753,7 +748,7 @@ class Worker(BaseWorker, ServerNode):
             data=self.memory_manager.data,
             threads=self.threads,
             plugins=self.plugins,
-            resources=self.total_resources,
+            resources=resources,
             total_out_connections=total_out_connections,
             validate=validate,
             transition_counter_max=transition_counter_max,
@@ -768,8 +763,7 @@ class Worker(BaseWorker, ServerNode):
         }
 
         self.heartbeat_interval = parse_timedelta(heartbeat_interval, default="ms")
-        # FIXME https://github.com/tornadoweb/tornado/issues/3117
-        pc = PeriodicCallback(self.heartbeat, self.heartbeat_interval * 1000)  # type: ignore
+        pc = PeriodicCallback(self.heartbeat, self.heartbeat_interval * 1000)
         self.periodic_callbacks["heartbeat"] = pc
 
         pc = PeriodicCallback(lambda: self.batched_send({"op": "keep-alive"}), 60000)
@@ -876,6 +870,7 @@ class Worker(BaseWorker, ServerNode):
     tasks = DeprecatedWorkerStateAttribute()
     target_message_size = DeprecatedWorkerStateAttribute()
     total_out_connections = DeprecatedWorkerStateAttribute()
+    total_resources = DeprecatedWorkerStateAttribute()
     transition_counter = DeprecatedWorkerStateAttribute()
     transition_counter_max = DeprecatedWorkerStateAttribute()
     validate = DeprecatedWorkerStateAttribute()
@@ -932,17 +927,24 @@ class Worker(BaseWorker, ServerNode):
         return self.executors["default"]
 
     @ServerNode.status.setter  # type: ignore
-    def status(self, value):
+    def status(self, value: Status) -> None:
         """Override Server.status to notify the Scheduler of status changes.
         Also handles pausing/unpausing.
         """
         prev_status = self.status
-        ServerNode.status.__set__(self, value)
+        if prev_status == value:
+            return
+
+        ServerNode.status.__set__(self, value)  # type: ignore
         stimulus_id = f"worker-status-change-{time()}"
         self._send_worker_status_change(stimulus_id)
+
         if prev_status == Status.running:
             self.handle_stimulus(PauseEvent(stimulus_id=stimulus_id))
-        elif value == Status.running:
+        elif value == Status.running and prev_status in (
+            Status.paused,
+            Status.closing_gracefully,
+        ):
             self.handle_stimulus(UnpauseEvent(stimulus_id=stimulus_id))
 
     def _send_worker_status_change(self, stimulus_id: str) -> None:
@@ -1092,7 +1094,7 @@ class Worker(BaseWorker, ServerNode):
                         },
                         types={k: typename(v) for k, v in self.data.items()},
                         now=time(),
-                        resources=self.total_resources,
+                        resources=self.state.total_resources,
                         memory_limit=self.memory_manager.memory_limit,
                         local_directory=self.local_directory,
                         services=self.service_ports,
@@ -1542,21 +1544,31 @@ class Worker(BaseWorker, ServerNode):
             if executor is utils._offload_executor:
                 continue  # Never shutdown the offload executor
 
-            def _close():
+            def _close(wait):
                 if isinstance(executor, ThreadPoolExecutor):
                     executor._work_queue.queue.clear()
-                    executor.shutdown(wait=executor_wait, timeout=timeout)
+                    executor.shutdown(wait=wait, timeout=timeout)
                 else:
-                    executor.shutdown(wait=executor_wait)
+                    executor.shutdown(wait=wait)
 
             # Waiting for the shutdown can block the event loop causing
             # weird deadlocks particularly if the task that is executing in
             # the thread is waiting for a server reply, e.g. when using
             # worker clients, semaphores, etc.
-            try:
-                await to_thread(_close)
-            except RuntimeError:  # Are we shutting down the process?
-                _close()  # Just run it directly
+            if is_python_shutting_down():
+                # If we're shutting down there is no need to wait for daemon
+                # threads to finish
+                _close(wait=False)
+            else:
+                try:
+                    await to_thread(_close, wait=executor_wait)
+                except RuntimeError:  # Are we shutting down the process?
+                    logger.error(
+                        "Could not close executor %r by dispatching to thread. Trying synchronously.",
+                        executor,
+                        exc_info=True,
+                    )
+                    _close(wait=executor_wait)  # Just run it directly
 
         self.stop()
         await self.rpc.close()
@@ -1734,17 +1746,19 @@ class Worker(BaseWorker, ServerNode):
         )
         return {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
 
-    async def set_resources(self, **resources) -> None:
+    async def set_resources(self, **resources: float) -> None:
         for r, quantity in resources.items():
-            if r in self.total_resources:
-                self.state.available_resources[r] += quantity - self.total_resources[r]
+            if r in self.state.total_resources:
+                self.state.available_resources[r] += (
+                    quantity - self.state.total_resources[r]
+                )
             else:
                 self.state.available_resources[r] = quantity
-            self.total_resources[r] = quantity
+            self.state.total_resources[r] = quantity
 
         await retry_operation(
             self.scheduler.set_resources,
-            resources=self.total_resources,
+            resources=self.state.total_resources,
             worker=self.contact_address,
         )
 
@@ -2218,7 +2232,7 @@ class Worker(BaseWorker, ServerNode):
                 )
 
             if isinstance(result["actual-exception"], Reschedule):
-                return RescheduleEvent(key=ts.key, stimulus_id=stimulus_id)
+                return RescheduleEvent(key=ts.key, stimulus_id=f"reschedule-{time()}")
 
             logger.warning(
                 "Compute Failed\n"

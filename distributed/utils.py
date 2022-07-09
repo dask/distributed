@@ -24,6 +24,7 @@ from collections.abc import Callable, Collection, Container, KeysView, ValuesVie
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
+from datetime import timedelta
 from functools import wraps
 from hashlib import md5
 from importlib.util import cache_from_source
@@ -32,7 +33,7 @@ from time import sleep
 from types import ModuleType
 from typing import TYPE_CHECKING
 from typing import Any as AnyType
-from typing import ClassVar, TypeVar, overload
+from typing import ClassVar, Iterator, TypeVar, overload
 
 import click
 import tblib.pickling_support
@@ -125,7 +126,8 @@ def has_arg(func, argname):
     """
     while True:
         try:
-            if argname in inspect.getfullargspec(func).args:
+            argspec = inspect.getfullargspec(func)
+            if argname in set(argspec.args) | set(argspec.kwonlyargs):
                 return True
         except TypeError:
             break
@@ -1253,12 +1255,19 @@ def iscoroutinefunction(f):
 
 
 @contextmanager
-def warn_on_duration(duration, msg):
+def warn_on_duration(duration: str | float | timedelta, msg: str) -> Iterator[None]:
+    """Generate a UserWarning if the operation in this context takes longer than
+    *duration* and print *msg*
+
+    The message may include a format string `{duration}` which will be formatted
+    to include the actual duration it took
+    """
     start = time()
     yield
     stop = time()
-    if stop - start > _parse_timedelta(duration):
-        warnings.warn(msg, stacklevel=2)
+    diff = stop - start
+    if diff > _parse_timedelta(duration):
+        warnings.warn(msg.format(duration=diff), stacklevel=2)
 
 
 def format_dashboard_link(host, port):

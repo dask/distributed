@@ -32,7 +32,11 @@ from distributed.utils_test import (
     slowidentity,
     slowinc,
 )
-from distributed.worker_state_machine import StealRequestEvent
+from distributed.worker_state_machine import (
+    ExecuteSuccessEvent,
+    FreeKeysEvent,
+    StealRequestEvent,
+)
 
 pytestmark = pytest.mark.ci1
 
@@ -1104,7 +1108,7 @@ async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
 
     steal.move_task_request(victim_ts, wsA, wsB)
 
-    s.reschedule(victim_key)
+    s.reschedule(victim_key, stimulus_id="test")
     await c.gather(futs1)
 
     del futs1
@@ -1238,7 +1242,7 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
     steal.move_task_request(victim_ts, wsA, wsB)
 
     s.set_restrictions(worker={victim_key: [wsB.address]})
-    s.reschedule(victim_key)
+    s.reschedule(victim_key, stimulus_id="test")
     assert wsB == victim_ts.processing_on
     # move_task_request is not responsible for respecting worker restrictions
     steal.move_task_request(victim_ts, wsB, wsC)
@@ -1317,3 +1321,17 @@ async def test_steal_stimulus_id_unique(c, s, a, b):
         stimulus_ids = {dct["stimulus_id"] for dct in steal.in_flight.values()}
         assert len(stimulus_ids) == num_futs
         await c.cancel(futures)
+
+
+def test_steal_worker_state(ws_with_running_task):
+    ws = ws_with_running_task
+
+    ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
+    assert ws.available_resources == {"R": 0}
+    assert ws.tasks["x"].state == "cancelled"
+
+    instructions = ws.handle_stimulus(ExecuteSuccessEvent.dummy("x", stimulus_id="s2"))
+    assert not instructions
+    assert "x" not in ws.tasks
+    assert "x" not in ws.data
+    assert ws.available_resources == {"R": 1}

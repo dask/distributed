@@ -6,6 +6,7 @@ import importlib
 import logging
 import os
 import sys
+import tempfile
 import threading
 import traceback
 import warnings
@@ -32,7 +33,6 @@ from distributed import (
     Client,
     Event,
     Nanny,
-    Reschedule,
     default_client,
     get_client,
     get_worker,
@@ -579,6 +579,15 @@ async def test_run_dask_worker(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_run_dask_worker_kwonlyarg(c, s, a, b):
+    def f(*, dask_worker=None):
+        return dask_worker.id
+
+    response = await c._run(f)
+    assert response == {a.address: a.id, b.address: b.id}
+
+
+@gen_cluster(client=True)
 async def test_run_coroutine_dask_worker(c, s, a, b):
     async def f(dask_worker=None):
         await asyncio.sleep(0.001)
@@ -926,25 +935,27 @@ async def test_heartbeats(c, s, a, b):
 
 
 @pytest.mark.parametrize("worker", [Worker, Nanny])
-def test_worker_dir(worker):
-    with tmpfile() as fn:
+def test_worker_dir(worker, tmpdir):
+    @gen_cluster(client=True, worker_kwargs={"local_directory": str(tmpdir)})
+    async def test_worker_dir(c, s, a, b):
+        directories = [w.local_directory for w in s.workers.values()]
+        assert all(d.startswith(str(tmpdir)) for d in directories)
+        assert len(set(directories)) == 2  # distinct
 
-        @gen_cluster(client=True, worker_kwargs={"local_directory": fn})
-        async def test_worker_dir(c, s, a, b):
-            directories = [w.local_directory for w in s.workers.values()]
-            assert all(d.startswith(fn) for d in directories)
-            assert len(set(directories)) == 2  # distinct
-
-        test_worker_dir()
+    test_worker_dir()
 
 
-@gen_cluster(nthreads=[], config={"temporary-directory": None})
-async def test_false_worker_dir(s):
-    async with Worker(s.address, local_directory="") as w:
-        local_directory = w.local_directory
+@gen_cluster(client=True, nthreads=[], config={"temporary-directory": None})
+async def test_default_worker_dir(c, s):
+    expect = os.path.join(tempfile.gettempdir(), "dask-worker-space")
 
-    cwd = os.getcwd()
-    assert os.path.dirname(local_directory) == os.path.join(cwd, "dask-worker-space")
+    async with Worker(s.address) as w:
+        assert os.path.dirname(w.local_directory) == expect
+
+    async with Nanny(s.address) as n:
+        assert n.local_directory == expect
+        results = await c.run(lambda dask_worker: dask_worker.local_directory)
+        assert os.path.dirname(results[n.worker_address]) == expect
 
 
 @gen_cluster(client=True)
@@ -1179,23 +1190,6 @@ async def test_get_current_task(c, s, a, b):
 
     result = await c.submit(some_name)
     assert result.startswith("some_name")
-
-
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
-async def test_reschedule(c, s, a, b):
-    await s.extensions["stealing"].stop()
-    a_address = a.address
-
-    def f(x):
-        sleep(0.1)
-        if get_worker().address == a_address:
-            raise Reschedule()
-
-    futures = c.map(f, range(4))
-    futures2 = c.map(slowinc, range(10), delay=0.1, workers=a.address)
-    await wait(futures)
-
-    assert all(f.key in b.data for f in futures)
 
 
 @gen_cluster(nthreads=[])
