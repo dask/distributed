@@ -17,6 +17,7 @@ from dask.widgets import get_template
 
 from distributed.core import Status
 from distributed.deploy.adaptive import Adaptive
+from distributed.metrics import time
 from distributed.objects import SchedulerInfo
 from distributed.utils import (
     Log,
@@ -531,3 +532,44 @@ class Cluster(SyncMethodMixin):
 
     def __hash__(self):
         return id(self)
+
+    async def _wait_for_workers(self, n_workers=0, timeout=None):
+        info = self.scheduler.identity()
+        self._scheduler_identity = SchedulerInfo(info)
+        if timeout:
+            deadline = time() + parse_timedelta(timeout)
+        else:
+            deadline = None
+
+        def running_workers(info):
+            return len(
+                [
+                    ws
+                    for ws in info["workers"].values()
+                    if ws["status"] == Status.running.name
+                ]
+            )
+
+        while n_workers and running_workers(info) < n_workers:
+            if deadline and time() > deadline:
+                raise TimeoutError(
+                    "Only %d/%d workers arrived after %s"
+                    % (running_workers(info), n_workers, timeout)
+                )
+            await asyncio.sleep(0.1)
+
+            info = self.scheduler.identity()
+            self._scheduler_identity = SchedulerInfo(info)
+
+    def wait_for_workers(self, n_workers=0, timeout=None):
+        """Blocking call to wait for n workers before continuing
+
+        Parameters
+        ----------
+        n_workers : int
+            The number of workers
+        timeout : number, optional
+            Time in seconds after which to raise a
+            ``dask.distributed.TimeoutError``
+        """
+        return self.sync(self._wait_for_workers, n_workers, timeout=timeout)

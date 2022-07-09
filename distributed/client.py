@@ -1332,7 +1332,10 @@ class Client(SyncMethodMixin):
             Time in seconds after which to raise a
             ``dask.distributed.TimeoutError``
         """
-        return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
+        if self.cluster is not None:
+            return self.cluster.wait_for_workers(n_workers, timeout)
+        else:
+            return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
 
     def _heartbeat(self):
         if self.scheduler_comm:
