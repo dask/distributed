@@ -1121,7 +1121,9 @@ def test_task_with_dependencies_acquires_resources(ws):
         pytest.param(
             ExecuteFailureEvent,
             "error",
-            marks=pytest.mark.xfail(reason="distributed#6689,distributed#6693"),
+            marks=pytest.mark.xfail(
+                reason="distributed#6682,distributed#6689,distributed#6693"
+            ),
         ),
     ],
 )
