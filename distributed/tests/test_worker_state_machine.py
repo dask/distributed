@@ -25,6 +25,7 @@ from distributed.utils_test import (
 )
 from distributed.worker_state_machine import (
     AcquireReplicasEvent,
+    AddKeysMsg,
     ComputeTaskEvent,
     Execute,
     ExecuteFailureEvent,
@@ -1057,7 +1058,7 @@ def test_gather_priority(ws):
 
 
 @pytest.mark.parametrize("state", ["executing", "long-running"])
-def test_running_constrained_task_acquires_resources(state, ws):
+def test_task_acquires_resources(ws, state):
     ws.available_resources = {"R": 1}
     ws.total_resources = {"R": 1}
 
@@ -1074,14 +1075,11 @@ def test_running_constrained_task_acquires_resources(state, ws):
     assert ws.available_resources == {"R": 0}
 
 
-@pytest.mark.xfail(reason="distributed#6565")
 @pytest.mark.parametrize(
     "done_ev_cls,done_status",
     [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "error")],
 )
-def test_done_constrained_task_releases_resources(
-    ws_with_running_task, done_ev_cls, done_status
-):
+def test_task_releases_resources(ws_with_running_task, done_ev_cls, done_status):
     ws = ws_with_running_task
     assert ws.available_resources == {"R": 0}
 
@@ -1090,16 +1088,13 @@ def test_done_constrained_task_releases_resources(
     assert ws.available_resources == {"R": 1}
 
 
-def test_constrained_task_with_dependencies_acquires_resources_on_execution(ws):
+def test_task_with_dependencies_acquires_resources(ws):
     ws.available_resources = {"R": 1}
     ws.total_resources = {"R": 1}
-
+    ws2 = "127.0.0.1:2"
     ws.handle_stimulus(
         ComputeTaskEvent.dummy(
-            key="y",
-            who_has={"x": ["127.0.0.1:1235"]},
-            resource_restrictions={"R": 1},
-            stimulus_id="compute",
+            "y", who_has={"x": [ws2]}, resource_restrictions={"R": 1}, stimulus_id="s1"
         )
     )
     assert ws.tasks["x"].state == "flight"
@@ -1107,43 +1102,48 @@ def test_constrained_task_with_dependencies_acquires_resources_on_execution(ws):
     assert ws.available_resources == {"R": 1}
 
     instructions = ws.handle_stimulus(
-        GatherDepSuccessEvent("gather-dep-done", "127.0.0.1:1235", 8, {"x": 1.0})
+        GatherDepSuccessEvent(
+            worker=ws2, data={"x": 123}, total_nbytes=8, stimulus_id="s2"
+        )
     )
-    assert Execute(stimulus_id="gather-dep-done", key="y") in instructions
+    assert instructions == [
+        AddKeysMsg(keys=["x"], stimulus_id="s2"),
+        Execute(key="y", stimulus_id="s2"),
+    ]
     assert ws.tasks["y"].state == "executing"
     assert ws.available_resources == {"R": 0}
 
 
-@pytest.mark.xfail(reason="distributed#6565, distributed#6682")
 @pytest.mark.parametrize(
     "done_ev_cls,done_status",
-    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "error")],
+    [
+        (ExecuteSuccessEvent, "memory"),
+        pytest.param(
+            ExecuteFailureEvent,
+            "error",
+            marks=pytest.mark.xfail(reason="distributed#6689,distributed#6693"),
+        ),
+    ],
 )
-def test_resumed_running_task_only_holds_resources_during_execution(
+def test_resumed_task_releases_resources(
     ws_with_running_task, done_ev_cls, done_status
 ):
     ws = ws_with_running_task
+    assert ws.available_resources == {"R": 0}
+    ws2 = "127.0.0.1:2"
 
     ws.handle_stimulus(FreeKeysEvent("cancel", ["x"]))
     assert ws.tasks["x"].state == "cancelled"
     assert ws.available_resources == {"R": 0}
 
-    ws.handle_stimulus(
-        ComputeTaskEvent.dummy(
-            "y",
-            who_has={"x": ["127.0.0.1:1235"]},
-            stimulus_id="compute",
-        )
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="compute")
     )
+    assert not instructions
     assert ws.tasks["x"].state == "resumed"
     assert ws.available_resources == {"R": 0}
 
-    ws.handle_stimulus(
-        done_ev_cls.dummy(
-            "x",
-            stimulus_id="s2",
-        )
-    )
+    ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="s2"))
     assert ws.tasks["x"].state == done_status
     assert ws.available_resources == {"R": 1}
 

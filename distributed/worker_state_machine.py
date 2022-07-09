@@ -93,6 +93,7 @@ WAITING_FOR_DATA: set[TaskStateState] = {
     "resumed",
     "waiting",
 }
+
 NO_VALUE = "--no-value-sentinel--"
 
 
@@ -1963,6 +1964,8 @@ class WorkerState:
 
             if ts._previous in ("executing", "long-running"):
                 self._release_resources(ts)
+                self.executing.discard(ts)
+                self.long_running.discard(ts)
 
             if next_state != finish:
                 recs, instructions = self._transition_generic_released(
