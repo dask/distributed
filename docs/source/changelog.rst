@@ -1,6 +1,64 @@
 Changelog
 =========
 
+.. _v2022.7.0:
+
+2022.7.0
+--------
+
+Released on July 8, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Use a tempdir path by default instead of cwd for the worker scratch dir (:pr:`6658`) `Florian Jetter`_
+- Add ``WorkerState.all_running_tasks`` (:pr:`6690`) `Hendrik Makait`_
+- ``Scheduler.reschedule()`` works only by accident (:pr:`6339`) `crusaderky`_
+- Remove spurious ``UnpauseEvent`` at worker start (:pr:`6652`) `crusaderky`_
+- Log if closing an executor is not possible in thread (:pr:`6644`) `Florian Jetter`_
+- Cloudpickle register by value (:pr:`6466`) `Ian Rose`_
+- Adding replicas to a task in fetch now sends it to flight immediately (:pr:`6594`) `crusaderky`_
+
+Bug Fixes
+^^^^^^^^^
+- Fix dump output of parameter-less events (:pr:`6695`) `crusaderky`_
+- Set ``MALLOC_TRIM_THRESHOLD_`` before interpreter start (:pr:`6681`) `crusaderky`_
+- Fix deadlocks around rescheduled and resumed states (:pr:`6673`) `crusaderky`_
+- ``has_arg`` returns ``True`` for keyword-only arguments (:pr:`6648`) `Lawrence Mitchell`_
+- Transitions caused by worker death use old 'worker-connect' ``stimulus_id`` (:pr:`6657`) `crusaderky`_
+- A key is forgotten while ``acquire-replicas`` is running (:pr:`6638`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Revisit ``WorkerState.long_running`` set (:pr:`6697`) `crusaderky`_
+- ``WorkerState`` unit tests for resumed state (:pr:`6688`) `crusaderky`_
+- Bump version of pandas-stubs (:pr:`6691`) `crusaderky`_
+- Add ``dummy`` factory methods for ``ExecuteSuccessEvent`` and ``ExecuteFailureEvent`` (:pr:`6687`) `Hendrik Makait`_
+- Pin ``tornado<6.2`` in nightly conda recipes (:pr:`6675`) `Peter Andreas Entschev`_
+- Refactor resource restriction handling in ``WorkerState`` (:pr:`6672`) `Hendrik Makait`_
+- ``test_signal`` and ``test_terminate`` occasionally return ``SIGKILL`` on MacOS (:pr:`6671`) `crusaderky`_
+- Use the ``loop`` fixture in even more tests (:pr:`6674`) `Thomas Grainger`_
+- Inconditionally ``import ssl`` (:pr:`6670`) `Thomas Grainger`_
+- Use the ``loop`` fixture in more tests (:pr:`6642`) `Thomas Grainger`_
+- Pin tornado to <6.2 (:pr:`6668`) `Florian Jetter`_
+- Handle ``AsyncTaskGroupClosedError`` (:pr:`6664`) `Hendrik Makait`_
+- Replace occurences of large delay ``slowinc`` with locks (:pr:`6656`) `Florian Jetter`_
+- Merge ``extend-ignore`` and ``ignore`` values for ``flake8`` (:pr:`6660`) `Hendrik Makait`_
+- Remove server close background task grace period (:pr:`6633`) `Thomas Grainger`_
+- Do not use tempfile in ``utils_test`` (:pr:`6651`) `Florian Jetter`_
+- ``close_worker`` cleanup (:pr:`6650`) `crusaderky`_
+- Rewrite ``test_cancelled_resumed_after_flight_with_dependencies`` using ``WorkerState`` (:pr:`6645`) `crusaderky`_
+- Log the actual duration to create a directory (:pr:`6647`) `Florian Jetter`_
+- ``pandas`` type stubs (:pr:`6635`) `crusaderky`_
+- Remove unused ``__started`` ``Event`` in ``Server`` (:pr:`6615`) `Florian Jetter`_
+- Use safe temp directory in ``gen_cluster`` (:pr:`6628`) `Florian Jetter`_
+- Print CI host info (:pr:`6629`) `crusaderky`_
+- Deduplicate ``data_needed`` (:pr:`6587`) `crusaderky`_
+- Remove ``EnsureCommunicatingAfterTransitions`` (:pr:`6462`) `crusaderky`_
+- Pickle ``WorkerState`` (:pr:`6623`) `crusaderky`_
+- Harden vs. ``TaskState`` collisions (:pr:`6593`) `crusaderky`_
+- Do not interact with the event loop when the cluster is garbage collected (:pr:`6627`) `Thomas Grainger`_
+
+
 .. _v2022.6.1:
 
 2022.6.1
