@@ -2462,7 +2462,6 @@ def ws_with_running_task(ws, request):
             SecedeEvent(key="x", compute_duration=1.0, stimulus_id="secede")
         )
     assert ws.tasks["x"].state == request.param
-    assert ws.available_resources == {"R": 0}
     yield ws
 
 

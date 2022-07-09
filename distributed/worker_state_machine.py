@@ -1746,8 +1746,6 @@ class WorkerState:
 
         if ts.waiting_for_data:
             self.waiting_for_data_count += 1
-        elif ts.resource_restrictions:
-            recommendations[ts] = "constrained"
         else:
             recommendations[ts] = "ready"
 
@@ -1830,6 +1828,9 @@ class WorkerState:
             for dep in ts.dependencies:
                 assert dep.key in self.data or dep.key in self.actors
                 assert dep.state == "memory"
+
+        if ts.resource_restrictions:
+            return {ts: "constrained"}, []
 
         ts.state = "ready"
         assert ts.priority is not None
@@ -1960,6 +1961,11 @@ class WorkerState:
             next_state = ts._next
             assert next_state in {"waiting", "fetch"}, next_state
             assert ts._previous in {"executing", "long-running", "flight"}, ts._previous
+
+            if ts._previous in ("executing", "long-running"):
+                self._release_resources(ts)
+                self.executing.discard(ts)
+                self.long_running.discard(ts)
 
             if next_state != finish:
                 recs, instructions = self._transition_generic_released(
@@ -3201,6 +3207,22 @@ class WorkerState:
         # Test that there aren't multiple TaskState objects with the same key in data_needed
         for tss in self.data_needed.values():
             assert len({ts.key for ts in tss}) == len(tss)
+
+        self._validate_resources()
+
+    def _validate_resources(self) -> None:
+        """Assert that available_resources + resources held by tasks = total_resources"""
+        assert self.total_resources.keys() == self.available_resources.keys()
+        total = self.total_resources.copy()
+        for k, v in self.available_resources.items():
+            assert v > -1e-9, self.available_resources
+            total[k] -= v
+        for ts in self.all_running_tasks:
+            for k, v in ts.resource_restrictions.items():
+                assert v >= 0, (ts, ts.resource_restrictions)
+                total[k] -= v
+
+        assert all((abs(v) < 1e-9) for v in total.values()), total
 
 
 class BaseWorker(abc.ABC):

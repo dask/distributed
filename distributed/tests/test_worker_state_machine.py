@@ -25,11 +25,14 @@ from distributed.utils_test import (
 )
 from distributed.worker_state_machine import (
     AcquireReplicasEvent,
+    AddKeysMsg,
     ComputeTaskEvent,
+    Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     FreeKeysEvent,
     GatherDep,
+    GatherDepSuccessEvent,
     Instruction,
     PauseEvent,
     RecommendationsConflict,
@@ -37,6 +40,7 @@ from distributed.worker_state_machine import (
     ReleaseWorkerDataMsg,
     RescheduleEvent,
     RescheduleMsg,
+    SecedeEvent,
     SerializedTask,
     StateMachineEvent,
     TaskState,
@@ -1051,6 +1055,99 @@ def test_gather_priority(ws):
             total_nbytes=4 * 2**20,
         ),
     ]
+
+
+@pytest.mark.parametrize("state", ["executing", "long-running"])
+def test_task_acquires_resources(ws, state):
+    ws.available_resources = {"R": 1}
+    ws.total_resources = {"R": 1}
+
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            key="x", resource_restrictions={"R": 1}, stimulus_id="compute"
+        )
+    )
+    if state == "long-running":
+        ws.handle_stimulus(
+            SecedeEvent(key="x", compute_duration=1.0, stimulus_id="secede")
+        )
+    assert ws.tasks["x"].state == state
+    assert ws.available_resources == {"R": 0}
+
+
+@pytest.mark.parametrize(
+    "done_ev_cls,done_status",
+    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "error")],
+)
+def test_task_releases_resources(ws_with_running_task, done_ev_cls, done_status):
+    ws = ws_with_running_task
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="success"))
+    assert ws.tasks["x"].state == done_status
+    assert ws.available_resources == {"R": 1}
+
+
+def test_task_with_dependencies_acquires_resources(ws):
+    ws.available_resources = {"R": 1}
+    ws.total_resources = {"R": 1}
+    ws2 = "127.0.0.1:2"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "y", who_has={"x": [ws2]}, resource_restrictions={"R": 1}, stimulus_id="s1"
+        )
+    )
+    assert ws.tasks["x"].state == "flight"
+    assert ws.tasks["y"].state == "waiting"
+    assert ws.available_resources == {"R": 1}
+
+    instructions = ws.handle_stimulus(
+        GatherDepSuccessEvent(
+            worker=ws2, data={"x": 123}, total_nbytes=8, stimulus_id="s2"
+        )
+    )
+    assert instructions == [
+        AddKeysMsg(keys=["x"], stimulus_id="s2"),
+        Execute(key="y", stimulus_id="s2"),
+    ]
+    assert ws.tasks["y"].state == "executing"
+    assert ws.available_resources == {"R": 0}
+
+
+@pytest.mark.parametrize(
+    "done_ev_cls,done_status",
+    [
+        (ExecuteSuccessEvent, "memory"),
+        pytest.param(
+            ExecuteFailureEvent,
+            "error",
+            marks=pytest.mark.xfail(
+                reason="distributed#6682,distributed#6689,distributed#6693"
+            ),
+        ),
+    ],
+)
+def test_resumed_task_releases_resources(
+    ws_with_running_task, done_ev_cls, done_status
+):
+    ws = ws_with_running_task
+    assert ws.available_resources == {"R": 0}
+    ws2 = "127.0.0.1:2"
+
+    ws.handle_stimulus(FreeKeysEvent("cancel", ["x"]))
+    assert ws.tasks["x"].state == "cancelled"
+    assert ws.available_resources == {"R": 0}
+
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="compute")
+    )
+    assert not instructions
+    assert ws.tasks["x"].state == "resumed"
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="s2"))
+    assert ws.tasks["x"].state == done_status
+    assert ws.available_resources == {"R": 1}
 
 
 @gen_cluster()
