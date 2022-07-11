@@ -50,6 +50,20 @@ from distributed.worker_state_machine import (
 )
 
 
+def test_instruction_match():
+    i = ReleaseWorkerDataMsg(key="x", stimulus_id="s1")
+    assert i == ReleaseWorkerDataMsg(key="x", stimulus_id="s1")
+    assert i != ReleaseWorkerDataMsg(key="y", stimulus_id="s1")
+    assert i != ReleaseWorkerDataMsg(key="x", stimulus_id="s2")
+    assert i != RescheduleMsg(key="x", stimulus_id="s1")
+
+    assert i == ReleaseWorkerDataMsg.match(key="x")
+    assert i == ReleaseWorkerDataMsg.match(stimulus_id="s1")
+    assert i != ReleaseWorkerDataMsg.match(key="y")
+    assert i != ReleaseWorkerDataMsg.match(stimulus_id="s2")
+    assert i != RescheduleMsg.match(key="x")
+
+
 def test_TaskState_tracking(cleanup):
     gc.collect()
     x = TaskState("x")
@@ -961,19 +975,16 @@ async def test_deprecated_worker_attributes(s, a, b):
     ],
 )
 def test_aggregate_gather_deps(ws, nbytes, n_in_flight):
+    ws2 = "127.0.0.1:2"
     instructions = ws.handle_stimulus(
         AcquireReplicasEvent(
-            who_has={
-                "x1": ["127.0.0.1:1235"],
-                "x2": ["127.0.0.1:1235"],
-                "x3": ["127.0.0.1:1235"],
-            },
+            who_has={"x1": [ws2], "x2": [ws2], "x3": [ws2]},
             nbytes={"x1": nbytes, "x2": nbytes, "x3": nbytes},
-            stimulus_id="test",
+            stimulus_id="s1",
         )
     )
-    assert len(instructions) == 1
-    assert isinstance(instructions[0], GatherDep)
+    assert instructions == [GatherDep.match(worker=ws2, stimulus_id="s1")]
+    assert len(instructions[0].to_gather) == n_in_flight
     assert len(ws.in_flight_tasks) == n_in_flight
 
 

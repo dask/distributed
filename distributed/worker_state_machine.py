@@ -340,6 +340,56 @@ class Instruction:
     __slots__ = ("stimulus_id",)
     stimulus_id: str
 
+    @classmethod
+    def match(cls, **kwargs: Any) -> _InstructionMatch:
+        """Generate a partial match to compare against an Instruction instance.
+        The typical usage is to compare a list of instructions returned by
+        :meth:`WorkerState.handle_stimulus` or in :attr:`WorkerState.stimulus_log` vs.
+        an expected list of matches.
+
+        Example
+        -------
+
+        .. code-block:: python
+
+            instructions = ws.handle_stimulus(...)
+            assert instructions == [
+                TaskFinishedMsg.match(key="x"),
+                ...
+            ]
+        """
+        return _InstructionMatch(cls, **kwargs)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, _InstructionMatch):
+            return other == self
+        else:
+            # Revert to default dataclass behaviour
+            return super().__eq__(other)
+
+
+class _InstructionMatch:
+    """Dummy class, to be used to test an instructions list.
+    See :meth:`Instruction.match`.
+    """
+
+    cls: type[Instruction]
+    kwargs: dict[str, Any]
+
+    def __init__(self, cls: type[Instruction], **kwargs: Any):
+        self.cls = cls
+        self.kwargs = kwargs
+
+    def __repr__(self) -> str:
+        cls_str = self.cls.__name__
+        kwargs_str = ", ".join(f"{k}={v}" for k, v in self.kwargs.items())
+        return f"{cls_str}({kwargs_str}) (dummy match)"
+
+    def __eq__(self, other: object) -> bool:
+        if type(other) is not self.cls:
+            return False
+        return all(getattr(other, k) == v for k, v in self.kwargs.items())
+
 
 @dataclass
 class GatherDep(Instruction):
@@ -1861,9 +1911,7 @@ class WorkerState:
         # message to the scheduler since from the schedulers POV it already
         # released this task
         if self.validate:
-            assert len(instructions) == 1
-            assert isinstance(instructions[0], TaskErredMsg)
-            assert instructions[0].key == ts.key
+            assert instructions == [TaskErredMsg.match(key=ts.key)]
         instructions.clear()
         # Workers should never "retry" tasks. A transition to error should, by
         # default, be the end. Since cancelled indicates that the scheduler lost
