@@ -130,6 +130,9 @@ class InvalidTransition(Exception):
         self.finish = finish
         self.story = story
 
+    def __reduce__(self) -> tuple[Callable, tuple]:
+        return type(self), (self.key, self.start, self.finish, self.story)
+
     def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}: {self.key} :: {self.start}->{self.finish}"
@@ -168,6 +171,9 @@ class InvalidTaskState(Exception):
         self.key = key
         self.state = state
         self.story = story
+
+    def __reduce__(self) -> tuple[Callable, tuple]:
+        return type(self), (self.key, self.state, self.story)
 
     def __repr__(self) -> str:
         return (
@@ -2463,7 +2469,10 @@ class WorkerState:
                 # final
                 ts.state,
                 # new recommendations
-                {ts.key: new for ts, new in recs.items()},
+                {
+                    ts.key: new[0] if isinstance(new, tuple) else new
+                    for ts, new in recs.items()
+                },
                 stimulus_id,
                 time(),
             )

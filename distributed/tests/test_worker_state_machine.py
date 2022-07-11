@@ -34,6 +34,8 @@ from distributed.worker_state_machine import (
     GatherDep,
     GatherDepSuccessEvent,
     Instruction,
+    InvalidTaskState,
+    InvalidTransition,
     PauseEvent,
     RecommendationsConflict,
     RefreshWhoHasEvent,
@@ -44,6 +46,7 @@ from distributed.worker_state_machine import (
     SerializedTask,
     StateMachineEvent,
     TaskState,
+    TransitionCounterMaxExceeded,
     UnpauseEvent,
     UpdateDataEvent,
     merge_recs_instructions,
@@ -206,6 +209,32 @@ def test_WorkerState_pickle(ws):
     ws2 = pickle.loads(pickle.dumps(ws))
     assert ws2.tasks.keys() == {"x", "y"}
     assert ws2.data == {"y": 123}
+
+
+@pytest.mark.parametrize(
+    "cls,kwargs",
+    [
+        (
+            InvalidTransition,
+            dict(key="x", start="released", finish="waiting", story=[]),
+        ),
+        (
+            TransitionCounterMaxExceeded,
+            dict(key="x", start="released", finish="waiting", story=[]),
+        ),
+        (InvalidTaskState, dict(key="x", state="released", story=[])),
+    ],
+)
+@pytest.mark.parametrize("positional", [False, True])
+def test_pickle_exceptions(cls, kwargs, positional):
+    if positional:
+        e = cls(*kwargs.values())
+    else:
+        e = cls(**kwargs)
+    e2 = pickle.loads(pickle.dumps(e))
+    assert type(e2) is type(e)
+    for k, v in kwargs.items():
+        assert getattr(e2, k) == v
 
 
 def traverse_subclasses(cls: type) -> Iterator[type]:
