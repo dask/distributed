@@ -711,8 +711,7 @@ def test_workerstate_executing_skips_fetch_on_success(ws_with_running_task):
 
 
 @pytest.mark.xfail(reason="distributed#6689")
-@pytest.mark.parametrize("block_queue", [False, True])
-def test_workerstate_executing_failure_to_fetch(ws_with_running_task, block_queue):
+def test_workerstate_executing_failure_to_fetch(ws_with_running_task):
     """Test state loops:
 
     - executing -> cancelled -> resumed(fetch)
@@ -733,53 +732,11 @@ def test_workerstate_executing_failure_to_fetch(ws_with_running_task, block_queu
     instructions = ws.handle_stimulus(
         FreeKeysEvent(keys=["x"], stimulus_id="s1"),
         ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2"),
+        ExecuteFailureEvent.dummy("x", stimulus_id="s3"),
     )
-    assert not instructions
-    assert ws.tasks["x"].state == "resumed"
-
-    if block_queue:
-        instructions = ws.handle_stimulus(
-            ComputeTaskEvent.dummy(
-                key="z1",
-                who_has={"z2": [ws2]},
-                nbytes={"z2": 2**30},
-                stimulus_id="s3",
-            ),
-            ExecuteFailureEvent.dummy("x", stimulus_id="s4"),
-            GatherDepSuccessEvent(
-                worker=ws2, data={"z2": None}, total_nbytes=2**30, stimulus_id="s5"
-            ),
-        )
-        assert instructions == [
-            GatherDep(
-                worker=ws2, to_gather={"z2"}, total_nbytes=2**30, stimulus_id="s3"
-            ),
-            AddKeysMsg(keys=["z2"], stimulus_id="s5"),
-            GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s5"),
-        ]
-        assert_story(
-            ws.story("x"),
-            [
-                ("x", "resumed", "error", "released", {"x": "fetch"}),
-                ("x", "released", "fetch", "fetch", {}),
-            ],
-        )
-
-    else:
-        instructions = ws.handle_stimulus(
-            ExecuteFailureEvent.dummy("x", stimulus_id="s4"),
-        )
-        assert instructions == [
-            GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s4"),
-        ]
-        assert_story(
-            ws.story("x"),
-            [
-                ("x", "resumed", "error", "released", {"x": "fetch"}),
-                ("x", "released", "fetch", "fetch", {"x": "flight"}),
-            ],
-        )
-
+    assert instructions == [
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s3")
+    ]
     assert ws.tasks["x"].state == "flight"
 
 
