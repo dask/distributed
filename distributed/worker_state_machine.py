@@ -233,7 +233,7 @@ class TaskState:
     state: TaskStateState = "released"
     #: The previous state of the task. It is not None iff state in (cancelled, resumed).
     previous: TaskStateState | None = None
-    #: The next state of the task. It is non-None iff state == resumed.
+    #: The next state of the task. It is not None iff state == resumed.
     next: TaskStateState | None = None
 
     #: Expected duration of the task
