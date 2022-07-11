@@ -369,7 +369,7 @@ class Instruction:
 
 
 class _InstructionMatch:
-    """Dummy class, to be used to test an instructions list.
+    """Utility class, to be used to test an instructions list.
     See :meth:`Instruction.match`.
     """
 
