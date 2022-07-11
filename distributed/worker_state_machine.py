@@ -369,7 +369,7 @@ class Instruction:
 
 
 class _InstructionMatch:
-    """Dummy class, to be used to test an instructions list.
+    """Utility class, to be used to test an instructions list.
     See :meth:`Instruction.match`.
     """
 
@@ -383,7 +383,7 @@ class _InstructionMatch:
     def __repr__(self) -> str:
         cls_str = self.cls.__name__
         kwargs_str = ", ".join(f"{k}={v}" for k, v in self.kwargs.items())
-        return f"{cls_str}({kwargs_str}) (dummy match)"
+        return f"{cls_str}({kwargs_str}) (partial match)"
 
     def __eq__(self, other: object) -> bool:
         if type(other) is not self.cls:
