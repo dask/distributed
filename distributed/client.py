@@ -908,7 +908,6 @@ class Client(SyncMethodMixin):
             "cancelled-key": self._handle_cancelled_key,
             "task-retried": self._handle_retried_key,
             "task-erred": self._handle_task_erred,
-            "restart": self._handle_restart,
             "error": self._handle_error,
             "event": self._handle_event,
         }
@@ -1463,14 +1462,6 @@ class Client(SyncMethodMixin):
         state = self.futures.get(key)
         if state is not None:
             state.set_error(exception, traceback)
-
-    def _handle_restart(self):
-        logger.info("Receive restart signal from scheduler")
-        for state in self.futures.values():
-            state.cancel()
-        self.futures.clear()
-        with suppress(AttributeError):
-            self._restart_event.set()
 
     def _handle_error(self, exception=None):
         logger.warning("Scheduler exception:")
@@ -3325,12 +3316,11 @@ class Client(SyncMethodMixin):
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
 
-        self._send_to_scheduler({"op": "restart", "timeout": timeout})
-        self._restart_event = asyncio.Event()
-        try:
-            await asyncio.wait_for(self._restart_event.wait(), timeout)
-        except TimeoutError:
-            logger.error("Restart timed out after %.2f seconds", timeout)
+        await self.scheduler.restart(timeout=timeout)
+
+        for state in self.futures.values():
+            state.cancel()
+        self.futures.clear()
 
         self.generation += 1
         with self._refcount_lock:

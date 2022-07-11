@@ -630,10 +630,10 @@ async def test_restart(c, s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(Worker=Nanny, nthreads=[("", 1)] * 5)
-async def test_restart_waits_for_new_workers(s, *workers):
+@gen_cluster(client=True, Worker=Nanny, nthreads=[("", 1)] * 5)
+async def test_restart_waits_for_new_workers(c, s, *workers):
     n_initial_workers = len(s.workers)
-    await s.restart()
+    await c.restart()
     assert len(s.workers) == n_initial_workers
     for w in workers:
         assert w.address not in s.workers
@@ -654,18 +654,18 @@ class SlowRestartNanny(Nanny):
         return await super().restart(timeout=timeout)
 
 
-@gen_cluster(Worker=SlowRestartNanny, nthreads=[("", 1)] * 2)
-async def test_restart_nanny_timeout_exceeded(s, a, b):
+@gen_cluster(client=True, Worker=SlowRestartNanny, nthreads=[("", 1)] * 2)
+async def test_restart_nanny_timeout_exceeded(c, s, a, b):
     with pytest.raises(TimeoutError, match=r"2 worker\(s\) did not restart within 1s"):
-        await s.restart(timeout=1)
+        await c.restart(timeout="1s")
     assert a.restart_called.is_set()
     assert b.restart_called.is_set()
 
 
-@gen_cluster(nthreads=[("", 1)] * 2)
-async def test_restart_not_all_workers_return(s, a, b):
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
+async def test_restart_not_all_workers_return(c, s, a, b):
     with pytest.raises(TimeoutError, match=r"after 1s, only 0 have returned"):
-        await s.restart(timeout=1)
+        await c.restart(timeout="1s")
 
 
 @gen_cluster(client=True, Worker=Nanny)
@@ -676,7 +676,7 @@ async def test_restart_some_nannies_some_not(c, s, a, b):
         await c.wait_for_workers(3)
 
         with pytest.raises(TimeoutError, match="after 5s, only 2 have returned"):
-            await s.restart(timeout=5)
+            await c.restart(timeout="5s")
 
         assert w.status == Status.closed
 

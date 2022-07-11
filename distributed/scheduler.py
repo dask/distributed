@@ -3045,7 +3045,6 @@ class Scheduler(SchedulerState, ServerNode):
             "client-releases-keys": self.client_releases_keys,
             "heartbeat-client": self.client_heartbeat,
             "close-client": self.remove_client,
-            "restart": self.restart,
             "subscribe-topic": self.subscribe_topic,
             "unsubscribe-topic": self.unsubscribe_topic,
         }
@@ -3082,6 +3081,7 @@ class Scheduler(SchedulerState, ServerNode):
             "rebalance": self.rebalance,
             "replicate": self.replicate,
             "run_function": self.run_function,
+            "restart": self.restart,
             "update_data": self.update_data,
             "set_resources": self.add_resources,
             "retire_workers": self.retire_workers,
@@ -5176,8 +5176,6 @@ class Scheduler(SchedulerState, ServerNode):
                 f"Waited for {n_workers} worker(s) to reconnect after restarting, "
                 f"but after {timeout}s, only {len(self.workers)} have returned."
             )
-
-        self.report({"op": "restart"})
 
     async def broadcast(
         self,

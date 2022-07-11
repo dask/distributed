@@ -3493,14 +3493,6 @@ async def test_Client_clears_references_after_restart(c, s, a, b):
         assert key not in c.refcount
 
 
-@gen_cluster(Worker=Nanny, client=True)
-async def test_restart_timeout_is_logged(c, s, a, b):
-    with captured_logger(logging.getLogger("distributed.client")) as logger:
-        await c.restart(timeout="0.5s")
-    text = logger.getvalue()
-    assert "Restart timed out after 0.50 seconds" in text
-
-
 def test_get_stops_work_after_error(c):
     with pytest.raises(RuntimeError):
         c.get({"x": (throws, 1), "y": (sleep, 1.5)}, ["x", "y"])
