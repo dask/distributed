@@ -3316,15 +3316,16 @@ class Client(SyncMethodMixin):
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
 
-        await self.scheduler.restart(timeout=timeout)
+        try:
+            await self.scheduler.restart(timeout=timeout)
+        finally:
+            for state in self.futures.values():
+                state.cancel()
+            self.futures.clear()
 
-        for state in self.futures.values():
-            state.cancel()
-        self.futures.clear()
-
-        self.generation += 1
-        with self._refcount_lock:
-            self.refcount.clear()
+            self.generation += 1
+            with self._refcount_lock:
+                self.refcount.clear()
 
         return self
 

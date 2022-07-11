@@ -3478,13 +3478,17 @@ def test_get_returns_early(c):
 
 
 @pytest.mark.slow
-@gen_cluster(Worker=Nanny, client=True, timeout=60)
+@gen_cluster(client=True)
 async def test_Client_clears_references_after_restart(c, s, a, b):
     x = c.submit(inc, 1)
     assert x.key in c.refcount
+    assert x.key in c.futures
 
-    await c.restart()
+    with pytest.raises(TimeoutError):
+        await c.restart(timeout=5)
+
     assert x.key not in c.refcount
+    assert not c.futures
 
     key = x.key
     del x
