@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+import time
 
 import pytest
 
@@ -16,7 +17,7 @@ path = "/tmp/plasma"
 @pytest.fixture(scope="module")
 def plasma_process():
     cmd = shlex.split(f"plasma_store -m 10000000 -s {path}")  # 10MB
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    proc = subprocess.Popen(cmd)
     yield
     proc.terminate()
     proc.wait()
@@ -24,7 +25,17 @@ def plasma_process():
 
 @pytest.fixture()
 def plasma_session(plasma_process):
-    client = plasma.connect(path)
+    timeout = 10
+    while True:
+        try:
+            client = plasma.connect(path)
+            client.list()
+            break
+        except (ValueError, TypeError, RuntimeError):
+            timeout -= 0.1
+            if timeout < 0:
+                raise RuntimeError
+            time.sleep(0.1)
     client.evict(1000000)
     yield client
     client.evict(1000000)

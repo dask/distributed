@@ -520,6 +520,7 @@ class Worker(BaseWorker, ServerNode):
             )
         self.nanny = nanny
         self._lock = threading.Lock()
+        self.shared_data = {}
 
         total_out_connections = dask.config.get(
             "distributed.worker.connections.outgoing"
