@@ -66,7 +66,7 @@ jobs:
 
       - name: Install dev version of bokeh
         shell: bash -l {0}
-        run: mamba install -c bokeh/label/dev "bokeh>=3"
+        run: mamba install -c bokeh/label/dev "bokeh=3"
 
       - name: Show conda options
         shell: bash -l {0}
