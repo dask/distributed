@@ -286,6 +286,7 @@ async def test_set_resources(c, s, a):
     assert s.workers[a.address].resources == {"A": 3}
 
 
+@pytest.mark.repeat(100)  # DO NOT MERGE
 @gen_cluster(
     client=True,
     nthreads=[

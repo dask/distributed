@@ -3083,7 +3083,6 @@ class WorkerState:
         assert isinstance(ts.nbytes, int)
         assert not ts.waiting_for_data
         assert ts.key not in self.ready
-        assert ts.state == "memory"
 
     def _validate_task_executing(self, ts: TaskState) -> None:
         if ts.state == "executing":
@@ -3102,9 +3101,17 @@ class WorkerState:
             assert dep.key in self.data or dep.key in self.actors
 
     def _validate_task_ready(self, ts: TaskState) -> None:
-        assert ts.key in pluck(1, self.ready)
+        if ts.state == "ready":
+            assert not ts.resource_restrictions
+            assert ts.key in pluck(1, self.ready)
+            assert ts.key not in self.constrained
+        else:
+            assert ts.resource_restrictions
+            assert ts.state == "constrained"
+            assert ts.key not in pluck(1, self.ready)
+            assert ts.key in self.constrained
+
         assert ts.key not in self.data
-        assert ts.state != "executing"
         assert not ts.done
         assert not ts.waiting_for_data
         assert all(
@@ -3113,7 +3120,6 @@ class WorkerState:
 
     def _validate_task_waiting(self, ts: TaskState) -> None:
         assert ts.key not in self.data
-        assert ts.state == "waiting"
         assert not ts.done
         if ts.dependencies and ts.run_spec:
             assert not all(dep.key in self.data for dep in ts.dependencies)
@@ -3189,7 +3195,7 @@ class WorkerState:
                 self._validate_task_cancelled(ts)
             elif ts.state == "resumed":
                 self._validate_task_resumed(ts)
-            elif ts.state == "ready":
+            elif ts.state in ("ready", "constrained"):
                 self._validate_task_ready(ts)
             elif ts.state in ("executing", "long-running"):
                 self._validate_task_executing(ts)
