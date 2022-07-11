@@ -959,9 +959,6 @@ def test_workerstate_flight_skips_executing_on_success(ws):
     )
     assert instructions == [
         GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
-        # Even if the data was created by a GatherDepSuccessEvent, and thus would
-        # normally trigger a AddKeysMsg, from the scheduler's point of view this task is
-        # computing, so it expects a TaskFinishedMsg instead.
         TaskFinishedMsg.match(key="x", stimulus_id="s4"),
     ]
     assert ws.tasks["x"].state == "memory"
