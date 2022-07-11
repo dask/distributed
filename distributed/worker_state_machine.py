@@ -3104,11 +3104,13 @@ class WorkerState:
         if ts.state == "ready":
             assert not ts.resource_restrictions
             assert ts.key in pluck(1, self.ready)
-            assert ts.key not in self.constrained
+            # FIXME https://github.com/dask/distributed/issues/6710
+            # assert ts.key not in self.constrained
         else:
             assert ts.resource_restrictions
             assert ts.state == "constrained"
-            assert ts.key not in pluck(1, self.ready)
+            # FIXME https://github.com/dask/distributed/issues/6710
+            # assert ts.key not in pluck(1, self.ready)
             assert ts.key in self.constrained
 
         assert ts.key not in self.data
