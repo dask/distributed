@@ -1852,6 +1852,7 @@ class WorkerState:
             assert all(dep.state == "memory" for dep in ts.dependencies)
             # FIXME https://github.com/dask/distributed/issues/6710
             # assert ts.key not in pluck(1, self.ready)
+            # assert ts.key not in self.constrained
         ts.state = "constrained"
         self.constrained.append(ts.key)
         return self._ensure_computing()
@@ -1888,6 +1889,7 @@ class WorkerState:
             assert ts.state == "waiting"
             # FIXME https://github.com/dask/distributed/issues/6710
             # assert ts.key not in pluck(1, self.ready)
+            # assert ts.key not in self.constrained
             assert not ts.waiting_for_data
             for dep in ts.dependencies:
                 assert dep.key in self.data or dep.key in self.actors
